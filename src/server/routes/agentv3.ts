@@ -2342,7 +2342,11 @@ export function registerAgentV3Routes(app: Express): void {
           }
         };
         const fastPreview = async (): Promise<void> => {
-          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: '[ -d node_modules ] && echo "deps present" || npm install' } }, 'frontend');
+          // Re-install when package.json is NEWER than node_modules (the generator added deps like
+          // tailwindcss). The old `[ -d node_modules ] && "deps present"` skipped install on a
+          // restored/scaffolded sandbox even after new deps were added → "Cannot find module
+          // 'tailwindcss'" → dev server crash. This installs exactly when the dep set changed.
+          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install; else echo "deps present"; fi' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
         };
@@ -2352,7 +2356,7 @@ export function registerAgentV3Routes(app: Express): void {
         // type error is detected by the "error TSxxxx" marker. A throw → "couldn't verify" (non-blocking).
         const fastVerify = async (): Promise<{ ok: boolean; errors: string }> => {
           try {
-            const r = await actuator.runCommand(workspaceId, '[ -d node_modules ] || npm install >/dev/null 2>&1; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
+            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             const hasErrors = /error TS\d+/.test(out);
             if (hasErrors) {

@@ -153,6 +153,18 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
   const importmap = JSON.stringify({ imports: buildImportmap(vfs) }).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
+  // TAILWIND: an app that uses Tailwind (its CSS has @tailwind directives, or a tailwind.config exists)
+  // needs PostCSS to generate the utility classes — which the no-build in-browser preview can't run, so
+  // the preview was UNSTYLED. The Tailwind Play CDN compiles Tailwind in the browser at runtime: load it,
+  // and put the project CSS in a <style type="text/tailwindcss"> so @tailwind/@apply are processed too.
+  // Vite apps import their CSS from JS (`import './index.css'`) rather than via a <link>, so most Tailwind
+  // CSS arrives through the runtime loader's injectCss — which appends into the `#__nbai-tw` block below.
+  const usesTailwind = Object.values(modules).some((v) => /@tailwind\b|@apply\b/.test(v))
+    || vfs.paths().some((p) => /(^|\/)tailwind\.config\.[cm]?[jt]s$/.test(p));
+  const tailwindCdn = usesTailwind ? '<script src="https://cdn.tailwindcss.com"></script>' : '';
+  const styleTag = usesTailwind
+    ? `<style id="__nbai-tw" type="text/tailwindcss">\n${css}\n</style>`
+    : (css ? `<style>\n${css}\n</style>` : '');
 
   // The loader runs in the browser. It transpiles each module with Babel (JSX
   // automatic runtime, so no React-in-scope needed), wires a CommonJS-style
@@ -165,7 +177,8 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Preview</title>
-${css ? `<style>\n${css}\n</style>` : ''}
+${tailwindCdn}
+${styleTag}
 <script type="importmap">${importmap}</script>
 ${babelTag}
 </head>
@@ -213,10 +226,22 @@ ${babelTag}
     return base;
   }
   function interop(ns) { var m = {}; for (var k in ns) m[k] = ns[k]; m.__esModule = true; if (m.default === undefined) m.default = ns; return m; }
-  var styleEl;
+  var styleEl, twStyleEl;
   function injectCss(text) {
+    var t = text || '';
+    // CSS carrying @tailwind/@apply MUST land in a <style type="text/tailwindcss"> so the Tailwind Play
+    // CDN compiles it — a plain <style> would leave the directives as inert (no-op) CSS and the app would
+    // render unstyled. Reuse the head's #__nbai-tw block when present (Vite imports CSS from JS at runtime).
+    if (/@tailwind\\b|@apply\\b/.test(t)) {
+      if (!twStyleEl) {
+        twStyleEl = document.getElementById('__nbai-tw');
+        if (!twStyleEl) { twStyleEl = document.createElement('style'); twStyleEl.setAttribute('type', 'text/tailwindcss'); document.head.appendChild(twStyleEl); }
+      }
+      twStyleEl.appendChild(document.createTextNode('\\n' + t));
+      return;
+    }
     if (!styleEl) { styleEl = document.createElement('style'); document.head.appendChild(styleEl); }
-    styleEl.appendChild(document.createTextNode('\\n' + (text || '')));
+    styleEl.appendChild(document.createTextNode('\\n' + t));
   }
 
   function requireModule(path) {

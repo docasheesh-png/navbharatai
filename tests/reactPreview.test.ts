@@ -71,6 +71,25 @@ describe('buildReactPreview', () => {
     expect(buildReactPreview(reactVfs())).toContain("runtime: 'automatic'");
   });
 
+  it('loads the Tailwind Play CDN when the app uses Tailwind (so the no-build preview is STYLED)', () => {
+    const tw = VirtualFileSystem.fromRecord({
+      'package.json': JSON.stringify({ dependencies: { react: '^18.3.1' } }),
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': "import './index.css';\nexport default ()=>null",
+      'src/index.css': '@tailwind base;\n@tailwind components;\n@tailwind utilities;',
+    });
+    const html = buildReactPreview(tw);
+    expect(html).toContain('https://cdn.tailwindcss.com');
+    expect(html).toContain('type="text/tailwindcss"'); // so @tailwind/@apply get processed
+    // A non-Tailwind app does NOT pull the CDN.
+    const plain = buildReactPreview(VirtualFileSystem.fromRecord({
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx': 'export default ()=>null',
+      'src/index.css': 'body{margin:0}',
+    }));
+    expect(plain).not.toContain('cdn.tailwindcss.com');
+  });
+
   it('falls back to a clear notice when no entry module exists', () => {
     const html = buildReactPreview(VirtualFileSystem.fromRecord({ 'foo.txt': 'x' }));
     expect(html).toContain('No React entry module found');

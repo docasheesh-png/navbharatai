@@ -21,7 +21,7 @@ export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn.tailwindcss.com"],
       styleSrc:   ["'self'", "'unsafe-inline'"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "https:", "wss:"],

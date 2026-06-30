@@ -5910,3 +5910,32 @@ src/components/NoteCard.tsx)") + postMessages it to the host so the Build report
 (e.g. React) still hard-errors — that genuinely can't be stubbed.
 
 Gate: frontend tsc 0, server tsc 0, vitest 3586/3586 PASS, boot:check PASS.
+
+## 2026-06-30 — FIX: all 4 build-report errors (Tailwind toolchain + skip-install + in-browser Tailwind CDN + prop/type prompt contracts)
+
+A "todo app" build report surfaced 4 problems; fixed at the deterministic root cause "best tarikhe se":
+
+1. (biggest) `npm run dev` crashed `Cannot find module 'tailwindcss'` (PostCSS) → live preview never came
+   up + in-browser unstyled. Root cause: apps use Tailwind but the scaffold didn't ship it, AND the fast-lane
+   install (`[ -d node_modules ] && echo "deps present" || npm install`) SKIPPED install when node_modules
+   existed but package.json had since added tailwindcss. Fix: (a) Scaffold.ts now bundles the Tailwind
+   toolchain into BOTH vite-react and vite-react-ts scaffolds — devDeps (tailwindcss/postcss/autoprefixer),
+   postcss.config.js, tailwind.config.js, and `@tailwind base/components/utilities` in src/index.css.
+   (b) agentv3.ts install commands (fastPreview + fastVerify) now re-install when package.json is NEWER than
+   node_modules (`[ ! -d node_modules ] || [ package.json -nt node_modules ]`) so a newly-added dep is never
+   skipped. (c) ReactPreview.ts: a Tailwind-using app loads the Tailwind Play CDN and routes @tailwind/@apply
+   CSS (incl. Vite's JS-imported index.css via the runtime injectCss → #__nbai-tw block) into a
+   `<style type="text/tailwindcss">` so the no-build in-browser preview is STYLED. (d) CSP scriptSrc allows
+   cdn.tailwindcss.com so the preview iframe can load it.
+2. TaskCounter prop mismatch (parent passed remaining/total, child declared count), 3. useLocalStorage.ts
+   used `React.Dispatch` in a .ts file without importing React ("Cannot find namespace 'React'"), 4. `key`
+   placed in a props interface. All three are prevented at generation: SimpleBuilder's EXPORT_IMPORT_CONVENTION
+   now carries PROP & TYPE CONTRACTS (parent props must EXACTLY match the child's declared props; in .ts/.tsx
+   import React types via `import type { Dispatch, SetStateAction } from "react"`, never bare `React.` without
+   importing React; `key` is React's list special prop, never in a props interface) — injected into both the
+   generation and repair prompts, with verify(tsc)+auto-repair as the backstop.
+
+Tests: +Tailwind-CDN preview test (reactPreview), +Tailwind-toolchain scaffold test (both scaffolds),
++cdn.tailwindcss.com CSP guard (headers).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3693/3693 PASS, boot:check PASS.

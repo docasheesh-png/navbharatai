@@ -1,5 +1,5 @@
 import { readFile, writeFile, unlink, readdir, mkdir, rename } from 'fs/promises';
-import { openSync, writeSync, fsyncSync, closeSync } from 'fs';
+import { openSync, writeSync, fsyncSync, closeSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { Checkpoint } from './CheckpointTypes';
 import * as admin from 'firebase-admin';
@@ -53,6 +53,11 @@ export class CheckpointStorage {
         const filePath = join(this.storageRoot, `${id}.json`);
         const tmpPath = join(this.storageRoot, `${id}.json.tmp`);
         const content = JSON.stringify(data);
+
+        // The constructor's mkdir is async (best-effort); a save() that races ahead of it would hit
+        // ENOENT on the openSync below. Guarantee the directory exists synchronously, right here, so
+        // the very first save can never lose the race. Idempotent + cheap (no-op once created).
+        mkdirSync(this.storageRoot, { recursive: true });
 
         const fd = openSync(tmpPath, 'w');
         try {

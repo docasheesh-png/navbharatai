@@ -830,15 +830,17 @@
 - **Files:** new `src/lib/flakyTests.ts`, `tests/flakyTests.test.ts`; `src/components/ide/TestPanel.tsx`,
   `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-TQA.9 — Test Data Manager / Fixture System  🟡 PARTIAL → full  [MED]
-- `AITestingSuite.tsx` generates test data inline per test. No reusable fixture files, no faker.js-style
-  random data generator, no seeded test database. Tests are fragile because they use hardcoded strings.
-- [ ] Add `tests/fixtures/` directory with JSON fixture files per entity (user, workspace, buildJob, chatMessage).
-- [ ] Add `src/server/QualityEvaluationEngine/TestDataManager.ts` — loads fixtures, generates random-but-seeded
-  test data via `@faker-js/faker` with a fixed seed for determinism.
-- [ ] Wire `TestDataManager` into `AITestingSuite.tsx` as the data source for generated tests.
-- **Files:** new `tests/fixtures/`, new `src/server/QualityEvaluationEngine/TestDataManager.ts`,
-  `src/components/ide/AITestingSuite.tsx`.
+### P-TQA.9 — Test Data Manager / Fixture System  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- `AITestingSuite.tsx` generated test data inline per test (hardcoded strings → fragile).
+- [x] **`tests/fixtures/`** — JSON fixtures per entity (user, workspace, buildJob, chatMessage).
+- [x] **`TestDataManager.ts`** — DEPENDENCY-FREE seeded generator (mulberry32 + FNV seed; NOT `@faker-js/faker`,
+  per the codebase's dependency-free policy). Same seed → identical data every run; helpers (int/pick/bool/id/
+  name/email/sentence) + entity factories whose shapes match the fixtures. Pure (no fs) → client-safe.
+- [x] Wired into `AITestingSuite.tsx` via `sampleInputValue()` — the generated input test now uses a realistic,
+  deterministic value instead of the hardcoded `'test value'`. Tests: `testDataManager.test.ts` (4, incl.
+  factory↔fixture shape parity).
+- **Files:** new `tests/fixtures/*.json`, new `src/server/QualityEvaluationEngine/TestDataManager.ts`,
+  `src/components/ide/AITestingSuite.tsx`, new `tests/testDataManager.test.ts`.
 
 ### P-TQA.10 — DAST / Runtime Security Scanning  ✅ DONE (2026-06-29)
 - `SecurityEvaluator.ts` does static analysis only; there was no dynamic scan of the running server and no

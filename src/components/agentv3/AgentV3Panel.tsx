@@ -909,6 +909,13 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
                   : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
+            {/* P-UX.7 — token usage for this build (input + output), shown alongside the ₹ cost. */}
+            {state.done && typeof state.tokens === 'number' && state.tokens > 0 && (
+              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Tokens used by this build (input + output)">
+                <FileCode className="w-3 h-3" />
+                {state.tokens >= 1000 ? `${(state.tokens / 1000).toFixed(1)}k` : state.tokens} tokens
+              </div>
+            )}
             {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
             {/* P-UX.6 — lightweight CSAT: thumbs feedback on a finished build (once per workspace). */}
             {state.done && state.ok && state.workspaceId && <BuildFeedback workspaceId={state.workspaceId} />}

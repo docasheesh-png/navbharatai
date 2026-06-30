@@ -2180,11 +2180,17 @@
   AppKnowledgeBase updated.
 - **Files:** `src/components/agentv3/AgentV3Panel.tsx`, `src/server/AppContext/AppKnowledgeBase.ts` (uses `src/lib/analytics.ts`).
 
-### P-UX.7 — Token Usage Visualization  ❌ MISSING  [MED]
-- Token spend is tracked in `AgentV3CostTelemetry.ts` but never surfaced to the user.
-- [ ] Show a token/cost gauge in the billing dashboard (daily spend vs. quota).
-- [ ] Optional: per-message token count badge in pro mode.
-- **Files:** `src/App.tsx` (billing view), new backend endpoint `/api/usage/tokens`.
+### P-UX.7 — Token Usage Visualization  ✅ DONE (2026-06-30, scoped) · 🔌 WIRED  [MED]
+- Token spend was tracked server-side but never shown to the user (only the ₹ cost was).
+- [x] **Per-build token badge** — the build `result` event now carries `tokens` (input + output, from
+  `result.usage`); `agentV3Types` + reducer + `AgentV3Panel` surface a "N tokens" badge next to the existing ₹
+  cost on a finished build (0 → omitted). The "optional per-message token badge in pro mode" from the spec.
+- **Honest scope:** the **daily-spend-vs-quota gauge** is deferred — it needs per-user daily token aggregation
+  (a new `/api/usage/tokens` endpoint + storage that doesn't exist; `AgentV3CostTelemetry` is admin-aggregate,
+  not per-user). The ₹ cost was already shown per build, so cost visibility existed; this adds the token detail.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` (+1 reducer) ✅ · `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/routes/agentv3.ts`, `src/components/agentv3/{agentV3Types,agentV3Reducer,AgentV3Panel}.ts(x)`,
+  `src/components/agentv3/agentV3Reducer.test.ts`.
 
 ### P-UX.8 — Account Recovery (forgot password)  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
 - Locked-out password users had no way back in — the sign-in screen had login/signup but no reset.

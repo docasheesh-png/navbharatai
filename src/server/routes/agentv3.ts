@@ -2954,7 +2954,9 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
-      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(diagnostics ? { diagnostics } : {}) });
+      // P-UX.7 — surface the build's token count to the client (in + out) for a usage badge. 0 → omitted.
+      const totalTokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).
       try {

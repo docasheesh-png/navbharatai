@@ -477,6 +477,33 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_deploy_artifacts',
+      description:
+        'Generate deployment artifacts for the app and write them to the workspace: a production ' +
+        'Dockerfile (alpine, multi-stage, non-root), a docker-compose.yml, and a GitHub Actions CI ' +
+        'workflow (.github/workflows/ci.yml). By default all three are written; pass "include" to pick ' +
+        'a subset. Build/start/lint/test commands and node version/port are configurable — only the ' +
+        'commands you provide become steps (no placeholder steps). Use before shipping a real app.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            description: "Which artifacts to write. Any of 'docker', 'compose', 'ci'. Defaults to all three.",
+            items: { type: 'string', enum: ['docker', 'compose', 'ci'] },
+          },
+          nodeVersion: { type: 'string', description: 'Node major version (default 20).' },
+          port: { type: 'number', description: 'Exposed/app port (default 8080).' },
+          installCmd: { type: 'string', description: 'Install command (default npm ci).' },
+          buildCmd: { type: 'string', description: 'Build command (omitted if empty).' },
+          startCmd: { type: 'string', description: 'Start command (default npm start).' },
+          lintCmd: { type: 'string', description: 'Lint command for CI (omitted if empty).' },
+          testCmd: { type: 'string', description: 'Test command for CI (omitted if empty).' },
+          multiStage: { type: 'boolean', description: 'Multi-stage Dockerfile (default true).' },
+        },
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -629,6 +656,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_seed_data',
   'generate_auth',
   'generate_migration',
+  'generate_deploy_artifacts',
   'check_conventions',
   'generate_release_notes',
   'web_search',

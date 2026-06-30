@@ -1677,7 +1677,7 @@
   `tests/authCodeGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
   `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
-### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  🟡 engine+API DONE / workspace-emit PENDING  [MED]
+### P-CGE.9 — Dockerfile + CI/CD Pipeline Generators (for generated apps)  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
 - Generated apps had no `Dockerfile`/`docker-compose.yml`/CI. Now there is a real generator.
 - [x] Added `src/server/lib/DeployArtifactGenerator.ts` — pure, dependency-free: `generateDockerfile`
   (alpine, **multi-stage**, **non-root `USER node`**, configurable node/port/build/start; single-stage option),
@@ -1685,8 +1685,15 @@
   Actions: checkout + setup-node + install → lint → test → build, only the declared steps — no placeholder steps).
   6 unit tests.
 - [x] Added `POST /api/deploy-artifacts` (stateless): `{ docker?, compose?, ci? }` → `{ dockerfile?, dockerCompose?, ciWorkflow? }`.
-- [ ] **Still pending:** emit these files into the generated workspace as a post-generation step (build-path wiring — deferred).
-- **Files:** new `src/server/lib/DeployArtifactGenerator.ts` + `.test.ts`, new `src/server/routes/deployArtifacts.ts`, `server.ts`.
+- [x] **Workspace-emit DONE (2026-06-30):** wired as the `generate_deploy_artifacts` AgentV3 tool (types.ts +
+  ToolCatalog + `CATALOG_TOOL_NAMES` + AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge +
+  ToolDispatcher tests). The build agent writes `Dockerfile`, `docker-compose.yml`, and `.github/workflows/ci.yml`
+  into the workspace (records/indexes/checkpoints), with `include` to pick a subset and configurable node/port/
+  install/build/start/lint/test commands. AppKnowledgeBase updated (AUTO DEPLOY ARTIFACTS). **P-CGE.9 now fully ✅.**
+- **Verification (workspace-emit):** `tsc` (fe+server) ✅ · `vitest run` 3692 passing (2 new dispatcher tests) ✅ ·
+  `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/lib/DeployArtifactGenerator.ts` + `.test.ts`, new `src/server/routes/deployArtifacts.ts`, `server.ts`;
+  wired in `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
 ### P-CGE.10 — Bundle Optimization Generators  ✅ DONE (2026-06-29) · 🔌 WIRED
 - Generated Vite+React apps used no bundle optimization — no code-splitting, no vendor chunking — so

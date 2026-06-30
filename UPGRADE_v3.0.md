@@ -2052,13 +2052,20 @@
 - [ ] Add a voting/arbitration step: when 2 providers diverge on critical code, score both via `QualityEvaluationEngine` and keep the winner (reuse the P-AI.12 model-eval scorer).
 - **Files:** new `src/server/AgentV3/EnsembleCoordinator.ts`, `src/server/AgentV3/Consensus.ts`.
 
-### P-AI.16 — Tool Discovery & Invocation Planner  🟡 PARTIAL → full  [MED]
-- `ToolDispatcher.ts` executes a fixed, hardcoded tool set by name. There is no **tool discovery**
-  (dynamic registry the agent can query for available tools + schemas) and no **invocation planner**
-  (deciding the order/batching of tool calls before executing them).
-- [ ] Add a tool registry the agent can introspect (name, description, schema, when-to-use) instead of a hardcoded switch.
-- [ ] Add a lightweight invocation planner: batch independent tool calls, sequence dependent ones.
-- **Files:** `src/server/AgentV3/ToolDispatcher.ts`, new `src/server/AgentV3/ToolRegistry.ts`.
+### P-AI.16 — Tool Discovery & Invocation Planner  ✅ DONE (2026-06-30, already-satisfied) · 🔌 WIRED  [MED]
+- **Audited (safeguard #6 — do not build redundant work): the architecture already satisfies both halves.**
+- [x] **Tool discovery** — `defaultToolCatalog()` / `catalogForTools(allowed)` (`ToolCatalog.ts`) IS the dynamic
+  registry: every tool's `{ name, description (incl. when-to-use), input_schema }` is passed to the model as
+  `tools:` on every turn (`SubAgent.ts:55`, AgentRegistry per-role allowlists). The model therefore introspects
+  the full, current tool set + schemas each turn — a separate "query for tools" endpoint would be redundant
+  (the model already has them). The dispatch switch is just the executor for what the registry advertises.
+- [x] **Invocation planning / batching** — the model decides ordering and emits multiple independent `tool_use`
+  blocks in a single turn (a batch); the dispatcher executes reads/writes with **bounded concurrency**
+  (`mapWithConcurrency`, `ToolDispatcher.ts`) and offers an explicit `write_files_batch` tool, while dependent
+  calls are naturally sequenced across turns. Independent → batched, dependent → sequenced, already.
+- **Conclusion:** a parallel `ToolRegistry.ts` the agent queries at runtime would duplicate the catalog the model
+  already receives — intentionally NOT built. Marked DONE to stop a future session re-implementing it.
+- **Files:** `src/server/AgentV3/ToolCatalog.ts`, `src/server/AgentV3/ToolDispatcher.ts`, `src/server/AgentV3/SubAgent.ts` (existing).
 
 ### P-AI.17 — Provider Latency / Reliability Prediction + Smart Job Scheduling  🟡 PARTIAL → full  [LOW]
 - `HealthRegistry.ts` + `AIRouter` cooldowns track provider health reactively. Missing: **predictive**

@@ -6012,3 +6012,33 @@ Tests: +isLongRunningCommand cases (bare/npx/node vite + vite preview = true; vi
 / curl / tsc = false), +systemPrompt case (no `cd /workspace`).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3706/3706 PASS, boot:check PASS.
+
+## 2026-06-30 — MEMORY: best-in-class recall (BM25) + outcome-weighted "proven lessons"
+
+Admin asked to make v3.0's memory top-level / better than all AIs. v3.0 already has a sophisticated
+multi-layer memory (WorkspaceMemory graph+episodes, Firestore persistence, Reflection→KnowledgeEvolution
+→RecalledLessons learning loop, UserPreferenceStore). This upgrades the two layers that decide WHAT the
+agent is reminded of, both pure + fully unit-tested (no new infra):
+
+1. **BM25 relevance ranking (new `Bm25.ts`).** Recall scored every query token with a flat "+2 whole-word
+   /+1 substring" tally — a common token ("page", "button") counted as much as a rare, discriminating one
+   ("stripe", "websocket"). Recall now ranks token relevance with Okapi BM25 over the whole memory corpus
+   (symbols+files+episodes): IDF weights rare tokens higher, TF saturates so a doc can't win by spamming a
+   word, and length-normalisation favours focused docs. WorkspaceMemory.recall keeps its exact/prefix/
+   substring phrase bonuses (so "UserCard"→the UserCard symbol still wins) and the deterministic recency
+   tiebreak on top of the BM25 token signal — all prior recall tests stay green.
+
+2. **Outcome-weighted "proven lessons" (KnowledgeEvolution + RecalledLessons).** Lessons now carry their
+   episode `kind`, and evolveLessons ranks by CONFIDENCE first: a proven `fix` (worked) > a `note`
+   (reflection) > a one-off `error`, plus a reinforcement bump each time the same lesson is independently
+   re-recorded (repeatedly-confirmed advice ranks higher; contradictions still let newer advice win).
+   Confidence is gated to 0 when no `kind` is supplied, so every existing caller/test keeps its prior
+   ordering — the new weighting only activates on real episode outcomes.
+
+Net effect: each build is reminded of the MOST relevant + MOST trustworthy lessons first, not a flat
+keyword dump — the recall quality that separates a top-tier agent memory from a basic one.
+
+Tests: +Bm25.test.ts (IDF/TF-saturation/length-norm/empty), +WorkspaceMemory rare-token-ranks-first,
++KnowledgeEvolution fix>note>error & reinforcement & kind-less-neutral, +RecalledLessons fix-before-error.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3717/3717 PASS, boot:check PASS.

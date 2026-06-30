@@ -81,6 +81,36 @@ describe('evolveLessons — recency ranking (aging)', () => {
   });
 });
 
+describe('evolveLessons — outcome-weighted confidence', () => {
+  const K = (text: string, kind: Lesson['kind'], score = 1, ts?: number): Lesson => ({ text, score, ts, kind });
+
+  it('ranks a proven `fix` above a `note` above a one-off `error` (equal relevance)', () => {
+    const out = evolveLessons([
+      K('saw Module not found error', 'error'),
+      K('prefer named exports', 'note'),
+      K('installed the missing dependency and it built', 'fix'),
+    ]);
+    expect(out[0]).toMatch(/installed the missing dependency/); // fix — highest confidence
+    expect(out[1]).toMatch(/prefer named exports/);             // note
+    expect(out[2]).toMatch(/Module not found/);                 // error — lowest
+  });
+
+  it('boosts a REPEATEDLY-confirmed lesson above a same-kind one seen once', () => {
+    const out = evolveLessons([
+      K('use tailwind for styling', 'note'),
+      K('use tailwind for styling', 'note'), // reinforcement (near-duplicate)
+      K('use tailwind for styling', 'note'), // reinforced again
+      K('use redux for state', 'note'),
+    ]);
+    expect(out[0]).toMatch(/tailwind/); // 3× confirmed outranks the single redux note
+  });
+
+  it('is neutral when no `kind` is supplied (legacy ordering preserved)', () => {
+    // Identical to a pure relevance/recency ranking — confidence stays 0 for kind-less lessons.
+    expect(evolveLessons([L('alpha'), L('bravo'), L('charlie')])).toEqual(['alpha', 'bravo', 'charlie']);
+  });
+});
+
 describe('evolveLessons — robustness', () => {
   it('ignores empty/whitespace lessons and returns [] for empty input', () => {
     expect(evolveLessons([])).toEqual([]);

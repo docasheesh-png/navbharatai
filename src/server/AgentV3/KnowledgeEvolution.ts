@@ -24,6 +24,35 @@ export interface Lesson {
   score: number;
   /** Episode timestamp (ms); undefined for sources without a time. */
   ts?: number;
+  /**
+   * Outcome polarity of the lesson, used to weight CONFIDENCE:
+   *   'fix'   — a change that actually WORKED → highest-confidence guidance
+   *   'note'  — a reflection lesson ("use X / avoid Y")
+   *   'error' — a problem that was observed (may already be resolved → lowest)
+   * Absent/unknown ⇒ neutral: confidence stays 0 so legacy callers rank exactly as before.
+   */
+  kind?: 'fix' | 'note' | 'error' | string;
+}
+
+/** Confidence weight by outcome kind. 0 (neutral) for unknown so legacy ranking is unchanged. */
+function kindWeight(kind?: string): number {
+  switch (kind) {
+    case 'fix': return 3;   // proven to work — trust it most
+    case 'note': return 2;  // a reflection lesson
+    case 'error': return 1; // a problem seen — weakest, may be stale
+    default: return 0;      // unknown/absent → neutral
+  }
+}
+
+/**
+ * Confidence of a lesson = outcome weight + a gentle bump per REINFORCEMENT (each time the same
+ * lesson was independently recorded it is more trustworthy). Gated: a lesson with no `kind` scores
+ * 0 so callers that don't supply outcomes keep the exact prior relevance/recency ordering.
+ */
+function confidence(kind: string | undefined, reinforcements: number): number {
+  const w = kindWeight(kind);
+  if (w === 0) return 0;
+  return w + Math.log(1 + Math.max(0, reinforcements - 1));
 }
 
 const NEGATIONS = /\b(?:dont|do not|don't|never|avoid|no longer|stop|without|not|cannot|can't|shouldn't|should not)\b/gi;
@@ -94,26 +123,38 @@ export function evolveLessons(input: Lesson[]): string[] {
     .map((l) => ({ lesson: l, norm: normalize(l.text) }))
     .filter((x) => x.norm);
 
-  const kept: { lesson: Lesson; norm: string }[] = [];
+  const kept: { lesson: Lesson; norm: string; reinforced: number }[] = [];
   for (const it of items) {
     let merged = false;
     for (let k = 0; k < kept.length; k++) {
       const ke = kept[k];
-      if (isNearDuplicate(it.norm, ke.norm) || isConflict(it.norm, ke.norm)) {
-        // Replace the incumbent only if the newcomer is preferred — keep its slot
-        // (position) so equal-rank ordering stays stable.
-        if (preferred(it.lesson, ke.lesson)) kept[k] = it;
+      if (isNearDuplicate(it.norm, ke.norm)) {
+        // Same statement seen again → REINFORCEMENT. Keep the preferred text in its slot
+        // (position) so equal-rank ordering stays stable, and bump the confirmation count.
+        kept[k] = preferred(it.lesson, ke.lesson)
+          ? { lesson: it.lesson, norm: it.norm, reinforced: ke.reinforced + 1 }
+          : { ...ke, reinforced: ke.reinforced + 1 };
+        merged = true;
+        break;
+      }
+      if (isConflict(it.norm, ke.norm)) {
+        // Contradiction (same claim, opposite polarity) → newer advice wins; this is NOT the
+        // same lesson, so confirmations reset rather than accumulate.
+        if (preferred(it.lesson, ke.lesson)) kept[k] = { lesson: it.lesson, norm: it.norm, reinforced: 1 };
         merged = true;
         break;
       }
     }
-    if (!merged) kept.push(it);
+    if (!merged) kept.push({ lesson: it.lesson, norm: it.norm, reinforced: 1 });
   }
 
-  // Recency-weighted ranking (aging): score desc, then ts desc, then original order.
+  // Rank by CONFIDENCE (outcome weight + reinforcement) first — so a proven, repeatedly-confirmed
+  // fix outranks a one-off error — then by relevance, then recency, then original order. Confidence
+  // is 0 for lessons with no `kind`, so callers that don't supply outcomes keep the prior ordering.
   return kept
-    .map((x, idx) => ({ x, idx }))
+    .map((x, idx) => ({ x, idx, conf: confidence(x.lesson.kind, x.reinforced) }))
     .sort((p, q) =>
+      (q.conf - p.conf) ||
       (q.x.lesson.score - p.x.lesson.score) ||
       ((q.x.lesson.ts ?? 0) - (p.x.lesson.ts ?? 0)) ||
       (p.idx - q.idx),

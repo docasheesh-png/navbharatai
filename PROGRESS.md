@@ -6117,3 +6117,16 @@ Tests: +parsePlanState round-trip/tolerance/coercion (4). Gate: frontend tsc 0, 
 HONEST LIMITATION: the actual Cloud Run cold-start can't be reproduced in CI. The restore logic is pure +
 unit-tested and the wiring is additive/best-effort (it can never break a running build — strictly improves
 resilience), but final end-to-end confirmation needs a real resumed session after an idle recycle.
+
+## 2026-06-30 — UX: v3.0 composer — device-aware Enter + auto-grow + expand/minimize
+
+Two requested composer changes in AgentV3Panel:
+1. Enter behaviour is now device-aware: on a LAPTOP (fine pointer / physical keyboard) Enter sends; on a
+   PHONE (touch-primary, `matchMedia('(pointer: coarse)')`) Enter inserts a newline and you send via the
+   button — matching how mobile chat apps behave. Shift+Enter is always a newline. Reactive to device change.
+2. The composer auto-grows with its content (was a fixed 2 rows) up to ~5 lines, then scrolls internally,
+   and gains an expand/minimize button (Maximize2/Minimize2) that opens a tall 50vh editor so a long
+   message can be read/edited comfortably; in the expanded editor Enter always inserts a newline (so a long
+   message can be edited freely), and sending collapses it back.
+
+Gate: frontend tsc 0, vitest 3750/3750 PASS. UI-only change (AgentV3Panel.tsx); no server change.

@@ -6207,3 +6207,24 @@ Slice B (next): client poll wiring (the 2nd device actually rendering the live e
 cost-gating (only poll while a chat is open + a build is active) and cross-instance "active" detection.
 
 Gate: server tsc 0, vitest 3785/3785 PASS, boot:check PASS.
+
+## 2026-06-30 — FEATURE (Slice B): cross-device live mirror — client poll of the shared LiveChannel
+
+Completes the cross-device live build sync (Slice A shipped the server LiveChannel + poll endpoint). Now a
+2nd device watching the same chat RENDERS the live activity from a build running on another device/instance.
+
+- useAgentV3Build: new `subscribeLive()` — polls GET /api/agentv3/live (cursor = last seq), feeds the
+  returned events through the SAME reducer as the live stream, and is SELF-LIMITING for cost: it only runs
+  while started, and auto-stops after ~30s of no activity when the server reports not-running.
+- AgentV3Panel: starts subscribeLive only while the panel is OPEN + VISIBLE and NOT running a build locally;
+  re-armed on visibility (liveNonce); torn down the moment a local build starts. So only visible, idle v3.0
+  panels poll (every 3s), and they wind down quickly — bounded cost; Redis/WebSocket can replace polling later.
+
+Net: open the same chat on phone + laptop → the device that isn't building shows the other's live progress;
+when the build finishes the durable result is already in place (#719/#730).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3785/3785 PASS.
+
+HONEST LIMITATION: the actual cross-device/cross-instance live behaviour can't be reproduced in CI; the
+ring/seq/delta core is unit-tested and the wiring is additive (it never touches the local build stream).
+Final confirmation needs 2 real signed-in devices.

@@ -3,6 +3,8 @@ import { Editor } from './Editor';
 import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
 import { TerminalPanel } from './TerminalPanel';
+import { DebugPanel } from './DebugPanel';
+import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMap, BREAKPOINTS_STORAGE_KEY, type BreakpointMap } from '../../lib/breakpoints';
 import { CommandPalette } from './CommandPalette';
 import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
@@ -135,6 +137,28 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isPanelMaximized, setIsPanelMaximized] = useState(false);
+  // P-DEV.3 — breakpoints (file → lines), persisted to localStorage; + the Debugger panel toggle.
+  const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
+  const [breakpoints, setBreakpoints] = useState<BreakpointMap>(() => {
+    try { return loadBreakpoints(localStorage.getItem(BREAKPOINTS_STORAGE_KEY)); } catch { return {}; }
+  });
+  const persistBreakpoints = (next: BreakpointMap) => {
+    setBreakpoints(next);
+    try { localStorage.setItem(BREAKPOINTS_STORAGE_KEY, serializeBreakpoints(next)); } catch { /* ignore */ }
+  };
+  const handleToggleBreakpoint = (file: string, line: number) => persistBreakpoints(toggleBpInMap(breakpoints, file, line));
+  const handleClearBreakpoint = (file: string, line: number) => persistBreakpoints(toggleBpInMap(breakpoints, file, line)); // toggle off an existing one
+  const handleClearAllBreakpoints = () => persistBreakpoints({});
+  const handleJumpToBreakpoint = (file: string, line: number) => {
+    if (files[file] !== undefined) setActiveFile(file);
+    setTimeout(() => {
+      try {
+        editorInstance?.revealLineInCenter?.(line);
+        editorInstance?.setPosition?.({ lineNumber: line, column: 1 });
+        editorInstance?.focus?.();
+      } catch { /* best-effort jump */ }
+    }, 80);
+  };
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     return !!localStorage.getItem('github_oauth_return_active_screen') || true;
   });
@@ -987,8 +1011,10 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                 onMount={setEditorInstance}
                 allFiles={files}
                 onNavigateOpen={(path) => { if (files[path] !== undefined) setActiveFile(path); }}
+                activeBreakpoints={breakpoints[activeFile] ?? []}
+                onBreakpointToggle={handleToggleBreakpoint}
                 onRun={() => onRun(files)}
-                onDebug={() => setIsPanelOpen(true)}
+                onDebug={() => setIsDebugPanelOpen(true)}
                 dirtyTabs={dirtyTabs}
                 editorTheme={editorTheme}
                 editorOptions={{
@@ -1093,17 +1119,37 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                      exit={{ height: 0 }}
                      className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
                   >
-                      <TerminalPanel 
+                      <TerminalPanel
                         onClose={() => {
                           setIsPanelOpen(false);
                           setIsPanelMaximized(false);
-                        }} 
+                        }}
                         files={files}
                         onFilesChange={onFilesChange}
                         activeFile={activeFile}
                         onActiveFileChange={setActiveFile}
                         isMaximized={isPanelMaximized}
                         onToggleMaximize={() => setIsPanelMaximized(prev => !prev)}
+                      />
+                  </motion.div>
+              )}
+          </AnimatePresence>
+
+          {/* P-DEV.3 — Debugger panel (breakpoints list + honest deferred live-pause state) */}
+          <AnimatePresence>
+              {isDebugPanelOpen && (
+                  <motion.div
+                     initial={{ height: 0 }}
+                     animate={{ height: '35%' }}
+                     exit={{ height: 0 }}
+                     className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+                  >
+                      <DebugPanel
+                        onClose={() => setIsDebugPanelOpen(false)}
+                        breakpoints={breakpoints}
+                        onJumpToBreakpoint={handleJumpToBreakpoint}
+                        onClearBreakpoint={handleClearBreakpoint}
+                        onClearAll={handleClearAllBreakpoints}
                       />
                   </motion.div>
               )}

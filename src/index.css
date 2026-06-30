@@ -193,3 +193,15 @@ html, body {
   will-change: auto;
   transform: none;
 }
+
+/* P-DEV.3 — breakpoint glyph in the Monaco gutter (a red dot on lines with a breakpoint). */
+.nbai-breakpoint-glyph {
+  background-color: #e51400;
+  border-radius: 50%;
+  width: 0.7em !important;
+  height: 0.7em !important;
+  margin-left: 5px;
+  margin-top: 0.45em;
+  box-shadow: 0 0 4px rgba(229, 20, 0, 0.7);
+  cursor: pointer;
+}

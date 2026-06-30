@@ -23,8 +23,7 @@ import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v3.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { buildApp, buildAppStream, fetchBuildSession, previewSrcFor } from './services/buildService';
-import { CommandPalette } from './components/ide/CommandPalette';
-import { 
+import {
   Send, Bot, User, Zap, Code, MessageSquare, Loader2, IndianRupee, Heart, QrCode, ExternalLink, HeartHandshake,
   Terminal, Activity, Cpu, Settings, X, Shield, ShieldCheck, Eye, EyeOff, Lock, Wallet, CreditCard,
   Globe, FileCode, GitBranch, Play, Monitor, Search, ChevronRight, Gamepad2, Sparkles,
@@ -320,8 +319,6 @@ export default function App() {
   // 9.5 — AI Teaching Mode (beginner-friendly explanations)
   const [teachMode, setTeachMode] = useState<boolean>(() => localStorage.getItem('navbharat_teach_mode') === 'true');
   useEffect(() => { localStorage.setItem('navbharat_teach_mode', teachMode.toString()); }, [teachMode]);
-  // 10.5 — Command Palette
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
   // Phase 6.2 — real-time network status for mobile UX.
@@ -1205,15 +1202,8 @@ export default function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const inInput = document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT';
-      // 10.5 Ctrl+K — Command Palette (works everywhere)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setShowCommandPalette(p => !p);
-        return;
-      }
-      // L7: Escape — close command palette and any open modal overlay
+      // L7: Escape — close any open modal overlay
       if (e.key === 'Escape') {
-        if (showCommandPalette) { setShowCommandPalette(false); return; }
         if (showAuth) { setShowAuth(false); return; }
         if (showVishwakarmaChooser) { setShowVishwakarmaChooser(false); return; }
         if (showVishwakarmaUnlockModal) { setShowVishwakarmaUnlockModal(false); return; }
@@ -1233,7 +1223,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showCommandPalette, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
@@ -5313,7 +5303,6 @@ ${buildLanguageRule(preferredLanguage)}`;
         redoCode={redoCode}
         user={user}
         setShowAuth={setShowAuth}
-        setShowCommandPalette={setShowCommandPalette}
         auth={auth}
         theme={theme}
         setTheme={setTheme}
@@ -6350,20 +6339,6 @@ ${buildLanguageRule(preferredLanguage)}`;
         }
       `}</style>
 
-      {/* 10.5 — Command Palette */}
-      <CommandPalette
-        isOpen={showCommandPalette}
-        onClose={() => setShowCommandPalette(false)}
-        onAction={(id) => {
-          setShowCommandPalette(false);
-          if (id === 'settings-open') toggleTab('settings' as ViewType);
-          else if (id === 'files-new') toggleTab('files' as ViewType);
-          else if (id === 'ai-debug') { setInput('Review this code for bugs and fix any issues you find'); toggleTab('nbi_chat' as ViewType); }
-          else if (id === 'ai-refactor') { setInput('Refactor this code to be cleaner and more maintainable'); toggleTab('nbi_chat' as ViewType); }
-          else if (id === 'deploy-vercel') toggleTab('studio' as ViewType);
-          addToast(`Running: ${id}`, 'info');
-        }}
-      />
 
       {/* 10.6 — Toast notifications */}
       <ToastContainer toasts={toasts} onRemove={removeToast} />

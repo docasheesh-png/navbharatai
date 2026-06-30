@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, Search, X, RotateCcw, LogOut, Sun, Moon, User, Settings, ChevronDown } from 'lucide-react';
+import { Menu, X, RotateCcw, LogOut, Sun, Moon, User, Settings, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
@@ -32,7 +32,6 @@ export interface TopNavProps {
   redoCode: () => void;
   user: FirebaseUser | null;
   setShowAuth: (v: boolean) => void;
-  setShowCommandPalette: (v: boolean) => void;
   auth: any;
   /** G1: quick dark/light theme toggle */
   theme?: ThemeMode;
@@ -46,7 +45,7 @@ export function TopNav({
   themeClasses, effectiveDeviceMode, isSidebarCollapsed, setIsSidebarCollapsed,
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
-  user, setShowAuth, setShowCommandPalette, auth, theme, setTheme,
+  user, setShowAuth, auth, theme, setTheme,
   onOpenProfile, onOpenSettings,
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -121,17 +120,6 @@ export function TopNav({
             referrerPolicy="no-referrer"
           />
           <h1 className="text-sm font-bold tracking-tighter text-white hidden sm:block italic">navBharatAI</h1>
-        </button>
-
-        {/* Command Palette trigger */}
-        <button
-          onClick={() => setShowCommandPalette(true)}
-          className="hidden md:flex items-center gap-2 h-7 px-3 bg-white/5 hover:bg-white/8 border border-white/5 hover:border-white/15 rounded-lg text-[#484f58] hover:text-white transition-all shrink-0 mr-1"
-          title="Command Palette (Ctrl+K)"
-        >
-          <Search className="w-3 h-3" />
-          <span className="text-[10px] text-[#484f58]">Search commands...</span>
-          <kbd className="text-[8px] font-black bg-white/5 border border-white/10 px-1 rounded">⌘K</kbd>
         </button>
 
         {/* Open tabs */}

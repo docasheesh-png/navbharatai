@@ -78,7 +78,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
   }, [workspaceId, userId, email]);
 
   useEffect(() => {
-    if (mode === 'inbrowser' && !html && !loading && !err && workspaceId) { void loadInBrowser(); }
+    // Auto-(re)load the in-browser preview whenever the tab is shown or the workspace (re)appears.
+    // NOTE: we intentionally retry even if a prior attempt errored — after a server cold-start the
+    // first fetch can 404 ("no files yet") while the durable saved files are still loading; reopening
+    // the session must re-attempt (the server falls back to the durable files) instead of showing the
+    // stale error forever. This only re-runs on mode/workspaceId change, so it can never loop.
+    if (mode === 'inbrowser' && !html && !loading && workspaceId) { void loadInBrowser(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workspaceId]);
 

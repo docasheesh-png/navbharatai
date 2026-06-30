@@ -170,6 +170,13 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (!conv || !Array.isArray(conv.messages)) return null;
       let next = initialAgentV3State();
       for (const e of conversationToEvents(conv)) next = agentV3Reducer(next, e);
+      // Cold-resume fix: the live plan/todos were lost when the server instance recycled (~15-min
+      // idle), so the conversation events alone leave the plan panel at 0/N. Repopulate it from the
+      // durably-saved plan the server restored (workspaceState.todos) so progress is preserved.
+      const restoredTodos = Array.isArray(oneJson?.workspaceState?.todos) ? oneJson.workspaceState.todos : [];
+      if (restoredTodos.length > 0) {
+        next = agentV3Reducer(next, { type: 'todo_updated', todos: restoredTodos, ts: Date.now() } as AgentV3WireEvent);
+      }
       setState(next);
       // Return the user's OWN messages so the panel can restore them too (the reducer/narration
       // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload), AND

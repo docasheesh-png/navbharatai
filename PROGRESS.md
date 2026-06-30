@@ -6091,3 +6091,29 @@ A high-effort code review of the cross-project brain surfaced two real correctne
    actually follows.
 
 Tests: +LessonBlock.test.ts (4). Gate: frontend tsc 0, server tsc 0, vitest 3734/3734 PASS, boot:check PASS.
+
+## 2026-06-30 — FIX (hard): v3.0 state survives a server cold-start (preview + plan no longer vanish after ~15-min idle)
+
+Real report: after ~10–15 min idle the Cloud Run instance recycles and ALL in-memory state is lost — the
+in-browser preview showed "No files to preview yet" (even though Files(15) listed files), the plan reset to
+0/N, and memory looked gone. A high-effort trace found three gaps at the durable-store ↔ client boundary;
+fixed the two VISIBLE ones (memory was already durable + restored for the agent on the next build):
+
+1. PLAN/TODOS vanished. The plan is saved durably as a PLAN_STATE note in workspace memory but was only
+   parsed to prime the next build's PROMPT — never sent back to the UI on resume, so the panel reset to 0/N.
+   Fix: new pure `parsePlanState()` (exact inverse of `formatPlanState`, round-trip tested) + the
+   `GET /api/agentv3/conversations/:id` endpoint now also returns `workspaceState.todos` (restored from the
+   durable PLAN_STATE) + `loadConversation()` dispatches them into the reducer. Reopening a session now shows
+   the real plan progress. All best-effort — a restore failure never blocks resume.
+2. PREVIEW stuck on a stale error. The in-browser preview auto-load effect had a `!err` guard, so once the
+   first fetch 404'd on a cold instance (durable saved files still loading) it NEVER retried — the stale
+   "No files" error stuck forever. Fix: drop the `!err` guard so reopening the session re-attempts (the
+   server endpoint already falls back to the durable saved files). The effect only re-runs on mode/workspace
+   change, so it can't loop.
+
+Tests: +parsePlanState round-trip/tolerance/coercion (4). Gate: frontend tsc 0, server tsc 0, vitest
+3740/3740 PASS, boot:check PASS.
+
+HONEST LIMITATION: the actual Cloud Run cold-start can't be reproduced in CI. The restore logic is pure +
+unit-tested and the wiring is additive/best-effort (it can never break a running build — strictly improves
+resilience), but final end-to-end confirmation needs a real resumed session after an idle recycle.

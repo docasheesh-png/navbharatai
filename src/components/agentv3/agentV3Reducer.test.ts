@@ -153,6 +153,17 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.error).toBe('boom');
   });
 
+  it('carries the resumable flag from a time-limit pause (Layer 3 auto-continue)', () => {
+    const paused = agentV3Reducer(initialAgentV3State(), {
+      type: 'result', ok: false, summary: 'Build paused at the time limit', steps: 0, billedUsd: 0, resumable: true,
+    });
+    expect(paused.done).toBe(true);
+    expect(paused.resumable).toBe(true);
+    // A normal success result is NOT resumable (so it never auto-continues).
+    const ok = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 3, billedUsd: 0.2 });
+    expect(ok.resumable).toBe(false);
+  });
+
   it('keeps the diagnostics report delivered with the result event (for the "Build report" button)', () => {
     const report = { schema: 'navbharatai.v3.build-diagnostics/1', issues: [{ code: 'TOOL_CALL' }] };
     const withDiag = agentV3Reducer(initialAgentV3State(), {

@@ -1671,8 +1671,10 @@ export function registerAgentV3Routes(app: Express): void {
         const billedUsd = typeof buildResultRef.billedUsd === 'number' ? buildResultRef.billedUsd : 0;
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd, billedInr: Math.round(billedUsd * usdInrRate() * 100) / 100, ...(dl ? { diagnostics: dl } : {}) });
       } else {
-        emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done. Just type **"continue"** and I will pick up exactly where I left off and finish it.', ts: Date.now() });
-        emit({ type: 'result', ok: false, summary: 'Build paused at the time limit — your files are saved. Type "continue" to finish where it left off.', steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
+        emit({ type: 'narration', agent: 'architect', text: 'This build hit the time limit and was paused automatically — every file generated so far is saved. It was likely almost done; I will continue automatically and finish it.', ts: Date.now() });
+        // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
+        // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
+        emit({ type: 'result', ok: false, resumable: true, summary: 'Build paused at the time limit — your files are saved. Continuing automatically…', steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
       }
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);

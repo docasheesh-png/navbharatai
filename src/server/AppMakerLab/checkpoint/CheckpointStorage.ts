@@ -1,5 +1,5 @@
 import { readFile, writeFile, unlink, readdir, mkdir, rename } from 'fs/promises';
-import { openSync, writeSync, fsyncSync, closeSync } from 'fs';
+import { openSync, writeSync, fsyncSync, closeSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { Checkpoint } from './CheckpointTypes';
 import * as admin from 'firebase-admin';
@@ -50,6 +50,10 @@ export class CheckpointStorage {
     }
 
     async save(id: string, data: Checkpoint): Promise<void> {
+        // Ensure the storage dir exists BEFORE writing — the constructor's mkdir is async and may not
+        // have completed on the first save (and the dir never exists on a fresh instance). Sync +
+        // idempotent so the very first checkpoint never races into ENOENT.
+        try { mkdirSync(this.storageRoot, { recursive: true }); } catch { /* already exists */ }
         const filePath = join(this.storageRoot, `${id}.json`);
         const tmpPath = join(this.storageRoot, `${id}.json.tmp`);
         const content = JSON.stringify(data);

@@ -814,14 +814,21 @@
       "No new high/critical vulnerabilities" (8 allowlisted), exit 0 ✅.
 - **Files:** `scripts/auditGate.mjs`, `.audit-allowlist.json`, `tests/auditGate.test.ts`, `.github/workflows/ci.yml`, `.github/dependabot.yml`, `package.json`.
 
-### P-TQA.8 — Flaky Test Detection & Tracker  ❌ MISSING  [MED]
-- `TestPanel.tsx` tracks pass/fail per run but not flakiness across multiple runs. Tests that alternate
-  pass/fail on every run are indistinguishable from genuinely stable tests.
-- [ ] Add `FlakyTestTracker.ts`: persist test run results to Firestore `testRuns/{workspaceId}/{testId}[]`.
-  After 5+ runs, compute `flakiness_rate = failCount / totalRuns`. Flag tests with rate > 20% as flaky.
-- [ ] Show flaky badge (🟡) in `TestPanel.tsx` next to test name when `flakiness_rate > 0.2`.
-- [ ] Optionally auto-retry flaky tests up to 3 times before marking as failed.
-- **Files:** new `src/server/QualityEvaluationEngine/FlakyTestTracker.ts`, `src/components/ide/TestPanel.tsx`.
+### P-TQA.8 — Flaky Test Detection & Tracker  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- TestPanel showed only the latest pass/fail — a test alternating pass/fail looked identical to a stable one.
+- [x] **`src/lib/flakyTests.ts`** (pure, unit-tested) — `recordRun` (capped per-test history), `flakinessRate`,
+  `isFlaky` (≥5 runs, >20% failures, AND both passed-and-failed — an all-fail test is broken, not flaky),
+  `loadHistory`/`serializeHistory`.
+- [x] **Wired into `TestPanel.tsx`** — every `TEST_RESULT` records the outcome to per-test history persisted in
+  `localStorage` (`nbai:test_runs`); a **🟡 flaky badge** renders next to any test flagged flaky.
+- **Honest deviations:** persistence is `localStorage` (per-browser, real, zero extra endpoint) rather than the
+  spec's Firestore `testRuns/{workspaceId}` (avoids shipping an unwired route); auto-retry-3× is left out (it
+  would mask flakiness — surfacing it is the point). Lib lives in `src/lib/` (client) since TestPanel runs tests
+  client-side, not the server `QualityEvaluationEngine`.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3769 passing (7 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS. AppKnowledgeBase updated.
+- **Files:** new `src/lib/flakyTests.ts`, `tests/flakyTests.test.ts`; `src/components/ide/TestPanel.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-TQA.9 — Test Data Manager / Fixture System  🟡 PARTIAL → full  [MED]
 - `AITestingSuite.tsx` generates test data inline per test. No reusable fixture files, no faker.js-style

@@ -39,6 +39,8 @@ export interface UseAgentV3Build {
   restore: (sha: string) => Promise<boolean>;
   /** Phase G1 — load the durable git checkpoint history for a workspace (newest first, cross-session). */
   getCheckpoints: (opts: { workspaceId: string; userId?: string; email?: string }) => Promise<GitCheckpoint[]>;
+  /** Phase G2 — real working-tree git status for a workspace (available:false when the sandbox is cold). */
+  getGitStatus: (opts: { workspaceId: string; userId?: string; email?: string }) => Promise<GitStatus>;
   /** "Restore all files" — genuinely bring the whole project back into the workspace (writes the
    *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
   restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
@@ -63,6 +65,14 @@ export interface UseAgentV3Build {
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<ConversationMeta[]>;
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn. */
   subscribeLive: (opts?: { userId?: string; email?: string }) => (() => void);
+}
+
+/** Real working-tree git status (Phase G2). available:false when the sandbox isn't warm this session. */
+export interface GitStatus {
+  available: boolean;
+  clean: boolean;
+  changed: number;
+  head: string;
 }
 
 /** Lightweight conversation metadata for the history list (matches GET /api/agentv3/conversations). */
@@ -376,6 +386,33 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // Phase G2 — fetch the live working-tree git status for a workspace. Best-effort: returns an
+  // honest "not available" shape on any error or cold sandbox.
+  const getGitStatus = useCallback(async (opts: { workspaceId: string; userId?: string; email?: string }): Promise<GitStatus> => {
+    const offline: GitStatus = { available: false, clean: false, changed: 0, head: '' };
+    if (!opts?.workspaceId) return offline;
+    try {
+      const params = new URLSearchParams();
+      params.set('workspaceId', opts.workspaceId);
+      const uid = opts.userId ?? userIdRef.current;
+      const em = opts.email ?? emailRef.current;
+      if (uid) params.set('userId', uid);
+      if (em) params.set('email', em);
+      const res = await fetch(`/api/agentv3/git-status?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (!res.ok) return offline;
+      const j = await res.json().catch(() => null);
+      if (!j || typeof j !== 'object') return offline;
+      return {
+        available: j.available === true,
+        clean: j.clean === true,
+        changed: typeof j.changed === 'number' ? j.changed : 0,
+        head: typeof j.head === 'string' ? j.head : '',
+      };
+    } catch {
+      return offline;
+    }
+  }, []);
+
   const start = useCallback(
     async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string }) => {
       if (running) return;
@@ -551,5 +588,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
 }

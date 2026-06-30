@@ -51,6 +51,21 @@ export async function restoreSession(
   return session.git.restore(sha);
 }
 
+/**
+ * Real git working-tree status for a session's workspace (Phase G2). Returns null when the session is
+ * unknown, not owned by the user, or git is unavailable — so the caller can show an honest "not active
+ * in this session" state instead of faking a clean tree.
+ */
+export async function gitStatusForSession(
+  workspaceId: string,
+  userId?: string,
+): Promise<{ clean: boolean; changed: number; head: string } | null> {
+  const session = sessions.get(workspaceId);
+  if (!session) return null;
+  if (userId && session.userId && session.userId !== userId) return null;
+  return session.git.status();
+}
+
 export function sessionCount(): number {
   return sessions.size;
 }

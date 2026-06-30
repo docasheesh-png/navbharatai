@@ -86,6 +86,24 @@ export class GitManager implements Checkpointer {
     }
   }
 
+  /**
+   * Real working-tree status from `git status --porcelain` — how many files changed since the last
+   * checkpoint, plus the current HEAD. Returns null when git is unavailable (cold/shell-less sandbox),
+   * so callers can show an honest "not active" state instead of a fake "clean". Best-effort.
+   */
+  async status(): Promise<{ clean: boolean; changed: number; head: string } | null> {
+    if (!this.ready) return null;
+    try {
+      const r = await this.run('git status --porcelain 2>/dev/null');
+      if (r.exitCode !== 0) return null;
+      const changed = r.stdout.split('\n').map((s) => s.trim()).filter(Boolean).length;
+      const head = (await this.run('git rev-parse --short HEAD 2>/dev/null || true')).stdout.trim();
+      return { clean: changed === 0, changed, head };
+    } catch {
+      return null;
+    }
+  }
+
   private async run(command: string) {
     const r = await this.runner.runCommand(this.workspaceId, command);
     return r;

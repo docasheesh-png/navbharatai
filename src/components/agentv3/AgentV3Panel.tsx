@@ -3,7 +3,7 @@ import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown,
   FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, MessageSquare,
 } from 'lucide-react';
@@ -54,7 +54,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 };
 
 export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -116,6 +116,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // (e.g. it recycled since that checkpoint, or we're in a fresh session). We tell the user the truth
   // instead of a silent no-op or a fake "restored".
   const [restoreNote, setRestoreNote] = useState<string>('');
+  // Phase G2 — live working-tree git status (wired into the sync body). null until first load.
+  const [gitStatus, setGitStatus] = useState<import('../../hooks/useAgentV3Build').GitStatus | null>(null);
   const handleRestoreCheckpoint = async (sha: string) => {
     setRestoreNote('Restoring…');
     const ok = await restore(sha);
@@ -290,23 +292,28 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     const workspaceId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
     (async () => {
       const durable = await getCheckpoints({ workspaceId, userId, email });
-      if (cancelled || durable.length === 0) return;
-      setCheckpointHistory((prev) => {
-        const seen = new Set<string>();
-        const merged: GitCheckpoint[] = [];
-        // Oldest-first to match how checkpointHistory is built across turns (durable comes newest-first).
-        for (const c of [...durable].reverse().concat(prev)) {
-          const key = c.sha || c.id;
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(c);
-        }
-        return merged;
-      });
+      if (!cancelled && durable.length > 0) {
+        setCheckpointHistory((prev) => {
+          const seen = new Set<string>();
+          const merged: GitCheckpoint[] = [];
+          // Oldest-first to match how checkpointHistory is built across turns (durable comes newest-first).
+          for (const c of [...durable].reverse().concat(prev)) {
+            const key = c.sha || c.id;
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            merged.push(c);
+          }
+          return merged;
+        });
+      }
+      // Phase G2 — also pull the live working-tree git status so the History tab reflects the real
+      // git organ state (clean / N uncommitted) tied to this same workspace.
+      const status = await getGitStatus({ workspaceId, userId, email });
+      if (!cancelled) setGitStatus(status);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, resume?.nonce, state.workspaceId, state.done]);
+  }, [userId, resume?.nonce, state.workspaceId, state.done, tab]);
 
   // Persist the v3.0 conversation into NavBharatAI's MAIN History (the sidebar
   // "History" option), using the SAME chat_sessions shape as Free/Pro/SDA chats.
@@ -1331,6 +1338,18 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                       {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
+                    </div>
+                  )}
+                  {gitStatus && (
+                    <div className="mb-2 flex items-center gap-2 text-[11px] px-2 py-1 rounded bg-zinc-800/60 border border-white/5">
+                      <GitBranch className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      {!gitStatus.available ? (
+                        <span className="text-zinc-500">Git status: not active in this session — continue a build to make the working tree live.</span>
+                      ) : gitStatus.clean ? (
+                        <span className="text-emerald-400">Working tree clean{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
+                      ) : (
+                        <span className="text-amber-400">{gitStatus.changed} uncommitted change{gitStatus.changed === 1 ? '' : 's'}{gitStatus.head ? ` · on ${gitStatus.head}` : ''}</span>
+                      )}
                     </div>
                   )}
                   {restoreNote && (

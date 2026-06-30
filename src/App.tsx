@@ -5471,6 +5471,10 @@ ${buildLanguageRule(preferredLanguage)}`;
               email={user?.email}
               resume={v3Resume}
               onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
+              /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
+                 the durable store so the build never runs on a stale file set (and so the user's latest
+                 hand edits are what v3.0 reads/acknowledges). Best-effort — never blocks the build. */
+              onBeforeBuild={() => workspaceSyncerRef.current?.flush() ?? Promise.resolve()}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v3.0

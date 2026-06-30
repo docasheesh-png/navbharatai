@@ -61,4 +61,33 @@ describe('makeWorkspaceSyncer', () => {
     expect(sync).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
+
+  it('flush() syncs pending immediately, bypassing the debounce, and resolves when drained', async () => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const s = makeWorkspaceSyncer({ sync, debounceMs: 5000 }); // long debounce — flush must not wait for it
+    s.onLocalChange({}, { 'a.ts': '1', 'b.ts': '2' });
+    expect(s.hasPending()).toBe(true);
+    await s.flush();
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(sync).toHaveBeenCalledWith({ 'a.ts': '1', 'b.ts': '2' });
+    expect(s.hasPending()).toBe(false);
+  });
+
+  it('flush() is a safe no-op when nothing is pending', async () => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const s = makeWorkspaceSyncer({ sync, debounceMs: 50 });
+    await s.flush();
+    expect(sync).not.toHaveBeenCalled();
+    expect(s.hasPending()).toBe(false);
+  });
+
+  it('hasPending reflects queued edits before they are flushed', async () => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const s = makeWorkspaceSyncer({ sync, debounceMs: 50 });
+    expect(s.hasPending()).toBe(false);
+    s.onLocalChange({}, { 'a.ts': '1' });
+    expect(s.hasPending()).toBe(true);
+    await s.flush();
+    expect(s.hasPending()).toBe(false);
+  });
 });

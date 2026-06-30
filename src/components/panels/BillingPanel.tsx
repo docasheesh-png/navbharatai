@@ -224,6 +224,7 @@ export function BillingPanel(props: BillingPanelProps) {
 
             {/* CARD 1: AVAILABLE CREDIT */}
             <div
+              data-tour="billing"
               onClick={() => onSetActiveBillingDetailTab('remaining')}
               className={cn(
                 "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",

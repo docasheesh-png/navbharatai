@@ -129,7 +129,7 @@ export function SidebarNav({
     <>
       {/* Persistent Desktop Sidebar */}
       {effectiveDeviceMode === 'desktop' && (
-        <aside className={cn(
+        <aside data-tour="sidebar" className={cn(
           "bg-[#161b22] border-r border-white/10 hidden lg:flex flex-col h-full shadow-3xl flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
           isSidebarCollapsed ? 'w-0' : 'w-72'
         )}>

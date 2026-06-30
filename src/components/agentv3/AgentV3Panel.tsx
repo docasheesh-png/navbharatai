@@ -748,7 +748,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
           )}
         </div>
         <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
-          <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />}>Preview</TabPill>
+          <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />} dataTour="preview">Preview</TabPill>
           <TabPill active={showWorkspace && tab === 'files'} onClick={() => openTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
@@ -811,6 +811,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
           )}
           <button
             onClick={deployLive}
+            data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -1021,7 +1022,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
                 <Paperclip className="w-4 h-4" />
                 {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
               </button>
-              <div className="relative flex-1">
+              <div className="relative flex-1" data-tour="chat">
                 <textarea
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-12 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
                   rows={2}
@@ -1543,10 +1544,11 @@ function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   );
 }
 
-function TabPill({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+function TabPill({ active, onClick, icon, children, dataTour }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode; dataTour?: string }) {
   return (
     <button
       onClick={onClick}
+      data-tour={dataTour}
       className={`flex items-center gap-1 shrink-0 px-3 py-1 rounded-full text-xs border whitespace-nowrap ${
         active
           ? 'bg-indigo-600 border-indigo-500 text-white'

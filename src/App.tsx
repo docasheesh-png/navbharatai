@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
+import { ProductTour } from './components/ProductTour';
 // AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
@@ -6286,6 +6287,9 @@ ${buildLanguageRule(preferredLanguage)}`;
         setPreviewBuildError={setPreviewBuildError}
       />
 
+      {/* P-UX.4 — Product Tour overlay (dependency-free; renders its own launcher). Navigates via the
+          app's guarded toggleTab and gracefully skips any target not present on the current view. */}
+      <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} />
 
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop) */}
       {effectiveDeviceMode !== 'desktop' && (

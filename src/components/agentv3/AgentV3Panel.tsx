@@ -160,6 +160,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   // never have to click "Resume" after a refresh. The button stays as a manual fallback.
   // Guarded so it fires once per detected running build.
   const autoResumedRef = useRef(false);
+  // Layer 3 — how many times a paused (time-limit) build has been auto-continued this turn.
+  const AUTO_CONTINUE_MAX = 2;
+  const autoContinueRef = useRef(0);
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
@@ -319,6 +322,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   const send = async () => {
     const text = prompt.trim();
     if ((!text && files.length === 0) || running) return;
+    // A fresh user message resets the Layer-3 auto-continue budget for the new turn.
+    autoContinueRef.current = 0;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
     // build state — otherwise the prior reply (which lives only in state.narration)
     // disappears from the thread the moment the next message begins.
@@ -349,6 +354,33 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
     setImportUrl(''); // consume import URL on first send
     start(msgText, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
   };
+
+  // ── Layer 3: bounded auto-continue ──────────────────────────────────────────────
+  // When a build PAUSES at the wall-clock limit (resumable), automatically resume the SAME
+  // project without the user typing "continue" — up to AUTO_CONTINUE_MAX times so a genuinely
+  // stuck build can never loop forever or rack up unbounded cost. After the budget, we hand back
+  // to the user honestly. Reuses the proven resume path (start('continue', …)); no build-loop surgery.
+  useEffect(() => {
+    if (!state.done || !state.resumable || running) return;
+    if (autoContinueRef.current >= AUTO_CONTINUE_MAX) {
+      setAgentHistory((h) => [
+        ...h,
+        { role: 'agent' as const, agent: 'architect', text: 'This build is taking longer than the time limit allows even after auto-continuing. Type **"continue"** and I will keep finishing it.', ts: Date.now() },
+      ]);
+      return;
+    }
+    autoContinueRef.current += 1;
+    // Preserve the paused turn's replies into history before start() resets the live state.
+    if (state.narration.length > 0) {
+      setAgentHistory((h) => [
+        ...h,
+        ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind })),
+      ]);
+    }
+    if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done, state.resumable, running]);
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
   const startNewSession = () => {

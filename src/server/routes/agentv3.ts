@@ -2202,6 +2202,13 @@ export function registerAgentV3Routes(app: Express): void {
         if (lessons) buildPrompt = `${lessons}\n\n---\n\n${buildPrompt}`;
       } catch { /* recall is best-effort — never blocks a build */ }
 
+      // Cross-Project Lesson Brain watermark: capture the time BEFORE the build runs. On a resumed
+      // build, restoreWorkspaceMemory replays every PRIOR build's episodes into memory (re-stamped
+      // with a fresh ts), so promoting the whole snapshot later would re-promote old lessons and
+      // falsely inflate their confidence/recency. We promote only episodes created AT/AFTER this
+      // watermark — i.e. what THIS build actually produced.
+      const brainBaselineTs = Date.now();
+
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
       // language explicitly; otherwise we instruct Claude to mirror whatever
@@ -2719,7 +2726,11 @@ export function registerAgentV3Routes(app: Express): void {
       // projects. Best-effort and gated on a successful build — never blocks or affects the outcome.
       if (result.ok && userId) {
         try {
-          const episodes = getWorkspaceMemory(workspaceId).snapshot().episodes;
+          // Only THIS build's episodes (created at/after the pre-run watermark) — never the prior
+          // builds' episodes that restoreWorkspaceMemory replayed, which would inflate confidence.
+          const episodes = getWorkspaceMemory(workspaceId)
+            .snapshot()
+            .episodes.filter((e) => typeof e.ts === 'number' && e.ts >= brainBaselineTs);
           userLessonBrainStore.recordBuildLessons(userId, episodes, new Date().toISOString()).catch(() => {});
         } catch { /* brain promotion is best-effort */ }
       }

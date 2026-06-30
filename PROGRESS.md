@@ -6070,3 +6070,24 @@ conflict-newer-wins, cap, null-tolerance, gating, fix-above-note, block cap) + W
 (exact match beats token match; recall determinism).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3730/3730 PASS, boot:check PASS.
+
+## 2026-06-30 — MEMORY: rock-solid pass on the cross-project brain (review fixes)
+
+A high-effort code review of the cross-project brain surfaced two real correctness findings + reuse/polish:
+
+1. (correctness) Re-promotion inflation / recency corruption. On a RESUMED build, restoreWorkspaceMemory
+   replays every PRIOR build's episodes into memory (re-stamped with a fresh ts). Promoting the whole
+   snapshot re-promoted those old lessons every build → falsely inflated `reinforced` (confidence) counts
+   and made months-old advice look perpetually fresh. Fix: the route now captures a watermark
+   (`brainBaselineTs = Date.now()`) BEFORE the build runs and promotes ONLY episodes created at/after it —
+   i.e. exactly what THIS build produced — so each lesson is reinforced once per genuine confirmation.
+   (v3.0 records no `fix` episodes mid-build; the real transferable signal is this build's reflection note.)
+2. (reuse) formatBrainLessons duplicated RecalledLessons' snippet + budget + assembly loop. Extracted a
+   shared `LessonBlock.ts` (`formatLessonBlock` + `lessonSnippet` + ONE budget constant) and refactored BOTH
+   RecalledLessons and UserLessonBrain onto it, so the per-workspace and cross-project injection blocks can
+   never drift. Behaviour-identical (all prior tests green).
+3. (polish) Tightened comments: dead rhetorical comment removed; `totalBuilds` doc clarified to "builds that
+   contributed a lesson"; the store doc-comment now references the FirestoreWorkspaceMemoryStore pattern it
+   actually follows.
+
+Tests: +LessonBlock.test.ts (4). Gate: frontend tsc 0, server tsc 0, vitest 3734/3734 PASS, boot:check PASS.

@@ -27,6 +27,7 @@ import {
   isConflict,
   lessonConfidence,
 } from './KnowledgeEvolution';
+import { formatLessonBlock } from './LessonBlock';
 import type { Episode } from './WorkspaceMemory';
 
 /** The transferable polarity a brain lesson can hold (only proven fixes + reflections are kept). */
@@ -43,7 +44,7 @@ export interface BrainLesson {
 
 export interface UserBrain {
   lessons: BrainLesson[];
-  /** Number of builds folded into this brain. */
+  /** Number of builds that CONTRIBUTED a lesson to this brain (a build that taught nothing is not counted). */
   totalBuilds: number;
   updatedAt?: string;
 }
@@ -57,10 +58,7 @@ export interface IncomingLesson {
 
 const MAX_BRAIN_LESSONS = 60;     // cap the stored set (weakest-confidence dropped)
 const MAX_PROMOTED_PER_BUILD = 12; // don't fold an unbounded number of fixes from one build
-const MAX_INJECTED = 6;           // top lessons injected into a prompt
-const LESSON_MAX_CHARS = 160;
-const BLOCK_MAX_CHARS = 1200;
-/** Don't inject cross-project lessons until there is real history (≥ this many prior builds). */
+/** Don't inject cross-project lessons until there is real history (≥ this many contributing builds). */
 export const MIN_BUILDS_FOR_BRAIN = 2;
 
 const HEADER =
@@ -163,38 +161,25 @@ export function mergeLessonsIntoBrain(
   return { lessons: ranked, totalBuilds: (base.totalBuilds || 0) + 1, updatedAt: nowIso };
 }
 
-/** Trim a lesson to a short single-line snippet (~max chars). */
-function snippet(text: string, max = LESSON_MAX_CHARS): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim();
-  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
-}
-
 /**
  * Render the top cross-project lessons as an injectable guidance block, or '' when there is not yet
- * enough history (< MIN_BUILDS_FOR_BRAIN) or nothing worth injecting. Pure — safe to inline.
+ * enough history (< MIN_BUILDS_FOR_BRAIN) or nothing worth injecting. Pure — safe to inline. Uses the
+ * shared lesson-block formatter (same budget as the per-workspace recall block, so they never drift).
  */
 export function formatBrainLessons(brain: UserBrain | null | undefined): string {
   const b = brain && Array.isArray(brain.lessons) ? brain : null;
   if (!b || (b.totalBuilds || 0) < MIN_BUILDS_FOR_BRAIN || b.lessons.length === 0) return '';
 
-  const top = [...b.lessons]
+  const ordered = [...b.lessons]
     .sort((a, b2) => brainConfidence(b2) - brainConfidence(a) || b2.ts - a.ts)
-    .slice(0, MAX_INJECTED)
-    .map((l) => snippet(l.text));
-
-  const lines = [HEADER];
-  for (const lesson of top) {
-    const candidate = `- ${lesson}`;
-    if (lines.join('\n').length + 1 + candidate.length > BLOCK_MAX_CHARS) break;
-    lines.push(candidate);
-  }
-  if (lines.length === 1) return '';
-  return lines.join('\n');
+    .map((l) => l.text);
+  return formatLessonBlock(HEADER, ordered);
 }
 
 /**
- * Firestore-backed persistence around the pure core. VITEST-skip, best-effort, never throws —
- * mirrors UserPreferenceStore / FirestoreWorkspaceMemoryStore.
+ * Firestore-backed persistence around the pure core. Follows the established v3.0 store pattern
+ * (VITEST-skip, best-effort, never throws, `firestoreDatabaseId()` on the Firestore handle) — same
+ * as FirestoreWorkspaceMemoryStore.
  */
 class UserLessonBrainStore {
   private db: admin.firestore.Firestore | null = null;
@@ -247,8 +232,7 @@ class UserLessonBrainStore {
     if (!db || !userId) return null;
     try {
       const incoming = extractPromotableLessons(episodes);
-      // Even with no new lessons we still want totalBuilds to advance? No — only write when there
-      // is real signal, so a build that taught nothing doesn't churn the doc.
+      // Skip the write when a build taught nothing, so the doc never churns on no-op builds.
       if (incoming.length === 0) return null;
       const ref = db.collection('user_brain_v3').doc(userId);
       const snap = await ref.get();

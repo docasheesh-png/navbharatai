@@ -6182,3 +6182,28 @@ v3.0 header was redundant. Removed it (idle state only); the running "Stop" and 
 controls are unchanged, and startNewSession still backs the menu's "+ New chat". UI-only.
 
 Gate: frontend tsc 0, vitest 3775/3775 PASS.
+
+## 2026-06-30 — FEATURE (Slice A): cross-device live-sync FOUNDATION (shared LiveChannel + poll endpoint)
+
+Admin chose "throttled Firestore + abstraction" for cross-device live build activity (a 2nd device watching
+the same account's build sees the live processing, even on a different Cloud Run instance). Slice A is the
+server foundation (additive — the existing in-memory /attach live path is untouched):
+
+- NEW pure `LiveEventBuffer.ts` — a capped ring + monotonic seq, with `appendEvents` and `eventsSince`
+  (delta-since-cursor + a `gap` flag when the cursor predates the trimmed ring). Fully unit-tested (10).
+- NEW `LiveChannel.ts` — a swappable transport interface + `FirestoreLiveChannel`: THROTTLED publish
+  (one batched write ~every 1.5s, capped 200-event ring per channel → cheap at 1M users; throwaway events
+  are never durably stored beyond the recent tail), `readSince`, `close`. Single-writer in-memory mirror
+  (the build instance) avoids a read-before-write. Server-only (admin SDK) so the DB is never client-exposed.
+  A RedisLiveChannel can drop in behind the same interface at extreme scale.
+- Wired: broadcastBuild now ALSO mirrors each event to liveChannel.publish (best-effort); endBuild closes
+  the channel; the build registers its key. New GET /api/agentv3/live?sinceSeq= reads the shared channel
+  (works cross-instance) and returns {events, seq, gap, running}.
+
+Cost/security (admin's concern, addressed): live events are EPHEMERAL + throttled + capped (not per-event
+durable writes), and the store is server-mediated only (clients hit our API, never Firestore directly).
+
+Slice B (next): client poll wiring (the 2nd device actually rendering the live events), with tight
+cost-gating (only poll while a chat is open + a build is active) and cross-instance "active" detection.
+
+Gate: server tsc 0, vitest 3785/3785 PASS, boot:check PASS.

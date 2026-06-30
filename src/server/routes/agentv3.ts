@@ -88,6 +88,7 @@ import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
+import { liveChannel } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
@@ -382,6 +383,8 @@ interface RunningBuild {
   subscribers: Set<BuildSubscriber>;
   ended: boolean;
   startedTs: number;
+  /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. */
+  key?: string;
 }
 const runningBuilds = new Map<string, RunningBuild>();
 const MAX_BUILD_BUFFER = 4000;
@@ -392,12 +395,16 @@ const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
   if (rb.buffer.length < MAX_BUILD_BUFFER) rb.buffer.push(e);
   for (const s of rb.subscribers) { try { s.write(e); } catch { /* drop a dead subscriber */ } }
+  // Mirror to the cross-device LiveChannel (throttled, best-effort) so a SECOND device — even on a
+  // different server instance — can watch this build's activity live. Never affects the build.
+  if (rb.key) { try { liveChannel.publish(rb.key, [e]); } catch { /* best-effort */ } }
 }
 /** End every subscriber stream for a finished/stopped build. */
 function endBuild(rb: RunningBuild): void {
   rb.ended = true;
   for (const s of rb.subscribers) { try { s.end(); } catch { /* already closed */ } }
   rb.subscribers.clear();
+  if (rb.key) { try { liveChannel.close(rb.key); } catch { /* best-effort */ } }
 }
 /** Is a build currently running for this account? */
 function isBuildRunning(buildKey: string): boolean {
@@ -1097,6 +1104,32 @@ export function registerAgentV3Routes(app: Express): void {
     req.on('close', () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); });
   });
 
+  // CROSS-DEVICE LIVE SYNC (poll): a SECOND device watching the same account's build polls this for
+  // events newer than its cursor. Unlike /attach (in-memory, one instance), this reads the shared
+  // LiveChannel, so it works even when the build runs on a DIFFERENT Cloud Run instance. Server-only
+  // DB access (admin SDK) — the client never touches Firestore. Returns {events, seq, gap, running}.
+  app.get('/api/agentv3/live', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required.' });
+      return;
+    }
+    const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
+    try {
+      const { events, seq, gap } = await liveChannel.readSince(userId, sinceSeq);
+      // `running` lets the watcher stop polling once the build is done on this instance; the durable
+      // result then syncs via the normal conversation reload.
+      res.json({ events, seq, gap, running: isBuildRunning(userId) });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // History → restore: roll the workspace back to a checkpoint commit (P-git).
   app.post('/api/agentv3/restore', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
@@ -1631,7 +1664,7 @@ export function registerAgentV3Routes(app: Express): void {
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
     const abort = new AbortController();
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now() };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: buildKey };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },

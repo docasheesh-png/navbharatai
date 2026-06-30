@@ -43,6 +43,7 @@ import {
   type PrCapableClient,
   registerSession,
   restoreSession,
+  gitStatusForSession,
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
@@ -1175,6 +1176,30 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     res.json({ checkpoints: await loadCheckpoints(workspaceId) });
+  });
+
+  // Phase G2 — wire git STATUS into the sync body: the real working-tree state from the live sandbox
+  // (`git status --porcelain`) so the IDE can show "clean / N uncommitted change(s)" tied to the same
+  // workspace the build + the editor share. `available:false` is the honest answer when the sandbox
+  // isn't warm in this session (cold/recycled) — never a faked "clean". Ownership-checked.
+  app.get('/api/agentv3/git-status', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) {
+      res.status(400).json({ error: 'workspaceId is required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    const status = await gitStatusForSession(workspaceId, userId ?? undefined);
+    res.json(status ? { available: true, ...status } : { available: false, clean: false, changed: 0, head: '' });
   });
 
   // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).

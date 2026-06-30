@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { registerSession, getSession, restoreSession, sessionCount, _clearSessions } from './WorkspaceRegistry';
+import { registerSession, getSession, restoreSession, gitStatusForSession, sessionCount, _clearSessions } from './WorkspaceRegistry';
 import { GitManager, type CommandRunner } from './GitManager';
 
 class FakeShell implements CommandRunner {
@@ -42,5 +42,13 @@ describe('WorkspaceRegistry', () => {
   it('rejects an invalid sha through the registry', async () => {
     registerSession('ws-1', await makeGit(), 'user-1');
     expect(await restoreSession('ws-1', 'bad sha!', 'user-1')).toBe(false);
+  });
+
+  it('returns git status for the owning user, null for unknown / wrong owner', async () => {
+    registerSession('ws-1', await makeGit(), 'owner');
+    const st = await gitStatusForSession('ws-1', 'owner');
+    expect(st?.clean).toBe(true);
+    expect(await gitStatusForSession('nope', 'owner')).toBeNull();
+    expect(await gitStatusForSession('ws-1', 'attacker')).toBeNull();
   });
 });

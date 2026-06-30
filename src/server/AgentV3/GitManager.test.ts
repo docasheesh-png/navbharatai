@@ -68,4 +68,33 @@ describe('GitManager', () => {
     await git.ensureRepo();
     expect(await git.restore('not-a-sha!')).toBe(false);
   });
+
+  it('reports a clean working tree when git status --porcelain is empty', async () => {
+    const git = new GitManager(new FakeShell(), 'ws-1');
+    await git.ensureRepo();
+    const st = await git.status();
+    expect(st?.clean).toBe(true);
+    expect(st?.changed).toBe(0);
+    expect(typeof st?.head).toBe('string');
+  });
+
+  it('counts uncommitted changes from git status --porcelain', async () => {
+    class DirtyShell implements CommandRunner {
+      async runCommand(_w: string, command: string) {
+        if (command.includes('status --porcelain')) return { exitCode: 0, stdout: ' M src/App.tsx\n?? new.ts\n', stderr: '' };
+        if (command.includes('rev-parse --short HEAD')) return { exitCode: 0, stdout: 'deadbee\n', stderr: '' };
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+    }
+    const git = new GitManager(new DirtyShell(), 'ws-1');
+    await git.ensureRepo();
+    const st = await git.status();
+    expect(st).toEqual({ clean: false, changed: 2, head: 'deadbee' });
+  });
+
+  it('status is null on a shell-less sandbox (honest "not available")', async () => {
+    const git = new GitManager(new NoShell(), 'ws-1');
+    await git.ensureRepo();
+    expect(await git.status()).toBeNull();
+  });
 });

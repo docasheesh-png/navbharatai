@@ -91,7 +91,7 @@ export { makeSubAgentSpawn } from './SubAgent';
 export type { SubAgentDeps } from './SubAgent';
 export { GitManager } from './GitManager';
 export type { Checkpointer, CommandRunner } from './GitManager';
-export { registerSession, getSession, restoreSession, sessionCount } from './WorkspaceRegistry';
+export { registerSession, getSession, restoreSession, gitStatusForSession, sessionCount } from './WorkspaceRegistry';
 export type { WorkspaceSession } from './WorkspaceRegistry';
 export { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart } from './IntentClassifier';
 export type { BuildIntent, IntentWithConfidence } from './IntentClassifier';

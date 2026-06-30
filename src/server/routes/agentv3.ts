@@ -539,6 +539,24 @@ export function cheapFloorAllowedForTier(startTier?: string): boolean {
 }
 
 /**
+ * Account CANARY gate for the cheap build floor. `AGENTV3_CHEAP_FLOOR_USERS` is an optional
+ * comma-separated allowlist of user ids AND/OR emails: when SET, the cheap floor leads ONLY for
+ * those accounts (e.g. the admin's own) — everyone else stays on today's Claude path. When
+ * EMPTY/unset (the default), the floor applies to all users (no change). This is the "flag-gated
+ * to your account before all users" rollout step: enable the floor in production but limit blast
+ * radius to yourself first, watch the `deliveredVia` telemetry, then widen by clearing the list.
+ * A uid is matched exactly (Firebase uids are case-sensitive); an email is matched
+ * case-insensitively (so `Admin@x.com` in the list matches `admin@x.com`). Pure + exported.
+ */
+export function cheapFloorAllowedForUser(userId: string | null | undefined, email?: string | null): boolean {
+  const allow = (process.env.AGENTV3_CHEAP_FLOOR_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (allow.length === 0) return true; // no allowlist → every user (default, unchanged)
+  if (userId && allow.includes(userId)) return true; // exact uid match (case-sensitive)
+  if (email) { const mail = email.toLowerCase(); if (allow.some(a => a.toLowerCase() === mail)) return true; }
+  return false;
+}
+
+/**
  * PR4 delivery telemetry — given per-provider turn counts gathered over a build (via the
  * `onProviderUsed` callback), return the provider that drove the MOST turns: the build's
  * dominant builder. AgentV3CostTelemetry records this as `deliveredVia`, so an admin can see
@@ -1715,8 +1733,9 @@ export function registerAgentV3Routes(app: Express): void {
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
-        // straight to the strong model). Escalation builds below never pass this, so they stay Claude.
-        allowCheapFloor: cheapFloorAllowedForTier(analysis?.startTier),
+        // straight to the strong model) AND only for allowlisted users (canary; empty list = all).
+        // Escalation builds below never pass this, so they stay Claude.
+        allowCheapFloor: cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
         onProviderUsed: captureProvider,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',

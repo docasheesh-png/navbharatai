@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, dominantProvider, parseModelLadder } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -206,6 +206,38 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
     process.env.GLM_API_KEY = 'x';
     expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+});
+
+describe('cheapFloorAllowedForUser — account canary allowlist (your account before all users)', () => {
+  const saved = process.env.AGENTV3_CHEAP_FLOOR_USERS;
+  afterEach(() => { if (saved === undefined) delete process.env.AGENTV3_CHEAP_FLOOR_USERS; else process.env.AGENTV3_CHEAP_FLOOR_USERS = saved; });
+
+  it('empty/unset allowlist → every user allowed (default, unchanged behaviour)', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_USERS;
+    expect(cheapFloorAllowedForUser('anyone')).toBe(true);
+    expect(cheapFloorAllowedForUser(null)).toBe(true);
+    process.env.AGENTV3_CHEAP_FLOOR_USERS = '  ,  ';
+    expect(cheapFloorAllowedForUser('anyone')).toBe(true);
+  });
+  it('a set allowlist → only listed uids (canary), everyone else stays on Claude', () => {
+    process.env.AGENTV3_CHEAP_FLOOR_USERS = 'admin-uid, friend-uid';
+    expect(cheapFloorAllowedForUser('admin-uid')).toBe(true);
+    expect(cheapFloorAllowedForUser('friend-uid')).toBe(true);
+    expect(cheapFloorAllowedForUser('random-user')).toBe(false);
+    expect(cheapFloorAllowedForUser(null)).toBe(false); // anon never canaried
+  });
+  it('matches by EMAIL too (case-insensitive) — the admin can canary by their email', () => {
+    process.env.AGENTV3_CHEAP_FLOOR_USERS = 'aashishcpmt09@gmail.com';
+    expect(cheapFloorAllowedForUser('some-uid', 'aashishcpmt09@gmail.com')).toBe(true);
+    expect(cheapFloorAllowedForUser('some-uid', 'AAShishCPMT09@Gmail.com')).toBe(true); // case-insensitive
+    expect(cheapFloorAllowedForUser('some-uid', 'other@gmail.com')).toBe(false);
+    expect(cheapFloorAllowedForUser('some-uid', null)).toBe(false);
+  });
+  it('a uid is matched case-sensitively (Firebase uids are case-sensitive)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR_USERS = 'AbCdEf123';
+    expect(cheapFloorAllowedForUser('AbCdEf123')).toBe(true);
+    expect(cheapFloorAllowedForUser('abcdef123')).toBe(false);
   });
 });
 

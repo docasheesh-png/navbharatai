@@ -75,6 +75,26 @@ describe('WorkspaceMemory', () => {
     expect(hits.some((h) => h.type === 'episode' && h.ref.includes('countdown timer'))).toBe(true);
   });
 
+  it('recall keeps an EXACT match ranked above a mere token match (phrase bonus dominates BM25)', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/Invoice.tsx', 'export function Invoice(){ return null; }');
+    // An episode that merely mentions the word should never outrank the exact-named symbol.
+    mem.recordNote('refactored the invoice rendering and invoice totals and invoice export');
+    const hits = mem.recall('Invoice');
+    expect(hits[0].type).toBe('symbol');
+    expect(hits[0].ref).toBe('Invoice');
+  });
+
+  it('recall is deterministic (same query → identical ordering)', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/A.tsx', 'export function Alpha(){return null;}');
+    mem.recordFix('fixed the alpha timer', 'src/A.tsx');
+    mem.recordNote('alpha layout pass');
+    const a = mem.recall('alpha').map((h) => h.ref);
+    const b = mem.recall('alpha').map((h) => h.ref);
+    expect(a).toEqual(b);
+  });
+
   it('recall ranks a RARE discriminating token above a common one (BM25 IDF)', () => {
     const mem = new WorkspaceMemory();
     // "page" is common across the corpus; "stripe" is rare and discriminating.

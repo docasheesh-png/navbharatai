@@ -13,23 +13,12 @@
 
 import type { RecallHit } from './WorkspaceMemory';
 import { evolveLessons, type Lesson } from './KnowledgeEvolution';
+import { formatLessonBlock } from './LessonBlock';
 
 /** Episode kinds whose recalled text is worth feeding back as guidance. */
 const GUIDANCE_KINDS = new Set(['note', 'error', 'fix']);
-/** Max number of lessons we inject into a single build prompt. */
-const MAX_LESSONS = 6;
-/** Per-lesson text cap (chars) before truncation. */
-const LESSON_MAX_CHARS = 160;
-/** Soft cap for the whole guidance block (chars). */
-const BLOCK_MAX_CHARS = 1200;
 
 const HEADER = 'Lessons from earlier in this project (apply them, avoid repeating past mistakes):';
-
-/** Trim a piece of recalled text to a short, single-line snippet (~`max` chars). */
-function snippet(text: string, max = LESSON_MAX_CHARS): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim();
-  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
-}
 
 /**
  * Build a compact guidance block from recalled memory hits. PURE & deterministic.
@@ -59,20 +48,7 @@ export function formatRecalledLessons(hits: RecallHit[]): string {
     candidates.push({ text, score: typeof hit.score === 'number' ? hit.score : 0, ts: hit.ts, kind });
   }
 
-  // Evolve (dedupe + resolve conflicts + age/rank), then trim to the budget.
-  const lessons = evolveLessons(candidates).slice(0, MAX_LESSONS).map((t) => snippet(t));
-
-  if (lessons.length === 0) return '';
-
-  // Assemble line by line, stopping before the block exceeds the soft cap.
-  const lines = [HEADER];
-  for (const lesson of lessons) {
-    const candidate = `- ${lesson}`;
-    if (lines.join('\n').length + 1 + candidate.length > BLOCK_MAX_CHARS) break;
-    lines.push(candidate);
-  }
-  // Header only (every lesson was too long to fit) → nothing useful to inject.
-  if (lines.length === 1) return '';
-
-  return lines.join('\n');
+  // Evolve (dedupe + resolve conflicts + outcome-weight + age/rank), then render via the shared
+  // lesson-block formatter (same budget the cross-project brain uses, so they never drift).
+  return formatLessonBlock(HEADER, evolveLessons(candidates));
 }

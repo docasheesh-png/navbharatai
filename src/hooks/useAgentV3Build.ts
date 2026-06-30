@@ -59,6 +59,8 @@ export interface UseAgentV3Build {
   loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
   /** List the user's saved v3.0 conversations (metadata only) for the history menu. */
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<ConversationMeta[]>;
+  /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn. */
+  subscribeLive: (opts?: { userId?: string; email?: string }) => (() => void);
 }
 
 /** Lightweight conversation metadata for the history list (matches GET /api/agentv3/conversations). */
@@ -147,6 +149,46 @@ export function useAgentV3Build(): UseAgentV3Build {
           : 'No response from the v3.0 engine.',
       );
     }
+  }, []);
+
+  // Cross-device live mirror: poll the shared LiveChannel for a build running on ANOTHER device/
+  // instance and feed its events into THIS panel's reducer, so a 2nd device watching the same chat sees
+  // the live activity. Self-limiting for cost: caller starts it only while the panel is visible + not
+  // running locally; it also auto-stops after ~30 s of no activity when the server reports not-running.
+  // Returns a stop function. Best-effort — never throws.
+  const subscribeLive = useCallback((opts?: { userId?: string; email?: string }): (() => void) => {
+    const uid = opts?.userId ?? userIdRef.current;
+    const em = opts?.email ?? emailRef.current;
+    if (!uid) return () => {};
+    let stopped = false;
+    let sinceSeq = 0;
+    let idlePolls = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      if (stopped) return;
+      try {
+        const params = new URLSearchParams({ userId: uid });
+        if (em) params.set('email', em);
+        params.set('sinceSeq', String(sinceSeq));
+        const res = await fetch(`/api/agentv3/live?${params.toString()}`);
+        if (res.ok) {
+          const j = await res.json().catch(() => ({} as Record<string, unknown>));
+          if (typeof j.seq === 'number') sinceSeq = j.seq;
+          const events = Array.isArray(j.events) ? (j.events as AgentV3WireEvent[]) : [];
+          if (events.length > 0) {
+            idlePolls = 0;
+            setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
+          } else if (j.running === false) {
+            idlePolls += 1; // no activity + nothing running → wind down so an idle open panel stops polling
+          }
+        }
+      } catch { /* best-effort — a failed poll just retries */ }
+      if (stopped) return;
+      if (idlePolls >= 10) { stopped = true; return; } // ~30 s quiet → stop until re-armed by the panel
+      timer = setTimeout(() => { void tick(); }, 3000);
+    };
+    void tick();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, []);
 
   const checkRunning = useCallback(async (opts?: { userId?: string; email?: string }) => {
@@ -485,5 +527,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations };
+  return { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
 }

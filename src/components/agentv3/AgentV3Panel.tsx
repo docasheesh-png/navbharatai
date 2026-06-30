@@ -54,7 +54,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 };
 
 export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -201,14 +201,27 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   // can silently drop the event stream. When the tab becomes visible again, immediately
   // reconcile with the server — re-attach a still-running build (via the auto-resume
   // effect above) so the build never looks "stopped" after a tab switch.
+  const [liveNonce, setLiveNonce] = useState(0);
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       if (!running) checkRunning({ userId, email });
+      setLiveNonce((n) => n + 1); // re-arm the cross-device live poll when the tab is shown again
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [running, userId, email, checkRunning]);
+
+  // CROSS-DEVICE LIVE MIRROR (Slice B): while this panel is OPEN + VISIBLE and NOT running a build
+  // locally, watch the shared LiveChannel so a build started on ANOTHER device shows its activity
+  // here live. Cost-gated: only polls while visible, and the poller self-stops after ~30s of no
+  // activity; re-armed by liveNonce on visibility. Stops the moment a local build starts (running).
+  useEffect(() => {
+    if (running || !userId) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    const stop = subscribeLive({ userId, email });
+    return () => stop();
+  }, [running, userId, email, subscribeLive, liveNonce]);
 
   // D7 — on first open with a signed-in account, re-display the most recent persisted build's
   // chat history so a refresh/reconnect doesn't lose it (option (a): chat + git-restore). Runs

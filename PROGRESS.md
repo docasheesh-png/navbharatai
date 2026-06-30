@@ -6130,3 +6130,25 @@ Two requested composer changes in AgentV3Panel:
    message can be edited freely), and sending collapses it back.
 
 Gate: frontend tsc 0, vitest 3750/3750 PASS. UI-only change (AgentV3Panel.tsx); no server change.
+
+## 2026-06-30 — FIX: in-browser preview no longer fails "No React entry module found"
+
+Build report (online media player, vite-react-ts): build OK + app compiles, but BOTH previews failed —
+Live server "No live preview yet" (cold sandbox: live URL gone — the in-browser preview is the intended
+fallback) AND In-browser "No React entry module found", even though src/main.tsx exists and index.html
+references it. Root cause: findEntry only resolved the entry by EXACT key (the index.html script src, then
+a fixed list of src/main.* defaults). When the file map reaches the preview keyed under an unexpected
+prefix / leading slash / `./` (durable restore, cold-reconnect collection), the exact lookup misses and
+the preview dies even though an entry clearly exists.
+
+Fix: findEntry is now RESILIENT — after the exact index.html-src and src/main.* defaults, it (1) matches
+the script src's BASENAME anywhere in the tree, then (2) falls back to ANY `main`/`index` source file
+anywhere (preferring main.*, shallower paths; ignoring .test/.spec files). So as long as an entry exists
+under any key shape, the in-browser preview renders instead of erroring. Combined with #719's retry-on-
+reopen, a session reopened after the sandbox is gone now renders via the durable files.
+
+Tests: +2 reactPreview cases (basename fallback; last-resort main/index anywhere, test files excluded).
+Gate: server tsc 0, vitest 3764/3764 PASS, boot:check PASS.
+
+HONEST LIMITATION: I can't reproduce the exact cold-sandbox file-keying in CI; the fix is a pure,
+unit-tested resilience improvement to entry detection. Final confirmation needs a real reopened session.

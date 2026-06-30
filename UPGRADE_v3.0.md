@@ -2383,13 +2383,19 @@
       `boot:check` PASS.
 - **Files:** `src/server/lib/validate.ts` (new), `tests/validate.test.ts` (new), `src/server/routes/sbom.ts`.
 
-### P-DATA.2 — Durable Workspace Artifact / Checkpoint Store  🟡 PARTIAL → full  [MED — data-loss risk]
-- Workspace *files* are durable in Firestore, but **checkpoints / VersionStore snapshots are written to local disk**
-  (`.checkpoints`), which is **ephemeral on Cloud Run** with `min-instances=0` — undo/rollback history is lost on
-  scale-to-zero or instance recycle. (Distinct from P-BRE.5 build-cache and P-BRE.6 job-queue.)
-- [ ] Back `CheckpointManager` / `VersionStore` with Firestore (or a GCS bucket) so undo/restore survives restarts.
-- [ ] Keep local disk as a fast write-through cache; reconcile on boot.
-- **Files:** `src/server/AppMakerLab/checkpoint/CheckpointManager.ts`, `src/server/project/VersionStore.ts`.
+### P-DATA.2 — Durable Workspace Artifact / Checkpoint Store  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED — data-loss risk]
+- Workspace *files* are durable in Firestore, but **checkpoints were written to local disk** (`.checkpoints`),
+  which is **ephemeral on Cloud Run** with `min-instances=0` — undo/rollback history was lost on scale-to-zero.
+- [x] **`CheckpointStorage` is now Firestore write-through** (`appmaker_checkpoints/{docId}`): `save` writes local
+  AND Firestore (size-guarded ≤900KB); `load` falls back to Firestore when the local cache is cold (fresh instance)
+  and repopulates the cache; `delete` removes both; `list` reconciles local + Firestore so a cold instance sees the
+  full history. Best-effort + VITEST-skip — a Firestore failure never breaks the local path. Zero call-site changes
+  (all 4 `new CheckpointStorage()` sites inherit durability: AutoRepair, DeploymentEngine, DeploymentRollback, Orchestrator).
+- [x] Local disk stays the fast write-through cache; reconcile-on-read covers boot.
+- Note: `ProjectVersionStore` is an **in-memory, per-operation** undo store (created fresh per build/migration, never
+  written to disk) — there is no persisted history to lose there, so it is out of scope for the data-loss fix.
+- [x] Pure helpers (`checkpointStorageDocId`, `fitsFirestoreDoc`) + local round-trip tested (`checkpointStorage.test.ts`).
+- **Files:** `src/server/AppMakerLab/checkpoint/CheckpointStorage.ts`, new `tests/checkpointStorage.test.ts`.
 
 ### P-DATA.3 — Durable Embedding / Vector Store  🟡 PARTIAL → full  [MED]
 - `EmbeddingSearch` keeps embeddings in an in-memory `Map` — lost on every cold start, so RAG re-embeds the whole

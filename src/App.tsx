@@ -114,6 +114,7 @@ import { trackEvent } from './lib/analytics';
 import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
+import type { PreviewProblem } from './lib/previewProblems';
 import {
   type ApnapanProfile,
   APNAPAN_DEFAULT_PROFILE,
@@ -1118,6 +1119,9 @@ export default function App() {
     'style.css': 'body { margin: 0; font-family: system-ui; }'
   });
   const [activeFile, setActiveFile] = useState<string>('index.html');
+  // Real compile-error "Problems" from the live esbuild preview bundle (no fakes — only what the
+  // bundler actually reported). Surfaced in Code Studio's Problems panel; click to jump to the file/line.
+  const [problems, setProblems] = useState<PreviewProblem[]>([]);
   const [previewHistory, setPreviewHistory] = useState<{ id: string; label: string; ts: Date; html: string }[]>([]);
   const [fileUploadConflict, setFileUploadConflict] = useState<{ file: File; existingKey: string; isZip: boolean } | null>(null);
   const [zipSizeModal, setZipSizeModal] = useState<{ variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null>(null);
@@ -2269,9 +2273,17 @@ ${buildLanguageRule(preferredLanguage)}`;
         body: JSON.stringify({ files: currentFiles }),
         signal: ctl.signal,
       })
-        .then(r => r.ok ? r.json() : Promise.reject(new Error(`Bundle failed: ${r.status}`)))
-        .then(({ html }: { html: string }) => { if (html) setGeneratedCode(html); })
-        .catch(() => { /* server bundling failed — client-side fallback already set */ })
+        .then(async (r) => {
+          const data = await r.json().catch(() => ({} as { html?: string; problems?: PreviewProblem[] }));
+          if (r.ok && data.html) {
+            setGeneratedCode(data.html);
+            setProblems([]); // a clean bundle clears the Problems panel
+          } else if (Array.isArray(data.problems)) {
+            // Real esbuild compile errors — surface them in the Problems panel (client fallback still renders).
+            setProblems(data.problems);
+          }
+        })
+        .catch(() => { /* network/abort — leave the client-side fallback + last problems as-is */ })
         .finally(() => clearTimeout(timeout));
       // Show client-side fallback immediately so the user isn't stuck on a blank/old preview.
       finalHtml = clientFallback;
@@ -6176,6 +6188,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
           <ViewPanels
             v3Preview={v3Preview}
+            problems={problems}
             activeView={activeView}
             generatedCode={generatedCode}
             setGeneratedCode={setGeneratedCode}

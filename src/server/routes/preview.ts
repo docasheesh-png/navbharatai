@@ -3,6 +3,7 @@ import type { Express, Request, Response, RequestHandler } from 'express';
 /** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
 const previewPassthrough: RequestHandler = (_req, _res, next) => next();
 import { build as esbuild } from 'esbuild';
+import { esbuildMessagesToProblems } from '../../lib/previewProblems';
 import path from 'path';
 import os from 'os';
 import { promises as fsp } from 'fs';
@@ -115,7 +116,9 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
     const barePackages = [...collectBarePackages(files)];
     const external = barePackages.flatMap(p => [p, `${p}/*`]);
 
-    const result = await esbuild({
+    let result;
+    try {
+      result = await esbuild({
       entryPoints: [path.join(tmpDir, entry)],
       bundle: true,
       write: false,
@@ -150,7 +153,15 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
       }],
       logLevel: 'silent',
       define: { 'import.meta.env': '{"MODE":"production","DEV":false,"PROD":true}' },
-    });
+      });
+    } catch (buildErr: any) {
+      // esbuild throws a BuildFailure with a structured `errors` array (text + file/line/column).
+      // Surface those as REAL "Problems" so the IDE can list them — attached to the thrown error and
+      // mapped to workspace-relative paths. Never fabricated.
+      const problems = esbuildMessagesToProblems(buildErr?.errors, tmpDir);
+      const msg = problems.length > 0 ? problems[0].message : (buildErr?.message || 'Bundle failed');
+      throw Object.assign(new Error(msg), { problems });
+    }
 
     const js = result.outputFiles?.find(f => f.path.endsWith('.js'))?.text || '';
     const css = result.outputFiles?.find(f => f.path.endsWith('.css'))?.text || '';
@@ -234,7 +245,9 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
       return res.json({ html });
     } catch (err: any) {
       console.error('[preview-bundle] error:', err?.message || err);
-      return res.status(500).json({ error: err?.message || 'Bundle failed' });
+      // Include the real esbuild problems (file/line/message) so the IDE's Problems panel can list them.
+      const problems = Array.isArray(err?.problems) ? err.problems : [];
+      return res.status(500).json({ error: err?.message || 'Bundle failed', problems });
     }
   });
 

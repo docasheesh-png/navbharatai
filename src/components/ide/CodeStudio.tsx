@@ -4,6 +4,8 @@ import { FileExplorer } from './FileExplorer';
 import { ActivityBar } from './ActivityBar';
 import { TerminalPanel } from './TerminalPanel';
 import { DebugPanel } from './DebugPanel';
+import { ProblemsPanel } from './ProblemsPanel';
+import type { PreviewProblem } from '../../lib/previewProblems';
 import { loadBreakpoints, serializeBreakpoints, toggleBreakpoint as toggleBpInMap, BREAKPOINTS_STORAGE_KEY, type BreakpointMap } from '../../lib/breakpoints';
 import { CommandPalette } from './CommandPalette';
 import { ExtensionMarket } from './ExtensionMarket';
@@ -24,7 +26,7 @@ import {
   Bot, Palette, Monitor, FileCode, Plus, AlignJustify, Map, Code2,
   MessageSquare, Sparkles, TestTube, FileText, Bug, ShieldCheck,
   BookOpen, Key, Layers, Moon, Smartphone, Database, Accessibility, Braces,
-  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle
+  RefreshCw, Shield, Package, Lock, Users, Cpu, Type, BarChart2, Activity, AlertTriangle, AlertCircle
 } from 'lucide-react';
 
 interface CodeStudioProps {
@@ -41,7 +43,8 @@ interface CodeStudioProps {
   onChatSend: () => void;
   isChatLoading: boolean;
   activeIntent?: string;
-  problems?: string | null;
+  /** Real compile-error problems from the live esbuild preview bundle (empty = compiled clean). */
+  problems?: PreviewProblem[];
   pendingGHEdit?: any;
   onConfirmPush?: () => void;
   isGHPushing?: boolean;
@@ -91,7 +94,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onChatSend,
   isChatLoading,
   activeIntent = 'social',
-  problems,
+  problems = [],
   pendingGHEdit,
   onConfirmPush,
   isGHPushing,
@@ -137,6 +140,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isPanelMaximized, setIsPanelMaximized] = useState(false);
+  // Real "Problems" panel (esbuild compile errors from the live preview bundle).
+  const [isProblemsPanelOpen, setIsProblemsPanelOpen] = useState(false);
   // P-DEV.3 — breakpoints (file → lines), persisted to localStorage; + the Debugger panel toggle.
   const [isDebugPanelOpen, setIsDebugPanelOpen] = useState(false);
   const [breakpoints, setBreakpoints] = useState<BreakpointMap>(() => {
@@ -389,9 +394,11 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         case 'workbench.action.toggleSidebarVisibility':
           setIsSidebarOpen(prev => !prev);
           break;
+        case 'workbench.actions.view.problems':
+          setIsProblemsPanelOpen(prev => !prev);
+          break;
         case 'workbench.action.terminal.toggleTerminal':
         case 'workbench.action.output.toggleOutput':
-        case 'workbench.actions.view.problems':
           setIsPanelOpen(prev => !prev);
           break;
         case 'workbench.view.explorer':
@@ -1155,15 +1162,46 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               )}
           </AnimatePresence>
           
+          {/* Real Problems panel — esbuild compile errors from the live preview bundle */}
+          <AnimatePresence>
+              {isProblemsPanelOpen && (
+                  <motion.div
+                     initial={{ height: 0 }}
+                     animate={{ height: '35%' }}
+                     exit={{ height: 0 }}
+                     className="absolute left-0 right-0 bottom-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]"
+                  >
+                      <ProblemsPanel
+                        problems={problems}
+                        onOpen={handleJumpToBreakpoint}
+                        onClose={() => setIsProblemsPanelOpen(false)}
+                      />
+                  </motion.div>
+              )}
+          </AnimatePresence>
+
           {/* Panel Toggle Handle */}
           {!isPanelOpen && activeScreen !== 'preview' && (
-             <button
-               onClick={() => setIsPanelOpen(true)}
-               aria-label="Open terminal panel"
-               className="absolute bottom-4 right-4 z-[45] w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
-             >
-                <ChevronUp className="w-5 h-5" />
-             </button>
+             <div className="absolute bottom-4 right-4 z-[45] flex items-center gap-2">
+               {problems.length > 0 && !isProblemsPanelOpen && (
+                 <button
+                   onClick={() => setIsProblemsPanelOpen(true)}
+                   aria-label="Open Problems panel"
+                   title={`${problems.length} problem${problems.length === 1 ? '' : 's'}`}
+                   className="h-10 px-3 bg-amber-600/20 hover:bg-amber-600/30 rounded-lg border border-amber-500/30 flex items-center gap-1.5 text-amber-300 hover:text-amber-200 transition-all shadow-2xl text-xs font-bold"
+                 >
+                    <AlertCircle className="w-4 h-4" />
+                    {problems.length}
+                 </button>
+               )}
+               <button
+                 onClick={() => setIsPanelOpen(true)}
+                 aria-label="Open terminal panel"
+                 className="w-10 h-10 bg-[#333] hover:bg-[#444] rounded-lg border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all shadow-2xl"
+               >
+                  <ChevronUp className="w-5 h-5" />
+               </button>
+             </div>
           )}
         </div>
       </div>

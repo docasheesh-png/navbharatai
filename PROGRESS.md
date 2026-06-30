@@ -6300,3 +6300,28 @@ Gate: server tsc 0, vitest 3865/3865 PASS, boot:check PASS.
 NET (A+B+C): drift is prevented at generation (shared contract + real producer source) AND, if any residue
 reaches verify, named precisely + compactly into repair so it converges. HONEST: end-to-end convergence on a
 live model still needs a real fast-lane build to confirm; all three layers' logic is pure + unit-tested.
+
+## 2026-06-30 — RELIABILITY (audit + keystone fix): deterministic Build Outcome classification
+
+A 3-agent audit of the admin's P0/P1/P2 + Quality-Gates roadmap found the system already implements ~90%
+(DependencySync = package.json reconciliation from imports; post-gen tsc verify gate; ContractMap = runtime
+import/export + enum-member validation; ArchitectureAnalysis = circular-dep + unresolved-import detection;
+ProjectVerifier/ArchitectureValidator = integrity; durable restore/resume; retry budget; structured
+diagnostics with ORIGINAL-error preservation + timeline). Genuine gaps identified: (P0) no build-outcome
+classification (just boolean ok); (G4) no production `npm run build` gate; (G3) tsc gate only in fast lane,
+not the agentic loop; (P1) no durable↔live workspace consistency check; orphan/unused-import detection;
+stuck-tool auto-recovery + deadlock detection.
+
+Keystone fix shipped (the one the admin explicitly listed, and what every gate/dashboard branches on): a
+PURE BuildOutcome classifier — BUILD_SUCCESS / BUILD_PARTIAL / TYPECHECK_FAILED / BUILD_FAILED /
+PREVIEW_FAILED / RUNTIME_FAILED. It resolves the standing tension between "a preview/runtime failure must
+NOT mark a compiling app as a BUILD failure" and "a runtime smoke check is required before full success":
+the answer is to CLASSIFY, not blunt-fail — a compiling app whose preview is down is PREVIEW_FAILED
+(ship-with-warning), distinct from TYPECHECK_FAILED / BUILD_FAILED (real build failures). SimpleBuildResult
+now carries `outcome`; the route records it into the build report (OUTCOME_*).
+
+Tests: +10 BuildOutcome (every precedence path + isBuildFailure + labels). Gate: server tsc 0, vitest
+3878/3878 PASS, boot:check PASS.
+
+Next reliability gaps (prioritized, follow-up PRs): G3 tsc-in-agentic-loop, G4 production-build gate (flag-
+gated), durable↔live workspace-consistency check, orphan/unused-import detection.

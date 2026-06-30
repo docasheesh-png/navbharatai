@@ -2612,6 +2612,9 @@ export function registerAgentV3Routes(app: Express): void {
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
         const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off' });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
+        // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
+        if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
         if (sb.ok) {
           fastResult(sb.summary, sb.filesWritten);
         } else {

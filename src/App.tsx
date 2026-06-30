@@ -111,6 +111,7 @@ import { MessageContent } from './components/MessageContent';
 import { HomeView } from './components/home/HomeView';
 import { GitHubService } from './lib/githubService';
 import { trackEvent } from './lib/analytics';
+import { makeWorkspaceSyncer, type WorkspaceSyncer } from './lib/workspaceSync';
 import { saveFile, saveAllFiles, loadAllFiles, clearWorkspace, deleteFile as storageDeleteFile } from './lib/storage';
 import { getAgentV3WorkspaceId } from './lib/agentv3Workspace';
 import {
@@ -2472,7 +2473,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   // also gates on v3.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
   // non-v3.0 users. The workspace id is the SAME one the v3.0 chat panel uses (shared localStorage
   // session), so the IDE and v3.0 operate on one workspace.
-  const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>): Promise<void> => {
+  const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean }): Promise<void> => {
     const uid = user?.uid;
     if (!uid) return;
     const paths = Object.keys(filesToSync || {});
@@ -2492,11 +2493,20 @@ ${buildLanguageRule(preferredLanguage)}`;
       if (res.ok) {
         const j = await res.json().catch(() => ({} as any));
         const n = typeof j?.imported === 'number' ? j.imported : paths.length;
-        addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v3.0 ✓`, 'success');
+        if (!opts?.silent) addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v3.0 ✓`, 'success');
       }
       // 404 (v3.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
     } catch { /* network/best-effort — never block the upload flow */ }
   }, [user, addToast]);
+
+  // Phase S1 — IDE↔v3.0 edit sync: a debounced, echo-suppressed syncer that durably pushes a user's
+  // Code Studio edits into the v3.0 workspace (silent, best-effort). Re-created when syncFilesToV3
+  // changes (i.e. on sign-in). The IDE edit seam calls onLocalChange; the v3.0→IDE path calls noteRemote.
+  const workspaceSyncerRef = useRef<WorkspaceSyncer | null>(null);
+  useEffect(() => {
+    workspaceSyncerRef.current = makeWorkspaceSyncer({ sync: (changed) => syncFilesToV3(changed, { silent: true }) });
+    return () => workspaceSyncerRef.current?.dispose();
+  }, [syncFilesToV3]);
 
   const handleModelSelect = (id: string) => {
     if (id === 'auto') {
@@ -5460,7 +5470,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               userId={user?.uid}
               email={user?.email}
               resume={v3Resume}
-              onFilesSync={(synced) => setFiles((prev) => ({ ...prev, ...synced }))}
+              onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v3.0
@@ -6090,7 +6100,7 @@ ${buildLanguageRule(preferredLanguage)}`;
                 onPushToRepo={selectedRepo ? pushToRepo : null}
                 onConnectFirebase={connectFirebase}
                 onDisconnectFirebase={disconnectFirebase}
-                onFilesChange={(newFiles) => { setFiles(newFiles); updatePreview(newFiles); }}
+                onFilesChange={(newFiles) => { workspaceSyncerRef.current?.onLocalChange(files, newFiles); setFiles(newFiles); updatePreview(newFiles); }}
                 onAgentChange={handleAgentChange}
                 onToggleView={toggleTab}
                 onActivatePreview={handleTriggerPreviewBuild}

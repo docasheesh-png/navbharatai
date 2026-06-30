@@ -504,6 +504,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'replace_symbol',
+      description:
+        'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
+        'in a file by name, leaving all surrounding code byte-for-byte intact. Use this instead of ' +
+        'edit_file when you want to rewrite a whole function/class and a fuzzy string match would be ' +
+        'risky or ambiguous — it parses the file with the TypeScript compiler and swaps exactly that ' +
+        "declaration's node. Returns an honest error (with the available symbol names) if the symbol " +
+        "isn't a top-level declaration.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File to patch, e.g. src/lib/auth.ts.' },
+          symbol: { type: 'string', description: 'Top-level symbol name to replace (function/class/interface/type/enum/const).' },
+          code: { type: 'string', description: 'The complete new declaration text (e.g. the full "export function ...() { ... }").' },
+        },
+        required: ['path', 'symbol', 'code'],
+      },
+    },
+    {
       name: 'check_conventions',
       description:
         'Check naming + import-ordering conventions and get suggested fixes (analysis only — writes ' +
@@ -657,6 +676,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_deploy_artifacts',
+  'replace_symbol',
   'check_conventions',
   'generate_release_notes',
   'web_search',

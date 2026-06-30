@@ -23,4 +23,14 @@ describe('ConflictDetector.detectConflicts', () => {
       { path: 'src/b.ts', content: 'b' },
     ]))).toBe(false);
   });
+
+  it('detects a conflict when two patches target the SAME path (last-write-wins data loss)', () => {
+    const b = batch([
+      { path: 'src/a.ts', content: 'v1' },
+      { path: 'src/b.ts', content: 'b' },
+      { path: 'src/a.ts', content: 'v2' },
+    ]);
+    expect(detector.detectConflicts(b)).toBe(true);
+    expect(detector.conflictingPaths(b)).toEqual(['src/a.ts']);
+  });
 });

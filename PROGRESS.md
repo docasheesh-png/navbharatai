@@ -5939,3 +5939,34 @@ Tests: +Tailwind-CDN preview test (reactPreview), +Tailwind-toolchain scaffold t
 +cdn.tailwindcss.com CSP guard (headers).
 
 Gate: frontend tsc 0, server tsc 0, vitest 3693/3693 PASS, boot:check PASS.
+
+## 2026-06-30 — FIX (permanent): AgentV3 dev server "Killed" loop + E2B stale-deps skip-install
+
+A live build report ("add a real-time clock") showed the dev server starting fine
+(`VITE ready … Local: http://localhost:5173/`) then printing **`Killed`** seconds later,
+the health-check restarting it, and the loop burning the full 1080s budget → `BUILD_TIMEOUT`.
+Two root causes, both in the AgentV3 E2B sandbox path, both fixed deterministically:
+
+1. **Dev server self-backgrounding → orphaned → reaped.** The actuator already starts long-running
+   commands with E2B `background:true` (which keeps the process alive across calls). But the agent
+   wrote its OWN backgrounding — `npm run dev … &> /tmp/vite.log &`, `nohup npm run dev … &`,
+   `npx vite … 2>&1 &` — so the shell launched vite in the background and EXITED immediately; E2B saw
+   its command finish and reaped the command's process group, killing the orphaned vite ("Killed").
+   EVERY launch in the report ended in a trailing `&`. Fix: new pure `stripDevServerBackgrounding()`
+   in devServerHost.ts removes a trailing single `&` (never `&&`) and a leading `nohup` (+ the file
+   redirect that precedes the `&`), so vite runs in the FOREGROUND of E2B's background command and
+   E2B tracks its lifetime → it stays up. Applied in E2BActuator.runCommand before host/port pinning.
+2. **E2B install gate skipped on stale node_modules.** `build()` only ran `npm install` when
+   node_modules was MISSING — so when the scaffold/agent added a dep (tailwindcss) to package.json but
+   node_modules already existed from a prior build, the dep was never installed and `npm run dev`
+   crashed with "Cannot find module 'tailwindcss'". Fix: new pure `buildDepsStaleCheckCommand()`
+   (`[ ! -d node_modules ] || [ package.json -nt node_modules ]`) gates the install in build() AND
+   before the dev server launches, so a newly-declared dep is always installed before boot. (npm ci's
+   own "errors when lock and package.json are out of sync" behaviour makes the fallback to `npm install`
+   reconcile the new dep.)
+
+Tests: +6 devServerHost cases (stripDevServerBackgrounding across the exact failing commands +
+foreground/`&&` safety; buildDepsStaleCheckCommand). These complement the same-PR scaffold/skip-install/
+in-browser-Tailwind fixes.
+
+Gate: frontend tsc 0, server tsc 0, vitest 3699/3699 PASS, boot:check PASS.

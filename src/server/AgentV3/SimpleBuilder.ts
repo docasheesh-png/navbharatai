@@ -16,6 +16,7 @@
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
+import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 
 export interface SimpleFileSpec {
   path: string;
@@ -342,6 +343,8 @@ export interface SimpleBuildResult {
   filesWritten: number;
   summary: string;
   reason?: string;
+  /** Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …). */
+  outcome?: BuildOutcome;
 }
 
 /**
@@ -406,7 +409,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    return { ok: false, filesWritten: 0, summary: 'Simple build could not produce the app — switching to the full builder.', reason };
+    return { ok: false, filesWritten: 0, summary: 'Simple build could not produce the app — switching to the full builder.', reason, outcome: 'BUILD_FAILED' };
   }
 
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);
@@ -442,7 +445,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     }
     if (!verdict.ok) {
       deps.log?.('The app still has build errors — handing to the full builder to finish it.');
-      return { ok: false, filesWritten: files.length, summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.', reason: 'verify_failed' };
+      return {
+        ok: false, filesWritten: files.length, reason: 'verify_failed',
+        summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
+        outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
+      };
     }
     files = [...byPath.values()];
     deps.log?.('Build verified — the app compiles. ✓');
@@ -453,5 +460,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }
     catch { deps.log?.('Preview is still starting — your files are ready.'); }
   }
-  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).` };
+  // typecheckOk: true when the verify gate ran + passed; null when verify wasn't wired (no sandbox).
+  // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
+  const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify ? true : null });
+  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome };
 }

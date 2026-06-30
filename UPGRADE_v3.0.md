@@ -789,14 +789,20 @@
 - **Verification:** `tsc` (fe+server) ✅ · `vitest run` 2870/2870 ✅ (6 new) · `npm run test:bundle` on real `dist/` → within budget ✅.
 - **Files:** `scripts/bundleBudget.mjs`, `tests/bundleBudget.test.ts`, `package.json`, `.github/workflows/ci.yml`.
 
-### P-TQA.6 — Quality Gate (CI Merge Block on Score Threshold)  🟡 PARTIAL → full  [MED]
-- `QualityScorer.ts` computes a 0-100 quality score per build. But this score is only shown in the UI
-  (`AppHealthMonitor.tsx`) — it does NOT block a merge/deploy if quality is low.
-- [ ] Add a CI step that runs `QualityEvaluationEngine` against the built output and exits with code 1
-  if quality score < 70 (configurable via env `QUALITY_GATE_THRESHOLD`).
-- [ ] Surface the score in the PR check: "Quality Gate: 74/100 ✅" or "Quality Gate: 52/100 ❌".
-- [ ] Add `DeploymentValidator.ts` to reject deploys when score is below threshold.
-- **Files:** new `scripts/quality-gate.ts`, `.github/workflows/ci.yml`, `src/server/AppMakerLab/deployment/DeploymentValidator.ts`.
+### P-TQA.6 — Quality Gate (Merge/Deploy Block on Score Threshold)  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- `QualityScorer` computes a quality score per build; it did not block a deploy on a configurable threshold.
+- [x] **`qualityGate.ts`** — pure, configurable threshold via `QUALITY_GATE_THRESHOLD` (accepts BOTH a
+  fraction `0.7` and a percentage `70`), `passesQualityGate()`, and an honest `formatGateLine()`
+  ("Quality Gate: 74/100 ✅ (threshold 70)"). Unit-tested (`qualityGate.test.ts`, 6).
+- [x] **`DeploymentValidator`** now blocks a deploy when the score is below the configurable threshold
+  (was a hardcoded `0.8`) and logs the honest gate line — already wired into `DeploymentEngine.runDeployment`.
+- [x] **`scripts/quality-gate.ts`** — standalone CLI to score a GENERATED-app workspace and exit 1 below
+  threshold (for a generated app's own CI / manual runs).
+- Note: NavBharatAI's OWN CI already enforces dedicated gates (typecheck/test/coverage/build/bundle/boot);
+  `QualityEvaluationEngine` scores GENERATED apps, not the platform repo, so it is intentionally NOT added
+  as a step in NavBharatAI's `ci.yml` (it would be semantically wrong + heavy).
+- **Files:** new `src/server/QualityEvaluationEngine/qualityGate.ts`, new `scripts/quality-gate.ts`,
+  `src/server/AppMakerLab/deployment/DeploymentValidator.ts`, new `tests/qualityGate.test.ts`.
 
 ### P-TQA.7 — Dependency Vulnerability Scan (Blocks, Not Warns)  ✅ DONE (2026-06-28)
 - [x] Replaced the toothless `npm audit … continue-on-error: true` CI step (which blocked NOTHING) with a real

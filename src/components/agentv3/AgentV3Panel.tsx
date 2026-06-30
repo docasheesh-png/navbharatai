@@ -855,16 +855,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
                 <Square className="w-3.5 h-3.5" /> Stop
               </button>
             </div>
-          ) : (
-            <button
-              onClick={startNewSession}
-              disabled={running}
-              title="Start a new project (fresh sandbox + memory)"
-              className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-white disabled:opacity-40 border border-zinc-700 rounded px-2 py-1"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> New
-            </button>
-          )}
+          ) : null}
         </div>
         <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
           <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />} dataTour="preview">Preview</TabPill>

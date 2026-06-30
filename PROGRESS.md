@@ -6174,3 +6174,11 @@ Added:
 
 Gate: frontend tsc 0, server tsc 0, vitest 3771/3771 PASS, boot:check PASS. UI + thin client/hook wiring;
 reuses the existing per-user conversation store + durable restore (no new server endpoints).
+
+## 2026-06-30 — UX: remove the redundant top-right "New" button from the v3.0 header
+
+The ☰ chats menu (#730) now carries "+ New chat", so the separate "↺ New" button at the top-right of the
+v3.0 header was redundant. Removed it (idle state only); the running "Stop" and server-running "Resume/Stop"
+controls are unchanged, and startNewSession still backs the menu's "+ New chat". UI-only.
+
+Gate: frontend tsc 0, vitest 3775/3775 PASS.

@@ -11,6 +11,21 @@
  *
  * If the command already binds a host we leave it untouched.
  */
+/**
+ * Stop the dev server from trying to auto-open a browser inside the HEADLESS E2B sandbox.
+ * A Vite/CRA config with `server.open: true` (or an `--open` flag) spawns the OS opener
+ * (`xdg-open` on Linux), which does NOT exist in the sandbox → `spawn xdg-open ENOENT`. That
+ * unhandled spawn error can CRASH the dev server right after it prints "ready", taking the
+ * preview port down with it — so `update_preview` then finds the port dead, returns a warning,
+ * and never publishes the URL ("No live preview yet" even though the app built fine). Both Vite
+ * and CRA honour `BROWSER=none` (their openBrowser maps it to a no-op, skipping the spawn
+ * entirely), so prepend it as an inline env assignment. Idempotent + pure.
+ */
+export function disableDevServerAutoOpen(command: string): string {
+  if (!command || /(?:^|\s)BROWSER=/.test(command)) return command;
+  return `BROWSER=none ${command}`;
+}
+
 export function ensureHostBinding(command: string): string {
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.

@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen } from './devServerHost';
+
+describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
+  it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
+    expect(disableDevServerAutoOpen('npm run dev -- --host 0.0.0.0 --port 5173')).toBe('BROWSER=none npm run dev -- --host 0.0.0.0 --port 5173');
+    expect(disableDevServerAutoOpen('vite --host 0.0.0.0')).toBe('BROWSER=none vite --host 0.0.0.0');
+  });
+  it('is idempotent — never double-prefixes when BROWSER is already set', () => {
+    expect(disableDevServerAutoOpen('BROWSER=none vite')).toBe('BROWSER=none vite');
+    expect(disableDevServerAutoOpen('BROWSER=chrome npm run dev')).toBe('BROWSER=chrome npm run dev');
+  });
+  it('leaves an empty command untouched', () => {
+    expect(disableDevServerAutoOpen('')).toBe('');
+  });
+});
 
 describe('ensureHostBinding (v3.0 actuator)', () => {
   it('appends --host to a vite package-manager dev script', () => {

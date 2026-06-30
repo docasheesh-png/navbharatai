@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -535,7 +535,9 @@ export class E2BActuator implements IEngineerActuator {
       // Strip the agent's own `… &` / `nohup … &` FIRST: E2B already backgrounds this
       // command, and a self-backgrounded vite is orphaned + reaped (prints "Killed" right
       // after "ready") — the root cause of the preview-restart loop and BUILD_TIMEOUT.
-      const devCommand = pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port);
+      // disableDevServerAutoOpen: stop Vite/CRA from spawning `xdg-open` (absent in the headless
+      // sandbox) — that ENOENT can crash the server right after "ready" and leave the preview dead.
+      const devCommand = disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port));
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the
       // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,

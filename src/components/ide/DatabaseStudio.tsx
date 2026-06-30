@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Database, Plus, Trash2, Edit2, Check, X, RefreshCw, Download, Upload, Search, ChevronRight, Copy, AlertCircle, Table, Filter, ArrowUpDown } from 'lucide-react';
 import { db } from '../../App';
 import { collection, getDocs, doc, setDoc, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
+import { Breadcrumb } from '../ui/Breadcrumb';
 
 interface DBRow { [key: string]: any; }
 
@@ -181,9 +182,17 @@ export function DatabaseStudio() {
         <div className="w-10 h-10 bg-cyan-600/20 rounded-xl flex items-center justify-center">
           <Database className="w-5 h-5 text-cyan-400" />
         </div>
-        <div>
+        <div className="min-w-0">
           <h2 className="font-semibold text-white text-base">Database Studio</h2>
-          <p className="text-xs text-white/40">Visual Firestore browser — dekhno, edit karo, manage karo</p>
+          {/* P-UX.5 — breadcrumb: source → collection → [selected document] */}
+          <Breadcrumb
+            className="mt-0.5"
+            items={[
+              { label: source === 'firestore' ? 'Firestore' : 'Demo' },
+              ...(selectedCol ? [{ label: selectedCol, title: `Collection: ${selectedCol}`, onClick: selectedDocId ? () => setSelectedDocId(null) : undefined }] : []),
+              ...(selectedDocId ? [{ label: selectedDocId, title: `Document: ${selectedDocId}` }] : []),
+            ]}
+          />
         </div>
         <div className="ml-auto flex items-center gap-2">
           <div className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-lg border ${source === 'firestore' ? 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10' : 'border-amber-500/40 text-amber-300 bg-amber-500/10'}`}>

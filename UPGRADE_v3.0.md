@@ -2154,10 +2154,18 @@
   `src/components/panels/SidebarNav.tsx`, `src/components/agentv3/AgentV3Panel.tsx`,
   `src/components/panels/BillingPanel.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-UX.5 — Breadcrumb Navigation  ❌ MISSING  [MED]
-- No breadcrumbs in deep views (Database Studio → collection → document; Code Studio → file → symbol).
-- [ ] Add a `<Breadcrumb>` component used in panel headers.
-- **Files:** new `src/components/ui/Breadcrumb.tsx`.
+### P-UX.5 — Breadcrumb Navigation  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- Deep views had no breadcrumb trail.
+- [x] **`src/components/ui/Breadcrumb.tsx`** (new, pure, static-render-tested) — reusable, dependency-free:
+  ordered crumbs, chevron separators, last crumb is the current location (non-interactive), earlier crumbs
+  clickable when they carry an `onClick`; truncates long labels; `aria-label`/`aria-current` for a11y.
+- [x] **Wired into Database Studio** (`DatabaseStudio.tsx` header) — shows `source → collection → [document]`;
+  clicking the collection crumb deselects the open document. Felt in a real deep view (not an orphan component).
+- **Honest scope:** Code Studio "file → symbol" breadcrumb deferred (Code Studio already shows the active file
+  in its tab bar; a symbol breadcrumb needs the AST symbol-at-cursor wiring — separate, lower value). The reusable
+  component is ready to drop into other deep views.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` (3 new) ✅ · `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/components/ui/Breadcrumb.tsx` + `.test.tsx`, `src/components/ide/DatabaseStudio.tsx`.
 
 ### P-UX.6 — NPS / CSAT Feedback  ❌ MISSING  [MED]
 - No in-app Net Promoter Score or thumbs-up/down per AI response.

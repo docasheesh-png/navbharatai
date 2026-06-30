@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand } from './devServerHost';
 
 describe('ensureHostBinding (v3.0 actuator)', () => {
   it('appends --host to a vite package-manager dev script', () => {
@@ -99,6 +99,36 @@ describe('detectDevPort', () => {
   it('falls back when no port is present in the output', () => {
     expect(detectDevPort('starting…', 5173)).toBe(5173);
     expect(detectDevPort('', 3000)).toBe(3000);
+  });
+});
+
+describe('isLongRunningCommand', () => {
+  it('detects bare/npx/node Vite invocations (the ones that hit the 300s timeout in the report)', () => {
+    expect(isLongRunningCommand('npx vite --host 0.0.0.0 --port 5173')).toBe(true);
+    expect(isLongRunningCommand('vite --host 0.0.0.0')).toBe(true);
+    expect(isLongRunningCommand('node node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173')).toBe(true);
+    expect(isLongRunningCommand('npx vite preview')).toBe(true);
+  });
+
+  it('does NOT treat `vite build` (compiles then exits) as long-running', () => {
+    expect(isLongRunningCommand('npx vite build')).toBe(false);
+    expect(isLongRunningCommand('vite build --mode production')).toBe(false);
+    expect(isLongRunningCommand('npm run build')).toBe(false);
+  });
+
+  it('still detects the dev-server forms it already knew', () => {
+    expect(isLongRunningCommand('npm run dev')).toBe(true);
+    expect(isLongRunningCommand('npm run dev -- --host 0.0.0.0')).toBe(true);
+    expect(isLongRunningCommand('next dev -H 0.0.0.0')).toBe(true);
+    expect(isLongRunningCommand('bash dev.sh')).toBe(true);
+    expect(isLongRunningCommand('uvicorn main:app')).toBe(true);
+  });
+
+  it('treats one-shot fetches and ordinary commands as NOT long-running', () => {
+    expect(isLongRunningCommand('curl -s http://localhost:5173/serve')).toBe(false);
+    expect(isLongRunningCommand('npm install')).toBe(false);
+    expect(isLongRunningCommand('npx tsc --noEmit')).toBe(false);
+    expect(isLongRunningCommand('')).toBe(false);
   });
 });
 

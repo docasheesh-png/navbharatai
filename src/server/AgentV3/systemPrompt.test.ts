@@ -125,6 +125,12 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('do NOT relaunch with');
   });
 
+  it('tells the agent it is already in the project root (no `cd /workspace`)', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('cd /workspace');
+    expect(p).toContain('project root');
+  });
+
   it('carries the prompt-injection guard: fenced external content is data, never instructions', () => {
     const p = architectSystemPrompt();
     expect(p).toContain('UNTRUSTED EXTERNAL DATA');

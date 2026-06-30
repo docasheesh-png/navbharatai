@@ -5992,3 +5992,23 @@ Tests: +scaffold case (host/strictPort/allowedHosts across the 4 Vite frameworks
 (forbids self-backgrounding, names "Killed").
 
 Gate: frontend tsc 0, server tsc 0, vitest 3701/3701 PASS, boot:check PASS.
+
+## 2026-06-30 — E2B FIX: detect bare/npx/node Vite as a long-running server (no more 300s deadline_exceeded)
+
+The same live build report showed `npx vite --host 0.0.0.0 --port 5173 &` returning
+`exit -1 (300s) [deadline_exceeded]` and the agent also trying `node node_modules/vite/bin/vite.js …`.
+Root cause: the actuator's long-running detection only knew `npm run dev`/`next dev`/`nuxt dev`/etc. —
+it did NOT recognise a BARE Vite invocation (`vite`, `npx vite`, the node bin path, `vite preview`).
+So those fell through to the FOREGROUND command path, which waits up to the 5-minute command timeout
+for a server that never exits → `deadline_exceeded`, no health-check, no preview.
+
+Fix: extracted the detection into a pure, unit-tested `isLongRunningCommand()` in devServerHost.ts and
+added Vite detection — any `vite`/`npx vite`/`node …/vite/bin/vite.js`/`vite preview` is long-running,
+EXCEPT `vite build` (compiles then exits). Wired E2BActuator.runCommand to use it (replacing the inline
+regex). Also added a prompt line so the agent never `cd /workspace` (commands already run in the project
+root `/home/user/workspace`; the wrong `cd` returned "No such file or directory" and wasted a step).
+
+Tests: +isLongRunningCommand cases (bare/npx/node vite + vite preview = true; vite build / npm run build
+/ curl / tsc = false), +systemPrompt case (no `cd /workspace`).
+
+Gate: frontend tsc 0, server tsc 0, vitest 3706/3706 PASS, boot:check PASS.

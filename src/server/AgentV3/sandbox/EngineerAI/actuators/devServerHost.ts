@@ -29,6 +29,42 @@ export function ensureHostBinding(command: string): string {
 }
 
 /**
+ * True when a command starts a long-running dev server / watcher (never exits on its own),
+ * so the actuator must run it with E2B `background:true` + a health-check poll instead of
+ * waiting for it to finish. A non-background run of one of these blocks until the 5-minute
+ * command timeout and returns `deadline_exceeded` — exactly what happened in a real build
+ * report where `npx vite …` and `node node_modules/vite/bin/vite.js …` were NOT detected
+ * (the old check only knew `npm run dev`/`next dev`/…), fell through to the foreground path,
+ * and timed out at 300s.
+ *
+ * Detects: the `dev`/`serve`/`watch` keywords, `npm run dev|start|serve`, framework CLIs
+ * (next/nuxt/astro/ng), python/uvicorn/gunicorn/flask servers, dev.sh wrappers, AND any Vite
+ * invocation — bare `vite`, `npx vite`, `node …/vite/bin/vite.js`, `vite preview` — EXCEPT
+ * `vite build` (which compiles and exits). One-shot fetches (curl/wget) are never long-running.
+ * PURE + unit-testable.
+ */
+export function isLongRunningCommand(command: string): boolean {
+  if (!command) return false;
+  if (/^\s*(?:curl|wget)\b/.test(command)) return false;
+  // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
+  const isVite = /\bvite(?:\.js)?\b/i.test(command) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(command);
+  return (
+    isVite ||
+    /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
+    /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
+    /python.*http\.server|http-server|live-server/i.test(command) ||
+    /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command) ||
+    // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
+    /^\s*(?:bash|sh)\s+\S*dev\.sh\b/i.test(command) ||
+    // Framework-specific CLIs
+    /\bng\s+serve\b/i.test(command) ||            // Angular CLI
+    /\bnext\s+dev\b/i.test(command) ||             // Next.js direct
+    /\bnuxt\s+dev\b/i.test(command) ||             // Nuxt direct
+    /\bastro\s+dev\b/i.test(command)               // Astro direct
+  );
+}
+
+/**
  * Strip shell-level self-backgrounding from a dev-server command so it runs in the
  * FOREGROUND of E2B's `background:true` runner.
  *

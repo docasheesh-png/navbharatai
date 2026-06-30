@@ -70,6 +70,40 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
 }
 
 /**
+ * MERGE a PARTIAL set of files into the durable workspace (upsert only the given files, UNION their
+ * paths into the authoritative list). Unlike `saveWorkspaceFiles` (which REPLACES the path list and
+ * would drop every unchanged file when given a partial set), this never forgets existing files — so
+ * a single IDE edit can be persisted durably without wiping the rest of the project. This is what
+ * makes a manual IDE edit survive sandbox recycling (the File Guardian then sees the fresh content,
+ * not a stale durable copy). Best-effort — never throws.
+ */
+export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<string, string>): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const entries = Object.entries(partial || {}).filter(([, c]) => typeof c === 'string' && Buffer.byteLength(c, 'utf8') <= MAX_FILE_BYTES);
+  if (entries.length === 0) return;
+  try {
+    const root = db.collection(COLLECTION).doc(workspaceId);
+    const filesCol = root.collection('files');
+    // 1) Upsert ONLY the changed/added content docs.
+    for (let i = 0; i < entries.length; i += BATCH) {
+      const batch = db.batch();
+      for (const [path, content] of entries.slice(i, i + BATCH)) {
+        batch.set(filesCol.doc(fileDocId(path)), { path, content });
+      }
+      await batch.commit();
+    }
+    // 2) UNION the authoritative path list (never drop unchanged files).
+    const meta = await root.get();
+    const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
+    const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
+    await root.set({ paths: union, count: union.length, savedAt: Date.now() }, { merge: true });
+  } catch {
+    /* best-effort — a merge failure never blocks anything */
+  }
+}
+
+/**
  * Load the last persisted file set for a workspace as { path: content }. Returns {} when absent.
  * Only paths in the authoritative metadata list are returned (so deleted files stay deleted).
  * Never throws.

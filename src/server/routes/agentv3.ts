@@ -134,7 +134,7 @@ import {
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
@@ -1300,6 +1300,12 @@ export function registerAgentV3Routes(app: Express): void {
       // imported repo lands cleanly without scaffolded template files mixed in).
       try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
       const { written, skipped } = await writeWorkspaceFiles(actuator, workspaceId, files as Record<string, string>);
+      // DURABLE PERSIST (the keystone fix): also merge the imported/edited files into the durable
+      // WorkspaceFileStore — NOT just the ephemeral sandbox. Without this, an IDE edit lands only in a
+      // volatile sandbox and the File Guardian later restores the stale durable copy, silently
+      // destroying the edit. mergeWorkspaceFiles UNIONS paths so a partial set never drops other files.
+      // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
+      try { await mergeWorkspaceFiles(workspaceId, files as Record<string, string>); } catch { /* durable persist is best-effort */ }
       res.json({ imported: written.length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to import the files.' });

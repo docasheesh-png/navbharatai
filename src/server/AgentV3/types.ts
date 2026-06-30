@@ -32,6 +32,7 @@ export type ToolName =
   | 'generate_auth'
   | 'generate_migration'
   | 'generate_deploy_artifacts'
+  | 'replace_symbol'
   | 'check_conventions'
   | 'generate_release_notes'
   | 'task'

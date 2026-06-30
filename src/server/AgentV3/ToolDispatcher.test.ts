@@ -255,6 +255,28 @@ describe('ToolDispatcher', () => {
     expect(act.files.has('docker-compose.yml')).toBe(false);
   });
 
+  it('replace_symbol AST-swaps one function, leaving the rest intact', async () => {
+    act.files.set('src/m.ts', 'export const A = 1;\nexport function f(x: number) { return x; }\nexport const B = 2;\n');
+    const res = await d.dispatch(
+      call('replace_symbol', { path: 'src/m.ts', symbol: 'f', code: 'export function f(x: number) { return x * 2; }' }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    const out = act.files.get('src/m.ts')!;
+    expect(out).toContain('return x * 2;');
+    expect(out).toContain('export const A = 1;'); // untouched
+    expect(out).toContain('export const B = 2;'); // untouched
+    expect(state.snapshot().files).toContainEqual({ path: 'src/m.ts', kind: 'modify' });
+  });
+
+  it('replace_symbol errors honestly on a missing symbol / missing file', async () => {
+    act.files.set('src/m.ts', 'export const A = 1;\n');
+    const missingSym = await d.dispatch(call('replace_symbol', { path: 'src/m.ts', symbol: 'nope', code: 'const nope = 1;' }), 'frontend');
+    expect(missingSym.content).toContain('not found');
+    const missingFile = await d.dispatch(call('replace_symbol', { path: 'src/ghost.ts', symbol: 'f', code: 'const f = 1;' }), 'frontend');
+    expect(missingFile.content).toContain('file not found');
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

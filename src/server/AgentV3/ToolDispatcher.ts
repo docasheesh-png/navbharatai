@@ -43,6 +43,7 @@ import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/Mock
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput } from '../lib/DeployArtifactGenerator';
+import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1420,6 +1421,33 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('deploy artifacts');
         return `Generated ${written.length} deployment artifact(s):\n${written.join('\n')}`;
+      }
+
+      case 'replace_symbol': {
+        const path = optStr(input, 'path');
+        const symbol = optStr(input, 'symbol');
+        const code = typeof (input as Record<string, unknown>)?.code === 'string' ? (input as Record<string, unknown>).code as string : '';
+        if (!path || !symbol || !code.trim()) {
+          return 'replace_symbol: "path", "symbol" and "code" are all required.';
+        }
+        let current: string;
+        try {
+          current = await this.actuator.readFile(this.workspaceId, path);
+        } catch {
+          return `replace_symbol: file not found: ${path}. Use write_file to create it first.`;
+        }
+        const result = replaceSymbol(current, symbol, code);
+        if (!result.ok || typeof result.content !== 'string') {
+          return result.error || `replace_symbol: could not replace "${symbol}" in ${path}.`;
+        }
+        if (result.content === current) {
+          return `replace_symbol: no change — the new code for "${symbol}" is identical.`;
+        }
+        await this.actuator.writeFile(this.workspaceId, path, result.content);
+        this.state?.recordFileChange({ path, kind: 'modify' }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, result.content);
+        this.scheduleCheckpoint(`replace ${symbol} in ${path}`);
+        return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).`;
       }
 
       case 'check_conventions': {

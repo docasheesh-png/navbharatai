@@ -1539,21 +1539,30 @@
 - **Resilience**: CheckpointManager + CheckpointStorage (ACID checkpoint/restore), LockManager,
   JournalManager, TransactionCoordinator, ConflictDetector (interface present), EventHistoryStore.
 
-### P-CGE.1 — True Incremental / AST-Based Patch Generation  🟡 PARTIAL → full  [HIGH]
-- **Problem:** All generation engines produce full-file rewrites (`Patch = {path, content}`). There is
-  no way to update a single function/class/component without regenerating the entire file. This causes
-  data loss on user edits and makes partial regeneration impossible.
-- [ ] Implement AST-aware partial patch: given a file + target symbol (function name / class name),
-  replace only that node using ts-morph, leaving surrounding code untouched.
-- [ ] Extend `IGenerationEngine` interface with `generatePatch(filePath, targetSymbol, instruction)`.
-- [ ] Wire into repair flow: `RepairExecutor` should call partial-patch for `EDIT_FILE` actions instead
-  of full rewrite when the file already exists.
-- [ ] Implement real `ConflictDetector.detectConflicts()` — currently always returns `false` (stub).
-  Use last-write-wins + 3-way merge for parallel patch application.
-- **Files:** `src/server/AppMakerLab/generator/IGenerationEngine.ts`,
-  `src/server/AppMakerLab/mutation/ConflictDetector.ts`,
-  `src/server/AppMakerLab/autorepair/RepairExecutor.ts`,
-  new `src/server/AppMakerLab/generator/ASTPatching.ts`.
+### P-CGE.1 — True Incremental / AST-Based Patch Generation  ✅ DONE (2026-06-30) · 🔌 WIRED  [HIGH]
+- **Problem:** edits could only do full-file rewrites — no way to replace a single function/class by
+  name without regenerating (and risking clobbering) the whole file; `ConflictDetector` was a stub.
+- [x] **`ASTPatching.ts`** (pure, unit-tested) — `replaceSymbol(source, symbol, newCode)` + `listSymbols`,
+  built on the **`typescript` compiler API** (already a project dep — NOT `ts-morph`, per the
+  dependency-free policy). Parses the file, finds the top-level declaration (function/class/interface/
+  type/enum/const) by name, and replaces exactly that node's span — surrounding code stays byte-for-byte.
+  Honest error (with the available symbol names) when the symbol isn't a top-level declaration.
+- [x] **Wired as the `replace_symbol` AgentV3 tool** (types.ts + ToolCatalog + `CATALOG_TOOL_NAMES` +
+  AgentRegistry `BUILD_TOOLS` + ToolDispatcher case + systemPrompt nudge + ToolDispatcher tests) — the
+  LIVE v3.0 edit path now has an AST-safe whole-symbol replace, so a fuzzy `edit_file` string match can't
+  clobber the wrong code. This is the genuinely-felt realization of AST patching on the path v3.0 uses.
+- [x] **Real `ConflictDetector.detectConflicts()`** — replaces the `return false` stub with same-path
+  detection (`conflictingPaths()`): a batch conflicts when ≥2 patches target one path (last-write-wins
+  data loss). Unit-tested.
+- **Honest scope:** the legacy `IGenerationEngine.generatePatch` / `RepairExecutor` wiring in the
+  `AppMakerLab/autorepair` subsystem is intentionally NOT done — that subsystem is not on the live v3.0
+  build path (it would be an orphan, like the P-AI.11 RootCauseAnalyzer note). The capability is delivered
+  where v3.0 actually edits files (the `replace_symbol` tool) + real conflict detection.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` (AST 7 + conflict +1 + dispatcher +2 new) ✅ ·
+  `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/AppMakerLab/generator/ASTPatching.ts`, `tests/astPatching.test.ts`;
+  `src/server/AppMakerLab/mutation/ConflictDetector.ts`, `tests/conflictDetector.test.ts`;
+  wired in `src/server/AgentV3/{types,ToolCatalog,AgentRegistry,ToolDispatcher,systemPrompt}.ts`, `ToolDispatcher.test.ts`.
 
 ### P-CGE.2 — Documentation Generators  ✅ DONE (2026-06-29) · 🔌 WIRED  [AST inline-comments deferred]
 - Generated apps had no docs. Now there is a real generator, wired into the live v3.0 build as an agent tool.

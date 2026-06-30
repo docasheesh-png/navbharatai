@@ -73,20 +73,56 @@ export function isReactProject(vfs: VirtualFileSystem): boolean {
   return vfs.paths().some((p) => p.endsWith('.jsx') || p.endsWith('.tsx'));
 }
 
-/** Find the module entry: the <script type=module src> in index.html, else common defaults. */
+/** True if `p` is a source (not test) module file. */
+const isEntryCandidateFile = (p: string): boolean =>
+  SOURCE_EXT.some((e) => p.endsWith(e)) && !/\.(test|spec)\.[jt]sx?$/.test(p);
+
+/**
+ * Pick the best entry from a set of candidate paths: prefer `main.*` over `index.*`, then a
+ * shallower path (closer to root / in `src/`). Deterministic.
+ */
+function pickBestEntry(paths: string[]): string | null {
+  if (paths.length === 0) return null;
+  return [...paths].sort((a, b) => {
+    const am = /(^|\/)main\.[jt]sx?$/.test(a) ? 0 : 1;
+    const bm = /(^|\/)main\.[jt]sx?$/.test(b) ? 0 : 1;
+    return am - bm || a.split('/').length - b.split('/').length || a.length - b.length;
+  })[0];
+}
+
+/**
+ * Find the module entry: the <script type=module src> in index.html, else common defaults, else a
+ * RESILIENT fallback to any `main`/`index` source file anywhere in the tree. The fallback matters
+ * because the file map can reach the preview keyed under an unexpected prefix or from a partial
+ * restore — without it the preview died with "No React entry module found" even though an entry
+ * clearly exists (e.g. src/main.tsx referenced by index.html).
+ */
 function findEntry(vfs: VirtualFileSystem): string | null {
   const html = vfs.readText('index.html');
   if (html) {
     const m = html.match(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/i);
     if (m) {
-      const resolved = resolveModule(vfs, normalizePath(m[1].replace(/^\//, '')));
+      const spec = m[1].replace(/^\//, '');
+      const resolved = resolveModule(vfs, normalizePath(spec));
       if (resolved) return resolved;
+      // The script src didn't resolve by exact path — match its BASENAME anywhere in the tree
+      // (handles a file map keyed under an unexpected prefix / leading slash).
+      const base = (spec.split('/').pop() || '').replace(/\.[^./]+$/, '');
+      if (base) {
+        const byBase = vfs.paths().filter(
+          (p) => isEntryCandidateFile(p) && (p.split('/').pop() || '').replace(/\.[^./]+$/, '') === base,
+        );
+        const best = pickBestEntry(byBase);
+        if (best) return best;
+      }
     }
   }
   for (const cand of ['src/main.jsx', 'src/main.tsx', 'src/index.jsx', 'src/index.tsx', 'src/main.js', 'src/index.js']) {
     if (vfs.has(cand)) return cand;
   }
-  return null;
+  // LAST RESORT — any main/index source file anywhere in the tree, so the in-browser preview renders
+  // instead of failing when the entry sits at a non-standard path or under an unexpected key prefix.
+  return pickBestEntry(vfs.paths().filter((p) => isEntryCandidateFile(p) && /(^|\/)(main|index)\.[jt]sx?$/.test(p)));
 }
 
 /** Resolve a module path (with/without extension, or /index) against the VFS. */

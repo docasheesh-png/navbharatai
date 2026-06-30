@@ -95,6 +95,30 @@ describe('buildReactPreview', () => {
     expect(html).toContain('No React entry module found');
   });
 
+  it('resiliently finds the entry by basename when the exact index.html path does not resolve', () => {
+    // index.html points at /src/main.tsx but the file lives at a different path (e.g. the file map
+    // reached the preview keyed under an unexpected prefix). It must STILL render, not fail with
+    // "No React entry module found".
+    const vfs = VirtualFileSystem.fromRecord({
+      'index.html': '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
+      'source/main.tsx': 'export default function Main(){ return null }',
+    });
+    const html = buildReactPreview(vfs);
+    expect(html).not.toContain('No React entry module found');
+    expect(html).toContain('source/main.tsx');
+  });
+
+  it('finds a main/index entry anywhere as a last resort (prefers main.*, ignores test files)', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'app/index.tsx': 'export default ()=>null',
+      'app/src/main.tsx': 'export default ()=>null',
+      'app/src/components/Widget.test.tsx': 'test',   // test file — must NOT be chosen as entry
+    });
+    const html = buildReactPreview(vfs);
+    expect(html).not.toContain('No React entry module found');
+    expect(html).toContain('"entry":"app/src/main.tsx"'); // main.* is the conventional Vite entry → preferred
+  });
+
   it('emits PRECISE module errors + is RESILIENT to a missing local file (stub, not a blank crash)', () => {
     const html = buildReactPreview(reactVfs());
     // A missing LOCAL file no longer crashes the whole preview — it is stubbed and a banner names it.

@@ -2171,10 +2171,15 @@
 - [ ] Optional: per-message token count badge in pro mode.
 - **Files:** `src/App.tsx` (billing view), new backend endpoint `/api/usage/tokens`.
 
-### P-UX.8 — Account Recovery (forgot password)  ❌ MISSING  [MED]
-- Email/password login exists but no "Forgot password" link — Firebase Auth supports this natively.
-- [ ] Add a "Forgot password?" link in the login modal → `firebase.auth().sendPasswordResetEmail()`.
-- **Files:** `src/App.tsx` (login modal), `src/config/firebase.ts`.
+### P-UX.8 — Account Recovery (forgot password)  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- Locked-out password users had no way back in — the sign-in screen had login/signup but no reset.
+- [x] **`AuthComponent.tsx`** — a "Forgot password?" link (login mode) calls Firebase
+  `sendPasswordResetEmail(auth, email)` and confirms via the existing success banner. Account-enumeration-safe
+  (same confirmation whether or not an account exists); honest, specific errors only for invalid-email / rate-limit.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` ✅ · `test:coverage` exit 0 · `build` ✅ · `boot:check` PASS.
+  AppKnowledgeBase updated. (Thin Firebase-native wrapper — covered by tsc/build/suite rather than a unit test.)
+- **Files:** `src/components/AuthComponent.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
+  *(Wired into the real `AuthComponent` sign-in screen — the felt path — rather than the legacy `App.tsx` login modal the original spec named.)*
 
 ### P-UX.9 — Session Replay / Heatmap  ❌ MISSING  [LOW]
 - No session replay tool (Hotjar / PostHog / LogRocket) for UX debugging.

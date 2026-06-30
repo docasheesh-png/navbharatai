@@ -11,6 +11,7 @@ import {
   signInWithPopup,
   signInWithRedirect,
   fetchSignInMethodsForEmail,
+  sendPasswordResetEmail,
   linkWithCredential,
   AuthProvider,
   UserCredential,
@@ -301,6 +302,30 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     }
   };
 
+  // P-UX.8 — Account recovery: email a Firebase password-reset link so a locked-out user can get back in.
+  const handleForgotPassword = async () => {
+    const target = email.trim();
+    setError('');
+    setSuccessMessage('');
+    if (!target) {
+      setError('Enter your email above first, then tap "Forgot password?".');
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, target);
+      // Don't reveal whether an account exists (account-enumeration safety) — always confirm sent.
+      setSuccessMessage(`If an account exists for ${target}, a password reset link is on its way. Check your inbox (and spam).`);
+    } catch (err: any) {
+      // Firebase hides user-not-found by default; surface only real, actionable errors.
+      if (err?.code === 'auth/invalid-email') setError('That email address looks invalid. Please check it and try again.');
+      else if (err?.code === 'auth/too-many-requests') setError('Too many attempts. Please wait a minute and try again.');
+      else setError(describeAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Helper for IDE logs integration if needed
   const addTerminalLine = (text: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
       console.log(`[IDE LOG] ${type}: ${text}`);
@@ -581,9 +606,21 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                     required
                     value={password} 
                     onChange={e => setPassword(e.target.value)} 
-                    placeholder="••••••••" 
-                    className="w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 transition-all shadow-inner" 
+                    placeholder="••••••••"
+                    className="w-full bg-[#0d1117] border border-white/10 rounded-2xl p-4 text-xs text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
                   />
+                  {isLogin && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        disabled={loading}
+                        className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors mt-1 mr-1"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {!isLogin && (

@@ -5,7 +5,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy,
+  FileCode, Copy, Maximize2, Minimize2,
 } from 'lucide-react';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { normalizeUid } from '../../lib/agentv3Workspace';
@@ -71,6 +71,30 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [composerExpanded, setComposerExpanded] = useState(false);
+  // Touch-primary devices (phones) → Enter inserts a newline; only the Send button sends. A laptop
+  // (fine pointer / physical keyboard) → Enter sends. Reactive to device/orientation changes.
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setIsTouchDevice(mq.matches);
+    update();
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, []);
+  // Auto-grow the composer to fit its content, capped at ~5 lines (then it scrolls internally). When
+  // expanded, a CSS class drives the height instead, so we clear the inline height.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    if (composerExpanded) { el.style.height = ''; return; }
+    el.style.height = 'auto';
+    const maxHeight = 24 * 5 + 16; // ~5 lines (line-height 24) + vertical padding (py-2)
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, [prompt, composerExpanded]);
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
   const [importUrl, setImportUrl] = useState('');
@@ -1023,8 +1047,9 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
               </button>
               <div className="relative flex-1">
                 <textarea
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-12 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500"
-                  rows={2}
+                  ref={composerRef}
+                  className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-20 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
+                  rows={1}
                   placeholder="Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -1035,14 +1060,31 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onOpenInIDE, 
                       .filter((f): f is File => !!f);
                     if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
                   }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                  onKeyDown={(e) => {
+                    // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
+                    // (send only via the button). In the expanded editor Enter always inserts a newline
+                    // so a long message can be edited freely. Shift+Enter is always a newline.
+                    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && !composerExpanded) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
                 />
+                {/* Expand / minimize the composer so a long message can be read & edited. */}
+                <button
+                  type="button"
+                  onClick={() => setComposerExpanded((v) => !v)}
+                  title={composerExpanded ? 'Minimize' : 'Expand'}
+                  className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                >
+                  {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
                 {running ? (
                   <button onClick={stop} title="Stop" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={send} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     <Send className="w-4 h-4" />
                   </button>
                 )}

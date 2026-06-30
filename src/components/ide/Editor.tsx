@@ -63,6 +63,10 @@ interface EditorProps {
   allFiles?: Record<string, string>;
   /** P-DEV.1: open a (possibly different) file at a location when navigating cross-file. */
   onNavigateOpen?: (path: string, line?: number, column?: number) => void;
+  /** P-DEV.3: breakpoint lines (1-based) for the active file — rendered as red gutter glyphs. */
+  activeBreakpoints?: number[];
+  /** P-DEV.3: toggle a breakpoint when the user clicks the line's gutter glyph margin. */
+  onBreakpointToggle?: (file: string, line: number) => void;
 }
 
 export const Editor: React.FC<EditorProps> = React.memo(({
@@ -83,9 +87,17 @@ export const Editor: React.FC<EditorProps> = React.memo(({
   onRevealInExplorer,
   allFiles,
   onNavigateOpen,
+  activeBreakpoints,
+  onBreakpointToggle,
 }) => {
   const isBinaryFile = BINARY_EXTENSIONS.has(fileName.split('.').pop()?.toLowerCase() ?? '');
   const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+  // P-DEV.3 — keep the latest file name + toggle callback in a ref so the once-registered gutter
+  // mouse handler always reads fresh values (same pattern as navRef below).
+  const bpRef = useRef<{ fileName: string; onToggle?: (file: string, line: number) => void }>({ fileName });
+  bpRef.current = { fileName, onToggle: onBreakpointToggle };
+  const bpDecorationsRef = useRef<string[]>([]);
   // P-DEV.1 — keep the latest workspace file set / active file / open-callback in refs so the
   // once-registered F12/Shift+F12 actions always read fresh values.
   const navRef = useRef<{ allFiles?: Record<string, string>; fileName: string; onOpen?: (p: string, l?: number, c?: number) => void }>({ fileName });
@@ -136,9 +148,41 @@ export const Editor: React.FC<EditorProps> = React.memo(({
     try { registerEditorThemes(monaco); } catch { /* non-fatal */ }
   };
 
+  // P-DEV.3 — render breakpoint glyphs for the active file. Re-runs on breakpoint/file change.
+  // Best-effort: a failure (e.g. textarea fallback, model swapping) is swallowed, never disrupts editing.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    try {
+      const decos = (activeBreakpoints ?? []).map((line) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: { isWholeLine: false, glyphMarginClassName: 'nbai-breakpoint-glyph', glyphMarginHoverMessage: { value: 'Breakpoint' } },
+      }));
+      bpDecorationsRef.current = editor.deltaDecorations(bpDecorationsRef.current, decos);
+    } catch { /* decorations are best-effort */ }
+  }, [activeBreakpoints, fileName, monacoFailed]);
+
   const handleEditorDidMount = (editor: any, monaco?: any) => {
     editorRef.current = editor;
+    if (monaco) monacoRef.current = monaco;
     if (onMount) onMount(editor);
+    // P-DEV.3 — toggle a breakpoint when the user clicks the line's gutter glyph margin. Registered
+    // once; reads the fresh file + callback from bpRef. Best-effort — never disrupts editing.
+    if (monaco) {
+      try {
+        editor.onMouseDown((e: any) => {
+          try {
+            if (e?.target?.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+              const line = e.target.position?.lineNumber;
+              if (typeof line === 'number' && line >= 1 && bpRef.current.onToggle) {
+                bpRef.current.onToggle(bpRef.current.fileName, line);
+              }
+            }
+          } catch { /* ignore a single mis-click */ }
+        });
+      } catch { /* gutter breakpoints are best-effort */ }
+    }
     // P-DEV.1 — register workspace-wide Go-to-Definition (F12) + Find-References (Shift+F12) that call
     // the semantic /api/workspace/navigate engine over the WHOLE file set (Monaco's per-file worker
     // can't). Same-file hits move the cursor; cross-file hits open the target file. Additive: only
@@ -335,6 +379,7 @@ export const Editor: React.FC<EditorProps> = React.memo(({
             wordWrap: 'on',
             scrollBeyondLastLine: false,
             automaticLayout: true,
+            glyphMargin: true, // P-DEV.3 — room for breakpoint glyphs in the gutter
             tabSize: 2,
             padding: { top: 10 },
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",

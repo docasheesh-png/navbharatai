@@ -22,3 +22,9 @@ export interface Tab {
   path: string;
   isDirty?: boolean;
 }
+
+/** P-DEV.3 — a single breakpoint (file path + 1-based line). */
+export interface Breakpoint {
+  file: string;
+  line: number;
+}

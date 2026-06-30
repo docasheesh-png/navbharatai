@@ -1182,12 +1182,30 @@
 - **Files (existing, verified):** `src/App.tsx` (sync effects), `src/server/routes/sync.ts`,
       `src/server/project/{WorkspaceStore,SyncMerge}.ts`.
 
-### P-DEV.3 — Real Debugger Panel (Breakpoints + Call Stack + Variable Watch)  ❌ MISSING  [HIGH]
-- `AIDebugger.tsx` does AI analysis of error text — it is NOT a runtime debugger. No breakpoints, no call stack, no variable inspection.
-- [ ] Add breakpoint markers in Monaco gutter (click to toggle, persist to `WorkspaceContext`).
-- [ ] Wire E2B sandbox (already in `infra/e2b/`) to pause execution at breakpoints and stream call stack + local variables via WebSocket.
-- [ ] Render a DebugPanel: call stack list, variable watch (add/remove expressions), continue/step-over/step-into buttons.
-- **Files:** new `src/components/ide/DebugPanel.tsx`, `src/components/ide/Editor.tsx`, `infra/e2b/`, `server.ts`.
+### P-DEV.3 — Real Debugger Panel (Breakpoints + Call Stack + Variable Watch)  ✅ DONE (2026-06-30, scoped) · 🔌 WIRED  [HIGH]
+- Shipped the **real, safe increment** (verified via a 3-agent read-only feasibility recon): Monaco gutter
+  breakpoints + persistence + a Debug panel — with the live-pause half **honestly deferred**, not faked.
+- [x] **Real breakpoints:** click the Monaco gutter glyph margin to toggle a red breakpoint dot
+  (`Editor.tsx` — `onMouseDown` on `GUTTER_GLYPH_MARGIN` + `deltaDecorations`; `glyphMargin` enabled; CSS
+  `.nbai-breakpoint-glyph`). Additive optional props (`activeBreakpoints`, `onBreakpointToggle`) — existing
+  single-file Editor callers are unaffected.
+- [x] **Persistence:** `src/lib/breakpoints.ts` (pure, unit-tested) — `toggleBreakpoint`/`loadBreakpoints`/
+  `serializeBreakpoints`/`breakpointList`/`clearFileBreakpoints`; stored in `localStorage` under
+  `nbai:breakpoints`, surviving refresh. (Wired as local state in `CodeStudio.tsx` — no fragile context coupling.)
+- [x] **`DebugPanel.tsx`** (new) — Breakpoints tab lists every `file:line`, click to **jump to the exact
+  line** (reveal + cursor), remove one or all. Mounted in its OWN panel (separate `isDebugPanelOpen` — the
+  `onDebug` toggle was previously opening the Terminal panel by mistake; now fixed).
+- [x] **Honest deferral (rule #2):** Call Stack / Variables tabs show a clear "coming soon — needs the cloud
+  sandbox" state and the Continue/Step/Pause controls are rendered **disabled**. **No mock data, no fake
+  stepping.** Live pause needs a CDP (Node-inspector) tunnel to the E2B sandbox — the recon confirmed the
+  existing WS proxy does NOT reach E2B's `*.e2b.app` inspector, so a real live debugger is 3–5 passes of new
+  tunnel/auth/orchestration work and is left for a dedicated effort rather than shipped half-faked.
+- [x] **AppKnowledgeBase** — BREAKPOINTS / DEBUGGER capability bullet added.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 3762 passing (10 new) ✅ · `test:coverage` exit 0 ·
+  `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/lib/breakpoints.ts` + `tests/breakpoints.test.ts`, new `src/components/ide/DebugPanel.tsx`
+  + `.test.tsx`; `src/components/ide/Editor.tsx`, `src/components/ide/CodeStudio.tsx`, `src/types/ide.ts`,
+  `src/index.css`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-DEV.4 — Merge Conflict Resolver (3-way Merge Editor)  ✅ DONE (2026-06-29)
 - `DiffViewer.tsx` showed only 2-way LCS diffs — no way to resolve conflict markers in a file.

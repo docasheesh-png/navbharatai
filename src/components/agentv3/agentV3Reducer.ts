@@ -197,7 +197,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'result':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
 
     case 'error':
       return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };

@@ -56,7 +56,7 @@ export type AgentV3WireEvent =
   | { type: 'repo'; url: string; fullName: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -146,6 +146,8 @@ export interface AgentV3ClientState {
   diagnostics?: unknown;
   /** True when the build paused at the wall-clock limit and can be auto-continued (Layer 3). */
   resumable?: boolean;
+  /** P-UX.7 — total tokens (in + out) the finished build used, for the usage badge. */
+  tokens?: number;
   error?: string;
 }
 

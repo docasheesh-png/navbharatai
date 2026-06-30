@@ -153,6 +153,15 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.error).toBe('boom');
   });
 
+  it('carries the token count from a result (P-UX.7 usage badge)', () => {
+    const withTokens = agentV3Reducer(initialAgentV3State(), {
+      type: 'result', ok: true, summary: 'built', steps: 3, billedUsd: 0.2, tokens: 12345,
+    });
+    expect(withTokens.tokens).toBe(12345);
+    const noTokens = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 1, billedUsd: 0 });
+    expect(noTokens.tokens).toBeUndefined();
+  });
+
   it('carries the resumable flag from a time-limit pause (Layer 3 auto-continue)', () => {
     const paused = agentV3Reducer(initialAgentV3State(), {
       type: 'result', ok: false, summary: 'Build paused at the time limit', steps: 0, billedUsd: 0, resumable: true,

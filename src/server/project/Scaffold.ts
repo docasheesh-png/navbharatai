@@ -95,7 +95,14 @@ const VITE_REACT_FILES: Record<string, string> = {
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
-    `export default defineConfig({ plugins: [react()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [react()],\n` +
+    // host:true binds 0.0.0.0 so the cloud-sandbox preview URL is reachable (not just localhost);
+    // strictPort stops the silent 5173→5174 drift that points the preview at a dead port; allowedHosts
+    // lets the sandbox proxy host through (newer Vite blocks it with "Blocked request … is not allowed").
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
     `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
@@ -160,7 +167,14 @@ const VITE_REACT_TS_FILES: Record<string, string> = {
   'vite.config.ts':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
-    `export default defineConfig({ plugins: [react()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [react()],\n` +
+    // host:true binds 0.0.0.0 so the cloud-sandbox preview URL is reachable (not just localhost);
+    // strictPort stops the silent 5173→5174 drift that points the preview at a dead port; allowedHosts
+    // lets the sandbox proxy host through (newer Vite blocks it with "Blocked request … is not allowed").
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'tsconfig.json': JSON.stringify(
     {
       compilerOptions: {
@@ -224,7 +238,11 @@ const VITE_VUE_FILES: Record<string, string> = {
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import vue from '@vitejs/plugin-vue';\n\n` +
-    `export default defineConfig({ plugins: [vue()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [vue()],\n` +
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
     `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
@@ -264,7 +282,11 @@ const VITE_SVELTE_FILES: Record<string, string> = {
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import { svelte } from '@sveltejs/vite-plugin-svelte';\n\n` +
-    `export default defineConfig({ plugins: [svelte()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [svelte()],\n` +
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
     `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
@@ -301,7 +323,14 @@ const VITE_POCKETBASE_FILES: Record<string, string> = {
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
-    `export default defineConfig({ plugins: [react()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [react()],\n` +
+    // host:true binds 0.0.0.0 so the cloud-sandbox preview URL is reachable (not just localhost);
+    // strictPort stops the silent 5173→5174 drift that points the preview at a dead port; allowedHosts
+    // lets the sandbox proxy host through (newer Vite blocks it with "Blocked request … is not allowed").
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
     `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +
@@ -378,7 +407,14 @@ const VITE_CONVEX_FILES: Record<string, string> = {
   'vite.config.js':
     `import { defineConfig } from 'vite';\n` +
     `import react from '@vitejs/plugin-react';\n\n` +
-    `export default defineConfig({ plugins: [react()] });\n`,
+    `export default defineConfig({\n` +
+    `  plugins: [react()],\n` +
+    // host:true binds 0.0.0.0 so the cloud-sandbox preview URL is reachable (not just localhost);
+    // strictPort stops the silent 5173→5174 drift that points the preview at a dead port; allowedHosts
+    // lets the sandbox proxy host through (newer Vite blocks it with "Blocked request … is not allowed").
+    `  server: { host: true, port: 5173, strictPort: true, allowedHosts: true },\n` +
+    `  preview: { allowedHosts: true },\n` +
+    `});\n`,
   'index.html':
     `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n` +
     `    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n` +

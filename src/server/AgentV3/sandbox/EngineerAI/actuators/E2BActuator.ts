@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -516,26 +516,11 @@ export class E2BActuator implements IEngineerActuator {
     usageTracker.record(workspaceId, 'command');
 
     // Long-running commands (dev servers, watchers) never exit — run in background,
-    // collect startup output for 20 s (enough for Vite/Next to print the port),
-    // then disconnect and leave the process alive.
-    // Guard: a one-shot fetch (curl/wget) is never long-running even if its URL
-    // happens to contain words like "serve" or "dev".
-    const isFetch = /^\s*(?:curl|wget)\b/.test(command);
-    const isLongRunning = !isFetch && (
-      /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
-      /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
-      /python.*http\.server|http-server|live-server/i.test(command) ||
-      /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command) ||
-      // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
-      /^\s*(?:bash|sh)\s+\S*dev\.sh\b/i.test(command) ||
-      // Framework-specific CLIs
-      /\bng\s+serve\b/i.test(command) ||            // Angular CLI
-      /\bnext\s+dev\b/i.test(command) ||             // Next.js direct
-      /\bnuxt\s+dev\b/i.test(command) ||             // Nuxt direct
-      /\bastro\s+dev\b/i.test(command)               // Astro direct
-    );
-
-    if (isLongRunning) {
+    // poll the port, then disconnect and leave the process alive. A non-background run
+    // would block until the 5-minute command timeout (deadline_exceeded). Detection lives
+    // in the pure isLongRunningCommand() so a missed pattern (e.g. bare `npx vite`) is a
+    // one-line, unit-tested fix instead of an inline regex drift.
+    if (isLongRunningCommand(command)) {
       let stdout = '';
       let stderr = '';
       // Force the dev server to bind 0.0.0.0 so the PUBLIC E2B preview URL is

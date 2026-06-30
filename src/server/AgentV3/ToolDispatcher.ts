@@ -42,6 +42,7 @@ import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptim
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
+import { generateDeployArtifacts, type DeployArtifactInput } from '../lib/DeployArtifactGenerator';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
@@ -1379,6 +1380,46 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`migration (${provider})`);
         return `${summary}\n${written.join('\n')}`;
+      }
+
+      case 'generate_deploy_artifacts': {
+        const rec = (input as Record<string, unknown>) || {};
+        const includeRaw = Array.isArray(rec.include) ? rec.include.filter((x): x is string => typeof x === 'string') : [];
+        const include = new Set(includeRaw.length ? includeRaw : ['docker', 'compose', 'ci']);
+        const nodeVersion = optStr(input, 'nodeVersion') || undefined;
+        const port = typeof rec.port === 'number' && rec.port > 0 ? rec.port : undefined;
+        const installCmd = optStr(input, 'installCmd') || undefined;
+        const buildCmd = optStr(input, 'buildCmd') || undefined;
+        const startCmd = optStr(input, 'startCmd') || undefined;
+        const lintCmd = optStr(input, 'lintCmd') || undefined;
+        const testCmd = optStr(input, 'testCmd') || undefined;
+        const multiStage = rec.multiStage === false ? false : undefined;
+        const genInput: DeployArtifactInput = {};
+        if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage };
+        if (include.has('compose')) genInput.compose = { port };
+        if (include.has('ci')) genInput.ci = { nodeVersion, installCmd, lintCmd, testCmd, buildCmd };
+        const artifacts = generateDeployArtifacts(genInput);
+        const toWrite: Array<{ path: string; content: string }> = [];
+        if (artifacts.dockerfile) toWrite.push({ path: 'Dockerfile', content: artifacts.dockerfile });
+        if (artifacts.dockerCompose) toWrite.push({ path: 'docker-compose.yml', content: artifacts.dockerCompose });
+        if (artifacts.ciWorkflow) toWrite.push({ path: '.github/workflows/ci.yml', content: artifacts.ciWorkflow });
+        if (toWrite.length === 0) return 'generate_deploy_artifacts: nothing to write — pass include: ["docker","compose","ci"].';
+        const written: string[] = [];
+        for (const file of toWrite) {
+          let kind: 'create' | 'modify' = 'create';
+          try {
+            await this.actuator.readFile(this.workspaceId, file.path);
+            kind = 'modify';
+          } catch {
+            kind = 'create';
+          }
+          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(file.path, file.content);
+          written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${file.path}`);
+        }
+        this.scheduleCheckpoint('deploy artifacts');
+        return `Generated ${written.length} deployment artifact(s):\n${written.join('\n')}`;
       }
 
       case 'check_conventions': {

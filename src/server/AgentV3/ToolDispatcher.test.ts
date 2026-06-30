@@ -236,6 +236,25 @@ describe('ToolDispatcher', () => {
     expect(res.content).toContain('empty or missing');
   });
 
+  it('generate_deploy_artifacts writes Dockerfile + compose + CI by default', async () => {
+    const res = await d.dispatch(call('generate_deploy_artifacts', { buildCmd: 'npm run build', testCmd: 'npm test' }), 'backend');
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('Dockerfile')).toContain('FROM node:');
+    expect(act.files.get('Dockerfile')).toContain('USER node'); // non-root
+    expect(act.files.get('docker-compose.yml')).toContain('services:');
+    const ci = act.files.get('.github/workflows/ci.yml')!;
+    expect(ci).toContain('actions/checkout@v4');
+    expect(ci).toContain('npm test'); // declared test step present
+  });
+
+  it('generate_deploy_artifacts honours an include subset', async () => {
+    const res = await d.dispatch(call('generate_deploy_artifacts', { include: ['ci'] }), 'backend');
+    expect(res.is_error).toBe(false);
+    expect(act.files.has('.github/workflows/ci.yml')).toBe(true);
+    expect(act.files.has('Dockerfile')).toBe(false);
+    expect(act.files.has('docker-compose.yml')).toBe(false);
+  });
+
   it('check_conventions reports violations with suggestions (analysis only, no write)', async () => {
     const res = await d.dispatch(
       call('check_conventions', {

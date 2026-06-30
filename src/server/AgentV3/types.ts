@@ -31,6 +31,7 @@ export type ToolName =
   | 'generate_seed_data'
   | 'generate_auth'
   | 'generate_migration'
+  | 'generate_deploy_artifacts'
   | 'check_conventions'
   | 'generate_release_notes'
   | 'task'

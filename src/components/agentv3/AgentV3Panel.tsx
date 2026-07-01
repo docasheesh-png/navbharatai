@@ -629,6 +629,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // instead of silently no-op'ing until the current build finishes.
   const openConversation = async (id: string) => {
     setHistoryOpen(false);
+    // DETACH the current build first (same as startNewSession): reset() aborts this UI's stream,
+    // clears `running` (so the opened chat's composer is enabled, not stuck disabled) and bumps the
+    // generation guard so the abandoned build can't re-attach over the one being opened. The server
+    // build, if any, keeps running in the background and stays resumable from History — nothing is
+    // killed. Without this, opening a chat during a (possibly stuck) build left `running` true and
+    // the old stream still writing into the newly-opened session.
+    reset();
     setWorkspaceFiles(null);
     setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
     setSelectedFile(null);

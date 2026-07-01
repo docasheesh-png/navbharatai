@@ -2243,7 +2243,10 @@ export function registerAgentV3Routes(app: Express): void {
           const text = remainingMs > 45_000
             ? `⏱️ Still building… ${inTxt} in · ~${formatEta(remainingMs).replace('~', '')} to go`
             : `⏱️ Still building… ${inTxt} in · wrapping up (a little longer than estimated)`;
-          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now() });
+          // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
+          // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
+          // this ONE transient line the moment the build finishes (it is live status, not chat history).
+          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
         } catch { /* ETA is best-effort — never affects the build */ }
       }
     }, 60_000);

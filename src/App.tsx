@@ -4663,6 +4663,8 @@ ${buildLanguageRule(preferredLanguage)}`;
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
       setCurrentSessionId(targetSession.id);
+      v3ResumeInFlightRef.current = true; // resume, NOT a fresh open — suppress the new-chat bump so
+                                          // toggleTab doesn't start a blank session over the resumed one
       toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addToast('Resumed v3.0 session.', 'success');
       return true;

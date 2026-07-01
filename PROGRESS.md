@@ -6684,3 +6684,56 @@ mid-build (one turn took 131 seconds) — GLM reliability/latency is a provider 
 something to code-fix; and a `[health-check] port not responding — restarting…` message bled into an
 unrelated later command's stdout (the same attribution artifact already understood from earlier in this
 session — not a new distinct bug).
+
+## 2026-07-01 — GLM+KIMI "friendship" chain, cheap-floor timeout cut, and default-intent flipped to chat-first
+
+Three admin-requested changes, shipped together:
+
+**A. GLM and KIMI are now "friends" in the cheap-build-floor chain.** Admin's exact spec: *"GLM aur
+KIMI 2.7 apas me friendship jaise ho, ek se kaam na ho to dusre se karwa do! dono fail to claude, claude
+nhi fail to vertex/gemini"* — chain: `{GLM 4.7 → GLM 4.6} = {KIMI 2.7 → KIMI 2.6} → Claude
+(Haiku/Sonnet by complexity) → Vertex/Gemini`. Previously `AGENTV3_CHEAP_FLOOR` was mutually exclusive
+(`'glm'` XOR `'kimi'`) — `cheapBuildFloorRunners()` now accepts `'glm'`, `'kimi'`, `'both'`, or `'on'`
+(both), with GLM's 2-model ladder ordered first, then KIMI's, before Claude — matching the admin's
+stated priority. An explicit allowlist (not "anything but off") was used deliberately so a stray/typo
+config value still safely no-ops, preserving the existing "unknown value = off" safety guarantee.
+Still fully OFF by default (`AGENTV3_CHEAP_FLOOR` unset/`'off'`) — zero behavior change unless the
+admin explicitly opts in.
+
+Vertex/Gemini's position in `buildTurnRunner()`'s chain was also corrected to sit AFTER the Haiku/
+Sonnet backstop (true last resort), matching the admin's stated order. **`AGENTV3_BUILD_ALLOW_GEMINI`
+stays opt-in** (unchanged, default off) — while implementing this I found a documented REAL historical
+incident in the existing code comments: Gemini/Vertex previously hallucinated a "successful" build by
+describing writing files in its tool-use loop without ever calling `write_file`, producing zero real
+files, caught by the admin only via $0 Anthropic-dashboard spend on that build. Flipping this to
+default-on would silently reintroduce that risk, so it was deliberately left opt-in — reversing a fix
+for a real, admin-witnessed incident needs an explicit go-ahead, not a silent default flip.
+
+**B. Cheap-floor provider timeout cut 60s → 25s.** A build report showed a single GLM turn stuck for
+131 seconds before falling through — with GLM+KIMI now chained together (A above), a slow rung should
+fail fast onto the next friend rather than stall the whole build.
+
+**C. True last-resort intent default flipped from `new_build` to `chat`.** Admin's exact ask: *"build
+should prefer chat when ambiguous ... isko smartly handle karna hai! aisa na ho ki build kare hi na"*
+(handle it smartly — but never end up NEVER building). `classifyIntentWithConfidence()`'s and
+`classifyIntent()`'s final fallback (reached only when NO keyword signal matches at all — every
+specific new-build/edit/informational/continuation/problem signal already checked and missed) now
+returns `chat` instead of `new_build`, confidence stays `low` so the LLM upgrade (`classifyIntentSmart`)
+still gets the final say whenever it's available — this default only fires in the LLM-unavailable
+fallback path. Every existing, more specific signal (explicit build verbs, edit verbs, "compare",
+continuation phrases, problem reports) still wins exactly as before — this only changes what happens
+when literally nothing else matched. To make sure a genuinely-ambiguous ask never gets silently dropped
+as a wrong-guess chat reply, the plain-chat route in `agentv3.ts` now re-checks
+`classifyIntentWithConfidence(prompt).signal === 'default'` and, when true, appends an instruction to
+the chat system prompt telling the AI to answer naturally AND ask a short clarifying question ("Would
+you like me to build/fix this for you?") — so the user can confirm with their next message instead of
+the ask silently vanishing into a chat reply.
+
+Tests: +3 in `IntentClassifier.test.ts` (signal-free message defaults to chat, LLM upgrade still wins
+when available, every earlier specific signal still takes priority) and +3 in `agentv3.test.ts` (GLM+
+KIMI "both"/"on" combined ordering, independent no-op when only one has a key, "glm"/"kimi" still pin to
+exactly one provider). Gate: frontend tsc 0, server tsc 0, vitest 4091/4091 PASS, boot:check PASS.
+
+**Not yet started (explicitly requested, tracked separately):** confirming the root cause of the
+`pkill -f "vite" || true` → exit -1 "signal: terminated" mystery — currently only a working theory
+(health-check background-restart cycle overlapping the next dispatched command), no confirmed fix yet.

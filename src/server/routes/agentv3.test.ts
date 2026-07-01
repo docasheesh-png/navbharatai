@@ -238,10 +238,43 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.GLM_MODEL = 'glm-5.2, glm-4.7 , glm-4.6';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'GLM', 'GLM']);
   });
-  it('an unknown floor value is treated as off', () => {
+  it('an unknown floor value is treated as off (not "anything but off" — a stray/typo value must never silently enable paid calls)', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
     process.env.GLM_API_KEY = 'x';
     expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+
+  it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, GLM first (admin decision, 2026-07-01)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'both';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-4.7'; // pin to 1 rung each for a clean, exact assertion
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    process.env.KIMI_MODEL = 'kimi-k2.7-code';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
+
+    process.env.AGENTV3_CHEAP_FLOOR = 'on';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
+  });
+
+  it('with "both" set, GLM alone still works if only GLM has a key (KIMI independently no-ops) — and vice versa', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'both';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-4.7';
+    // KIMI_API_KEY intentionally absent
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM']);
+
+    delete process.env.GLM_API_KEY;
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    process.env.KIMI_MODEL = 'kimi-k2.7-code';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI']);
+  });
+
+  it('"glm"/"kimi" still pin to exactly ONE provider (explicit single-provider testing/rollback) even when the other has a key too', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-4.7';
+    process.env.KIMI_API_KEY = 'kimi-test-key'; // present but must NOT be used — floor pins to glm only
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM']);
   });
 });
 

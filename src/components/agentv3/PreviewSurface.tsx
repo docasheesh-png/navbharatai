@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v3.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope } from 'lucide-react';
+import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from 'lucide-react';
 import { auth } from '../../App';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
@@ -30,7 +30,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; onFixError?: (errorText: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
   const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
@@ -155,6 +155,53 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     return () => window.removeEventListener('message', onMessage);
   }, [workspaceId, userId, email]);
 
+  // VISUAL EDITOR (v1, in-browser mode only — see ReactPreview.ts's injected inspector script).
+  // Clicking an element in edit mode reports back {file, line, column, newText}; this applies it via
+  // the REAL AST-based endpoint (never a guess), then reloads the in-browser preview from the freshly
+  // saved source so the edit is confirmed against what actually compiled, and notifies the parent
+  // (onFileEdited) so Files/Code Studio/Git pick up the change immediately too — same as any other
+  // v3.0 file write.
+  const inBrowserIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
+  const setIframeEditMode = useCallback((on: boolean) => {
+    try { inBrowserIframeRef.current?.contentWindow?.postMessage({ __nbaiSetEditMode: on }, '*'); } catch { /* best-effort */ }
+  }, []);
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data as { __nbaiVisualEditCommit?: boolean; file?: string; line?: number; column?: number; newText?: string } | null;
+      if (!d || d.__nbaiVisualEditCommit !== true || !workspaceId || typeof d.file !== 'string') return;
+      setSavingEdit(true);
+      setEditError('');
+      void (async () => {
+        try {
+          const res = await fetch('/api/agentv3/visual-edit', {
+            method: 'POST',
+            headers: await authJsonHeaders(),
+            body: JSON.stringify({ workspaceId, userId, email, file: d.file, line: d.line, column: d.column, newText: d.newText ?? '' }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
+          onFileEdited?.(d.file as string, typeof data.content === 'string' ? data.content : '');
+          await loadInBrowser(); // reload from the freshly-saved source so the preview reflects the real edit
+        } catch (err) {
+          setEditError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setSavingEdit(false);
+        }
+      })();
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, userId, email, onFileEdited]);
+  // Turn edit mode off whenever we leave in-browser mode or the preview reloads with fresh content —
+  // the iframe itself is a NEW document after a reload, so any prior postMessage toggle is gone anyway;
+  // this just keeps the button's own displayed state honest.
+  useEffect(() => { if (mode !== 'inbrowser') setEditMode(false); }, [mode]);
+  useEffect(() => { setEditMode(false); }, [html]);
+
   const switcher = (
     <div className="flex items-center gap-1">
       <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
@@ -234,10 +281,25 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
         {switcher}
         <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
+        {savingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />}
+        {!!html && !err && (
+          <button
+            onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
+            disabled={savingEdit}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] border disabled:opacity-40 ${editMode ? 'bg-emerald-600 text-white border-emerald-500' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`}
+            title={editMode ? 'Exit visual editing — click a text element to edit it directly' : 'Visual Editor — click text in the preview to edit it directly (v1: simple text content)'}
+          >
+            {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
+            {editMode ? 'Editing…' : 'Edit'}
+          </button>
+        )}
         <button onClick={loadInBrowser} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
+      {editError && (
+        <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
+      )}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
       ) : err ? (
@@ -260,7 +322,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // NOTE: allow-same-origin is REQUIRED here — without it the srcDoc has an opaque origin and a
         // dynamic ES-module import() (how the preview loads React from the CDN) is blocked, so React
         // never loads → "Missing dependency react". The live-server iframe above already sets it.
-        <iframe title="In-browser preview" srcDoc={html} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        <iframe
+          ref={inBrowserIframeRef}
+          title="In-browser preview"
+          srcDoc={html}
+          className="flex-1 w-full bg-white"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
       ) : (
         <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
       )}

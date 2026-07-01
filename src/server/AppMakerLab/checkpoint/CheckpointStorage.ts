@@ -58,11 +58,6 @@ export class CheckpointStorage {
         const tmpPath = join(this.storageRoot, `${id}.json.tmp`);
         const content = JSON.stringify(data);
 
-        // The constructor's mkdir is async (best-effort); a save() that races ahead of it would hit
-        // ENOENT on the openSync below. Guarantee the directory exists synchronously, right here, so
-        // the very first save can never lose the race. Idempotent + cheap (no-op once created).
-        mkdirSync(this.storageRoot, { recursive: true });
-
         const fd = openSync(tmpPath, 'w');
         try {
             writeSync(fd, content);

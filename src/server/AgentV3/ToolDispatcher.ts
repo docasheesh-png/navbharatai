@@ -838,9 +838,18 @@ export class ToolDispatcher {
           this.state?.appendTerminal(msg);
           return msg;
         }
-        // Governance (Layer 58): classify the command's risk before it runs so the
-        // result carries an honest warning and a decision-audit episode is recorded.
+        // Governance (Layer 58): classify the command's risk BEFORE execution.
+        // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate
+        // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);
+        if (risk.level === 'high') {
+          const blockMsg = `[GOVERNANCE BLOCKED] Command not executed — HIGH-risk operation detected:\n  ${risk.reasons.join('\n  ')}\n  Command: ${command.slice(0, 300)}\n\nIf this was a legitimate need, rephrase the task to avoid dangerous shell patterns.`;
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-HIGH] refused: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
+          );
+          this.state?.appendTerminal(blockMsg);
+          return blockMsg;
+        }
         const cmdStartedAt = Date.now();
         const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).

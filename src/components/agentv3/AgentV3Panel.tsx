@@ -1604,6 +1604,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               workspaceId={state.workspaceId}
               userId={userId}
               email={email}
+              framework={framework}
               onFixError={(errText) => {
                 // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
                 // (collapse the workspace) so the user can review and send the fix request.

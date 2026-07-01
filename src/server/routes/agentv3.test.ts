@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -376,6 +376,27 @@ describe('oneShotDevPort — preview port per framework for the one-shot lane', 
     expect(oneShotDevPort('astro')).toBe(4321);
     expect(oneShotDevPort('static')).toBe(3000);
     expect(oneShotDevPort('python-fastapi')).toBe(8000);
+  });
+});
+
+describe('parseDevServerHealthCheck — real "Diagnose" outcome from E2BActuator.runCommand output', () => {
+  it('detects an UP dev server and extracts the real bound port', () => {
+    const combined = 'npm install output...\n[health-check] dev server is UP on port 5173. Call update_preview with port=5173.';
+    expect(parseDevServerHealthCheck(combined)).toEqual({ up: true, port: 5173 });
+  });
+
+  it('detects a DOWN dev server and extracts the port it failed on', () => {
+    const combined = 'some crash log\n[health-check] dev server did not come up on port 5173 — check the logs above, then start it again.';
+    expect(parseDevServerHealthCheck(combined)).toEqual({ up: false, port: 5173 });
+  });
+
+  it('falls back to unknown-port-down when neither health-check line is present (unexpected output)', () => {
+    expect(parseDevServerHealthCheck('some unrelated log with no health-check marker')).toEqual({ up: false, port: null });
+  });
+
+  it('picks the actually-bound port even when it drifted from the requested one', () => {
+    const combined = '[health-check] dev server is UP on port 5174. Call update_preview with port=5174.';
+    expect(parseDevServerHealthCheck(combined)).toEqual({ up: true, port: 5174 });
   });
 });
 

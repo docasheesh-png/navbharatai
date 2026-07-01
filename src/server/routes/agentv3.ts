@@ -123,6 +123,7 @@ import { describeVisionAttachments } from '../lib/visionDescribe';
 import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
+import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -517,6 +518,21 @@ export function oneShotDevPort(framework: string): number {
   if (/static|vanilla/i.test(framework)) return 3000;
   if (/fastapi|flask|django|python/i.test(framework)) return 8000;
   return 5173; // vite-react / vue / svelte and the default
+}
+
+/**
+ * Parse the E2BActuator's own dev-server health-check line out of `runCommand('npm run dev')`'s
+ * combined stdout+stderr (see E2BActuator.runCommand's long-running-command branch, which ALWAYS
+ * appends one of these two exact lines). Reused by the "Diagnose" preview button so it reports
+ * the REAL boot outcome (installed deps, pre-kill, start, port-wait, one retry) instead of a guess.
+ * Pure + exported for testing.
+ */
+export function parseDevServerHealthCheck(combined: string): { up: boolean; port: number | null } {
+  const upMatch = /dev server is UP on port (\d+)/.exec(combined);
+  if (upMatch) return { up: true, port: Number(upMatch[1]) };
+  const downMatch = /dev server did not come up on port (\d+)/.exec(combined);
+  if (downMatch) return { up: false, port: Number(downMatch[1]) };
+  return { up: false, port: null };
 }
 
 /**
@@ -1164,6 +1180,60 @@ export function registerAgentV3Routes(app: Express): void {
   // deployment (LocalActuator → no live preview), or a custom preview domain needs DNS.
   app.get('/api/agentv3/preview-status', (_req: Request, res: Response) => {
     res.json(sandboxDiag());
+  });
+
+  // "Diagnose" button (Live server empty state) — reuses the EXACT same real boot sequence the
+  // build loop uses (E2BActuator.runCommand's long-running-command branch: stale-deps install,
+  // pre-kill any stale process on the port, start the dev server, poll the port, one automatic
+  // restart on failure) instead of a separate speculative check, so what the user sees is the
+  // real internal outcome — not a guess. On success it also resolves + returns the live URL so
+  // the client can restore the preview immediately, without waiting for the agent to republish it.
+  app.post('/api/agentv3/preview-diagnose', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    const diag = sandboxDiag();
+    if (!diag.livePreviewAvailable) {
+      res.json({ ok: false, portListening: false, reason: 'Live server preview isn\'t available on this deployment — no cloud sandbox (E2B) is configured. Use the In-browser preview instead.', detail: '' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const expectedPort = oneShotDevPort(framework);
+      // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +
+      // one retry can legitimately take that long on a cold sandbox; a shorter cap would report a
+      // false "could not reach the sandbox" for an install that's simply still running).
+      const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-diagnose');
+      const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+      const { up, port } = parseDevServerHealthCheck(combined);
+      const boundPort = port ?? expectedPort;
+      if (up) {
+        let previewUrl: string | undefined;
+        try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
+        res.json({
+          ok: true,
+          portListening: true,
+          port: boundPort,
+          previewUrl,
+          reason: previewUrl ? `Dev server is up on port ${boundPort} — preview restored.` : `Dev server is up on port ${boundPort}, but the public URL could not be resolved yet. Try again in a few seconds.`,
+          detail: combined.slice(-4000),
+        });
+        return;
+      }
+      res.json({
+        ok: false,
+        portListening: false,
+        port: boundPort,
+        reason: `The dev server did not come up on port ${boundPort} after installing dependencies and one restart attempt. The exact cause is in the detail log below (a crash on boot, a missing dependency, or a port conflict).`,
+        detail: combined.slice(-4000),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, portListening: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox to diagnose the preview.', detail: '' });
+    }
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).

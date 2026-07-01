@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -94,6 +94,24 @@ describe('deriveWorkspaceId (session continuity)', () => {
   it('treats a missing/unsafe userId as anon', () => {
     expect(deriveWorkspaceId(null, 'sess-abc123')).toBe('agentv3-anon-sess-abc123');
     expect(deriveWorkspaceId('bad id!', 'sess-abc123')).toBe('agentv3-anon-sess-abc123');
+  });
+});
+
+describe('chatWorkspaceContextLine — v3.0 always knows its real file count, even in plain chat', () => {
+  it('is empty for a brand-new/empty workspace — nothing honest to add', () => {
+    expect(chatWorkspaceContextLine(0)).toBe('');
+    expect(chatWorkspaceContextLine(-1)).toBe('');
+    expect(chatWorkspaceContextLine(NaN)).toBe('');
+  });
+  it('injects the REAL count so "kितni files hai?" is answered honestly, not guessed', () => {
+    const line = chatWorkspaceContextLine(12);
+    expect(line).toContain('12 file(s)');
+    expect(line).toContain('REAL number');
+    expect(line).toContain('never guess');
+  });
+  it('scales with whatever the real count is (not a fixed/guessed number)', () => {
+    expect(chatWorkspaceContextLine(1)).toContain('1 file(s)');
+    expect(chatWorkspaceContextLine(200)).toContain('200 file(s)');
   });
 });
 

@@ -10,6 +10,7 @@
 import type { Express, Request, Response } from 'express';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
+import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 
 const MAX_CODE = 12_000;
 const MAX_BRAND = 600;
@@ -42,5 +43,16 @@ export function registerDesignRoutes(app: Express): void {
     } catch {
       res.json({ palette: null });
     }
+  });
+
+  // P-DESIGN.8 — deterministic design-consistency lint (no AI, no credit spend). Scores the current
+  // app's code for colour/font/spacing consistency and returns concrete, actionable violations.
+  app.post('/api/design/lint', (req: Request, res: Response) => {
+    const code = typeof req.body?.code === 'string' ? req.body.code.slice(0, MAX_CODE) : '';
+    if (!code) {
+      res.status(400).json({ error: 'provide { code: "<app source>" }' });
+      return;
+    }
+    res.json(lintDesign(code));
   });
 }

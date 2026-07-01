@@ -1,0 +1,160 @@
+// P-DESIGN.8 — Design Governance / visual linter (pure, deterministic — no AI, no credit spend).
+//
+// Scans generated app code for design-consistency issues a polished app shouldn't have: an
+// explosion of one-off colours, too many font families, off-grid spacing, and heavy hardcoded
+// colours (instead of tokens/CSS variables). Returns a 0–100 consistency score + a letter grade +
+// concrete violations. All logic is pure and unit-tested; the route + UI are thin adapters.
+//
+// This is a *consistency* linter (works from the code alone). A future pass can additionally compare
+// against a specific brand token set (WhitelabelBranding); the pure extractors here are the base.
+
+export type ViolationType = 'color-count' | 'font-count' | 'off-grid-spacing' | 'hardcoded-colors';
+
+export interface DesignViolation {
+  type: ViolationType;
+  severity: 'info' | 'warn';
+  message: string;
+  count: number;
+  examples: string[];
+}
+
+export interface DesignLintResult {
+  score: number; // 0–100
+  grade: 'A' | 'B' | 'C' | 'D';
+  violations: DesignViolation[];
+  stats: { colors: number; fonts: number; spacingValues: number; offGridSpacing: number; hasTokens: boolean };
+}
+
+// Tunable thresholds (kept here so the intent is explicit and the tests pin them).
+export const MAX_COLORS = 12;
+export const MAX_FONTS = 2;
+export const SPACING_GRID = 4; // px
+export const MAX_OFFGRID = 3;
+export const HARDCODE_COLOR_LIMIT = 8;
+
+/** Expand `#abc` → `#aabbcc`; lowercase; drop any alpha byte so `#rrggbbaa` dedupes with `#rrggbb`. Pure. */
+export function normalizeHex(hex: string): string | null {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(hex.trim());
+  if (!m) return null;
+  let h = m[1].toLowerCase();
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return '#' + h.slice(0, 6);
+}
+
+/** All distinct normalized hex colours in the code. Pure. */
+export function extractHexColors(code: string): string[] {
+  const out = new Set<string>();
+  const re = /#[0-9a-fA-F]{3,8}\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const n = normalizeHex(m[0]);
+    if (n) out.add(n);
+  }
+  return [...out];
+}
+
+/** Distinct font-family names declared in the code (CSS `font-family` + Tailwind `font-[...]`). Pure. */
+export function extractFontFamilies(code: string): string[] {
+  const out = new Set<string>();
+  const re = /font-family\s*:\s*([^;}]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    // First family in the stack identifies the choice; strip quotes/whitespace.
+    const first = m[1].split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+    if (first && !/^(inherit|initial|unset|var\()/.test(first)) out.add(first);
+  }
+  return [...out];
+}
+
+/** All px spacing values from padding/margin/gap declarations. Pure. */
+export function extractSpacingPx(code: string): number[] {
+  const values: number[] = [];
+  const re = /(?:padding|margin|gap|row-gap|column-gap)[^:;{}]*:\s*([^;"'}]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    const nums = m[1].match(/(\d+(?:\.\d+)?)px/g);
+    if (nums) for (const n of nums) values.push(parseFloat(n));
+  }
+  return values;
+}
+
+/** Spacing values that don't sit on the `grid` (default 4px). Pure. */
+export function offGridSpacing(values: number[], grid: number = SPACING_GRID): number[] {
+  const g = grid > 0 ? grid : SPACING_GRID;
+  return values.filter((v) => v > 0 && Math.abs(v % g) > 1e-9);
+}
+
+function scoreToGrade(score: number): 'A' | 'B' | 'C' | 'D' {
+  if (score >= 90) return 'A';
+  if (score >= 75) return 'B';
+  if (score >= 60) return 'C';
+  return 'D';
+}
+
+/**
+ * Lint generated code for design-consistency issues. Deterministic — same code in, same result out.
+ * Returns a 0–100 score, a grade, and concrete violations. Empty/tiny code → a perfect, honest 100.
+ */
+export function lintDesign(code: string): DesignLintResult {
+  const src = typeof code === 'string' ? code : '';
+  const colors = extractHexColors(src);
+  const fonts = extractFontFamilies(src);
+  const spacing = extractSpacingPx(src);
+  const offGrid = offGridSpacing(spacing);
+  const hasTokens = /var\(\s*--/.test(src);
+
+  const violations: DesignViolation[] = [];
+  let penalty = 0;
+
+  if (colors.length > MAX_COLORS) {
+    penalty += Math.min(30, (colors.length - MAX_COLORS) * 2);
+    violations.push({
+      type: 'color-count',
+      severity: 'warn',
+      message: `${colors.length} distinct colours — consolidate into a small palette (≤ ${MAX_COLORS}) for a consistent look.`,
+      count: colors.length,
+      examples: colors.slice(0, 6),
+    });
+  }
+
+  if (fonts.length > MAX_FONTS) {
+    penalty += Math.min(20, (fonts.length - MAX_FONTS) * 10);
+    violations.push({
+      type: 'font-count',
+      severity: 'warn',
+      message: `${fonts.length} font families — limit to ${MAX_FONTS} (a display + a body font) for cleaner typography.`,
+      count: fonts.length,
+      examples: fonts.slice(0, 4),
+    });
+  }
+
+  if (offGrid.length > MAX_OFFGRID) {
+    penalty += Math.min(20, (offGrid.length - MAX_OFFGRID) * 2);
+    violations.push({
+      type: 'off-grid-spacing',
+      severity: 'warn',
+      message: `${offGrid.length} spacing values are off the ${SPACING_GRID}px grid — snap to multiples of ${SPACING_GRID}px for rhythm.`,
+      count: offGrid.length,
+      examples: [...new Set(offGrid)].slice(0, 6).map((v) => `${v}px`),
+    });
+  }
+
+  if (colors.length > HARDCODE_COLOR_LIMIT && !hasTokens) {
+    penalty += 10;
+    violations.push({
+      type: 'hardcoded-colors',
+      severity: 'info',
+      message: `${colors.length} hardcoded colours and no CSS variables — extract design tokens (\`--brand-*\`) so themes stay consistent.`,
+      count: colors.length,
+      examples: colors.slice(0, 6),
+    });
+  }
+
+  const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));
+  return {
+    score,
+    grade: scoreToGrade(score),
+    violations,
+    stats: { colors: colors.length, fonts: fonts.length, spacingValues: spacing.length, offGridSpacing: offGrid.length, hasTokens },
+  };
+}

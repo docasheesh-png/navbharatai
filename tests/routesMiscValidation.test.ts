@@ -260,3 +260,43 @@ describe('Team routes — invite lifecycle', () => {
     expect(res.body?.error).toMatch(/teamId and uid required/i);
   });
 });
+
+// ── Design routes ───────────────────────────────────────────────────────────────
+
+async function importDesignRoutes() {
+  const { registerDesignRoutes } = await import('../src/server/routes/design');
+  return registerDesignRoutes;
+}
+
+describe('Design routes — /api/design/lint (P-DESIGN.8)', () => {
+  it('registers the deterministic design-lint endpoint', async () => {
+    const register = await importDesignRoutes();
+    const routes = captureRoutes(register);
+    expect(routes.has('POST /api/design/lint')).toBe(true);
+  });
+
+  it('returns 400 when code is missing', async () => {
+    const register = await importDesignRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/design/lint')!;
+
+    const req = mockReq({ body: {} });
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toMatch(/provide.*code/i);
+  });
+
+  it('scores clean code A/100 and returns violations shape', async () => {
+    const register = await importDesignRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/design/lint')!;
+
+    const req = mockReq({ body: { code: 'a{padding:8px;color:#fff;font-family:Inter}' } });
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.body?.score).toBe(100);
+    expect(res.body?.grade).toBe('A');
+    expect(Array.isArray(res.body?.violations)).toBe(true);
+  });
+});

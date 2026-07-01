@@ -66,6 +66,33 @@ describe('classifyIntent — continuation phrases resume the build (NOT the amne
   });
 });
 
+describe('classifyIntent — "something isn\'t working" bug reports resume the build, not chit-chat', () => {
+  it('routes a short Hinglish "X nahi chala" complaint to edit_existing (real report: "previw nahi chala")', () => {
+    // Real user report: a typo'd "preview nahi chala" ("the preview didn't work") was answered with a
+    // sympathetic chat reply instead of actually checking/fixing the preview — because the bare word
+    // "nahi" alone matches the SOCIAL_PATTERNS short-acknowledgement check ("nahi" as a standalone "no").
+    expect(classifyIntent('previw nahi chala')).toBe('edit_existing');
+    expect(classifyIntent('preview nahi chala')).toBe('edit_existing');
+    expect(classifyIntent('nahi chala')).toBe('edit_existing');
+    expect(classifyIntent('chal nahi raha')).toBe('edit_existing');
+  });
+  it('routes English "not working" phrasings to edit_existing', () => {
+    expect(classifyIntent('preview not working')).toBe('edit_existing');
+    expect(classifyIntent("it doesn't work")).toBe('edit_existing');
+    expect(classifyIntent('it is broken')).toBe('edit_existing');
+    expect(classifyIntent('not loading')).toBe('edit_existing');
+  });
+  it('marks a problem report HIGH-confidence so the LLM upgrade cannot downgrade it to chat', async () => {
+    expect(classifyIntentWithConfidence('preview nahi chala')).toEqual({ intent: 'edit_existing', confidence: 'high', signal: 'problem-report' });
+    const llm = async () => 'chat';
+    expect(await classifyIntentSmart('preview nahi chala', llm)).toBe('edit_existing');
+  });
+  it('a bare standalone "nahi" (answering a yes/no question) is still chat — only a real complaint sentence is not', () => {
+    expect(classifyIntent('nahi')).toBe('chat');
+    expect(classifyIntent('no')).toBe('chat');
+  });
+});
+
 describe('classifyIntentSmart — intention-aware gatekeeper (not keyword-locked)', () => {
   it('ambiguous tech-noun messages are NO LONGER hard-locked — they consult the LLM', async () => {
     // "the notes app keeps crashing" contains the build noun 'app' but is a QUESTION. It used to be

@@ -6434,3 +6434,38 @@ login-gated (real Firebase auth on the production project) — a full authentica
 redesigned menu against real saved sessions could not be done in this sandboxed session; the fix rests on
 tsc + the full test suite + a clean root-page load, mirroring the same E2B/live-runtime limitation already
 on record for this project.
+
+## 2026-07-01 — two root-cause fixes: "preview nahi chala" chatted instead of fixed + "memory gone after reload"
+
+Admin reported two related symptoms from a real session: (1) typing "previw nahi chala" ("preview
+didn't work") got a sympathetic CHAT reply instead of an actual check/fix, and (2) after reloading the
+page, "sari memory gayab" (all memory gone) — a follow-up referencing "the app you just built" hit a
+brand-new, empty workspace.
+
+**Root cause 1 — intent misclassification.** `IntentClassifier.ts`'s SOCIAL_PATTERNS check includes a
+bare `nahi`/`no` as a short standalone chit-chat acknowledgement (answering "no" to a yes/no question).
+But "previw nahi chala" (3 words) ALSO contains that same bare "nahi" — as a NEGATION inside a real bug
+report, not a standalone reply — and the classifier checked SOCIAL_PATTERNS before recognizing this as a
+problem report, so any short "X nahi chala / X not working" complaint got answered as chit-chat, with NO
+project file context, and no actual investigation ever happened.
+Fix: new `PROBLEM_SIGNALS` array ("nahi chala", "kaam nahi kar raha", "not working", "doesn't work",
+"is broken", …), checked BEFORE SOCIAL_PATTERNS, HIGH confidence → routes to `edit_existing` (mirrors the
+existing CONTINUATION_SIGNALS design/philosophy: "erring toward edit_existing is safe — never dismiss a
+real report as chit-chat"). A bare standalone "nahi"/"no" (no other words) is still correctly chat.
++6 tests.
+
+**Root cause 2 — the fast lane never persists to ConversationStore.** Only the agentic `AgentRunner.run()`
+writes to ConversationStore (via its own `persistence` option, triggered inside run()). The FAST LANE
+(SimpleBuilder/OneShot — the PRIMARY, most-common path for a simple build) never calls `runner.run()`
+when it succeeds, so a build that completed ENTIRELY through the fast lane left NO durable conversation
+record at all. On reload, "restore the most recent build" (`GET /api/agentv3/conversations`) found
+nothing for that workspace (or an older, unrelated record) — the chat/session looked wiped even though
+the generated FILES were saved separately via the durable file store.
+Fix: a best-effort fallback at the point the build result SETTLES — checks whether ANY conversation
+record for this workspace was touched during (or after) this build's own start (`buildStartedAt`); if
+not (fast-lane-only success), creates one using the same conversationId already prepared for the base
+runner. Never double-writes over a richer agentic-path transcript (the "already persisted" check covers
+every persistence-configured runner, not just the base one). New pure, exported, unit-tested
+`needsFallbackConversationPersist()` — +4 tests.
+
+Tests: +10 total. Gate: frontend tsc 0, server tsc 0, vitest 4012/4012 PASS, boot:check PASS.

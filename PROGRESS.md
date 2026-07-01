@@ -7103,3 +7103,42 @@ use it — a real, cost-incurring cloud build step the account owner should trig
 Gate: this PR is infrastructure/CI/documentation only (no runtime app code touched) — frontend tsc 0,
 server tsc 0, vitest 4148/4148 PASS (unchanged from before this PR), `node --check` on the modified
 `build.mjs`, and the modified GitHub Actions workflow YAML validated with two independent parsers.
+
+## 2026-07-01 — The unkillable "ghost chat" finally root-caused: a permanent stale LiveChannel doc
+
+Admin: one specific chat is stuck and REAPPEARS no matter what — "+ New chat" and opening any old chat
+both fail to escape it; "claude ne 100 time try kiya woh hat nahi rahi." All the earlier fixes (#802
+generation guard, #804 workspace-scoped attach/status, #806 navigate-while-running, #809/#810/#813
+stuck-running fixes) closed real client/attach races — but the ghost survived them all because it lives
+somewhere none of those fixes touch: **Firestore**.
+
+**The confirmed mechanism (this was the documented "narrower, rarer follow-up gap" in #804 — it turned
+out to be neither narrow nor rare):**
+1. `LiveChannel.close()` only released the IN-MEMORY mirror — it **never deleted the Firestore doc**
+   (`agentv3_live/{userId}`). A finished/stuck/dead build's last 200 events sat there **forever**.
+2. The client's cross-device live-mirror poll (`subscribeLive`) starts every subscription at
+   `sinceSeq = 0`, so each (re)subscription re-reads the ENTIRE stale ring buffer.
+3. The #804 workspace filter on `/api/agentv3/live` only worked when the serving instance had the
+   build in its local `runningBuilds` map. After any Cloud Run instance recycle (constant in
+   production) there is no local record — so the read fell through to the Firestore doc UNFILTERED.
+4. The live-mirror re-arms on mount/visibility/`running` flips — i.e. **immediately after "+ New
+   chat" and after opening any old chat** — so every escape route deterministically replayed the
+   ghost's 200 events into whatever session was open. From any device. Forever.
+
+**Fix (server-side, three parts, all in `LiveChannel.ts` + the `/live` route):**
+- **Events are now stamped with the `workspaceId`** of the build that produced them
+  (`broadcastBuild` passes `rb.workspaceId` → stored in the channel doc). `/api/agentv3/live` refuses
+  a different session's events even cross-instance — the case #804 couldn't cover.
+- **Unstamped events are refused too** for a session-scoped caller (`liveEventsAllowedFor`, pure +
+  unit-tested): a pre-upgrade ghost doc is EXACTLY the unstamped case, so the existing stuck doc in
+  production is neutralized the moment this deploys — no manual Firestore cleanup needed. Conservative
+  deny, same principle as `isBuildRunningForWorkspace`.
+- **`close()` now DELETES the Firestore doc** (and discards un-flushed pending events instead of
+  writing one last stale batch) — a finished build leaves NO tail for later polls to replay. This is
+  the root-cause kill; the stamping above is defense-in-depth for the instance-recycled-mid-build case
+  where `close()` never runs.
+
+Tests: +8 (`liveEventsAllowedFor` all four quadrants incl. the ghost-doc conservative deny; the real
+in-memory channel path: workspace stamp round-trip, close-leaves-no-tail, close-discards-pending,
+cursor-past-seq returns nothing). Gate: frontend tsc 0, server tsc 0, vitest 4156/4156 PASS,
+boot:check PASS.

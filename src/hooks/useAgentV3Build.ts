@@ -49,11 +49,15 @@ export interface UseAgentV3Build {
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
   serverBuildRunning: boolean;
-  /** Re-attach to a build that is already running for this account (replays its
-   *  events so the UI catches up, then streams live). */
-  resume: (opts?: { userId?: string; email?: string }) => Promise<void>;
-  /** Ask the server whether a build is running for this account (sets serverBuildRunning). */
-  checkRunning: (opts?: { userId?: string; email?: string }) => Promise<void>;
+  /** Re-attach to a build that is already running for this account (replays its events so the UI
+   *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
+   *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
+  resume: (opts?: { userId?: string; email?: string; workspaceId?: string }) => Promise<void>;
+  /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
+   *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
+   *  account-wide check, which is what caused a different session's still-running build to
+   *  auto-attach into whatever v3.0 session was currently open. */
+  checkRunning: (opts?: { userId?: string; email?: string; workspaceId?: string }) => Promise<void>;
   /**
    * D7 — on (re)load, fetch the user's most recent persisted build and re-display its chat history
    * (option (a): chat + git-restore). Rebuilds the agent narration into state and RETURNS the user's
@@ -70,8 +74,9 @@ export interface UseAgentV3Build {
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<{ items: ConversationMeta[]; error?: string }>;
   /** Delete a saved conversation (history-menu delete action). Returns true on success. */
   deleteConversation: (id: string, opts?: { userId?: string; email?: string }) => Promise<boolean>;
-  /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn. */
-  subscribeLive: (opts?: { userId?: string; email?: string }) => (() => void);
+  /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
+   *  Pass `workspaceId` so the server (same-instance case) won't mirror a build for a different session. */
+  subscribeLive: (opts?: { userId?: string; email?: string; workspaceId?: string }) => (() => void);
 }
 
 /** Real working-tree git status (Phase G2). available:false when the sandbox isn't warm this session. */
@@ -207,14 +212,18 @@ export function useAgentV3Build(): UseAgentV3Build {
   // the live activity. Self-limiting for cost: caller starts it only while the panel is visible + not
   // running locally; it also auto-stops after ~30 s of no activity when the server reports not-running.
   //
-  // GENERATION GUARD: /api/agentv3/live is keyed only by userId (no session/workspace scoping), and its
-  // Firestore-backed ring buffer persists well after a build finishes — so a poll that (re)starts with
-  // sinceSeq=0 can still fetch a PAST build's tail events. Freezing `myGen` at call time and re-checking
-  // it before every setState means that once the user resets/starts a new session, this poll's next
-  // tick sees the mismatch and stops applying (and stops polling) instead of repopulating stale
-  // messages/build-status into a session the user has since left ("New chat reverts to the old chat").
+  // GENERATION GUARD: /api/agentv3/live is keyed only by userId, and its Firestore-backed ring buffer
+  // persists well after a build finishes — so a poll that (re)starts with sinceSeq=0 can still fetch a
+  // PAST build's tail events. Freezing `myGen` at call time and re-checking it before every setState
+  // means that once the user resets/starts a new session, this poll's next tick sees the mismatch and
+  // stops applying (and stops polling) instead of repopulating stale messages/build-status into a
+  // session the user has since left ("New chat reverts to the old chat").
+  //
+  // `opts.workspaceId` (the CALLER's current session) additionally lets the SERVER refuse to mirror a
+  // build that's genuinely still running but belongs to a DIFFERENT session under the same account
+  // (same-instance case only — see the /live route). Optional for back-compat.
   // Returns a stop function. Best-effort — never throws.
-  const subscribeLive = useCallback((opts?: { userId?: string; email?: string }): (() => void) => {
+  const subscribeLive = useCallback((opts?: { userId?: string; email?: string; workspaceId?: string }): (() => void) => {
     const uid = opts?.userId ?? userIdRef.current;
     const em = opts?.email ?? emailRef.current;
     if (!uid) return () => {};
@@ -228,6 +237,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       try {
         const params = new URLSearchParams({ userId: uid });
         if (em) params.set('email', em);
+        if (opts?.workspaceId) params.set('workspaceId', opts.workspaceId);
         params.set('sinceSeq', String(sinceSeq));
         const res = await fetch(`/api/agentv3/live?${params.toString()}`);
         if (res.ok) {
@@ -251,15 +261,22 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, []);
 
-  const checkRunning = useCallback(async (opts?: { userId?: string; email?: string }) => {
+  // `workspaceId` scopes the check to the CALLER's current session — without it, `buildRunningHere`
+  // is undefined and we fall back to the account-wide `buildRunning`, but auto-resume should always
+  // pass the session it's actually asking about (see AgentV3Panel's auto-resume effect). Root-caused
+  // 2026-07-01: a build genuinely still running in a DIFFERENT v3.0 session under the same account
+  // was silently auto-attached into whatever session the user had just opened, because this check
+  // only ever asked "is ANY build running for this account" — never "for THIS one".
+  const checkRunning = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string }) => {
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
       const params = new URLSearchParams();
       if (userIdRef.current) params.set('userId', userIdRef.current);
       if (emailRef.current) params.set('email', emailRef.current);
+      if (opts?.workspaceId) params.set('workspaceId', opts.workspaceId);
       const r = await fetch(`/api/agentv3/status?${params.toString()}`);
       const j = await r.json().catch(() => ({}));
-      setServerBuildRunning(j?.buildRunning === true);
+      setServerBuildRunning(opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true);
     } catch {
       /* best-effort probe — stay as-is on failure */
     }
@@ -372,7 +389,10 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
-  const resume = useCallback(async (opts?: { userId?: string; email?: string }) => {
+  // `workspaceId`, when given, must be the CALLER's current session — the server refuses to attach
+  // if the running build belongs to a different session under the same account (see /attach route).
+  // Omit it only for a truly account-wide manual "Resume" (no session context to check against).
+  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string }) => {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
@@ -387,7 +407,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       const res = await fetch('/api/agentv3/attach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: opts?.workspaceId }),
         signal: controller.signal,
       });
       if (isStale(gen)) return; // a reset() happened while /attach was in flight

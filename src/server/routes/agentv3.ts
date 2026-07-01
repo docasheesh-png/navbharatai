@@ -421,7 +421,7 @@ const MAX_PROMPT_LEN = 20_000;
 // (a) RE-ATTACH to a build whose original connection was lost ("Resume"), and
 // (b) actually STOP it server-side ("Stop") — not just abort their own local fetch.
 interface BuildSubscriber { write: (e: unknown) => void; end: () => void; }
-interface RunningBuild {
+export interface RunningBuild {
   abort: AbortController;
   buffer: unknown[];
   subscribers: Set<BuildSubscriber>;
@@ -429,6 +429,13 @@ interface RunningBuild {
   startedTs: number;
   /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. */
   key?: string;
+  /** Which v3.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
+   *  have several DIFFERENT chat sessions; `runningBuilds` is keyed by userId only (one account can
+   *  only build one thing at a time), but the auto-resume/attach and live-mirror paths must still
+   *  verify the running build is actually the CALLER's session before replaying/mirroring it — else a
+   *  build genuinely still running in session A silently bleeds into a freshly-opened session B under
+   *  the same account (root-caused 2026-07-01: "+ New chat" showing an unrelated build's progress). */
+  workspaceId?: string;
 }
 const runningBuilds = new Map<string, RunningBuild>();
 const MAX_BUILD_BUFFER = 4000;
@@ -450,10 +457,25 @@ function endBuild(rb: RunningBuild): void {
   rb.subscribers.clear();
   if (rb.key) { try { liveChannel.close(rb.key); } catch { /* best-effort */ } }
 }
-/** Is a build currently running for this account? */
+/** Is a build currently running for this account? (Account-wide — unscoped by session. Kept for
+ *  callers that only care "is this account building anything", e.g. the /chat route's own
+ *  reconnect-on-drop, which is always reconnecting to a build IT started, so it can't attach to the
+ *  wrong session by construction.) */
 function isBuildRunning(buildKey: string): boolean {
   const rb = runningBuilds.get(buildKey);
   return !!rb && !rb.ended;
+}
+/** Is a build running for this account AND does it belong to `workspaceId`? Use this (not
+ *  `isBuildRunning`) for any path that might auto-attach to a build the caller didn't itself start —
+ *  otherwise a build genuinely still running in a DIFFERENT v3.0 session under the same account gets
+ *  silently replayed/mirrored into whatever session is currently open. `workspaceId: null` (unknown)
+ *  falls back to the account-wide check for backward compatibility with callers that don't have one.
+ *  Takes the `RunningBuild` directly (not a `buildKey` lookup) so it's a pure, unit-testable function —
+ *  callers pass `runningBuilds.get(buildKey)`. */
+export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspaceId: string | null): boolean {
+  if (!rb || rb.ended) return false;
+  if (!workspaceId) return true;
+  return rb.workspaceId === workspaceId;
 }
 
 /**
@@ -920,9 +942,21 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/status', (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
-    // buildRunning lets the UI detect an orphaned build (started elsewhere / lost its
-    // connection) and offer "Resume" + "Stop".
-    res.json({ enabled: isAgentV3Enabled(userId, email), buildRunning: isBuildRunning(userId ?? 'anon'), ...agentV3Status(), team: agentLifecycle.snapshot() });
+    // `workspaceId` is OPTIONAL (older/other callers that only care "is this account building
+    // anything" keep working unchanged). When the caller DOES pass one (the v3.0 panel's
+    // auto-resume check), `buildRunningHere` answers "is a build running for THIS session" —
+    // the account-wide `buildRunning` stays as-is for backward compatibility, but auto-resume
+    // must key off `buildRunningHere`, or a build genuinely still running in a DIFFERENT v3.0
+    // session bleeds its progress into whatever session the user currently has open.
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
+    const buildKey = userId ?? 'anon';
+    res.json({
+      enabled: isAgentV3Enabled(userId, email),
+      buildRunning: isBuildRunning(buildKey),
+      buildRunningHere: isBuildRunningForWorkspace(runningBuilds.get(buildKey), workspaceId),
+      ...agentV3Status(),
+      team: agentLifecycle.snapshot(),
+    });
   });
 
   // D7 — list a user's persisted builds (most-recently-updated first) so the client can
@@ -1283,6 +1317,15 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'No running build to resume.' });
       return;
     }
+    // `workspaceId` is OPTIONAL for back-compat, but the panel's auto-resume ALWAYS sends the
+    // session it's asking about — refuse to attach when the running build belongs to a DIFFERENT
+    // session under the same account, so a build genuinely still running elsewhere never gets
+    // silently replayed into the session the user currently has open.
+    const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    if (requestedWorkspaceId && rb.workspaceId && rb.workspaceId !== requestedWorkspaceId) {
+      res.status(404).json({ error: 'No running build to resume for this session.' });
+      return;
+    }
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -1320,6 +1363,19 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
+    // `workspaceId` is OPTIONAL for back-compat with older clients. When THIS instance is the one
+    // actually running the build (the common case — same-instance), its in-memory `rb.workspaceId`
+    // is authoritative: if it's for a DIFFERENT session than the caller asked about, report nothing —
+    // otherwise a build genuinely still running in session A bleeds its progress into session B's
+    // live-mirror poll. When this instance has no local record (cross-instance — the build runs
+    // elsewhere), we can't verify the workspace without a LiveChannel schema change, so we fall back
+    // to the unfiltered account-wide read (unchanged behavior; a known, narrower follow-up gap).
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
+    const localRb = runningBuilds.get(userId);
+    if (workspaceId && localRb && !localRb.ended && localRb.workspaceId && localRb.workspaceId !== workspaceId) {
+      res.json({ events: [], seq: sinceSeq, gap: false, running: false });
+      return;
+    }
     try {
       const { events, seq, gap } = await liveChannel.readSince(userId, sinceSeq);
       // `running` lets the watcher stop polling once the build is done on this instance; the durable
@@ -2002,7 +2058,10 @@ export function registerAgentV3Routes(app: Express): void {
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
     const abort = new AbortController();
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: buildKey };
+    // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
+    // intent classification — reuse it so the running-build registry knows which session owns this
+    // build, instead of computing it twice from the same (userId, sessionId) pair.
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: buildKey, workspaceId: intentWorkspaceId };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },

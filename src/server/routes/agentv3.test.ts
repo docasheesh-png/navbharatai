@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -711,5 +711,52 @@ describe('sandboxDiag (why the Live-server/E2B preview tab is missing)', () => {
     expect(d.previewDomain).toBe('mitrify.xyz');
     expect(d.previewDomainWarning).toContain('wildcard');
     expect(d.previewDomainWarning).toContain('mitrify.xyz');
+  });
+});
+
+describe('isBuildRunningForWorkspace — server-side session/workspace scoping for auto-resume + live-mirror', () => {
+  // Root-caused 2026-07-01: a build genuinely still running in a DIFFERENT v3.0 session under the
+  // same account was silently auto-attached/mirrored into whatever session the user had just opened
+  // (e.g. right after "+ New chat"), because the running-build registry was checked account-wide
+  // (userId only) with no idea WHICH session's build it actually was.
+  const fakeRunningBuild = (overrides: Partial<RunningBuild> = {}): RunningBuild => ({
+    abort: new AbortController(),
+    buffer: [],
+    subscribers: new Set(),
+    ended: false,
+    startedTs: Date.now(),
+    ...overrides,
+  });
+
+  it('no running build at all → false regardless of workspaceId', () => {
+    expect(isBuildRunningForWorkspace(undefined, 'agentv3-u1-s1')).toBe(false);
+    expect(isBuildRunningForWorkspace(undefined, null)).toBe(false);
+  });
+
+  it('a running build that has already ended → false even if workspaceId matches', () => {
+    const rb = fakeRunningBuild({ ended: true, workspaceId: 'agentv3-u1-s1' });
+    expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-s1')).toBe(false);
+  });
+
+  it('workspaceId omitted (null) → falls back to the account-wide check (back-compat)', () => {
+    const rb = fakeRunningBuild({ workspaceId: 'agentv3-u1-s1' });
+    expect(isBuildRunningForWorkspace(rb, null)).toBe(true);
+  });
+
+  it('running build IS for the requested workspace → true', () => {
+    const rb = fakeRunningBuild({ workspaceId: 'agentv3-u1-s1' });
+    expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-s1')).toBe(true);
+  });
+
+  it('running build is for a DIFFERENT session under the same account → false (the actual fix)', () => {
+    // This is the exact scenario from the report: a 12-file build still running in session A,
+    // the user opens fresh session B ("+ New chat") — B must NOT see A's build as "running here".
+    const rb = fakeRunningBuild({ workspaceId: 'agentv3-u1-OLD_SESSION' });
+    expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-NEW_SESSION')).toBe(false);
+  });
+
+  it('running build has no workspaceId recorded, but the CALLER requested a specific one → false (unknown ownership is never assumed to match)', () => {
+    const rb = fakeRunningBuild({});
+    expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-s1')).toBe(false);
   });
 });

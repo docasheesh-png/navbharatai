@@ -6834,3 +6834,48 @@ registry and LiveChannel by `(userId, workspaceId)` is the deeper fix; flagged a
 attempted in this PR (bigger surface: `/chat`, `/attach`, `/live`, `/stop`, `/status`).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4093/4093 PASS, boot:check PASS.
+
+## 2026-07-01 — Follow-up: "New chat" still showed an unrelated session's live build (the flagged server gap, now fixed)
+
+The previous fix (above) closed the STALE-callback gap (a finished session's replay/mirror landing
+after the user moved on) but the admin reproduced a related, DIFFERENT case: opening "+ New chat" and
+sending a plain "hello" showed that fresh chat's normal reply INTERLEAVED with an unrelated, GENUINELY
+STILL RUNNING 12-file build from a completely different v3.0 session under the same account — exactly
+the deeper gap flagged (not theoretically) in the previous entry: `runningBuilds` (and the LiveChannel)
+are keyed only by `userId`, so the auto-resume/live-mirror mechanisms had no way to tell "a build I got
+disconnected from" apart from "a build that belongs to an entirely different, unrelated session that
+also happens to still be running." The client generation-guard doesn't help here because this is a
+NEW, current-generation resume() correctly attaching to whatever the server reports as running for the
+account — it just reports the wrong build.
+
+**Real fix this time (server + client, not just client):**
+- `RunningBuild` (server) now carries `workspaceId` (the session that started it), set from the
+  already-computed `intentWorkspaceId` when a build registers.
+- `isBuildRunningForWorkspace(rb, workspaceId)` — a new pure, exported, unit-tested function — replaces
+  the account-wide `isBuildRunning` check on every path that might auto-attach to a build it didn't
+  itself start. `workspaceId: null` (not provided) falls back to the old account-wide behavior for
+  back-compat; an UNKNOWN running build's ownership is never assumed to match a caller's specific ask
+  (conservative deny, not permissive allow).
+- `GET /api/agentv3/status` — accepts optional `?workspaceId=`, returns a new `buildRunningHere` field
+  (workspace-scoped) alongside the existing `buildRunning` (unchanged, account-wide, kept for other
+  callers like `AgentV3Launcher`/`ProV3Surface` that only check `enabled`).
+- `POST /api/agentv3/attach` — accepts optional `workspaceId` in the body; refuses to attach (404) when
+  the running build belongs to a different session.
+- `GET /api/agentv3/live` (cross-device mirror) — accepts optional `workspaceId`; when THIS instance is
+  the one running the build (the common, same-instance case), refuses to mirror a mismatched session's
+  events. **Known remaining gap, explicitly not fixed:** the true cross-instance case (build runs on a
+  DIFFERENT Cloud Run instance with no local `RunningBuild` record here) still can't be verified without
+  a `LiveChannel` schema change (its Firestore ring buffer doesn't store workspaceId) — falls back to
+  the old unfiltered behavior. Narrower and rarer than the case just fixed.
+- Client (`useAgentV3Build.ts`): `checkRunning`/`resume`/`subscribeLive` all accept an optional
+  `workspaceId` and thread it to the corresponding endpoint; `checkRunning` uses `buildRunningHere`
+  (not `buildRunning`) whenever a workspaceId is supplied.
+- Client (`AgentV3Panel.tsx`): a new `expectedWorkspaceId()` helper (the session's derived/adopted
+  workspaceId) is now passed to every `checkRunning`/`resumeBuild`/`subscribeLive` call site (auto-check
+  effect, auto-resume effect, tab-visibility recheck, cross-device mirror effect, and the manual
+  "Resume" button).
+
+Tests: +6 for `isBuildRunningForWorkspace` (no running build, ended build, workspaceId omitted →
+account-wide fallback, matching workspace → true, DIFFERENT session's build → false — the exact
+reported regression, and an unrecorded workspaceId never assumed to match a specific request). Gate:
+frontend tsc 0, server tsc 0, vitest 4126/4126 PASS, boot:check PASS.

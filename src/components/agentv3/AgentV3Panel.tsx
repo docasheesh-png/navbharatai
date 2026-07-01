@@ -178,7 +178,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       kind: n.kind,
       streaming: n.streaming,
     })),
-  ].sort((a, b) => a.ts - b.ts);
+  ]
+    // "⏱️ Still building… N min in" is a TRANSIENT live-progress line (server ETA heartbeat), not chat
+    // history. Show it only while a build is running; once done, drop it so a finished session's thread
+    // isn't left cluttered with stale "Still building…" bubbles that make a completed build look
+    // permanently stuck. Filtering by the text marker (not just the live id) also cleans OLD sessions
+    // that persisted these lines before the fix, and keeps them out of the History save (which reads
+    // `convo` after `running` has cleared on the terminal result).
+    .filter((m) => running || !/^⏱️\s*Still building…/.test(m.text || ''))
+    .sort((a, b) => a.ts - b.ts);
 
   // All checkpoints across the session (prior turns + the live build), deduped by
   // sha so the History tab keeps showing earlier checkpoints across messages.

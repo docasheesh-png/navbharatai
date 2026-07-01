@@ -17,8 +17,19 @@ export interface A11yViolation {
   severity: 'info' | 'warn';
   wcag: string; // the WCAG success criterion, e.g. "1.1.1"
   message: string;
+  /** A ready-to-send instruction that tells the builder AI how to fix this (one-click "Fix with AI"). */
+  fix: string;
   count: number;
 }
+
+/** The AI fix-prompt for each accessibility violation type. */
+const A11Y_FIX: Record<A11yViolationType, string> = {
+  'img-alt': 'Add descriptive alt text to every image in this app (use alt="" only for purely decorative images).',
+  'input-label': 'Give every form field in this app a clear label — a <label> element, or an aria-label — so screen readers announce it.',
+  'control-name': 'Give every button and link an accessible name — visible text or an aria-label — especially icon-only buttons.',
+  'html-lang': 'Add a lang attribute to the <html> element of this app (e.g. lang="en" or lang="hi").',
+  'positive-tabindex': 'Remove positive tabindex values in this app; use tabindex="0" and natural DOM order so keyboard focus order stays logical.',
+};
 
 export interface A11yLintResult {
   score: number; // 0–100
@@ -130,23 +141,23 @@ export function lintA11y(code: string): A11yLintResult {
 
   if (imagesNoAlt > 0) {
     penalty += Math.min(30, imagesNoAlt * 6);
-    violations.push({ type: 'img-alt', severity: 'warn', wcag: '1.1.1', count: imagesNoAlt, message: `${imagesNoAlt} image(s) missing alt text — add \`alt\` (use \`alt=""\` for decorative images).` });
+    violations.push({ type: 'img-alt', severity: 'warn', wcag: '1.1.1', count: imagesNoAlt, message: `${imagesNoAlt} image(s) missing alt text — add \`alt\` (use \`alt=""\` for decorative images).`, fix: A11Y_FIX['img-alt'] });
   }
   if (inputsNoLabel > 0) {
     penalty += Math.min(30, inputsNoLabel * 8);
-    violations.push({ type: 'input-label', severity: 'warn', wcag: '1.3.1', count: inputsNoLabel, message: `${inputsNoLabel} form field(s) with no label — add a \`<label>\`, \`aria-label\`, or \`id\`.` });
+    violations.push({ type: 'input-label', severity: 'warn', wcag: '1.3.1', count: inputsNoLabel, message: `${inputsNoLabel} form field(s) with no label — add a \`<label>\`, \`aria-label\`, or \`id\`.`, fix: A11Y_FIX['input-label'] });
   }
   if (controlsNoName > 0) {
     penalty += Math.min(25, controlsNoName * 8);
-    violations.push({ type: 'control-name', severity: 'warn', wcag: '4.1.2', count: controlsNoName, message: `${controlsNoName} button/link with no accessible name — add text or an \`aria-label\` (e.g. icon-only buttons).` });
+    violations.push({ type: 'control-name', severity: 'warn', wcag: '4.1.2', count: controlsNoName, message: `${controlsNoName} button/link with no accessible name — add text or an \`aria-label\` (e.g. icon-only buttons).`, fix: A11Y_FIX['control-name'] });
   }
   if (noLang) {
     penalty += 10;
-    violations.push({ type: 'html-lang', severity: 'warn', wcag: '3.1.1', count: 1, message: 'The `<html>` element has no `lang` — add e.g. `lang="en"` (or `hi`) for screen readers.' });
+    violations.push({ type: 'html-lang', severity: 'warn', wcag: '3.1.1', count: 1, message: 'The `<html>` element has no `lang` — add e.g. `lang="en"` (or `hi`) for screen readers.', fix: A11Y_FIX['html-lang'] });
   }
   if (posTab > 0) {
     penalty += Math.min(10, posTab * 3);
-    violations.push({ type: 'positive-tabindex', severity: 'info', wcag: '2.4.3', count: posTab, message: `${posTab} positive tabindex value(s) — prefer \`tabindex="0"\`/DOM order so focus order stays logical.` });
+    violations.push({ type: 'positive-tabindex', severity: 'info', wcag: '2.4.3', count: posTab, message: `${posTab} positive tabindex value(s) — prefer \`tabindex="0"\`/DOM order so focus order stays logical.`, fix: A11Y_FIX['positive-tabindex'] });
   }
 
   const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));

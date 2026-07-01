@@ -877,7 +877,8 @@
   `<html lang>` (3.1.1), positive `tabindex` (2.4.3). Checks are conservative (few false positives).
 - [x] **Endpoint** `POST /api/design/a11y { code }` (deterministic; no credit spend). **UI-WIRED** into the AI Copilot as
   an **Accessibility** score, right beside the P-DESIGN.8 Design-health block (shared `HealthBlock` renderer). Route
-  tests added. `AppKnowledgeBase.ts` updated.
+  tests added. `AppKnowledgeBase.ts` updated. Each violation has a one-click **"Fix with AI"** button (fix-prompt →
+  builder) added 2026-07-01.
 - **Deferred (the roadmap's original axe-core variant):** a full **axe-core 2.1-AA gate in a Playwright CI job** that
   renders the live preview iframe is a heavier, separate approach — it needs a real browser + the `@axe-core/playwright`
   dev dep + the P-TQA.2 visual-testing Playwright setup. The dependency-free builder-side linter above catches the
@@ -2613,6 +2614,8 @@
   **Design health** panel: the grade + score + the top violations with fixes, refreshed whenever the app's code changes.
   (Chosen consumer: `WhitelabelBranding` has no access to the generated code; AISuggestions — where design suggestions
   already live — does, so it's the natural home. `AppKnowledgeBase.ts` updated.)
+- [x] **Actionable (2026-07-01):** each violation carries a `fix` prompt and a one-click **"Fix with AI"** button that
+  sends the exact fix instruction to the builder — passive report → one-click fix.
 - **Note:** this is a *consistency* linter (works from the code alone); comparing against a specific brand token set from
   `WhitelabelBranding` can layer on top later using the same pure extractors.
 - **Files:** new `src/server/AppMakerLab/intelligence/DesignLinter.ts` + `tests/designLinter.test.ts`,

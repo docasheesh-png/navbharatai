@@ -64,13 +64,18 @@ describe('lintA11y', () => {
     expect(r.grade).toBe('A');
     expect(r.violations).toEqual([]);
   });
-  it('accumulates penalties and reports mapped WCAG violations', () => {
+  it('accumulates penalties and reports mapped WCAG violations with AI fix-prompts', () => {
     const code = '<html><img src="a"><button><svg/></button><input type="text"></html>';
     const r = lintA11y(code);
     const types = r.violations.map((v) => v.type).sort();
     expect(types).toEqual(['control-name', 'html-lang', 'img-alt', 'input-label']);
     expect(r.score).toBeLessThan(100);
-    expect(r.violations.find((v) => v.type === 'img-alt')?.wcag).toBe('1.1.1');
+    const imgAlt = r.violations.find((v) => v.type === 'img-alt');
+    expect(imgAlt?.wcag).toBe('1.1.1');
+    expect(typeof imgAlt?.fix).toBe('string');
+    expect(imgAlt?.fix.length).toBeGreaterThan(10);
+    // every violation carries a fix-prompt
+    expect(r.violations.every((v) => typeof v.fix === 'string' && v.fix.length > 0)).toBe(true);
   });
   it('score clamped to [0,100]; empty code is a perfect 100', () => {
     expect(lintA11y('').score).toBe(100);

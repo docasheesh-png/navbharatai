@@ -67,12 +67,15 @@ describe('lintDesign', () => {
     expect(lintDesign('a{padding:8px;color:#fff;font-family:Inter}').grade).toBe('A');
   });
 
-  it('penalises a colour explosion', () => {
+  it('penalises a colour explosion and attaches an AI fix-prompt', () => {
     // 15 distinct colours (> MAX_COLORS=12)
     const colors = Array.from({ length: 15 }, (_, i) => `.c${i}{color:#${(i + 10).toString(16).padStart(2, '0')}00ff}`).join('');
     const r = lintDesign(colors);
     expect(r.stats.colors).toBeGreaterThan(MAX_COLORS);
-    expect(r.violations.some((v) => v.type === 'color-count')).toBe(true);
+    const cc = r.violations.find((v) => v.type === 'color-count');
+    expect(cc).toBeDefined();
+    expect(typeof cc?.fix).toBe('string');
+    expect(cc?.fix.length).toBeGreaterThan(10);
     expect(r.score).toBeLessThan(100);
   });
 

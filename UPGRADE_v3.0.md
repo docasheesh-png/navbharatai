@@ -2322,18 +2322,11 @@
   force-compress step (powerLevel) can read.
 - **Files:** new `src/server/AgentV3/TokenEstimator.ts` + `tests/tokenEstimator.test.ts`, `src/server/routes/agentv3.ts`.
 
-### P-PE.5 — Prompt Evaluation / A-B Testing  🔶 DEFERRED — needs admin decision (2026-07-01)  [MED]
-- A/B feature flags (`featureFlags.ts`) exist for UI. No prompt-level A/B: variant A vs B system prompts.
-- [ ] Extend `featureFlags.ts` to support prompt variant bucketing (same deterministic hash).
-- [ ] Log variant + quality signal (user thumbs/NPS from P-UX.6) to Firestore for offline eval.
-- **🔶 Why deferred (honest):** the bucketing + logging INFRASTRUCTURE is safe/additive, but a *real* prompt A/B by
-  definition ships a **variant B that changes the live builder's system prompt** — a core Engineer-AI/AgentV3
-  behavior change. Per the Engineer-AI permanent constraints + safeguard #3 (0.01 % doubt on core behavior → ask),
-  the admin needs to define/approve **what variant B actually changes** before this ships. Building the infra with no
-  active experiment would be shelf-ware (violates the real-features rule); building it with a self-chosen variant B
-  would change core behavior without sign-off. **Needs:** admin decision on the experiment (what B tweaks + success
-  metric). Then it's a clean ship.
-- **Files:** `src/lib/featureFlags.ts`, `src/server/AgentV3/systemPrompt.ts`, `src/lib/analytics.ts`.
+### P-PE.5 — Prompt Evaluation / A-B Testing  ⏸️ MOVED → POST-LAUNCH BACKLOG (do LAST)  [MED]
+- **Moved to the end of this roadmap (2026-07-01, admin decision):** A/B testing is pointless without a real user
+  base — one person testing produces no statistically-meaningful data, so building it now would be shelf-ware.
+  Do it LAST, once there's real traffic. Full entry (incl. the auto-optimizing "champion/challenger" design) lives
+  in the **⏸️ POST-LAUNCH BACKLOG** section near the end of this file.
 
 ### P-PE.6 — Prompt Audit Trail  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
 - `AgentV3CostTelemetry.ts` logs cost/tokens but not the exact prompt text or version that produced a response.
@@ -3055,7 +3048,35 @@
 
 ---
 
+## ⏸️ POST-LAUNCH BACKLOG — do LAST, once there's a real user base
+
+Items that are **real and worth building, but only make sense at scale** (they need real user traffic to
+work). Building them now would be shelf-ware. Revisit after launch when there are actual users.
+
+### P-PE.5 — Prompt Evaluation / A-B Testing (Self-Optimizing Prompt)  ⏸️ POST-LAUNCH  [MED]
+- **Why last (admin decision 2026-07-01):** A/B testing needs **volume** — with one person testing there is no
+  statistically-meaningful data, so the "winner" would be noise. Do this only when there's a real user base.
+- **What it is:** run the live builder's system prompt as **Champion vs Challenger**. The challenger (a tweaked
+  prompt) is tested on a small traffic slice (~15 %, not 50-50, to cap blast radius). Every build logs an automatic
+  quality signal. Every ~30 days a cycle scans the data and **auto-promotes** the challenger to champion **only if**
+  it wins clearly + on enough samples + above a hard quality floor; otherwise nothing changes.
+- **Fully automatic (admin's ask):** no dashboard to watch — a "lazy trigger" (check on each build whether 30 days
+  elapsed) runs the cycle, so **no cron infra needed**. Guardrails keep it safe: small-slice testing, promote-only-on-
+  clear-win, **auto-rollback** if live quality drops after a promotion, and a notification to the admin on each change
+  (automatic but not invisible — veto/rollback optional, never required).
+- **The one open decision (when we build it):** the **success metric** the system optimizes toward. Recommended
+  default: a blend of *build succeeds first-try + preview works first-try + user doesn't immediately re-edit*.
+- **Where new challengers come from (when we build it):** start with a small human-seeded candidate pool (safer);
+  optionally later, an AI proposes new candidates each cycle (more autonomous, needs the guardrails above).
+- **Files (when built):** `src/lib/featureFlags.ts` (prompt-variant bucketing), `src/server/AgentV3/systemPrompt.ts`
+  (champion/challenger selection), `src/lib/analytics.ts` + a new store (variant + quality logging), a new
+  optimization-cycle module (lazy 30-day trigger + promote/rollback).
+
+---
+
 ## NOTES / DECISIONS LOG
+- 2026-07-01: **P-PE.5 (prompt A/B) moved to POST-LAUNCH BACKLOG** by admin — no user base yet, so A/B has no data to
+  work with; revisit at scale. Captured the auto-optimizing champion/challenger design for when we build it.
 - 2026-06-27: Roadmap created from full architecture audit (200 components + 30 principles).
   Baseline: ~62% HAVE / ~23% PARTIAL / ~15% MISSING. Two core-law violations identified (SDA router, tests).
 - 2026-06-27 (same day, deeper scan): Ran the 280-component **infrastructure** audit. Found the codebase

@@ -67,6 +67,7 @@ import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCre
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
+import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
@@ -1584,6 +1585,31 @@ export function registerAgentV3Routes(app: Express): void {
       // written advances the progress; the build's final success marks every item done (below).
       let planSteps = 0;
       const onFileWrite = (path: string, content: string) => {
+        // Security gate: scan AI-generated JS/TS files for malicious patterns before
+        // they are persisted. Critical findings emit a security warning event so the
+        // user sees it in the build log; the write itself is still recorded (the agent
+        // may be writing the file to then fix it), but the warning is surfaced clearly.
+        try {
+          const scanResult = scanGeneratedCode(path, content);
+          if (scanResult.findings.length > 0) {
+            const report = formatCodeScanReport(scanResult);
+            console.warn('[agentv3] CodeSafetyScanner finding:', report);
+            events.emit({
+              type: 'security_warning',
+              filePath: path,
+              safe: scanResult.safe,
+              findings: scanResult.findings.map((f) => ({
+                severity: f.severity,
+                rule: f.rule,
+                description: f.description,
+                line: f.line,
+              })),
+              report,
+              ts: Date.now(),
+            });
+          }
+        } catch { /* security scan is best-effort — never blocks the build pipeline */ }
+
         writtenFiles.set(path, content);
         try {
           const cur = state.snapshot().todos;

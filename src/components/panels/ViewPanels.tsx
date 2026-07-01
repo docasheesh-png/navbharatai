@@ -116,8 +116,12 @@ export interface ViewPanelsProps {
   zipSizeModal: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null;
   setZipSizeModal: (v: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null) => void;
   /** The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the main "Preview"
-   *  menu shows the SAME working v3.0 preview instead of the retired v2.0 generatedCode. */
-  v3Preview?: { previewUrl?: string; workspaceId?: string };
+   *  menu shows the SAME working v3.0 preview instead of the retired v2.0 generatedCode.
+   *  `framework` + `running` (2026-07-01) let the sidebar PreviewSurface reach feature parity with
+   *  the in-panel one (auto-resume + framework-aware Diagnose). */
+  v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
+  /** "Fix with AI" clicked from the sidebar preview — prefills the v3.0 chat with the error. */
+  onV3FixError?: (errText: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
 }
@@ -134,7 +138,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, onV3FixError, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -187,7 +191,6 @@ export function ViewPanels({
               toggleTab('nbi_pro_chat');
               addLog('Cognitive memory layer successfully merged and redirected to main cockpit.', 'info');
             }}
-            onOpenProChat={() => toggleTab('nbi_pro_chat')}
             wallet={wallet}
             onUnlockVishwakarma={() => setShowVishwakarmaUnlockModal(true)}
             onSendDirect={(text: string) => handleSendForTab(
@@ -203,11 +206,17 @@ export function ViewPanels({
           {v3Preview?.workspaceId ? (
             // A v3.0 build is active → show the SAME working v3.0 preview (live URL or in-browser
             // build of the saved files), not the retired v2.0 generatedCode the v3 engine never writes.
+            // `framework`/`autoResume`/`onFixError` bring this to full parity with the in-panel Preview
+            // tab (2026-07-01, admin request) — same PreviewSurface component, same feature set,
+            // regardless of which of the two entry points the user opens it from.
             <PreviewSurface
               url={v3Preview.previewUrl}
               workspaceId={v3Preview.workspaceId}
               userId={user?.uid}
               email={user?.email ?? undefined}
+              framework={v3Preview.framework}
+              autoResume={!v3Preview.running}
+              onFixError={onV3FixError}
             />
           ) : (
             <PreviewPanel

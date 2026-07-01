@@ -4549,7 +4549,14 @@ ${buildLanguageRule(preferredLanguage)}`;
   const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
   // The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the MAIN slide-out
   // "Preview" menu renders the SAME working v3.0 preview (was wired to the retired v2.0 generatedCode).
-  const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string }>({});
+  // `framework` + `running` are ALSO lifted (2026-07-01) so the sidebar's PreviewSurface can reach full
+  // feature parity with the in-panel one — auto-resuming a dead sandbox and the framework-aware
+  // Diagnose flow both need them (previously only the in-panel PreviewSurface received these props).
+  const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }>({});
+  // "Fix with AI" clicked from the SIDEBAR preview (outside the v3.0 panel's own UI) — prefills the
+  // v3.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
+  // even if the previous fix request is still sitting in the input unsent.
+  const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number } | null>(null);
 
   const resumeSession = (session: ChatSession) => {
     // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
@@ -5580,6 +5587,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               onBeforeBuild={() => workspaceSyncerRef.current?.flush() ?? Promise.resolve()}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
+              pendingFix={v3PendingFix}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v3.0
                  "Files" tab and the sidebar "Files" are ONE feature with two gates — same component,
                  same data (uploads + v3.0 builds), same actions. */
@@ -6279,6 +6287,7 @@ ${buildLanguageRule(preferredLanguage)}`;
 
           <ViewPanels
             v3Preview={v3Preview}
+            onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             problems={problems}
             activeView={activeView}
             generatedCode={generatedCode}

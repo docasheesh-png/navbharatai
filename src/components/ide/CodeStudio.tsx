@@ -11,7 +11,7 @@ import { CommandPalette } from './CommandPalette';
 import { ExtensionMarket } from './ExtensionMarket';
 import { GitPanel } from './GitPanel';
 import { PreviewPanel } from './PreviewPanel';
-import { AIChat } from './AIChat';
+import { AgentV3MiniChat } from './AgentV3MiniChat';
 import { SecurityScan } from './SecurityScan';
 import { VirtualKeyboard } from './VirtualKeyboard';
 import { CursorPopup } from './CursorPopup';
@@ -79,7 +79,6 @@ interface CodeStudioProps {
   onThemeChange?: (theme: ThemeMode) => void;
   onAgentChange?: (agent: string) => void;
   onGoToMain?: () => void;
-  onOpenProChat?: () => void;
   wallet?: any;
   onUnlockVishwakarma: () => void;
   /** N1-N9: Send a message directly to AI (bypasses controlled input state). */
@@ -130,7 +129,6 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
   onThemeChange,
   onAgentChange,
   onGoToMain,
-  onOpenProChat,
   wallet,
   onUnlockVishwakarma,
   onSendDirect,
@@ -686,32 +684,14 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         );
       case 'extensions': return <ExtensionMarket />;
       case 'ai':
-        return (
-          <AIChat 
-            activeAgent={activeAgent}
-            messages={messages}
-            input={chatInput}
-            onInputChange={onChatInputChange}
-            onSend={onChatSend}
-            isLoading={isChatLoading}
-            activeIntent={activeIntent}
-            pendingGHEdit={pendingGHEdit}
-            onConfirmPush={onConfirmPush}
-            isPushing={isGHPushing}
-            isPinned={isPinned}
-            onTogglePin={onTogglePin}
-            isLoggedIn={isLoggedIn}
-            onShowLogin={onShowLogin}
-            mode={mode}
-            onModeChange={onModeChange}
-            isAppBuilt={isAppBuilt}
-            onPreviewClick={onPreviewClick}
-            theme={theme}
-            onGoToMain={onGoToMain}
-            wallet={wallet}
-            onUnlockVishwakarma={onUnlockVishwakarma}
-          />
-        );
+        // Code Studio's AI chat IS NavBharatAI Pro v3.0 (AgentV3) — the SAME session/memory/file-write
+        // engine as the main v3.0 panel, not the separate "Free" chat AI. Root-caused 2026-07-01: this
+        // used to render <AIChat> wired to the Free-tier text-only endpoint, which has zero file
+        // access and is explicitly instructed server-side to never write code — so it could only talk
+        // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for RealTerminal below)
+        // give it the same identity; getAgentV3SessionId/getAgentV3WorkspaceId (shared with
+        // AgentV3Panel via the same localStorage key) put it on the exact same workspace.
+        return <AgentV3MiniChat userId={v3UserId} email={v3Email} />;
       case 'settings':
         return (
           <div className="p-6 h-full bg-[#161b22] space-y-6">
@@ -929,9 +909,9 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
          <div className="flex items-center gap-2">
             <button
               id="ide-social-chat-trigger"
-              onClick={() => onOpenProChat ? onOpenProChat() : (handleScreenChange('ai'), setIsSidebarOpen(true))}
+              onClick={() => { handleScreenChange('ai'); setIsSidebarOpen(true); }}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="Open NavBharatAI v2.0"
+              title="AI Chat — NavBharatAI Pro v3.0"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>
@@ -1005,7 +985,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
                       <Plus className="w-3.5 h-3.5" /> New File
                    </button>
                    <button
-                      onClick={() => (onOpenProChat ? onOpenProChat() : handleScreenChange('ai'))}
+                      onClick={() => handleScreenChange('ai')}
                       className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/80 text-xs font-bold flex items-center gap-1.5"
                    >
                       <Bot className="w-3.5 h-3.5" /> Ask AI

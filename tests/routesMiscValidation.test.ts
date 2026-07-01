@@ -299,4 +299,22 @@ describe('Design routes — /api/design/lint (P-DESIGN.8)', () => {
     expect(res.body?.grade).toBe('A');
     expect(Array.isArray(res.body?.violations)).toBe(true);
   });
+
+  it('registers the a11y lint endpoint and flags missing alt/label', async () => {
+    const register = await importDesignRoutes();
+    const routes = captureRoutes(register);
+    expect(routes.has('POST /api/design/a11y')).toBe(true);
+    const handler = routes.get('POST /api/design/a11y')!;
+
+    const bad = mockReq({ body: {} });
+    const badRes = mockRes();
+    await handler(bad, badRes);
+    expect(badRes.statusCode).toBe(400);
+
+    const ok = mockReq({ body: { code: '<html><img src="x"><input type="text"></html>' } });
+    const okRes = mockRes();
+    await handler(ok, okRes);
+    expect(okRes.body?.score).toBeLessThan(100);
+    expect(okRes.body?.violations.some((v: any) => v.type === 'img-alt')).toBe(true);
+  });
 });

@@ -14,6 +14,7 @@ import { auth } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { Popover } from '../ui/Popover';
 import { cardClasses } from '../ui/variants';
 
 interface ProjectInsightsPanelProps {
@@ -192,7 +193,17 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
 
       {/* Webhooks */}
       <Card icon={<WebhookIcon className="w-4 h-4 text-cyan-400" />} title="Webhooks"
-        action={hooks.length > 0 ? <Button variant="ghost" size="sm" onClick={testHooks} className="uppercase tracking-widest text-cyan-400"><Send className="w-3 h-3" />Send test</Button> : undefined}>
+        action={
+          <div className="flex items-center gap-1.5">
+            <Popover align="right" trigger={<button aria-label="Which events fire?" className="text-[#8b949e] hover:text-white text-[11px] w-5 h-5 rounded-full border border-white/15 leading-none">?</button>}>
+              <div className="px-2 py-1.5 text-[11px] text-[#c9d1d9] max-w-[15rem] space-y-1">
+                <p className="font-bold text-white">Events delivered</p>
+                <p>BUILD_COMPLETE · BUILD_FAILED · DEPLOY_COMPLETE · DEPLOY_FAILED — a POST is sent to every configured URL.</p>
+              </div>
+            </Popover>
+            {hooks.length > 0 && <Button variant="ghost" size="sm" onClick={testHooks} className="uppercase tracking-widest text-cyan-400"><Send className="w-3 h-3" />Send test</Button>}
+          </div>
+        }>
         {!uid ? (
           <p className="text-[11px] text-[#8b949e]">Sign in to manage webhooks for build/deploy events.</p>
         ) : (

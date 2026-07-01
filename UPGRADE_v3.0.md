@@ -2485,12 +2485,20 @@
 - **Files:** new `src/components/ui/{variants.ts,Button,Badge,Card,Input,Tabs,Tooltip,index}.tsx`,
   `src/components/panels/ProjectInsightsPanel.tsx`, `tests/uiVariants.test.ts` (new).
 
-### P-DESIGN.2 — Missing Overlay & Interaction Primitives  🟡 PARTIAL → full  [MED]
-- No reusable **Tooltip / Popover / Context-Menu / Drawer / Bottom-Sheet** primitives; drag-and-drop is motion-only
-  (no `DndContext`); no resize interaction. Modals are centralized (`AppModals.tsx`) but other overlays are absent.
-- [ ] Add accessible Tooltip, Popover, ContextMenu, Drawer, BottomSheet (part of P-DESIGN.1's `ui/`).
-- [ ] Add a real DnD layer (`@dnd-kit`) for the visual builder + file tree; add resize handles for panels.
-- **Files:** new `src/components/ui/*`, `src/components/ide/VisualEditor.tsx`, `FileExplorer.tsx`.
+### P-DESIGN.2 — Missing Overlay & Interaction Primitives  ✅ DONE (2026-06-30, overlays) · 🔌 UI-WIRED  [MED]
+- No reusable Popover / Drawer / Bottom-Sheet overlay primitives (Tooltip already shipped in P-DESIGN.1).
+- [x] **Added accessible, dependency-free overlays to `src/components/ui/`**: `Popover` (click-toggle, outside-click +
+  Esc close, `aria-haspopup`/`aria-expanded`), `Drawer` (side panel + backdrop, `role=dialog aria-modal`, Esc-close),
+  `BottomSheet` (mobile sheet + backdrop, Esc-close). Look/positioning vocabulary added to the single-source-of-truth
+  `variants.ts` (`overlayBackdropClasses`/`popoverPanelClasses`/`drawerPanelClasses`/`bottomSheetClasses`), exported via
+  the `ui/` barrel. Pure resolvers + render smoke tests (`overlayPrimitives.test.tsx`, 7).
+- [x] **Adopted live** — `ProjectInsightsPanel` Webhooks card now uses `Popover` for the "which events fire?" help
+  (same demonstration view as P-DESIGN.1; broad incremental adoption can follow).
+- **Deferred (honest):** the `@dnd-kit` drag-and-drop layer + panel resize handles are NOT built — `@dnd-kit` is a new
+  runtime dependency, which conflicts with the codebase's dependency-free policy; that belongs in a separate,
+  explicitly-approved dependency decision. The dependency-free overlay primitives (the bulk of the item) are done.
+- **Files:** new `src/components/ui/{Popover,Drawer,BottomSheet}.tsx`, `src/components/ui/{variants.ts,index.ts}`,
+  `src/components/panels/ProjectInsightsPanel.tsx`, new `src/components/ui/overlayPrimitives.test.tsx`.
 
 ### P-DESIGN.3 — Platform Accessibility Engine  🟡 PARTIAL → full  [MED]
 - A11y is scattered: ARIA used in ~16 files, `Toast` has `aria-live`, `PerformanceAnalyzer` audits *generated* apps —

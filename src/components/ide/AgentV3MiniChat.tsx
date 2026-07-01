@@ -39,7 +39,7 @@ export function AgentV3MiniChat({ userId, email }: { userId?: string; email?: st
   if (userId && idsRef.current?.uid !== userId) {
     idsRef.current = { uid: userId, sessionId: getAgentV3SessionId(userId) };
   }
-  const sessionId = idsRef.current?.uid === userId ? idsRef.current.sessionId : '';
+  const sessionId = idsRef.current && idsRef.current.uid === userId ? idsRef.current.sessionId : '';
   const workspaceId = userId && sessionId ? getAgentV3WorkspaceId(userId) : undefined;
 
   // Load this session's saved thread once, and check whether a build is already running for it (a

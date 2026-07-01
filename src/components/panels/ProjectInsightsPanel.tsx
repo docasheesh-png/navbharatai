@@ -15,6 +15,7 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Popover } from '../ui/Popover';
+import { Donut } from '../ui/charts';
 import { cardClasses } from '../ui/variants';
 
 interface ProjectInsightsPanelProps {
@@ -135,7 +136,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           <p className="text-[11px] text-[#8b949e]">No builds yet — SLO compliance appears once builds have run.</p>
         ) : (
           <div className="space-y-2">
-            <div className="text-xs text-[#8b949e]">Builds: <span className="text-white font-bold">{slo.totalBuilds}</span> · Violations: <span className="text-red-400 font-bold">{slo.totalViolations}</span> ({Math.round((slo.overallViolationRate || 0) * 100)}%)</div>
+            <div className="flex items-center gap-4">
+              <Donut
+                size={72}
+                thickness={10}
+                slices={[
+                  { value: Math.max(0, (slo.totalBuilds || 0) - (slo.totalViolations || 0)), color: '#10b981', label: 'Within SLO' },
+                  { value: slo.totalViolations || 0, color: '#ef4444', label: 'Over SLO' },
+                ]}
+                center={<span className="text-white font-black text-sm">{Math.round((1 - (slo.overallViolationRate || 0)) * 100)}%</span>}
+              />
+              <div className="text-xs text-[#8b949e]">Builds: <span className="text-white font-bold">{slo.totalBuilds}</span> · Violations: <span className="text-red-400 font-bold">{slo.totalViolations}</span> ({Math.round((slo.overallViolationRate || 0) * 100)}%)<div className="text-[10px] mt-1">Green = within SLO · red = over.</div></div>
+            </div>
             {(slo.byTier || []).map((t: any) => (
               <div key={t.tier} className="flex justify-between bg-black/30 rounded-xl px-4 py-2 text-[11px]">
                 <span className="text-white font-bold uppercase">{t.tier} <span className="text-[#8b949e] normal-case">(SLO {fmtSec(t.sloMs)})</span></span>

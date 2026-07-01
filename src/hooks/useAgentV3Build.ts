@@ -253,6 +253,32 @@ export function useAgentV3Build(): UseAgentV3Build {
         next = agentV3Reducer(next, { type: 'todo_updated', todos: restoredTodos, ts: Date.now() } as AgentV3WireEvent);
       }
       setState(next);
+      if (conv.workspaceId) {
+        // Adopt the workspaceId at the HOOK level so restoreAllFiles / git-status / file loads work on
+        // a COLD reopen (they read workspaceIdRef, which the build stream normally sets — but no build
+        // ran on a pure reopen). Fixes the "Restore all files" button + file ops being dead cold.
+        workspaceIdRef.current = conv.workspaceId;
+        // Populate state.files from durable storage so the header "Files (N)" count and every
+        // file-count-keyed effect work on reopen (the restored transcript carries NO file events, so
+        // state.files was stuck at 0). Fire-and-forget + best-effort; guarded so a fast session switch
+        // can't dispatch a stale workspace's files over the new one.
+        const wsForFiles = conv.workspaceId;
+        void (async () => {
+          try {
+            const fr = await fetch('/api/agentv3/workspace-files', {
+              method: 'POST',
+              headers: await authJsonHeaders(),
+              body: JSON.stringify({ workspaceId: wsForFiles, userId: userIdRef.current, email: emailRef.current }),
+            });
+            if (!fr.ok) return;
+            const fj = await fr.json().catch(() => ({} as { files?: Record<string, string> }));
+            const paths = fj?.files && typeof fj.files === 'object' ? Object.keys(fj.files) : [];
+            if (paths.length > 0 && workspaceIdRef.current === wsForFiles) {
+              setState((prev) => agentV3Reducer(prev, { type: 'files_restored', files: paths.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() }));
+            }
+          } catch { /* best-effort — the viewer cache still loads files independently */ }
+        })();
+      }
       // Return the user's OWN messages so the panel can restore them too (the reducer/narration
       // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload), AND
       // the restored workspaceId so the panel can adopt the SAME session id → a follow-up continues

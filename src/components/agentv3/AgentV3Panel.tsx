@@ -140,13 +140,18 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
       ? crypto.randomUUID()
       : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const sessionStorageKey = `agentv3_session_${userId || 'anon'}`;
+  // Persist the session id so a RELOAD continues the same project. localStorage can throw in some
+  // Incognito/Private modes — fall back to sessionStorage so continuity holds within the tab session
+  // instead of minting a fresh (empty) workspace on every reload.
   const persistSessionId = (id: string) => {
-    try { localStorage.setItem(sessionStorageKey, id); } catch { /* storage may be unavailable */ }
+    try { localStorage.setItem(sessionStorageKey, id); return; } catch { /* try sessionStorage next */ }
+    try { sessionStorage.setItem(sessionStorageKey, id); } catch { /* both storages unavailable */ }
   };
   const sessionIdRef = useRef<string>('');
   if (!sessionIdRef.current) {
     let restored = '';
     try { restored = localStorage.getItem(sessionStorageKey) || ''; } catch { /* ignore */ }
+    if (!restored) { try { restored = sessionStorage.getItem(sessionStorageKey) || ''; } catch { /* ignore */ } }
     sessionIdRef.current = restored || newSessionId();
     if (!restored) persistSessionId(sessionIdRef.current);
   }
@@ -493,6 +498,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
     rehydratedWsRef.current = '';            // re-arm file rehydrate for the new (empty) workspace
     setWorkspaceFiles(null);
+    setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
     setSelectedFile(null);
     setUserMsgs([]);
     setAgentHistory([]);
@@ -522,6 +528,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
     if (running) return;
     setHistoryOpen(false);
     setWorkspaceFiles(null);
+    setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
     setSelectedFile(null);
     setAgentHistory([]);
     setCheckpointHistory([]);
@@ -761,6 +768,11 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // them, and reuse the same map both to (a) show a file's content when clicked
   // and (b) sync the built project into the main app's Files view (onFilesSync).
   const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, string> | null>(null);
+  // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
+  // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
+  // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to
+  // the current workspace makes the guard workspace-specific.
+  const [workspaceFilesFor, setWorkspaceFilesFor] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState<string>('');
@@ -783,6 +795,7 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
       const data = await res.json() as { files?: Record<string, string> };
       const files = data.files ?? {};
       setWorkspaceFiles(files);
+      setWorkspaceFilesFor(wsId); // tag which workspace these files belong to (stale-switch guard)
       return files;
     } catch (e) {
       setFileError(e instanceof Error ? e.message : 'Failed to load file contents');
@@ -849,11 +862,14 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   useEffect(() => {
     if (running || !userId || !sessionIdRef.current) return;
     const wsId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
-    if (rehydratedWsRef.current === wsId || workspaceFiles !== null) return;
+    // Skip only if we've already rehydrated THIS workspace, or the cache already holds THIS workspace's
+    // files. A stale in-flight load for a PREVIOUS workspace (workspaceFilesFor !== wsId) must NOT block
+    // loading the current one.
+    if (rehydratedWsRef.current === wsId || (workspaceFiles !== null && workspaceFilesFor === wsId)) return;
     rehydratedWsRef.current = wsId;
     void loadWorkspaceFiles(wsId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, state.workspaceId, running, workspaceFiles]);
+  }, [userId, state.workspaceId, running, workspaceFiles, workspaceFilesFor]);
 
   // Plan (todo list) collapse toggle (Task 3) — keeps the chat area readable.
   const [planCollapsed, setPlanCollapsed] = useState(false);

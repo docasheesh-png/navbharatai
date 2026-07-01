@@ -205,6 +205,26 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
   it('returns undefined while still running (ok not yet set) with nothing to report', () => {
     expect(deriveRootCause({ issues: [] })).toBeUndefined();
   });
+
+  it('prefers an UNRESOLVED problem over an earlier, merely-routine auto-resolved one (real report regression)', () => {
+    // Real report: a routine "Provider GLM failed — falling back" (auto-resolved — the resilience
+    // mechanism WORKING as intended, not a failure) was chosen as root cause ahead of a genuine
+    // unresolved pkill command failure later in the SAME build. The unresolved one is the real signal.
+    const issues = [
+      { ts: 1, phase: 'provider' as const, severity: 'warning' as const, code: 'PROVIDER_FALLBACK', message: 'Provider GLM failed — falling back to the next provider', autoResolved: true },
+      { ts: 2, phase: 'provider' as const, severity: 'warning' as const, code: 'PROVIDER_FALLBACK', message: 'Provider GLM failed — falling back to the next provider', autoResolved: true },
+      { ts: 3, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ pkill -f "vite" || true → exit -1 (0s)', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues })).toBe('$ pkill -f "vite" || true → exit -1 (0s)');
+  });
+
+  it('prefers an error over a warning when both are auto-resolved and nothing is unresolved', () => {
+    const issues = [
+      { ts: 1, phase: 'provider' as const, severity: 'warning' as const, code: 'PROVIDER_FALLBACK', message: 'fell back to Haiku', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'error' as const, code: 'BUILD_ERROR', message: 'transient error, later recovered', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues })).toBe('transient error, later recovered');
+  });
 });
 
 describe('renderDiagnosticsText — root cause first, problems (not the full noisy timeline) by default', () => {

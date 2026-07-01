@@ -6660,3 +6660,27 @@ Mirrors the same design already used for CONTINUATION_SIGNALS/PROBLEM_SIGNALS ea
 Tests: +5 (the exact reported message, English/Hinglish comparison variants, the HIGH-confidence/LLM-
 can't-override guarantee, and the explicit-build-verb-still-wins safety check). Gate: frontend tsc 0,
 server tsc 0, vitest 4071/4071 PASS, boot:check PASS.
+
+## 2026-07-01 — rootCause now prefers a real unresolved problem over a routine auto-resolved one
+
+Admin pasted a real build report; analysis found the `rootCause` field (from the earlier build-report
+redesign) picked a ROUTINE, already-auto-resolved event — "Provider GLM failed — falling back to the
+next provider" (the resilience mechanism working exactly as designed, not a failure) — ahead of a
+genuine UNRESOLVED problem later in the same build (`pkill -f "vite" || true` failing with "signal:
+terminated"). `deriveRootCause()`'s "first real problem" fallback tier picked strictly by chronological
+order, with no regard for whether the problem was actually resolved or just a warning vs a real error.
+
+Fix: within that fallback tier, now prefers (1) the first UNRESOLVED non-info problem (autoResolved:
+false — something that happened and was never fixed) → (2) the first ERROR (even if auto-resolved) →
+(3) the first WARNING (previous behavior, last resort). A routine, successfully-recovered-from event
+should never outrank a genuine unresolved issue as "the root cause".
+
+Tests: +2 (the exact real-report regression case, and error-beats-warning-when-both-resolved). Gate:
+frontend tsc 0, server tsc 0, vitest 4085/4085 PASS, boot:check PASS.
+
+**Also observed in this report, not changed (no confirmed distinct code bug, likely provider/infra
+behavior):** GLM (the cheap-floor provider) delivered 12 of 13 build turns and timed out twice
+mid-build (one turn took 131 seconds) — GLM reliability/latency is a provider characteristic, not
+something to code-fix; and a `[health-check] port not responding — restarting…` message bled into an
+unrelated later command's stdout (the same attribution artifact already understood from earlier in this
+session — not a new distinct bug).

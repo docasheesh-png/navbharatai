@@ -90,6 +90,7 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
+import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { liveChannel } from '../AgentV3/LiveChannel';
@@ -201,7 +202,10 @@ function getConversationStore(): ConversationStore {
   if (useFirestore) {
     try {
       sharedConversationStore = new FirestoreConversationStore();
-    } catch {
+    } catch (e) {
+      // Durable chat history is UNAVAILABLE — the in-memory fallback means transcripts vanish on any
+      // redeploy / instance rotation. Surface it (throttled) so this isn't a silent prod degradation.
+      notePersistenceFailure('conversation_store', 'init', e);
       sharedConversationStore = new InMemoryConversationStore();
     }
   } else {
@@ -1233,6 +1237,16 @@ export function registerAgentV3Routes(app: Express): void {
   // deployment (LocalActuator → no live preview), or a custom preview domain needs DNS.
   app.get('/api/agentv3/preview-status', (_req: Request, res: Response) => {
     res.json(sandboxDiag());
+  });
+
+  // Persistence health (C3) — a one-URL admin check for "why did my chat/files/memory vanish on
+  // reload?". Returns whether any Firestore write/init has silently failed this process (the
+  // free-tier daily write-quota case, or a mis-pointed FIRESTORE_DATABASE_ID). `healthy:true` with
+  // 0 failures means persistence is working; a non-zero `failures` with the last scope/op/error is
+  // the smoking gun that data is silently NOT being saved. Unauthenticated like preview-status
+  // (diagnostic only — it exposes no user data, just a failure count + the last error message).
+  app.get('/api/agentv3/persistence-status', (_req: Request, res: Response) => {
+    res.json(persistenceHealth());
   });
 
   // "Diagnose" button (Live server empty state) — reuses the EXACT same real boot sequence the

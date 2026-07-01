@@ -5421,6 +5421,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         isAdmin={isAdmin}
         setShowVishwakarmaChooser={setShowVishwakarmaChooser}
         setErrorContext={setErrorContext}
+        sessions={sessions}
+        onResumeSession={resumeSession}
       />
       {/* Workspace */}
       <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">

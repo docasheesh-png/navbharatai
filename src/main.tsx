@@ -6,6 +6,7 @@ import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
 import { ConsentBanner } from './components/ConsentBanner';
+import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
@@ -181,6 +182,7 @@ createRoot(document.getElementById('root')!).render(
       <BuildProvider>
         <App />
         <ConsentBanner />
+        <InviteAcceptGate />
       </BuildProvider>
     </ErrorBoundary>
   </StrictMode>,

@@ -2668,13 +2668,34 @@
 - **⬜ N/A-by-design (not a comms platform):** team chat/DM/channels (Slack-like), voice/video rooms, screen-share/annotation, remote-control, whiteboard/diagram/canvas co-edit, meeting scheduler/calendar/timezone, recording/transcripts/AI-meeting-notes, task/sprint/milestone management, RACI matrix, expert-finder/skill-discovery, org/relationship graph, enterprise hub, team-health dashboards, eDiscovery/legal-hold.
 - **Already tracked:** RBAC/role enforcement → **P-SEC.1**; inline code comments/review-mode/threads → **P-DEV.11**; cursor-sharing/element-comments/OT/CRDT realtime co-edit → **P-DESIGN.7**; 3-way merge/conflict-resolution → **P-DEV.4**; voice collaboration → **P-DEV.13**; offline mode/sync → **P-DEV.7/P3.2**; cross-session/workspace persistence → **P-DEV.2/P-PME.1**; ADR/decision log → **P-PME.10**; human-approval gate → **P-AI.8**; notification delivery → **P-BRE.7/P-PME.9**; AI code/design reviewers + semantic search → **P-AI**; retention/legal-hold → **P-DATA.4**; data export → **P-DATA.7**; workspace backup/restore → **P-DATA.2/P9**.
 
-### P-COLLAB.1 — Durable Team Membership + Invite Acceptance  🟡 PARTIAL → full  [MED-HIGH]
-- Team members + invites live in **localStorage** and `routes/team.ts` only **records** invites — email delivery is a
-  stub ("coming soon") and there is no accept flow, so teams vanish on logout. (RBAC *enforcement* is P-SEC.1; this is
-  the membership **data model + invite lifecycle**.)
-- [ ] Persist `teams/{teamId}/members` in Firestore (uid, role, status); real invite email + token-based accept route.
-- [ ] Load team + role on login; make `TeamCollaboration.tsx` read/write the backend instead of localStorage.
-- **Files:** `src/server/routes/team.ts`, `src/components/ide/TeamCollaboration.tsx`, new `src/server/lib/TeamStore.ts`.
+### P-COLLAB.1 — Durable Team Membership + Invite Acceptance  ✅ DONE (2026-07-01) · 🔌 WIRED  [MED-HIGH]
+- Team members + invites lived in **localStorage** and `routes/team.ts` only **recorded** invites (audit + a throwaway
+  id) — there was no accept flow, so teams vanished on logout and an invite could never actually be accepted.
+- [x] **Durable data model — new `src/server/lib/TeamStore.ts`** (firebase-admin, VITEST-skip, pure builders, never
+  throws): `teamInvites/{token}` (token, teamId, email, role, status, invitedBy, createdAt, expiresAt, 14-day TTL) +
+  `teams/{teamId}/members/{uid}` (uid, email, role, status, joinedAt). `teamId === owner uid`. Pure logic
+  (`normalizeInviteRole` — defaults to least-privileged *viewer*, never grants owner; `buildInviteRecord`,
+  `isInviteAcceptable`, `buildMemberRecord`) unit-tested (10).
+- [x] **Full invite lifecycle in `routes/team.ts`** — `POST /api/team/invite` (RBAC-gated) issues a durable,
+  token-based invite link; `GET /api/team/invite/:token` resolves it; `POST /api/team/accept` (authenticated) adds the
+  user to the team **and grants their RBAC role via `setUserRole` (ties into P-SEC.1)**; `POST /api/team/invite/:token/revoke`
+  and `POST /api/team/member/remove` complete the lifecycle; `GET /api/team/:teamId/members` lists members. Route
+  validation + auth branches unit-tested.
+- [x] **`TeamCollaboration.tsx` writes the backend** — invite now sends the owner's Firebase ID token (so the RBAC gate
+  actually passes), surfaces the **real, copyable invite LINK**, and revoke hits the backend so the link truly stops
+  working. Replaces the old silent "mock fallback" + "email delivery coming soon" dead-end.
+- [x] **Accept reachable end-to-end** — new isolated `src/components/InviteAcceptGate.tsx` (mounted next to
+  ConsentBanner in `main.tsx`, **not** in App.tsx's router) detects a `?join=<token>` link, resolves the invite, and
+  lets a signed-in user accept — joining the team + getting their role. Renders nothing on a normal load.
+- [x] `AppKnowledgeBase.ts` — new **Team Collaboration** entry (invite / roles / copy-link / accept / revoke).
+- **Honest deferrals (infra-bound, not faked):** (a) invite **email delivery** — NavBharatAI has no SMTP/provider
+  infra, so instead of a fake "sent" state the invite shares a real, working LINK; email can layer on later with no
+  data-model change. (b) Migrating the members-**list display** + role-load-on-login from the legacy localStorage/client
+  path to the new `GET …/members` route is a follow-up on the 693-line panel (the backend list route already exists).
+- **Files:** new `src/server/lib/TeamStore.ts` + `tests/teamStore.test.ts`, `src/server/routes/team.ts`,
+  `tests/routesMiscValidation.test.ts`, new `src/components/InviteAcceptGate.tsx`, `src/main.tsx`,
+  `src/components/ide/TeamCollaboration.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3980 green · `build` OK · boot PASS.
 
 ### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  🟡 PARTIAL → full  [MED]
 - Share links (`navbharat.ai/shared/{projectId}`) and access toggles are **UI-only**; nothing on the backend enforces

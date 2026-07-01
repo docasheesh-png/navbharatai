@@ -134,6 +134,23 @@ describe('buildReactPreview', () => {
   });
 });
 
+describe('buildReactPreview — Visual Editor (v1) wiring', () => {
+  it('enables JSX source metadata (development:true) so a clicked element maps back to its real source', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain("development: true");
+  });
+  it('injects the edit-mode inspector script, toggled by the parent via postMessage', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('__nbaiSetEditMode');
+    expect(html).toContain('__nbaiVisualEditCommit');
+    expect(html).toContain('_debugSource');
+  });
+  it('inspector never activates itself — starts with editMode false, only flips on an explicit message', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('var editMode = false;');
+  });
+});
+
 describe('renderPreview', () => {
   it('routes a react project to the react bundler', () => {
     expect(renderPreview(reactVfs())).toContain('@babel/standalone');

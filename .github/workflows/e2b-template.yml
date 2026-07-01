@@ -26,10 +26,18 @@ name: Build E2B Builder Template
 on:
   workflow_dispatch:
     inputs:
-      template_name:
-        description: 'E2B template name (alias used by Sandbox.create)'
+      template_kind:
+        description: 'Which template to build'
         required: true
-        default: 'navbharat-builder'
+        type: choice
+        options:
+          - default
+          - android
+        default: 'default'
+      template_name:
+        description: 'E2B template name (alias used by Sandbox.create) — leave blank to use the kind''s default alias'
+        required: false
+        default: ''
 
 jobs:
   build-template:
@@ -52,11 +60,31 @@ jobs:
           fi
           echo "E2B_API_KEY is present (length ${#E2B_API_KEY})."
 
+      - name: Resolve build parameters for the chosen template kind
+        id: params
+        run: |
+          if [ "${{ github.event.inputs.template_kind }}" = "android" ]; then
+            echo "dockerfile=e2b-android.Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "default_name=navbharat-android-builder" >> "$GITHUB_OUTPUT"
+            echo "cpu_count=4" >> "$GITHUB_OUTPUT"
+            echo "memory_mb=8192" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerfile=e2b.Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "default_name=navbharat-builder" >> "$GITHUB_OUTPUT"
+            echo "cpu_count=2" >> "$GITHUB_OUTPUT"
+            echo "memory_mb=2048" >> "$GITHUB_OUTPUT"
+          fi
+          NAME="${{ github.event.inputs.template_name }}"
+          echo "name=${NAME:-$(if [ "${{ github.event.inputs.template_kind }}" = "android" ]; then echo navbharat-android-builder; else echo navbharat-builder; fi)}" >> "$GITHUB_OUTPUT"
+
       - name: Build & publish template (E2B build system v2)
         working-directory: infra/e2b
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
-          TEMPLATE_NAME: ${{ github.event.inputs.template_name }}
+          TEMPLATE_NAME: ${{ steps.params.outputs.name }}
+          DOCKERFILE: ${{ steps.params.outputs.dockerfile }}
+          CPU_COUNT: ${{ steps.params.outputs.cpu_count }}
+          MEMORY_MB: ${{ steps.params.outputs.memory_mb }}
         run: |
           npm install
           node build.mjs
@@ -64,11 +92,18 @@ jobs:
       - name: Surface the template alias
         if: success()
         run: |
-          NAME="${{ github.event.inputs.template_name }}"
+          NAME="${{ steps.params.outputs.name }}"
+          KIND="${{ github.event.inputs.template_kind }}"
           echo "## E2B template build complete ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Template alias:** \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Kind:** \`$KIND\`  ·  **Template alias:** \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
-          echo "1. Set Cloud Run env \`E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "2. Run the code-wiring PR (Sandbox.create template + MODE A enable + MODE A→B fallback)." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$KIND" = "android" ]; then
+            echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
+            echo "1. Set Cloud Run env \`ANDROID_E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "2. Run the Bubblewrap/APK-build code-wiring PR (not built yet — see infra/e2b/README.md)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
+            echo "1. Set Cloud Run env \`E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "2. Run the code-wiring PR (Sandbox.create template + MODE A enable + MODE A→B fallback)." >> "$GITHUB_STEP_SUMMARY"
+          fi

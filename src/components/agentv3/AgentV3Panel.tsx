@@ -1670,6 +1670,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 );
                 setShowWorkspace(false);
               }}
+              onFileEdited={(path, content) => {
+                // Visual Editor saved a real edit — keep this panel's OWN Files-tab cache honest, and
+                // push it through the SAME onFilesSync bridge a build's own file writes use, so the
+                // main app's shared files state (Code Studio, sidebar Files, Git) picks it up too.
+                setWorkspaceFiles((prev) => (prev ? { ...prev, [path]: content } : prev));
+                onFilesSync?.({ [path]: content });
+              }}
             />
           ) : tab === 'files' ? (
             // Unified Files — the SAME rich FilesPanel the sidebar "Files" menu uses, so both

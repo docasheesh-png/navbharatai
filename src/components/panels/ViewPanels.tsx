@@ -217,6 +217,7 @@ export function ViewPanels({
               framework={v3Preview.framework}
               autoResume={!v3Preview.running}
               onFixError={onV3FixError}
+              onFileEdited={(path, content) => setFiles((prev: any) => ({ ...prev, [path]: content }))}
             />
           ) : (
             <PreviewPanel

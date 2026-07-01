@@ -147,6 +147,7 @@ import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
+import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
 import { GeminiProvider } from '../AI/Router/providers/GeminiProvider';
 import { GrokProvider } from '../AI/Router/providers/GrokProvider';
@@ -1645,6 +1646,57 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ html, kind, count: Object.keys(files).length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
+    }
+  });
+
+  // VISUAL EDITOR (in-browser mode, v1: single simple text child) — apply a text edit made in the
+  // RENDERED preview back into the REAL source file at its exact JSX position, via a real AST
+  // (VisualEditPatcher.ts), never a blind string/line replacement. Writes through the SAME durable
+  // store + live actuator every other file write uses, so the edit shows up everywhere else (Files,
+  // Code Studio's own editor, Git) exactly like a v3.0-panel edit does — not a disposable, disconnected
+  // copy the next build would silently overwrite.
+  app.post('/api/agentv3/visual-edit', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const filePath = typeof req.body?.file === 'string' ? req.body.file : '';
+    const line = Number(req.body?.line);
+    const column = Number(req.body?.column);
+    const newText = typeof req.body?.newText === 'string' ? req.body.newText : null;
+    if (!workspaceId || !filePath || newText === null) {
+      res.status(400).json({ error: 'workspaceId, file and newText are required.' });
+      return;
+    }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+      res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
+      return;
+    }
+    try {
+      const actuator = buildActuator();
+      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId);
+      const source = files[filePath];
+      if (source == null) {
+        res.status(404).json({ error: `${filePath} was not found in this workspace's current files.` });
+        return;
+      }
+      const result = await applyVisualTextEdit({ filePath, source, line, column, newText });
+      if (!result.ok) {
+        res.status(422).json({ error: result.error });
+        return;
+      }
+      // Write through BOTH the live actuator (so a still-warm sandbox reflects it immediately) and the
+      // durable store (so it survives an instance recycle / is what the next preview build reads) —
+      // matching how every other v3.0 file write persists. Actuator write is best-effort: a VFS-tier
+      // or cold sandbox has no live copy to write into, and the durable save below is authoritative.
+      try { await actuator.writeFile(workspaceId, filePath, result.newSource); } catch { /* best-effort */ }
+      await saveWorkspaceFiles(workspaceId, { [filePath]: result.newSource });
+      res.json({ ok: true, file: filePath, content: result.newSource });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to apply the visual edit.' });
     }
   });
 

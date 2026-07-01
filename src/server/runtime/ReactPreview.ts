@@ -287,9 +287,15 @@ ${babelTag}
     if (/\\.css$/.test(path)) { injectCss(code); cache[path] = { exports: {} }; return cache[path].exports; }
     if (/\\.json$/.test(path)) { cache[path] = { exports: JSON.parse(code) }; return cache[path].exports; }
     var isTs = /\\.tsx?$/.test(path), isTsx = /\\.tsx$/.test(path);
+    // development:true adds @babel/plugin-transform-react-jsx-source, which attaches each JSX
+    // element's real source file/line/column to its React element (readable at runtime via the
+    // fiber's _debugSource) — this is what lets the Visual Editor map a clicked, RENDERED element
+    // back to its exact position in the REAL source file, so an edit lands there instead of on a
+    // disposable compiled copy the next build would overwrite. Same mechanism React DevTools' own
+    // "open in editor" feature uses.
     var presets = isTs
-      ? [['react', { runtime: 'automatic' }], ['typescript', { isTSX: isTsx, allExtensions: true }]]
-      : [['react', { runtime: 'automatic' }]];
+      ? [['react', { runtime: 'automatic', development: true }], ['typescript', { isTSX: isTsx, allExtensions: true }]]
+      : [['react', { runtime: 'automatic', development: true }]];
     var transformed;
     try { transformed = Babel.transform(code, { filename: path, presets: presets, plugins: ['transform-modules-commonjs'], sourceType: 'module' }).code; }
     catch (e) { throw new Error('Compile ' + path + ': ' + e.message); }
@@ -392,9 +398,103 @@ ${babelTag}
   })();
 })();
 </script>
+${VISUAL_EDITOR_SCRIPT}
 </body>
 </html>`;
 }
+
+// VISUAL EDITOR (v1) — a separate script/scope from the loader above so it never interferes with the
+// module graph. Toggled on/off by the PARENT page via postMessage (never active unless explicitly
+// turned on), and reports back through postMessage too — this document is same-origin `srcDoc`, so a
+// direct call would also work, but postMessage matches the established pattern this preview already
+// uses for error reporting (__nbaiPreviewError), keeping ONE communication channel.
+//
+// Mechanism: React (with development:true set on the JSX transform above) attaches `_debugSource`
+// (fileName/lineNumber/columnNumber) to the fiber of every JSX element — the same data React DevTools'
+// own "open in editor" feature reads. Walking a clicked DOM node's `__reactFiber$*` property to its
+// fiber (a real, stable React internal API, not a hack specific to this app) gives that exact source
+// location, so an edit can be sent back to EXACTLY the JSX element the user clicked — no guessing.
+const VISUAL_EDITOR_SCRIPT = `<script>
+(function () {
+  var editMode = false;
+  var hovered = null;
+  var editing = null;
+
+  function fiberOf(el) {
+    var key = Object.keys(el).find(function (k) { return k.indexOf('__reactFiber$') === 0; });
+    return key ? el[key] : null;
+  }
+  function debugSourceFor(el) {
+    var fiber = fiberOf(el);
+    while (fiber) {
+      if (fiber._debugSource) return fiber._debugSource;
+      fiber = fiber.return;
+    }
+    return null;
+  }
+  function clearHover() {
+    if (hovered) { hovered.style.outline = ''; hovered.style.cursor = ''; hovered = null; }
+  }
+  function onMouseOver(e) {
+    if (!editMode || editing) return;
+    if (hovered && hovered !== e.target) clearHover();
+    hovered = e.target;
+    hovered.style.outline = '2px solid #6366f1';
+    hovered.style.cursor = 'text';
+  }
+  function stopEditing(commit) {
+    if (!editing) return;
+    var el = editing, src = editing.__nbaiSrc;
+    editing.contentEditable = 'false';
+    editing.style.outline = '';
+    editing = null;
+    if (commit && src) {
+      try {
+        (window.parent || window.top).postMessage({
+          __nbaiVisualEditCommit: true,
+          file: src.fileName, line: src.lineNumber, column: src.columnNumber,
+          newText: el.textContent,
+        }, '*');
+      } catch (e) {}
+    }
+  }
+  function onClick(e) {
+    if (!editMode || editing) return;
+    var src = debugSourceFor(e.target);
+    if (!src || !src.fileName) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearHover();
+    editing = e.target;
+    editing.__nbaiSrc = src;
+    editing.contentEditable = 'true';
+    editing.style.outline = '2px solid #10b981';
+    editing.focus();
+    var range = document.createRange();
+    range.selectNodeContents(editing);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function onBlur(e) { if (editing === e.target) stopEditing(true); }
+  function onKeyDown(e) {
+    if (!editing) return;
+    if (e.key === 'Enter') { e.preventDefault(); editing.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); stopEditing(false); }
+  }
+  window.addEventListener('message', function (e) {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.__nbaiSetEditMode === undefined) return;
+    editMode = !!e.data.__nbaiSetEditMode;
+    if (!editMode) { clearHover(); stopEditing(false); }
+    document.body.style.cursor = editMode ? 'crosshair' : '';
+  });
+  document.addEventListener('mouseover', onMouseOver, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('blur', onBlur, true);
+  document.addEventListener('keydown', onKeyDown, true);
+})();
+</script>`;
 
 /** Build an esm.sh importmap from package.json deps (+ always-needed React entries). */
 function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {

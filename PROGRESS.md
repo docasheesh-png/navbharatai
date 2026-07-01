@@ -6986,3 +6986,120 @@ confirmed gone from the sidebar, clicking Code Studio's "AI" button now shows th
 Studio" for an anonymous session) instead of redirecting to login — no crashes, no new console errors.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4136/4136 PASS, boot:check PASS.
+
+## 2026-07-01 — Hotfix: AgentV3MiniChat crashed for signed-out users (PR #814)
+
+Found via a real-browser Playwright check while continuing follow-up work: a null-check gap in the
+session-id memoization added for the earlier code-review finding above — `idsRef.current?.uid ===
+userId` evaluates `undefined === undefined` = `true` when `userId` is `undefined` (anonymous), even
+though `idsRef.current` itself is `null`, so the ternary took the branch reading
+`idsRef.current.sessionId` on a null ref and crashed the component (caught by the ErrorBoundary) the
+instant any signed-out user opened Code Studio's "AI" tab. Fixed with `idsRef.current &&
+idsRef.current.uid === userId ? ... : ''`. Shipped as its own isolated, urgent hotfix commit (stashed
+the in-progress Visual Editor work to keep this a clean, single-line diff) ahead of the larger feature
+below. Gate: frontend tsc 0, vitest 4144/4144 PASS, boot:check PASS, verified in a real browser.
+
+## 2026-07-01 — Visual Editor v1 (in-browser preview): real text edits land in the real source
+
+Admin: "Visual Editor ('Edit'), Download apk — bas yeh do option add kar do. 100% real working. e2b,
+aur in browser preview dono me." Researched both honestly before writing any code (see the APK
+investigation below) — Visual Editor and Download APK are NOT equal-effort asks. Visual Editor for the
+**in-browser preview mode** is genuinely buildable now with no new infrastructure; the **E2B live mode**
+needs a real, separate infra piece (a cross-origin bridge) — scoped explicitly as a v1 (in-browser,
+text-content edits only) per the admin's own confirmed sequencing choice.
+
+**Why this is "100% real" and not a fake WYSIWYG toy:** a v3.0 project has no single "the HTML" — the
+rendered preview is compiled from real multi-file .tsx/.jsx source. An edit that only mutated the
+compiled preview copy would be silently overwritten by the next build. This ships a genuine
+click-in-the-rendered-preview → edit-the-real-source-file pipeline:
+
+1. **`src/server/runtime/ReactPreview.ts`** — the Babel-standalone JSX transform now sets
+   `development: true` on the react preset, which attaches `_debugSource` (fileName/lineNumber/
+   columnNumber) to every JSX element's fiber at runtime — the SAME mechanism React DevTools' own
+   "open in editor" feature uses. A new injected inspector script (toggled on/off ONLY via an explicit
+   `postMessage` from the parent — never active by default) walks a clicked DOM node's
+   `__reactFiber$*` property to find this source location, makes the element `contentEditable`, and
+   posts `{file, line, column, newText}` back on blur/Enter.
+2. **`src/server/AgentV3/VisualEditPatcher.ts`** (new, pure, unit-tested) — `applyVisualTextEdit()`
+   converts React's 1-based `_debugSource` position into ts-morph's 0-based convention, finds the
+   EXACT JsxElement/JsxSelfClosingElement whose opening tag starts there via a real AST (never a
+   guess), and replaces its text — but ONLY when that element has exactly ONE simple text child.
+   Anything with mixed/nested children (an expression, a nested element, multiple text runs) is
+   REFUSED with a clear reason rather than risking a wrong edit landing in the wrong place — an
+   honest "can't do this one yet" beats silent corruption. New text is escaped via REAL JSX expression-
+   container string literals (`{` → `{'{'}`) — not HTML entities, which a code-review pass found don't
+   actually protect anything (JSX text isn't parsed as HTML; Babel/esbuild's tokenizer just happens to
+   decode entities back today, which isn't a real guarantee against a different toolchain).
+3. **`POST /api/agentv3/visual-edit`** (new route) — reads the workspace's current files, applies the
+   edit, writes the result through BOTH the live actuator (best-effort) and the durable store — the
+   exact same dual-write path every other v3.0 file write uses.
+4. **`PreviewSurface.tsx`** — a new "Edit" toggle (in-browser mode only) sends the postMessage toggle,
+   listens for the commit event, calls the new endpoint, reloads the in-browser preview from the
+   freshly-saved source (confirming the edit against what actually compiled — not a hopeful guess),
+   and calls a new `onFileEdited` callback so Files/Code Studio/Git pick up the change immediately too
+   (wired through both the sidebar Preview and the in-panel Preview tab, reusing the existing
+   `onFilesSync` bridge for the in-panel case).
+
+A dedicated adversarial code-review pass (the single most safety-critical review this session — a
+wrong AST edit silently applied to a real source file is a genuine data-corruption risk) verified,
+with actual runtime execution (not just re-reading the code): the line/column convention conversion is
+correct (proved against `@babel/plugin-transform-react-jsx-source`'s real source + an empirical test),
+ts-morph's `getStart()` trivia-skipping matches Babel's `_debugSource` exactly, the NaN/bounds guard on
+the server route works, multiple-elements-at-one-position can't actually happen for this AST shape, and
+ownership checks run before any file read. It found one real (non-corrupting but misleadingly-commented)
+issue — the HTML-entity escaping — fixed as described above, with a new test that round-trips the
+escaped source through a FRESH ts-morph parse and confirms the reconstructed text matches the original
+exactly (not just "the raw string looks escaped").
+
+Tests: +9 for `VisualEditPatcher` (success, preserves surrounding code, refuses mixed children, refuses
+self-closing/no-text, refuses non-JSX files, honest "reload and try again" on a stale/moved position,
+honest out-of-range-line error, real expression-container escaping, and a full re-parse round-trip
+proof) and +3 for `ReactPreview.ts` (development:true present, inspector script injected, starts
+inactive). Gate: frontend tsc 0, server tsc 0, vitest 4148/4148 PASS, boot:check PASS.
+
+**Deliberately NOT built in this slice (honest, not half-done):** styling/layout edits, multi-text-run
+elements, and the E2B live-mode bridge (needs a Vite plugin injected into the project scaffold +
+postMessage bridge — a real, separate infrastructure piece, tracked as explicit follow-up work, not
+silently skipped).
+
+## 2026-07-01 — Download APK: Android build-environment infra (Slice 1 of 2, admin-approved investment)
+
+Admin, after being told honestly that "100% real working APK download" needs new infrastructure (no
+JDK/Android SDK/Gradle anywhere in this codebase, no existing Android CI/build service — see the
+research summary in the PR): "Infra investment shuru karo" (start the infra investment). This ships
+the FIRST real, admin-actionable piece — the build ENVIRONMENT — following the exact same
+"infra-first, code-wiring-second" sequencing `infra/e2b/README.md` already established for the default
+builder template's own MODE A rollout, so the eventual feature is never pointed at a half-built image.
+
+- **`infra/e2b/e2b-android.Dockerfile`** (new) — a SEPARATE, on-demand E2B template (not added to the
+  default `e2b.Dockerfile`, which every ordinary build uses — bloating it would slow every build's
+  cold-start for a feature most builds never touch): JDK 17, Android SDK cmdline-tools
+  (platform-tools, `platforms;android-34`, `build-tools;34.0.0`), and Google's own **Bubblewrap CLI**
+  — the official TWA (Trusted Web Activity) generator. A TWA is the lightest REAL path to an
+  installable APK: wrap an ALREADY-HOSTED web app (a real, durable public URL — which
+  `DeploymentService.ts`'s existing per-workspace Firebase Hosting deploy already provides) in a thin
+  native Android shell, backed by a real Gradle build + a real signing keystore. Has its own
+  build-time sanity gate (fails the IMAGE build, not a user build, if java/Android SDK/bubblewrap
+  aren't actually usable).
+- **`infra/e2b/build.mjs`** — parametrized via env vars (`DOCKERFILE`, `CPU_COUNT`, `MEMORY_MB`) so ONE
+  script builds either template; every new var defaults to the EXISTING hardcoded values, so an
+  unmodified CI invocation (as it's always been called) builds the exact same default image as before
+  — zero behavior change for the current template.
+- **`.github/workflows/e2b-template.yml`** — added a `template_kind` choice input (`default` |
+  `android`); resolves the right Dockerfile/alias/CPU/memory for whichever is picked. Still
+  manual-dispatch-only (never rebuilds/costs money on ordinary pushes).
+- **`infra/e2b/README.md`** — new section documenting the Android template, its purpose, HONEST cost
+  (this image is substantially larger — several GB of JDK/SDK/Gradle caches — and slower to build/use
+  than the lean default template), and a verify-the-published-template checklist.
+
+**What this does NOT do (deliberately, not half-done):** actually orchestrate a build (no code invokes
+`bubblewrap`/Gradle/signs an APK yet — that is separate, larger follow-up work, gated behind a NEW,
+separate `ANDROID_E2B_TEMPLATE_ID` env var, unset by default). **What still needs the admin's own
+action** (cannot be done from this session — `api.e2b.dev` is egress-blocked here, matching the
+existing default-template note): actually running the `template_kind: android` workflow dispatch (with
+`E2B_API_KEY` configured) to build + publish this image before ANY orchestration code can be wired to
+use it — a real, cost-incurring cloud build step the account owner should trigger themselves.
+
+Gate: this PR is infrastructure/CI/documentation only (no runtime app code touched) — frontend tsc 0,
+server tsc 0, vitest 4148/4148 PASS (unchanged from before this PR), `node --check` on the modified
+`build.mjs`, and the modified GitHub Actions workflow YAML validated with two independent parsers.

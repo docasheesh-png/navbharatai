@@ -2589,11 +2589,25 @@
   `src/server/AppContext/AppKnowledgeBase.ts`.
 - **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3991 green · `build` OK · boot PASS.
 
-### P-DESIGN.8 — Design Governance (consistency + brand compliance)  ❌ MISSING  [LOW]
-- `WhitelabelBranding.tsx` sets brand config but there is no **consistency checker**, **visual linter**, or
-  **design-policy/registry** enforcing token usage / brand rules across a generated app.
-- [ ] Add a visual-lint pass: flag off-token colors/spacing/fonts in generated code; report brand-compliance score.
-- **Files:** new `src/server/AppMakerLab/intelligence/DesignLinter.ts`, `src/components/ide/WhitelabelBranding.tsx`.
+### P-DESIGN.8 — Design Governance (consistency + brand compliance)  ✅ DONE (2026-07-01) · 🔌 UI-WIRED  [LOW]
+- `WhitelabelBranding.tsx` sets brand config but there was no consistency checker / visual linter across a generated app.
+- [x] **Deterministic visual linter — new `src/server/AppMakerLab/intelligence/DesignLinter.ts`** (pure, no AI, no
+  credit spend, 13 tests). `lintDesign(code)` → a 0–100 consistency **score** + **grade (A–D)** + concrete violations:
+  colour explosion (> 12 distinct), too many font families (> 2), spacing off the 4px grid, and hardcoded colours with
+  no CSS-variable tokens. Pure extractors (`extractHexColors`/`extractFontFamilies`/`extractSpacingPx`/`offGridSpacing`,
+  `normalizeHex`) are individually unit-tested.
+- [x] **Endpoint** `POST /api/design/lint { code }` → the lint result (added to the existing `routes/design.ts`;
+  deterministic, so it never spends the FREE router — pure static analysis). Route tests added.
+- [x] **UI-WIRED** — the floating **AI Copilot** (`AISuggestions.tsx`, which already has the generated code) now shows a
+  **Design health** panel: the grade + score + the top violations with fixes, refreshed whenever the app's code changes.
+  (Chosen consumer: `WhitelabelBranding` has no access to the generated code; AISuggestions — where design suggestions
+  already live — does, so it's the natural home. `AppKnowledgeBase.ts` updated.)
+- **Note:** this is a *consistency* linter (works from the code alone); comparing against a specific brand token set from
+  `WhitelabelBranding` can layer on top later using the same pure extractors.
+- **Files:** new `src/server/AppMakerLab/intelligence/DesignLinter.ts` + `tests/designLinter.test.ts`,
+  `src/server/routes/design.ts`, `tests/routesMiscValidation.test.ts`, `src/components/ide/AISuggestions.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 4062 green · `build` OK · boot PASS.
 
 ---
 

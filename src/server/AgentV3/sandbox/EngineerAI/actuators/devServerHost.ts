@@ -61,6 +61,18 @@ export function ensureHostBinding(command: string): string {
 export function isLongRunningCommand(command: string): boolean {
   if (!command) return false;
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
+  // One-shot process-inspection/management commands are NEVER a dev-server start, even when they
+  // reference "vite" as a filter/pattern — e.g. `pkill -f "vite"`, `ps aux | grep vite`, a piped
+  // `grep -E "vite|node" | head -10`. Matching "vite" as a bare substring (below) previously caught
+  // these too, routing a kill/inspect command into the background-dev-server-start path: it force-
+  // killed the port, then tried to "launch" the mangled command with dev-server flags appended
+  // (`ensureHostBinding`/`pinDevServerPort`), which pkill/ps/grep/head reject as unrecognized options
+  // — the process management the agent actually asked for silently failed, so a server the agent
+  // tried to stop/inspect kept getting reported as "not responding — restarting…" after a ~45s port-
+  // wait, and the agent looped: restart dev server, try to verify/kill it, get corrupted output,
+  // restart again. Confirmed against a real build report (repeated `pkill: unrecognized option
+  // '--host'` / `grep: unrecognized option '--host'` / `head: unrecognized option '--host'`).
+  if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat)\b/i.test(command)) return false;
   // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
   const isVite = /\bvite(?:\.js)?\b/i.test(command) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(command);
   return (

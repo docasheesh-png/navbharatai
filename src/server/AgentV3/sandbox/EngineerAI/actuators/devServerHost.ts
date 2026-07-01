@@ -58,37 +58,50 @@ export function ensureHostBinding(command: string): string {
  * `vite build` (which compiles and exits). One-shot fetches (curl/wget) are never long-running.
  * PURE + unit-testable.
  */
+/** The one-shot process-inspection/management commands from the fix below — never a dev-server
+ *  start ON THEIR OWN, even when they reference "vite" as a filter/pattern argument. */
+const ONE_SHOT_PREFIX = /^\s*(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat)\b/i;
+
+/** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
+ *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
+ *  command (see below) instead of only to the whole string. */
+function isDevServerInvocation(segment: string): boolean {
+  // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
+  const isVite = /\bvite(?:\.js)?\b/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
+  return (
+    isVite ||
+    /\b(?:dev|serve|watch|livereload)\b/i.test(segment) ||
+    /npm\s+run\s+(?:dev|start|serve)\b/i.test(segment) ||
+    /python.*http\.server|http-server|live-server/i.test(segment) ||
+    /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(segment) ||
+    // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
+    /^\s*(?:bash|sh)\s+\S*dev\.sh\b/i.test(segment) ||
+    // Framework-specific CLIs
+    /\bng\s+serve\b/i.test(segment) ||            // Angular CLI
+    /\bnext\s+dev\b/i.test(segment) ||             // Next.js direct
+    /\bnuxt\s+dev\b/i.test(segment) ||             // Nuxt direct
+    /\bastro\s+dev\b/i.test(segment)               // Astro direct
+  );
+}
+
 export function isLongRunningCommand(command: string): boolean {
   if (!command) return false;
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
-  // One-shot process-inspection/management commands are NEVER a dev-server start, even when they
-  // reference "vite" as a filter/pattern — e.g. `pkill -f "vite"`, `ps aux | grep vite`, a piped
-  // `grep -E "vite|node" | head -10`. Matching "vite" as a bare substring (below) previously caught
-  // these too, routing a kill/inspect command into the background-dev-server-start path: it force-
-  // killed the port, then tried to "launch" the mangled command with dev-server flags appended
-  // (`ensureHostBinding`/`pinDevServerPort`), which pkill/ps/grep/head reject as unrecognized options
-  // — the process management the agent actually asked for silently failed, so a server the agent
-  // tried to stop/inspect kept getting reported as "not responding — restarting…" after a ~45s port-
-  // wait, and the agent looped: restart dev server, try to verify/kill it, get corrupted output,
-  // restart again. Confirmed against a real build report (repeated `pkill: unrecognized option
-  // '--host'` / `grep: unrecognized option '--host'` / `head: unrecognized option '--host'`).
-  if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|head|tail|wc|find|which|echo|cat)\b/i.test(command)) return false;
-  // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
-  const isVite = /\bvite(?:\.js)?\b/i.test(command) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(command);
-  return (
-    isVite ||
-    /\b(?:dev|serve|watch|livereload)\b/i.test(command) ||
-    /npm\s+run\s+(?:dev|start|serve)\b/i.test(command) ||
-    /python.*http\.server|http-server|live-server/i.test(command) ||
-    /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(command) ||
-    // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)
-    /^\s*(?:bash|sh)\s+\S*dev\.sh\b/i.test(command) ||
-    // Framework-specific CLIs
-    /\bng\s+serve\b/i.test(command) ||            // Angular CLI
-    /\bnext\s+dev\b/i.test(command) ||             // Next.js direct
-    /\bnuxt\s+dev\b/i.test(command) ||             // Nuxt direct
-    /\bastro\s+dev\b/i.test(command)               // Astro direct
-  );
+  // Judge EACH top-level chained segment (split on `;`/`&&`/`||`) on its own, not just the whole
+  // string. A one-shot process-inspection/management segment (pkill/ps/grep/…) is NEVER itself a
+  // dev-server start, even when it references "vite" as a filter/pattern — e.g. `pkill -f "vite"`,
+  // `ps aux | grep vite` (matching "vite" as a bare substring previously caught these too, routing a
+  // kill/inspect command into the background-dev-server-start path, which mangled it with --host/
+  // --port flags pkill/ps/grep reject outright — see the regression this comment used to describe).
+  // BUT a compound command like `pkill -f "vite"; sleep 1; npm run dev &` genuinely DOES start a dev
+  // server in its LAST segment — excluding the whole command there (an actual regression this fix
+  // introduced) skipped ensureHostBinding/stripDevServerBackgrounding for that real npm-run-dev
+  // segment, so the agent's own self-backgrounded `&` was never stripped and the dev server got
+  // orphaned + reaped exactly like the original "Killed right after ready" bug, just via a different
+  // code path. So: a one-shot-prefixed segment's OWN text is never checked for a dev-server pattern,
+  // but every OTHER segment still is — the whole command is long-running if ANY of those matches.
+  const segments = command.split(/&&|\|\||;/);
+  return segments.some((seg) => !ONE_SHOT_PREFIX.test(seg) && isDevServerInvocation(seg));
 }
 
 /**

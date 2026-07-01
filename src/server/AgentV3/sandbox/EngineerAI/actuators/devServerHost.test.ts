@@ -157,6 +157,20 @@ describe('isLongRunningCommand', () => {
     expect(isLongRunningCommand('ps aux | grep -E "vite|node" | grep -v grep | head -10')).toBe(false);
     expect(isLongRunningCommand('netstat -tlnp 2>&1 | grep 5173 || echo "Port 5173 not in use"')).toBe(false);
   });
+
+  it('STILL detects a compound command that kills the old server then starts a new one (real regression from the pkill/ps/grep fix above)', () => {
+    // The FIX above (excluding a whole command starting with pkill/ps/grep/…) had its own regression:
+    // a real build report showed the agent chaining "kill stale process; restart it" as ONE command —
+    // `pkill -f "vite" 2>/dev/null; sleep 1; npm run dev 2>&1 &`. Excluding the WHOLE command here (it
+    // starts with pkill) skipped ensureHostBinding/stripDevServerBackgrounding for the REAL npm-run-dev
+    // segment at the end, so the agent's own trailing `&` was never stripped and the dev server got
+    // orphaned + reaped — the exact "Killed right after ready" bug, just reached via a different path.
+    // Each chained segment must be judged on its own: a one-shot prefix segment's own "vite" mention
+    // still doesn't count, but a LATER segment that genuinely starts a dev server still must.
+    expect(isLongRunningCommand('pkill -f "vite" 2>/dev/null; sleep 1; npm run dev 2>&1 &')).toBe(true);
+    expect(isLongRunningCommand('pkill -f "vite"; npx vite --host 0.0.0.0')).toBe(true);
+    expect(isLongRunningCommand('ps aux | grep vite && npm run dev')).toBe(true);
+  });
 });
 
 describe('stripDevServerBackgrounding', () => {

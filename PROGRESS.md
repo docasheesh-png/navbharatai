@@ -6582,3 +6582,30 @@ opt-in needed.
 
 Tests: +7 (5 findOrphanComponents/analyzeArchitecture, 1 Readiness warning-not-blocker, 1 pre-existing
 fixture fix). Gate: frontend tsc 0, server tsc 0, vitest 4040/4040 PASS, boot:check PASS.
+
+## 2026-07-01 — fixed a regression in my own earlier isLongRunningCommand fix
+
+Admin's newest diagnostics JSON (rootCause auto-surfaced it instantly: "Budget reached ($25.83 of
+$25.00). Stopped.") showed both previews still failing after the earlier pkill/ps/grep fix (#782/PR
+history). Traced a NEW bug: `pkill -f "vite" 2>/dev/null; sleep 1; npm run dev 2>&1 &` — a compound
+command chaining a cleanup step into a genuine dev-server restart, self-backgrounded with a trailing
+`&`. The earlier fix excluded the WHOLE command from `isLongRunningCommand()` because it STARTS with
+`pkill` — but that meant `ensureHostBinding`/`stripDevServerBackgrounding`/`pinDevServerPort` never ran
+on the real `npm run dev` segment at the end, so its own `&` was never stripped and the dev server got
+orphaned + reaped by E2B — the EXACT "Killed right after ready" bug the original fix (weeks ago) existed
+to prevent, just reached via a different path (my OWN recent fix regressed it for this compound-command
+shape).
+
+Fix: `isLongRunningCommand()` now splits a command on `;`/`&&`/`||` and judges each segment
+independently — a one-shot-prefixed segment's own text (even one mentioning "vite" as a pkill/grep
+pattern) still never counts, but any OTHER segment that genuinely starts a dev server still does, so
+the whole compound command is correctly recognized as long-running. Verified against all 23
+combinations (every prior true/false case + the new regression case) before writing the test.
+
+Also confirmed (not fixed — needs more evidence before touching): the in-browser preview's 30/req-per-
+hour ANONYMOUS rate-limit cap was hit, even though the frontend does send an auth token — worth
+watching whether this recurs now that the dev-server thrash (which multiplied fallback preview
+requests) is fixed; not touched this pass since there's no confirmed distinct root cause yet.
+
+Tests: +3 (the exact regression command + 2 variants). Gate: frontend tsc 0, server tsc 0,
+vitest 4043/4043 PASS, boot:check PASS.

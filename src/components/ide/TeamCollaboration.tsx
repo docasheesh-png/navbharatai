@@ -79,11 +79,35 @@ const ROLE_STYLES: Record<Role, { bg: string; text: string; label: string }> = {
   Viewer: { bg: 'bg-gray-500/20', text: 'text-gray-400', label: 'Viewer' },
 };
 
-const DEFAULT_MEMBERS: TeamMember[] = [
-  { id: 'u1', name: 'You',          email: 'you@example.com',          role: 'Admin',  online: true,  isYou: true,  avatarColor: AVATAR_COLORS[5] },
-  { id: 'u2', name: 'Priya Sharma', email: 'priya@example.com',        role: 'Editor', online: false, lastSeen: '2 hours ago',  avatarColor: AVATAR_COLORS[3] },
-  { id: 'u3', name: 'Rahul Dev',    email: 'rahul@example.com',        role: 'Viewer', online: false, lastSeen: '1 day ago',    avatarColor: AVATAR_COLORS[6] },
-];
+// P-COLLAB.1 — members now load from the real backend (`GET /api/team/:teamId/members`); no mock roster.
+/** The current user's own member entry (the team owner). */
+function makeSelf(userId?: string): TeamMember {
+  return { id: userId || 'you', name: 'You', email: '', role: 'Admin', online: true, isYou: true, avatarColor: AVATAR_COLORS[5] };
+}
+
+/** Map a backend RBAC role string to the display Role. */
+function displayRole(role: string): Role {
+  const r = String(role || '').toLowerCase();
+  if (r === 'admin' || r === 'owner') return 'Admin';
+  if (r === 'editor') return 'Editor';
+  return 'Viewer';
+}
+
+/** Map a backend member record (uid/email/role/joinedAt) to the display TeamMember shape. */
+function mapBackendMember(m: { uid: string; email?: string; role?: string }): TeamMember {
+  const name = (m.email && m.email.split('@')[0]) || 'Member';
+  let hash = 0;
+  const key = String(m.uid || name);
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return {
+    id: String(m.uid),
+    name,
+    email: String(m.email || ''),
+    role: displayRole(String(m.role || 'viewer')),
+    online: false,
+    avatarColor: AVATAR_COLORS[hash % AVATAR_COLORS.length],
+  };
+}
 
 const DEFAULT_ACTIVITIES: ActivityEntry[] = [
   { id: 'a1',  member: 'Priya Sharma', action: 'edited a file',            time: '5 min ago'    },
@@ -201,7 +225,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
 
   // — Team state
-  const [members, setMembers] = useState<TeamMember[]>(DEFAULT_MEMBERS);
+  const [members, setMembers] = useState<TeamMember[]>(() => [makeSelf(userId)]);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -231,26 +255,37 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // — Load from Firestore or localStorage
+  // — Load the real team from the backend (P-COLLAB.1). Members = you (owner) + everyone who accepted
+  // an invite (`teams/{teamId}/members`). Falls back to the local cache when offline/unauthenticated.
   useEffect(() => {
+    const self = makeSelf(userId);
     const loadTeam = async () => {
-      try {
-        const { getFirestore, collection, getDocs } = await import('firebase/firestore');
-        const { getApp } = await import('firebase/app');
-        const db = getFirestore(getApp());
-        const snap = await getDocs(collection(db, `projects/${userId}/team`));
-        if (!snap.empty) {
-          const data = snap.docs.map(d => d.data() as TeamMember);
-          setMembers(data);
-          return;
+      if (userId) {
+        try {
+          const authHeader = await teamAuthHeader();
+          const res = await fetch(`/api/team/${encodeURIComponent(userId)}/members`, { headers: authHeader });
+          if (res.ok) {
+            const data = await res.json();
+            const backend: TeamMember[] = Array.isArray(data.members)
+              ? data.members.filter((m: any) => m && m.uid && m.uid !== userId).map(mapBackendMember)
+              : [];
+            const composed = [self, ...backend];
+            setMembers(composed);
+            try { localStorage.setItem(localKey(userId), JSON.stringify(composed)); } catch { /* ignore */ }
+            return;
+          }
+        } catch {
+          // backend unavailable — fall through to the local cache
         }
-      } catch {
-        // Firestore unavailable — fall through to localStorage
       }
       const saved = localStorage.getItem(localKey(userId));
       if (saved) {
-        try { setMembers(JSON.parse(saved)); } catch { /* ignore */ }
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length) { setMembers(parsed); return; }
+        } catch { /* ignore */ }
       }
+      setMembers([self]);
     };
     loadTeam();
   }, [userId]);
@@ -349,17 +384,39 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     showToast('Invite revoked');
   };
 
-  // — Role change
-  const changeMemberRole = (memberId: string, newRole: Role) => {
+  // — Role change (persists to the backend for real members; the RBAC role is updated too).
+  const changeMemberRole = async (memberId: string, newRole: Role) => {
+    const target = members.find(m => m.id === memberId);
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m));
     setMenuOpen(null);
+    if (target && !target.isYou && userId) {
+      try {
+        const authHeader = await teamAuthHeader();
+        await fetch('/api/team/member/role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeader },
+          body: JSON.stringify({ teamId: userId, uid: memberId, role: newRole }),
+        });
+      } catch { /* local update stands; backend is best-effort */ }
+    }
     showToast('Role updated');
   };
 
-  // — Remove member
-  const removeMember = (memberId: string) => {
+  // — Remove member (also removes on the backend for real members).
+  const removeMember = async (memberId: string) => {
+    const target = members.find(m => m.id === memberId);
     setMembers(prev => prev.filter(m => m.id !== memberId));
     setMenuOpen(null);
+    if (target && !target.isYou && userId) {
+      try {
+        const authHeader = await teamAuthHeader();
+        await fetch('/api/team/member/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeader },
+          body: JSON.stringify({ teamId: userId, uid: memberId }),
+        });
+      } catch { /* local removal stands; backend is best-effort */ }
+    }
     showToast('Member removed');
   };
 

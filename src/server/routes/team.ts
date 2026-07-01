@@ -12,6 +12,7 @@ import {
   setInviteStatus,
   addMember,
   removeMember,
+  updateMemberRole,
   listMembers,
 } from '../lib/TeamStore';
 
@@ -133,6 +134,17 @@ export function registerTeamRoutes(app: Express): void {
     await removeMember(String(teamId), String(uid));
     audit('TEAM_MEMBER_REMOVED', { teamId, uid });
     return res.json({ ok: true });
+  });
+
+  // Change a member's role (owner/admin only) — updates the team member record AND the RBAC role.
+  app.post('/api/team/member/role', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+    const { teamId, uid, role } = req.body || {};
+    if (!teamId || !uid || !role) return res.status(400).json({ error: 'teamId, uid and role required' });
+    const normalized = normalizeInviteRole(role);
+    await updateMemberRole(String(teamId), String(uid), normalized);
+    try { await setUserRole(String(uid), normalized); } catch { /* RBAC grant best-effort */ }
+    audit('TEAM_MEMBER_ROLE_CHANGED', { teamId, uid, role: normalized });
+    return res.json({ ok: true, role: normalized });
   });
 }
 

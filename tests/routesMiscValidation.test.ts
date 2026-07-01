@@ -195,7 +195,7 @@ describe('Team routes — /api/team/invite', () => {
 });
 
 describe('Team routes — invite lifecycle', () => {
-  it('registers the accept, resolve, members and revoke endpoints', async () => {
+  it('registers the accept, resolve, members, revoke and role endpoints', async () => {
     const register = await importTeamRoutes();
     const routes = captureRoutes(register);
     expect(routes.has('POST /api/team/accept')).toBe(true);
@@ -203,6 +203,25 @@ describe('Team routes — invite lifecycle', () => {
     expect(routes.has('GET /api/team/:teamId/members')).toBe(true);
     expect(routes.has('POST /api/team/invite/:token/revoke')).toBe(true);
     expect(routes.has('POST /api/team/member/remove')).toBe(true);
+    expect(routes.has('POST /api/team/member/role')).toBe(true);
+  });
+
+  it('member/role validates inputs and normalises the role', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/team/member/role')!;
+
+    const bad = mockReq({ body: { teamId: 'owner1', uid: 'u2' } }); // missing role
+    const badRes = mockRes();
+    await handler(bad, badRes);
+    expect(badRes.statusCode).toBe(400);
+    expect(badRes.body?.error).toMatch(/teamId, uid and role required/i);
+
+    const ok = mockReq({ body: { teamId: 'owner1', uid: 'u2', role: 'Editor' } });
+    const okRes = mockRes();
+    await handler(ok, okRes);
+    expect(okRes.body?.ok).toBe(true);
+    expect(okRes.body?.role).toBe('editor'); // 'Editor' normalised
   });
 
   it('accept requires authentication (401 without a verified token)', async () => {

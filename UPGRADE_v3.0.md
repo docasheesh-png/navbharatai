@@ -2708,10 +2708,14 @@
   ConsentBanner in `main.tsx`, **not** in App.tsx's router) detects a `?join=<token>` link, resolves the invite, and
   lets a signed-in user accept — joining the team + getting their role. Renders nothing on a normal load.
 - [x] `AppKnowledgeBase.ts` — new **Team Collaboration** entry (invite / roles / copy-link / accept / revoke).
-- **Honest deferrals (infra-bound, not faked):** (a) invite **email delivery** — NavBharatAI has no SMTP/provider
-  infra, so instead of a fake "sent" state the invite shares a real, working LINK; email can layer on later with no
-  data-model change. (b) Migrating the members-**list display** + role-load-on-login from the legacy localStorage/client
-  path to the new `GET …/members` route is a follow-up on the 693-line panel (the backend list route already exists).
+- [x] **Members list now loads from the backend (follow-up shipped 2026-07-01).** `TeamCollaboration` reads real
+  members from `GET /api/team/:teamId/members` on load (you + everyone who accepted an invite), mapped to the display
+  shape, with a localStorage offline cache. The **mock roster (Priya/Rahul `DEFAULT_MEMBERS`) is deleted.** Role-change
+  and remove now persist to the backend (`POST /api/team/member/role` — new, updates the member record **and** the RBAC
+  role via `setUserRole`; `POST /api/team/member/remove`). This gives the members-list route a real consumer.
+- **Honest deferrals (infra-bound, not faked):** invite **email delivery** — NavBharatAI has no SMTP/provider infra,
+  so instead of a fake "sent" state the invite shares a real, working LINK; email can layer on later with no data-model
+  change. (The separate activity-feed mock in this panel is a different feature, not part of the membership model.)
 - **Files:** new `src/server/lib/TeamStore.ts` + `tests/teamStore.test.ts`, `src/server/routes/team.ts`,
   `tests/routesMiscValidation.test.ts`, new `src/components/InviteAcceptGate.tsx`, `src/main.tsx`,
   `src/components/ide/TeamCollaboration.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.

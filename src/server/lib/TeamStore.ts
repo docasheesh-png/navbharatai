@@ -205,6 +205,17 @@ export async function removeMember(teamId: string, uid: string): Promise<void> {
   }
 }
 
+/** Update a member's role in the team. Best-effort. */
+export async function updateMemberRole(teamId: string, uid: string, role: InvitableRole): Promise<void> {
+  const db = getDb();
+  if (!db || !teamId || !uid) return;
+  try {
+    await db.collection(TEAMS_COLLECTION).doc(teamId).collection(MEMBERS_SUBCOLLECTION).doc(uid).set({ role }, { merge: true });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** List a team's active members (newest first). Never throws. */
 export async function listMembers(teamId: string): Promise<MemberRecord[]> {
   if (!teamId) return [];

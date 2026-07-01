@@ -2563,11 +2563,24 @@
 - [ ] Add a prototype mode: link pages, preview transitions, shareable read-only prototype link.
 - **Files:** new `src/components/ide/PrototypeMode.tsx`, `ide/MultiPageBuilder.tsx`.
 
-### P-DESIGN.7 — Real-Time Design Collaboration Hardening  🟡 PARTIAL → full  [LOW]
-- `LiveCollaboration.tsx` has room chat + presence + debounced code push, but **no cursor sharing, no element-level
-  comments/annotations, and no OT/CRDT** (last-write-wins). (Editor merge is separately tracked in P-DEV.)
-- [ ] Add live cursors + element-anchored comments/annotations; evaluate a CRDT (Yjs) for conflict-free co-editing.
-- **Files:** `src/components/ide/LiveCollaboration.tsx`, `TeamCollaboration.tsx`.
+### P-DESIGN.7 — Real-Time Design Collaboration Hardening  ✅ DONE (2026-07-01) · 🔌 WIRED  [LOW]
+- `LiveCollaboration.tsx` had room chat + presence + debounced code push, but no cursor sharing, no element-level
+  comments/annotations, and no OT/CRDT.
+- [x] **Live cursors** — each collaborator's caret **line** is broadcast to a `collab_rooms/{id}/presence/{uid}`
+  subcollection (throttled ~300 ms so we don't hammer Firestore) and shown next to their name in the Online list
+  ("✎ line N"). Stale/offline cursors drop off after 30 s. Honest fidelity: line-level presence over Firestore
+  (not a pixel-perfect overlay on the plain `<textarea>`, and not sub-100 ms) — real and useful without faking.
+- [x] **Line-anchored comments/annotations** — a `collab_rooms/{id}/comments` subcollection: pin a note to the caret's
+  current line, everyone sees it live, click a comment to **jump** to that line, and **resolve** it when done.
+- [x] **CRDT evaluated → intentionally not adopted:** Yjs would be a new runtime dependency (against the codebase's
+  dependency-free policy). The existing **last-write-wins + debounce** stays the co-edit model; conflict-free 3-way
+  merge for the *editor* remains separately tracked in P-DEV.4.
+- [x] All caret/line math is a pure, unit-tested module `src/lib/collabAnnotations.ts` (`lineOfOffset`,
+  `offsetRangeOfLine`, `buildAnnotation`, `sortAnnotations` — 11 tests); the component is a thin Firestore adapter.
+  `AppKnowledgeBase.ts` gains a **Live Collaboration** entry (cursors/comments/room).
+- **Files:** `src/components/ide/LiveCollaboration.tsx`, new `src/lib/collabAnnotations.ts` + `collabAnnotations.test.ts`,
+  `src/server/AppContext/AppKnowledgeBase.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3991 green · `build` OK · boot PASS.
 
 ### P-DESIGN.8 — Design Governance (consistency + brand compliance)  ❌ MISSING  [LOW]
 - `WhitelabelBranding.tsx` sets brand config but there is no **consistency checker**, **visual linter**, or

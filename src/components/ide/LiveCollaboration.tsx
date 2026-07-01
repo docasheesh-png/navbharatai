@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw } from 'lucide-react';
+import { Users, Video, Wifi, MessageSquare, Share2, Plus, Trash2, X, Check, Copy, Clock, Edit2, Globe, RefreshCw, MessageCircle, CheckCircle2 } from 'lucide-react';
 import { db } from '../../App';
 import { doc, setDoc, getDoc, onSnapshot, collection, addDoc, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
+
+/** A remote collaborator's live cursor position (which line they're editing). */
+interface RemotePresence {
+  id: string;
+  name: string;
+  color: string;
+  caretLine: number;
+  online: boolean;
+  updatedAt: number;
+}
 
 interface Collaborator {
   id: string;
@@ -49,10 +60,78 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
   const [myId] = useState(userId || genId());
   const [myColor] = useState(COLORS[Math.floor(Math.random() * COLORS.length)]);
   const [isEditing, setIsEditing] = useState(false);
+  // P-DESIGN.7 — live cursors + line-anchored comments.
+  const [presence, setPresence] = useState<RemotePresence[]>([]);
+  const [comments, setComments] = useState<CommentAnnotation[]>([]);
+  const [commentInput, setCommentInput] = useState('');
+  const [caretLine, setCaretLine] = useState(1);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const unsubChatRef = useRef<(() => void) | null>(null);
+  const unsubPresenceRef = useRef<(() => void) | null>(null);
+  const unsubCommentsRef = useRef<(() => void) | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const presenceThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCaretLineRef = useRef(1);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Publish my cursor line to the room's presence subcollection, throttled so we don't hammer
+  // Firestore on every keystroke (~300ms). Best-effort — a failed presence write never breaks editing.
+  const publishCaret = (line: number) => {
+    if (!activeRoom) return;
+    if (presenceThrottleRef.current) return; // a write is already scheduled this window
+    presenceThrottleRef.current = setTimeout(async () => {
+      presenceThrottleRef.current = null;
+      try {
+        await setDoc(
+          doc(db, 'collab_rooms', activeRoom, 'presence', myId),
+          { id: myId, name: myName, color: myColor, caretLine: lastCaretLineRef.current, online: true, updatedAt: Date.now() },
+          { merge: true },
+        );
+      } catch { /* best-effort presence */ }
+    }, 300);
+  };
+
+  // Track the caret's line as the user moves/edits, and broadcast it.
+  const handleCaret = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const line = lineOfOffset(el.value, el.selectionStart ?? 0);
+    lastCaretLineRef.current = line;
+    setCaretLine(line);
+    publishCaret(line);
+  };
+
+  // Add a comment anchored to the caret's current line.
+  const addComment = async () => {
+    if (!commentInput.trim() || !activeRoom) return;
+    const record = buildAnnotation({ id: genId(), line: caretLine, text: commentInput, authorId: myId, authorName: myName, color: myColor, timestamp: Date.now() });
+    setCommentInput('');
+    try {
+      await addDoc(collection(db, 'collab_rooms', activeRoom, 'comments'), {
+        line: record.line, text: record.text, authorId: record.authorId, authorName: record.authorName,
+        color: record.color, timestamp: record.timestamp, resolved: false,
+      });
+    } catch { /* best-effort — the onSnapshot listener reflects the write when it lands */ }
+  };
+
+  // Mark a comment resolved.
+  const resolveComment = async (id: string) => {
+    if (!activeRoom) return;
+    try {
+      await setDoc(doc(db, 'collab_rooms', activeRoom, 'comments', id), { resolved: true }, { merge: true });
+    } catch { /* best-effort */ }
+  };
+
+  // Jump the editor selection to a commented line.
+  const jumpToLine = (line: number) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const [start, end] = offsetRangeOfLine(el.value, line);
+    el.focus();
+    el.setSelectionRange(start, end);
+    setCaretLine(line);
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -60,6 +139,9 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
     return () => {
       unsubscribeRef.current?.();
       unsubChatRef.current?.();
+      unsubPresenceRef.current?.();
+      unsubCommentsRef.current?.();
+      if (presenceThrottleRef.current) clearTimeout(presenceThrottleRef.current);
     };
   }, []);
 
@@ -118,6 +200,32 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
         setChatMessages(msgs);
       });
 
+      // P-DESIGN.7 — live cursors: other collaborators' current line (presence subcollection).
+      unsubPresenceRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'presence'), (snap) => {
+        const now = Date.now();
+        const others: RemotePresence[] = [];
+        snap.forEach((d) => {
+          const p = d.data() as Partial<RemotePresence>;
+          // Show only other members seen in the last 30s (stale/offline cursors drop off).
+          if (p.id && p.id !== myId && p.online !== false && typeof p.updatedAt === 'number' && now - p.updatedAt < 30000) {
+            others.push({ id: String(p.id), name: String(p.name || 'User'), color: String(p.color || '#6366f1'), caretLine: Math.max(1, Number(p.caretLine) || 1), online: true, updatedAt: p.updatedAt });
+          }
+        });
+        setPresence(others);
+      });
+
+      // P-DESIGN.7 — line-anchored comments (comments subcollection).
+      unsubCommentsRef.current = onSnapshot(collection(db, 'collab_rooms', id, 'comments'), (snap) => {
+        const list: CommentAnnotation[] = snap.docs.map((d) => {
+          const c = d.data() as Partial<CommentAnnotation>;
+          return buildAnnotation({ id: d.id, line: Number(c.line) || 1, text: String(c.text || ''), authorId: String(c.authorId || ''), authorName: String(c.authorName || 'User'), color: String(c.color || '#6366f1'), timestamp: Number(c.timestamp) || 0 });
+        }).map((c, i) => ({ ...c, resolved: (snap.docs[i].data() as any).resolved === true }));
+        setComments(sortAnnotations(list));
+      });
+
+      // Register my initial presence.
+      try { await setDoc(doc(db, 'collab_rooms', id, 'presence', myId), { id: myId, name: myName, color: myColor, caretLine: 1, online: true, updatedAt: Date.now() }, { merge: true }); } catch { /* best-effort */ }
+
       setSharedCode(data.code || '');
       onCodeUpdate(data.code || '');
       setActiveRoom(id);
@@ -141,13 +249,20 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
         );
         await setDoc(roomRef, { ...d, collaborators: updated });
       }
+      // Drop my live cursor so teammates stop seeing it.
+      await setDoc(doc(db, 'collab_rooms', activeRoom, 'presence', myId), { online: false, updatedAt: Date.now() }, { merge: true });
     } catch {}
     unsubscribeRef.current?.();
     unsubChatRef.current?.();
+    unsubPresenceRef.current?.();
+    unsubCommentsRef.current?.();
+    if (presenceThrottleRef.current) { clearTimeout(presenceThrottleRef.current); presenceThrottleRef.current = null; }
     setActiveRoom(null);
     setStatus('idle');
     setCollaborators([]);
     setChatMessages([]);
+    setPresence([]);
+    setComments([]);
     localStorage.removeItem(STORAGE_KEY);
   };
 
@@ -280,30 +395,76 @@ export function LiveCollaboration({ generatedCode, onCodeUpdate, userId, userNam
               </div>
             </div>
             <textarea
+              ref={textareaRef}
               className="flex-1 bg-[#0d1117] font-mono text-xs text-white/80 p-4 resize-none focus:outline-none"
               value={sharedCode}
-              onChange={e => handleCodeChange(e.target.value)}
+              onChange={e => { handleCodeChange(e.target.value); handleCaret(); }}
+              onSelect={handleCaret}
+              onKeyUp={handleCaret}
+              onClick={handleCaret}
               placeholder="Write code here — all members see it live..."
             />
+            {/* P-DESIGN.7 — line-anchored comments composer + list */}
+            <div className="border-t border-white/5 bg-[#0d1117]">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+                <MessageCircle className="w-3.5 h-3.5 text-white/40" />
+                <span className="text-xs text-white/50">Comment on line {caretLine}</span>
+                <input
+                  className="flex-1 bg-[#161b22] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white placeholder-white/20 focus:outline-none focus:border-blue-500/40"
+                  placeholder={`Add a note for line ${caretLine}…`}
+                  value={commentInput}
+                  onChange={e => setCommentInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addComment(); }}
+                />
+                <button onClick={addComment} disabled={!commentInput.trim()} className="px-2 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg text-[10px] text-white transition-all">Add</button>
+              </div>
+              {comments.length > 0 && (
+                <div className="max-h-40 overflow-y-auto p-2 space-y-1.5">
+                  {comments.map(c => (
+                    <div key={c.id} className={`flex items-start gap-2 px-2 py-1.5 rounded-lg ${c.resolved ? 'bg-white/5 opacity-60' : 'bg-[#161b22]'}`}>
+                      <button onClick={() => jumpToLine(c.line)} title={`Go to line ${c.line}`} className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: c.color + '30', color: c.color }}>
+                        L{c.line}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-[10px] text-white/80 break-words ${c.resolved ? 'line-through' : ''}`}>{c.text}</p>
+                        <p className="text-[8px] text-white/30 mt-0.5">{c.authorName}</p>
+                      </div>
+                      {!c.resolved && (
+                        <button onClick={() => resolveComment(c.id)} title="Resolve" className="text-white/30 hover:text-emerald-400 transition-colors shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right Panel: Collaborators + Chat */}
           <div className="w-64 flex flex-col border-l border-white/5 bg-[#161b22]">
-            {/* Collaborators */}
+            {/* Collaborators — with live cursor line (P-DESIGN.7) */}
             <div className="p-3 border-b border-white/5">
               <p className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Online ({collaborators.filter(c => c.online).length})</p>
               <div className="space-y-1.5">
-                {collaborators.map(c => (
-                  <div key={c.id} className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ backgroundColor: c.color }}>
-                      {c.name[0].toUpperCase()}
+                {collaborators.map(c => {
+                  const remote = c.id !== myId ? presence.find(p => p.id === c.id) : null;
+                  const line = c.id === myId ? caretLine : remote?.caretLine;
+                  return (
+                    <div key={c.id} className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ backgroundColor: c.color }}>
+                        {c.name[0].toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-white truncate">{c.name} {c.id === myId ? '(you)' : ''}</p>
+                        {line != null && (c.id === myId || remote) && (
+                          <p className="text-[8px] text-white/35">✎ line {line}</p>
+                        )}
+                      </div>
+                      <div className={`w-1.5 h-1.5 rounded-full ${c.online ? 'bg-emerald-400' : 'bg-white/20'}`} title={c.online ? 'online' : 'offline'} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] text-white truncate">{c.name} {c.id === myId ? '(you)' : ''}</p>
-                    </div>
-                    <div className={`w-1.5 h-1.5 rounded-full ${c.online ? 'bg-emerald-400' : 'bg-white/20'}`} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

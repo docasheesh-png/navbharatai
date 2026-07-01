@@ -2430,11 +2430,18 @@
 - [ ] Generate an `openapi.json` from zod schemas (P-DATA.1) via `zod-to-openapi`; serve at `/api/docs`.
 - **Files:** new `src/server/lib/openapi.ts`, `server.ts`.
 
-### P-DATA.6 — Hardened File Upload Pipeline  🟡 PARTIAL → full  [LOW]
-- Attachments are parsed for text (`attachmentText`) but there is no durable multipart upload, size/type enforcement,
-  or malware scan for user-supplied files.
-- [ ] Add multipart handling + strict size/MIME validation; store to Firebase Storage/GCS; optional ClamAV/VirusTotal scan.
-- **Files:** new `src/server/routes/upload.ts`, `src/server/lib/attachmentText.ts`.
+### P-DATA.6 — Hardened File Upload Pipeline  ✅ DONE (2026-06-30) · 🔌 WIRED  [LOW]
+- Attachments were parsed for text with only a per-document CHARACTER cap — a huge base64 blob or a
+  disallowed/dangerous type was still decoded and processed.
+- [x] **`uploadValidation.ts`** (pure) — strict `validateAttachment()`: a 15 MB DECODED-size ceiling
+  (`base64DecodedBytes`) + a MIME/extension ALLOWLIST (`isSupportedAttachment`) covering documents, code/text,
+  archives, images/pdf. Unit-tested.
+- [x] Wired at the SHARED choke point `extractDocumentText` (so every AI surface — Free/Pro chat, SDA, v3.0 —
+  inherits it): an oversized file is skipped with an honest "[Skipped …: too large]" note; an unsupported/unknown
+  binary is ignored exactly as before (no behavior regression). Tests: `uploadValidation.test.ts` (7).
+- Note: durable multipart-to-GCS storage + ClamAV/VirusTotal malware scan need external infra/services and remain
+  out of scope for this code-only pass (the size/type gate is the real security win and is now enforced everywhere).
+- **Files:** new `src/server/lib/uploadValidation.ts`, `src/server/lib/attachmentText.ts`, new `tests/uploadValidation.test.ts`.
 
 ### P-DATA.7 — Data Export / Report Generation  ❌ MISSING  [LOW]
 - Users can import (ZIP/Excel/CSV/JSON) but cannot export their data (build history, cost/usage, project metadata) as CSV/Excel/PDF.

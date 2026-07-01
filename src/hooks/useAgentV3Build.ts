@@ -61,8 +61,13 @@ export interface UseAgentV3Build {
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
   loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
-  /** List the user's saved v3.0 conversations (metadata only) for the history menu. */
-  listConversations: (opts?: { userId?: string; email?: string }) => Promise<ConversationMeta[]>;
+  /**
+   * List the user's saved v3.0 conversations (metadata only) for the history menu.
+   * Always returns an honest result: `error` is set (and `items` is []) whenever the list
+   * could NOT be determined (not signed in, network/server failure) — the caller must NOT
+   * treat that the same as a genuinely empty history.
+   */
+  listConversations: (opts?: { userId?: string; email?: string }) => Promise<{ items: ConversationMeta[]; error?: string }>;
   /** Delete a saved conversation (history-menu delete action). Returns true on success. */
   deleteConversation: (id: string, opts?: { userId?: string; email?: string }) => Promise<boolean>;
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn. */
@@ -292,20 +297,24 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, [running]);
 
-  const listConversations = useCallback(async (opts?: { userId?: string; email?: string }): Promise<ConversationMeta[]> => {
+  const listConversations = useCallback(async (opts?: { userId?: string; email?: string }): Promise<{ items: ConversationMeta[]; error?: string }> => {
     const uid = opts?.userId ?? userIdRef.current;
     const em = opts?.email ?? emailRef.current;
-    if (!uid) return [];
+    if (!uid) return { items: [], error: 'Not signed in.' };
     try {
       const params = new URLSearchParams();
       params.set('userId', uid);
       if (em) params.set('email', em);
       const res = await fetch(`/api/agentv3/conversations?${params.toString()}`);
-      if (!res.ok) return [];
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({} as { error?: string }));
+        return { items: [], error: body?.error || `Server error (${res.status}).` };
+      }
       const json = await res.json().catch(() => ({}));
-      return Array.isArray(json?.conversations) ? (json.conversations as ConversationMeta[]) : [];
-    } catch {
-      return []; // best-effort — the history menu just shows nothing on failure
+      const items = Array.isArray(json?.conversations) ? (json.conversations as ConversationMeta[]) : [];
+      return { items };
+    } catch (err) {
+      return { items: [], error: err instanceof Error ? err.message : 'Network error — could not reach the server.' };
     }
   }, []);
 

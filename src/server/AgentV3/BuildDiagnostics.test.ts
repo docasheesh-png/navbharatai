@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery, deriveRootCause } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -142,6 +142,28 @@ describe('problems (P-REPORT.2 — noise-free "problems only" view)', () => {
     const d = fresh();
     d.finish(true, 'done');
     expect(d.report().problems).toEqual([]);
+  });
+
+  it('is bounded to the most recent entries even when a build produces an unusually large number of real problems', () => {
+    const d = fresh();
+    for (let i = 0; i < 400; i++) d.record({ phase: 'build', severity: 'error', code: 'E', message: `error ${i}`, autoResolved: false });
+    const r = d.report();
+    expect(r.problems.length).toBeLessThanOrEqual(300);
+    expect(r.problems[r.problems.length - 1].message).toBe('error 399'); // newest kept
+  });
+});
+
+describe('capProblems (bounds the problems view; shared by BuildDiagnostics.report() and trimReportForStorage)', () => {
+  it('leaves a short list untouched', () => {
+    const list = [{ ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'E', message: 'x', autoResolved: false }];
+    expect(capProblems(list)).toEqual(list);
+  });
+  it('keeps the newest (tail) entries when over the cap', () => {
+    const list = Array.from({ length: 350 }, (_, i) => ({ ts: i, phase: 'build' as const, severity: 'error' as const, code: 'E', message: `m${i}`, autoResolved: false }));
+    const capped = capProblems(list);
+    expect(capped.length).toBe(300);
+    expect(capped[capped.length - 1].message).toBe('m349');
+    expect(capped[0].message).toBe('m50'); // the oldest 50 were dropped
   });
 });
 

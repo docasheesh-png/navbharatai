@@ -718,6 +718,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
+  // Download the FULL human/Claude-readable text render (root cause first, problems-only, plus the
+  // complete AI Diagnosis Bundle — sandbox commands, LLM I/O, preview errors, reviewer's full findings)
+  // instead of raw JSON. Server-rendered (renderDiagnosticsText) so the client never re-implements the
+  // same formatting.
+  const [downloadingDiagText, setDownloadingDiagText] = useState(false);
+  const downloadDiagnosticsText = async () => {
+    if (downloadingDiagText || !state.workspaceId) return;
+    setDownloadingDiagText(true);
+    try {
+      const params = new URLSearchParams({ workspaceId: state.workspaceId, format: 'text' });
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      if (selectedHistoryBuildId) params.set('buildId', selectedHistoryBuildId);
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (!res.ok) { alert('No build report yet — build an app first, then download the report.'); return; }
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `navbharatai-v3-build-diagnostics-${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
+    } finally {
+      setDownloadingDiagText(false);
+    }
+  };
+
   // One-tap COPY of the build report to the clipboard — so it can be pasted straight into a support
   // chat without the download → find-file → upload dance. Uses the same client copy / durable
   // server fallback as the download. Leads with a short, READABLE summary (root cause + the real
@@ -1093,11 +1125,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <button
             onClick={downloadDiagnostics}
             disabled={downloadingDiag}
-            title="Download the diagnostics report from your last build — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
+            title="Download the diagnostics report from your last build (JSON) — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             {downloadingDiag ? 'Preparing…' : 'Build report'}
+          </button>
+          <button
+            onClick={downloadDiagnosticsText}
+            disabled={downloadingDiagText || !state.workspaceId}
+            title="Download the SAME report as a readable text document — root cause first, only real problems, plus the full sandbox/LLM/reviewer detail. Easier to read than the JSON."
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {downloadingDiagText ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileCode className="w-3.5 h-3.5" />}
+            {downloadingDiagText ? 'Preparing…' : 'Text report'}
           </button>
           <button
             onClick={copyDiagnostics}

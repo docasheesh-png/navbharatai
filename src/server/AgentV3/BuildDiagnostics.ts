@@ -178,6 +178,9 @@ export interface BuildDiagnosticsMeta {
 
 /** Hard cap on timeline entries so a runaway loop can't grow the report without bound. */
 const MAX_ISSUES = 2000;
+/** Cap on the "problems" (noise-free) view — kept well under MAX_ISSUES so it can never itself
+ *  bypass the storage byte-budget even on a build with an unusually large number of real problems. */
+const MAX_PROBLEMS = 300;
 /** Caps for the AI Diagnosis Bundle channels (a long build runs many commands / model turns). */
 const MAX_COMMANDS = 300;
 const MAX_LLM_CALLS = 300;
@@ -201,6 +204,17 @@ function capTail(s: string | undefined, cap: number): string {
 function capHead(s: string | undefined, cap: number): string {
   const t = String(s ?? '');
   return t.length <= cap ? t : `${t.slice(0, cap)}…[${t.length - cap} chars truncated]`;
+}
+
+/**
+ * Bound the "problems" view to the most recent `MAX_PROBLEMS` entries. Exported so
+ * `trimReportForStorage` (DiagnosticsStore.ts) can RECOMPUTE `problems` from the storage-trimmed
+ * `issues` array with the SAME cap — otherwise a `problems` list derived from the pre-trim issues
+ * could reference entries no longer present in the stored `issues` timeline (an inconsistent report)
+ * or itself bypass the Firestore byte-budget safety net. PURE + unit-testable.
+ */
+export function capProblems(problems: readonly BuildIssue[]): BuildIssue[] {
+  return problems.length <= MAX_PROBLEMS ? [...problems] : problems.slice(problems.length - MAX_PROBLEMS);
 }
 
 export class BuildDiagnostics {
@@ -553,7 +567,7 @@ export class BuildDiagnostics {
         unresolved: this.issues.filter((i) => !i.autoResolved).length,
       },
       issues: [...this.issues],
-      problems: this.issues.filter((i) => i.severity !== 'info'),
+      problems: capProblems(this.issues.filter((i) => i.severity !== 'info')),
       rootCause: deriveRootCause({ issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok }),
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,

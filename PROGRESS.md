@@ -6518,3 +6518,27 @@ App.tsx (root cause of the recurring "Hello World" preview); the reviewer finds 
 but nothing auto-repairs them; a stale-checkpoint restore silently lost 12 files' worth of recent edits;
 contradictory simultaneous "no files produced" + "here's what I built" messages. Queued for a future
 pass if the admin wants them tackled.
+
+## 2026-07-01 — build report follow-up: consistency fix + text report reachable
+
+Two more genuine gaps found while reviewing the just-shipped build-report redesign (admin asked
+"kuch aur add karna hai?"):
+
+1. **Consistency bug**: the new `problems` field was computed once from the FULL (pre-storage-trim)
+   issues array and stored as-is — but `trimReportForStorage()` separately trims `issues` to the last
+   500 for the Firestore byte budget. A `problems` entry referencing something OLDER than that window
+   would dangle (present in `problems`, absent from the stored `issues`), and `problems` itself had no
+   cap of its own, so an unusually large number of real problems could still bypass the byte-budget
+   safety net. Fixed: new pure `capProblems()` (300-cap, keeps the newest) is now the SINGLE source of
+   truth, used identically by `BuildDiagnostics.report()` (live) and RECOMPUTED from the trimmed issues
+   inside `trimReportForStorage()` (storage) — the two can never diverge. Applied the same fix to
+   `saveDiagnosticsHistory`'s over-budget safety net for parity with `saveDiagnostics`.
+2. **Shelf-ware wired in**: `renderDiagnosticsText()` — a complete, already-tested, human/Claude-
+   readable renderer (root cause, problems, full sandbox/LLM/preview/reviewer detail) — was reachable
+   from NO button anywhere in the product. `GET /api/agentv3/diagnostics` now supports `?format=text`
+   (works for the latest report, a history entry, or a specific buildId), and a new "Text report" button
+   in the v3.0 header downloads it as a readable `.txt` — a genuinely comprehensive document, not just
+   the smaller inline summary "Copy report" builds client-side.
+
+Tests: +5 (2 capProblems, 2 trimReportForStorage consistency, 1 BuildDiagnostics.report() problems-cap).
+Gate: frontend tsc 0, server tsc 0, vitest 4034/4034 PASS, boot:check PASS, Playwright root-page load clean.

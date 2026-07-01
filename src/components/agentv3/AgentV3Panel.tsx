@@ -54,7 +54,7 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -1045,10 +1045,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // Lift the v3.0 preview state (live URL + workspace) up to the app shell so the MAIN slide-out
   // "Preview" menu can render the SAME working v3.0 preview — not the retired v2.0 generatedCode.
+  // `framework`/`running` are ALSO lifted (2026-07-01) so the sidebar's PreviewSurface can reach full
+  // feature parity with this in-panel one (auto-resume + framework-aware Diagnose need them).
   useEffect(() => {
-    onPreviewState?.({ previewUrl: state.previewUrl, workspaceId: state.workspaceId });
+    onPreviewState?.({ previewUrl: state.previewUrl, workspaceId: state.workspaceId, framework, running });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.previewUrl, state.workspaceId]);
+  }, [state.previewUrl, state.workspaceId, framework, running]);
+
+  // "Fix with AI" clicked from the SIDEBAR preview (outside this panel's own UI) — prefill the chat
+  // input with the error and bring the chat into view, mirroring this panel's OWN onFixError handler
+  // for its in-panel Preview tab (below). Fires on each new pendingFix (nonce change).
+  useEffect(() => {
+    if (!pendingFix?.text) return;
+    setPrompt(pendingFix.text);
+    setShowWorkspace(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFix?.nonce]);
 
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.

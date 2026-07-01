@@ -6930,3 +6930,59 @@ drawer (`SidebarNav.tsx`) — a merged Firestore (`chat_sessions`) + prop-based 
 
 Gate: frontend tsc 0, vitest 4136/4136 PASS, boot:check PASS. (Server untouched — no server tsc re-run
 needed; frontend-only change.)
+
+## 2026-07-01 — "One body, one brain": Code Studio's AI is now v3.0, Preview reaches full parity
+
+Admin's framing: the 5 sidebar organs (v3.0, Preview, Files, Code Studio/IDE, Git) should behave like
+"organs of one body" — a change in one should show up everywhere else. Research confirmed: Files +
+Code Studio's editor + Git already share ONE live state (genuinely fine); the two real gaps were (1)
+Code Studio's built-in AI chat was wired to the separate "NavBharatAI Free" text-only endpoint — which
+the server explicitly instructs to never generate code, and which the free tier has file/canvas context
+disabled for server-side — so it could only talk ABOUT an open file, never act on one; and (2) the
+sidebar's global "Preview" menu item was MISSING 3 props (`framework`, `autoResume`, `onFixError`) that
+the in-panel v3.0 "Preview" tab already had, even though both render the exact same `PreviewSurface`
+component — so the sidebar Preview never auto-resumed a dead sandbox and had no "Fix with AI" button.
+
+**Fix 1 — Preview parity (small, safe):** lifted `framework` + `running` from `AgentV3Panel` up through
+its existing `onPreviewState` callback (already used to lift `previewUrl`/`workspaceId`) into `App.tsx`'s
+`v3Preview` state, and threaded them into `ViewPanels.tsx`'s sidebar `<PreviewSurface>` call alongside a
+new `onFixError` bridge (`v3PendingFix` state in `App.tsx`, passed down as a new `pendingFix` prop through
+`ProV3Surface` → `AgentV3Panel`, consumed by a new effect that prefills the chat input exactly like the
+in-panel Preview's own `onFixError` handler already does). Zero new components — same `PreviewSurface`,
+same feature set, from either entry point.
+
+**Fix 2 — Code Studio's AI chat IS NavBharatAI Pro v3.0 (the bigger change):** new component
+`AgentV3MiniChat.tsx` runs its own `useAgentV3Build()` instance but targets the EXACT SAME session as
+the main v3.0 panel via `getAgentV3SessionId`/`getAgentV3WorkspaceId` (the same localStorage-backed id
+the panel already persists) — no cross-component state store exists in this codebase, so this is a
+second window onto the same server-side session/memory, not a shared React object. It reuses the
+resume()/subscribeLive() cross-device-mirror machinery (built earlier today for "two viewers, one live
+build") to auto-attach if a build for this exact session is already running, and loads the account's
+most-recent conversation ONLY if its `workspaceId` matches this session (never guesses — an honest empty
+thread beats risking the WRONG conversation, since the conversation store's own ids are random UUIDs
+unrelated to sessionId, so there's no way to look up "the" conversation for a session directly). Sending
+a message calls `start(text, {sessionId})` — the SAME server endpoint/session the v3.0 panel uses, so any
+file it writes appears everywhere else (Files, Code Studio's own editor, Git) exactly like a v3.0-panel
+edit does.
+
+Also found (and fixed) that Code Studio's "AI" trigger button was UNREACHABLE in practice: both call
+sites did `onOpenProChat?.() : handleScreenChange('ai')`, and `onOpenProChat` was ALWAYS provided by the
+caller — so clicking "AI" inside Code Studio always navigated away to the full v3.0 panel, never actually
+showing Code Studio's own embedded AI screen. Removed the `onOpenProChat` branch (and the now-fully-dead
+prop) entirely so the button now shows the embedded, correctly-wired `AgentV3MiniChat` in place.
+
+A code-review pass (medium effort) on this diff found one real issue: `AgentV3MiniChat` recomputed
+`getAgentV3SessionId`/`getAgentV3WorkspaceId` (real localStorage I/O) on every render instead of once —
+fixed by memoizing via a ref keyed on `userId`. Six other candidate findings (a loadConversation/reset
+mismatch-race, a reset-vs-resume generation-guard interaction, multi-subscriber safety on `/attach`, a
+`pendingFix` effect loop risk, the removed `onOpenProChat` prop's blast radius, and `autoResume`'s default
+before `onPreviewState` first fires) were all investigated and refuted — the existing generation-guard/
+gating logic already covers them.
+
+Manually verified in a real browser (Playwright + the pre-installed Chromium, no test credentials
+available so the signed-in flow wasn't end-to-end exercised): app boots clean, "Recent Chats" removal
+confirmed gone from the sidebar, clicking Code Studio's "AI" button now shows the embedded
+`AgentV3MiniChat` (correctly gated with "Sign in to chat with NavBharatAI Pro v3.0 right here in Code
+Studio" for an anonymous session) instead of redirecting to login — no crashes, no new console errors.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4136/4136 PASS, boot:check PASS.

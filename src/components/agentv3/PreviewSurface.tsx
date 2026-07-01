@@ -6,7 +6,7 @@
 // build never writes — so the preview looked permanently "disconnected" from the v3.0 engine.
 
 import { useCallback, useEffect, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2, Wand2 } from 'lucide-react';
+import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope } from 'lucide-react';
 import { auth } from '../../App';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
@@ -30,7 +30,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
-export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; onFixError?: (errorText: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; onFixError?: (errorText: string) => void }) {
   const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
@@ -38,8 +38,42 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
   const [err, setErr] = useState<string>('');
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   const [liveReloadKey, setLiveReloadKey] = useState(0);
+  // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
+  // port-wait/one retry) instead of guessing, so the empty state can show the REAL internal
+  // reason the live preview isn't up (and self-heal + restore the URL when it actually comes up).
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagResult, setDiagResult] = useState<{ ok: boolean; reason: string; detail: string } | null>(null);
+  const [foundUrl, setFoundUrl] = useState<string>('');
 
   useEffect(() => { if (url) setMode('live'); }, [url]);
+  useEffect(() => { setFoundUrl(''); setDiagResult(null); }, [workspaceId]); // a new workspace never inherits a stale diagnosis
+
+  const runDiagnose = useCallback(async () => {
+    if (!workspaceId) return;
+    setDiagnosing(true);
+    setDiagResult(null);
+    try {
+      const res = await fetch('/api/agentv3/preview-diagnose', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, userId, email, framework }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reason = typeof data?.reason === 'string' ? data.reason : (typeof data?.error === 'string' ? data.error : 'Diagnosis failed — no details returned.');
+      const detail = typeof data?.detail === 'string' ? data.detail : '';
+      setDiagResult({ ok: !!data?.ok, reason, detail });
+      if (data?.ok && typeof data?.previewUrl === 'string' && data.previewUrl) {
+        setFoundUrl(data.previewUrl);
+        setMode('live');
+      }
+    } catch (e) {
+      setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
+    } finally {
+      setDiagnosing(false);
+    }
+  }, [workspaceId, userId, email, framework]);
+
+  const effectiveUrl = url || foundUrl;
 
   const refreshSandbox = useCallback(async () => {
     try {
@@ -112,16 +146,16 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
     </div>
   );
 
-  if (mode === 'live' && url) {
+  if (mode === 'live' && effectiveUrl) {
     return (
       <div className="h-full flex flex-col">
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
           {switcher}
-          <span className="truncate flex-1">{url}</span>
+          <span className="truncate flex-1">{effectiveUrl}</span>
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
-          <a href={url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
+          <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
-        <iframe key={liveReloadKey} title="Live preview" src={url} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
       </div>
     );
   }
@@ -149,6 +183,27 @@ export function PreviewSurface({ url, workspaceId, userId, email, onFixError }: 
                 <p>The live server appears the moment the agent starts your app. While you wait, the <button onClick={() => setMode('inbrowser')} className="underline hover:text-zinc-200">In-browser preview</button> renders the current files instantly.</p>
                 {sandbox?.previewDomainWarning && (
                   <p className="text-amber-400/80 text-xs">{sandbox.previewDomainWarning}</p>
+                )}
+                {workspaceId && (
+                  <div className="pt-1">
+                    <button
+                      onClick={() => void runDiagnose()}
+                      disabled={diagnosing}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
+                      title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"
+                    >
+                      {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Stethoscope className="w-3.5 h-3.5" />}
+                      {diagnosing ? 'Diagnosing…' : 'Diagnose'}
+                    </button>
+                  </div>
+                )}
+                {diagResult && (
+                  <div className={`mt-2 text-left rounded-lg border p-3 text-xs ${diagResult.ok ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200' : 'border-amber-800 bg-amber-950/30 text-amber-200'}`}>
+                    <p className="font-medium">{diagResult.reason}</p>
+                    {diagResult.detail && (
+                      <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] text-zinc-400 font-mono">{diagResult.detail}</pre>
+                    )}
+                  </div>
                 )}
               </>
             )}

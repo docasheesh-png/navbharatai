@@ -6353,3 +6353,50 @@ vitest 3897/3897 PASS, boot:check PASS.
 
 Next reliability gaps (prioritized, follow-up PRs): G4 production-build gate (flag-gated),
 durable↔live workspace-consistency check, orphan/unused-import detection, stuck-tool auto-recovery.
+
+## 2026-07-01 — PARTIAL-hardening batch: 4 roadmap PARTIALs shipped rock-solid (#770–#773)
+
+Continued the "🟡 partial → rock-solid, one by one" march. Each shipped via the full cycle
+(real feature → tsc+vitest+build+boot gate → unique branch → PR → CI green → squash-merge →
+roadmap updated). All real, wired, tested — no shelf-ware.
+
+1. **P-DEPLOY.6 (#770)** — MultiCloudDeploy made honest + real. Removed dead fake `LOG_MESSAGES`
+   ("Deployment successful!" placeholder logs). Added a REAL in-app Vercel deploy: when the user
+   supplies their own `VERCEL_TOKEN`, "Deploy" publishes via the existing `/api/pro/deploy`
+   (`deployVercel` → real Vercel `/v13/deployments`) and shows the true live URL; no token → honest
+   CLI-instructions path (never a faked success).
+2. **P-DESIGN.3 (#771)** — centralized Platform Accessibility Engine `src/lib/a11y.ts` (pure logic +
+   thin DOM adapter, like the chart lib). Focus-trap adopted in the Drawer/BottomSheet modals (they
+   were `aria-modal` but let focus escape — WCAG 2.4.3); real Text-Size/zoom control (90–140 %,
+   `--nb-font-scale`); tri-state Motion pref (On/Reduced/**System** honors OS `prefers-reduced-motion`,
+   opt-in so the animations-on default is respected). 17 unit tests. Color-blind palettes + a formal
+   CI WCAG gate honestly deferred.
+3. **P-COLLAB.1 (#772)** — durable team membership + real token-based invite acceptance. New
+   `TeamStore.ts` (Firestore, VITEST-skip, pure builders, 10 tests): `teamInvites/{token}` +
+   `teams/{teamId}/members/{uid}`. Full lifecycle in `routes/team.ts` (invite/resolve/accept/revoke/
+   member-remove/list); accept **grants the RBAC role** via `setUserRole` (wires into P-SEC.1). Frontend:
+   TeamCollaboration sends the owner's ID token (so the RBAC gate passes), surfaces a real copyable
+   invite LINK, real backend revoke; new isolated `InviteAcceptGate` (`?join=<token>`, mounted in
+   main.tsx not App.tsx). Email delivery deferred (no SMTP infra → real link-based invite instead).
+4. **P-DESIGN.7 (#773)** — live cursors + line-anchored comments in LiveCollaboration, over the
+   existing Firestore room channel (no new dep). Presence subcollection broadcasts each teammate's caret
+   LINE (throttled ~300 ms; shown as "✎ line N"); comments subcollection with jump-to-line + resolve.
+   Pure `collabAnnotations.ts` (11 tests). CRDT/Yjs evaluated → not adopted (dependency-free policy).
+
+Every user-facing change also updated `AppKnowledgeBase.ts` (Text Size, Motion, Team Collaboration,
+Live Collaboration entries) per the mandatory sync rule.
+
+**Remaining item-level PARTIALs that are doable but NOT safe for the autonomous rapid cycle — deferred
+honestly (see roadmap 🔶 notes), needs an admin decision:**
+- **P-PE.5 (prompt A/B):** a real variant B changes the LIVE builder system prompt = core Engineer-AI
+  behavior change → needs admin to define/approve the experiment (Engineer-AI constraints + safeguard #3).
+- **P-COLLAB.2 (workspace ACL):** verified the target routes (`/api/sync/:userId`) are currently
+  UNAUTHENTICATED — enforcing there *adds* auth = breakage risk; and the `requireUserMatch` routes are
+  sensitive (secrets/webhooks) that members must never see → security risk. Needs a careful, reviewed
+  per-route pass, not the rapid cycle. (Member data model already exists from P-COLLAB.1.)
+
+The remaining item-level PARTIALs classified earlier as shelf-ware (no genuine consumer) are still
+correctly NOT built (P-PME.12, P-CGE.12, P-AI.17, P-AI.15, P-DEPLOY.3, P-DEPLOY.4, P-COLLAB.4).
+
+Gate on every PR: frontend tsc 0, server tsc 0 (when touched), vitest all-green (grew to 3991 as tests
+were added), `npm run build` OK, `boot:check` PASS.

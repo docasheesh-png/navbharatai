@@ -585,9 +585,17 @@ export class BuildDiagnostics {
  * never has to hunt through hundreds of timeline entries to find out WHY a build struggled. Checked in
  * priority order, most specific first: the deterministic BuildOutcome classification already recorded
  * on the timeline (OUTCOME_*) → the reviewer's first [CRITICAL] finding (a real, guaranteed-to-break
- * problem it caught) → the first fully-captured error → the first real (non-info) problem on the
- * timeline → an honest "nothing wrong found" once the build has actually settled. Pure + exported +
- * unit-testable — this is what problem #3 ("root cause bhi mil jaye") asked for.
+ * problem it caught) → the first fully-captured error → the first REAL (non-info) problem on the
+ * timeline, itself prioritized by how concerning it actually is (see below) → an honest "nothing wrong
+ * found" once the build has actually settled. Pure + exported + unit-testable — this is what problem
+ * #3 ("root cause bhi mil jaye") asked for.
+ *
+ * Within the "first real problem" tier: an UNRESOLVED problem (autoResolved:false — something that
+ * happened and was never fixed) beats a merely-routine, auto-resolved one (e.g. a provider timeout that
+ * successfully fell back — the resilience mechanism WORKING, not a failure), which beats a bare warning.
+ * Confirmed against a real report where a routine "Provider GLM failed — falling back" (auto-resolved,
+ * the system recovering on its own) was chosen as root cause ahead of a genuine unresolved
+ * `pkill` command failure later in the same build — backwards; the unresolved one is the real signal.
  */
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
@@ -603,7 +611,9 @@ export function deriveRootCause(input: {
     if (m) return `Critical issue found by review: ${m[1].trim()}`;
   }
   if (errors && errors.length > 0) return `Error: ${errors[0].message.split('\n')[0].slice(0, 300)}`;
-  const problem = issues.find((i) => i.severity !== 'info');
+  const problem = issues.find((i) => i.severity !== 'info' && !i.autoResolved)
+    ?? issues.find((i) => i.severity === 'error')
+    ?? issues.find((i) => i.severity !== 'info');
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';
   if (ok === false) return 'Build did not succeed, but no specific error was captured.';

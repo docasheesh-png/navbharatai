@@ -1905,9 +1905,27 @@ export function registerAgentV3Routes(app: Express): void {
     // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
     // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
     const deadlineMs = maxBuildSeconds() * 1000;
-    const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(() => {
+    const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(async () => {
       if (rb.ended) return;
       try { abort.abort(); } catch { /* best-effort */ }
+      // GUARANTEE the durable file save actually happens BEFORE claiming "your files are saved" below
+      // (real build report evidence: a build cut off by this exact deadline left its just-written files
+      // NEVER durably saved — only the fire-and-forget 3s onFileWrite debounce had a chance to run, and
+      // it can be starved by back-to-back writes or simply not fire before the process is reclaimed — so
+      // the in-browser preview later found nothing and returned the misleading "No files to preview
+      // yet" 404 even though the workspace genuinely had files). Awaited + best-effort: mirrors the
+      // "DURABLE FILE SAVE" block at normal completion (captured writes ∪ a live sandbox scan).
+      try {
+        if (writtenFiles.size > 0) {
+          const toSave: Record<string, string> = {};
+          try {
+            const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+            Object.assign(toSave, scanned.files);
+          } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
+          for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+          await saveWorkspaceFiles(workspaceId, toSave);
+        }
+      } catch { /* durable file save is best-effort — never blocks the deadline finalization */ }
       // SUCCESS-AWARE DEADLINE: if the build ALREADY produced a successful result (the app is built,
       // compiled and durably saved) and the deadline only fired during ADVISORY post-build work
       // (the quality review / preview-heal / console-autofix / memory persist), finalize as SUCCESS —
@@ -1943,6 +1961,12 @@ export function registerAgentV3Routes(app: Express): void {
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
+    // DURABLE FILE CAPTURE, hoisted here (not just inside the build-execution block below) so BOTH the
+    // deadline-timeout handler above and the crash catch below — a plain `try{}`/`catch{}` block is its
+    // own separate scope from an inner `const` — can see and durably flush it. Records the exact content
+    // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
+    // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
+    const writtenFiles = new Map<string, string>();
 
     // P-PME.4 — LIVE, ADAPTIVE ETA state. The up-front estimate (set below at build start) is a
     // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
@@ -2251,10 +2275,7 @@ export function registerAgentV3Routes(app: Express): void {
         (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
         userId,
       );
-      // DURABLE FILE CAPTURE: record the exact content of every file the agent writes (reliable —
-      // straight from the write op, not a later listFiles that can come back empty). Persisted to
-      // Firestore at build end so the source survives a sandbox loss and restores next session.
-      const writtenFiles = new Map<string, string>();
+      // writtenFiles is declared further up (hoisted so the deadline-timeout/crash paths can see it too).
       // Fix 2 — PROGRESSIVE SERVER PERSISTENCE: save every written file to Firestore
       // within 3 s of each write. If the client connection drops mid-build (tab close,
       // network hiccup), the files already written are safely on the server. The final
@@ -3393,6 +3414,15 @@ export function registerAgentV3Routes(app: Express): void {
           saveDiagnosticsHistory(workspaceId, crashReport).catch(() => {});
         }
       } catch { /* diagnostics are best-effort */ }
+      // Same durable-file-save guarantee as the deadline-timeout path: a crash mid-build must not
+      // strand whatever files WERE captured behind only the flaky fire-and-forget 3s debounce. In its
+      // own try/catch — `writtenFiles` may not be declared yet if the crash happened very early (before
+      // any file was written), which would throw a ReferenceError here and must not block the error emit.
+      try {
+        if (writtenFiles.size > 0) {
+          saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
+        }
+      } catch { /* writtenFiles not yet in scope (crash before any write), or save failed — best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       // Flush the LAST background checkpoint so the finished app is captured in History/restore.

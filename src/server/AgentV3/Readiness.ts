@@ -37,6 +37,7 @@ const PENALTY = {
   unresolvedImport: 25, // breaks the build
   cycle: 8,
   layering: 5,
+  orphanComponent: 6, // the app compiles, but a generated component is never shown to the user
   securityHigh: 30,
   securityMedium: 8,
   securityLow: 2,
@@ -62,6 +63,14 @@ export function assessReadiness(
   if (arch.layeringViolations.length) {
     score -= PENALTY.layering * arch.layeringViolations.length;
     warnings.push(`${arch.layeringViolations.length} layering violation(s)`);
+  }
+  if (arch.orphanComponents.length) {
+    // Warning, not a blocker: the app still compiles and runs — it just won't SHOW the component,
+    // which is a real quality defect but not something that should force a rebuild-from-scratch loop
+    // (a false positive here — e.g. a component genuinely reserved for a next feature — must never
+    // block a real, working build).
+    score -= PENALTY.orphanComponent * arch.orphanComponents.length;
+    warnings.push(`${arch.orphanComponents.length} component(s) created but never used: ${arch.orphanComponents.slice(0, 3).join(', ')}${arch.orphanComponents.length > 3 ? ', …' : ''}`);
   }
 
   const high = security.filter((f) => f.severity === 'high').length;

@@ -4,7 +4,7 @@ import type { ArchitectureReport } from './ArchitectureAnalysis';
 import type { SecurityFinding } from './SecurityAnalysis';
 
 const cleanArch: ArchitectureReport = {
-  fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [], nodeBuiltinsInFrontend: [],
+  fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [], nodeBuiltinsInFrontend: [], orphanComponents: [],
 };
 
 describe('assessReadiness', () => {
@@ -45,6 +45,15 @@ describe('assessReadiness', () => {
     const r2 = assessReadiness(manyBlockers, []);
     expect(r1.score).toBe(r2.score);
     expect(r1.score).toBeGreaterThanOrEqual(0);
+  });
+
+  it('an orphan component (generated but never imported/rendered) is a WARNING, not a blocker', () => {
+    // A build that compiles and runs must never be forced NOT READY just because one component isn't
+    // wired in yet — that would risk a false-positive rebuild loop. It's real, but ship-with-warning.
+    const r = assessReadiness({ ...cleanArch, orphanComponents: ['src/components/Hero.tsx (Hero)'] }, []);
+    expect(r.ready).toBe(true);
+    expect(r.score).toBeLessThan(100);
+    expect(r.warnings.join(' ')).toContain('Hero.tsx');
   });
 });
 

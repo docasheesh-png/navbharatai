@@ -8,6 +8,7 @@ import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemin
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
+import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { securityHeadersConfig } from './src/server/lib/securityHeaders';
@@ -545,6 +546,9 @@ setInterval(() => {
 
   // Team collaboration routes — extracted to src/server/routes/team.ts (Phase 1).
   registerTeamRoutes(app);
+
+  // Client / stakeholder read-only share portal + feedback (P-COLLAB.3).
+  registerShareRoutes(app);
 
   // Telemetry / analysis routes — extracted to src/server/routes/telemetry.ts (Phase 1).
   registerTelemetryRoutes(app);

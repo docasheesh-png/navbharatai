@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ShareForReview } from './ShareForReview';
 import { CloudUpload, ServerCog, CloudCheck, CloudCog, Globe, Rocket, Check, X, Loader2, ChevronRight, RefreshCw, ExternalLink, Terminal, Shield, Zap, Clock, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 
 type Platform = 'vercel' | 'netlify' | 'firebase' | 'cloudrun' | 'railway' | 'render' | 'navbharat';
@@ -336,6 +337,9 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 )}
               </div>
             )}
+
+            {/* P-COLLAB.3 — share a read-only preview with a client + collect feedback */}
+            <ShareForReview generatedCode={generatedCode} />
           </div>
         )}
 

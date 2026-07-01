@@ -6879,3 +6879,35 @@ Tests: +6 for `isBuildRunningForWorkspace` (no running build, ended build, works
 account-wide fallback, matching workspace → true, DIFFERENT session's build → false — the exact
 reported regression, and an unrecorded workspaceId never assumed to match a specific request). Gate:
 frontend tsc 0, server tsc 0, vitest 4126/4126 PASS, boot:check PASS.
+
+## 2026-07-01 — Fix: "+ New chat" / any history item silently no-op'd while a build was actively streaming
+
+Admin reproduced yet another angle after the two fixes above: "chahe naya ho ya purana, yahi rahega" —
+neither "+ New chat" nor any history item did ANYTHING, permanently, whenever the currently-open
+session had an actively-streaming build. Root cause (pre-existing, not introduced today, but only
+became this visible once auto-resume started correctly re-attaching to a session's own long build):
+`startNewSession()` and `openConversation()` (`AgentV3Panel.tsx`) both silently `return` early when
+`running` is `true` — and `loadConversation()` (the hook) had the SAME guard. Worse, the history-item
+row's className applied `pointer-events-none` whenever `running`, so it was unclickable at the CSS
+layer too — not just a JS no-op. A build that takes several minutes (the norm, not the exception)
+meant the ENTIRE session-history menu was non-functional for that whole window.
+
+**Fix: navigation (starting new / opening a different saved chat) is no longer gated on `running` at
+all.** It now always DETACHES from whatever's currently attached instead of blocking until the current
+build finishes — the underlying SERVER build (if any) is untouched and keeps running in the background,
+staying resumable from History exactly as before; only the LOCAL UI stream is torn down.
+
+This required extending the generation-guard machinery (built for the first fix above) to `start()`'s
+OWN reader loop, which is unlike `pumpStream`/`subscribeLive`: `start()` had an explicit code comment
+asserting it didn't need a generation guard because "every reset() call site is gated on `!running`" —
+that invariant is exactly what this fix removes, so the comment's own stated condition for revisiting
+applied. `start()` now captures a generation at build-start, checks it before every `setState` in its
+reader loop (cancelling the reader once stale), skips the mid-stream-drop reconnect/error-surfacing
+entirely once stale (an abandoned build's dropped connection is not the new session's problem), and its
+`finally` only clears shared `running`/`abortRef` state if still the current generation — the exact
+pattern already used in `resume()`. `loadConversation()` also now aborts the in-flight stream and clears
+`running` alongside its existing generation bump, so opening a saved chat cleanly detaches too.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4126/4126 PASS, boot:check PASS. No new tests added (same
+hook-testing-infra gap as the first fix above — this codebase has no harness for React
+effects/async-state timing; verified via the gate, matching this file's established practice).

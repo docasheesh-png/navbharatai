@@ -526,9 +526,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
-  // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
+  // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat. Allowed even
+  // while a build is actively streaming HERE — reset() detaches from that stream (the underlying
+  // server build, if any, keeps running in the background and stays resumable from History) instead
+  // of blocking navigation until the build finishes. Root-caused 2026-07-01: "+ New chat"/history
+  // items used to silently no-op (`if (running) return`) for as long as the current session's build
+  // was in progress — with auto-resume now correctly reattaching to a genuinely long build, this made
+  // the panel look permanently "stuck" on whatever chat had an active build.
   const startNewSession = () => {
-    if (running) return;
     sessionIdRef.current = newSessionId();
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
     autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
@@ -619,8 +624,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
   // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
+  // Allowed even while a build is actively streaming HERE — loadConversation() detaches from it (the
+  // underlying server build, if any, keeps running in the background and stays resumable from History)
+  // instead of silently no-op'ing until the current build finishes.
   const openConversation = async (id: string) => {
-    if (running) return;
     setHistoryOpen(false);
     setWorkspaceFiles(null);
     setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
@@ -1103,7 +1110,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
                   <button
                     onClick={newChatFromHistory}
-                    disabled={running}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
                   >
                     <Plus className="w-4 h-4 text-indigo-400" /> New chat
@@ -1139,11 +1145,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             <div
                               key={c.id}
                               role="button"
-                              tabIndex={running ? -1 : 0}
-                              onClick={() => { if (!running) openConversation(c.id); }}
-                              onKeyDown={(e) => { if (!running && (e.key === 'Enter' || e.key === ' ')) openConversation(c.id); }}
+                              tabIndex={isDeleting ? -1 : 0}
+                              onClick={() => { if (!isDeleting) openConversation(c.id); }}
+                              onKeyDown={(e) => { if (!isDeleting && (e.key === 'Enter' || e.key === ' ')) openConversation(c.id); }}
                               title={c.title || 'Untitled build'}
-                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${running || isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
                             >
                               <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
                                 <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />

@@ -509,8 +509,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [state.done, state.resumable, running]);
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat.
-  const startNewSession = () => {
-    if (running) return;
+  // `force` (from the ☰ menu's "+ New chat") abandons an in-flight — possibly STUCK — build so the
+  // user is never trapped on a spinner that won't clear. Without force it no-ops during a build.
+  const startNewSession = (force = false) => {
+    if (running) {
+      if (!force) return;
+      stop(); // abort the (possibly stuck) build's stream and clear `running` so navigation works
+    }
     sessionIdRef.current = newSessionId();
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
     autoRestoredSessionRef.current = sessionIdRef.current; // mark handled → auto-restore won't load the old chat over this blank one
@@ -601,8 +606,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
   // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
-  const openConversation = async (id: string) => {
-    if (running) return;
+  const openConversation = async (id: string, force = false) => {
+    if (running) {
+      if (!force) return;
+      stop(); // abandon the in-flight (possibly stuck) build so opening another chat is never blocked
+    }
     setHistoryOpen(false);
     setWorkspaceFiles(null);
     setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
@@ -639,7 +647,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setUserMsgs(saved.filter(isUser).map((m) => ({ role: 'user' as const, text: m.text, ts: toTs(m) })));
     setAgentHistory(saved.filter((m) => !isUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: toTs(m) })));
   };
-  const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
+  const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(true); };
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —
   // the Firestore record and its transcript are gone). If the deleted session is the one currently
   // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
@@ -1085,8 +1093,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
                   <button
                     onClick={newChatFromHistory}
-                    disabled={running}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800"
                   >
                     <Plus className="w-4 h-4 text-indigo-400" /> New chat
                   </button>
@@ -1121,11 +1128,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             <div
                               key={c.id}
                               role="button"
-                              tabIndex={running ? -1 : 0}
-                              onClick={() => { if (!running) openConversation(c.id); }}
-                              onKeyDown={(e) => { if (!running && (e.key === 'Enter' || e.key === ' ')) openConversation(c.id); }}
+                              tabIndex={isDeleting ? -1 : 0}
+                              onClick={() => openConversation(c.id, true)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openConversation(c.id, true); }}
                               title={c.title || 'Untitled build'}
-                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${running || isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
                             >
                               <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
                                 <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />

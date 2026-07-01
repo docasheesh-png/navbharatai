@@ -46,28 +46,33 @@ const EMPTY_GRAPH: ProjectGraph = {
   dependencies: [],
 };
 
-/** Save a WorkspaceMemory snapshot to Firestore. Best-effort — never throws. */
+/** Save a WorkspaceMemory snapshot to Firestore. Best-effort — never throws. Retries a TRANSIENT
+ *  write failure a few times (exponential backoff) so a brief Firestore hiccup at the end of a build
+ *  doesn't silently drop the turn's memory (which would reset the plan / lose lessons next session). */
 export async function saveWorkspaceMemory(
   workspaceId: string,
   snapshot: MemorySnapshot,
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
-  try {
-    const doc = db.collection(COLLECTION).doc(workspaceId);
-    await doc.set(
-      {
-        workspaceId,
-        graph: snapshot.graph,
-        // Only persist the most recent episodes to stay within document size limits.
-        episodes: snapshot.episodes.slice(-MAX_EPISODES),
-        savedAt: Date.now(),
-        version: 1,
-      },
-      { merge: false },
-    );
-  } catch {
-    /* best-effort — a save failure never blocks or fails a build */
+  const payload = {
+    workspaceId,
+    graph: snapshot.graph,
+    // Only persist the most recent episodes to stay within document size limits.
+    episodes: snapshot.episodes.slice(-MAX_EPISODES),
+    savedAt: Date.now(),
+    version: 1,
+  };
+  const doc = db.collection(COLLECTION).doc(workspaceId);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await doc.set(payload, { merge: false });
+      return; // persisted
+    } catch {
+      // Transient failure (network / quota spike) — back off and retry; give up quietly after the
+      // last attempt so a save failure never blocks or fails a build.
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
   }
 }
 
@@ -105,15 +110,22 @@ export async function restoreWorkspaceMemory(
   workspaceId: string,
   mem: import('./WorkspaceMemory').WorkspaceMemory,
 ): Promise<MemorySnapshot | null> {
+  // IDEMPOTENT: replay durable episodes into a given live memory object AT MOST ONCE, so calling
+  // restore on multiple paths (e.g. an intent-time hydrate + the build path) can't duplicate them.
+  // Marked before the load so a null snapshot still counts as "reconciled" (the in-process memory is
+  // then the source of truth); the flag resets when the 2h-TTL cache evicts + recreates the object.
+  if (mem.isHydrated()) return null;
+  mem.markHydrated();
   const snapshot = await loadWorkspaceMemory(workspaceId);
   if (!snapshot) return null;
   try {
-    // Replay episodes into the live memory object.
+    // Replay episodes into the live memory object — PRESERVING each episode's original timestamp so
+    // recency ranking stays honest across a restore (re-stamping to now() made old lessons look fresh).
     for (const ep of snapshot.episodes) {
-      if (ep.kind === 'error') mem.recordError(ep.text, ep.file);
-      else if (ep.kind === 'fix') mem.recordFix(ep.text, ep.file);
-      else if (ep.kind === 'note') mem.recordNote(ep.text, ep.file);
-      else if (ep.kind === 'request') mem.recordRequest(ep.text);
+      if (ep.kind === 'error') mem.recordError(ep.text, ep.file, ep.ts);
+      else if (ep.kind === 'fix') mem.recordFix(ep.text, ep.file, ep.ts);
+      else if (ep.kind === 'note') mem.recordNote(ep.text, ep.file, ep.ts);
+      else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts);
     }
     // Mark the known files as indexed (content empty — warmIndexFiles will fill them later).
     // This populates the graph.files set so warmIndexFiles skips already-known files.

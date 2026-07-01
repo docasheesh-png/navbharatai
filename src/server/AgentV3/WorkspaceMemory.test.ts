@@ -36,6 +36,36 @@ describe('extractFacts (artifact indexer)', () => {
   });
 });
 
+describe('WorkspaceMemory — restore hardening (preserve timestamps + hydration guard)', () => {
+  it('preserves an episode ORIGINAL timestamp when one is supplied (restore path)', () => {
+    const mem = new WorkspaceMemory();
+    const past = 1_000_000;
+    mem.recordError('old error', 'a.tsx', past);
+    mem.recordFix('old fix', 'a.tsx', past + 1);
+    mem.recordNote('old note', undefined, past + 2);
+    mem.recordRequest('old request', past + 3);
+    const eps = mem.snapshot().episodes;
+    expect(eps.find((e) => e.kind === 'error')!.ts).toBe(past);
+    expect(eps.find((e) => e.kind === 'fix')!.ts).toBe(past + 1);
+    expect(eps.find((e) => e.kind === 'note')!.ts).toBe(past + 2);
+    expect(eps.find((e) => e.kind === 'request')!.ts).toBe(past + 3);
+  });
+  it('stamps now() when no timestamp is supplied (live path) and ignores a non-positive ts', () => {
+    const mem = new WorkspaceMemory();
+    const before = Date.now();
+    mem.recordError('live error');
+    mem.recordNote('zero ts', undefined, 0); // 0 → treated as "no ts" → now()
+    const eps = mem.snapshot().episodes;
+    for (const e of eps) expect(e.ts).toBeGreaterThanOrEqual(before);
+  });
+  it('hydration flag is false by default and sticks once marked (idempotent restore guard)', () => {
+    const mem = new WorkspaceMemory();
+    expect(mem.isHydrated()).toBe(false);
+    mem.markHydrated();
+    expect(mem.isHydrated()).toBe(true);
+  });
+});
+
 describe('WorkspaceMemory', () => {
   it('builds a project graph and re-indexing a file replaces its facts', () => {
     const mem = new WorkspaceMemory();

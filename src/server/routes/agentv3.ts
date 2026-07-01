@@ -1657,6 +1657,13 @@ export function registerAgentV3Routes(app: Express): void {
     // exist in this session, and what did the user recently ask? Computed ONCE here (bounded), then
     // reused below for the deterministic safety-net so Firestore is read at most once. Best-effort.
     const intentWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+    // Hydrate this workspace's memory from durable storage BEFORE reading recent requests / classifying
+    // intent — on a COLD Cloud Run instance the in-process memory is empty, so a "continue" would look
+    // like a brand-new build (the classifier reads recentRequests). Idempotent (a hydration flag stops
+    // the build path re-replaying) + bounded + best-effort so a slow Firestore never hangs the gate.
+    try {
+      await raceTimeout(restoreWorkspaceMemory(intentWorkspaceId, getWorkspaceMemory(intentWorkspaceId)), 3_000, 'restoreMemoryForIntent');
+    } catch { /* best-effort — classification falls back to keyword + projectExists */ }
     const projectExists = (await raceTimeout(
       countWorkspaceFiles(intentWorkspaceId),
       4_000,
@@ -1733,10 +1740,15 @@ export function registerAgentV3Routes(app: Express): void {
             chatResponseCache.set(cacheKey, reply);
           }
         }
-        // Record the turn in project memory so iterative context is preserved
-        // (mirrors the build path's recordRequest). Best-effort.
+        // Record the turn in project memory so iterative context is preserved (mirrors the build
+        // path's recordRequest). Memory was already hydrated at intent-time above, so this appends to
+        // the real history; then PERSIST it so a plain-chat turn ("what are we building?") survives an
+        // instance recycle and a later build still remembers it. Both best-effort — never block a reply.
         try {
-          getWorkspaceMemory(deriveWorkspaceId(userId, req.body?.sessionId)).recordRequest(prompt);
+          const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
+          const chatMem = getWorkspaceMemory(chatWsId);
+          chatMem.recordRequest(prompt);
+          void saveWorkspaceMemory(chatWsId, chatMem.snapshot()).catch(() => {});
         } catch { /* memory is best-effort — never blocks a reply */ }
         // Surface the reply EXACTLY like a normal build narration — no provider
         // name, no note — then close out the stream the same way a build does.

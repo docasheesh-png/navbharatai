@@ -156,6 +156,12 @@ export function extractFacts(file: string, content: string): FileFacts {
 export class WorkspaceMemory {
   private readonly fileFacts = new Map<string, FileFacts>();
   private readonly episodes: Episode[] = [];
+  // True once durable episodes have been replayed into THIS instance's object. Tied to the object's
+  // lifecycle (resets when the 2h-TTL cache evicts + recreates it) so restoreWorkspaceMemory replays
+  // AT MOST ONCE per live object — calling restore on several code paths can't duplicate episodes.
+  private _hydrated = false;
+  isHydrated(): boolean { return this._hydrated; }
+  markHydrated(): void { this._hydrated = true; }
 
   /** Index (or re-index) a file's content into the project graph. */
   indexFile(file: string, content: string): void {
@@ -167,18 +173,21 @@ export class WorkspaceMemory {
     this.fileFacts.delete(file);
   }
 
-  private episode(kind: EpisodeKind, text: string, file?: string): void {
-    this.episodes.push({ ts: Date.now(), kind, text: text.slice(0, 2000), file });
+  // `ts` is optional so a RESTORE from durable storage can preserve each episode's ORIGINAL time
+  // instead of re-stamping it to now() — otherwise recency ranking in recall() treats every restored
+  // episode as brand-new, inflating old errors/lessons and corrupting cross-session confidence.
+  private episode(kind: EpisodeKind, text: string, file?: string, ts?: number): void {
+    this.episodes.push({ ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file });
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
-  recordRequest(text: string): void { this.episode('request', text); }
+  recordRequest(text: string, ts?: number): void { this.episode('request', text, undefined, ts); }
   /** The user's most recent request texts (oldest→newest) — conversational context for intent. */
   recentRequests(limit = 3): string[] {
     return this.episodes.filter((e) => e.kind === 'request').slice(-Math.max(1, limit)).map((e) => e.text);
   }
-  recordError(text: string, file?: string): void { this.episode('error', text, file); }
-  recordFix(text: string, file?: string): void { this.episode('fix', text, file); }
-  recordNote(text: string, file?: string): void { this.episode('note', text, file); }
+  recordError(text: string, file?: string, ts?: number): void { this.episode('error', text, file, ts); }
+  recordFix(text: string, file?: string, ts?: number): void { this.episode('fix', text, file, ts); }
+  recordNote(text: string, file?: string, ts?: number): void { this.episode('note', text, file, ts); }
   /** Governance decision-audit trail (Layer 58). Recorded but NOT fed back as a
    *  build "lesson" — it is a separate, queryable record of risky actions taken. */
   recordAudit(text: string, file?: string): void { this.episode('audit', text, file); }

@@ -5360,15 +5360,16 @@ ${buildLanguageRule(preferredLanguage)}`;
           effectiveDeviceMode !== 'desktop' ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
-             <HomeView 
+             <HomeView
                onStartChat={() => {
                  setActiveAgent('navbharatai');
                  toggleTab('nbi_chat');
-               }} 
+               }}
                onStartProChat={() => {
                  setActiveAgent('navbharatai-pro');
                  toggleTab('nbi_pro_chat');
                }}
+               onStartProfessionals={() => toggleTab('professionals')}
                isAdmin={isAdmin}
                data={homeData}
                onUpdate={(newData) => setHomeData(newData)}

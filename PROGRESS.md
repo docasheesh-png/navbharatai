@@ -6911,3 +6911,22 @@ pattern already used in `resume()`. `loadConversation()` also now aborts the in-
 Gate: frontend tsc 0, server tsc 0, vitest 4126/4126 PASS, boot:check PASS. No new tests added (same
 hook-testing-infra gap as the first fix above — this codebase has no harness for React
 effects/async-state timing; verified via the gate, matching this file's established practice).
+
+## 2026-07-01 — Removed the "Recent Chats" block from the main sidebar menu (admin request, urgent)
+
+Admin: "isko hata do, koi matalb ka nahi hai" — the "Recent Chats" section that PR #799 (a parallel
+session's work) added to the bottom of BOTH the desktop persistent sidebar and the mobile hamburger
+drawer (`SidebarNav.tsx`) — a merged Firestore (`chat_sessions`) + prop-based list of the account's last
+8 chats with Free/Pro/Doctor badges. Removed entirely per explicit, immediate admin instruction:
+- Deleted `renderRecentChats()`, the `recentChats`/`cloudSessions` computation + its Firestore fetch
+  effect, and `sessionKind()` (only used by the removed block) from `SidebarNav.tsx`.
+- Removed both render call sites (desktop sidebar + mobile drawer).
+- Removed now-unused imports (`useState`/`useEffect`, `History`/`Bot`/`Stethoscope`/`MessageSquare`
+  icons, the `firebase/firestore` query helpers, `db`).
+- `sessions`/`onResumeSession` props are kept on `SidebarNavProps` (unused internally now) rather than
+  also touching `App.tsx`'s call site — narrower, lower-risk diff for an urgent removal; `resumeSession`
+  is still used elsewhere in `App.tsx` (the full History page), so nothing is actually dead beyond this
+  one component no longer reading it.
+
+Gate: frontend tsc 0, vitest 4136/4136 PASS, boot:check PASS. (Server untouched — no server tsc re-run
+needed; frontend-only change.)

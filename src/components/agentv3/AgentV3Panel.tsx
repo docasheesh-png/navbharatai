@@ -28,7 +28,7 @@ async function authJsonHeaders(): Promise<Record<string, string>> {
   } catch { /* no token — server soft-falls-back */ }
   return headers;
 }
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v3.0 (Vargen 3.0), a Claude-Code-style chat
@@ -393,10 +393,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       }),
       { merge: true },
     ).catch(() => { /* history save is best-effort — never blocks the UI */ });
-    // Fires on build start (workspaceId), completion (done), and stop/timeout (running). `convo` is
-    // read at that moment — recent enough for the title + thread.
+    // Fires on the FIRST user message (userMsgs.length — so a CHAT-only session is saved to History
+    // too, not just builds), on build start (workspaceId), completion (done), and stop/timeout
+    // (running). `convo` is read at that moment. userMsgs.length changes only when the user sends a
+    // message (never during streaming — state.narration isn't a dep), so writes stay bounded and the
+    // `{ merge: true }` write just updates the same doc.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.workspaceId, state.done, running, userId]);
+  }, [state.workspaceId, state.done, running, userId, userMsgs.length]);
 
   // Read a File as base64 (no data: prefix); downscale large images to keep the
   // payload small and vision-optimal, exactly like the other chat surfaces.
@@ -530,15 +533,63 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  // Messages for chat_sessions-only history entries (keyed by sessionId), stashed at list time so
+  // opening one restores its thread without a second fetch. See loadHistory + openConversation.
+  const chatSessionMsgsRef = useRef<Map<string, Array<{ text: string; sender?: string; role?: string; timestamp?: string; ts?: number }>>>(new Map());
   // Reusable loader so both the initial open AND the "Try again" retry button can
   // re-fetch without duplicating the fetch/loading-state logic.
+  //
+  // Two sources are merged so EVERY v3.0 session shows (this fixes "History (0)" even though
+  // builds/chats happened): (1) the server conversation store (/api/agentv3/conversations) —
+  // rich transcripts, but only builds that reached the agentic persistence path land there; and
+  // (2) the Firestore `chat_sessions` collection, where AgentV3Panel durably writes EVERY v3.0
+  // session (any session with a first user message, chat OR build) as a `v3_<sessionId>` doc.
+  // Dedup by sessionId, preferring the conversation-store record when both exist.
   const loadHistory = async () => {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
       const { items, error: loadErr } = await listConversations({ userId, email });
-      setHistoryItems(items);
-      setHistoryError(loadErr ?? null);
+
+      // Pull this account's v3.0 sessions from chat_sessions (client SDK) — the reliable superset.
+      let chatItems: ConversationMeta[] = [];
+      chatSessionMsgsRef.current.clear();
+      const prefix = `agentv3-${normalizeUid(userId)}-`;
+      if (userId) {
+        try {
+          const snap = await getDocs(query(collection(db, 'chat_sessions'), where('userId', '==', userId)));
+          chatItems = snap.docs
+            .filter((d) => {
+              const data = d.data() as any;
+              return d.id.startsWith('v3_') || data?.tab === 'engine_builder'
+                || data?.current_agent === 'agentv3' || data?.original_agent === 'agentv3';
+            })
+            .map((d) => {
+              const data = d.data() as any;
+              const sessionId = d.id.replace(/^v3_/, '');
+              chatSessionMsgsRef.current.set(sessionId, Array.isArray(data.messages) ? data.messages : []);
+              return {
+                id: d.id,
+                title: data.title || 'Untitled build',
+                status: (data.status as string) || 'complete',
+                workspaceId: `${prefix}${sessionId}`,
+                updatedAt: data.lastUpdated ? (Date.parse(data.lastUpdated) || 0) : 0,
+              } as ConversationMeta;
+            });
+        } catch { /* best-effort — the conversation-store list still shows below */ }
+      }
+
+      const sidOf = (c: ConversationMeta) =>
+        (c.workspaceId && c.workspaceId.startsWith(prefix)) ? c.workspaceId.slice(prefix.length) : c.id;
+      const bySession = new Map<string, ConversationMeta>();
+      for (const c of chatItems) bySession.set(sidOf(c), c);   // baseline: every saved v3.0 session
+      for (const c of items) bySession.set(sidOf(c), c);        // richer conversation-store record wins
+      const merged = [...bySession.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+      setHistoryItems(merged);
+      // Only surface the conversation-store error when it produced NOTHING to show — if chat_sessions
+      // gave us the history, a transient store error must not blank the list with a scary message.
+      setHistoryError(merged.length > 0 ? null : (loadErr ?? null));
     } finally {
       setHistoryLoading(false);
     }
@@ -560,17 +611,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setCheckpointHistory([]);
     setFiles([]);
     const restored = await loadConversation({ userId, email, id });
-    if (!restored) return;
-    if (restored.workspaceId) {
-      const prefix = `agentv3-${normalizeUid(userId)}-`;
-      if (restored.workspaceId.startsWith(prefix)) {
-        const sid = restored.workspaceId.slice(prefix.length);
-        if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+    if (restored) {
+      if (restored.workspaceId) {
+        const prefix = `agentv3-${normalizeUid(userId)}-`;
+        if (restored.workspaceId.startsWith(prefix)) {
+          const sid = restored.workspaceId.slice(prefix.length);
+          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+        }
       }
+      autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
+      rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
+      setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
+      return;
     }
-    autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
-    rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
-    setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
+    // FALLBACK: the session exists only in chat_sessions (a chat, or a fast-lane build that never
+    // wrote a server transcript). Adopt its sessionId and restore its saved thread from the doc we
+    // stashed at list time; files rehydrate automatically from the derived workspaceId (S4 effect).
+    const sessionId = id.replace(/^v3_/, '');
+    const saved = chatSessionMsgsRef.current.get(sessionId);
+    if (!saved) return;
+    sessionIdRef.current = sessionId;
+    persistSessionId(sessionId);
+    autoRestoredSessionRef.current = sessionId;
+    rehydratedWsRef.current = '';
+    const toTs = (m: { timestamp?: string; ts?: number }) => m.ts ?? (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+    const isUser = (m: { sender?: string; role?: string }) => m.sender === 'user' || m.role === 'user';
+    setUserMsgs(saved.filter(isUser).map((m) => ({ role: 'user' as const, text: m.text, ts: toTs(m) })));
+    setAgentHistory(saved.filter((m) => !isUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: toTs(m) })));
   };
   const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —

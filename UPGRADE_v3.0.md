@@ -2500,13 +2500,32 @@
 - **Files:** new `src/components/ui/{Popover,Drawer,BottomSheet}.tsx`, `src/components/ui/{variants.ts,index.ts}`,
   `src/components/panels/ProjectInsightsPanel.tsx`, new `src/components/ui/overlayPrimitives.test.tsx`.
 
-### P-DESIGN.3 — Platform Accessibility Engine  🟡 PARTIAL → full  [MED]
-- A11y is scattered: ARIA used in ~16 files, `Toast` has `aria-live`, `PerformanceAnalyzer` audits *generated* apps —
-  but the platform's own UI has no centralized a11y, no `prefers-reduced-motion` wiring, no font-scaling/zoom, no
-  color-blind support, and only partial contrast validation.
-- [ ] Honor `prefers-reduced-motion` globally (gate motion animations); add font-scaling + zoom controls in settings.
-- [ ] Add a focus-trap/roving-tabindex util for overlays; run an internal WCAG checklist in CI on the builder UI.
-- **Files:** `src/main.tsx`, `src/lib/theme.ts`, new `src/lib/a11y.ts`, settings panel.
+### P-DESIGN.3 — Platform Accessibility Engine  ✅ DONE (2026-07-01) · 🔌 WIRED  [MED]
+- A11y was scattered: ARIA in ~16 files, `Toast` has `aria-live`, `PerformanceAnalyzer` audits *generated* apps —
+  but the platform's own UI had no centralized a11y, no `prefers-reduced-motion` wiring, no font-scaling/zoom, and no
+  reusable focus-trap.
+- [x] **Centralized engine `src/lib/a11y.ts`** (dependency-free, "pure logic + thin DOM adapter" split like the chart
+  lib): pure `clampFontScale` / `resolveReduceMotion` / `nextRovingIndex` / `computeTrapTarget` (unit-tested, 17) +
+  thin adapters `createFocusTrap` / `applyFontScale` / `applyMotionMode` / `getStored*`.
+- [x] **Focus-trap for modal overlays** — `createFocusTrap` traps Tab/Shift+Tab, focuses the first element, and
+  restores focus on close (WCAG 2.4.3). **Adopted live** in the `Drawer` and `BottomSheet` primitives (P-DESIGN.2),
+  which were `aria-modal` but let keyboard focus escape behind them. `nextRovingIndex` is available for menu/toolbar
+  arrow-key navigation.
+- [x] **Font-scaling / zoom** — real `Text Size` control in Settings → General → Accessibility (A−/A+/Reset,
+  layout-safe 90 %–140 %). Drives `--nb-font-scale` on `<html>`; because the UI is rem-based this zooms the whole
+  app. Persisted + re-applied pre-mount in `main.tsx` (no flash).
+- [x] **`prefers-reduced-motion` honored** — the old binary "Reduce Animations" toggle is now a tri-state **Motion**
+  control: On (default) · Reduced · **System** (follows the OS `prefers-reduced-motion`). Respects the deliberate
+  "animations on by default" product decision — System is opt-in, not a forced global override. Backward-compatible
+  with the legacy `navbharat_reduce_motion` key `main.tsx` reads on boot.
+- [x] `AppKnowledgeBase.ts` updated (Motion entry rewritten for the tri-state; new `Text Size` entry) so every AI can
+  answer "how do I make the text bigger / reduce motion?".
+- **Deferred (tracked, not faked):** color-blind palette presets and a *formal WCAG-checklist gate in CI* over the
+  whole builder UI are a larger, separate effort — not claimed here. The reusable primitives + visible focus outline
+  (`:focus-visible`) are the concrete foundation they'd build on.
+- **Files:** new `src/lib/a11y.ts` + `a11y.test.ts`, `src/main.tsx`, `src/index.css`, `src/components/ui/Drawer.tsx`,
+  `src/components/ui/BottomSheet.tsx`, `src/components/panels/SettingsPanel.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3963 green · `build` OK · boot PASS.
 
 ### P-DESIGN.4 — Chart / Data-Visualization Component Library  ✅ DONE (2026-06-30) · 🔌 UI-WIRED  [MED]
 - Dashboards rendered text/metric displays only; no reusable chart components.

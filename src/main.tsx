@@ -35,14 +35,25 @@ if (import.meta.env.PROD) {
   console.info = () => {};
 }
 
-// Motion preference (default: animations ON). The OS prefers-reduced-motion is NOT auto-applied;
-// users opt into reduced motion via Settings → General → "Reduce Animations". Apply the saved
-// choice as early as possible so there's no flash of motion before React mounts.
+// Accessibility preferences (P-DESIGN.3) — apply the saved motion + font-scale choices as early as
+// possible so there's no flash before React mounts. Motion is a tri-state ('animated' default |
+// 'reduced' | 'system'); the legacy 'navbharat_reduce_motion' boolean is honoured for older clients.
+// Animations remain ON by default — 'system' only reduces motion when the OS explicitly asks for it.
 try {
-  if (localStorage.getItem('navbharat_reduce_motion') === 'true') {
-    document.documentElement.classList.add('nb-reduce-motion');
+  const mode = localStorage.getItem('navbharat_motion_mode');
+  const sysReduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduce =
+    mode === 'reduced' ? true :
+    mode === 'animated' ? false :
+    mode === 'system' ? sysReduce :
+    localStorage.getItem('navbharat_reduce_motion') === 'true'; // legacy fallback
+  if (reduce) document.documentElement.classList.add('nb-reduce-motion');
+
+  const fontScale = parseFloat(localStorage.getItem('navbharat_font_scale') || '1');
+  if (Number.isFinite(fontScale) && fontScale !== 1) {
+    document.documentElement.style.setProperty('--nb-font-scale', String(Math.min(1.4, Math.max(0.9, fontScale))));
   }
-} catch { /* storage unavailable — default to animations on */ }
+} catch { /* storage unavailable — default to animations on, font-scale 1 */ }
 
 // Chunk load error recovery — new deployment invalidates old Vite chunks.
 // When a lazy import 404s, force a hard reload ONCE to pick up the new bundle.

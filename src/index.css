@@ -28,6 +28,14 @@ html, body {
     --theme-card: #161b22;
   }
 
+  /* P-DESIGN.3 — user font-scaling (Settings → General → Text Size). `--nb-font-scale` is set on
+     <html> by the accessibility engine (src/lib/a11y.ts), default 1. Because Tailwind sizing is
+     rem-based, scaling the root font-size acts as a real accessibility zoom across the whole UI.
+     The scale is clamped to a layout-safe range [0.9, 1.4] in code. */
+  html {
+    font-size: calc(100% * var(--nb-font-scale, 1));
+  }
+
   body, #root {
     height: 100vh;
     height: 100dvh;

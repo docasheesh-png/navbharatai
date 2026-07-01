@@ -375,6 +375,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         } catch { contract = ''; }
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);
+      // REAL per-file progress: the chat used to go silent between "Building N file(s)…" and "Built
+      // your app…" while N individual model calls ran (each taking real time) — the only signal
+      // during that gap was the time-based ETA heartbeat, which looks scripted/fake because it isn't
+      // tied to actual work. `filesDone` only increments on a GENUINE successful generation (never on
+      // a failed/skipped file), so each tick is a real, verifiable event — not a guess.
+      let filesDone = 0;
       // Generate ONE file (its own call, returns one FILE block). `produced` is the real source of
       // earlier-tier files, injected so this file uses their EXACT exported names.
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
@@ -383,7 +389,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock));
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
-          return match ? { path: spec.path, content: match.content } : null;
+          if (!match) return null;
+          filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
+          deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
+          return { path: spec.path, content: match.content };
         } catch {
           return null; // a single file's call failing must not kill the whole build
         }

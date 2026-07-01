@@ -67,6 +67,37 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     ...over,
   });
 
+  it('emits a REAL per-file progress line only on a genuine successful generation, numbered out of the real manifest size', async () => {
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({ log: (m) => logs.push(m) }));
+    expect(r.ok).toBe(true);
+    const fileTicks = logs.filter((l) => l.startsWith('✓ '));
+    expect(fileTicks).toHaveLength(3); // one per genuinely-generated file, not a guess
+    // Every path in the manifest gets its own tick, each counting up against the REAL total (3).
+    for (const path of ['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']) {
+      expect(fileTicks.some((l) => l.startsWith(`✓ ${path} (`) && l.endsWith('/3)'))).toBe(true);
+    }
+  });
+
+  it('a file that fails to generate gets NO tick — the counter only advances on real success', async () => {
+    let calls = 0;
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      log: (m) => logs.push(m),
+      generate: async (_s, user) => {
+        if (user.includes('Plan the file list')) return 'a.tsx :: a\nb.tsx :: b\nc.tsx :: c';
+        calls++;
+        if (calls === 1) throw new Error('network error'); // one file's call fails → no tick for it
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x.tsx';
+        return `<<<FILE ${path}>>>\nok\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(2);
+    expect(logs.filter((l) => l.startsWith('✓ '))).toHaveLength(2); // NOT 3 — the failed file is honestly absent
+  });
+
   it('plans a manifest, generates each file individually, writes them, returns ok', async () => {
     let written: OneShotFile[] = [];
     const r = await runSimpleBuild(baseDeps({ writeFiles: async (f) => { written = f; } }));

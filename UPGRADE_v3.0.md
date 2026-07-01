@@ -2508,11 +2508,18 @@
 - [ ] Add a focus-trap/roving-tabindex util for overlays; run an internal WCAG checklist in CI on the builder UI.
 - **Files:** `src/main.tsx`, `src/lib/theme.ts`, new `src/lib/a11y.ts`, settings panel.
 
-### P-DESIGN.4 — Chart / Data-Visualization Component Library  🟡 PARTIAL → full  [MED]
-- No charting library (chart.js/recharts/d3). Analytics/health/billing dashboards (`AppAnalytics`, `AppHealthMonitor`,
-  `BillingPanel`) render text/metric displays only; generated apps also can't get charts.
-- [ ] Adopt a lightweight chart lib (e.g. `recharts`); add Line/Bar/Area/Pie wrappers in `ui/`; use them in the dashboards.
-- **Files:** new `src/components/ui/charts/*`, `src/components/ide/AppAnalytics.tsx`, `AppHealthMonitor.tsx`.
+### P-DESIGN.4 — Chart / Data-Visualization Component Library  ✅ DONE (2026-06-30) · 🔌 UI-WIRED  [MED]
+- Dashboards rendered text/metric displays only; no reusable chart components.
+- [x] **Built a DEPENDENCY-FREE SVG chart library** `src/components/ui/charts/` — `BarChart`, `Sparkline`
+  (line/area), `Donut`. NOT recharts/chart.js/d3 (would be a new runtime dependency, against the codebase's
+  dependency-free policy) — instead all layout math is pure functions in `chartGeometry.ts`
+  (`niceMax`/`barLayout`/`linePoints`/`donutSegments`), unit-tested (10) and consumed by thin SVG renderers.
+  Accessible (`role=img aria-label`). Exported via a `charts/index.ts` barrel.
+- [x] **Adopted live** — `ProjectInsightsPanel`'s Build-SLO card now shows a real `Donut` of within-SLO vs
+  over-SLO builds (real data from `/api/analytics/slo`) with a compliance-% centre label. Render smoke tests
+  (`charts.render.test.tsx`, 3). Broad adoption of the other dashboards can follow incrementally.
+- **Files:** new `src/components/ui/charts/{chartGeometry.ts,Donut,BarChart,Sparkline,index}.tsx`,
+  `src/components/panels/ProjectInsightsPanel.tsx`, new `chartGeometry.test.ts` + `charts.render.test.tsx`.
 
 ### P-DESIGN.5 — AI Design Generation & Critique  ✅ DONE (2026-06-29) · 🔌 UI-WIRED  [palette→tokens UI deferred]
 - AI design was shallow: `AISuggestions` was static/pattern-based. Now there is a REAL AI design pass on the

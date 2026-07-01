@@ -139,7 +139,8 @@ export type AgentEvent =
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
-  | { type: 'error'; message: string; ts: number };
+  | { type: 'error'; message: string; ts: number }
+  | { type: 'security_warning'; filePath: string; safe: boolean; findings: Array<{ severity: string; rule: string; description: string; line: number }>; report: string; ts: number };
 
 /** R2 §4.6 — the objective readiness verdict surfaced to the user as a build-health card. */
 export interface BuildHealth {

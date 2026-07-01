@@ -4,6 +4,7 @@ import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding } from './devServerHost';
+import { scanPackageJson, formatPackageScanReport } from '../../AgentV3/PackageSafetyScanner';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -204,6 +205,25 @@ export class E2BActuator implements IEngineerActuator {
    * Never throws; returns success flag + combined log for the agent to read.
    */
   private async _npmInstall(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    // Step 0: Scan package.json for known-malicious or suspicious packages BEFORE
+    // any install command runs. Block installs that contain critical threats.
+    try {
+      const pkgJson = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`).catch(() => null);
+      if (pkgJson) {
+        const scanResult = scanPackageJson(typeof pkgJson === 'string' ? pkgJson : new TextDecoder().decode(pkgJson as Uint8Array));
+        if (!scanResult.safe) {
+          const report = formatPackageScanReport(scanResult);
+          console.error('[E2BActuator] npm install blocked by PackageSafetyScanner:\n', report);
+          return { success: false, log: report };
+        }
+        if (scanResult.findings.length > 0) {
+          console.warn('[E2BActuator] PackageSafetyScanner warnings:\n', formatPackageScanReport(scanResult));
+        }
+      }
+    } catch (scanErr) {
+      console.warn('[E2BActuator] PackageSafetyScanner skipped (non-fatal):', scanErr);
+    }
+
     // Step 1: npm ci when a lock file exists (clean, reproducible install)
     const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
     if (hasLock) {

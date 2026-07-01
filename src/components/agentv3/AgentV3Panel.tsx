@@ -156,6 +156,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     sessionIdRef.current = restored || newSessionId();
     if (!restored) persistSessionId(sessionIdRef.current);
   }
+  // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
+  // only auto-attaches/mirrors a build that actually belongs to THIS session, never one still running
+  // under a DIFFERENT v3.0 chat on the same account (root-caused 2026-07-01: "+ New chat" — and, more
+  // generally, opening any v3.0 session — could show an unrelated session's in-progress build).
+  const expectedWorkspaceId = (): string | undefined =>
+    state.workspaceId || (userId && sessionIdRef.current ? `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}` : undefined);
 
   // The chat thread merges the user's own messages with the engine's live
   // narration (which streams in word-by-word and finalizes in place), ordered by
@@ -197,7 +203,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // connection was lost) — so we can re-attach. Re-checks when the account loads and
   // whenever this UI goes idle.
   useEffect(() => {
-    if (!running) checkRunning({ userId, email });
+    if (!running) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, email, running, checkRunning]);
 
   // AUTO-RESUME on reload: when the server reports a build is still running but this
@@ -219,9 +226,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
-      void resumeBuild({ userId, email });
+      void resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() });
     }
     if (!serverBuildRunning && !running) autoResumedRef.current = false; // re-arm only once genuinely idle again
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverBuildRunning, running, userId, email, resumeBuild]);
 
   // TAB SWITCH resilience: a backgrounded tab (esp. mobile Safari) suspends timers and
@@ -232,11 +240,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!running) checkRunning({ userId, email });
+      if (!running) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
       setLiveNonce((n) => n + 1); // re-arm the cross-device live poll when the tab is shown again
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, userId, email, checkRunning]);
 
   // CROSS-DEVICE LIVE MIRROR (Slice B): while this panel is OPEN + VISIBLE and NOT running a build
@@ -246,8 +255,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (running || !userId) return;
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-    const stop = subscribeLive({ userId, email });
+    const stop = subscribeLive({ userId, email, workspaceId: expectedWorkspaceId() });
     return () => stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, userId, email, subscribeLive, liveNonce]);
 
   // D7 — on first open with a signed-in account, re-display the most recent persisted build's
@@ -1190,7 +1200,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             // A build is running server-side but this UI isn't attached → Resume + Stop.
             <div className="ml-auto flex items-center gap-1.5">
               <button
-                onClick={() => resumeBuild({ userId, email })}
+                onClick={() => resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() })}
                 title="Open the running build — resume where it left off"
                 className="flex items-center gap-1 text-xs text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2 py-1"
               >

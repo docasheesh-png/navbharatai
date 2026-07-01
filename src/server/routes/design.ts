@@ -11,6 +11,7 @@ import type { Express, Request, Response } from 'express';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
+import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
 
 const MAX_CODE = 12_000;
 const MAX_BRAND = 600;
@@ -54,5 +55,16 @@ export function registerDesignRoutes(app: Express): void {
       return;
     }
     res.json(lintDesign(code));
+  });
+
+  // P-TQA.11 (builder-side) — deterministic WCAG accessibility lint (no AI, no credit spend). Flags
+  // missing alt text, unlabelled form fields, unnamed controls, missing lang, positive tabindex.
+  app.post('/api/design/a11y', (req: Request, res: Response) => {
+    const code = typeof req.body?.code === 'string' ? req.body.code.slice(0, MAX_CODE) : '';
+    if (!code) {
+      res.status(400).json({ error: 'provide { code: "<app source>" }' });
+      return;
+    }
+    res.json(lintA11y(code));
   });
 }

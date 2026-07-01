@@ -868,13 +868,24 @@
       `boot:check` PASS.
 - **Files:** `tests/security/headers.test.ts` (new), `src/server/lib/securityHeaders.ts` (new), `server.ts`.
 
-### P-TQA.11 — WCAG Accessibility Automated Testing (axe-core)  ❌ MISSING  [LOW]
+### P-TQA.11 — WCAG Accessibility Testing  🟡 PARTIAL (builder-side linter shipped 2026-07-01) · 🔌 UI-WIRED  [LOW]
 - `PerformanceAnalyzer.tsx` shows manual accessibility hints. `AICodeReview.tsx` flags some a11y patterns.
-  But no automated WCAG 2.1 AA check runs against rendered app output in CI.
-- [ ] Add `tests/a11y/wcag.spec.ts` — Playwright test that renders the preview iframe and runs `axe-core`
-  via `@axe-core/playwright`. Assert zero critical violations.
-- [ ] Add to the visual testing CI job (shares Playwright setup with P-TQA.2).
-- **Files:** new `tests/a11y/wcag.spec.ts`, `playwright.config.ts`, `.github/workflows/ci.yml`.
+  There was no automated WCAG check on generated app output.
+- [x] **Dependency-free static WCAG linter — new `src/server/AppMakerLab/intelligence/A11yLinter.ts`** (pure, no AI,
+  no new dep, 11 tests). `lintA11y(code)` → a 0–100 score + grade (A–D) + violations mapped to WCAG criteria: images
+  without `alt` (1.1.1), form fields with no label (1.3.1), buttons/links with no accessible name (4.1.2), missing
+  `<html lang>` (3.1.1), positive `tabindex` (2.4.3). Checks are conservative (few false positives).
+- [x] **Endpoint** `POST /api/design/a11y { code }` (deterministic; no credit spend). **UI-WIRED** into the AI Copilot as
+  an **Accessibility** score, right beside the P-DESIGN.8 Design-health block (shared `HealthBlock` renderer). Route
+  tests added. `AppKnowledgeBase.ts` updated.
+- **Deferred (the roadmap's original axe-core variant):** a full **axe-core 2.1-AA gate in a Playwright CI job** that
+  renders the live preview iframe is a heavier, separate approach — it needs a real browser + the `@axe-core/playwright`
+  dev dep + the P-TQA.2 visual-testing Playwright setup. The dependency-free builder-side linter above catches the
+  common, high-impact failures *before* ship; the axe-core CI gate remains the deeper option.
+- **Files:** new `src/server/AppMakerLab/intelligence/A11yLinter.ts` + `tests/a11yLinter.test.ts`,
+  `src/server/routes/design.ts`, `tests/routesMiscValidation.test.ts`, `src/components/ide/AISuggestions.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`. (axe-core-CI variant: `tests/a11y/wcag.spec.ts`, `playwright.config.ts`, `ci.yml`.)
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 4078 green · `build` OK · boot PASS.
 
 ### P-TQA.12 — Mutation Testing Engine  ❌ MISSING  [LOW]
 - No mutation testing to verify that the test suite actually catches real bugs. A test suite can have

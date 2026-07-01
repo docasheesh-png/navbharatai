@@ -13,16 +13,40 @@ interface AISuggestionsProps {
   onSendSuggestion: (prompt: string) => void;
 }
 
-// P-DESIGN.8 — design-consistency lint result from /api/design/lint.
-interface DesignLintViolation { type: string; severity: 'info' | 'warn'; message: string }
-interface DesignLint { score: number; grade: 'A' | 'B' | 'C' | 'D'; violations: DesignLintViolation[] }
+// P-DESIGN.8 / P-TQA.11 — deterministic health results from /api/design/lint and /api/design/a11y.
+interface HealthViolation { type: string; severity: 'info' | 'warn'; message: string }
+interface HealthReport { score: number; grade: 'A' | 'B' | 'C' | 'D'; violations: HealthViolation[] }
 
-const GRADE_COLOR: Record<DesignLint['grade'], string> = {
+const GRADE_COLOR: Record<HealthReport['grade'], string> = {
   A: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
   B: 'text-lime-400 bg-lime-500/10 border-lime-500/20',
   C: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
   D: 'text-red-400 bg-red-500/10 border-red-500/20',
 };
+
+/** Shared renderer for a deterministic "health" block (design consistency, accessibility). */
+const HealthBlock: React.FC<{ title: string; report: HealthReport; okText: string }> = ({ title, report, okText }) => (
+  <div className="px-3 pt-2.5 pb-1.5 border-b border-white/5">
+    <div className="flex items-center justify-between">
+      <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">{title}</span>
+      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${GRADE_COLOR[report.grade]}`}>
+        {report.grade} · {report.score}/100
+      </span>
+    </div>
+    {report.violations.length === 0 ? (
+      <p className="text-[10px] text-emerald-400/80 mt-1.5">{okText}</p>
+    ) : (
+      <ul className="mt-1.5 space-y-1">
+        {report.violations.slice(0, 3).map((v, i) => (
+          <li key={i} className="text-[10px] text-[#8b949e] leading-tight flex gap-1.5">
+            <span className={v.severity === 'warn' ? 'text-amber-400' : 'text-[#484f58]'}>•</span>
+            <span>{v.message}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+);
 
 const CATEGORY_COLOR: Record<Suggestion['category'], string> = {
   improve: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
@@ -82,25 +106,29 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
   const [suggestions, setSuggestions] = useState<Suggestion[]>(STATIC_SUGGESTIONS.slice(0, 4));
   const [loading, setLoading] = useState(false);
   const [aiPowered, setAiPowered] = useState(false);
-  const [designLint, setDesignLint] = useState<DesignLint | null>(null);
+  const [designLint, setDesignLint] = useState<HealthReport | null>(null);
+  const [a11yLint, setA11yLint] = useState<HealthReport | null>(null);
   const prevCodeRef = useRef<string | undefined>(undefined);
 
-  // P-DESIGN.8 — deterministic design-consistency score for the current app (colours/fonts/spacing).
-  const fetchDesignLint = async () => {
-    if (!generatedCode) { setDesignLint(null); return; }
+  // Deterministic health checks for the current app: design consistency (P-DESIGN.8) + accessibility
+  // (P-TQA.11). Both hit no-AI endpoints; on any failure the block is simply hidden.
+  const fetchHealth = async (path: string, set: (r: HealthReport | null) => void) => {
+    if (!generatedCode) { set(null); return; }
     try {
-      const res = await fetch('/api/design/lint', {
+      const res = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: generatedCode }),
       });
-      if (!res.ok) { setDesignLint(null); return; }
+      if (!res.ok) { set(null); return; }
       const data = await res.json();
       if (typeof data?.score === 'number' && data?.grade) {
-        setDesignLint({ score: data.score, grade: data.grade, violations: Array.isArray(data.violations) ? data.violations : [] });
+        set({ score: data.score, grade: data.grade, violations: Array.isArray(data.violations) ? data.violations : [] });
       }
-    } catch { setDesignLint(null); }
+    } catch { set(null); }
   };
+  const fetchDesignLint = () => fetchHealth('/api/design/lint', setDesignLint);
+  const fetchA11yLint = () => fetchHealth('/api/design/a11y', setA11yLint);
 
   // P-DESIGN.5 — pull REAL AI suggestions from the design pass; fall back to the static/heuristic
   // list on any failure so the panel always shows something useful. Never throws.
@@ -141,6 +169,7 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
       setSuggestions(deriveSuggestions(generatedCode));
       void fetchAISuggestions();
       void fetchDesignLint();
+      void fetchA11yLint();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generatedCode]);
@@ -149,6 +178,7 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
   useEffect(() => {
     if (open && !aiPowered && !loading) void fetchAISuggestions();
     if (open && !designLint) void fetchDesignLint();
+    if (open && !a11yLint) void fetchA11yLint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -176,29 +206,9 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
             </div>
           </div>
 
-          {/* P-DESIGN.8 — design consistency health */}
-          {designLint && (
-            <div className="px-3 pt-2.5 pb-1.5 border-b border-white/5">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">Design health</span>
-                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border ${GRADE_COLOR[designLint.grade]}`}>
-                  {designLint.grade} · {designLint.score}/100
-                </span>
-              </div>
-              {designLint.violations.length === 0 ? (
-                <p className="text-[10px] text-emerald-400/80 mt-1.5">Clean, consistent design — no issues found.</p>
-              ) : (
-                <ul className="mt-1.5 space-y-1">
-                  {designLint.violations.slice(0, 3).map((v, i) => (
-                    <li key={i} className="text-[10px] text-[#8b949e] leading-tight flex gap-1.5">
-                      <span className={v.severity === 'warn' ? 'text-amber-400' : 'text-[#484f58]'}>•</span>
-                      <span>{v.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+          {/* P-DESIGN.8 — design consistency + P-TQA.11 — accessibility health */}
+          {designLint && <HealthBlock title="Design health" report={designLint} okText="Clean, consistent design — no issues found." />}
+          {a11yLint && <HealthBlock title="Accessibility" report={a11yLint} okText="No common WCAG issues found." />}
 
           <div className="p-2 space-y-1">
             <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest px-2 pb-1">

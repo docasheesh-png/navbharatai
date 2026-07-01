@@ -276,9 +276,17 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
   return `agentv3-${uid}-${Date.now()}`;
 }
 
-function maxBuildBudgetUsd(): number {
+/**
+ * Hard per-build cost cap (USD) — stops one runaway build from spending unbounded money.
+ * TEMPORARILY DISABLED (admin decision, 2026-07-01): while build-pipeline bugs are still being found
+ * and fixed, a build must be allowed to run to completion rather than being cut off mid-repair — the
+ * cap was firing on genuine, still-productive debugging sessions (e.g. "Budget reached ($25.83 of
+ * $25.00). Stopped." while the agent was actively fixing a real API mismatch). Re-enable later by
+ * setting AGENTV3_MAX_BUILD_USD to a positive number — no code change needed. 0/unset = disabled.
+ */
+export function maxBuildBudgetUsd(): number {
   const raw = Number(process.env.AGENTV3_MAX_BUILD_USD);
-  return Number.isFinite(raw) && raw > 0 ? raw : 25;
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
 /**
@@ -2107,6 +2115,9 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();
+      // AgentRunner treats `undefined` as "no cap" (0 would instead stop the build after its very
+      // first dollar, since it checks `billed() >= maxBudgetUsd`) — convert the disabled (0) case here.
+      const maxBudgetUsdForRunner = budget > 0 ? budget : undefined;
       const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
       // How many parallel-safe tools / review sub-agents may run at once in a turn (rate-limit
@@ -2271,7 +2282,7 @@ export function registerAgentV3Routes(app: Express): void {
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
         client, actuator, workspaceId, state, events, model, onlyOpus,
-        maxBudgetUsd: budget, maxSteps: subAgentMaxSteps, checkpointer: git,
+        maxBudgetUsd: maxBudgetUsdForRunner, maxSteps: subAgentMaxSteps, checkpointer: git,
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router
@@ -2485,7 +2496,7 @@ export function registerAgentV3Routes(app: Express): void {
         powerLevel: powerLevelReq,
         effort: powerSpecResolved.effort,
         thinking,
-        maxBudgetUsd: budget,
+        maxBudgetUsd: maxBudgetUsdForRunner,
         maxSteps,
         toolConcurrency,
         agentRole: 'architect' as const,
@@ -2638,7 +2649,7 @@ export function registerAgentV3Routes(app: Express): void {
           powerLevel: powerLevelReq,
           effort: powerSpecResolved.effort,
           thinking,
-          maxBudgetUsd: budget,
+          maxBudgetUsd: maxBudgetUsdForRunner,
           maxSteps: 4,
           agentRole: 'architect',
           signal: abort.signal,

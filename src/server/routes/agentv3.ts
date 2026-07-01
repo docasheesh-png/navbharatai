@@ -75,7 +75,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
-import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors } from '../AgentV3/TscGate';
@@ -1024,21 +1024,29 @@ export function registerAgentV3Routes(app: Express): void {
       res.json({ history });
       return;
     }
+    // Resolve the report: a SPECIFIC past build (buildId) or the latest one — shared by both the
+    // JSON response and the plain-text render below, so `?format=text` works on either.
+    let report: BuildDiagnosticsReport | null | undefined;
     if (typeof req.query.buildId === 'string' && req.query.buildId) {
       if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-      const report = await getDiagnosticsHistoryItem(workspaceId, req.query.buildId).catch(() => null);
+      report = await getDiagnosticsHistoryItem(workspaceId, req.query.buildId).catch(() => null);
       if (!report) { res.status(404).json({ error: 'No diagnostics found for that build.' }); return; }
-      res.json({ diagnostics: report });
+    } else {
+      // Prefer the DURABLE (Firestore) copy keyed by workspaceId: it is the freshest authoritative
+      // copy — it survives an instance rotation AND carries PREVIEW errors appended AFTER the build
+      // (the in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview
+      // append). Fall back to the in-memory copy only when there is no workspaceId or no durable copy.
+      if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
+      if (!report) report = lastDiagnostics.get(userId ?? 'anon');
+      if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+    }
+    // Human/Claude-readable plain-text render — root cause first, problems only, full AI Diagnosis
+    // Bundle (sandbox commands, LLM I/O, preview errors, the reviewer's complete findings). Previously
+    // built but reachable from nowhere; wired here so "Text report" can actually download it.
+    if (req.query.format === 'text') {
+      res.type('text/plain').send(renderDiagnosticsText(report));
       return;
     }
-    // Prefer the DURABLE (Firestore) copy keyed by workspaceId: it is the freshest authoritative copy
-    // — it survives an instance rotation AND carries PREVIEW errors appended AFTER the build (the
-    // in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview append).
-    // Fall back to the in-memory copy only when there is no workspaceId or no durable copy yet.
-    let report: BuildDiagnosticsReport | null | undefined;
-    if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
-    if (!report) report = lastDiagnostics.get(userId ?? 'anon');
-    if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     res.json({ diagnostics: report });
   });
 

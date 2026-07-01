@@ -10,7 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
-import type { BuildDiagnosticsReport } from './BuildDiagnostics';
+import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -47,9 +47,14 @@ function cap(s: string | undefined, n: number): string | undefined {
  * errors) to safe sizes while keeping the most recent, most useful detail. Pure + exported + tested.
  */
 export function trimReportForStorage(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const trimmedIssues = (report.issues ?? []).slice(-500);
   return {
     ...report,
-    issues: (report.issues ?? []).slice(-500),
+    issues: trimmedIssues,
+    // RECOMPUTE from the TRIMMED issues (not a pass-through of report.problems) so `problems` can
+    // never reference an entry that just fell out of the stored `issues` timeline, and can never
+    // itself bypass this function's byte-budget trimming with an unbounded list of its own.
+    problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
     commands: lastN(report.commands, 40)?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
     llmCalls: lastN(report.llmCalls, 40)?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
     errors: lastN(report.errors, 50)?.map((e) => ({ ...e, message: cap(e.message, 2000) ?? '', stack: cap(e.stack, 1500) })),
@@ -67,7 +72,14 @@ export async function saveDiagnostics(workspaceId: string, report: BuildDiagnost
     // Final safety net: if it is still somehow over the limit, drop the heaviest channels entirely
     // rather than fail the write (an empty-channel report still beats no report at all).
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      stored = { ...stored, commands: undefined, llmCalls: undefined, issues: (stored.issues ?? []).slice(-200) };
+      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
+      stored = {
+        ...stored,
+        commands: undefined,
+        llmCalls: undefined,
+        issues: furtherTrimmedIssues,
+        problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
+      };
     }
     await db.collection(COLLECTION).doc(workspaceId).set({ report: stored, savedAt: Date.now() }, { merge: false });
   } catch {
@@ -121,7 +133,19 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
   const db = getDb();
   if (!db || !workspaceId || !report || report.endedAt === undefined) return;
   try {
-    const stored = trimReportForStorage(report);
+    let stored = trimReportForStorage(report);
+    // Same final safety net as saveDiagnostics — a history entry that fails to write because it's
+    // over budget is worse than a lighter one that succeeds.
+    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
+      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
+      stored = {
+        ...stored,
+        commands: undefined,
+        llmCalls: undefined,
+        issues: furtherTrimmedIssues,
+        problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
+      };
+    }
     await db
       .collection(COLLECTION)
       .doc(workspaceId)

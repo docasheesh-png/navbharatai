@@ -44,6 +44,29 @@ describe('trimReportForStorage', () => {
     const r = baseReport({ generatedFiles: [{ ts: 1, path: 'src/App.tsx', content: 'const x = 1;', note: 'referenced by a compile error' }] });
     expect(trimReportForStorage(r).generatedFiles).toEqual(r.generatedFiles);
   });
+
+  it('RECOMPUTES problems from the trimmed issues, not a pass-through of the original problems field — a problem entry that fell out of the trimmed issues window is not left dangling in problems', () => {
+    // 501 old info-only issues, then ONE old error that gets trimmed away by the -500 slice, then a
+    // fresh error that survives. If `problems` were a naive pass-through of the ORIGINAL report.problems
+    // (computed before trimming), it would still list the now-vanished old error.
+    const oldNoise = Array.from({ length: 500 }, (_, i) => ({ ts: i, phase: 'build' as const, severity: 'info' as const, code: 'STEP', message: `step ${i}`, autoResolved: true }));
+    const oldError = { ts: 500, phase: 'build' as const, severity: 'error' as const, code: 'OLD_ERR', message: 'old error that will be trimmed', autoResolved: false };
+    const freshError = { ts: 501, phase: 'build' as const, severity: 'error' as const, code: 'NEW_ERR', message: 'fresh error that survives', autoResolved: false };
+    const issues = [oldError, ...oldNoise, freshError]; // oldError sits OUTSIDE the last-500 window
+    const r = baseReport({ issues, problems: [oldError, freshError] }); // original (pre-trim) problems
+    const trimmed = trimReportForStorage(r);
+    expect(trimmed.issues!.some((i) => i.code === 'OLD_ERR')).toBe(false); // trimmed out of issues
+    expect(trimmed.problems!.some((i) => i.code === 'OLD_ERR')).toBe(false); // must ALSO be gone from problems
+    expect(trimmed.problems!.some((i) => i.code === 'NEW_ERR')).toBe(true); // the surviving one is kept
+  });
+
+  it('bounds problems to MAX_PROBLEMS even when the trimmed issues contain more real problems than that', () => {
+    const manyErrors = Array.from({ length: 400 }, (_, i) => ({ ts: i, phase: 'build' as const, severity: 'error' as const, code: 'E', message: `error ${i}`, autoResolved: false }));
+    const trimmed = trimReportForStorage(baseReport({ issues: manyErrors, problems: manyErrors }));
+    expect(trimmed.problems!.length).toBeLessThanOrEqual(300);
+    // keeps the NEWEST (highest-index) errors, same "keep the tail" policy as issues/commands/llmCalls.
+    expect(trimmed.problems![trimmed.problems!.length - 1].message).toContain('error 399');
+  });
 });
 
 // P-REPORT.4 — history. Firestore is unreachable under VITEST (VITEST-skip, same contract as

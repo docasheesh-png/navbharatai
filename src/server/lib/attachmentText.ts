@@ -9,6 +9,8 @@
 // plain-text/code formats. Each extractor is wrapped so a single bad file never
 // throws — it degrades to a short honest note instead, so the app never breaks.
 
+import { validateAttachment } from './uploadValidation';
+
 export interface RawAttachment {
   name: string;
   type: string;
@@ -139,6 +141,11 @@ async function extractZip(buf: Buffer): Promise<string> {
  */
 export async function extractDocumentText(att: RawAttachment): Promise<string | null> {
   if (!att?.base64 || isVisionAttachment(att.type, att.name)) return null;
+  // P-DATA.6 — enforce size + type BEFORE decoding/processing. An OVERSIZED file gets an honest
+  // "skipped" note (the user should know it was too big); an unsupported/unknown binary is ignored
+  // (null) exactly as before, so buildDocumentContext simply omits it.
+  const gate = validateAttachment(att);
+  if (!gate.ok) return gate.reason?.startsWith('too large') ? `[Skipped "${att.name}": ${gate.reason}]` : null;
   const e = ext(att.name);
   let buf: Buffer;
   try {

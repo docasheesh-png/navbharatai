@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import type { Express, Request, Response } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { collection, addDoc } from 'firebase/firestore';
@@ -6,6 +5,7 @@ import { getDb } from '../lib/db';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 
 /**
@@ -273,162 +273,39 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
 
     console.log(`[CHAT] tier=${tier} isFree=${isFree} mode=${mode} intent=${intent} hasCanvas=${hasCanvas} files=${attachments.length}(vision=${visionAttachments.length}) sysprompt=${isFree ? 'FREE' : hasCanvas ? 'EDIT' : isBuildIntent ? 'BUILD' : 'CHAT'}`);
 
-    // Vision attachments (images + PDFs) — Gemini/Vertex multimodal call
+    // Vision attachments (images + PDFs) — read via the isolated, tier-aware vision
+    // chain: Vertex (service-account, the Free universe's primary Google auth) →
+    // API-key Gemini → Grok (images) → Claude (ONLY for non-Free universes). The old
+    // path only supported an API-key Gemini client and passed the bogus literal
+    // `apiKey: 'vertex'` when no key was set, so a Vertex-based deployment could not
+    // read images/PDFs in Free chat at all — this is the root-cause fix.
     if (visionAttachments.length > 0) {
-      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
-      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID || '';
-      {
-        try {
-          if (!geminiKey && !projectId) throw new Error('No Gemini/Vertex credentials — using Grok/Claude vision fallback');
-          const { GoogleGenAI } = await import('@google/genai');
-          const ai = new GoogleGenAI({ apiKey: geminiKey || 'vertex' });
-          const parts: any[] = [{ text: contextualMessage }];
-          for (const f of visionAttachments) {
-            parts.push({ inlineData: { mimeType: f.type, data: f.base64 } });
-          }
-          const visionConfig: any = {};
-          if (systemPrompt) visionConfig.systemInstruction = systemPrompt;
-          // gemini-2.0-flash: fast vision, no thinking delay (2.5-flash can take 5-10 min on images)
-          const VISION_MODEL = 'gemini-2.0-flash';
-          const visionCfg: any = { ...visionConfig, thinkingConfig: { thinkingBudget: 0 } };
-          if (req.body.stream === true) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Accel-Buffering', 'no');
-            res.flushHeaders();
-            const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15000);
-            const visionAc = new AbortController();
-            const visionTimeout = setTimeout(() => visionAc.abort(), 28000); // 28s hard cap
-            req.on('close', () => visionAc.abort());
-            try {
-              const stream = await ai.models.generateContentStream({
-                model: VISION_MODEL,
-                contents: [{ parts }],
-                config: Object.keys(visionCfg).length ? visionCfg : undefined,
-              });
-              for await (const chunk of stream) {
-                if (visionAc.signal.aborted) break;
-                const text = chunk.text || '';
-                if (text && !res.writableEnded) res.write(`data: ${JSON.stringify({ c: text })}\n\n`);
-              }
-            } finally {
-              clearTimeout(visionTimeout);
-              clearInterval(heartbeat);
-            }
-            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
-          } else {
-            const visionAc2 = new AbortController();
-            const t2 = setTimeout(() => visionAc2.abort(), 28000);
-            try {
-              const result = await ai.models.generateContent({
-                model: VISION_MODEL,
-                contents: [{ parts }],
-                config: Object.keys(visionCfg).length ? visionCfg : undefined,
-              });
-              return res.json({ reply: result.text || '' });
-            } finally { clearTimeout(t2); }
-          }
-          return;
-        } catch (visionErr: any) {
-          console.error('[CHAT/VISION] Gemini vision failed, trying Grok vision:', visionErr.message);
-          // Grok fallback for images (Grok doesn't support PDFs)
-          const imageOnly = visionAttachments.filter(f => f.type.startsWith('image/'));
-          if (imageOnly.length > 0) {
-            const grokVisionKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY || '';
-            if (grokVisionKey) {
-              try {
-                const grokVision = new OpenAI({ apiKey: grokVisionKey, baseURL: 'https://api.x.ai/v1' });
-                const grokContent: any[] = [
-                  ...imageOnly.map(f => ({ type: 'image_url', image_url: { url: `data:${f.type};base64,${f.base64}` } })),
-                  { type: 'text', text: contextualMessage },
-                ];
-                const grokMsgsV: any[] = [
-                  ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-                  { role: 'user', content: grokContent },
-                ];
-                for (const gm of ['grok-2-vision-1212', 'grok-2-mini-vision-1212']) {
-                  try {
-                    const r = await grokVision.chat.completions.create({ model: gm, messages: grokMsgsV, max_tokens: 1500 });
-                    const gText = r.choices[0]?.message?.content?.trim();
-                    if (gText) {
-                      if (!res.headersSent && req.body.stream === true) {
-                        res.setHeader('Content-Type', 'text/event-stream');
-                        res.setHeader('Cache-Control', 'no-cache');
-                        res.setHeader('Connection', 'keep-alive');
-                        res.setHeader('X-Accel-Buffering', 'no');
-                        res.flushHeaders();
-                      }
-                      if (req.body.stream === true) {
-                        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: gText })}\n\n`);
-                        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
-                      } else {
-                        res.json({ reply: gText });
-                      }
-                      return;
-                    }
-                  } catch (ge: any) { console.warn(`[CHAT/VISION] Grok ${gm}: ${ge.message}`); }
-                }
-              } catch (grokVisionErr: any) { console.warn('[CHAT/VISION] Grok vision failed:', grokVisionErr.message); }
-            }
-          }
-          // Last-resort vision fallback: Claude (native image + PDF document support).
-          // Kept LAST so the cheap providers (Gemini/Grok) are always preferred —
-          // Claude only runs if those are unavailable, guaranteeing files still work
-          // whenever ANY one provider key is set in the environment.
-          const anthropicVisionKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
-          if (anthropicVisionKey) {
-            try {
-              const Anthropic = (await import('@anthropic-ai/sdk')).default;
-              const claude = new Anthropic({ apiKey: anthropicVisionKey });
-              const claudeContent: any[] = [
-                ...visionAttachments.map(f => f.type === 'application/pdf'
-                  ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.base64 } }
-                  : { type: 'image', source: { type: 'base64', media_type: f.type, data: f.base64 } }),
-                { type: 'text', text: contextualMessage },
-              ];
-              const cr = await claude.messages.create({
-                model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
-                system: systemPrompt || undefined,
-                messages: [{ role: 'user', content: claudeContent }],
-              });
-              const cText = (cr.content.find((c: any) => c.type === 'text') as any)?.text?.trim();
-              if (cText) {
-                if (req.body.stream === true) {
-                  if (!res.headersSent) {
-                    res.setHeader('Content-Type', 'text/event-stream');
-                    res.setHeader('Cache-Control', 'no-cache');
-                    res.setHeader('Connection', 'keep-alive');
-                    res.setHeader('X-Accel-Buffering', 'no');
-                    res.flushHeaders();
-                  }
-                  if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: cText })}\n\n`);
-                  if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
-                } else {
-                  res.json({ reply: cText });
-                }
-                return;
-              }
-            } catch (claudeVisionErr: any) { console.warn('[CHAT/VISION] Claude vision failed:', claudeVisionErr.message); }
-          }
-          // All dedicated vision providers failed — return a clear error (do NOT fall
-          // through to the text-only race router which would silently drop the image).
-          console.error('[CHAT/VISION] All vision providers failed — returning error to client');
-          if (req.body.stream === true) {
-            if (!res.headersSent) {
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Connection', 'keep-alive');
-              res.flushHeaders();
-            }
-            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: 'Sorry, I could not process your image/file right now. Please try again or send a text-only message.' })}\n\n`);
-            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
-          } else {
-            res.json({ reply: 'Sorry, I could not process your image/file right now. Please try again or send a text-only message.' });
-          }
-          return;
-        }
+      const visionResult = await runVisionChain(visionAttachments, {
+        prompt: contextualMessage,
+        systemPrompt,
+        allowClaude: !isFree, // absolute rule: the Free universe NEVER uses Claude
+      });
+      if (visionResult) {
+        console.log(`[CHAT/VISION] tier=${tier} provider=${visionResult.provider} files=${visionAttachments.length}`);
+      } else {
+        console.error(`[CHAT/VISION] tier=${tier} — every allowed provider failed for ${visionAttachments.length} file(s)`);
       }
+      const replyText = visionResult?.text
+        || 'Sorry, I could not read your image/file right now. Please try again in a moment, or paste the text directly.';
+      if (req.body.stream === true) {
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.flushHeaders();
+        }
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: replyText })}\n\n`);
+        if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
+      } else {
+        res.json({ reply: replyText });
+      }
+      return;
     }
 
     try {

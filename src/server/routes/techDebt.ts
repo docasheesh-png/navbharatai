@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { loadDebt, recordDebt, prioritizeDebt, summarizeDebt, type IncomingFinding } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
-import { requireUserMatch } from '../lib/authMiddleware';
+import { requireWorkspaceAccess } from '../lib/WorkspaceAccess';
 import { validateBody, vobject, varray, vstring, venum } from '../lib/validate';
 
 /**
@@ -10,7 +10,8 @@ import { validateBody, vobject, varray, vstring, venum } from '../lib/validate';
  *   POST /api/techdebt/:userId/:projectId          — { findings: [{category,severity,file?,message}] }
  *                                                    → merge into the register, return prioritized list + summary
  *
- * Scoped to the authenticated user (requireUserMatch); POST body request-validated (P-DATA.1).
+ * Access: the workspace owner OR an active team member of that owner (P-COLLAB.2,
+ * `requireWorkspaceAccess`); POST body request-validated (P-DATA.1).
  */
 const recordSchema = vobject({
   findings: varray(vobject({
@@ -22,12 +23,12 @@ const recordSchema = vobject({
 });
 
 export function registerTechDebtRoutes(app: Express): void {
-  app.get('/api/techdebt/:userId/:projectId', requireUserMatch('userId'), async (req: Request, res: Response) => {
+  app.get('/api/techdebt/:userId/:projectId', requireWorkspaceAccess('userId'), async (req: Request, res: Response) => {
     const items = prioritizeDebt(await loadDebt(req.params.userId, req.params.projectId));
     res.json({ items, summary: summarizeDebt(items) });
   });
 
-  app.post('/api/techdebt/:userId/:projectId', requireUserMatch('userId'), validateBody(recordSchema), async (req: Request, res: Response) => {
+  app.post('/api/techdebt/:userId/:projectId', requireWorkspaceAccess('userId'), validateBody(recordSchema), async (req: Request, res: Response) => {
     const findings = (req.body.findings || []) as IncomingFinding[];
     const items = await recordDebt(req.params.userId, req.params.projectId, findings, new Date().toISOString());
     res.json({ items, summary: summarizeDebt(items) });

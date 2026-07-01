@@ -2749,21 +2749,27 @@
   `src/components/ide/TeamCollaboration.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 - **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3980 green · `build` OK · boot PASS.
 
-### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  🔶 DEFERRED — breakage/security risk, needs care (2026-07-01)  [MED]
-- Share links (`navbharat.ai/shared/{projectId}`) and access toggles are **UI-only**; nothing on the backend enforces
-  *which users can open which project*. Workspaces are owner-scoped with no member-grant.
-- [ ] Add a project membership/ACL: owner can grant team members access; enforce on every workspace/build/deploy route.
-- [ ] Resolve shared-link access server-side (member vs anyone-with-link vs expired).
-- **🔶 Why deferred (honest, verified 2026-07-01):** "enforce on every workspace route" is a **breakage + security**
-  minefield, not a rapid ship. Verified: the actual workspace routes (`/api/sync/:userId`) are **currently
-  unauthenticated** — adding an ACL there *adds* auth = **tightening**, which breaks existing unauthenticated callers
-  (violates the one absolute rule: the app must never break). Meanwhile the routes that DO use `requireUserMatch`
-  (`secrets`, `webhooks`, `techDebt`) are **sensitive personal data** that a Viewer/Editor must **never** be granted —
-  so a blanket relaxation is a **security hole**. A correct version needs per-route judgment (owner-always-passes +
-  member-grant on *workspace* routes only, fail-open, secrets stay owner-only) + integration testing against real
-  auth/Firestore. The member data model already exists (`TeamStore.listMembers`, shipped in P-COLLAB.1). **Needs:**
-  a careful, reviewed pass (not the autonomous rapid cycle) — admin nod on the approach recommended.
-- **Files:** `src/server/workspace/WorkspaceManager.ts`, `src/server/routes/{sync,engineer,agentv3}.ts`, new ACL middleware.
+### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  ✅ DONE (2026-07-01, admin-approved safe approach) · 🔌 WIRED  [MED]
+- Workspaces were owner-scoped: `requireUserMatch` routes allowed ONLY the owner, so a team member could never open
+  the owner's workspace-scoped data. (Admin approved the safe approach 2026-07-01: "owner hamesha pass, secrets member
+  ko na dikhe.")
+- [x] **New team-aware ACL — `src/server/lib/WorkspaceAccess.ts`** (pure decision + thin middleware, 6 tests):
+  `resolveWorkspaceAccess` → owner / member / anonymous / denied; `isTeamMember(ownerId, uid)` (reuses
+  `TeamStore.listMembers`); `requireWorkspaceAccess(param)` middleware — **owner always passes** (no Firestore lookup,
+  never lockable-out), an **active team member passes**, any other authed user → **403**, anonymous → **401**.
+- [x] **Purely additive + safe by construction:** it only ever GRANTS access to members over the old owner-only rule —
+  never removes the owner's access, and **fails CLOSED** on a membership-lookup error (a member is briefly denied in a
+  Firestore outage — never worse than the old rule, never a security hole).
+- [x] **Wired** — `routes/techDebt.ts` (`/api/techdebt/:userId/:projectId`, workspace-scoped) swapped
+  `requireUserMatch` → `requireWorkspaceAccess`, so team members can now see/contribute to the owner's tech-debt
+  register. **Sensitive routes (`secrets`, `webhooks`) intentionally KEEP `requireUserMatch`** — never opened to members.
+- [x] **Shared-link resolution server-side** — delivered by the P-COLLAB.3 share portal (`ShareStore` + `/api/share/*`:
+  valid / expired / revoked resolved server-side).
+- **Honest scope:** the hot build/preview routes (`/api/sync/:userId`, `agentv3/*`, `/api/build`) are currently
+  **unauthenticated / body-identity + rate-limited** — retrofitting auth there is a genuine breakage risk, so they are
+  **not** force-gated. The reusable `requireWorkspaceAccess` is the drop-in for adopting them route-by-route with care.
+- **Files:** new `src/server/lib/WorkspaceAccess.ts` + `tests/workspaceAccess.test.ts`, `src/server/routes/techDebt.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` green · `build` OK · boot PASS.
 
 ### P-COLLAB.3 — Client / Stakeholder Share Portal + Feedback Collection  ✅ DONE (2026-07-01) · 🔌 WIRED  [MED]
 - No way to share a built app/preview **read-only** with a non-member (client/stakeholder) and collect their feedback

@@ -6325,3 +6325,31 @@ Tests: +10 BuildOutcome (every precedence path + isBuildFailure + labels). Gate:
 
 Next reliability gaps (prioritized, follow-up PRs): G3 tsc-in-agentic-loop, G4 production-build gate (flag-
 gated), durable↔live workspace-consistency check, orphan/unused-import detection.
+
+## 2026-07-01 — RELIABILITY (G3): deterministic tsc gate in the agentic loop + flaky-test fix
+
+Two ship-blockers cleared, both aligned with "rock solid, error never returns":
+
+1. **Flaky CI fix (#753).** `CheckpointStorage.save()` called `openSync(tmpPath)` but the `.checkpoints`
+   directory was only created via an ASYNC `mkdir` in the constructor — a save that raced ahead of that
+   promise hit `ENOENT`. It was intermittent (same commit passed on one CI runner, failed on another).
+   Fix: a synchronous `mkdirSync(this.storageRoot, { recursive: true })` at the top of `save()` — idempotent,
+   cheap, and it makes the first save impossible to lose the race. Deterministic.
+
+2. **G3 — post-agentic tsc gate.** The fast lane (SimpleBuilder) type-checks + repairs, but the agentic
+   loop / escalation / empty-build retry path had NO deterministic compile gate — it relied on the agent
+   choosing to run `tsc`, which is not guaranteed, so a "finished" agentic build could still ship type
+   errors. Added a post-agentic gate (default-on; `AGENTV3_AGENTIC_TSC_GATE=off` to disable): one real
+   `tsc --noEmit` over the produced files → on type errors, ONE bounded Claude repair pass (same
+   repair prompts the fast lane uses) → re-check. Purely ADDITIVE — it NEVER flips `result.ok` and NEVER
+   blocks (best-effort, abortable, budget-capped); on persisting errors it records the honest
+   `OUTCOME_TYPECHECK_FAILED` into the build report (ship-with-warning, like PREVIEW_FAILED). A `fastLaneGated`
+   flag skips the gate when the fast lane already produced the result (no redundant tsc run). Runs BEFORE the
+   preview self-check so compile errors are fixed before rendering. New pure `hasTscErrors()` helper (shared,
+   unit-tested) keeps the "is this a real type error?" regex in one place (no drift with the fast lane).
+
+Tests: +5 TscGate (real error / clean / null / warning-only / noisy log). Gate: frontend tsc 0, server tsc 0,
+vitest 3897/3897 PASS, boot:check PASS.
+
+Next reliability gaps (prioritized, follow-up PRs): G4 production-build gate (flag-gated),
+durable↔live workspace-consistency check, orphan/unused-import detection, stuck-tool auto-recovery.

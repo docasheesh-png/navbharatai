@@ -77,6 +77,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3/SimpleBuilder';
+import { hasTscErrors } from '../AgentV3/TscGate';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout } from '../AgentV3/asyncUtils';
@@ -2505,6 +2506,9 @@ export function registerAgentV3Routes(app: Express): void {
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
       let result: Awaited<ReturnType<typeof runner.run>> | undefined;
       let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
+      // True once the fast lane (SimpleBuilder / OneShot) produced the result — that path already runs
+      // its own tsc verify-gate + repair, so the post-agentic tsc gate below skips it (no redundant run).
+      let fastLaneGated = false;
 
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
       // For a SIMPLE new-build app, try ONE cheap generation call first (no Architect, no
@@ -2605,6 +2609,7 @@ export function registerAgentV3Routes(app: Express): void {
         const fastResult = (summary: string, steps: number) => {
           result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
           deliveredTier = analysis?.startTier ?? 'haiku';
+          fastLaneGated = true; // the fast lane already type-checked + repaired — skip the agentic gate
         };
 
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
@@ -2725,6 +2730,58 @@ export function registerAgentV3Routes(app: Express): void {
           if (retry.ok || writtenFiles.size > 0) { result = retry; deliveredTier = 'sonnet'; }
         } catch (e) {
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      // G3 — POST-AGENTIC TSC GATE (default-on; disable with AGENTV3_AGENTIC_TSC_GATE=off). The fast
+      // lane (SimpleBuilder) type-checks + repairs, but the agentic loop / escalation / empty-build
+      // retry had NO deterministic compile gate — it relied on the agent choosing to run tsc, which is
+      // not guaranteed, so a build that "finished" could still ship type errors. This runs one real
+      // `tsc --noEmit` over the produced files and, on type errors, makes ONE bounded Claude repair
+      // pass, then re-checks. It is purely ADDITIVE: it NEVER flips result.ok and NEVER blocks (best-
+      // effort, abortable, budget-capped); on persisting errors it records the honest OUTCOME so the
+      // report/dashboard sees the true end-state (ship-with-warning, exactly like PREVIEW_FAILED).
+      if (
+        process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off' && !fastLaneGated
+        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        // Only with comfortable time left for install + tsc + one repair pass.
+        && (maxBuildSeconds() === 0 || Date.now() - buildStartedAt < maxBuildSeconds() * 1000 - 90_000)
+      ) {
+        const runTsc = async (): Promise<{ ok: boolean; errors: string }> => {
+          try {
+            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
+            const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+            return hasTscErrors(out) ? { ok: false, errors: out.slice(0, 6000) } : { ok: true, errors: '' };
+          } catch {
+            return { ok: true, errors: '' }; // couldn't verify (no real sandbox / tooling) → don't block
+          }
+        };
+        let check = await runTsc();
+        if (!check.ok) {
+          events.emit({ type: 'narration', agent: 'architect', text: '🔍 Type-checking the finished build — found type errors, fixing them…', ts: Date.now() });
+          try {
+            const currentFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
+            const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+              model: fastBuildModel(), system: repairSystemPrompt(framework),
+              messages: [{ role: 'user', content: repairUserPrompt(prompt, check.errors, currentFiles) }],
+              tools: [], maxTokens: 8000,
+            });
+            const fixes = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+            for (let i = 0; i < fixes.length; i++) {
+              await dispatcher.dispatch({ id: `tscgate-w${i}`, name: 'write_file', input: { path: fixes[i].path, content: fixes[i].content } }, 'frontend');
+            }
+          } catch (e) {
+            console.log(`[AGENTV3] agentic tsc-gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
+          }
+          check = await runTsc();
+          if (check.ok) {
+            events.emit({ type: 'narration', agent: 'architect', text: '✅ Type errors fixed — the finished build now compiles cleanly.', ts: Date.now() });
+          } else {
+            // Type errors remain after one repair — record the honest end-state (do NOT flip result.ok;
+            // the app is built and will be durably saved — ship-with-warning, like PREVIEW_FAILED).
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Type errors remained after the agentic build and one repair pass.', autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some TypeScript errors remain after one fix pass. Your files are saved — send a follow-up and I\'ll finish fixing them.', ts: Date.now() });
+          }
         }
       }
 

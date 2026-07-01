@@ -112,16 +112,38 @@ export function useAgentV3Build(): UseAgentV3Build {
   // reconnects WHILE running is true, and the old `if (running) return` made that reconnect a no-op,
   // leaving the spinner stuck forever after a genuinely dead stream.)
   const resumeInFlightRef = useRef(false);
+  // GENERATION GUARD — fixes "New chat reverts to the old chat ~10s later". resume()'s replayed
+  // buffer and the cross-device live-mirror poll (subscribeLive) both apply setState ASYNCHRONOUSLY,
+  // seconds after they start, with no idea which session/workspace the user is looking at NOW. Both
+  // /api/agentv3/attach and /api/agentv3/live are keyed only by userId (not by session/workspace), so
+  // an old, already-finished build's buffered events can still be replayed/mirrored well after the
+  // user has moved on. Every "fresh start" of state (reset(), resume()) bumps this counter and captures
+  // it; every async apply path re-checks it before calling setState and stops cold if it no longer
+  // matches — so a stale resume/mirror can never silently repopulate a session the user has since left.
+  const generationRef = useRef(0);
+  /** Has the session moved on since `gen` was captured? Named so every async apply site reads the
+   *  same intent instead of re-deriving the ref comparison. */
+  const isStale = (gen: number): boolean => gen !== generationRef.current;
 
   // Keep the latest workspace id available to restore() without a stale closure.
   workspaceIdRef.current = state.workspaceId;
 
   const reset = useCallback(() => {
+    // Invalidate any in-flight resume()/subscribeLive() from a PREVIOUS session first, and cancel the
+    // in-flight attach stream (detach-only — does NOT call /api/agentv3/stop, so a build that's still
+    // genuinely running server-side keeps running in the background and shows up in history when done;
+    // this only stops THIS UI from displaying its stream).
+    generationRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    resumeInFlightRef.current = false;
+    setRunning(false);
     setState(initialAgentV3State());
     setError(null);
   }, []);
 
   const stop = useCallback(() => {
+    generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive() from this point on
     abortRef.current?.abort();
     abortRef.current = null;
     setRunning(false);
@@ -135,9 +157,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     }).catch(() => { /* best-effort */ });
   }, []);
 
-  // Read the NDJSON event stream line by line and fold each event into the reducer.
-  // Shared by start() and resume(). Surfaces a non-event body so silent failures show.
-  const pumpStream = useCallback(async (res: Response): Promise<void> => {
+  // Read the NDJSON event stream line by line and fold each event into the reducer. Used by resume()'s
+  // replay/attach stream. `gen` is the generation captured when the stream was started (see
+  // generationRef above) — every event is dropped once it no longer matches the LIVE generation (the
+  // user has since reset/started a new session), instead of silently repopulating a session the user
+  // has left. Surfaces a non-event body so silent failures show.
+  const pumpStream = useCallback(async (res: Response, gen: number): Promise<void> => {
     if (!res.body) return;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -145,6 +170,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     let gotEvent = false;
     let rawSample = '';
     for (;;) {
+      if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -160,6 +186,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           if (rawSample.length < 400) rawSample += trimmed + '\n';
           continue;
         }
+        if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
         gotEvent = true;
         lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
         setState((prev) => agentV3Reducer(prev, event));
@@ -179,17 +206,25 @@ export function useAgentV3Build(): UseAgentV3Build {
   // instance and feed its events into THIS panel's reducer, so a 2nd device watching the same chat sees
   // the live activity. Self-limiting for cost: caller starts it only while the panel is visible + not
   // running locally; it also auto-stops after ~30 s of no activity when the server reports not-running.
+  //
+  // GENERATION GUARD: /api/agentv3/live is keyed only by userId (no session/workspace scoping), and its
+  // Firestore-backed ring buffer persists well after a build finishes — so a poll that (re)starts with
+  // sinceSeq=0 can still fetch a PAST build's tail events. Freezing `myGen` at call time and re-checking
+  // it before every setState means that once the user resets/starts a new session, this poll's next
+  // tick sees the mismatch and stops applying (and stops polling) instead of repopulating stale
+  // messages/build-status into a session the user has since left ("New chat reverts to the old chat").
   // Returns a stop function. Best-effort — never throws.
   const subscribeLive = useCallback((opts?: { userId?: string; email?: string }): (() => void) => {
     const uid = opts?.userId ?? userIdRef.current;
     const em = opts?.email ?? emailRef.current;
     if (!uid) return () => {};
+    const myGen = generationRef.current;
     let stopped = false;
     let sinceSeq = 0;
     let idlePolls = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
-      if (stopped) return;
+      if (stopped || isStale(myGen)) { stopped = true; return; }
       try {
         const params = new URLSearchParams({ userId: uid });
         if (em) params.set('email', em);
@@ -200,6 +235,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           if (typeof j.seq === 'number') sinceSeq = j.seq;
           const events = Array.isArray(j.events) ? (j.events as AgentV3WireEvent[]) : [];
           if (events.length > 0) {
+            if (isStale(myGen)) { stopped = true; return; } // session moved on while this fetch was in flight
             idlePolls = 0;
             setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
           } else if (j.running === false) {
@@ -207,7 +243,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           }
         }
       } catch { /* best-effort — a failed poll just retries */ }
-      if (stopped) return;
+      if (stopped || isStale(myGen)) { stopped = true; return; }
       if (idlePolls >= 10) { stopped = true; return; } // ~30 s quiet → stop until re-armed by the panel
       timer = setTimeout(() => { void tick(); }, 3000);
     };
@@ -260,6 +296,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (restoredTodos.length > 0) {
         next = agentV3Reducer(next, { type: 'todo_updated', todos: restoredTodos, ts: Date.now() } as AgentV3WireEvent);
       }
+      // Invalidate any resume()/subscribeLive() poll left over from a PREVIOUS session — otherwise its
+      // stale, still-in-flight setState can land moments later and overwrite the conversation just loaded.
+      generationRef.current += 1;
       setState(next);
       if (conv.workspaceId) {
         // Adopt the workspaceId at the HOOK level so restoreAllFiles / git-status / file loads work on
@@ -337,6 +376,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
+    const gen = ++generationRef.current;  // this resume is now the authoritative generation
     setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
     setError(null);
     setServerBuildRunning(false);
@@ -350,21 +390,27 @@ export function useAgentV3Build(): UseAgentV3Build {
         body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
         signal: controller.signal,
       });
+      if (isStale(gen)) return; // a reset() happened while /attach was in flight
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
         setError(typeof j?.error === 'string' ? j.error : `Resume failed (HTTP ${res.status}).`);
         setRunning(false);
         return;
       }
-      await pumpStream(res);
+      await pumpStream(res, gen);
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       resumeInFlightRef.current = false;
-      setRunning(false);
-      abortRef.current = null;
+      // Only clear shared flags if THIS resume is still the current generation — otherwise a NEWER
+      // resume()/reset() that started while this stale one was unwinding would have its own
+      // running/abortRef state clobbered by this call's cleanup.
+      if (!isStale(gen)) {
+        setRunning(false);
+        abortRef.current = null;
+      }
     }
   }, [pumpStream]);
 
@@ -547,7 +593,13 @@ export function useAgentV3Build(): UseAgentV3Build {
         let gotEvent = false;
         let rawSample = '';
 
-        // Read NDJSON: one JSON event per line (mirrors the Engineer stream).
+        // Read NDJSON: one JSON event per line (mirrors the Engineer stream). This loop has no
+        // generationRef guard (unlike pumpStream/subscribeLive) because it doesn't need one: every
+        // call site that resets state (reset(), used by "+ New chat" and "open from history") is
+        // itself gated on `!running`, and `running` is set true synchronously above before this loop
+        // starts — so a reset() can never fire while this loop is actively applying events. If that
+        // invariant ever changes (a reset path stops checking `running`), this loop must gain the
+        // same gen check pumpStream has, or it reintroduces the exact bug this file was fixed for.
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;

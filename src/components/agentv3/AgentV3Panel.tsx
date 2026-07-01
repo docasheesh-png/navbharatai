@@ -204,6 +204,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // (freshly reloaded) UI isn't attached, re-attach automatically — the user should
   // never have to click "Resume" after a refresh. The button stays as a manual fallback.
   // Guarded so it fires once per detected running build.
+  //
+  // The re-arm condition below MUST also check `!running` — resumeBuild() itself clears
+  // serverBuildRunning as its very first action (before the network call even resolves), so a
+  // re-arm keyed on `!serverBuildRunning` alone flips autoResumedRef back to false the instant
+  // resume() starts, defeating the "fires once" guard: any subsequent checkRunning() poll that
+  // (re)detects the SAME still-running build (e.g. after a tab-visibility recheck) would fire a
+  // brand-new resumeBuild() call moments later, silently re-attaching that old build's stream —
+  // this was a real path for a just-abandoned build to reappear after "+ New chat".
   const autoResumedRef = useRef(false);
   // Layer 3 — how many times a paused (time-limit) build has been auto-continued this turn.
   const AUTO_CONTINUE_MAX = 2;
@@ -213,7 +221,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       autoResumedRef.current = true;
       void resumeBuild({ userId, email });
     }
-    if (!serverBuildRunning) autoResumedRef.current = false; // re-arm for the next time
+    if (!serverBuildRunning && !running) autoResumedRef.current = false; // re-arm only once genuinely idle again
   }, [serverBuildRunning, running, userId, email, resumeBuild]);
 
   // TAB SWITCH resilience: a backgrounded tab (esp. mobile Safari) suspends timers and

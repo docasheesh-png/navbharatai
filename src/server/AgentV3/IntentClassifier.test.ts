@@ -302,6 +302,29 @@ describe('classifyIntent', () => {
     });
   });
 
+  describe('true last-resort default is now chat, not new_build (admin decision, 2026-07-01: "text reply > build app")', () => {
+    it('a genuinely signal-free message (no build/edit/informational/problem/continuation word, not short, not social) defaults to chat', () => {
+      // No word here matches NEW_BUILD/EDIT/BUILD_SIGNALS, INFORMATIONAL_SIGNALS, CONTINUATION_SIGNALS,
+      // PROBLEM_SIGNALS, or SOCIAL_PATTERNS, and it's longer than the 3-word short-message cutoff — the
+      // TRUE bare fallback, which used to silently start a build for an ambiguous non-build message.
+      expect(classifyIntent('tell me something interesting please')).toBe('chat');
+      expect(classifyIntentWithConfidence('tell me something interesting please')).toEqual({ intent: 'chat', confidence: 'low', signal: 'default' });
+    });
+    it('stays LOW confidence so the LLM upgrade (with project/conversation context) still gets the final say when available', async () => {
+      const llm = async () => 'edit'; // a genuine build/edit request phrased unusually
+      expect(await classifyIntentSmart('tell me something interesting please', llm)).toBe('edit_existing');
+    });
+    it('every EARLIER, more specific signal still wins — this default only fires when truly nothing else matched', () => {
+      // Unaffected: an explicit build/edit verb, a BUILD_SIGNALS tech noun, a comparison/problem/
+      // continuation phrase, a long message, a URL, or a short/social message all resolve BEFORE
+      // reaching this tail default, exactly as before.
+      expect(classifyIntent('build me a todo app')).toBe('new_build');
+      expect(classifyIntent('add a payment button')).toBe('new_build');
+      expect(classifyIntent('fix the login bug')).toBe('edit_existing');
+      expect(classifyIntent('hi')).toBe('chat');
+    });
+  });
+
   it('is case-insensitive', () => {
     expect(classifyIntent('HELLO')).toBe('chat');
     expect(classifyIntent('BUILD A PAGE')).toBe('new_build');

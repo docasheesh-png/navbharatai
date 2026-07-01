@@ -127,7 +127,7 @@ import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
-import { classifyIntentSmart, wantsFreshStart } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
@@ -536,18 +536,31 @@ export function parseModelLadder(env: string | undefined, fallback: string[]): s
  * NavBharatAI Pro v3.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
  *
  * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
- * `AGENTV3_CHEAP_FLOOR` names a provider AND that provider's key is present. Otherwise it
+ * `AGENTV3_CHEAP_FLOOR` is not "off" AND at least one provider's key is present. Otherwise it
  * returns `[]`, so the build chain stays **byte-for-byte today's Claude path** — the instant,
  * no-redeploy rollback. These runners are tried FIRST; `buildTurnRunner` keeps Claude (+ the
  * forced-Haiku backstop) permanently after them, so a cheap-model failure NEVER breaks a build.
  *
+ * GLM AND KIMI ARE "FRIENDS" (admin decision, 2026-07-01): both are included whenever the floor is
+ * on, one after the other — GLM's own ladder first, then KIMI's — so a GLM outage/rate-limit/slowness
+ * falls through to KIMI instead of jumping straight to the (more expensive) Claude tier, and vice
+ * versa. `AGENTV3_CHEAP_FLOOR=glm` or `=kimi` still pin to ONE ONLY (kept for explicit single-
+ * provider testing/rollback); any OTHER non-"off" value (e.g. `on`, `both`) enables both. Each
+ * provider independently no-ops if its own API key is missing — the other still works alone.
+ *
  * MODEL LADDER (admin-requested): each provider emits ONE runner per model id in its ladder, newest
  * → 1-step-back, so a retired/unresponsive latest model (e.g. a 404 on a discontinued id, an outage,
- * a rate-limit) falls through to the previous cheap model — then Claude. The existing
- * `MultiProviderTurnRunner` already does error-based per-turn fallback, so this is just "more runners
- * prepended" — no new orchestration. (This covers "no response / unavailable"; it does NOT cover a
- * model that replies but builds badly — that stays the objective gate + Claude escalation's job.)
- * The ladder stays CHEAP coding models, NOT the flagship — escalation owns "go stronger".
+ * a rate-limit) falls through to the previous cheap model — then the other provider — then Claude.
+ * The existing `MultiProviderTurnRunner` already does error-based per-turn fallback, so this is just
+ * "more runners prepended" — no new orchestration. (This covers "no response / unavailable"; it does
+ * NOT cover a model that replies but builds badly — that stays the objective gate + Claude escalation's
+ * job.) The ladder stays CHEAP coding models, NOT the flagship — escalation owns "go stronger".
+ *
+ * TIMEOUT (admin decision, 2026-07-01): 25s per call, down from 60s — a real build report showed a
+ * single stuck GLM call took 131s before the multi-provider runner's own retry/fallback even got a
+ * chance to act, wasting most of a build's wall-clock budget on one slow cheap-floor attempt. 25s is
+ * generous for a genuinely-working fast/cheap model turn while failing over to the next provider (or
+ * Claude) far sooner when one is stuck or degraded.
  *
  * Mirrors `grokPlanRunner`: `OpenAiToolRunner` forces its own `opts.model`, so the cost-ladder /
  * `selectBuildModel` / `models.ts` are never touched — routing decides ORDER, the runner decides
@@ -563,14 +576,19 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
     if (!apiKey) return; // no key → a second, independent off-switch
     for (const model of models) {
       try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: 60_000, maxRetries: 0 });
+        const client = new OpenAI({ apiKey, baseURL, timeout: 25_000, maxRetries: 0 });
         runners.push({ name, runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) });
       } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
     }
   };
-  if (floor === 'glm') {
+  // Explicit ALLOWLIST (not just "anything but off") so a stray/unrecognized value (a typo, an old
+  // config left over from a different provider name) stays a safe no-op instead of silently turning
+  // on paid GLM/KIMI calls. 'glm'/'kimi' still pin to ONE (explicit single-provider testing/rollback);
+  // 'both'/'on' enable the "friends" pair.
+  if (floor === 'glm' || floor === 'both' || floor === 'on') {
     add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-4.7', 'glm-4.6']));
-  } else if (floor === 'kimi') {
+  }
+  if (floor === 'kimi' || floor === 'both' || floor === 'on') {
     add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));
   }
   return runners;
@@ -668,16 +686,26 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // model actually answers. AGENTV3_DISABLE_HAIKU_BACKSTOP=1 removes it if ever needed.
   const haikuBackstop: NamedRunner = { name: 'CLAUDE_HAIKU', runner: forceModelRunner(new ClaudeClient(undefined, buildRetry), haikuModel()) };
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
-  // Builds run on CLAUDE ONLY (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex
-  // HALLUCINATE in the tool-use loop — they reply describing files ("creating index.html…") but
-  // never actually call write_file, so the build "succeeds" with ZERO real files and the model
-  // later claims "I'm an AI, I have no file system". So they are EXCLUDED from the build chain
-  // (they remain the cheap CHAT providers only). If Claude genuinely fails, the build errors
-  // HONESTLY with the real Claude error (e.g. a bad key or model id) instead of silently making
-  // fake files on Gemini. AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last resort.
+  // Builds run on CLAUDE FIRST (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex CAN
+  // hallucinate in the tool-use loop — reply describing files ("creating index.html…") without ever
+  // calling write_file — which is why they were EXCLUDED entirely from the build chain until now.
+  //
+  // Wired as the TRUE LAST RESORT (admin request, 2026-07-01: "Claude fail to vertex/gemini") — only
+  // after Claude's primary model AND its forced-Haiku backstop have BOTH thrown. Kept as an OPT-IN
+  // flag (AGENTV3_BUILD_ALLOW_GEMINI=1), NOT the new default: the exclusion above documents a REAL
+  // past incident (every build silently running on Gemini/Vertex with ZERO real files, $0 Claude
+  // spend on the dashboard) — not a theoretical risk. Safety nets built since (the empty-build
+  // retry-on-stronger-model net, the mandatory readiness gate, the G3 tsc verification gate) likely
+  // catch a repeat of that today, but "likely" isn't the bar for silently flipping a fix for an
+  // incident the admin personally hit — that decision needs an explicit, informed go-ahead first.
   const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
   const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
-  const baseChain = claudeFirst ? [claude, ...fallback, ...withBackstop] : [...fallback, claude, ...withBackstop];
+  // NOTE: fallback (Vertex/Gemini) sits AFTER withBackstop in the claudeFirst branch — Claude and its
+  // forced-Haiku backstop are exhausted FIRST, Vertex/Gemini is the absolute last resort, matching the
+  // requested chain "CLAUDE_HAIKU/sonnet (by complexity) -> vertex/gemini". The claudeFirst===false
+  // branch is a DIFFERENT, separately-opted-into cost strategy (try the cheap model before Claude) —
+  // left unchanged; the admin's chain applies to the default (claudeFirst===true) path.
+  const baseChain = claudeFirst ? [claude, ...withBackstop, ...fallback] : [...fallback, claude, ...withBackstop];
   // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
   // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
   const chain = [...floorRunners, ...baseChain];
@@ -1818,6 +1846,13 @@ export function registerAgentV3Routes(app: Express): void {
     const isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
       try {
+        // "Text reply > build app" (admin decision, 2026-07-01): the TRUE last-resort classifier
+        // default now prefers chat over a build for a genuinely ambiguous message — but that must
+        // never become "it refuses to build". Recompute the pure, no-I/O classification signal (cheap
+        // — a few regex checks) to tell a genuinely AMBIGUOUS message (signal 'default': no clear
+        // build/edit/informational/problem/continuation/social/short signal matched at all) apart from
+        // CLEAR chit-chat ('social'/'short') — only the ambiguous case gets nudged to offer building.
+        const ambiguousBuildAsk = classifyIntentWithConfidence(prompt).signal === 'default';
         const chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
@@ -1848,7 +1883,14 @@ export function registerAgentV3Routes(app: Express): void {
               LANGUAGE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext,
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext +
+                (ambiguousBuildAsk
+                  ? "\n\nThis message was ambiguous — it might be a request to build or change something "
+                    + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
+                    + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
+                    + "this\", ALSO ask a short clarifying question at the end (e.g. \"Would you like me "
+                    + "to build/fix this for you?\") so the user can confirm with their next message."
+                  : ''),
             ),
             30_000,
             'chatRouter.route',

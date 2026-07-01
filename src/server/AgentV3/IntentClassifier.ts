@@ -6,10 +6,15 @@
 // non-Claude free router and reserve the premium Claude build loop for real
 // build/engineering requests — WITHOUT changing the user experience.
 //
-// SAFETY: this is conservative by design. It returns 'chat' ONLY for messages
-// that are clearly social; on any doubt it returns 'new_build', so a real build
-// request is NEVER answered conversationally. Pure and deterministic (no I/O),
-// so it is trivially unit-testable.
+// SAFETY: every CLEAR signal (explicit build/edit verbs, a comparison/informational question, a
+// "something isn't working" report, a continuation phrase, a long/code-bearing message, or any of the
+// broader BUILD_SIGNALS tech-noun catch-all) is resolved deterministically and takes priority — a real
+// build/edit request is never answered conversationally. Only the TRUE last-resort default (no signal
+// matched at all — a narrow, rare corner case) now prefers 'chat' over 'new_build' (admin decision,
+// 2026-07-01: "text reply > build app" — a real report showed a ~9-minute build start for what was
+// only a question). The chat reply itself is prompted to offer to build/edit when that seems meant, so
+// this never becomes "it refuses to build" — it just asks first instead of assuming. Pure and
+// deterministic (no I/O), so it is trivially unit-testable.
 //
 // EDIT DETECTION: distinguishes 'new_build' (create something fresh) from
 // 'edit_existing' (modify what is already there). When 'edit_existing' is
@@ -329,7 +334,18 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
   }
   const wordCount = lower.split(/\s+/).filter(Boolean).length;
   if (wordCount <= SHORT_WORD_COUNT) return { intent: 'chat', confidence: 'low', signal: 'short' };
-  return { intent: 'new_build', confidence: 'low', signal: 'default' };
+  // TRUE last-resort default (admin decision, 2026-07-01: "preference text reply > build app" — a
+  // real report showed a build starting a ~9-minute cycle for what was actually just a question).
+  // Nothing above matched: no build/edit verb, no informational/problem/continuation phrase, not
+  // short, not social — a genuinely ambiguous message with no build-flavored word at all (BUILD_SIGNALS
+  // would already have caught anything mentioning an app/page/component/etc., so this default is a
+  // narrow, rare corner). Was 'new_build'; now 'chat' — LOW confidence, so the LLM upgrade (which sees
+  // full project/conversation context) still gets the final say when it's available and fast. This is
+  // ONLY the safety net for when that LLM call itself fails/times out — the actual disambiguation
+  // happens in the chat reply itself (it is prompted to offer to build/edit if that's what's meant),
+  // so a real build request phrased unusually is never permanently stuck as "just chat" — the user's
+  // very next message (or their reply to the clarifying question) resolves it via the normal signals.
+  return { intent: 'chat', confidence: 'low', signal: 'default' };
 }
 
 /** Context that lets the smart classifier judge INTENTION instead of isolated wording. */
@@ -448,6 +464,9 @@ export function classifyIntent(message: string): BuildIntent {
   const wordCount = lower.split(/\s+/).filter(Boolean).length;
   if (wordCount <= SHORT_WORD_COUNT) return 'chat';
 
-  // 7) Default: when unsure, treat as a new build (never risk answering a build request as chat).
-  return 'new_build';
+  // 7) TRUE last-resort default (admin decision, 2026-07-01: "text reply > build app"). Was
+  // 'new_build'; now 'chat' — the chat reply itself is prompted to offer to build/edit if that's
+  // what's meant, so a real request phrased unusually is never permanently stuck. See the matching
+  // comment in classifyIntentWithConfidence for the full reasoning.
+  return 'chat';
 }

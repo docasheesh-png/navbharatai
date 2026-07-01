@@ -6775,3 +6775,62 @@ that this command's result should never be treated as a build problem, regardles
 Tests: +2 (`|| true`-guarded command with exit -1/"signal: terminated" stays info/auto-resolved; the
 same command WITHOUT the guard still correctly surfaces as an unresolved failure). Gate: frontend tsc 0,
 server tsc 0, vitest 4093/4093 PASS, boot:check PASS.
+
+## 2026-07-01 — Fix: "+ New chat" in v3.0 reverts to the old chat ~10-12s later (root-caused)
+
+Admin report (with screenshots): inside v3.0's own session-history menu (the 3-line button INSIDE the
+v3.0 panel — NOT the app's main sidebar), clicking "+ New chat" opens a fresh empty chat, but 10-12
+seconds later the PREVIOUS session's full conversation (old "hi" message, "Done · 51 steps", build
+cost, rating buttons) silently reappears, overwriting the new chat. Root-caused to TWO independent,
+confirmed gaps in `useAgentV3Build.ts` — both had to be closed for a genuinely permanent fix:
+
+1. **`resume()`'s replay stream has no session identity.** `/api/agentv3/attach` is keyed only by
+   `userId` (not by session/workspace) and replays a build's FULL buffered event history into
+   whatever `setState` calls land, with no check that the panel is still showing the session that
+   attach was for. `startNewSession()` (the "+ New chat" handler) never cancelled an in-flight
+   `resume()` — its `setState` calls from `pumpStream` kept landing after the reset, silently
+   repopulating the old conversation.
+2. **The cross-device live mirror (`subscribeLive`) is equally userId-only scoped**, and its backing
+   store (`agentv3_live` Firestore doc via `LiveChannel.ts`) persists a build's tail events (up to 200)
+   well after that build finishes — so a poll that (re)starts with `sinceSeq=0` (e.g. after `running`
+   toggles, which happens whenever the OTHER gap above fires) can fetch and replay a PAST, unrelated
+   build's events into the current chat, matching the reported ~10-12s delay (a few of its 3s poll
+   ticks) far better than a one-shot stream replay would.
+
+**Fix — a generation guard in `useAgentV3Build.ts`:** a `generationRef` counter is bumped by every
+"fresh start" of state (`reset()`, `resume()`, `loadConversation()`, `stop()`). Every async apply path
+(`pumpStream`'s per-event `setState`, `subscribeLive`'s per-tick `setState`) captures the generation
+at call time and re-checks it before ever calling `setState` — a stale resume/mirror tick from a
+generation the user has since left is silently dropped (and its poll loop self-terminates) instead of
+repopulating the session the user is now looking at. `reset()` also aborts any in-flight `/attach`
+stream (detach-only — does NOT call `/api/agentv3/stop`, so a build still genuinely running
+server-side keeps running in the background and shows up in History once it finishes; this only stops
+THIS UI from displaying its stream).
+
+**Also fixed a related self-defeating guard** in `AgentV3Panel.tsx`'s auto-resume effect: the
+"fires once per detected running build" guard (`autoResumedRef`) re-armed itself the INSTANT
+`resume()` started (since `resume()` clears `serverBuildRunning` as its own first action, before the
+network call even resolves) — not when the build was actually confirmed done. This meant a later
+`checkRunning()` re-poll could silently re-trigger `resume()` for the SAME already-handled build. Now
+gated on `!running` too, so the guard only re-arms once genuinely idle again.
+
+No new test infra added — `useAgentV3Build.ts`/`AgentV3Panel.tsx` have no hook-testing harness in this
+codebase (component tests here use `renderToStaticMarkup`, which doesn't run effects/async state), and
+prior fixes to this exact hook (e.g. the 2026-06-28 stall-watchdog/resume-loop fix) shipped the same
+way — verified via the full gate, not new unit tests.
+
+Self-reviewed before push (per admin request to review code before merging). Two review passes (line-
+by-line correctness + reuse/simplification/altitude) surfaced: (1) `start()`'s own inline NDJSON loop
+has no generation guard — confirmed safe today because every `reset()` call site is itself gated on
+`!running`, and `start()` sets `running=true` before its own loop begins, so the two can never overlap;
+documented that invariant inline instead of adding an unneeded guard. (2) the repeated
+`gen !== generationRef.current` check was extracted into a small named `isStale(gen)` helper (5 call
+sites → 1 definition). (3) **Honest architecture note, not fixed here:** the real root cause one layer
+down is that `/api/agentv3/attach` and `/api/agentv3/live` (and the `runningBuilds`/`LiveChannel` maps
+backing them) are keyed only by `userId`, with no session/workspace scoping at all — this client-side
+generation guard fixes the reported symptom correctly, but a second browser tab/device on the same
+account could still attach to or mirror the WRONG session's build. Scoping the server-side build
+registry and LiveChannel by `(userId, workspaceId)` is the deeper fix; flagged as a follow-up, not
+attempted in this PR (bigger surface: `/chat`, `/attach`, `/live`, `/stop`, `/status`).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4093/4093 PASS, boot:check PASS.

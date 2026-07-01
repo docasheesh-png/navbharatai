@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
+import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -61,9 +62,22 @@ export function registerTelemetryRoutes(app: Express): void {
       const { event, props, userId, sessionId, ts } = req.body || {};
       if (!event) return res.status(400).json({ error: 'event required' });
       console.log('[ANALYTICS]', JSON.stringify({ event, props, userId: userId || 'anon', sessionId, ts: ts || Date.now() }));
+      // P-MON.1 — server-side aggregation: fold into the daily rollup + activation funnel. Best-effort.
+      recordAnalyticsEvent({ event, userId, sessionId, props, ts }).catch(() => {});
       res.status(204).end();
     } catch {
       res.status(204).end();
+    }
+  });
+
+  // P-MON.1 — activation funnel (signup → build → deploy → pay) over the last N days. Aggregate counts
+  // only (no PII), so it is safe as a lightweight admin/analytics read. `?days=30` (1..365).
+  app.get('/api/analytics/funnel', async (req: Request, res: Response) => {
+    try {
+      const days = Number(req.query.days);
+      res.json(await getFunnel(Number.isFinite(days) && days > 0 ? days : 30));
+    } catch {
+      res.status(200).json({ stages: { signup: 0, build: 0, deploy: 0, pay: 0 }, conversion: { signup: 1, build: 0, deploy: 0, pay: 0 } });
     }
   });
 }

@@ -10,6 +10,10 @@ import {
   Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+  type MotionMode, getStoredMotionMode, applyMotionMode,
+  getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
+} from '../../lib/a11y';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 
@@ -103,38 +107,92 @@ export interface SettingsPanelProps {
 }
 
 /**
- * "Reduce Animations" toggle (Settings → General). Animations are ON by default; turning this ON
- * sets the `nb-reduce-motion` class on <html> (CSS minimises every animation/transition, and the
- * JS-driven waving tiranga goes static). The choice is persisted in localStorage and re-applied on
- * load (see main.tsx). Self-contained so it needs no prop wiring.
+ * Motion preference (Settings → General → Accessibility). Tri-state (P-DESIGN.3): animations ON by
+ * default, always Reduced, or Match system (follows the OS `prefers-reduced-motion`). Driven by the
+ * accessibility engine (src/lib/a11y.ts), which toggles the `nb-reduce-motion` class on <html>,
+ * persists the choice, and keeps the legacy boolean key in sync so main.tsx re-applies it on load.
  */
-function ReduceMotionToggle() {
-  const [reduced, setReduced] = React.useState<boolean>(() => {
-    try { return localStorage.getItem('navbharat_reduce_motion') === 'true'; } catch { return false; }
-  });
-  const apply = (next: boolean) => {
-    setReduced(next);
-    try { localStorage.setItem('navbharat_reduce_motion', next ? 'true' : 'false'); } catch { /* ignore */ }
-    try { document.documentElement.classList.toggle('nb-reduce-motion', next); } catch { /* ignore */ }
+function MotionModeControl() {
+  const [mode, setMode] = React.useState<MotionMode>(() => getStoredMotionMode());
+  const apply = (next: MotionMode) => {
+    setMode(next);
+    applyMotionMode(next);
   };
+  const options: { id: MotionMode; label: string; hint: string }[] = [
+    { id: 'animated', label: 'On',     hint: 'Animations on (default)' },
+    { id: 'reduced',  label: 'Reduced', hint: 'Minimise all motion' },
+    { id: 'system',   label: 'System',  hint: 'Follow your OS setting' },
+  ];
   return (
-    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
-      <div className="flex items-center gap-4">
+    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4 mb-4">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
         <div>
-          <div className="text-sm font-bold text-white">Reduce Animations</div>
-          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Animations (like the waving flag) are on by default. Turn this on to minimise motion for comfort.</div>
+          <div className="text-sm font-bold text-white">Motion</div>
+          <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Animations (like the waving flag) are on by default. Choose Reduced for less motion, or System to follow your device.</div>
         </div>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={reduced}
-        onClick={() => apply(!reduced)}
-        className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${reduced ? 'bg-indigo-600' : 'bg-white/15'}`}
-      >
-        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${reduced ? 'translate-x-5' : ''}`} />
-      </button>
+      <div role="radiogroup" aria-label="Motion preference" className="grid grid-cols-3 gap-2">
+        {options.map(o => (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={mode === o.id}
+            title={o.hint}
+            onClick={() => apply(o.id)}
+            className={`p-3 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-colors ${mode === o.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-[#161b22] text-[#8b949e] border-white/5 hover:text-white'}`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Text-size / zoom control (Settings → General → Accessibility, P-DESIGN.3). Adjusts `--nb-font-scale`
+ * on <html> in layout-safe steps within [90%, 140%]; because the UI is rem-based this scales the whole
+ * app. Persisted + re-applied on load (main.tsx) via the accessibility engine.
+ */
+function FontScaleControl() {
+  const [scale, setScale] = React.useState<number>(() => getStoredFontScale());
+  const set = (next: number) => setScale(applyFontScale(next));
+  const pct = Math.round(scale * 100);
+  return (
+    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🔠</div>
+          <div>
+            <div className="text-sm font-bold text-white">Text Size</div>
+            <div className="text-[11px] text-[#8b949e] mt-0.5 max-w-xs">Scale the whole interface for readability. Current: {pct}%.</div>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Decrease text size"
+          disabled={scale <= FONT_SCALE_MIN}
+          onClick={() => set(scale - FONT_SCALE_STEP)}
+          className="w-10 h-10 rounded-xl border border-white/5 bg-[#161b22] text-white text-lg font-black disabled:opacity-30 disabled:cursor-not-allowed hover:border-indigo-500 transition-colors"
+        >A−</button>
+        <div className="flex-1 text-center text-sm font-black text-white tabular-nums" aria-live="polite">{pct}%</div>
+        <button
+          type="button"
+          aria-label="Increase text size"
+          disabled={scale >= FONT_SCALE_MAX}
+          onClick={() => set(scale + FONT_SCALE_STEP)}
+          className="w-10 h-10 rounded-xl border border-white/5 bg-[#161b22] text-white text-lg font-black disabled:opacity-30 disabled:cursor-not-allowed hover:border-indigo-500 transition-colors"
+        >A+</button>
+        <button
+          type="button"
+          onClick={() => set(FONT_SCALE_DEFAULT)}
+          className="px-4 h-10 rounded-xl border border-white/5 bg-[#161b22] text-[#8b949e] text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
+        >Reset</button>
+      </div>
     </div>
   );
 }
@@ -453,8 +511,9 @@ export function SettingsPanel({
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">
-                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Motion</label>
-                        <ReduceMotionToggle />
+                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Accessibility</label>
+                        <MotionModeControl />
+                        <FontScaleControl />
                      </div>
 
                      <div className="space-y-3 pt-6 border-t border-white/10">

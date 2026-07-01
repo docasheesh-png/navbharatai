@@ -2406,11 +2406,17 @@
 - [x] Pure helpers (`checkpointStorageDocId`, `fitsFirestoreDoc`) + local round-trip tested (`checkpointStorage.test.ts`).
 - **Files:** `src/server/AppMakerLab/checkpoint/CheckpointStorage.ts`, new `tests/checkpointStorage.test.ts`.
 
-### P-DATA.3 — Durable Embedding / Vector Store  🟡 PARTIAL → full  [MED]
-- `EmbeddingSearch` keeps embeddings in an in-memory `Map` — lost on every cold start, so RAG re-embeds the whole
-  workspace each boot (latency + cost). (Complements P-AI.2's reranker/grounding, which is about *quality*, not persistence.)
-- [ ] Persist embeddings (Firestore vector index, or a lightweight on-disk+GCS store keyed by file hash); re-embed only changed files.
-- **Files:** `src/server/AgentV3/EmbeddingSearch.ts`, new `src/server/AgentV3/EmbeddingStore.ts`.
+### P-DATA.3 — Durable Embedding / Vector Store  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- `EmbeddingSearch` kept embeddings in an in-memory `Map` — lost on every cold start, so RAG re-embedded the whole
+  workspace each boot (latency + cost).
+- [x] **`EmbeddingStore.ts`** — Firestore persistence keyed by workspace + path (`workspace_embeddings_v3/{ws}/files/{docId}`),
+  each row tagged with a content HASH. Pure helpers (`embeddingDocId`, `hashContent` (FNV-1a), `needsReembed`) +
+  best-effort `saveEmbedding` / `loadEmbeddings` / `removeEmbedding` (VITEST-skip, never throw).
+- [x] `EmbeddingSearch.EmbeddingStore` now takes a `workspaceId`: `addFile` SKIPS re-embedding an unchanged file
+  (same hash) and persists new embeddings; `search()` HYDRATES the in-memory index from the durable copy once on a
+  cold start (so a restarted instance searches immediately, re-embedding only changed files). `getEmbeddingStore()`
+  passes the workspaceId through. Tests: `embeddingStore.test.ts` (5) + existing EmbeddingSearch suite green.
+- **Files:** `src/server/AgentV3/EmbeddingSearch.ts`, new `src/server/AgentV3/EmbeddingStore.ts`, new `tests/embeddingStore.test.ts`.
 
 ### P-DATA.4 — Data Retention + Deletion (DPDP/GDPR right-to-be-forgotten)  ❌ MISSING  [MED — compliance]
 - The platform stores user profiles, conversations, build history, cost records, secrets — but has **no retention

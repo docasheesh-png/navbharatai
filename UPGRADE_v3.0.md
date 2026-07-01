@@ -2672,12 +2672,16 @@
 - **Already tracked:** OpenTelemetry/distributed-tracing/spans/service-map → **P2.1/P8/P-BRE.1**; error-tracking/Sentry/crash/exception → **P2.2/P8**; structured-logging/correlation-IDs/log-parsing → **P-BRE.3**; SIEM/security-analytics/threat → **P-SEC.7**; alerting-dispatch/notifications/incident/pager/Slack/email → **P8/P-BRE.7/P-PME.9**; SLO/SLA/SLI/error-budget → **P8/P-PME.11**; DORA/MTTR/lead-time → **P-DEPLOY.1**; charts/viz/dashboard-builder/graph/heatmap-render → **P-DESIGN.4**; session-replay/heatmap/RUM → **P-UX.9**; model-eval/benchmark → **P-AI.12**; hallucination-monitoring → **P-AI.1**; data-quality/lineage/retention → **P-DATA**; observability **for generated apps** → existing P-CGE/P-DEV item.
 - **⬜ N/A-by-design (managed-serverless, single-region):** Kubernetes/cluster/pod/node/container/GPU/power/network/disk/filesystem monitoring, multi-cloud/hybrid/edge/geo/multi-region monitoring, OLAP/data-warehouse/time-series-DB integration, carbon/GreenOps.
 
-### P-MON.1 — Server-Side Analytics Pipeline + Product Analytics  🟡 PARTIAL → full  [MED]
-- `lib/analytics.ts` is **client-side localStorage** event tracking; there is no server-side aggregation/ETL, and no
-  **product analytics** (funnels, cohorts, retention, engagement, conversion, segmentation). `AppAnalytics.tsx` reads localStorage.
-- [ ] Add a server `/api/analytics/event` ingestion → Firestore + a daily rollup job; build funnel/cohort/retention queries.
-- [ ] Surface activation, feature-adoption, and conversion (signup→build→deploy→pay) funnels in the admin dashboard.
-- **Files:** `src/lib/analytics.ts`, new `src/server/lib/AnalyticsPipeline.ts`, `src/server/routes/{telemetry,admin}.ts`.
+### P-MON.1 — Server-Side Analytics Pipeline + Product Analytics  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
+- `/api/analytics/event` only `console.log`'d events — no server-side aggregation, no product analytics.
+- [x] **`AnalyticsPipeline.ts`** — `/api/analytics/event` now folds each event into a DAILY rollup doc
+  (`analytics_daily/{YYYY-MM-DD}`: per-event counts + the activation funnel), race-safe via Firestore
+  `FieldValue.increment`, plus a bounded raw-event log (`analytics_events`) for cohort/segmentation drill-down.
+  Best-effort + VITEST-skip.
+- [x] Activation funnel **signup → build → deploy → pay** with stage-to-stage conversion — pure `funnelStage()`
+  (event→stage), `funnelFromDaily()` (aggregate + conversion), served at **`GET /api/analytics/funnel?days=N`**
+  (aggregate counts only, no PII) for the admin dashboard to consume. Tests: `analyticsPipeline.test.ts` (6).
+- **Files:** new `src/server/lib/AnalyticsPipeline.ts`, `src/server/routes/telemetry.ts`, new `tests/analyticsPipeline.test.ts`.
 
 ### P-MON.2 — Anomaly Detection + Trend Analysis + Forecasting  ✅ DONE  [MED]
 - Alerting was **static thresholds only** (`metricsAlerts.ts`). Now there is a real statistical engine for **anomaly

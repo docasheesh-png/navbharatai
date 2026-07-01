@@ -195,6 +195,14 @@ export function useAgentV3Build(): UseAgentV3Build {
         gotEvent = true;
         lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
         setState((prev) => agentV3Reducer(prev, event));
+        // TERMINAL EVENT → clear `running` immediately on a re-attached/resumed stream too, so a build
+        // whose post-result cleanup keeps the stream open never leaves the UI stuck "building" after the
+        // result is in. Key ONLY on `result` (build-terminal, once per build) — NOT `done`, which
+        // sub-agents also emit on this shared stream. See the same guard in start()'s stream loop.
+        if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+          setRunning(false);
+          setServerBuildRunning(false);
+        }
       }
     }
     if (!gotEvent) {
@@ -651,6 +659,19 @@ export function useAgentV3Build(): UseAgentV3Build {
             gotEvent = true;
             lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
             setState((prev) => agentV3Reducer(prev, event));
+            // TERMINAL EVENT → stop "running" the INSTANT the build's `result` arrives, instead of
+            // waiting for the stream to physically CLOSE. The server holds the stream open (15s pings)
+            // through the post-result cleanup/finally (checkpoint flush, durable saves), so waiting for
+            // close left the spinner stuck "building" after the app was already done — the exact
+            // "Done · N steps but still stuck" symptom. We key ONLY on `result` (emitted exactly once
+            // per build by the route), NOT `done` — sub-agents share this stream and each emits its own
+            // `done`, so `done` is not build-terminal. Further events still render; `running` clears as
+            // soon as the result is known. A resumable (deadline-paused) result clears running too — the
+            // bounded auto-continue re-arms it via state.resumable.
+            if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+              setRunning(false);
+              setServerBuildRunning(false);
+            }
           }
         }
 

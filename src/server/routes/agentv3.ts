@@ -2138,7 +2138,10 @@ export function registerAgentV3Routes(app: Express): void {
     // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
     // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
     const deadlineMs = maxBuildSeconds() * 1000;
-    const deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(async () => {
+    // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
+    // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
+    // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
+    const finalizeOnDeadline = async () => {
       if (rb.ended) return;
       try { abort.abort(); } catch { /* best-effort */ }
       // GUARANTEE the durable file save actually happens BEFORE claiming "your files are saved" below
@@ -2190,7 +2193,22 @@ export function registerAgentV3Routes(app: Express): void {
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
-    }, deadlineMs) : undefined;
+    };
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined = deadlineMs > 0 ? setTimeout(finalizeOnDeadline, deadlineMs) : undefined;
+    // ADVISORY CAP — the #1 "build stuck running" root cause: once the app is BUILT and durably saved,
+    // the remaining post-build work (reviewer, reflection, project summary, memory persist, and above
+    // all the GitHub push/merge NETWORK calls) is ADVISORY. A single hung advisory step used to hold
+    // the event stream open — and the 15s pings defeat the client stall-watchdog — so the UI stayed
+    // "building" long after the app was finished, all the way to the full wall-clock cap. Once the build
+    // has SUCCEEDED we shorten the deadline to this short cap, so the terminal `result` is emitted (and
+    // the stream closed → the client's spinner clears) promptly even when an advisory step hangs. The
+    // finalizer is success-aware, so it emits a real SUCCESS result, not a "paused".
+    const ADVISORY_CAP_MS = 120_000;
+    const armAdvisoryCap = () => {
+      if (deadlineMs <= 0) return;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      deadlineTimer = setTimeout(finalizeOnDeadline, ADVISORY_CAP_MS);
+    };
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
@@ -3286,7 +3304,13 @@ export function registerAgentV3Routes(app: Express): void {
       // — quality review, reflection, memory persist, git push — is ADVISORY. Expose the result to the
       // deadline timer NOW so that if the wall-clock cap fires during that advisory work, the build is
       // finalized as SUCCESS (the app is built + already durably saved), not "paused — type continue".
-      if (result.ok) buildResultRef = { ok: true, summary: result.summary, steps: result.steps, billedUsd: result.billedUsd };
+      if (result.ok) {
+        buildResultRef = { ok: true, summary: result.summary, steps: result.steps, billedUsd: result.billedUsd };
+        // Build succeeded + files saved → cap the remaining ADVISORY work so a hung push/persist can
+        // never hold the stream open (and the UI "building") past this short window. Normal completion
+        // clears the timer in the finally before it can fire, so this only bites a genuinely stuck tail.
+        armAdvisoryCap();
+      }
 
       // FAST-LANE PERSISTENCE FALLBACK ("memory gone after reload" fix): only the agentic AgentRunner
       // (escalation/empty-build-retry/preview-heal/auto-fix) persists to ConversationStore — via its

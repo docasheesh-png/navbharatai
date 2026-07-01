@@ -14,9 +14,19 @@ export interface DesignViolation {
   type: ViolationType;
   severity: 'info' | 'warn';
   message: string;
+  /** A ready-to-send instruction that tells the builder AI how to fix this (one-click "Fix with AI"). */
+  fix: string;
   count: number;
   examples: string[];
 }
+
+/** The AI fix-prompt for each design violation type. */
+const DESIGN_FIX: Record<ViolationType, string> = {
+  'color-count': 'Consolidate the colours in this app into a small, consistent palette (about 4–6 brand colours) and reuse them everywhere.',
+  'font-count': 'Reduce this app to at most two font families — one for headings and one for body text — and apply them consistently.',
+  'off-grid-spacing': 'Align all padding, margin, and gap values in this app to a consistent 4px spacing grid (use multiples of 4px/8px).',
+  'hardcoded-colors': 'Extract the hardcoded colours in this app into CSS variables (design tokens like --brand-primary) and use them throughout.',
+};
 
 export interface DesignLintResult {
   score: number; // 0–100
@@ -112,6 +122,7 @@ export function lintDesign(code: string): DesignLintResult {
       type: 'color-count',
       severity: 'warn',
       message: `${colors.length} distinct colours — consolidate into a small palette (≤ ${MAX_COLORS}) for a consistent look.`,
+      fix: DESIGN_FIX['color-count'],
       count: colors.length,
       examples: colors.slice(0, 6),
     });
@@ -123,6 +134,7 @@ export function lintDesign(code: string): DesignLintResult {
       type: 'font-count',
       severity: 'warn',
       message: `${fonts.length} font families — limit to ${MAX_FONTS} (a display + a body font) for cleaner typography.`,
+      fix: DESIGN_FIX['font-count'],
       count: fonts.length,
       examples: fonts.slice(0, 4),
     });
@@ -134,6 +146,7 @@ export function lintDesign(code: string): DesignLintResult {
       type: 'off-grid-spacing',
       severity: 'warn',
       message: `${offGrid.length} spacing values are off the ${SPACING_GRID}px grid — snap to multiples of ${SPACING_GRID}px for rhythm.`,
+      fix: DESIGN_FIX['off-grid-spacing'],
       count: offGrid.length,
       examples: [...new Set(offGrid)].slice(0, 6).map((v) => `${v}px`),
     });
@@ -145,6 +158,7 @@ export function lintDesign(code: string): DesignLintResult {
       type: 'hardcoded-colors',
       severity: 'info',
       message: `${colors.length} hardcoded colours and no CSS variables — extract design tokens (\`--brand-*\`) so themes stay consistent.`,
+      fix: DESIGN_FIX['hardcoded-colors'],
       count: colors.length,
       examples: colors.slice(0, 6),
     });

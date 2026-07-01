@@ -14,7 +14,7 @@ interface AISuggestionsProps {
 }
 
 // P-DESIGN.8 / P-TQA.11 — deterministic health results from /api/design/lint and /api/design/a11y.
-interface HealthViolation { type: string; severity: 'info' | 'warn'; message: string }
+interface HealthViolation { type: string; severity: 'info' | 'warn'; message: string; fix?: string }
 interface HealthReport { score: number; grade: 'A' | 'B' | 'C' | 'D'; violations: HealthViolation[] }
 
 const GRADE_COLOR: Record<HealthReport['grade'], string> = {
@@ -24,8 +24,9 @@ const GRADE_COLOR: Record<HealthReport['grade'], string> = {
   D: 'text-red-400 bg-red-500/10 border-red-500/20',
 };
 
-/** Shared renderer for a deterministic "health" block (design consistency, accessibility). */
-const HealthBlock: React.FC<{ title: string; report: HealthReport; okText: string }> = ({ title, report, okText }) => (
+/** Shared renderer for a deterministic "health" block (design consistency, accessibility). Each
+ *  violation gets a one-click "Fix with AI" button that sends its fix-prompt to the builder. */
+const HealthBlock: React.FC<{ title: string; report: HealthReport; okText: string; onFix: (prompt: string) => void }> = ({ title, report, okText, onFix }) => (
   <div className="px-3 pt-2.5 pb-1.5 border-b border-white/5">
     <div className="flex items-center justify-between">
       <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">{title}</span>
@@ -36,11 +37,22 @@ const HealthBlock: React.FC<{ title: string; report: HealthReport; okText: strin
     {report.violations.length === 0 ? (
       <p className="text-[10px] text-emerald-400/80 mt-1.5">{okText}</p>
     ) : (
-      <ul className="mt-1.5 space-y-1">
+      <ul className="mt-1.5 space-y-1.5">
         {report.violations.slice(0, 3).map((v, i) => (
           <li key={i} className="text-[10px] text-[#8b949e] leading-tight flex gap-1.5">
             <span className={v.severity === 'warn' ? 'text-amber-400' : 'text-[#484f58]'}>•</span>
-            <span>{v.message}</span>
+            <span className="flex-1">
+              {v.message}
+              {v.fix && (
+                <button
+                  onClick={() => onFix(v.fix!)}
+                  className="ml-1.5 text-indigo-400 hover:text-indigo-300 font-bold underline decoration-dotted underline-offset-2"
+                  title="Send this fix to the builder"
+                >
+                  Fix with AI
+                </button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -186,6 +198,12 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
     void fetchAISuggestions();
   };
 
+  // Send a health-violation fix-prompt straight to the builder (same path as tapping a suggestion).
+  const sendFix = (prompt: string) => {
+    onSendSuggestion(prompt);
+    setOpen(false);
+  };
+
   return (
     <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
       {/* Panel */}
@@ -206,9 +224,9 @@ export const AISuggestions: React.FC<AISuggestionsProps> = ({ generatedCode, onS
             </div>
           </div>
 
-          {/* P-DESIGN.8 — design consistency + P-TQA.11 — accessibility health */}
-          {designLint && <HealthBlock title="Design health" report={designLint} okText="Clean, consistent design — no issues found." />}
-          {a11yLint && <HealthBlock title="Accessibility" report={a11yLint} okText="No common WCAG issues found." />}
+          {/* P-DESIGN.8 — design consistency + P-TQA.11 — accessibility health (with one-click AI fixes) */}
+          {designLint && <HealthBlock title="Design health" report={designLint} okText="Clean, consistent design — no issues found." onFix={sendFix} />}
+          {a11yLint && <HealthBlock title="Accessibility" report={a11yLint} okText="No common WCAG issues found." onFix={sendFix} />}
 
           <div className="p-2 space-y-1">
             <p className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest px-2 pb-1">

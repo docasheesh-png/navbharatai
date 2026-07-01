@@ -330,8 +330,25 @@ export default function App() {
   // 9.5 — AI Teaching Mode (beginner-friendly explanations)
   const [teachMode, setTeachMode] = useState<boolean>(() => localStorage.getItem('navbharat_teach_mode') === 'true');
   useEffect(() => { localStorage.setItem('navbharat_teach_mode', teachMode.toString()); }, [teachMode]);
+  // Focus Mode — hides the header (TopNav) + the mobile bottom nav so only the open page/panel is
+  // visible. Opt-in (default off) so first-time users always see the normal chrome; persisted so a
+  // reload keeps the user's choice. Exited via the floating corner button or Esc (see the keydown
+  // effect below) — both always rendered/active even while the header itself is hidden.
+  const [focusMode, setFocusMode] = useState<boolean>(() => localStorage.getItem('navbharat_focus_mode') === 'true');
+  useEffect(() => { localStorage.setItem('navbharat_focus_mode', focusMode.toString()); }, [focusMode]);
   // 10.6 — Toast notifications
   const { toasts, addToast, removeToast } = useToast();
+  // Enter Focus Mode + a ONE-TIME hint so the header disappearing is never confusing —
+  // shown only the first time a given browser turns it on.
+  const handleEnterFocusMode = () => {
+    setFocusMode(true);
+    try {
+      if (localStorage.getItem('navbharat_focus_mode_hint_seen') !== 'true') {
+        addToast('Header hidden — tap the corner icon or press Esc to bring it back', 'info');
+        localStorage.setItem('navbharat_focus_mode_hint_seen', 'true');
+      }
+    } catch { /* localStorage may be unavailable (e.g. some private-browsing modes) */ }
+  };
   // Phase 6.2 — real-time network status for mobile UX.
   const networkStatus = useNetworkStatus();
   // 10.1 — Onboarding
@@ -1231,6 +1248,9 @@ export default function App() {
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
         if (showContinueModal) { setShowContinueModal(false); return; }
+        // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
+        // though the on-screen toggle/floating button might be out of view).
+        if (focusMode) { setFocusMode(false); return; }
         return;
       }
       // 9.1 Undo/Redo (not in input fields)
@@ -1243,7 +1263,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const saved = localStorage.getItem('navbharat_keys');
@@ -5370,31 +5390,33 @@ ${buildLanguageRule(preferredLanguage)}`;
       >
         Skip to main content
       </a>
-      <TopNav
-        themeClasses={themeClasses}
-        effectiveDeviceMode={effectiveDeviceMode}
-        isSidebarCollapsed={isSidebarCollapsed}
-        setIsSidebarCollapsed={setIsSidebarCollapsed}
-        setIsMenuOpen={setIsMenuOpen}
-        openTabs={openTabs}
-        activeView={activeView}
-        setActiveView={setActiveView}
-        toggleTab={toggleTab}
-        closeTab={closeTab}
-        menuItems={menuItems as any}
-        hasGeneratedCode={hasGeneratedCode}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        undoCode={undoCode}
-        redoCode={redoCode}
-        user={user}
-        setShowAuth={setShowAuth}
-        auth={auth}
-        theme={theme}
-        setTheme={setTheme}
-        onOpenProfile={() => setActiveView('my_profile')}
-        onOpenSettings={() => setActiveView('settings')}
-      />
+      {/* Focus Mode hides the header entirely — the floating corner button (below) or Esc bring it back. */}
+      {!focusMode && (
+        <TopNav
+          themeClasses={themeClasses}
+          effectiveDeviceMode={effectiveDeviceMode}
+          isSidebarCollapsed={isSidebarCollapsed}
+          setIsSidebarCollapsed={setIsSidebarCollapsed}
+          setIsMenuOpen={setIsMenuOpen}
+          openTabs={openTabs}
+          activeView={activeView}
+          setActiveView={setActiveView}
+          toggleTab={toggleTab}
+          closeTab={closeTab}
+          menuItems={menuItems as any}
+          hasGeneratedCode={hasGeneratedCode}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undoCode={undoCode}
+          redoCode={redoCode}
+          user={user}
+          setShowAuth={setShowAuth}
+          auth={auth}
+          onEnterFocusMode={handleEnterFocusMode}
+          onOpenProfile={() => setActiveView('my_profile')}
+          onOpenSettings={() => setActiveView('settings')}
+        />
+      )}
 
       {/* Main Content Area */}
       <div className={`flex flex-1 w-full min-h-0`}>
@@ -6385,8 +6407,8 @@ ${buildLanguageRule(preferredLanguage)}`;
           app's guarded toggleTab and gracefully skips any target not present on the current view. */}
       <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} />
 
-      {/* 8.1 — Mobile bottom navigation bar (hidden on desktop) */}
-      {effectiveDeviceMode !== 'desktop' && (
+      {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too). */}
+      {effectiveDeviceMode !== 'desktop' && !focusMode && (
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[#0d1117]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 h-14"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
@@ -6417,6 +6439,22 @@ ${buildLanguageRule(preferredLanguage)}`;
             );
           })}
         </nav>
+      )}
+
+      {/* Focus Mode — floating "bring the header back" button. Always visible (works on both mouse and
+          touch, unlike a hover-reveal) at a fixed corner so it's discoverable and never lost behind
+          other UI; safe-area-aware for notch/gesture-bar devices. Esc does the same thing (see the
+          keydown effect above). */}
+      {focusMode && (
+        <button
+          onClick={() => setFocusMode(false)}
+          title="Exit Focus Mode (Esc)"
+          aria-label="Exit Focus Mode — show header"
+          className="fixed z-[300] bottom-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/15 text-white/70 hover:text-white shadow-lg transition-all active:scale-90"
+          style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)', marginRight: 'env(safe-area-inset-right, 0px)' }}
+        >
+          <Minimize2 className="w-4 h-4" />
+        </button>
       )}
 
       <style>{`

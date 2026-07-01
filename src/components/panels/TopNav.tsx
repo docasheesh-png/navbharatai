@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, RotateCcw, LogOut, Sun, Moon, User, Settings, ChevronDown } from 'lucide-react';
+import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
-import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 
@@ -33,9 +32,10 @@ export interface TopNavProps {
   user: FirebaseUser | null;
   setShowAuth: (v: boolean) => void;
   auth: any;
-  /** G1: quick dark/light theme toggle */
-  theme?: ThemeMode;
-  setTheme?: (t: ThemeMode) => void;
+  /** Enter Focus Mode — hides the header (this bar) + the mobile bottom nav so only the
+   *  open page/panel is visible. A floating corner button (rendered by the app shell,
+   *  since this bar disappears) brings the chrome back. */
+  onEnterFocusMode?: () => void;
   /** Profile navigation */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
@@ -45,7 +45,7 @@ export function TopNav({
   themeClasses, effectiveDeviceMode, isSidebarCollapsed, setIsSidebarCollapsed,
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
-  user, setShowAuth, auth, theme, setTheme,
+  user, setShowAuth, auth, onEnterFocusMode,
   onOpenProfile, onOpenSettings,
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -185,14 +185,16 @@ export function TopNav({
             </button>
           </div>
         )}
-        {/* G1: quick dark/light theme toggle */}
-        {setTheme && (
+        {/* Focus Mode — hide the header + mobile bottom nav so only the open page is visible.
+            A floating corner button (app shell) brings it back; Esc also exits. */}
+        {onEnterFocusMode && (
           <button
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            title={theme === 'light' ? 'Switch to Dark mode' : 'Switch to Light mode'}
+            onClick={onEnterFocusMode}
+            title="Focus Mode — hide the header (Esc to exit)"
+            aria-label="Enter Focus Mode"
             className="p-2 hover:bg-white/5 rounded-lg text-[#484f58] hover:text-white transition-all border border-white/5"
           >
-            {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+            <Maximize2 className="w-4 h-4" />
           </button>
         )}
         {!user ? (

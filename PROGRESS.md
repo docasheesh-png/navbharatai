@@ -6400,3 +6400,37 @@ correctly NOT built (P-PME.12, P-CGE.12, P-AI.17, P-AI.15, P-DEPLOY.3, P-DEPLOY.
 
 Gate on every PR: frontend tsc 0, server tsc 0 (when touched), vitest all-green (grew to 3991 as tests
 were added), `npm run build` OK, `boot:check` PASS.
+
+## 2026-07-01 — v3.0 session-history menu: gold-standard redesign (grouped, status-aware, deletable)
+
+Admin feedback: the 3-line hamburger menu's history dropdown looked like "purana text" (old raw text)
+rather than real SESSION history. Root cause: it was a flat list of items whose only visible field was
+`title` — which IS the first user prompt, truncated (`deriveTitle()`), with no status, no grouping, no
+distinction between the currently-open session and the rest. The backend already returned `status`,
+`workspaceId`, `billedUsd` per conversation — none of it was rendered, so a rich per-session record looked
+like a wall of truncated sentences.
+
+**Redesign (Claude/ChatGPT-style session list), all real + wired:**
+- **Date-bucketed grouping** (Today / Yesterday / Previous 7 days / Previous 30 days / Older) — pure
+  `groupSessionsByDate()` + `sessionDateBucket()` in `agentV3History.ts` (empty buckets omitted).
+- **Status dot per session** (`sessionStatusMeta()`): indigo pulsing = building, green = built, red =
+  failed, gray = stopped — reads the `status` field the API always returned but the UI never displayed.
+- **Active-session highlight** — the currently-open chat (matched by `workspaceId`) is visually marked
+  "Current session" so it's never confused with a past one.
+- **Real delete** — a hover ✕ per session, confirmed, calls a NEW `DELETE /api/agentv3/conversations/:id`
+  route (owner-checked via the existing `conversationAccess()` gate; the store's `remove()` already
+  existed and was already unit-tested — the route was the only missing wire). Deleting the open session
+  starts a fresh one so the panel never shows a chat that no longer exists.
+- Richer empty state ("No saved sessions yet — every build you start is saved here automatically").
+
+All pure grouping/status logic lives in the existing testable `agentV3History.ts` module (matching the
+codebase's established pure-logic-separated-from-component convention) — not inline in the 1900-line panel.
+
+Tests: +27 (`sessionStatusMeta`, `sessionDateBucket`, `groupSessionsByDate` — every bucket boundary,
+ordering, empty-bucket omission, missing-timestamp fallback). Gate: frontend tsc 0, server tsc 0, vitest
+3921/3921 PASS, boot:check PASS. Manual: dev server boots and the app loads with zero runtime errors
+(Playwright root-page smoke check, clean console). **Honest limitation:** NavBharatAI Pro v3.0 is
+login-gated (real Firebase auth on the production project) — a full authenticated click-through of the
+redesigned menu against real saved sessions could not be done in this sandboxed session; the fix rests on
+tsc + the full test suite + a clean root-page load, mirroring the same E2B/live-runtime limitation already
+on record for this project.

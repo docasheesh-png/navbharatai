@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
 
@@ -114,5 +114,68 @@ describe('conversationToUserMessages (R5 reload fix — user bubbles no longer v
 
   it('returns [] for an empty transcript', () => {
     expect(conversationToUserMessages(conv({ messages: [] }))).toEqual([]);
+  });
+});
+
+describe('sessionStatusMeta (history-menu status dot)', () => {
+  it('maps every ConversationStatus to a dot + label', () => {
+    expect(sessionStatusMeta('running')).toMatchObject({ dot: 'bg-indigo-400', label: 'Building…', pulse: true });
+    expect(sessionStatusMeta('complete')).toMatchObject({ dot: 'bg-emerald-500', label: 'Built' });
+    expect(sessionStatusMeta('error')).toMatchObject({ dot: 'bg-red-500', label: 'Failed' });
+    expect(sessionStatusMeta('stopped')).toMatchObject({ dot: 'bg-zinc-500', label: 'Stopped' });
+  });
+  it('falls back to a neutral dot + empty label for unknown/missing status', () => {
+    expect(sessionStatusMeta(undefined)).toMatchObject({ dot: 'bg-zinc-600', label: '' });
+    expect(sessionStatusMeta('bogus')).toMatchObject({ dot: 'bg-zinc-600', label: '' });
+  });
+});
+
+describe('sessionDateBucket (history-menu date grouping)', () => {
+  const now = new Date('2026-07-01T12:00:00Z').getTime();
+  it('buckets same-calendar-day as Today', () => {
+    expect(sessionDateBucket(new Date('2026-07-01T00:30:00Z').getTime(), now)).toBe('Today');
+  });
+  it('buckets the previous calendar day as Yesterday', () => {
+    expect(sessionDateBucket(new Date('2026-06-30T23:00:00Z').getTime(), now)).toBe('Yesterday');
+  });
+  it('buckets 2-7 days ago as Previous 7 days', () => {
+    expect(sessionDateBucket(new Date('2026-06-27T12:00:00Z').getTime(), now)).toBe('Previous 7 days');
+  });
+  it('buckets 8-30 days ago as Previous 30 days', () => {
+    expect(sessionDateBucket(new Date('2026-06-10T12:00:00Z').getTime(), now)).toBe('Previous 30 days');
+  });
+  it('buckets anything older as Older', () => {
+    expect(sessionDateBucket(new Date('2026-01-01T12:00:00Z').getTime(), now)).toBe('Older');
+  });
+});
+
+interface TestSession { id: string; updatedAt?: number }
+
+describe('groupSessionsByDate (history-menu grouping — a real session list, not flat text)', () => {
+  const now = new Date('2026-07-01T12:00:00Z').getTime();
+  it('groups items into ordered date buckets, preserving each bucket\'s relative order', () => {
+    const items: TestSession[] = [
+      { id: 'a', updatedAt: new Date('2026-07-01T10:00:00Z').getTime() }, // Today
+      { id: 'b', updatedAt: new Date('2026-06-30T10:00:00Z').getTime() }, // Yesterday
+      { id: 'c', updatedAt: new Date('2026-07-01T02:00:00Z').getTime() }, // Today (older than a)
+      { id: 'd', updatedAt: new Date('2026-01-01T10:00:00Z').getTime() }, // Older
+    ];
+    const groups = groupSessionsByDate(items, now);
+    expect(groups.map((g) => g.label)).toEqual(['Today', 'Yesterday', 'Older']);
+    expect(groups[0].items.map((i) => i.id)).toEqual(['a', 'c']);
+    expect(groups[1].items.map((i) => i.id)).toEqual(['b']);
+    expect(groups[2].items.map((i) => i.id)).toEqual(['d']);
+  });
+  it('omits empty buckets entirely (no "Previous 30 days" header when nothing falls in it)', () => {
+    const groups = groupSessionsByDate<TestSession>([{ id: 'x', updatedAt: now }], now);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe('Today');
+  });
+  it('returns [] for an empty list', () => {
+    expect(groupSessionsByDate<TestSession>([], now)).toEqual([]);
+  });
+  it('treats a missing updatedAt as "now" (falls into Today)', () => {
+    const groups = groupSessionsByDate<TestSession>([{ id: 'no-ts' }], now);
+    expect(groups[0].label).toBe('Today');
   });
 });

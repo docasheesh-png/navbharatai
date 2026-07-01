@@ -144,6 +144,19 @@ describe('isLongRunningCommand', () => {
     expect(isLongRunningCommand('npx tsc --noEmit')).toBe(false);
     expect(isLongRunningCommand('')).toBe(false);
   });
+
+  it('does NOT treat pkill/ps/grep/head as long-running just because they reference "vite" as a filter (real build-report regression)', () => {
+    // Confirmed from a real failing build report: these were misrouted into the background-dev-
+    // server-start path, which force-killed the port then tried to "launch" the command with
+    // --host/--port/--strictPort appended — pkill/grep/head reject those as unrecognized options
+    // ("pkill: unrecognized option '--host'"), so the agent's own kill/inspect commands silently
+    // failed and it looped restarting a server it could never actually verify or stop.
+    expect(isLongRunningCommand('pkill -f "vite"')).toBe(false);
+    expect(isLongRunningCommand('pkill -f "vite.*5173" || true')).toBe(false);
+    expect(isLongRunningCommand('ps aux | grep vite')).toBe(false);
+    expect(isLongRunningCommand('ps aux | grep -E "vite|node" | grep -v grep | head -10')).toBe(false);
+    expect(isLongRunningCommand('netstat -tlnp 2>&1 | grep 5173 || echo "Port 5173 not in use"')).toBe(false);
+  });
 });
 
 describe('stripDevServerBackgrounding', () => {

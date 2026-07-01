@@ -134,6 +134,26 @@ const PROBLEM_SIGNALS: readonly string[] = [
 ];
 
 /**
+ * Comparison / explanation questions — the user wants an ANSWER, not a build. These often mention a
+ * build-flavored noun in passing — e.g. "compare v3.0 and Claude Code" contains "code", a BUILD_SIGNALS
+ * keyword — which previously fell through to the low-confidence 'new_build' default and spent a real
+ * ~9-minute build cycle answering what should have been an instant chat reply (confirmed from a real
+ * report: the message classified as `{ intent: 'new_build', confidence: 'low', signal: 'build-signal' }`
+ * purely because of the word "code" inside "Claude Code"). Checked BEFORE the generic BUILD_SIGNALS
+ * catch-all (exactly what "code" matched) but AFTER the explicit new-build/edit verbs above, so
+ * "build X and compare it to Y" still correctly builds. High confidence so the LLM upgrade can't be
+ * talked into a build by an ambiguous reply.
+ */
+const INFORMATIONAL_SIGNALS: readonly string[] = [
+  'compare', 'comparison', 'campair', // "campair" — a common Hinglish misspelling of "compare"
+  'vs', 'versus',
+  'difference between', "what's the difference", 'what is the difference',
+  'pros and cons', 'which is better', 'which one is better',
+  // Hindi / Hinglish
+  'compare karo', 'tulna karo', 'kya farak hai', 'farak kya hai', 'antar kya hai',
+];
+
+/**
  * Explicit "throw the current project away and start fresh" phrases. These are the ONLY case in
  * which a build-intent turn should rebuild from scratch even though the workspace already has an
  * app (one project per session). Everything else on a non-empty workspace is an EDIT — this is
@@ -272,6 +292,11 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
       return { intent: 'edit_existing', confidence: 'high', signal };
     }
   }
+  // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
+  // noun in passing. High confidence so length/code-heuristics below can't override it either.
+  if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {
+    return { intent: 'chat', confidence: 'high', signal: 'informational' };
+  }
   if (text.length > LONG_MESSAGE_THRESHOLD) {
     return { intent: 'new_build', confidence: 'high', signal: 'long-message' };
   }
@@ -390,6 +415,10 @@ export function classifyIntent(message: string): BuildIntent {
   // 2) Pure edit signals (fix, debug, update, change, refactor, …) → 'edit_existing'.
   //    Only fires when no new-build signal was found above.
   if (matchesSignal(lower, EDIT_SIGNALS)) return 'edit_existing';
+
+  // 2.5) A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-
+  //      flavored noun in passing (e.g. "compare v3.0 and Claude Code" contains "code").
+  if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) return 'chat';
 
   // 3) Long messages, code blocks, file paths or URLs → likely a real task → 'new_build'.
   if (text.length > LONG_MESSAGE_THRESHOLD) return 'new_build';

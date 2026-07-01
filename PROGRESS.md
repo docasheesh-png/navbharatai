@@ -6638,3 +6638,25 @@ pattern. Gate: frontend tsc 0, server tsc 0, vitest 4047/4047 PASS, boot:check P
 
 **Follow-up owed:** re-enable via `AGENTV3_MAX_BUILD_USD` (or restore the code default) once the admin
 confirms the build pipeline has stabilized — this is a standing action item, not a permanent change.
+
+## 2026-07-01 — "compare X and Y" questions no longer trigger a full 9-minute build
+
+Admin screenshot showed: typing "v3.0 aur claude code ko campair karo" (compare v3.0 and Claude Code —
+a pure comparison QUESTION) made v3.0 start a full build ("Estimated build time: ~9 min", "Setting up
+your workspace…"). Root-caused precisely: the message contains "code" (as part of "Claude Code"), which
+is a BUILD_SIGNALS keyword — the classifier's generic weak-signal catch-all matched it, producing
+`{ intent: 'new_build', confidence: 'low', signal: 'build-signal' }`. Low confidence should let the LLM
+upgrade re-judge it with context, but the observed behavior shows it fell through to a build regardless
+(LLM timeout, or the LLM itself guessed wrong under ambiguity) — either way, a comparison ask should
+never depend on an LLM correctly overriding a keyword mismatch.
+
+Fix: new deterministic `INFORMATIONAL_SIGNALS` array ("compare", "campair" — the exact Hinglish
+misspelling from the report, "vs", "versus", "difference between", "kya farak hai", "tulna karo", …),
+checked BEFORE the generic `BUILD_SIGNALS` catch-all (exactly what "code" matched) but AFTER the
+explicit new-build/edit verbs (so "build X and compare it to Y" still correctly builds) — HIGH
+confidence so the LLM upgrade can no longer be talked into a build for a genuine comparison question.
+Mirrors the same design already used for CONTINUATION_SIGNALS/PROBLEM_SIGNALS earlier this session.
+
+Tests: +5 (the exact reported message, English/Hinglish comparison variants, the HIGH-confidence/LLM-
+can't-override guarantee, and the explicit-build-verb-still-wins safety check). Gate: frontend tsc 0,
+server tsc 0, vitest 4071/4071 PASS, boot:check PASS.

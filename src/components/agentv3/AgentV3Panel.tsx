@@ -528,15 +528,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<ConversationMeta[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  // Reusable loader so both the initial open AND the "Try again" retry button can
+  // re-fetch without duplicating the fetch/loading-state logic.
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const { items, error: loadErr } = await listConversations({ userId, email });
+      setHistoryItems(items);
+      setHistoryError(loadErr ?? null);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
   const toggleHistory = async () => {
     const next = !historyOpen;
     setHistoryOpen(next);
-    if (next) {
-      setHistoryLoading(true);
-      try { setHistoryItems(await listConversations({ userId, email })); }
-      finally { setHistoryLoading(false); }
-    }
+    if (next) await loadHistory();
   };
   // Open a specific saved conversation: load its thread + plan, and adopt its sessionId so a
   // follow-up continues THAT exact workspace/memory (same as the auto-restore of the most recent).
@@ -1016,6 +1026,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="my-1 border-t border-zinc-800" />
                   {historyLoading ? (
                     <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
+                  ) : historyError ? (
+                    <div className="px-3 py-4 text-xs text-center">
+                      <div className="flex items-center justify-center gap-1.5 text-amber-400">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Couldn't load your history</span>
+                      </div>
+                      <div className="mt-1 text-zinc-500">{historyError}</div>
+                      <button
+                        onClick={loadHistory}
+                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-zinc-800 font-medium"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Try again
+                      </button>
+                    </div>
                   ) : historyItems.length === 0 ? (
                     <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
                   ) : (

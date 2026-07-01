@@ -299,6 +299,58 @@ describe('Design routes — /api/design/lint (P-DESIGN.8)', () => {
     expect(res.body?.grade).toBe('A');
     expect(Array.isArray(res.body?.violations)).toBe(true);
   });
+});
+
+// ── Share portal routes (P-COLLAB.3) ─────────────────────────────────────────────
+
+async function importShareRoutes() {
+  const { registerShareRoutes } = await import('../src/server/routes/share');
+  return registerShareRoutes;
+}
+
+describe('Share routes — /api/share (P-COLLAB.3)', () => {
+  it('registers the share portal endpoints', async () => {
+    const routes = captureRoutes(await importShareRoutes());
+    expect(routes.has('POST /api/share')).toBe(true);
+    expect(routes.has('GET /api/share/:token')).toBe(true);
+    expect(routes.has('POST /api/share/:token/feedback')).toBe(true);
+    expect(routes.has('GET /api/share/:token/feedback')).toBe(true);
+    expect(routes.has('POST /api/share/:token/revoke')).toBe(true);
+  });
+
+  it('create requires authentication (401 without a token)', async () => {
+    const routes = captureRoutes(await importShareRoutes());
+    const handler = routes.get('POST /api/share')!;
+    const res = mockRes();
+    await handler(mockReq({ body: { html: '<h1>hi</h1>' } }), res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body?.error).toMatch(/sign in/i);
+  });
+
+  it('resolve returns 404 for an unknown share token', async () => {
+    const routes = captureRoutes(await importShareRoutes());
+    const handler = routes.get('GET /api/share/:token')!;
+    const res = mockRes();
+    await handler(mockReq({ params: { token: 'nope' } }), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body?.valid).toBe(false);
+  });
+
+  it('feedback on an unavailable share returns 410', async () => {
+    const routes = captureRoutes(await importShareRoutes());
+    const handler = routes.get('POST /api/share/:token/feedback')!;
+    const res = mockRes();
+    await handler(mockReq({ params: { token: 'nope' }, body: { rating: 'approve' } }), res);
+    expect(res.statusCode).toBe(410);
+  });
+
+  it('listing feedback requires authentication (401)', async () => {
+    const routes = captureRoutes(await importShareRoutes());
+    const handler = routes.get('GET /api/share/:token/feedback')!;
+    const res = mockRes();
+    await handler(mockReq({ params: { token: 'x' } }), res);
+    expect(res.statusCode).toBe(401);
+  });
 
   it('registers the a11y lint endpoint and flags missing alt/label', async () => {
     const register = await importDesignRoutes();

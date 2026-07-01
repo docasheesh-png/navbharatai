@@ -2765,11 +2765,28 @@
   a careful, reviewed pass (not the autonomous rapid cycle) — admin nod on the approach recommended.
 - **Files:** `src/server/workspace/WorkspaceManager.ts`, `src/server/routes/{sync,engineer,agentv3}.ts`, new ACL middleware.
 
-### P-COLLAB.3 — Client / Stakeholder Share Portal + Feedback Collection  ❌ MISSING  [MED]
+### P-COLLAB.3 — Client / Stakeholder Share Portal + Feedback Collection  ✅ DONE (2026-07-01) · 🔌 WIRED  [MED]
 - No way to share a built app/preview **read-only** with a non-member (client/stakeholder) and collect their feedback
   or approval — a natural deliverable-handoff for an app builder.
-- [ ] Add a read-only shared preview link + a lightweight feedback/approval widget that records responses to Firestore.
-- **Files:** new `src/server/routes/share.ts`, new `src/components/SharePortal.tsx`, `routes/preview.ts`.
+- [x] **Durable share model — new `src/server/lib/ShareStore.ts`** (firebase-admin, VITEST-skip, pure builders, never
+  throws, 9 tests): `shares/{token}` (token, ownerId, title, html snapshot, status, 30-day expiry) +
+  `shares/{token}/feedback/{id}` (rating, comment, name). Size-capped (600 KB html / 2 KB comment). Pure
+  `buildShareRecord`/`isShareValid`/`normalizeRating`/`buildFeedback` unit-tested.
+- [x] **Routes — new `src/server/routes/share.ts`** (registered in `server.ts`): `POST /api/share` (auth owner) →
+  read-only review link; `GET /api/share/:token` (public) resolves title+html; `POST /api/share/:token/feedback`
+  (public) records Approve/Request-changes/Reject + comment; `GET /api/share/:token/feedback` + `POST …/revoke`
+  (owner-only, ownerId-checked). Route tests added.
+- [x] **Read-only viewer — new `src/components/SharePortal.tsx`** — isolated `?review=<token>` gate mounted in
+  `main.tsx` (not App.tsx). Renders the shared app in a **sandboxed iframe** (`sandbox="allow-scripts"`, NO
+  same-origin → can never touch the platform) + a feedback bar. Renders nothing on a normal load.
+- [x] **Creator UI — new `src/components/ide/ShareForReview.tsx`**, wired into `MultiCloudDeploy`'s Deploy tab (which
+  has the generated code): create link → copy → view feedback → revoke. `AppKnowledgeBase.ts` entry added.
+- **Honest:** no email is sent (no SMTP infra) — the owner shares the link themselves; links expire after 30 days.
+- **Files:** new `src/server/lib/ShareStore.ts` + `tests/shareStore.test.ts`, new `src/server/routes/share.ts`,
+  `server.ts`, `tests/routesMiscValidation.test.ts`, new `src/components/SharePortal.tsx`, new
+  `src/components/ide/ShareForReview.tsx`, `src/components/ide/MultiCloudDeploy.tsx`, `src/main.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`.
+- **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` green · `build` OK · boot PASS.
 
 ### P-COLLAB.4 — Shared Team Libraries (prompts / templates / components)  🟡 PARTIAL → full  [LOW]
 - `SyncedTemplates` and `ComponentLibrary` are **global** (one instance for everyone); there is no **team-scoped**

@@ -11,6 +11,7 @@ import { CheckpointManager } from '../checkpoint/CheckpointManager';
 import { CheckpointStorage } from '../checkpoint/CheckpointStorage';
 import { VCSProvider } from '../vcs/VCSProvider';
 import { EventBus } from '../eventbus/EventBus';
+import { Saga } from '../generator/Saga';
 
 export class DeploymentEngine implements IDeploymentEngine {
   private planner = new DeploymentPlanner();
@@ -33,7 +34,14 @@ export class DeploymentEngine implements IDeploymentEngine {
     await this.eventBus.publish('DEPLOYMENT_STARTED', { workspaceId, deploymentId });
     await this.checkpoint.saveCheckpoint(workspaceId);
     await this.vcs.commit(workspaceId, `Deployment start: ${deploymentId}`);
-    
+
+    // P-ORCH.3 — saga compensation: now that the start checkpoint/commit external effects have landed,
+    // register their compensation. On ANY later step failure the saga runs the registered compensations
+    // in reverse (here: roll the workspace back) — an ordered, extensible mechanism replacing the ad-hoc
+    // rollback call (future stages can register their own compensations, undone newest-first).
+    const saga = new Saga();
+    saga.register('rollback-workspace', () => this.rollbackManager.rollback(workspaceId));
+
     let artifact: any;
     let verification: any = { passed: false };
     let plan: any;
@@ -66,7 +74,8 @@ export class DeploymentEngine implements IDeploymentEngine {
       await this.persistAudit(deploymentId, artifact.artifactId, stateTransitions, true, false, startTime, verifyStart, verification, plan, allocationTimestamp);
       return { success: true, deploymentId, environment: 'LOCAL', rollbackAvailable: true, validationPassed: true, host: 'localhost', port: plan.port, healthPath: plan.healthPath };
     } catch (e) {
-      await this.rollbackManager.rollback(workspaceId);
+      // P-ORCH.3 — run the saga's registered compensations in reverse (rolls the workspace back).
+      await saga.compensate();
       stateTransitions.push(DeploymentState.FAILED);
       await this.stateManager.persistState(deploymentId, { state: DeploymentState.FAILED });
       await this.eventBus.publish('DEPLOYMENT_FAILED', { workspaceId, deploymentId });

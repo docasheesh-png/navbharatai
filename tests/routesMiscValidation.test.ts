@@ -176,4 +176,68 @@ describe('Team routes — /api/team/invite', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body?.error).toMatch(/invalid email/i);
   });
+
+  it('issues a durable, token-based invite link for a valid request', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/team/invite')!;
+
+    const req = mockReq({ body: { email: 'teammate@example.com', userId: 'owner1', role: 'Editor' } });
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.body?.ok).toBe(true);
+    expect(typeof res.body?.token).toBe('string');
+    expect(res.body?.token.length).toBeGreaterThan(10);
+    expect(res.body?.role).toBe('editor'); // 'Editor' normalised
+    expect(res.body?.inviteUrl).toBe(`/?join=${res.body.token}`);
+    expect(res.body?.emailSent).toBe(false); // honest: no SMTP infra, link-based
+  });
+});
+
+describe('Team routes — invite lifecycle', () => {
+  it('registers the accept, resolve, members and revoke endpoints', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    expect(routes.has('POST /api/team/accept')).toBe(true);
+    expect(routes.has('GET /api/team/invite/:token')).toBe(true);
+    expect(routes.has('GET /api/team/:teamId/members')).toBe(true);
+    expect(routes.has('POST /api/team/invite/:token/revoke')).toBe(true);
+    expect(routes.has('POST /api/team/member/remove')).toBe(true);
+  });
+
+  it('accept requires authentication (401 without a verified token)', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/team/accept')!;
+
+    const req = mockReq({ body: { token: 'sometoken' } }); // no Authorization header
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body?.error).toMatch(/sign in/i);
+  });
+
+  it('resolve returns 404 for an unknown invite token', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('GET /api/team/invite/:token')!;
+
+    const req = mockReq({ params: { token: 'does-not-exist' } });
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body?.valid).toBe(false);
+  });
+
+  it('member/remove validates its inputs', async () => {
+    const register = await importTeamRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/team/member/remove')!;
+
+    const req = mockReq({ body: { teamId: 'owner1' } }); // missing uid
+    const res = mockRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toMatch(/teamId and uid required/i);
+  });
 });

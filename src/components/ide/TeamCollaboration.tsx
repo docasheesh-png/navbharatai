@@ -43,6 +43,8 @@ interface PendingInvite {
   email: string;
   role: Role;
   sentAt: string;
+  /** Real, durable, copyable invite link (P-COLLAB.1) — resolves + accepts via the backend. */
+  inviteUrl?: string;
 }
 
 interface ActivityEntry {
@@ -105,6 +107,24 @@ const generateProjectId = () =>
   Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
 
 const localKey = (uid?: string) => `navbharatai_team_${uid ?? 'anon'}`;
+
+/**
+ * Build an Authorization header carrying the signed-in user's Firebase ID token, for the RBAC-gated
+ * team routes. Best-effort: returns `{}` when unauthenticated or Firebase isn't ready, so the caller
+ * can surface an honest "sign in" message rather than silently failing.
+ */
+async function teamAuthHeader(): Promise<Record<string, string>> {
+  try {
+    const { getAuth } = await import('firebase/auth');
+    const { getApp } = await import('firebase/app');
+    const user = getAuth(getApp()).currentUser;
+    if (!user) return {};
+    const token = await user.getIdToken();
+    return { Authorization: `Bearer ${token}` };
+  } catch {
+    return {};
+  }
+}
 
 // ─── Simple ASCII QR placeholder ─────────────────────────────────────────────
 
@@ -267,32 +287,65 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
       return;
     }
     setInviting(true);
+    let inviteUrl: string | undefined;
+    let ok = false;
     try {
+      // The invite route is RBAC-gated (owner/admin), so it needs the signed-in owner's ID token.
+      const authHeader = await teamAuthHeader();
       const res = await fetch('/api/team/invite', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole, projectId, userId }),
       });
+      if (res.status === 401 || res.status === 403) {
+        showToast('Sign in as the team owner to send invites', 'error');
+        setInviting(false);
+        return;
+      }
       if (!res.ok) throw new Error('API failed');
       const data = await res.json();
-      showToast(data.emailSent ? `Invite sent: ${inviteEmail}` : `Invite recorded — email delivery coming soon`);
+      ok = !!data.ok;
+      // Make the backend's relative `/?join=<token>` link absolute so it can be shared as-is.
+      if (data.inviteUrl) {
+        try { inviteUrl = new URL(data.inviteUrl, window.location.origin).toString(); }
+        catch { inviteUrl = `${window.location.origin}${data.inviteUrl}`; }
+      }
+      // Honest: no SMTP infra, so we share a real, working invite LINK rather than claim an email was sent.
+      showToast(inviteUrl ? `Invite link ready for ${inviteEmail} — copy & share it` : `Invite recorded for ${inviteEmail}`);
     } catch {
-      // Mock fallback
-      showToast(`Invite sent (mock): ${inviteEmail}`);
+      showToast('Could not create the invite. Check your connection and try again.', 'error');
     }
-    const invite: PendingInvite = {
-      id: Math.random().toString(36).slice(2),
-      email: inviteEmail,
-      role: inviteRole,
-      sentAt: 'Just now',
-    };
-    setPendingInvites(prev => [invite, ...prev]);
-    setInviteEmail('');
+    if (ok) {
+      const invite: PendingInvite = {
+        id: Math.random().toString(36).slice(2),
+        email: inviteEmail,
+        role: inviteRole,
+        sentAt: 'Just now',
+        inviteUrl,
+      };
+      setPendingInvites(prev => [invite, ...prev]);
+      setInviteEmail('');
+    }
     setInviting(false);
   };
 
-  const revokeInvite = (id: string) => {
+  // Copy a pending invite's shareable link to the clipboard.
+  const copyInviteLink = (url: string) => {
+    navigator.clipboard.writeText(url).catch(() => {});
+    showToast('Invite link copied');
+  };
+
+  const revokeInvite = async (id: string) => {
+    const invite = pendingInvites.find(i => i.id === id);
     setPendingInvites(prev => prev.filter(i => i.id !== id));
+    // Also revoke on the backend so the link truly stops working (not just hidden locally).
+    const token = invite?.inviteUrl ? new URLSearchParams(new URL(invite.inviteUrl).search).get('join') : null;
+    if (token) {
+      try {
+        const authHeader = await teamAuthHeader();
+        await fetch(`/api/team/invite/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: authHeader });
+      } catch { /* local removal already done; backend revoke is best-effort */ }
+    }
     showToast('Invite revoked');
   };
 
@@ -394,17 +447,28 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                   <div className="flex flex-col gap-1.5">
                     {pendingInvites.map(inv => (
                       <div key={inv.id} className="flex items-center justify-between bg-[#0d1117] rounded-lg px-3 py-2">
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs text-gray-300 truncate max-w-[160px]">{inv.email}</p>
                           <p className="text-xs text-gray-600">{inv.role} · {inv.sentAt}</p>
                         </div>
-                        <button
-                          onClick={() => revokeInvite(inv.id)}
-                          className="text-gray-600 hover:text-red-400 transition-colors ml-2"
-                          title="Revoke invite"
-                        >
-                          <X size={13} />
-                        </button>
+                        <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                          {inv.inviteUrl && (
+                            <button
+                              onClick={() => copyInviteLink(inv.inviteUrl!)}
+                              className="text-gray-500 hover:text-indigo-400 transition-colors"
+                              title="Copy invite link"
+                            >
+                              <Copy size={13} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => revokeInvite(inv.id)}
+                            className="text-gray-600 hover:text-red-400 transition-colors"
+                            title="Revoke invite"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -41,8 +41,9 @@ here pins Node 22, so MODE A will run the same way in the sandbox.
 
 | File | Purpose |
 |------|---------|
-| `e2b.Dockerfile` | The sandbox image recipe: Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
-| `build.mjs` | **Build system v2** script — defines the template from `e2b.Dockerfile` (`fromDockerfile()`) and calls `Template.build()` |
+| `e2b.Dockerfile` | The DEFAULT sandbox image recipe (used by every v3.0 build): Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
+| `e2b-android.Dockerfile` | A SEPARATE, on-demand template for the Android APK builder (JDK 17 + Android SDK + Bubblewrap CLI) — see "Android APK builder template" below |
+| `build.mjs` | **Build system v2** script — builds EITHER template (env-var selected) via `fromDockerfile()` + `Template.build()`. Defaults to the original `e2b.Dockerfile` behavior unchanged. |
 | `package.json` | Declares the `e2b` SDK dependency for `build.mjs` |
 | `e2b.toml` | Legacy v1 config — **not used by the v2 build** (CPU/RAM now live in `build.mjs`). Kept for reference only. |
 | `README.md` | This guide |
@@ -143,6 +144,59 @@ PR will:
 5. **Config:** set `E2B_TEMPLATE_ID` in Cloud Run env to the published id.
 
 6. **AppKnowledgeBase entry** for the new "MODE A / official scaffolds" capability.
+
+---
+
+## Android APK builder template (2026-07-01 — infra only, NOT wired to any feature yet)
+
+Admin request: a "100% real, working" Download APK feature. Researched honestly before building
+anything (see PROGRESS.md 2026-07-01): a real, automatic APK build needs a JDK + Android SDK + Gradle
+somewhere, which the DEFAULT builder template deliberately does not have (would slow every ordinary
+build's cold-start for a feature most builds never use). This is a SEPARATE, on-demand template:
+`e2b-android.Dockerfile` — JDK 17, Android SDK cmdline-tools (`platform-tools`, `platforms;android-34`,
+`build-tools;34.0.0`), and Google's own **Bubblewrap CLI** (the official TWA — Trusted Web Activity —
+generator). A TWA is the lightest real path to an installable APK: it wraps an ALREADY-HOSTED web app
+(a real, durable public HTTPS URL — which NavBharatAI's existing per-workspace Firebase Hosting deploy,
+`src/server/EngineerAI/DeploymentService.ts`, already provides) in a thin native Android shell, backed
+by a real Gradle build and a real signing keystore.
+
+**What THIS template provides:** the build environment only. **What's still missing (deliberately NOT
+built yet — see "two valid states: fully working, or not built yet"):** the actual orchestration code
+that invokes `bubblewrap init`/`build` inside a sandbox from this template, generates/manages a signing
+keystore server-side, and streams the resulting `.apk` back to the user. That is separate, larger
+follow-up work, matching the SAME "infra template published + verified FIRST, code wiring SECOND"
+sequencing this directory already used for the default template's own MODE A rollout above — so the
+feature can never be pointed at a half-built image.
+
+### Build & publish (same GitHub Actions workflow, different input)
+
+1. Repo → **Settings → Secrets and variables → Actions** → confirm `E2B_API_KEY` is set (same secret
+   the default template uses).
+2. Repo → **Actions → "Build E2B Builder Template" → Run workflow** → set **template_kind: `android`**
+   (leave `template_name` blank to use the default alias `navbharat-android-builder`).
+3. Open the finished run → the job summary shows the usable template alias.
+4. Set Cloud Run env `ANDROID_E2B_TEMPLATE_ID=navbharat-android-builder` (a NEW, separate env var from
+   `E2B_TEMPLATE_ID` — this template is never used for ordinary builds).
+
+### Cost note (honest — bigger than the default template)
+
+This image is substantially larger than the default builder template (JDK + Android SDK + Gradle
+caches run into several GB, versus the default's lean Node-only image) and building/publishing it will
+take noticeably longer and cost more E2B build/storage time. An on-demand Android/Gradle build from
+this template (once the orchestration code exists) will also take real minutes, not seconds — this is
+an infra/product decision for the account owner, flagged here honestly, not hidden, same as the default
+template's own cost note below.
+
+### Verify the published template (once built)
+
+```bash
+e2b sandbox spawn navbharat-android-builder    # needs @e2b/cli: npm i -g @e2b/cli
+#   inside the sandbox shell:
+java -version                                   # must show 17.x
+sdkmanager --list_installed                     # must list platform-tools, platforms;android-34, build-tools;34.0.0
+bubblewrap --version                            # must print a version, not "command not found"
+exit
+```
 
 ---
 

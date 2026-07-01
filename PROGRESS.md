@@ -7061,3 +7061,45 @@ inactive). Gate: frontend tsc 0, server tsc 0, vitest 4148/4148 PASS, boot:check
 elements, and the E2B live-mode bridge (needs a Vite plugin injected into the project scaffold +
 postMessage bridge — a real, separate infrastructure piece, tracked as explicit follow-up work, not
 silently skipped).
+
+## 2026-07-01 — Download APK: Android build-environment infra (Slice 1 of 2, admin-approved investment)
+
+Admin, after being told honestly that "100% real working APK download" needs new infrastructure (no
+JDK/Android SDK/Gradle anywhere in this codebase, no existing Android CI/build service — see the
+research summary in the PR): "Infra investment shuru karo" (start the infra investment). This ships
+the FIRST real, admin-actionable piece — the build ENVIRONMENT — following the exact same
+"infra-first, code-wiring-second" sequencing `infra/e2b/README.md` already established for the default
+builder template's own MODE A rollout, so the eventual feature is never pointed at a half-built image.
+
+- **`infra/e2b/e2b-android.Dockerfile`** (new) — a SEPARATE, on-demand E2B template (not added to the
+  default `e2b.Dockerfile`, which every ordinary build uses — bloating it would slow every build's
+  cold-start for a feature most builds never touch): JDK 17, Android SDK cmdline-tools
+  (platform-tools, `platforms;android-34`, `build-tools;34.0.0`), and Google's own **Bubblewrap CLI**
+  — the official TWA (Trusted Web Activity) generator. A TWA is the lightest REAL path to an
+  installable APK: wrap an ALREADY-HOSTED web app (a real, durable public URL — which
+  `DeploymentService.ts`'s existing per-workspace Firebase Hosting deploy already provides) in a thin
+  native Android shell, backed by a real Gradle build + a real signing keystore. Has its own
+  build-time sanity gate (fails the IMAGE build, not a user build, if java/Android SDK/bubblewrap
+  aren't actually usable).
+- **`infra/e2b/build.mjs`** — parametrized via env vars (`DOCKERFILE`, `CPU_COUNT`, `MEMORY_MB`) so ONE
+  script builds either template; every new var defaults to the EXISTING hardcoded values, so an
+  unmodified CI invocation (as it's always been called) builds the exact same default image as before
+  — zero behavior change for the current template.
+- **`.github/workflows/e2b-template.yml`** — added a `template_kind` choice input (`default` |
+  `android`); resolves the right Dockerfile/alias/CPU/memory for whichever is picked. Still
+  manual-dispatch-only (never rebuilds/costs money on ordinary pushes).
+- **`infra/e2b/README.md`** — new section documenting the Android template, its purpose, HONEST cost
+  (this image is substantially larger — several GB of JDK/SDK/Gradle caches — and slower to build/use
+  than the lean default template), and a verify-the-published-template checklist.
+
+**What this does NOT do (deliberately, not half-done):** actually orchestrate a build (no code invokes
+`bubblewrap`/Gradle/signs an APK yet — that is separate, larger follow-up work, gated behind a NEW,
+separate `ANDROID_E2B_TEMPLATE_ID` env var, unset by default). **What still needs the admin's own
+action** (cannot be done from this session — `api.e2b.dev` is egress-blocked here, matching the
+existing default-template note): actually running the `template_kind: android` workflow dispatch (with
+`E2B_API_KEY` configured) to build + publish this image before ANY orchestration code can be wired to
+use it — a real, cost-incurring cloud build step the account owner should trigger themselves.
+
+Gate: this PR is infrastructure/CI/documentation only (no runtime app code touched) — frontend tsc 0,
+server tsc 0, vitest 4148/4148 PASS (unchanged from before this PR), `node --check` on the modified
+`build.mjs`, and the modified GitHub Actions workflow YAML validated with two independent parsers.

@@ -222,6 +222,22 @@ export function conversationAccess(
   return 'ok';
 }
 
+/**
+ * True when NO conversation record for this workspace was touched during (or after) this build's
+ * own start — meaning only the fast lane (SimpleBuilder/OneShot) ran, which never persists to
+ * ConversationStore itself (only the agentic AgentRunner does, via its own `persistence` option
+ * inside run()). Without a fallback record in that case, a reload's "restore the most recent
+ * build" finds nothing for this workspace — the chat/session looks wiped even though the
+ * generated files were saved separately. PURE & testable.
+ */
+export function needsFallbackConversationPersist(
+  recentForUser: readonly { workspaceId: string; updatedAt: number }[],
+  workspaceId: string,
+  buildStartedAt: number,
+): boolean {
+  return !recentForUser.some((r) => r.workspaceId === workspaceId && r.updatedAt >= buildStartedAt);
+}
+
 /** A client-supplied session id must be a safe, bounded token (it becomes part of
  *  the workspace id, which is interpolated into sandbox paths/commands). */
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
@@ -2405,6 +2421,9 @@ export function registerAgentV3Routes(app: Express): void {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
         },
       };
+      // Hoisted so the fast-lane fallback persistence below (SETTLED section) can reuse the SAME id —
+      // if the agentic runner ends up actually persisting under it, the fallback is a no-op.
+      const mainConversationId = randomUUID();
       const runner = new AgentRunner({
         ...baseRunnerOpts,
         client,
@@ -2414,7 +2433,7 @@ export function registerAgentV3Routes(app: Express): void {
         // GET /api/agentv3/conversations endpoints below.
         persistence: {
           store: getConversationStore(),
-          conversationId: randomUUID(),
+          conversationId: mainConversationId,
           userId: userId ?? 'anon',
           workspaceId,
           title: deriveTitle(prompt),
@@ -2968,6 +2987,42 @@ export function registerAgentV3Routes(app: Express): void {
       // deadline timer NOW so that if the wall-clock cap fires during that advisory work, the build is
       // finalized as SUCCESS (the app is built + already durably saved), not "paused — type continue".
       if (result.ok) buildResultRef = { ok: true, summary: result.summary, steps: result.steps, billedUsd: result.billedUsd };
+
+      // FAST-LANE PERSISTENCE FALLBACK ("memory gone after reload" fix): only the agentic AgentRunner
+      // (escalation/empty-build-retry/preview-heal/auto-fix) persists to ConversationStore — via its
+      // own `persistence` option, triggered inside run(). The FAST LANE (SimpleBuilder/OneShot — the
+      // PRIMARY, most-common path for a simple build) never calls runner.run() when it succeeds, so it
+      // never touches ConversationStore at all. A build that completed entirely through the fast lane
+      // therefore left NO durable conversation record: on reload, "restore the most recent build"
+      // (GET /api/agentv3/conversations) found nothing for this workspace (or an older, unrelated one),
+      // so the chat/session looked wiped even though the generated FILES were saved separately. Ensure
+      // exactly one record exists for every build, regardless of which path produced it — checked by
+      // whether ANYTHING was already persisted for this workspace during this build's own run (covers
+      // every persistence-configured runner above, not just the base one), so this never double-writes
+      // over a richer, already-saved transcript. Best-effort — a store failure never affects the build.
+      try {
+        const store = getConversationStore();
+        const recentForUser = await store.listByUser(userId ?? 'anon', 10);
+        if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
+          const now = Date.now();
+          await store.create({
+            id: mainConversationId,
+            userId: userId ?? 'anon',
+            workspaceId,
+            title: deriveTitle(prompt),
+            messages: [
+              { role: 'user', content: prompt },
+              { role: 'assistant', content: result.summary || '' },
+            ],
+            createdAt: now,
+          });
+          await store.update(mainConversationId, {
+            status: result.ok ? 'complete' : 'error',
+            billedUsd: result.billedUsd,
+            updatedAt: now,
+          });
+        }
+      } catch { /* fallback persistence is best-effort — never affects the build result */ }
 
       // Build Reflection (Layer 57, seed): derive a short reflection from what
       // happened this build (errors hit, fixes applied, outcome) and store it

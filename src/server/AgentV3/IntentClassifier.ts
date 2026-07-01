@@ -109,6 +109,31 @@ const CONTINUATION_SIGNALS: readonly string[] = [
 ];
 
 /**
+ * "Something isn't working" problem reports — the user is describing a BROKEN existing project
+ * (preview/build/feature), not making small talk. These are almost always SHORT (≤3 words, e.g.
+ * "preview nahi chala") and contain a bare negation word ("nahi", "not", "no") that the
+ * SOCIAL_PATTERNS check below would otherwise misread as a standalone chit-chat acknowledgement
+ * ("nahi" as a lone reply to a yes/no question) — routing a genuine bug report to a sympathetic
+ * chat reply instead of an actual fix, and losing the project/file context an edit gets. Checked
+ * BEFORE SOCIAL_PATTERNS so a real complaint always wins. Erring toward edit_existing is safe here
+ * for the same reason as CONTINUATION_SIGNALS above: worst case is running the memory-aware edit
+ * path on a fresh workspace, never dismissing a bug report as chit-chat.
+ */
+const PROBLEM_SIGNALS: readonly string[] = [
+  // English — "it isn't working" family
+  "doesn't work", 'does not work', "isn't working", 'is not working', 'not working',
+  "won't load", 'will not load', 'not loading', "isn't loading", 'is not loading',
+  'not showing', "isn't showing", 'stopped working', 'is broken', "isn't opening",
+  'is not opening', 'not opening', 'blank screen', 'blank page', 'not rendering',
+  // Hindi / Hinglish — "kaam/chal/ho/khul nahi raha" family
+  'nahi chala', 'nhi chala', 'chal nahi raha', 'chalu nahi', 'kaam nahi kar raha',
+  'kaam nahi kar rha', 'kaam nahi kiya', 'nahi ho raha', 'nhi ho raha', 'nahi hua',
+  'nahi aa raha', 'nhi aa raha', 'nahi aaya', 'nahi dikh raha', 'nhi dikh raha',
+  'nahi dikha', 'nahi khul raha', 'nhi khul raha', 'nahi khula', 'band ho gaya',
+  'kharab ho gaya', 'chal nhi raha',
+];
+
+/**
  * Explicit "throw the current project away and start fresh" phrases. These are the ONLY case in
  * which a build-intent turn should rebuild from scratch even though the workspace already has an
  * app (one project per session). Everything else on a non-empty workspace is an EDIT — this is
@@ -266,6 +291,12 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
   if (matchesSignal(lower, CONTINUATION_SIGNALS)) {
     return { intent: 'edit_existing', confidence: 'high', signal: 'continuation' };
   }
+  // A "something isn't working" bug report → edit_existing, not chat. Checked BEFORE
+  // SOCIAL_PATTERNS: a short complaint like "preview nahi chala" contains the bare word "nahi",
+  // which SOCIAL_PATTERNS alone would misread as a standalone chit-chat acknowledgement.
+  if (matchesSignal(lower, PROBLEM_SIGNALS)) {
+    return { intent: 'edit_existing', confidence: 'high', signal: 'problem-report' };
+  }
 
   // Steps 5–7 → low confidence (social pattern, short message, or default)
   for (const pattern of SOCIAL_PATTERNS) {
@@ -373,6 +404,11 @@ export function classifyIntent(message: string): BuildIntent {
   //      'chat' default and lose ALL build context/memory (the "please continue" → amnesia bug).
   //      Route them to the memory-aware edit/continuation path instead.
   if (matchesSignal(lower, CONTINUATION_SIGNALS)) return 'edit_existing';
+
+  // 4.6) "Something isn't working" bug report ("preview nahi chala", "not working", …) → edit_existing,
+  //      not chat. Checked BEFORE social patterns: a short complaint containing the bare word "nahi"/
+  //      "not" would otherwise be misread as a standalone chit-chat acknowledgement (see PROBLEM_SIGNALS).
+  if (matchesSignal(lower, PROBLEM_SIGNALS)) return 'edit_existing';
 
   // 5) Clear social patterns (no build signal present) → 'chat'.
   for (const pattern of SOCIAL_PATTERNS) {

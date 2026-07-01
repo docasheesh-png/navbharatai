@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -28,6 +28,24 @@ describe('conversationAccess (D7 ownership gate)', () => {
     expect(conversationAccess({ userId: 'u1' }, 'u2')).toBe('forbidden');
     expect(conversationAccess({ userId: 'u1' }, null)).toBe('forbidden'); // anonymous can't read an owned build
     expect(conversationAccess(null, 'u1')).toBe('not-found');
+  });
+});
+
+describe('needsFallbackConversationPersist (fast-lane "memory gone after reload" fix)', () => {
+  it('needs a fallback when nothing was persisted for this workspace during the build', () => {
+    expect(needsFallbackConversationPersist([], 'ws-1', 1000)).toBe(true);
+    expect(needsFallbackConversationPersist([{ workspaceId: 'ws-other', updatedAt: 2000 }], 'ws-1', 1000)).toBe(true);
+  });
+  it('does NOT need a fallback when the agentic runner already persisted this workspace during the build', () => {
+    expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1500 }], 'ws-1', 1000)).toBe(false);
+  });
+  it('a STALE record for the same workspace from BEFORE this build started still needs a fallback', () => {
+    // An older conversation for the same workspace (e.g. from a fast-lane build hours ago) must not
+    // be mistaken for "this build already persisted" — only an updatedAt AT/AFTER buildStartedAt counts.
+    expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 500 }], 'ws-1', 1000)).toBe(true);
+  });
+  it('a record updated exactly at buildStartedAt counts as already-persisted (inclusive boundary)', () => {
+    expect(needsFallbackConversationPersist([{ workspaceId: 'ws-1', updatedAt: 1000 }], 'ws-1', 1000)).toBe(false);
   });
 });
 

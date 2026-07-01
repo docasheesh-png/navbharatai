@@ -2793,11 +2793,18 @@
 - [ ] Add a simple builder UI + starter templates; optionally an AI "describe your automation" → workflow generator.
 - **Files:** new `src/server/AppMakerLab/workflow/{WorkflowEngine,WorkflowTypes}.ts`, new `src/components/ide/WorkflowBuilder.tsx`.
 
-### P-ORCH.3 — Saga / Compensation for Multi-Step Orchestration  🟡 PARTIAL → full  [LOW]
-- `TransactionCoordinator` gives ACID-ish *workspace-file* transactions, but there is no **saga / compensation** across
-  a multi-step pipeline (e.g. build → deploy → verify): if a late step fails, earlier external effects aren't auto-undone.
-- [ ] Define compensation handlers per orchestrator stage; on failure, run compensations in reverse (deploy→rollback, etc.).
-- **Files:** `src/server/AppMakerLab/generator/ExecutionOrchestrator.ts`, `src/server/AppMakerLab/deployment/DeploymentRollbackManager.ts`, new `Saga.ts`.
+### P-ORCH.3 — Saga / Compensation for Multi-Step Orchestration  ✅ DONE (2026-06-30) · 🔌 WIRED  [LOW]
+- `TransactionCoordinator` gives ACID-ish *workspace-file* transactions, but there was no **saga / compensation**
+  across a multi-step pipeline (build → deploy → verify): a late failure didn't undo earlier external effects in order.
+- [x] **`Saga.ts`** — generic compensation coordinator: `register(name, compensate)` as each external effect lands +
+  `compensate()` runs them in REVERSE (LIFO), best-effort (every handler runs even if one throws); plus a static
+  `Saga.run(steps)` that executes forward and compensates completed steps on the first failure, returning a structured
+  `SagaResult`. Pure control-flow → fully unit-tested (`saga.test.ts`, 5).
+- [x] Wired into `DeploymentEngine.runDeployment`: the start checkpoint's rollback is registered as a saga
+  compensation and the failure path now runs `saga.compensate()` (behavior-preserving — rollback still runs on
+  failure, now via the ordered saga so later stages can register their own compensations, undone newest-first).
+- **Files:** new `src/server/AppMakerLab/generator/Saga.ts`, `src/server/AppMakerLab/deployment/DeploymentEngine.ts`,
+  new `tests/saga.test.ts`.
 
 ---
 

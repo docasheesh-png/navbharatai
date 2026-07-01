@@ -2614,11 +2614,22 @@
 - [ ] Add an opt-in approval gate + a freeze flag (Firestore config) the deploy pipeline checks before promoting.
 - **Files:** `.github/workflows/deploy.yml`, `cloudbuild.yaml`, `src/server/routes/admin.ts`.
 
-### P-DEPLOY.6 — Expanded Deploy Targets + Wire MultiCloudDeploy UI  🟡 PARTIAL → full  [LOW]
+### P-DEPLOY.6 — Expanded Deploy Targets + Wire MultiCloudDeploy UI  ✅ DONE (2026-06-30) · 🔌 UI-WIRED  [LOW]
 - `ide/MultiCloudDeploy.tsx` lists Railway/Render/Fly.io/Cloudflare but only Firebase/Vercel/Netlify have real
   backend providers. Repo integration is GitHub-only (no GitLab/Bitbucket).
-- [ ] Implement real providers for the listed targets (or hide unsupported ones); optionally add GitLab/Bitbucket import.
-- **Files:** `src/server/AgentV3/DeployProviders.ts`, `src/components/ide/MultiCloudDeploy.tsx`.
+- [x] **Removed dead fake `LOG_MESSAGES`** (hardcoded "✅ Deployment successful!" / "Your app is live!" logs that
+  faked a deploy — never wired, but a real-features-rule violation waiting to happen; deleted).
+- [x] **Real in-app Vercel deploy** — when the user supplies their own `VERCEL_TOKEN` in the Config tab, "Deploy"
+  now publishes the generated app through the platform's existing, already-tested `/api/pro/deploy` backend
+  (`deployVercel` → real Vercel `/v13/deployments` REST API) and shows the true live URL. No token → falls through
+  to the honest CLI-instructions path (never a faked success). `VERCEL_TOKEN` added to the vercel platform's env vars.
+- [x] All other listed targets keep the **honest CLI-instructions** path (real `npx …` commands), so the UI never
+  claims a deploy it didn't perform. Full GitLab/Bitbucket import + first-party Railway/Render/Fly backends are a
+  larger scope (needs each provider's deploy API + token UX) — deferred, tracked separately, not faked here.
+- **Files:** `src/components/ide/MultiCloudDeploy.tsx` (UI + real Vercel branch), reuses `src/server/routes/pro.ts`
+  `/api/pro/deploy` + `src/server/pro/ProDeploy.ts` `deployVercel` (both pre-existing, real).
+- **Verify:** `tsc --noEmit` clean · `vitest run` green · `npm run build` OK. Honest: dead fake logs gone, real
+  Vercel deploy wired end-to-end, no fabricated "live" state anywhere in the panel.
 
 ---
 

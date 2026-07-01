@@ -44,7 +44,8 @@ const PLATFORMS: Record<Platform, PlatformConfig> = {
     description: 'Fastest frontend deployments with Edge Network',
     buildCmd: 'npm run build',
     outputDir: 'dist',
-    envVars: ['VITE_API_URL', 'VITE_FIREBASE_KEY'],
+    // VERCEL_TOKEN enables a REAL in-app deploy (P-DEPLOY.6, via /api/pro/deploy); without it, honest CLI steps.
+    envVars: ['VERCEL_TOKEN', 'VITE_API_URL', 'VITE_FIREBASE_KEY'],
     features: ['Edge CDN', 'Auto HTTPS', 'Preview URLs', 'Analytics'],
     free: true,
   },
@@ -103,30 +104,6 @@ const PLATFORMS: Record<Platform, PlatformConfig> = {
     features: ['Static Sites', 'Web Services', 'Cron Jobs', 'Private Network'],
     free: true,
   },
-};
-
-const LOG_MESSAGES: Record<DeployStatus, string[]> = {
-  idle: [],
-  building: [
-    '> Installing dependencies...',
-    '> npm install --production',
-    '> Dependencies installed (1.2s)',
-    '> Running build...',
-    '> npm run build',
-    '> vite build',
-    '> Transforming modules...',
-    '> Bundling chunks...',
-    '> Build complete (4.8s)',
-  ],
-  deploying: [
-    '> Uploading assets...',
-    '> Deploying to CDN...',
-    '> Configuring DNS...',
-    '> SSL certificate provisioned',
-    '> Deployment propagating...',
-  ],
-  success: ['> ✅ Deployment successful!', '> 🌍 Your app is live!'],
-  failed: ['> ❌ Deployment failed', '> Check environment variables and try again'],
 };
 
 interface MultiCloudDeployProps {
@@ -188,6 +165,41 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
       } catch (err: any) {
         setDeployStatus('failed');
         setLogs(prev => [...prev, `> ❌ ${err.message || 'Deploy failed'}`]);
+      }
+      return;
+    }
+
+    // P-DEPLOY.6 — REAL Vercel deploy when the user supplies their own token: publish via the platform's
+    // existing /api/pro/deploy backend (deployVercel) instead of only printing CLI text. Honest: no token
+    // → falls through to the CLI instructions below (never a faked success).
+    if (selectedPlatform === 'vercel' && (envVars['VERCEL_TOKEN'] || '').trim()) {
+      if (!generatedCode) {
+        setDeployStatus('failed');
+        setLogs(['> ❌ No app code found. Build something with NavBharat AI first.']);
+        return;
+      }
+      setDeployStatus('deploying');
+      setLogs(['> Deploying to Vercel with your token…']);
+      try {
+        const titleMatch = generatedCode.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const name = (titleMatch?.[1]?.trim() || 'navbharat-app').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 52) || 'navbharat-app';
+        const res = await fetch('/api/pro/deploy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'vercel', token: envVars['VERCEL_TOKEN'].trim(), name, files: { 'index.html': generatedCode } }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.url) {
+          setDeployStatus('success');
+          setLiveUrl(data.url);
+          setLogs(prev => [...prev, '> ✅ Deployed to Vercel!', `> 🌍 Live URL: ${data.url}`]);
+          setDeployments(prev => [{ id: Date.now().toString(), platform: 'vercel', url: data.url, status: 'live', timestamp: Date.now(), duration: 3 }, ...prev.slice(0, 9)]);
+        } else {
+          throw new Error(data.error || `Vercel deploy failed (${res.status})`);
+        }
+      } catch (err: any) {
+        setDeployStatus('failed');
+        setLogs(prev => [...prev, `> ❌ ${err.message || 'Vercel deploy failed'}`, '> Check your VERCEL_TOKEN in the Config tab.']);
       }
       return;
     }

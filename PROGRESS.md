@@ -6542,3 +6542,43 @@ Two more genuine gaps found while reviewing the just-shipped build-report redesi
 
 Tests: +5 (2 capProblems, 2 trimReportForStorage consistency, 1 BuildDiagnostics.report() problems-cap).
 Gate: frontend tsc 0, server tsc 0, vitest 4034/4034 PASS, boot:check PASS, Playwright root-page load clean.
+
+## 2026-07-01 — two more E2B/preview root causes fixed (admin: "e2b, preview bhi fix kar do")
+
+Continuing the investigation from the earlier real transcript (misleading "No files to preview yet"
+and components never wired into App.tsx). A research agent traced both to exact file:line locations
+before any fix was written.
+
+**BUG A — files existed but were never durably saved when a build was cut short.** Durable file
+persistence for the AGENTIC build path only had TWO guarantees: a fire-and-forget 3-second debounce on
+every write (`onFileWrite`), and one reliable "captured writes + live scan" save at NORMAL completion.
+Neither the deadline-timeout path (18-min wall-clock cap) nor the crash-catch path ever called this
+reliable save — yet the deadline-timeout path's own messages CLAIMED "every file generated so far is
+saved" / "your files are saved" (a fake-success violation). If the debounce hadn't fired yet (starved by
+back-to-back writes, or the process reclaimed before its 3s window elapsed) and the live E2B sandbox then
+became unreachable (very plausible right after a long, resource-heavy build), the in-browser preview's
+`collectFilesWithSavedFallback` found NOTHING durable — hence "No files to preview yet — build something
+first" even though the workspace genuinely had files.
+Fix: both the deadline-timeout handler and the crash-catch handler now run the SAME reliable durable-save
+(captured writes ∪ a live sandbox scan) BEFORE their "files are saved" messages — so the claim is finally
+true. `writtenFiles` had to be hoisted to an outer scope (a `try{}`-scoped `const` is invisible from a
+sibling `catch{}` block, and from a closure defined before that `try` even opens) to make this possible.
+
+**BUG B — a generated component that nothing ever imports goes completely undetected.** The existing
+architecture/readiness checks validate: do imports resolve (ContractMap/ArchitectureAnalysis), are cycles
+absent, is layering clean, are npm deps used (DependencyAnalysis) — but NONE of them ask "was this
+component ever actually imported by anything?". A file like `src/components/Hero.tsx` can be perfectly
+valid, syntactically correct, and still be dead code because the entry/shell (App.tsx) was never updated
+to import + render it — exactly why a real build transcript showed the agent discovering, after 3 prior
+"successful" builds, that "App.tsx only renders `<h1>Hello World</h1>`" despite Hero/Features/Footer all
+existing on disk.
+Fix: new pure `findOrphanComponents()` in `ArchitectureAnalysis.ts` — reuses the project graph's already-
+extracted symbols (no new parsing) to find every PascalCase component export whose file is imported by
+NOTHING else (entry points main/index/App excluded as roots-by-design). Added to `ArchitectureReport` and
+wired into `Readiness.ts` as a WARNING (not a blocker — a real defect, but not one that should force a
+rebuild-from-scratch loop on a false positive). Because `assessBuildReadiness()` is the MANDATORY gate
+every agentic build already runs at completion (R2 §1.1), this fires automatically on every build — no
+opt-in needed.
+
+Tests: +7 (5 findOrphanComponents/analyzeArchitecture, 1 Readiness warning-not-blocker, 1 pre-existing
+fixture fix). Gate: frontend tsc 0, server tsc 0, vitest 4040/4040 PASS, boot:check PASS.

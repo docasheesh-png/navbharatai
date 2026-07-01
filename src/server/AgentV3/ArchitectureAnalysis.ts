@@ -9,6 +9,7 @@
 
 import path from 'path';
 import type { ProjectGraph } from './WorkspaceMemory';
+import { isComponentName } from './WorkspaceMemory';
 
 export interface ArchitectureReport {
   fileCount: number;
@@ -21,6 +22,10 @@ export interface ArchitectureReport {
   layeringViolations: string[];
   /** Front-end modules importing a server-only Node builtin ("file -> spec"). */
   nodeBuiltinsInFrontend: string[];
+  /** Component files that were CREATED but are imported by NOTHING else ("file (ComponentName)") —
+   *  the defect behind "the components exist but the app still shows the starter screen" (the entry/
+   *  shell was never updated to import + render them). See findOrphanComponents(). */
+  orphanComponents: string[];
 }
 
 const CODE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
@@ -54,6 +59,38 @@ export function resolveLocalImport(fromFile: string, spec: string, files: Set<st
   ];
   for (const c of candidates) if (files.has(c)) return c;
   return null;
+}
+
+/**
+ * A component that was CREATED (a PascalCase component symbol exists in some .tsx/.jsx file) but is
+ * imported by NOTHING else in the project — the exact real-world defect where separate component files
+ * (Hero.tsx, Features.tsx, Footer.tsx, …) get generated yet the entry/shell (App.tsx) is never updated
+ * to import and render them, so the live app keeps showing only its starter scaffold no matter how many
+ * files exist. Reuses the graph's already-extracted symbols (no new parsing) and the SAME local-import
+ * resolution as unresolvedImports/cycles above — one source of truth for "does this import resolve".
+ * The entry points themselves (main/index/App) are excluded — they are roots BY DESIGN, not components
+ * that need to be wired into something else. Returns each orphan as "file (ComponentName)", sorted.
+ * PURE + exported + unit-testable.
+ */
+export function findOrphanComponents(graph: ProjectGraph): string[] {
+  const files = new Set(graph.files);
+  const importedFiles = new Set<string>();
+  for (const [file, specs] of Object.entries(graph.imports)) {
+    for (const spec of specs) {
+      const resolved = resolveLocalImport(file, spec, files);
+      if (resolved && resolved !== file) importedFiles.add(resolved);
+    }
+  }
+  const isEntryPoint = (f: string): boolean => /(^|\/)(main|index|App)\.(t|j)sx?$/i.test(f);
+  const orphans = new Set<string>();
+  for (const sym of graph.symbols) {
+    if (!isComponentName(sym.name)) continue;
+    if (!/\.(t|j)sx$/.test(sym.file)) continue;
+    if (isEntryPoint(sym.file)) continue;
+    if (importedFiles.has(sym.file)) continue;
+    orphans.add(`${sym.file} (${sym.name})`);
+  }
+  return [...orphans].sort();
 }
 
 /** Analyse the project graph for real architectural defects. */
@@ -100,6 +137,7 @@ export function analyzeArchitecture(graph: ProjectGraph): ArchitectureReport {
     unresolvedImports,
     layeringViolations,
     nodeBuiltinsInFrontend,
+    orphanComponents: findOrphanComponents(graph),
   };
 }
 
@@ -137,7 +175,8 @@ function detectCycles(adjacency: Record<string, string[]>): string[][] {
 
 /** A concise, honest text report for the agent (and the user). */
 export function architectureSummary(report: ArchitectureReport): string {
-  const problems = report.cycles.length + report.unresolvedImports.length + report.layeringViolations.length + report.nodeBuiltinsInFrontend.length;
+  const problems = report.cycles.length + report.unresolvedImports.length + report.layeringViolations.length
+    + report.nodeBuiltinsInFrontend.length + report.orphanComponents.length;
   const lines = [
     `Architecture analysis: ${report.fileCount} files, ${report.edgeCount} local import edges.`,
   ];
@@ -157,6 +196,10 @@ export function architectureSummary(report: ArchitectureReport): string {
     lines.push(`Server-only Node builtins imported by front-end code (${report.nodeBuiltinsInFrontend.length}) — these break the browser build:`);
     lines.push(...report.nodeBuiltinsInFrontend.slice(0, 10).map((v) => `  - ${v}`));
   }
-  if (problems === 0) lines.push('No structural defects found (no unresolved imports, cycles, layering violations or browser-incompatible Node builtins).');
+  if (report.orphanComponents.length) {
+    lines.push(`Orphan component(s) (${report.orphanComponents.length}) — created but never imported/rendered by anything else (the app will NOT show them):`);
+    lines.push(...report.orphanComponents.slice(0, 15).map((v) => `  - ${v}`));
+  }
+  if (problems === 0) lines.push('No structural defects found (no unresolved imports, cycles, layering violations, browser-incompatible Node builtins, or orphan components).');
   return lines.join('\n');
 }

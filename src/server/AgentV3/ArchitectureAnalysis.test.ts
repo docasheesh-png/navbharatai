@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeArchitecture, resolveLocalImport, architectureSummary } from './ArchitectureAnalysis';
+import { analyzeArchitecture, resolveLocalImport, architectureSummary, findOrphanComponents } from './ArchitectureAnalysis';
 import { WorkspaceMemory } from './WorkspaceMemory';
 import type { ProjectGraph } from './WorkspaceMemory';
 
@@ -84,6 +84,59 @@ describe('analyzeArchitecture', () => {
     expect(r.cycles).toEqual([]);
     expect(r.unresolvedImports).toEqual([]);
     expect(r.layeringViolations).toEqual([]);
+    expect(r.orphanComponents).toEqual([]);
     expect(architectureSummary(r)).toContain('No structural defects');
+  });
+});
+
+describe('findOrphanComponents (P-REPORT.5 — "components exist but the app still shows Hello World")', () => {
+  it('flags a component file that exists but is never imported by anything else', () => {
+    // Exactly the real-world defect: Hero/Features/Footer generated as separate files, but App.tsx
+    // was never updated to import + render them.
+    const g = graphOf({
+      'src/App.tsx': "export function App(){ return <h1>Hello World</h1>; }",
+      'src/components/Hero.tsx': "export function Hero(){ return null; }",
+      'src/components/Features.tsx': "export function Features(){ return null; }",
+    });
+    const orphans = findOrphanComponents(g);
+    expect(orphans.some((o) => o.includes('Hero.tsx') && o.includes('Hero'))).toBe(true);
+    expect(orphans.some((o) => o.includes('Features.tsx') && o.includes('Features'))).toBe(true);
+  });
+
+  it('does NOT flag a component that IS imported and rendered', () => {
+    const g = graphOf({
+      'src/App.tsx': "import { Hero } from './components/Hero';\nexport function App(){ return <Hero />; }",
+      'src/components/Hero.tsx': "export function Hero(){ return null; }",
+    });
+    expect(findOrphanComponents(g)).toEqual([]);
+  });
+
+  it('never flags the entry points themselves (App/main/index), even though nothing imports them', () => {
+    const g = graphOf({
+      'src/main.tsx': "import { App } from './App';\nApp();",
+      'src/App.tsx': "export function App(){ return null; }",
+    });
+    // App.tsx IS imported by main.tsx here, but even if it weren't, entry points are roots by design.
+    expect(findOrphanComponents(g).some((o) => o.includes('App.tsx'))).toBe(false);
+    expect(findOrphanComponents(g).some((o) => o.includes('main.tsx'))).toBe(false);
+  });
+
+  it('does NOT flag non-component exports (camelCase hooks/utils are not components)', () => {
+    const g = graphOf({
+      'src/App.tsx': "export function App(){ return null; }",
+      'src/hooks/useTheme.tsx': "export function useTheme(){ return 'dark'; }",
+    });
+    expect(findOrphanComponents(g)).toEqual([]);
+  });
+
+  it('is included in analyzeArchitecture()\'s report and architectureSummary()\'s text', () => {
+    const g = graphOf({
+      'src/App.tsx': "export function App(){ return null; }",
+      'src/components/Hero.tsx': "export function Hero(){ return null; }",
+    });
+    const r = analyzeArchitecture(g);
+    expect(r.orphanComponents.length).toBe(1);
+    expect(architectureSummary(r)).toContain('Orphan component');
+    expect(architectureSummary(r)).toContain('Hero.tsx');
   });
 });

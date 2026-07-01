@@ -87,7 +87,8 @@ const MAX_EPISODES = 500;
 const isCode = (f: string): boolean => /\.(t|j)sx?$/.test(f);
 // A React component name is PascalCase: starts uppercase AND has a lowercase
 // letter (so ALL_CAPS constants like PRIMARY are not mistaken for components).
-const isComponentName = (n: string): boolean => /^[A-Z]/.test(n) && /[a-z]/.test(n);
+// Exported so ArchitectureAnalysis's orphan-component check reuses the SAME definition (no drift).
+export const isComponentName = (n: string): boolean => /^[A-Z]/.test(n) && /[a-z]/.test(n);
 
 /** External dependency root from a module specifier ('react-dom/client' → 'react-dom'; '@x/y/z' → '@x/y'). */
 function depRoot(spec: string): string | null {

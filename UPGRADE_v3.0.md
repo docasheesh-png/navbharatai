@@ -2310,10 +2310,17 @@
   force-compress step (powerLevel) can read.
 - **Files:** new `src/server/AgentV3/TokenEstimator.ts` + `tests/tokenEstimator.test.ts`, `src/server/routes/agentv3.ts`.
 
-### P-PE.5 — Prompt Evaluation / A-B Testing  🟡 PARTIAL → full  [MED]
+### P-PE.5 — Prompt Evaluation / A-B Testing  🔶 DEFERRED — needs admin decision (2026-07-01)  [MED]
 - A/B feature flags (`featureFlags.ts`) exist for UI. No prompt-level A/B: variant A vs B system prompts.
 - [ ] Extend `featureFlags.ts` to support prompt variant bucketing (same deterministic hash).
 - [ ] Log variant + quality signal (user thumbs/NPS from P-UX.6) to Firestore for offline eval.
+- **🔶 Why deferred (honest):** the bucketing + logging INFRASTRUCTURE is safe/additive, but a *real* prompt A/B by
+  definition ships a **variant B that changes the live builder's system prompt** — a core Engineer-AI/AgentV3
+  behavior change. Per the Engineer-AI permanent constraints + safeguard #3 (0.01 % doubt on core behavior → ask),
+  the admin needs to define/approve **what variant B actually changes** before this ships. Building the infra with no
+  active experiment would be shelf-ware (violates the real-features rule); building it with a self-chosen variant B
+  would change core behavior without sign-off. **Needs:** admin decision on the experiment (what B tweaks + success
+  metric). Then it's a clean ship.
 - **Files:** `src/lib/featureFlags.ts`, `src/server/AgentV3/systemPrompt.ts`, `src/lib/analytics.ts`.
 
 ### P-PE.6 — Prompt Audit Trail  ✅ DONE (2026-06-30) · 🔌 WIRED  [MED]
@@ -2710,11 +2717,20 @@
   `src/components/ide/TeamCollaboration.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 - **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` 3980 green · `build` OK · boot PASS.
 
-### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  🟡 PARTIAL → full  [MED]
+### P-COLLAB.2 — Shared Workspace Access Model (backend ACL)  🔶 DEFERRED — breakage/security risk, needs care (2026-07-01)  [MED]
 - Share links (`navbharat.ai/shared/{projectId}`) and access toggles are **UI-only**; nothing on the backend enforces
   *which users can open which project*. Workspaces are owner-scoped with no member-grant.
 - [ ] Add a project membership/ACL: owner can grant team members access; enforce on every workspace/build/deploy route.
 - [ ] Resolve shared-link access server-side (member vs anyone-with-link vs expired).
+- **🔶 Why deferred (honest, verified 2026-07-01):** "enforce on every workspace route" is a **breakage + security**
+  minefield, not a rapid ship. Verified: the actual workspace routes (`/api/sync/:userId`) are **currently
+  unauthenticated** — adding an ACL there *adds* auth = **tightening**, which breaks existing unauthenticated callers
+  (violates the one absolute rule: the app must never break). Meanwhile the routes that DO use `requireUserMatch`
+  (`secrets`, `webhooks`, `techDebt`) are **sensitive personal data** that a Viewer/Editor must **never** be granted —
+  so a blanket relaxation is a **security hole**. A correct version needs per-route judgment (owner-always-passes +
+  member-grant on *workspace* routes only, fail-open, secrets stay owner-only) + integration testing against real
+  auth/Firestore. The member data model already exists (`TeamStore.listMembers`, shipped in P-COLLAB.1). **Needs:**
+  a careful, reviewed pass (not the autonomous rapid cycle) — admin nod on the approach recommended.
 - **Files:** `src/server/workspace/WorkspaceManager.ts`, `src/server/routes/{sync,engineer,agentv3}.ts`, new ACL middleware.
 
 ### P-COLLAB.3 — Client / Stakeholder Share Portal + Feedback Collection  ❌ MISSING  [MED]

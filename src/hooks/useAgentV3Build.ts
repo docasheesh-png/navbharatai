@@ -282,8 +282,10 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // Allowed even while a build is actively streaming HERE (opening a different saved conversation is
+  // navigation, same as "+ New chat" — see reset()/start()'s generation-guard comments). Detaches from
+  // whatever's currently attached; the underlying server build, if any, keeps running in the background.
   const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null> => {
-    if (running) return null;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
       const params = new URLSearchParams();
@@ -313,9 +315,14 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (restoredTodos.length > 0) {
         next = agentV3Reducer(next, { type: 'todo_updated', todos: restoredTodos, ts: Date.now() } as AgentV3WireEvent);
       }
-      // Invalidate any resume()/subscribeLive() poll left over from a PREVIOUS session — otherwise its
-      // stale, still-in-flight setState can land moments later and overwrite the conversation just loaded.
+      // Invalidate any resume()/start()/subscribeLive() left running from a PREVIOUS session — otherwise
+      // its stale, still-in-flight setState can land moments later and overwrite the conversation just
+      // loaded. Also detach the actual stream connection (if any); the underlying server build, if any,
+      // keeps running in the background and stays resumable from History.
       generationRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setRunning(false);
       setState(next);
       if (conv.workspaceId) {
         // Adopt the workspaceId at the HOOK level so restoreAllFiles / git-status / file loads work on
@@ -351,7 +358,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     } catch {
       return null; // best-effort — never disrupt the panel on a load failure
     }
-  }, [running]);
+  }, []);
 
   const listConversations = useCallback(async (opts?: { userId?: string; email?: string }): Promise<{ items: ConversationMeta[]; error?: string }> => {
     const uid = opts?.userId ?? userIdRef.current;
@@ -543,6 +550,11 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (running) return;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
+      // This build's generation — reset() can now fire WHILE this loop is streaming (the user
+      // navigating to "+ New chat" / a different history item no longer waits for `running` to go
+      // false; see the comment on the reader loop below). Bumping here means a stale event from an
+      // ABANDONED build can never land on the session the user switched to.
+      const gen = ++generationRef.current;
       // Reset only the TRANSIENT build state for the new turn (narration, todos, plan,
       // agents, done/health). PRESERVE the durable project view — files, workspace, live
       // preview and repo — so a follow-up/retry message does NOT blank the user's files to
@@ -613,14 +625,13 @@ export function useAgentV3Build(): UseAgentV3Build {
         let gotEvent = false;
         let rawSample = '';
 
-        // Read NDJSON: one JSON event per line (mirrors the Engineer stream). This loop has no
-        // generationRef guard (unlike pumpStream/subscribeLive) because it doesn't need one: every
-        // call site that resets state (reset(), used by "+ New chat" and "open from history") is
-        // itself gated on `!running`, and `running` is set true synchronously above before this loop
-        // starts — so a reset() can never fire while this loop is actively applying events. If that
-        // invariant ever changes (a reset path stops checking `running`), this loop must gain the
-        // same gen check pumpStream has, or it reintroduces the exact bug this file was fixed for.
+        // Read NDJSON: one JSON event per line (mirrors the Engineer stream). GENERATION GUARD: the
+        // user can now navigate to "+ New chat" / a different history item WHILE this build is still
+        // streaming (reset() no longer waits for `running` to go false) — abort() ends the fetch, but
+        // any event already in-flight when that happens must still be dropped, exactly like
+        // pumpStream/subscribeLive, or it silently repopulates the session the user just switched to.
         for (;;) {
+          if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -636,6 +647,7 @@ export function useAgentV3Build(): UseAgentV3Build {
               if (rawSample.length < 400) rawSample += trimmed + '\n';
               continue;
             }
+            if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
             gotEvent = true;
             lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
             setState((prev) => agentV3Reducer(prev, event));
@@ -643,8 +655,9 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
 
         // If the stream produced no usable events, surface what came back so a
-        // silent failure (e.g. an HTML error page, or an empty body) is visible.
-        if (!gotEvent) {
+        // silent failure (e.g. an HTML error page, or an empty body) is visible. Skipped if the user
+        // has since navigated away — an abandoned build's empty-stream case is not THEIR problem.
+        if (!gotEvent && !isStale(gen)) {
           const sample = (rawSample || buffer).trim();
           setError(
             sample
@@ -653,7 +666,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           );
         }
       } catch (err) {
-        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        if (!(err instanceof DOMException && err.name === 'AbortError') && !isStale(gen)) {
           // A mid-stream network drop — iOS Safari surfaces this as "Load failed", and a
           // flaky mobile link or a brief server blip looks the same — must NOT dead-end the
           // build. The server keeps the build alive and BUFFERED (runningBuilds + /attach),
@@ -662,6 +675,8 @@ export function useAgentV3Build(): UseAgentV3Build {
           // raw error when the build is genuinely gone. This is the same recovery the stall
           // WATCHDOG performs, triggered immediately on the drop instead of waiting for a
           // silence window that never comes (the drop flips `running` to false first).
+          // Skipped entirely once stale — the user already navigated away, so a dropped connection
+          // for the ABANDONED build must not reconnect into (or show an error on) the new session.
           let reconnected = false;
           try {
             const params = new URLSearchParams();
@@ -669,17 +684,22 @@ export function useAgentV3Build(): UseAgentV3Build {
             if (emailRef.current) params.set('email', emailRef.current);
             const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
             const j = await probe.json().catch(() => ({}));
-            if (j?.buildRunning === true) {
+            if (j?.buildRunning === true && !isStale(gen)) {
               reconnected = true;
               await resume({ userId: userIdRef.current, email: emailRef.current });
             }
           } catch { /* probe/reconnect failed — fall through to showing the real error */ }
-          if (!reconnected) setError(err instanceof Error ? err.message : String(err));
+          if (!reconnected && !isStale(gen)) setError(err instanceof Error ? err.message : String(err));
         }
       } finally {
-        setRunning(false);
-        setServerBuildRunning(false);
-        abortRef.current = null;
+        // Only clear shared flags if THIS build is still the current generation — otherwise a
+        // NEWER session's reset()/start()/resume() that began while this one was unwinding would
+        // have its own running/abortRef state clobbered by this call's cleanup.
+        if (!isStale(gen)) {
+          setRunning(false);
+          setServerBuildRunning(false);
+          abortRef.current = null;
+        }
       }
     },
     [running, resume],

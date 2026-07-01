@@ -27,6 +27,8 @@ async function loadOpenAI(): Promise<any> {
   }
 }
 
+import { saveEmbedding, removeEmbedding, loadEmbeddings, hashContent, needsReembed } from './EmbeddingStore';
+
 export interface EmbeddingEntry {
   id: string;
   text: string;
@@ -51,11 +53,35 @@ function cosineSimilarity(a: number[], b: number[]): number {
  */
 export class EmbeddingStore {
   private readonly entries = new Map<string, EmbeddingEntry>();
+  // P-DATA.3 — per-path content hash, so an unchanged file is never re-embedded (cost/latency).
+  private readonly hashes = new Map<string, string>();
   private client: any = null;
   private readonly apiKey: string;
+  private readonly workspaceId?: string;
+  private hydrated = false;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, workspaceId?: string) {
     this.apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? '';
+    this.workspaceId = workspaceId;
+  }
+
+  /**
+   * P-DATA.3 — hydrate the in-memory index from the durable store ONCE (cold start), so a restarted
+   * instance can search immediately without re-embedding the whole workspace. Best-effort, idempotent.
+   */
+  async hydrate(): Promise<void> {
+    if (this.hydrated) return;
+    this.hydrated = true;
+    if (!this.workspaceId) return;
+    try {
+      const rows = await loadEmbeddings(this.workspaceId);
+      for (const r of rows) {
+        if (!this.entries.has(r.path) && Array.isArray(r.embedding) && r.embedding.length > 0) {
+          this.entries.set(r.path, { id: r.path, text: '', embedding: r.embedding });
+          if (r.hash) this.hashes.set(r.path, r.hash);
+        }
+      }
+    } catch { /* best-effort */ }
   }
 
   private async getClient(): Promise<any> {
@@ -87,15 +113,23 @@ export class EmbeddingStore {
 
   /** Add (or update) a file in the embedding index. No-op if embed fails. */
   async addFile(path: string, content: string): Promise<void> {
+    // P-DATA.3 — skip re-embedding an unchanged file (same content hash) — saves an API call + cost.
+    const hash = hashContent(content);
+    if (this.entries.has(path) && !needsReembed(this.hashes.get(path), hash)) return;
     const text = buildEmbedText(path, content);
     const embedding = await this.embed(text);
     if (!embedding) return;
     this.entries.set(path, { id: path, text, embedding });
+    this.hashes.set(path, hash);
+    // Persist durably (best-effort) so a cold start hydrates instead of re-embedding.
+    if (this.workspaceId) saveEmbedding(this.workspaceId, { path, hash, embedding }).catch(() => {});
   }
 
   /** Remove a file from the index (called when a file is deleted). */
   removeFile(path: string): void {
     this.entries.delete(path);
+    this.hashes.delete(path);
+    if (this.workspaceId) removeEmbedding(this.workspaceId, path).catch(() => {});
   }
 
   /**
@@ -103,6 +137,7 @@ export class EmbeddingStore {
    * Returns [] when no embeddings exist or the API is unavailable.
    */
   async search(query: string, topK = 5): Promise<string[]> {
+    await this.hydrate(); // P-DATA.3 — pull the durable index in on a cold start before searching.
     if (this.entries.size === 0) return [];
     const queryEmb = await this.embed(query);
     if (!queryEmb) return [];
@@ -147,7 +182,7 @@ const stores = new Map<string, EmbeddingStore>();
 export function getEmbeddingStore(workspaceId: string): EmbeddingStore {
   let s = stores.get(workspaceId);
   if (!s) {
-    s = new EmbeddingStore();
+    s = new EmbeddingStore(undefined, workspaceId); // P-DATA.3 — durable, per-workspace embeddings.
     stores.set(workspaceId, s);
   }
   return s;

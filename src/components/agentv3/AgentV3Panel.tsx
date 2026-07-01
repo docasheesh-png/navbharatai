@@ -5,10 +5,11 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, MessageSquare,
+  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus,
 } from 'lucide-react';
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { sessionStatusMeta, groupSessionsByDate } from './agentV3History';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
@@ -54,7 +55,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 };
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -527,6 +528,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<ConversationMeta[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
   const toggleHistory = async () => {
     const next = !historyOpen;
     setHistoryOpen(next);
@@ -561,6 +563,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
   };
   const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
+  // Delete a saved session from the history list. Confirms first (destructive + irreversible —
+  // the Firestore record and its transcript are gone). If the deleted session is the one currently
+  // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
+  const handleDeleteConversation = async (e: React.MouseEvent, c: ConversationMeta) => {
+    e.stopPropagation();
+    if (deletingHistoryId) return;
+    if (!window.confirm(`Delete "${c.title || 'Untitled chat'}"? This cannot be undone.`)) return;
+    setDeletingHistoryId(c.id);
+    try {
+      const ok = await deleteConversation(c.id, { userId, email });
+      if (ok) {
+        setHistoryItems((prev) => prev.filter((item) => item.id !== c.id));
+        if (c.workspaceId && c.workspaceId === state.workspaceId) startNewSession();
+      }
+    } finally {
+      setDeletingHistoryId(null);
+    }
+  };
   const relTime = (ts?: number): string => {
     if (!ts || typeof ts !== 'number') return '';
     const m = Math.floor((Date.now() - ts) / 60000);
@@ -913,7 +933,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {historyOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setHistoryOpen(false)} />
-                <div className="absolute left-0 top-9 z-50 w-72 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
+                <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
+                  <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
                   <button
                     onClick={newChatFromHistory}
                     disabled={running}
@@ -923,22 +944,51 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   </button>
                   <div className="my-1 border-t border-zinc-800" />
                   {historyLoading ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
                   ) : historyItems.length === 0 ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500">No saved chats yet.</div>
+                    <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
                   ) : (
-                    historyItems.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => openConversation(c.id)}
-                        disabled={running}
-                        title={c.title || 'Untitled chat'}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                        <span className="truncate flex-1">{c.title || 'Untitled chat'}</span>
-                        {c.updatedAt ? <span className="text-[10px] text-zinc-600 shrink-0">{relTime(c.updatedAt)}</span> : null}
-                      </button>
+                    groupSessionsByDate(historyItems, Date.now()).map((group) => (
+                      <div key={group.label}>
+                        <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
+                        {group.items.map((c) => {
+                          const meta = sessionStatusMeta(c.status);
+                          const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
+                          const isDeleting = deletingHistoryId === c.id;
+                          return (
+                            <div
+                              key={c.id}
+                              role="button"
+                              tabIndex={running ? -1 : 0}
+                              onClick={() => { if (!running) openConversation(c.id); }}
+                              onKeyDown={(e) => { if (!running && (e.key === 'Enter' || e.key === ' ')) openConversation(c.id); }}
+                              title={c.title || 'Untitled build'}
+                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${running || isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
+                            >
+                              <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
+                                <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />
+                              </span>
+                              <span className="flex-1 min-w-0">
+                                <span className="block truncate">{c.title || 'Untitled build'}</span>
+                                <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+                                  {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
+                                  {meta.label && <span>{meta.label}</span>}
+                                  {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
+                                </span>
+                              </span>
+                              <button
+                                onClick={(e) => handleDeleteConversation(e, c)}
+                                disabled={running || isDeleting}
+                                title="Delete this session"
+                                aria-label="Delete this session"
+                                className="shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+                              >
+                                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     ))
                   )}
                 </div>

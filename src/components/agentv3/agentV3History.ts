@@ -101,3 +101,45 @@ export function conversationToUserMessages(conv: PersistedConversation): Array<{
   });
   return out;
 }
+
+// ── Session-history menu (the 3-line hamburger menu's dropdown) ──────────────────────────────
+//
+// Was a flat list of raw truncated first-prompt text with no structure — indistinguishable from
+// "old text history". This groups saved builds into a real SESSION history (Claude/ChatGPT-style):
+// date-bucketed, each item showing its build status (running/built/failed/stopped), not just text.
+
+/** Visual status dot + label for a saved build session, keyed by ConversationStatus. Pure. */
+const SESSION_STATUS_META: Record<string, { dot: string; label: string; pulse?: boolean }> = {
+  running: { dot: 'bg-indigo-400', label: 'Building…', pulse: true },
+  complete: { dot: 'bg-emerald-500', label: 'Built' },
+  error: { dot: 'bg-red-500', label: 'Failed' },
+  stopped: { dot: 'bg-zinc-500', label: 'Stopped' },
+};
+export function sessionStatusMeta(status?: string): { dot: string; label: string; pulse?: boolean } {
+  return SESSION_STATUS_META[status || ''] ?? { dot: 'bg-zinc-600', label: '' };
+}
+
+/** Date-bucket label for a session-history group header (Today / Yesterday / Previous 7 Days / Older). Pure. */
+export function sessionDateBucket(ts: number, now: number): string {
+  const startOfDay = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const today = startOfDay(now);
+  const day = startOfDay(ts);
+  const diffDays = Math.round((today - day) / 86_400_000);
+  if (diffDays <= 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays <= 7) return 'Previous 7 days';
+  if (diffDays <= 30) return 'Previous 30 days';
+  return 'Older';
+}
+
+/** Group saved sessions (already sorted newest-first by the API) into ordered date buckets. Pure. */
+export function groupSessionsByDate<T extends { updatedAt?: number }>(items: T[], now: number): Array<{ label: string; items: T[] }> {
+  const order = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
+  const buckets = new Map<string, T[]>();
+  for (const item of items) {
+    const label = sessionDateBucket(item.updatedAt ?? now, now);
+    const list = buckets.get(label);
+    if (list) list.push(item); else buckets.set(label, [item]);
+  }
+  return order.filter((label) => buckets.has(label)).map((label) => ({ label, items: buckets.get(label)! }));
+}

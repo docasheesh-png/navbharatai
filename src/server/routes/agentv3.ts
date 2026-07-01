@@ -914,6 +914,35 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // Delete one persisted build (history-menu "delete" action). Owner-only — the same
+  // conversationAccess() ownership check as the GET-one route above. The underlying store's
+  // remove() is a no-op if the id doesn't exist, so this is safe to call twice (double-click).
+  app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      return;
+    }
+    try {
+      const store = getConversationStore();
+      const rec = await store.get(req.params.id);
+      const access = conversationAccess(rec, userId);
+      if (access === 'not-found') {
+        res.json({ ok: true }); // already gone — idempotent
+        return;
+      }
+      if (access === 'forbidden') {
+        res.status(403).json({ error: 'This build belongs to another account.' });
+        return;
+      }
+      await store.remove(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Provider diagnosis — confirms whether a real Anthropic key is configured.
   // Returns no secrets (only the public "sk-ant-" scheme prefix + lengths), so a
   // wrong/leftover key is visible without exposing it. Optional ?test=1 makes one

@@ -63,6 +63,8 @@ export interface UseAgentV3Build {
   loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
   /** List the user's saved v3.0 conversations (metadata only) for the history menu. */
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<ConversationMeta[]>;
+  /** Delete a saved conversation (history-menu delete action). Returns true on success. */
+  deleteConversation: (id: string, opts?: { userId?: string; email?: string }) => Promise<boolean>;
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn. */
   subscribeLive: (opts?: { userId?: string; email?: string }) => (() => void);
 }
@@ -85,6 +87,7 @@ export interface ConversationMeta {
   title?: string;
   status?: string;
   workspaceId?: string;
+  billedUsd?: number;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -303,6 +306,21 @@ export function useAgentV3Build(): UseAgentV3Build {
       return Array.isArray(json?.conversations) ? (json.conversations as ConversationMeta[]) : [];
     } catch {
       return []; // best-effort — the history menu just shows nothing on failure
+    }
+  }, []);
+
+  const deleteConversation = useCallback(async (id: string, opts?: { userId?: string; email?: string }): Promise<boolean> => {
+    const uid = opts?.userId ?? userIdRef.current;
+    const em = opts?.email ?? emailRef.current;
+    if (!uid || !id) return false;
+    try {
+      const params = new URLSearchParams();
+      params.set('userId', uid);
+      if (em) params.set('email', em);
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?${params.toString()}`, { method: 'DELETE' });
+      return res.ok;
+    } catch {
+      return false;
     }
   }, []);
 
@@ -620,5 +638,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive };
 }

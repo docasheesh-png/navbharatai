@@ -17,7 +17,7 @@ export type IssuePhase =
 export type IssueSeverity = 'info' | 'warning' | 'error';
 
 export interface BuildIssue {
-  /** When the issue was recorded (ms). */
+  /** When the issue was recorded (ms) — the LATEST occurrence if repeatCount > 1. */
   ts: number;
   /** Which part of the pipeline it came from. */
   phase: IssuePhase;
@@ -30,6 +30,9 @@ export interface BuildIssue {
   autoResolved: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
+  /** Set when the SAME code+message repeated back-to-back (e.g. many identical "▶ write_file" tool
+   *  calls) — collapsed into one entry instead of one line per occurrence. Absent/1 = no repeat. */
+  repeatCount?: number;
 }
 
 /**
@@ -148,6 +151,16 @@ export interface BuildDiagnosticsReport {
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
+  /** ONLY the timeline entries that are a real problem (severity warning/error) — every "▶ write_file"
+   *  / heartbeat / progress-narration info line excluded. This is the noise-free "problems only" view;
+   *  `issues` (above) remains the full raw timeline for anyone who wants it. Always present (may be
+   *  empty on a clean build). */
+  problems: BuildIssue[];
+  /** One-paragraph, plain-language ROOT CAUSE — the single most important line in the report. Derived
+   *  from (in priority order) the deterministic BuildOutcome classification, the reviewer's first
+   *  [CRITICAL] finding, the first fully-captured error, or the first real problem — whichever is most
+   *  specific. Undefined only when the build is still running with nothing to report yet. */
+  rootCause?: string;
 }
 
 export interface BuildDiagnosticsMeta {
@@ -225,8 +238,23 @@ export class BuildDiagnostics {
     try { this.meta.onUpdate?.(this.report()); } catch { /* persistence is best-effort */ }
   }
 
-  /** Record an issue/timeline entry. Capped so a runaway build can't grow it without bound. */
+  /**
+   * Record an issue/timeline entry. Capped so a runaway build can't grow it without bound.
+   *
+   * DEDUP: a build routinely repeats the exact same code+message back-to-back (many identical
+   * "▶ write_file" tool-call entries, "⏱ minute N — still working" heartbeats with the same status,
+   * the same narration line double-emitted) — recording each as its own line bloats the report with
+   * pure noise while adding zero information (the message is byte-identical). Collapse a back-to-back
+   * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
+   */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    const last = this.issues[this.issues.length - 1];
+    if (last && last.phase === issue.phase && last.code === issue.code && last.message === issue.message) {
+      last.repeatCount = (last.repeatCount ?? 1) + 1;
+      last.ts = issue.ts ?? this.now();
+      this.notify();
+      return;
+    }
     if (this.issues.length >= MAX_ISSUES) {
       if (!this.truncated) {
         this.truncated = true;
@@ -525,6 +553,8 @@ export class BuildDiagnostics {
         unresolved: this.issues.filter((i) => !i.autoResolved).length,
       },
       issues: [...this.issues],
+      problems: this.issues.filter((i) => i.severity !== 'info'),
+      rootCause: deriveRootCause({ issues: this.issues, errors: this.errors, review: this.reviewText, ok: this.ok }),
       commands: this.commands.length ? [...this.commands] : undefined,
       llmCalls: this.llmCalls.length ? [...this.llmCalls] : undefined,
       errors: this.errors.length ? [...this.errors] : undefined,
@@ -534,6 +564,36 @@ export class BuildDiagnostics {
       review: this.reviewText,
     };
   }
+}
+
+/**
+ * Derive the single most important line in the report — the ROOT CAUSE — so a reader (or the admin)
+ * never has to hunt through hundreds of timeline entries to find out WHY a build struggled. Checked in
+ * priority order, most specific first: the deterministic BuildOutcome classification already recorded
+ * on the timeline (OUTCOME_*) → the reviewer's first [CRITICAL] finding (a real, guaranteed-to-break
+ * problem it caught) → the first fully-captured error → the first real (non-info) problem on the
+ * timeline → an honest "nothing wrong found" once the build has actually settled. Pure + exported +
+ * unit-testable — this is what problem #3 ("root cause bhi mil jaye") asked for.
+ */
+export function deriveRootCause(input: {
+  issues: readonly BuildIssue[];
+  errors?: readonly CapturedError[];
+  review?: string;
+  ok?: boolean;
+}): string | undefined {
+  const { issues, errors, review, ok } = input;
+  const outcome = [...issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
+  if (outcome) return outcome.message;
+  if (review) {
+    const m = review.match(/\[CRITICAL\]\s*([^\n]+)/);
+    if (m) return `Critical issue found by review: ${m[1].trim()}`;
+  }
+  if (errors && errors.length > 0) return `Error: ${errors[0].message.split('\n')[0].slice(0, 300)}`;
+  const problem = issues.find((i) => i.severity !== 'info');
+  if (problem) return problem.message;
+  if (ok === true) return 'Build completed successfully with no problems recorded.';
+  if (ok === false) return 'Build did not succeed, but no specific error was captured.';
+  return undefined; // still running / nothing to report yet
 }
 
 /**
@@ -568,15 +628,30 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   }
   lines.push(`Issues   : ${r.counts.total} total — ${r.counts.errors} error(s), ${r.counts.warnings} warning(s), ${r.counts.autoResolved} auto-resolved, ${r.counts.unresolved} unresolved`);
   lines.push('');
-  if (r.issues.length === 0) {
-    lines.push('No issues recorded — the build ran clean. 🎉');
+  // ROOT CAUSE first — the single most important line, so nobody has to read the whole timeline
+  // to find out WHY the build struggled.
+  if (r.rootCause) {
+    lines.push('ROOT CAUSE:');
+    lines.push(`  ${r.rootCause}`);
+    lines.push('');
+  }
+  const problems = r.problems ?? r.issues.filter((i) => i.severity !== 'info');
+  const infoCount = r.issues.length - problems.length;
+  if (problems.length === 0) {
+    lines.push('No problems recorded — the build ran clean. 🎉');
   } else {
-    lines.push('Issues (in order):');
-    r.issues.forEach((i, n) => {
-      lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code}) ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
+    lines.push(`Problems (${problems.length}, in order — the noise-free view: warnings + errors only):`);
+    problems.forEach((i, n) => {
+      const rep = i.repeatCount && i.repeatCount > 1 ? ` ×${i.repeatCount}` : '';
+      lines.push(`${n + 1}. [${i.severity.toUpperCase()}] (${i.phase}/${i.code})${rep} ${i.autoResolved ? 'auto-resolved' : 'UNRESOLVED'}`);
       lines.push(`   ${i.message}`);
       if (i.detail) lines.push(`   ↳ ${i.detail}`);
     });
+  }
+  if (infoCount > 0) {
+    lines.push('');
+    lines.push(`(+${infoCount} informational timeline entries — progress narration, tool calls, heartbeats —`);
+    lines.push(`  omitted from this view. See the "issues" array in the downloaded JSON for the full timeline.)`);
   }
   // ── AI Diagnosis Bundle — full raw signals (the detail the timeline summarizes). ──
   if (r.errors?.length) {

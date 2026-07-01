@@ -88,3 +88,86 @@ export async function loadDiagnostics(workspaceId: string): Promise<BuildDiagnos
     return null;
   }
 }
+
+// ── History (P-REPORT.4 — "the report disappears the moment the next build starts") ────────────
+//
+// saveDiagnostics()/loadDiagnostics() above keep only ONE doc per workspace: the LATEST settled
+// build's report. As soon as the next message's build also settles — even a tiny one that produced
+// almost nothing — it fully overwrites that doc, and the previous (possibly much richer) report is
+// gone with no way back. This subcollection keeps a bounded history of every SETTLED build's report
+// so a small/quick build never destroys access to a prior, more useful one.
+
+const HISTORY_SUBCOLLECTION = 'history';
+/** How many past builds' reports to keep visible in the history list. */
+const MAX_HISTORY_ITEMS = 20;
+
+/** Lightweight metadata for one history entry — no full payload, so listing stays cheap. */
+export interface DiagnosticsHistoryEntry {
+  id: string;
+  startedAt: number;
+  endedAt?: number;
+  ok?: boolean;
+  summary?: string;
+  rootCause?: string;
+  counts: BuildDiagnosticsReport['counts'];
+}
+
+/**
+ * Persist a SETTLED build's report into the workspace's bounded history. No-op for a report that
+ * hasn't actually finished yet (`endedAt` unset) — only a build that genuinely ended gets a history
+ * entry, so an in-progress build never pollutes the list. Best-effort — never throws.
+ */
+export async function saveDiagnosticsHistory(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
+  const db = getDb();
+  if (!db || !workspaceId || !report || report.endedAt === undefined) return;
+  try {
+    const stored = trimReportForStorage(report);
+    await db
+      .collection(COLLECTION)
+      .doc(workspaceId)
+      .collection(HISTORY_SUBCOLLECTION)
+      .doc(String(report.startedAt))
+      .set({ report: stored, savedAt: Date.now() }, { merge: false });
+  } catch {
+    /* best-effort — history is a convenience, never blocks or breaks a build */
+  }
+}
+
+/**
+ * List a workspace's past builds, most-recent-first, metadata only (cheap for a picker/list UI).
+ * Ordered by document id (the stringified `startedAt` epoch-ms — lexicographic order matches numeric
+ * order for same-length epoch-ms strings) so no composite index on a nested field is ever needed.
+ * Never throws — returns [] on any failure or when nothing has been recorded yet.
+ */
+export async function listDiagnosticsHistory(workspaceId: string, limit = MAX_HISTORY_ITEMS): Promise<DiagnosticsHistoryEntry[]> {
+  const db = getDb();
+  if (!db || !workspaceId) return [];
+  try {
+    const snap = await db
+      .collection(COLLECTION)
+      .doc(workspaceId)
+      .collection(HISTORY_SUBCOLLECTION)
+      .orderBy(admin.firestore.FieldPath.documentId(), 'desc')
+      .limit(Math.max(0, limit))
+      .get();
+    return snap.docs.map((d) => {
+      const r = d.data().report as BuildDiagnosticsReport;
+      return { id: d.id, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok, summary: r.summary, rootCause: r.rootCause, counts: r.counts };
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Load ONE specific historical report by id (an entry's `id` from listDiagnosticsHistory). Null on any failure/absence. */
+export async function getDiagnosticsHistoryItem(workspaceId: string, id: string): Promise<BuildDiagnosticsReport | null> {
+  const db = getDb();
+  if (!db || !workspaceId || !id) return null;
+  try {
+    const doc = await db.collection(COLLECTION).doc(workspaceId).collection(HISTORY_SUBCOLLECTION).doc(id).get();
+    if (!doc.exists) return null;
+    return (doc.data()?.report as BuildDiagnosticsReport) ?? null;
+  } catch {
+    return null;
+  }
+}

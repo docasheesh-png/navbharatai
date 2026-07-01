@@ -41,6 +41,28 @@ function getDb(): admin.firestore.Firestore | null {
   }
 }
 
+/** The 'dormant but valid' git status the UI shows when the live sandbox is cold (recycled). */
+export interface DormantGitStatus {
+  available: true;
+  live: false;
+  clean: true;
+  changed: 0;
+  head: string;
+  lastCommit: string;
+}
+
+/**
+ * Build a DORMANT-but-valid git status from durable checkpoints (newest-first) for a workspace whose
+ * sandbox has recycled — so the History panel shows the last-known working tree ("Last saved … on
+ * <sha>") instead of the scary "not active in this session" dead-end. Returns null when there is no
+ * durable history at all (then the caller keeps the honest "not available"). Pure + exported for tests.
+ */
+export function dormantGitStatusFromCheckpoints(cps: DurableCheckpoint[] | null | undefined): DormantGitStatus | null {
+  if (!cps || cps.length === 0) return null;
+  const newest = cps[0]; // loadCheckpoints returns newest-first
+  return { available: true, live: false, clean: true, changed: 0, head: (newest.sha || '').slice(0, 7), lastCommit: newest.message || '' };
+}
+
 /** Deterministic, Firestore-safe doc id for a checkpoint (prefer the commit SHA; fall back to its id). */
 export function checkpointDocId(cp: { sha?: string; id?: string }): string {
   const raw = (cp.sha || cp.id || '').replace(/[^a-zA-Z0-9_-]/g, '');

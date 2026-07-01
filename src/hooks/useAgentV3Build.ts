@@ -73,6 +73,10 @@ export interface GitStatus {
   clean: boolean;
   changed: number;
   head: string;
+  /** false for a DORMANT (sandbox-cold) last-known state restored from durable checkpoints; true/absent = live. */
+  live?: boolean;
+  /** Last durable commit message — shown alongside the dormant "Last saved …" line. */
+  lastCommit?: string;
 }
 
 /** Lightweight conversation metadata for the history list (matches GET /api/agentv3/conversations). */
@@ -389,7 +393,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // Phase G2 — fetch the live working-tree git status for a workspace. Best-effort: returns an
   // honest "not available" shape on any error or cold sandbox.
   const getGitStatus = useCallback(async (opts: { workspaceId: string; userId?: string; email?: string }): Promise<GitStatus> => {
-    const offline: GitStatus = { available: false, clean: false, changed: 0, head: '' };
+    const offline: GitStatus = { available: false, clean: false, changed: 0, head: '', live: false };
     if (!opts?.workspaceId) return offline;
     try {
       const params = new URLSearchParams();
@@ -407,6 +411,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         clean: j.clean === true,
         changed: typeof j.changed === 'number' ? j.changed : 0,
         head: typeof j.head === 'string' ? j.head : '',
+        live: j.live !== false, // warm sessions omit `live` → default true; dormant sends live:false
+        lastCommit: typeof j.lastCommit === 'string' ? j.lastCommit : undefined,
       };
     } catch {
       return offline;

@@ -1,10 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, Palette, X, Globe } from 'lucide-react';
+import { Info, Lock, Settings, Heart, Palette, X, Globe, MessageSquare, Bot, Stethoscope, History } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
-import type { ViewType } from '../../types';
+import type { ViewType, ChatSession } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 interface MenuItem {
@@ -41,6 +41,24 @@ export interface SidebarNavProps {
   isAdmin: boolean;
   setShowVishwakarmaChooser: (v: boolean) => void;
   setErrorContext: (v: any) => void;
+  /** Recent chats shown inside the hamburger drawer so past conversations are one tap away. */
+  sessions?: ChatSession[];
+  /** Reopen a past chat (routes v3.0 → Pro v3.0, others → their own surface). */
+  onResumeSession?: (session: ChatSession) => void;
+}
+
+/** Classify a saved session for the small agent badge in the recent-chats list. */
+function sessionKind(s: ChatSession): { label: string; Icon: React.ComponentType<{ className?: string }>; color: string } {
+  const a = String((s as any).agent || (s as any).currentAgent || (s as any).originalAgent || '').toLowerCase();
+  const tab = String((s as any).meta?.tab || (s as any).tab || '').toLowerCase();
+  const id = String(s.id || '').toLowerCase();
+  if (a.includes('agentv3') || a.includes('pro') || a.includes('vishwakarma') || tab === 'engine_builder' || id.startsWith('v3_')) {
+    return { label: 'Pro', Icon: Bot, color: 'text-indigo-400' };
+  }
+  if (a.includes('sda') || a.includes('doctor')) {
+    return { label: 'Doctor', Icon: Stethoscope, color: 'text-teal-400' };
+  }
+  return { label: 'Free', Icon: MessageSquare, color: 'text-orange-400' };
 }
 
 function NavItem({
@@ -105,8 +123,16 @@ export function SidebarNav({
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
   isAdmin, setShowVishwakarmaChooser, setErrorContext,
+  sessions, onResumeSession,
 }: SidebarNavProps) {
   const visibleItems = menuItems.filter(item => enabledModules[item.id] !== false);
+
+  // Most-recent chats for the hamburger drawer (newest first, capped so the drawer stays scannable).
+  const recentChats = (sessions || [])
+    .filter(s => s && s.id && Array.isArray(s.messages) && s.messages.length > 0)
+    .slice()
+    .sort((a, b) => new Date(b.lastUpdated || 0).getTime() - new Date(a.lastUpdated || 0).getTime())
+    .slice(0, 8);
 
   const makeClickHandler = (item: MenuItem, closeMenu?: boolean) => () => {
     if (item.id === 'preview') { toggleTab('preview'); if (closeMenu) setIsMenuOpen(false); return; }
@@ -232,6 +258,40 @@ export function SidebarNav({
                       onClick={makeClickHandler(item, true)}
                     />
                   ))}
+
+                  {/* Recent Chats — past conversations one tap away, right inside the hamburger. */}
+                  {user && recentChats.length > 0 && (
+                    <div className="pt-4 mt-2 border-t border-white/10">
+                      <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest px-3 mb-3 flex items-center gap-2">
+                        <History className="w-3 h-3" />
+                        Recent Chats
+                      </div>
+                      <div className="space-y-1">
+                        {recentChats.map(s => {
+                          const kind = sessionKind(s);
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => { onResumeSession?.(s); setIsMenuOpen(false); }}
+                              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-[#8b949e] hover:bg-white/5 hover:text-white transition-all group"
+                            >
+                              <kind.Icon className={cn('w-4 h-4 shrink-0', kind.color)} />
+                              <span className="flex-1 min-w-0 truncate text-[13px] font-semibold">{s.title || 'Untitled chat'}</span>
+                              <span className={cn('shrink-0 text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10', kind.color)}>
+                                {kind.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        onClick={() => makeClickHandler({ id: 'history', label: 'History', icon: History }, true)()}
+                        className="w-full mt-1 px-3 py-2 rounded-xl text-[11px] font-bold text-indigo-400 hover:bg-white/5 transition-all text-left"
+                      >
+                        View all history →
+                      </button>
+                    </div>
+                  )}
 
                   {/* Theme Selector */}
                   <div className="space-y-2 mt-2 px-1">

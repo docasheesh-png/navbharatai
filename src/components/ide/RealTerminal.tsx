@@ -60,7 +60,13 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
       if (!res.ok || !j) {
         append([{ kind: 'err', text: j?.error || `Request failed (${res.status}).` }]);
       } else if (j.available === false) {
-        append([{ kind: 'err', text: 'Sandbox not active in this session — start or continue a build in v3.0 to bring it up, then try again.' }]);
+        // Honest dormant state — not a dead-end. A cold Cloud Run instance (min-instances=0) loses the
+        // live sandbox, but the project's files are durably saved. Match the git panel's calm copy:
+        // sending a message in v3.0 chat re-warms the sandbox, then the terminal works again.
+        const msg = j.reason === 'dormant'
+          ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v3.0 chat to bring the sandbox back online, then the terminal works again.`
+          : 'Sandbox not active yet — start a build in NavBharatAI Pro v3.0 chat to bring the terminal online.';
+        append([{ kind: 'info', text: msg }]);
       } else {
         if (j.stdout) append([{ kind: 'out', text: String(j.stdout).replace(/\n$/, '') }]);
         if (j.stderr) append([{ kind: 'err', text: String(j.stderr).replace(/\n$/, '') }]);

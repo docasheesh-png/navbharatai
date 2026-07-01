@@ -1232,7 +1232,21 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    res.json(await execInSession(workspaceId, command, userId ?? undefined));
+    const execResult = await execInSession(workspaceId, command, userId ?? undefined);
+    // Honest dormant state (never faked output): when the live sandbox isn't warm (Cloud Run cold
+    // start / idle recycle), tell the terminal whether this is a real project that just needs waking
+    // ('dormant' — durable files exist) versus one that was never built ('not_started'). The UI shows
+    // the same non-scary "send a message to bring it online" copy the git panel uses.
+    if (execResult.available === false) {
+      const fileCount = await countWorkspaceFiles(workspaceId).catch(() => 0);
+      res.json({
+        ...execResult,
+        reason: fileCount > 0 ? 'dormant' : 'not_started',
+        savedFileCount: fileCount,
+      });
+      return;
+    }
+    res.json(execResult);
   });
 
   // R5 §5.1 — return a workspace's latest LIVE deployment URL (durable, survives reconnect).

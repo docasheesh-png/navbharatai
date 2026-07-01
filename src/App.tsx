@@ -268,7 +268,15 @@ export default function App() {
 
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
-  const [activeView, setActiveView] = useState<ViewType>('home');
+  // v3.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro v3.0 with the same
+  // project restored (messages/files/preview) — not dumped to Home. We persist ONLY the v3.0 view
+  // (narrow scope; other views still default to Home on reload) in sessionStorage so it survives a
+  // reload within the same tab but not a brand-new tab. This restore path deliberately bypasses
+  // toggleTab, which is how AgentV3Panel tells a RELOAD (restore) apart from a fresh OPEN (new chat).
+  const readV3ViewFlag = (): boolean => {
+    try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('nbi_v3_open') === '1'; } catch { return false; }
+  };
+  const [activeView, setActiveView] = useState<ViewType>(() => (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'));
   // Phase 3.1 — unified Chat+IDE: when an app exists, the live workspace (code +
   // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
   const [showWorkspace, setShowWorkspace] = useState<boolean>(true);
@@ -624,7 +632,13 @@ export default function App() {
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [openTabs, setOpenTabs] = useState<ViewType[]>([]);
+  const [openTabs, setOpenTabs] = useState<ViewType[]>(() => (readV3ViewFlag() ? ['nbi_pro_chat'] : []));
+  // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v3.0 from the menu/
+  // sidebar (a plain open → start a NEW chat). A reload restores the v3.0 view WITHOUT toggleTab, so
+  // the nonce stays 0 → AgentV3Panel takes the RESTORE path instead. A History reopen sets v3Resume
+  // and suppresses the bump (see v3ResumeInFlightRef) so it resumes that saved chat, not a new one.
+  const [v3OpenNonce, setV3OpenNonce] = useState(0);
+  const v3ResumeInFlightRef = useRef(false);
 
   // Touch swipe → sidebar control (replaces the accidental browser back/forward).
   // Left→right swipe opens the sidebar; right→left closes it (no-op if already closed).
@@ -1400,6 +1414,19 @@ export default function App() {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
     }
 
+    // v3.0 fresh-open signal: a deliberate open of the Pro tab starts a NEW chat. A History reopen
+    // sets v3Resume first and flags v3ResumeInFlightRef so we DON'T bump the nonce (it must resume,
+    // not start fresh). The nonce is never bumped on reload (reload restores the view without calling
+    // toggleTab), which is exactly how the panel distinguishes open-new from reload-restore.
+    if (view === 'nbi_pro_chat') {
+      if (v3ResumeInFlightRef.current) {
+        v3ResumeInFlightRef.current = false; // consume the resume signal — no fresh-open this time
+        setV3OpenNonce(0);                   // clear any stale fresh-open nonce so a remount resumes, not news
+      } else {
+        setV3OpenNonce(Date.now());
+      }
+    }
+
     if (view === 'security' && !user) {
       setShowAuth(true);
       addLog('Security Audit requires an active session. Please login.', 'warn');
@@ -1432,6 +1459,15 @@ export default function App() {
     
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
+
+  // Persist ONLY the v3.0 view so a reload lands back in Pro v3.0 (see activeView init). Any other
+  // view clears the flag, so leaving v3.0 and reloading correctly returns to Home.
+  useEffect(() => {
+    try {
+      if (activeView === 'nbi_pro_chat') sessionStorage.setItem('nbi_v3_open', '1');
+      else sessionStorage.removeItem('nbi_v3_open');
+    } catch { /* storage unavailable (private mode) — reload just falls back to Home */ }
+  }, [activeView]);
 
   // After login, navigate to any view that was gated behind auth (e.g. History)
   useEffect(() => {
@@ -4512,6 +4548,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
+      v3ResumeInFlightRef.current = true; // resume, not a fresh open — suppress the new-chat bump
       toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
       addLog(`Resumed v3.0 session: ${session.title}`, 'info');
       return;
@@ -5384,6 +5421,8 @@ ${buildLanguageRule(preferredLanguage)}`;
         isAdmin={isAdmin}
         setShowVishwakarmaChooser={setShowVishwakarmaChooser}
         setErrorContext={setErrorContext}
+        sessions={sessions}
+        onResumeSession={resumeSession}
       />
       {/* Workspace */}
       <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">
@@ -5509,6 +5548,7 @@ ${buildLanguageRule(preferredLanguage)}`;
               userId={user?.uid}
               email={user?.email}
               resume={v3Resume}
+              freshOpenNonce={v3OpenNonce}
               onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
               /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest

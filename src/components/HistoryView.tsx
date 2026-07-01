@@ -8,9 +8,21 @@ import { Skeleton, SkeletonList } from './ui/Skeleton';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
+// NavBharatAI Pro v3.0 (AgentV3) sessions are saved with agent 'agentv3', tab
+// 'engine_builder', and a doc id prefixed 'v3_'. They are Pro-tier builds and
+// must be classified as Pro (not Free) so they list under the Pro filter and in
+// the app-builder view.
+const isV3Session = (session: any) => {
+  const a = String(session.agent || session.current_agent || session.currentAgent || session.original_agent || '').toLowerCase();
+  const tab = String(session.tab || session.meta?.tab || '').toLowerCase();
+  const id = String(session.id || '').toLowerCase();
+  return a.includes('agentv3') || tab === 'engine_builder' || id.startsWith('v3_');
+};
+
 const isAppSession = (session: any) =>
   (session.files && Object.keys(session.files).length > 0) ||
   (session.mode && (session.mode === 'build' || session.mode === 'app_builder')) ||
+  isV3Session(session) ||
   (session.current_agent && (String(session.current_agent).includes('vishwakarma') || String(session.current_agent).includes('pro')));
 
 export const HistoryView = ({
@@ -57,7 +69,7 @@ export const HistoryView = ({
 
   const isProSession = (s: any) => {
     const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();
-    return a.includes('pro') || a.includes('vishwakarma');
+    return a.includes('pro') || a.includes('vishwakarma') || isV3Session(s);
   };
   const isSdaSession = (s: any) => {
     const a = String(s.agent || s.current_agent || s.currentAgent || '').toLowerCase();

@@ -53,7 +53,7 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
-export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string }) => void; filesPanel?: FilesPanelProps }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -250,8 +250,21 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
   // thread — the verified S1 race.) Keying it to the session means: each session auto-restores at most
   // once, AND a deliberate session switch mid-load discards the stale result so New chat stays blank.
   const autoRestoredSessionRef = useRef<string>('');
+  // Fresh-open discriminator (Bugs 1/3/4/5): App bumps freshOpenNonce ONLY when the user deliberately
+  // opens v3.0 from the menu/sidebar → start a brand-new chat. A hard reload restores the v3.0 view
+  // WITHOUT bumping the nonce (stays 0) → this effect takes the RESTORE branch instead, bringing the
+  // same project's messages/files/preview back. Each distinct nonce is handled at most once.
+  const freshOpenHandledRef = useRef<number>(0);
   useEffect(() => {
     if (running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
+    // PLAIN OPEN → new chat: a fresh (unhandled) nonce means the user opened the tab on purpose.
+    // Start a clean session and do NOT auto-restore the previous project (that was Bug 1). Returning
+    // here also means no id-less "most-recent" load is in flight, which removes the ~2s revert (Bug 3).
+    if (freshOpenNonce && freshOpenHandledRef.current !== freshOpenNonce) {
+      freshOpenHandledRef.current = freshOpenNonce;
+      startNewSession();
+      return;
+    }
     if (autoRestoredSessionRef.current === sessionIdRef.current) return; // this session already handled
     const sidAtStart = sessionIdRef.current;
     autoRestoredSessionRef.current = sidAtStart;
@@ -277,7 +290,8 @@ export function AgentV3Panel({ userId, email, resume, onFilesSync, onBeforeBuild
         setUserMsgs((cur) => (cur.length > 0 ? cur : restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
       }
     })();
-  }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation, freshOpenNonce]);
 
   // S4 — re-armed per workspace; the rehydrate EFFECT itself lives below loadWorkspaceFiles (declared
   // later) to avoid a temporal-dead-zone on workspaceFiles. New chat / open / resume reset it to ''.

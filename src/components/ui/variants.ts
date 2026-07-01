@@ -61,3 +61,38 @@ export function inputClasses(invalid = false): string {
       : 'border-zinc-700 focus:border-indigo-500')
   );
 }
+
+// ── P-DESIGN.2 — Overlay & interaction primitives (Popover / Drawer / BottomSheet) ──
+// Pure class resolvers for the overlay atoms, so their look/positioning vocabulary lives here too.
+
+export type OverlaySide = 'left' | 'right';
+
+/** Full-screen dimming backdrop shared by Drawer / BottomSheet. Pure. */
+export function overlayBackdropClasses(): string {
+  return 'fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm';
+}
+
+/** Floating panel for a click-triggered Popover (anchored under its trigger). Pure. */
+export function popoverPanelClasses(): string {
+  return (
+    'absolute z-[90] mt-1 min-w-[10rem] rounded-xl border border-white/10 bg-[#1c2128] ' +
+    'shadow-2xl p-1 focus:outline-none'
+  );
+}
+
+/** Side Drawer panel that slides in from the left or right. Pure. */
+export function drawerPanelClasses(side: OverlaySide = 'right'): string {
+  return (
+    'fixed top-0 bottom-0 z-[90] w-[min(90vw,22rem)] bg-[#161b22] border-white/10 shadow-2xl ' +
+    'flex flex-col ' +
+    (side === 'right' ? 'right-0 border-l' : 'left-0 border-r')
+  );
+}
+
+/** Bottom-sheet panel that slides up from the bottom (mobile-friendly). Pure. */
+export function bottomSheetClasses(): string {
+  return (
+    'fixed left-0 right-0 bottom-0 z-[90] max-h-[85vh] rounded-t-2xl bg-[#161b22] border-t border-white/10 ' +
+    'shadow-2xl flex flex-col'
+  );
+}

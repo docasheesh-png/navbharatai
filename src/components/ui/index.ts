@@ -5,6 +5,9 @@ export { Card, type CardProps } from './Card';
 export { Input, Select, type InputProps, type SelectProps } from './Input';
 export { Tabs, type TabItem, type TabsProps } from './Tabs';
 export { Tooltip, type TooltipProps } from './Tooltip';
+export { Popover, type PopoverProps } from './Popover';
+export { Drawer, type DrawerProps } from './Drawer';
+export { BottomSheet, type BottomSheetProps } from './BottomSheet';
 export {
   Skeleton,
   SkeletonText,
@@ -18,7 +21,12 @@ export {
   badgeClasses,
   cardClasses,
   inputClasses,
+  overlayBackdropClasses,
+  popoverPanelClasses,
+  drawerPanelClasses,
+  bottomSheetClasses,
   type ButtonVariant,
   type ButtonSize,
   type BadgeVariant,
+  type OverlaySide,
 } from './variants';

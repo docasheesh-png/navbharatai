@@ -6737,3 +6737,41 @@ exactly one provider). Gate: frontend tsc 0, server tsc 0, vitest 4091/4091 PASS
 **Not yet started (explicitly requested, tracked separately):** confirming the root cause of the
 `pkill -f "vite" || true` → exit -1 "signal: terminated" mystery — currently only a working theory
 (health-check background-restart cycle overlapping the next dispatched command), no confirmed fix yet.
+
+## 2026-07-01 — CONFIRMED root cause of the `pkill "signal: terminated"` mystery + diagnostics fix
+
+Investigated the previously-only-theorized `pkill -f "vite" || true` → exit -1, "signal: terminated"
+pattern that keeps appearing in build reports. **Confirmed, not theorized this time:**
+
+`"signal: terminated"` is the EXACT literal string Go's standard library (`os/exec` →
+`os.ProcessState.String()`) produces when it reports a child process killed by SIGTERM — verified by
+reproducing it directly. This string never appears anywhere in NavBharatAI's own TypeScript, and it is
+NOT what Node's `child_process` produces for a signaled child (Node reports `err.signal = 'SIGTERM'` +
+a `"Command failed: ..."` message, never this wording). `E2BActuator.runCommand()` calls the E2B SDK's
+`sandbox.commands.run()`, which executes the command via `/bin/bash -l -c "<cmd>"` **inside the remote
+E2B sandbox VM**, run by the sandbox's own daemon (`envd`, written in Go) — so this message is proof the
+SIGTERM was delivered to that remote bash process by the **E2B sandbox environment itself**, not by any
+NavBharatAI code, and not a client-side/Node timeout. NavBharatAI's own port-freeing logic
+(`devServerHost.ts`) deliberately uses `kill -9` (SIGKILL) which Go reports as `"signal: killed"` — ruling
+out our own pre-kill-port command as the direct culprit.
+
+**Still inferred, not proven line-by-line:** exactly WHAT inside the sandbox VM issues the SIGTERM (a
+session/process-group boundary event from `envd`, or a lifecycle call like `Sandbox.setTimeout` refreshing
+a session). The original "health-check restart overlapping a later command" theory remains a plausible
+trigger but is not proven to be the specific mechanism.
+
+**Real-world impact: cosmetic diagnostics noise, not a functional bug.** The `pkill || true` command's own
+purpose (best-effort cleanup) is unaffected either way — but the build-report pipeline was recording this
+guarded command's outcome as an UNRESOLVED error, making clean builds look like they hit a real unfixed
+problem (this is exactly the case the `deriveRootCause()` fix earlier today had to work around).
+
+**Fix:** `BuildDiagnostics.recordCommand()` now detects a command explicitly shell-guarded with `|| true`
+(regex `/\|\|\s*true\s*(?:;)?\s*$/` on the trimmed command) and treats ANY exit code/signal on it as
+`autoResolved: true` / informational — never an unresolved `SANDBOX_CMD_FAILED`. The raw exit code and
+stderr are still captured unchanged in the `commands` AI-Diagnosis-Bundle channel (nothing is hidden,
+only the timeline/root-cause classification changes). The caller's own `|| true` is unambiguous intent
+that this command's result should never be treated as a build problem, regardless of *how* it failed.
+
+Tests: +2 (`|| true`-guarded command with exit -1/"signal: terminated" stays info/auto-resolved; the
+same command WITHOUT the guard still correctly surfaces as an unresolved failure). Gate: frontend tsc 0,
+server tsc 0, vitest 4093/4093 PASS, boot:check PASS.

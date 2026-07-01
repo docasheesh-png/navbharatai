@@ -304,6 +304,30 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeUndefined();
   });
 
+  it('#3 a command explicitly guarded with "|| true" never surfaces as an unresolved failure, even on a non-zero/signaled exit', () => {
+    // Root-caused 2026-07-01: E2B's remote sandbox daemon can report exitCode -1 / "signal: terminated"
+    // for the wrapper bash of a `pkill -f "vite" || true` command due to an external SIGTERM the guard
+    // can't intercept — but the caller's `|| true` is unambiguous intent that this command's outcome
+    // should never be treated as a real build problem.
+    const d = fresh();
+    d.recordCommand({ command: 'pkill -f "vite" || true', exitCode: -1, stdout: '', stderr: 'signal: terminated' });
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD')?.severity).toBe('info');
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeUndefined();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD')?.autoResolved).toBe(true);
+    // the raw command record (for the AI Diagnosis Bundle) still keeps the real exit code — only the
+    // timeline classification changes, no data is hidden.
+    expect(r.commands![0].exitCode).toBe(-1);
+  });
+
+  it('#3 a normal command WITHOUT a "|| true" guard still surfaces a non-zero exit as an unresolved failure', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'pkill -f "vite"', exitCode: -1, stdout: '', stderr: 'signal: terminated' });
+    const marker = d.report().issues.find((i) => i.code === 'SANDBOX_CMD_FAILED');
+    expect(marker?.severity).toBe('error');
+    expect(marker?.autoResolved).toBe(false);
+  });
+
   it('#3 caps very large command output (keeps the tail where the error lives)', () => {
     const d = fresh();
     const huge = 'x'.repeat(50_000) + 'THE_REAL_ERROR_AT_THE_END';

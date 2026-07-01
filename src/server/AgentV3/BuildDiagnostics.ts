@@ -309,7 +309,16 @@ export class BuildDiagnostics {
         stderr: capTail(rec.stderr, CMD_OUTPUT_CAP),
       });
     }
-    const failed = rec.exitCode !== 0 && rec.exitCode !== null;
+    // A command explicitly shell-guarded with `|| true` (e.g. `pkill -f "vite" || true`) has already
+    // told the shell its own outcome must never matter. That guard only covers a normal non-zero exit
+    // from the command's own bash — it can't stop an EXTERNAL signal (e.g. E2B's sandbox daemon SIGTERM-
+    // ing the wrapper process, observed as exitCode -1 / "signal: terminated" with no NavBharatAI code
+    // involved) from still being reported as a raw exit code by the actuator. Either way, the caller's
+    // `|| true` is unambiguous intent: this command's result should never surface as an unresolved build
+    // problem. Root-caused 2026-07-01 (previously only theorized) — confirmed via the E2B SDK/daemon,
+    // not a NavBharatAI bug; see PROGRESS.md.
+    const guarded = /\|\|\s*true\s*(?:;)?\s*$/.test(rec.command.trimEnd());
+    const failed = !guarded && rec.exitCode !== 0 && rec.exitCode !== null;
     const cmdHead = rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     this.record({

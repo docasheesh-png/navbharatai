@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -629,9 +629,9 @@ describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
     if (prev === undefined) delete process.env.AGENTV3_MAX_BUILD_SECONDS;
     else process.env.AGENTV3_MAX_BUILD_SECONDS = prev;
   });
-  it('defaults to 1080s (18 min)', () => {
+  it('defaults to 1800s (30 min)', () => {
     delete process.env.AGENTV3_MAX_BUILD_SECONDS;
-    expect(maxBuildSeconds()).toBe(1080);
+    expect(maxBuildSeconds()).toBe(1800);
   });
   it('honors a positive override', () => {
     process.env.AGENTV3_MAX_BUILD_SECONDS = '300';
@@ -643,7 +643,33 @@ describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
   });
   it('falls back to the default on garbage', () => {
     process.env.AGENTV3_MAX_BUILD_SECONDS = 'abc';
-    expect(maxBuildSeconds()).toBe(1080);
+    expect(maxBuildSeconds()).toBe(1800);
+  });
+});
+
+describe('buildMaxTokensPerTurn (B1 — per-turn output cap for the agentic build runner)', () => {
+  const prev = process.env.AGENTV3_MAX_TOKENS_PER_TURN;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_MAX_TOKENS_PER_TURN;
+    else process.env.AGENTV3_MAX_TOKENS_PER_TURN = prev;
+  });
+  it('defaults to 32000 (4× the old 8192 fallback so large files are not truncated)', () => {
+    delete process.env.AGENTV3_MAX_TOKENS_PER_TURN;
+    expect(buildMaxTokensPerTurn()).toBe(32000);
+  });
+  it('honors a positive override', () => {
+    process.env.AGENTV3_MAX_TOKENS_PER_TURN = '48000';
+    expect(buildMaxTokensPerTurn()).toBe(48000);
+  });
+  it('hard-caps at 64000 to stay within model limits', () => {
+    process.env.AGENTV3_MAX_TOKENS_PER_TURN = '200000';
+    expect(buildMaxTokensPerTurn()).toBe(64000);
+  });
+  it('falls back to the default on garbage or non-positive input', () => {
+    process.env.AGENTV3_MAX_TOKENS_PER_TURN = 'abc';
+    expect(buildMaxTokensPerTurn()).toBe(32000);
+    process.env.AGENTV3_MAX_TOKENS_PER_TURN = '0';
+    expect(buildMaxTokensPerTurn()).toBe(32000);
   });
 });
 

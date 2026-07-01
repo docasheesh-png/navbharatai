@@ -336,7 +336,26 @@ export function readinessGateEnabled(): boolean {
 export function maxBuildSeconds(): number {
   const raw = Number(process.env.AGENTV3_MAX_BUILD_SECONDS);
   if (raw === 0) return 0;
-  return Number.isFinite(raw) && raw > 0 ? raw : 1080;
+  // Default raised 1080s (18 min) → 1800s (30 min): a genuinely complex full-stack app (auth + DB +
+  // multiple pages + install + dev-server verify) legitimately needs more than 18 min, and the flat
+  // cap was cutting big builds off mid-work with only partial files. The build stops the moment it is
+  // DONE — this ceiling only ever gives long builds more headroom, it never slows a quick build.
+  // Admin-tunable via AGENTV3_MAX_BUILD_SECONDS; set 0 to disable (not recommended).
+  return Number.isFinite(raw) && raw > 0 ? raw : 1800;
+}
+
+/**
+ * Per-turn MAX OUTPUT TOKENS for the agentic build runner. Previously the runner never set this, so
+ * every architect turn fell back to ClaudeClient's 8192 default — which truncated large multi-file
+ * writes and big components mid-output (stopReason 'max_tokens'), the single biggest reason complex
+ * apps came out incomplete. 32000 is a safe, valid ceiling for every current Claude 4.x model
+ * (Sonnet/Opus/Haiku all support ≥ 32k output) and 4× the old cap, so a large file no longer gets
+ * cut off in one turn. Admin-tunable via AGENTV3_MAX_TOKENS_PER_TURN (hard-capped at 64000 to stay
+ * within model limits).
+ */
+export function buildMaxTokensPerTurn(): number {
+  const raw = Number(process.env.AGENTV3_MAX_TOKENS_PER_TURN);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 64000) : 32000;
 }
 
 /**
@@ -2673,6 +2692,10 @@ export function registerAgentV3Routes(app: Express): void {
         agentRole: 'architect' as const,
         signal: abort.signal,
         expectsArtifacts,
+        // B1 — lift the per-turn output cap off ClaudeClient's 8192 default so a large file/component
+        // is written in ONE turn instead of truncating at max_tokens. Shared by the default build AND
+        // every escalated/retry runner that spreads baseRunnerOpts.
+        maxTokensPerTurn: buildMaxTokensPerTurn(),
         // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
         // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
         readinessGate: readinessGateEnabled(),

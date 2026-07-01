@@ -6469,3 +6469,52 @@ every persistence-configured runner, not just the base one). New pure, exported,
 `needsFallbackConversationPersist()` — +4 tests.
 
 Tests: +10 total. Gate: frontend tsc 0, server tsc 0, vitest 4012/4012 PASS, boot:check PASS.
+
+## 2026-07-01 — v3.0 build report redesigned: root cause first, noise-filtered, with history
+
+Admin's 6-point complaint about the build report, each confirmed against the actual code (not assumed)
+before fixing:
+
+1. **"Fokat ki cheeze aa jati, memory bahut jyada"** — confirmed: a real report had 180 entries, only
+   9 (5%) were actual problems; the rest was pure operational noise (tool-call/tool-done pairs,
+   minute-by-minute heartbeats, progress narration).
+2. **"Bas problems/errors ka collection ho"** — no filter existed; everything was one flat list.
+3. **"Root cause bhi mile"** — the data already existed (BuildOutcome classification, reviewer
+   findings, captured errors) but was buried in the noise, never surfaced.
+4. **"Backend zyada important hai"** — commands/LLM-I-O/errors were equal-weighted with chat narration.
+5 & 6. **"Report khaali ho jaati / naye message se purani gayab"** — root-caused: the report is stored
+   in exactly ONE Firestore doc per workspace (`{ merge: false }`); every new build's SETTLED report —
+   even one that finished almost instantly with 2 log lines — fully overwrites the previous, richer
+   report with no way back.
+
+**Fixes shipped, all real + tested:**
+- **Dedup**: `BuildDiagnostics.record()` now collapses an exact back-to-back repeat (same phase+code+
+  message — e.g. many identical "▶ write_file" tool calls, or a genuinely double-emitted narration
+  line) into the SAME entry with a `repeatCount`, instead of one line per occurrence.
+- **`problems` field**: the report now carries a noise-free `problems` array (severity ≠ info only) —
+  the "just problems" view — alongside the full `issues` timeline for anyone who wants everything.
+- **`rootCause` field**: a new pure `deriveRootCause()` picks the single most important line, in
+  priority order: the deterministic BuildOutcome classification → the reviewer's first [CRITICAL]
+  finding → the first fully-captured error → the first real problem → an honest "nothing wrong found".
+- **`renderDiagnosticsText()`** (previously built but never wired to any button) now puts ROOT CAUSE
+  first, lists only `problems`, and honestly notes how many info-only entries were omitted (no silent
+  caps) — wired into "Copy report" as a readable summary + full JSON, so pasting into chat is useful
+  at a glance.
+- **History**: new `DiagnosticsStore` subcollection (`workspace_diagnostics_v3/{workspaceId}/history/
+  {startedAt}`) — every SETTLED build's report (not just the "latest" doc) is durably kept, bounded to
+  the most recent 20. New "Report history" button in the v3.0 header lets the admin browse and reopen
+  a past build's report (status dot + root cause + timestamp) — download/copy then apply to that build
+  instead of latest; "Back to latest report" returns to today's default. Also fixed a related gap while
+  in this code: the crash-handler path (`catch (err)`) never durably saved its report at all (only the
+  per-instance in-memory cache) — now it does, both to "latest" and to history.
+
+Tests: +21 (13 BuildDiagnostics — dedup, problems, deriveRootCause, renderDiagnosticsText ordering;
+4 DiagnosticsStore history VITEST-skip contract; 1 fixed pre-existing assertion). Gate: frontend tsc 0,
+server tsc 0, vitest 4029/4029 PASS, boot:check PASS, Playwright root-page load clean (no runtime errors).
+
+**Separately flagged, NOT fixed in this PR** (found while reading a real v3.0 transcript the admin
+shared, out of scope for "build report"): components generated in isolation but never wired into
+App.tsx (root cause of the recurring "Hello World" preview); the reviewer finds real [CRITICAL] bugs
+but nothing auto-repairs them; a stale-checkpoint restore silently lost 12 files' worth of recent edits;
+contradictory simultaneous "no files produced" + "here's what I built" messages. Queued for a future
+pass if the admin wants them tackled.

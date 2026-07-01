@@ -142,7 +142,7 @@ import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWork
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -1015,6 +1015,22 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
+    // History list (P-REPORT.4): "the report vanished when the next build started" — past builds'
+    // reports are kept in a bounded per-workspace history, independent of whichever build most
+    // recently overwrote the "latest" doc below. Metadata only (cheap); fetch one in full via buildId.
+    if (req.query.history === '1') {
+      if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+      const history = await listDiagnosticsHistory(workspaceId).catch(() => []);
+      res.json({ history });
+      return;
+    }
+    if (typeof req.query.buildId === 'string' && req.query.buildId) {
+      if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+      const report = await getDiagnosticsHistoryItem(workspaceId, req.query.buildId).catch(() => null);
+      if (!report) { res.status(404).json({ error: 'No diagnostics found for that build.' }); return; }
+      res.json({ diagnostics: report });
+      return;
+    }
     // Prefer the DURABLE (Firestore) copy keyed by workspaceId: it is the freshest authoritative copy
     // — it survives an instance rotation AND carries PREVIEW errors appended AFTER the build (the
     // in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview append).
@@ -1073,7 +1089,13 @@ export function registerAgentV3Routes(app: Express): void {
       if (mem) lastDiagnostics.set(userId ?? 'anon', append(mem));
       // Update the durable copy so the download/copy reflects it even after an instance rotation.
       const durable = await loadDiagnostics(workspaceId).catch(() => null);
-      if (durable) await saveDiagnostics(workspaceId, append(durable)).catch(() => {});
+      if (durable) {
+        const withPreviewError = append(durable);
+        await saveDiagnostics(workspaceId, withPreviewError).catch(() => {});
+        // Refresh the SAME history entry (same startedAt → same id) with the late-arriving preview
+        // error, so a build's history record isn't missing evidence captured after it settled.
+        await saveDiagnosticsHistory(workspaceId, withPreviewError).catch(() => {});
+      }
       res.json({ ok: true });
     } catch {
       res.json({ ok: false }); // best-effort — never break the client over a diagnostics append
@@ -1892,6 +1914,9 @@ export function registerAgentV3Routes(app: Express): void {
         if (dl) {
           lastDiagnostics.set(buildKey, dl);
           saveDiagnostics(workspaceId, dl).catch(() => {}); // durable (survives instance rotation)
+          // Also into the bounded per-workspace HISTORY so this settled report survives even after
+          // a later (possibly much smaller) build overwrites the "latest" doc above.
+          saveDiagnosticsHistory(workspaceId, dl).catch(() => {});
         }
       } catch { /* diagnostics are best-effort */ }
       if (ok && buildResultRef) {
@@ -3285,6 +3310,9 @@ export function registerAgentV3Routes(app: Express): void {
         // survives a Cloud Run instance rotation / a page reload (the in-memory cache above is
         // per-instance and was the reason reports came back EMPTY). Awaited, best-effort.
         await saveDiagnostics(workspaceId, diagnostics).catch(() => {});
+        // Also into the bounded per-workspace HISTORY — the "latest" doc above gets overwritten by
+        // THIS build; history is what keeps a PREVIOUS build's report reachable after that happens.
+        await saveDiagnosticsHistory(workspaceId, diagnostics).catch(() => {});
       } catch { /* diagnostics are best-effort */ }
       // P-BRE.1 — finalize the build trace: record the generate span + rich attributes, export to the
       // OTLP endpoint when one is configured (Cloud Trace), and surface the traceId for log↔trace
@@ -3343,10 +3371,19 @@ export function registerAgentV3Routes(app: Express): void {
       const totalTokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
-      // Capture the crash in the diagnostics report too (real-time onUpdate already persisted it).
+      // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
+      // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
+      // must explicitly durable-save here, or this report is lost the moment the instance recycles
+      // (exactly the "empty build report" DiagnosticsStore.ts exists to prevent, but this path missed it).
       try {
         buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: err instanceof Error ? err.message : String(err), autoResolved: false });
         buildDiagRef?.finish(false);
+        const crashReport = buildDiagRef?.report();
+        if (crashReport) {
+          lastDiagnostics.set(buildKey, crashReport);
+          saveDiagnostics(workspaceId, crashReport).catch(() => {});
+          saveDiagnosticsHistory(workspaceId, crashReport).catch(() => {});
+        }
       } catch { /* diagnostics are best-effort */ }
       emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {

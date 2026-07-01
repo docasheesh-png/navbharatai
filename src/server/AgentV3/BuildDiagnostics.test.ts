@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery, deriveRootCause } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -91,7 +91,114 @@ describe('BuildDiagnostics', () => {
     d.finish(true, 'done');
     const r = d.report();
     expect(r.counts.total).toBe(0);
-    expect(renderDiagnosticsText(r)).toContain('No issues recorded');
+    expect(renderDiagnosticsText(r)).toContain('No problems recorded');
+  });
+});
+
+describe('dedup (P-REPORT.1 — repeated identical entries collapse instead of bloating the timeline)', () => {
+  it('collapses back-to-back identical tool calls into one entry with a repeatCount', () => {
+    const d = fresh();
+    for (let i = 0; i < 5; i++) d.ingestEvent({ type: 'tool_call', tool: 'write_file', callId: `c${i}`, ts: i } as unknown as AgentEvent);
+    const r = d.report();
+    // 5 identical "▶ write_file" TOOL_CALL entries collapse into ONE, not 5.
+    const toolCalls = r.issues.filter((i) => i.code === 'TOOL_CALL');
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0].repeatCount).toBe(5);
+    expect(r.counts.total).toBe(1);
+  });
+
+  it('does NOT collapse entries with different messages (different tool names)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', tool: 'write_file', callId: 'c1' } as unknown as AgentEvent);
+    d.ingestEvent({ type: 'tool_call', tool: 'read_file', callId: 'c2' } as unknown as AgentEvent);
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'TOOL_CALL')).toHaveLength(2);
+  });
+
+  it('does NOT collapse the same message if something else happened in between', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: 'Setting up your workspace…', autoResolved: true });
+    d.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: 'Planning the file list…', autoResolved: true });
+    d.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: 'Setting up your workspace…', autoResolved: true });
+    const r = d.report();
+    expect(r.issues).toHaveLength(3); // all three are distinct positions, no collapsing across a gap
+  });
+});
+
+describe('problems (P-REPORT.2 — noise-free "problems only" view)', () => {
+  it('excludes info-level entries (tool calls, heartbeats, progress narration)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', tool: 'write_file', callId: 'c1' } as unknown as AgentEvent);
+    d.heartbeat();
+    d.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: 'Setting up your workspace…', autoResolved: true });
+    d.record({ phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'fell back to Haiku', autoResolved: true });
+    const r = d.report();
+    expect(r.issues.length).toBeGreaterThan(1); // the full timeline still has everything
+    expect(r.problems).toHaveLength(1); // only the real warning survives
+    expect(r.problems[0].code).toBe('PROVIDER_FALLBACK');
+  });
+
+  it('is an empty array (not undefined) on a clean build', () => {
+    const d = fresh();
+    d.finish(true, 'done');
+    expect(d.report().problems).toEqual([]);
+  });
+});
+
+describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixed entries)', () => {
+  it('prefers the deterministic BuildOutcome classification above everything else', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'BUILD_ERROR', message: 'some error', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'OUTCOME_TYPECHECK_FAILED', message: 'Build outcome: TYPECHECK_FAILED', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues })).toBe('Build outcome: TYPECHECK_FAILED');
+  });
+
+  it('falls back to the reviewer\'s first [CRITICAL] finding when no outcome was recorded', () => {
+    const review = '[CRITICAL] **Missing Features.css file** - the import has no matching file.\n[WARNING] logo path wrong.';
+    expect(deriveRootCause({ issues: [], review })).toBe('Critical issue found by review: **Missing Features.css file** - the import has no matching file.');
+  });
+
+  it('falls back to the first fully-captured error', () => {
+    const errors = [{ ts: 1, phase: 'build' as const, message: 'Cannot find module \'./Features.css\'' }];
+    expect(deriveRootCause({ issues: [], errors })).toBe('Error: Cannot find module \'./Features.css\'');
+  });
+
+  it('falls back to the first real (non-info) problem on the timeline', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'AGENT_STEP', message: 'Setting up…', autoResolved: true },
+      { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'npm install failed', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues })).toBe('npm install failed');
+  });
+
+  it('reports an honest "no problems" once the build settled clean', () => {
+    expect(deriveRootCause({ issues: [], ok: true })).toBe('Build completed successfully with no problems recorded.');
+  });
+
+  it('reports an honest "no specific error captured" for a settled failure with nothing recorded', () => {
+    expect(deriveRootCause({ issues: [], ok: false })).toBe('Build did not succeed, but no specific error was captured.');
+  });
+
+  it('returns undefined while still running (ok not yet set) with nothing to report', () => {
+    expect(deriveRootCause({ issues: [] })).toBeUndefined();
+  });
+});
+
+describe('renderDiagnosticsText — root cause first, problems (not the full noisy timeline) by default', () => {
+  it('puts ROOT CAUSE at the top and lists only problems, noting how many info entries were omitted', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'tool_call', tool: 'write_file', callId: 'c1' } as unknown as AgentEvent);
+    d.record({ phase: 'build', severity: 'error', code: 'BUILD_ERROR', message: 'compile failed', autoResolved: false });
+    d.finish(false, 'failed');
+    const text = renderDiagnosticsText(d.report());
+    const rootCauseIdx = text.indexOf('ROOT CAUSE:');
+    const problemsIdx = text.indexOf('Problems (');
+    expect(rootCauseIdx).toBeGreaterThan(-1);
+    expect(problemsIdx).toBeGreaterThan(rootCauseIdx); // root cause comes BEFORE the problems list
+    expect(text).toContain('compile failed');
+    expect(text).not.toContain('▶ write_file'); // the info-level tool call is excluded from the default view
+    expect(text).toMatch(/\+\d+ informational timeline entries/); // honestly notes what was omitted (no silent caps)
   });
 });
 

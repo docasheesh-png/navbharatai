@@ -5,7 +5,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus,
+  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock,
 } from 'lucide-react';
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -657,26 +657,50 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // carries PREVIEW errors captured AFTER the build finished (#666), which the client copy never sees.
   // Fall back to the client's local copy only if the server has nothing (e.g. a stream that dropped
   // mid-build before the durable save).
-  const getLatestDiagnostics = useCallback(async (): Promise<unknown> => {
+  // P-REPORT.4 — history: which past build's report to read instead of "latest" (null = latest).
+  // Lets a small/quick recent build never permanently hide a previous, richer report.
+  const [selectedHistoryBuildId, setSelectedHistoryBuildId] = useState<string | null>(null);
+  const [historyReportOpen, setHistoryReportOpen] = useState(false);
+  const [historyReportItems, setHistoryReportItems] = useState<Array<{ id: string; startedAt: number; endedAt?: number; ok?: boolean; rootCause?: string }>>([]);
+  const [historyReportLoading, setHistoryReportLoading] = useState(false);
+  const toggleHistoryReport = async () => {
+    const next = !historyReportOpen;
+    setHistoryReportOpen(next);
+    if (next && state.workspaceId) {
+      setHistoryReportLoading(true);
+      try {
+        const params = new URLSearchParams({ workspaceId: state.workspaceId, history: '1' });
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+        const data = await res.json().catch(() => ({}));
+        setHistoryReportItems(Array.isArray(data?.history) ? data.history : []);
+      } catch { setHistoryReportItems([]); }
+      finally { setHistoryReportLoading(false); }
+    }
+  };
+
+  const getLatestDiagnostics = useCallback(async (buildId?: string | null): Promise<unknown> => {
     try {
       const params = new URLSearchParams();
       if (userId) params.set('userId', userId);
       if (email) params.set('email', email);
       if (state.workspaceId) params.set('workspaceId', state.workspaceId);
+      if (buildId) params.set('buildId', buildId);
       const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
       if (res.ok) {
         const data = await res.json() as { diagnostics?: unknown };
         if (data.diagnostics) return data.diagnostics;
       }
     } catch { /* fall through to the local copy */ }
-    return state.diagnostics ?? null;
+    return buildId ? null : (state.diagnostics ?? null); // the local copy is only ever "latest"
   }, [userId, email, state.workspaceId, state.diagnostics]);
 
   const downloadDiagnostics = async () => {
     if (downloadingDiag) return;
     setDownloadingDiag(true);
     try {
-      const diagnostics = await getLatestDiagnostics();
+      const diagnostics = await getLatestDiagnostics(selectedHistoryBuildId);
       if (!diagnostics) { alert('No build report yet — build an app first, then download the report.'); return; }
       const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -696,15 +720,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // One-tap COPY of the build report to the clipboard — so it can be pasted straight into a support
   // chat without the download → find-file → upload dance. Uses the same client copy / durable
-  // server fallback as the download.
+  // server fallback as the download. Leads with a short, READABLE summary (root cause + the real
+  // problems only, no tool-call/heartbeat noise) before the full JSON, so pasting it into chat is
+  // useful at a glance — not just a wall of raw data.
   const [copyingDiag, setCopyingDiag] = useState(false);
   const copyDiagnostics = async () => {
     if (copyingDiag) return;
     setCopyingDiag(true);
     try {
-      const diagnostics = await getLatestDiagnostics();
+      const diagnostics = await getLatestDiagnostics(selectedHistoryBuildId) as {
+        rootCause?: string; problems?: Array<{ severity: string; message: string }>; counts?: { total: number; errors: number; warnings: number };
+      } | null;
       if (!diagnostics) { alert('No build report yet — build an app first.'); return; }
-      await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
+      const lines: string[] = [];
+      if (diagnostics.rootCause) lines.push(`Root cause: ${diagnostics.rootCause}`);
+      const problems = diagnostics.problems ?? [];
+      if (problems.length) {
+        lines.push(`Problems (${problems.length}):`);
+        problems.slice(0, 10).forEach((p, i) => lines.push(`  ${i + 1}. [${p.severity.toUpperCase()}] ${p.message}`));
+        if (problems.length > 10) lines.push(`  …and ${problems.length - 10} more (see full JSON below).`);
+      } else {
+        lines.push('No problems recorded.');
+      }
+      const summary = lines.join('\n');
+      await navigator.clipboard.writeText(`${summary}\n\n--- Full report (JSON) ---\n${JSON.stringify(diagnostics, null, 2)}`);
       alert('Build report copied — paste it into the chat to share it.');
     } catch (e) {
       alert(`Could not copy the report: ${e instanceof Error ? e.message : String(e)}.`);
@@ -1069,6 +1108,53 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {copyingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
             {copyingDiag ? 'Copying…' : 'Copy report'}
           </button>
+          <div className="relative">
+            <button
+              onClick={toggleHistoryReport}
+              disabled={!state.workspaceId}
+              title="Browse past builds' reports — a small recent build never hides a previous, more useful report."
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedHistoryBuildId ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500'}`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              {selectedHistoryBuildId ? 'Viewing past build' : 'Report history'}
+            </button>
+            {historyReportOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setHistoryReportOpen(false)} />
+                <div className="absolute left-0 top-8 z-50 w-80 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
+                  {selectedHistoryBuildId && (
+                    <button
+                      onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-zinc-800" />
+                  {historyReportLoading ? (
+                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                  ) : historyReportItems.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
+                  ) : (
+                    historyReportItems.map((h) => (
+                      <button
+                        key={h.id}
+                        onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
+                        title={h.rootCause || ''}
+                        className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
+                      >
+                        <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
+                          <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           {state.repoUrl && (
             <a
               href={state.repoUrl}

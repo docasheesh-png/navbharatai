@@ -282,6 +282,18 @@ function maxBuildBudgetUsd(): number {
 }
 
 /**
+ * The workspace-awareness line appended to a PLAIN CHAT turn's system prompt when the project
+ * already has real, durably-saved files. Without this, a chat question like "kितni files hai?"
+ * had zero workspace context (the chat lane never loaded any) — the model could only guess or
+ * admit it doesn't know, even though the real count was one cheap Firestore read away. Empty
+ * string for a brand-new/empty workspace — nothing honest to add. Pure + exported for testing.
+ */
+export function chatWorkspaceContextLine(fileCount: number): string {
+  if (!Number.isFinite(fileCount) || fileCount <= 0) return '';
+  return `\n\n[Current project: ${fileCount} file(s) saved in this session's workspace. If asked how many files exist or what has been built, answer with this REAL number — never guess.]`;
+}
+
+/**
  * Per-user monthly spend ceiling (R1, roadmap §3.1). The hard per-BUILD cap
  * (maxBuildBudgetUsd) stops one runaway build; this caps a user's TOTAL billed
  * spend across the calendar month so a single user can never run the platform's
@@ -1754,11 +1766,14 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       await raceTimeout(restoreWorkspaceMemory(intentWorkspaceId, getWorkspaceMemory(intentWorkspaceId)), 3_000, 'restoreMemoryForIntent');
     } catch { /* best-effort — classification falls back to keyword + projectExists */ }
-    const projectExists = (await raceTimeout(
+    // Keep the RAW count (not just the boolean) — a plain-chat turn below reuses this same read to
+    // honestly answer "how many files do we have?" instead of answering blind. No extra Firestore call.
+    const projectFileCount = await raceTimeout(
       countWorkspaceFiles(intentWorkspaceId),
       4_000,
       'countWorkspaceFiles',
-    ).catch(() => 0)) > 0;
+    ).catch(() => 0);
+    const projectExists = projectFileCount > 0;
     const recentRequests = (() => {
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequests(3); } catch { return [] as string[]; }
     })();
@@ -1798,11 +1813,17 @@ export function registerAgentV3Routes(app: Express): void {
         const chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
-        // P-PE.1 — plain-chat response cache. This reply is a pure function of the current prompt (no
-        // transcript/user data injected here), so identical prompts WITHOUT an attachment can be served
-        // from an in-memory TTL+LRU cache: instant and free, no behaviour change. Build/edit turns never
-        // reach this path, and attachment turns are skipped (their prompt is unique).
-        const cacheable = !attachmentContext && chatCacheEnabled();
+        // v3.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
+        // lane never loaded any workspace context. projectFileCount was already computed above for
+        // intent classification (no extra Firestore call needed here).
+        const chatWorkspaceContext = chatWorkspaceContextLine(projectFileCount);
+        // P-PE.1 — plain-chat response cache. A reply is cacheable ONLY when it's a pure function of the
+        // prompt text alone (no per-workspace/per-user data injected) — identical prompts WITHOUT an
+        // attachment AND without workspace context can be served from an in-memory TTL+LRU cache: instant
+        // and free, no behaviour change. Once real file-count context is injected, the reply depends on
+        // THIS project's state, so it must bypass the cache (a stale/wrong count is worse than a cache
+        // miss). Build/edit turns never reach this path, and attachment turns are skipped (unique prompt).
+        const cacheable = !attachmentContext && !chatWorkspaceContext && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -1819,7 +1840,7 @@ export function registerAgentV3Routes(app: Express): void {
               LANGUAGE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY,
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext,
             ),
             30_000,
             'chatRouter.route',
@@ -2203,6 +2224,12 @@ export function registerAgentV3Routes(app: Express): void {
           const plan = planFileGuardian(saved, existing.files);
           if (plan.count > 0) {
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
+            // The guardian used to restore files SILENTLY — no file_changed event, so the client's
+            // "Files (N)" count (and the agent's own file-count answers in plain chat, above) stayed
+            // stuck at the pre-restore number even though the workspace genuinely has plan.count more
+            // files now. Record each restored path through the SAME channel a normal write uses, so
+            // every surface (header count, Files tab, plain-chat context) reflects reality immediately.
+            for (const path of Object.keys(plan.restore)) state.recordFileChange({ path, kind: 'create' }, 'architect');
             events.emit({
               type: 'narration',
               agent: 'architect',

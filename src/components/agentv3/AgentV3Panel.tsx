@@ -1623,6 +1623,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               userId={userId}
               email={email}
               framework={framework}
+              // C1 — when the panel is idle (no build running), let the preview auto-boot a dead
+              // sandbox ONCE on reopen so a returning user's live preview restores itself instead of
+              // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL
+              // arrives from the build itself — no need to boot a second sandbox).
+              autoResume={!running}
               onFixError={(errText) => {
                 // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
                 // (collapse the workspace) so the user can review and send the fix request.

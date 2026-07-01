@@ -5,7 +5,7 @@
 // files). Previously the main-menu Preview rendered the retired v2.0 `generatedCode`, which a v3.0
 // build never writes — so the preview looked permanently "disconnected" from the v3.0 engine.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope } from 'lucide-react';
 import { auth } from '../../App';
 
@@ -30,7 +30,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
-export function PreviewSurface({ url, workspaceId, userId, email, framework, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; onFixError?: (errorText: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, onFixError }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; onFixError?: (errorText: string) => void }) {
   const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
@@ -86,6 +86,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, onF
     } catch { /* non-fatal — the tab just falls back to a generic message */ }
   }, []);
   useEffect(() => { void refreshSandbox(); }, [refreshSandbox]);
+
+  // C1 — auto-restore the LIVE preview on reopen. After 2-3 days the sandbox is garbage-collected, so
+  // a reopened session's live preview is dead and the user had to hunt for the "Diagnose" button. When
+  // the caller says it's idle (autoResume — NOT mid-build), the Live tab is showing, the backend
+  // actually supports a live preview (E2B configured — otherwise there is nothing to boot), and we
+  // have a workspace with no live URL, run the SAME real rehydrate-and-reboot the Diagnose button uses,
+  // automatically. Gated to ONCE per workspace so it can never loop or repeatedly boot a sandbox.
+  const autoResumedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoResume || mode !== 'live' || !workspaceId) return;
+    if (url || foundUrl || diagnosing) return;
+    if (sandbox?.livePreviewAvailable !== true) return; // no live backend here → nothing to resume
+    if (autoResumedFor.current === workspaceId) return;
+    autoResumedFor.current = workspaceId;
+    void runDiagnose();
+  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, runDiagnose]);
 
   const loadInBrowser = useCallback(async () => {
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }

@@ -14,6 +14,7 @@
 import * as admin from 'firebase-admin';
 import type { MemorySnapshot, ProjectGraph, Episode } from './WorkspaceMemory';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { notePersistenceFailure } from '../lib/persistenceHealth';
 
 const COLLECTION = 'workspace_memory_v3';
 /** Keep snapshots for up to 30 days — after that they are stale and ignored. */
@@ -32,7 +33,8 @@ function getDb(): admin.firestore.Firestore | null {
     _db = admin.firestore();
     _db.settings({ databaseId: firestoreDatabaseId() });
     return _db;
-  } catch {
+  } catch (e) {
+    notePersistenceFailure('workspace_memory', 'init', e);
     return null;
   }
 }
@@ -64,16 +66,21 @@ export async function saveWorkspaceMemory(
     version: 1,
   };
   const doc = db.collection(COLLECTION).doc(workspaceId);
+  let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await doc.set(payload, { merge: false });
       return; // persisted
-    } catch {
+    } catch (e) {
       // Transient failure (network / quota spike) — back off and retry; give up quietly after the
       // last attempt so a save failure never blocks or fails a build.
+      lastErr = e;
       if (attempt < 2) await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
   }
+  // All attempts failed — the workspace memory for this build is lost. Surface it (throttled) so a
+  // persistence outage is visible instead of silently degrading every future reopen's context.
+  notePersistenceFailure('workspace_memory', 'write', lastErr);
 }
 
 /** Load a WorkspaceMemory snapshot from Firestore. Returns null when absent or stale. Never throws. */

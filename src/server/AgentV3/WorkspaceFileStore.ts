@@ -16,6 +16,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { notePersistenceFailure } from '../lib/persistenceHealth';
 
 const COLLECTION = 'workspace_files_v3';
 /** Firestore's hard per-document limit is 1 MB; skip a single file larger than this. */
@@ -33,7 +34,8 @@ function getDb(): admin.firestore.Firestore | null {
     _db = admin.firestore();
     _db.settings({ databaseId: firestoreDatabaseId() });
     return _db;
-  } catch {
+  } catch (e) {
+    notePersistenceFailure('workspace_files', 'init', e);
     return null;
   }
 }
@@ -64,8 +66,10 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
       await batch.commit();
     }
     await root.set({ paths: entries.map(([p]) => p), count: entries.length, savedAt: Date.now() }, { merge: false });
-  } catch {
-    /* best-effort — a save failure never blocks a build */
+  } catch (e) {
+    // Best-effort — a save failure never blocks a build — but it is the exact "reload pe data gayab"
+    // trigger (e.g. free-tier daily write quota exhausted), so make it visible instead of silent.
+    notePersistenceFailure('workspace_files', 'write', e);
   }
 }
 
@@ -98,8 +102,9 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
     const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
     await root.set({ paths: union, count: union.length, savedAt: Date.now() }, { merge: true });
-  } catch {
-    /* best-effort — a merge failure never blocks anything */
+  } catch (e) {
+    // Best-effort — a merge failure never blocks anything — but surface it (see saveWorkspaceFiles).
+    notePersistenceFailure('workspace_files', 'write', e);
   }
 }
 
@@ -191,7 +196,8 @@ export async function removeWorkspaceFiles(workspaceId: string, pathsToRemove: s
       await batch.commit();
     }
     return removed.length;
-  } catch {
+  } catch (e) {
+    notePersistenceFailure('workspace_files', 'write', e);
     return 0;
   }
 }

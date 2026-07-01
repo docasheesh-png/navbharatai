@@ -6609,3 +6609,32 @@ requests) is fixed; not touched this pass since there's no confirmed distinct ro
 
 Tests: +3 (the exact regression command + 2 variants). Gate: frontend tsc 0, server tsc 0,
 vitest 4043/4043 PASS, boot:check PASS.
+
+## 2026-07-01 — per-build $25 cost cap TEMPORARILY DISABLED (explicit admin decision)
+
+Admin asked to remove the v3.0 per-build budget-limit system while build-pipeline bugs are still being
+found and fixed, planning to re-enable it once things stabilize. I gave my honest pushback first (this
+is exactly the WRONG time to remove a runaway-spend safety net — the cap had just correctly stopped a
+build at $25.83 that was mid-genuine-fix; removing it now risks a still-undiscovered bug spending
+unbounded money) and recommended raising the cap instead of removing it. Admin explicitly confirmed:
+remove it completely. Proceeding on that explicit, informed decision.
+
+**Implementation — reversible by design, not a deletion.** `maxBuildBudgetUsd()` (agentv3.ts) now
+defaults to 0 (disabled) instead of 25, mirroring the existing `maxBuildSeconds()` "0 = disabled"
+convention already used elsewhere in this file. `AGENTV3_MAX_BUILD_USD` still works exactly as before —
+setting it to any positive number RE-ENABLES the cap with zero code change needed. The pass-through to
+`AgentRunner`'s `maxBudgetUsd` (which treats `undefined` as "no cap", not `0` — `0` would instead stop a
+build after its very first dollar) is handled via a new `maxBudgetUsdForRunner = budget > 0 ? budget :
+undefined` conversion at the single declaration site, threaded through all 3 call sites (top-level
+runner, sub-agent spawn, escalation runner).
+
+**Left untouched (out of scope — different mechanism, no evidence it was involved):** `sessionCostCapUsd()`
+($5 default) — a separate "retry-on-stronger-model-after-an-empty-build" gate; `userMonthlyCapUsd()` —
+already disabled by default.
+
+Tests: +4 (default-disabled, positive override, explicit-0-still-disabled, garbage-falls-back-to-
+disabled) — exported `maxBuildBudgetUsd` to make this properly testable, matching the `maxBuildSeconds`
+pattern. Gate: frontend tsc 0, server tsc 0, vitest 4047/4047 PASS, boot:check PASS.
+
+**Follow-up owed:** re-enable via `AGENTV3_MAX_BUILD_USD` (or restore the code default) once the admin
+confirms the build pipeline has stabilized — this is a standing action item, not a permanent change.

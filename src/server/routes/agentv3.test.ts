@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -590,6 +590,30 @@ describe('maxBuildSeconds (watchdog wall-clock cap)', () => {
   it('falls back to the default on garbage', () => {
     process.env.AGENTV3_MAX_BUILD_SECONDS = 'abc';
     expect(maxBuildSeconds()).toBe(1080);
+  });
+});
+
+describe('maxBuildBudgetUsd (per-build cost cap — TEMPORARILY DISABLED by default, admin decision 2026-07-01)', () => {
+  const prev = process.env.AGENTV3_MAX_BUILD_USD;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_MAX_BUILD_USD;
+    else process.env.AGENTV3_MAX_BUILD_USD = prev;
+  });
+  it('defaults to 0 (disabled) — a build is never cut off mid-repair while bugs are still being fixed', () => {
+    delete process.env.AGENTV3_MAX_BUILD_USD;
+    expect(maxBuildBudgetUsd()).toBe(0);
+  });
+  it('honors a positive override (re-enabling the cap needs only an env var, no code change)', () => {
+    process.env.AGENTV3_MAX_BUILD_USD = '25';
+    expect(maxBuildBudgetUsd()).toBe(25);
+  });
+  it('treats an explicit 0 the same as unset (disabled)', () => {
+    process.env.AGENTV3_MAX_BUILD_USD = '0';
+    expect(maxBuildBudgetUsd()).toBe(0);
+  });
+  it('falls back to disabled on garbage', () => {
+    process.env.AGENTV3_MAX_BUILD_USD = 'abc';
+    expect(maxBuildBudgetUsd()).toBe(0);
   });
 });
 

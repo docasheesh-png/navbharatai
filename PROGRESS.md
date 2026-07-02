@@ -7377,3 +7377,18 @@ stranger denied = the core fix, null/empty fail-closed). Gate: frontend tsc 0, s
 
 Remaining: back to v3.0 redesign (A6 build state machine, A8 resumable manifest) — large hot-path
 rewrites, pending fresh admin appetite.
+
+## 2026-07-02 — Security (IDOR sweep): close unauth /api/user/usage/:userId
+
+Swept all user-scoped routes for the wallet/sync IDOR pattern. Found ONE remaining gap: `GET
+/api/user/usage/:userId` (build.ts, Phase 4.2 monthly-AI-cost summary for the Billing panel) had NO
+auth middleware — any uid could read another user's build count and AI spend (USD). Every other
+user-scoped route (secrets, techdebt, sync, wallet, webhooks) already had requireUserMatch/
+requireWorkspaceAccess; admin routes use verifyAdminToken. This was the lone hole.
+
+Fix (same pattern): add `requireUserMatch('userId')` to the route (server); client sends the Bearer
+token via `authedHeaders()` on the fetch (was previously token-less). Best-effort caller (wrapped in
+try/catch, "never blocks wallet") degrades gracefully if the token is briefly unavailable. VITEST-skips
+the check. Gate: frontend tsc 0, server tsc 0, vitest 4187/4187 PASS, boot:check PASS.
+
+Remaining: back to v3.0 redesign (A6/A8) — large hot-path rewrites, pending fresh admin appetite.

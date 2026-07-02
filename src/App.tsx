@@ -948,7 +948,7 @@ export default function App() {
 
       // Phase 4.2 — fetch monthly AI cost (best-effort, never blocks wallet load).
       try {
-        const usageRes = await fetch(`/api/user/usage/${encodeURIComponent(user.uid)}`);
+        const usageRes = await fetch(`/api/user/usage/${encodeURIComponent(user.uid)}`, { headers: await authedHeaders() });
         if (usageRes.ok) {
           const usageData = await usageRes.json();
           setMonthlyAiCost({ totalBuilds: usageData.totalBuilds ?? 0, totalCostUsd: usageData.totalCostUsd ?? 0, month: usageData.month ?? '' });

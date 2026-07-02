@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, requireUserMatch } from '../lib/authMiddleware';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
@@ -811,7 +811,10 @@ export function registerBuildRoutes(app: Express): void {
   });
 
   // Phase 4.2 — Per-user monthly AI cost summary for the Billing panel.
-  app.get('/api/user/usage/:userId', async (req: Request, res: Response) => {
+  // SECURITY (audit IDOR): scope to the verified token uid — this exposes a user's build count and AI
+  // spend; without the check any uid could be read. Client sends the Bearer token via authedHeaders();
+  // VITEST skips the check (see requireUserMatch).
+  app.get('/api/user/usage/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ error: 'userId required' });
     const month = typeof req.query.month === 'string' ? req.query.month : undefined;

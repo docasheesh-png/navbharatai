@@ -21,6 +21,7 @@ export type ToolName =
   | 'recall'
   | 'evaluate'
   | 'generate_readme'
+  | 'generate_architecture_docs'
   | 'generate_env_example'
   | 'generate_gitignore'
   | 'generate_openapi'

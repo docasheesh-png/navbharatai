@@ -79,7 +79,15 @@ describe('makeSubAgentSpawn — specialist sub-agents', () => {
         create: async (params: Record<string, unknown>) => {
           const msgs = params.messages as Array<{ role: string; content: unknown }>;
           const first = msgs[0];
+          // Content can be a raw string OR a block array (the transcript cache breakpoint converts a
+          // string message into a [{type:'text',...}] block to carry cache_control) — read either shape.
           if (typeof first?.content === 'string') seenPrompt = first.content;
+          else if (Array.isArray(first?.content)) {
+            seenPrompt = (first.content as Array<{ type?: string; text?: string }>)
+              .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+              .map((b) => b.text)
+              .join('');
+          }
           return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } as never;
         },
       },

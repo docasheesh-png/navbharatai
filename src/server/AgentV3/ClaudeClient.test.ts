@@ -186,6 +186,47 @@ describe('ClaudeClient prompt caching (RC-2)', () => {
     expect(tools[0].cache_control).toBeUndefined();
     expect(tools[1].cache_control).toEqual({ type: 'ephemeral' });
   });
+
+  it('caches the growing transcript: last block of last message gets the breakpoint', async () => {
+    const { create, client } = mock();
+    await client.runTurn({
+      model: 'm',
+      system: 'sys',
+      messages: [
+        { role: 'user', content: 'build a todo app' },
+        { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', id: '1', name: 'write_file', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: '1', content: 'wrote' }] },
+      ],
+    });
+    const msgs = create.mock.calls[0][0].messages;
+    // First message's string content is untouched (no breakpoint on it).
+    expect(msgs[0].content).toBe('build a todo app');
+    // Last message's last block carries the breakpoint.
+    const lastBlocks = msgs[2].content;
+    expect(lastBlocks[lastBlocks.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('never accumulates >1 transcript breakpoint: a stale one on an earlier message is stripped', async () => {
+    const { create, client } = mock();
+    await client.runTurn({
+      model: 'm',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'old', cache_control: { type: 'ephemeral' } }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'reply' }] },
+      ],
+    });
+    const msgs = create.mock.calls[0][0].messages;
+    // The stale breakpoint on message 0 is removed; only the last message's last block has one.
+    expect(msgs[0].content[0].cache_control).toBeUndefined();
+    expect(msgs[1].content[0].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('does not cache the transcript when cache:false', async () => {
+    const { create, client } = mock();
+    const original = [{ role: 'user', content: 'hi' }];
+    await client.runTurn({ model: 'm', messages: original, cache: false });
+    expect(create.mock.calls[0][0].messages).toBe(original); // passed through untouched
+  });
 });
 
 describe('ClaudeClient retry/backoff (production hardening)', () => {

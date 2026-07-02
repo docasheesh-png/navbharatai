@@ -133,7 +133,8 @@ export async function callClaude(message: string, key?: string, history: any[] =
   messages.push({ role: 'user', content: message });
 
   const response = await client.messages.create({
-    model: "claude-3-5-sonnet-20241022",
+    // claude-3-5-sonnet-20241022 is retired (404s) — keep this on a current model.
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     system: systemInstruction || getBharatContext(),
     messages,

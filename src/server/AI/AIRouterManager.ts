@@ -38,27 +38,26 @@ export class AIRouterManager {
 
   static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; }
 
-  // FREE: Vertex (5 models) → Gemini (3 models) → Grok. Claude NEVER used in free.
+  // FREE: Vertex (3 models) → Gemini (2 models) → Grok. Claude NEVER used in free.
   private static buildFree(): AIRouter {
     const router = new AIRouter("free");
-    console.log('[ROUTER_MGR] Building FREE chain: Vertex×5 → Gemini×3 → Grok');
+    console.log('[ROUTER_MGR] Building FREE chain: Vertex×3 → Gemini×2 → Grok');
 
+    // Current Gemini models only — gemini-2.0-flash / gemini-1.5-* are RETIRED and 404
+    // at the provider, making those fallback slots dead weight that only added latency.
     const vertex = new VertexProvider();
     [
-      ['gemini-2.5-pro',   1],
-      ['gemini-2.5-flash', 2],
-      ['gemini-2.0-flash', 3],
-      ['gemini-1.5-pro',   4],
-      ['gemini-1.5-flash', 5],
+      ['gemini-2.5-pro',        1],
+      ['gemini-2.5-flash',      2],
+      ['gemini-2.5-flash-lite', 3],
     ].forEach(([m, p]) => {
       try { router.registerProvider(slot(vertex, p as number, m as string)); } catch {}
     });
 
     const gemini = new GeminiProvider();
     [
-      ['gemini-2.5-flash', 6],
-      ['gemini-2.0-flash', 7],
-      ['gemini-1.5-pro',   8],
+      ['gemini-2.5-flash',      6],
+      ['gemini-2.5-flash-lite', 7],
     ].forEach(([m, p]) => {
       try { router.registerProvider(slot(gemini, p as number, m as string)); } catch {}
     });
@@ -73,10 +72,10 @@ export class AIRouterManager {
     return router;
   }
 
-  // PRO: Claude Opus 4.8 (primary) → Sonnet 3.5 → Grok → Vertex → Gemini
+  // PRO: Claude Opus 4.8 (primary) → Sonnet 4.6 → Grok → Vertex → Gemini
   private static buildPro(): AIRouter {
     const router = new AIRouter("pro");
-    console.log('[ROUTER_MGR] Building PRO chain: Opus4.8(p1) → Sonnet3.5(p2) → Grok×2 → Vertex×5 → Gemini×3');
+    console.log('[ROUTER_MGR] Building PRO chain: Opus4.8(p1) → Sonnet4.6(p2) → Grok×2 → Vertex×3 → Gemini×2');
 
     try {
       const opus = new AnthropicProvider('claude-opus-4-8');
@@ -86,7 +85,8 @@ export class AIRouterManager {
     } catch {}
 
     try {
-      const sonnet = new AnthropicProvider('claude-3-5-sonnet-20241022');
+      // claude-3-5-sonnet-20241022 is RETIRED (404s) — this fallback slot was silently dead.
+      const sonnet = new AnthropicProvider('claude-sonnet-4-6');
       sonnet.priority = 2;
       router.registerProvider(sonnet);
     } catch {}
@@ -98,12 +98,12 @@ export class AIRouterManager {
     } catch {}
 
     const vertex = new VertexProvider();
-    [['gemini-2.5-pro',5],['gemini-2.5-flash',6],['gemini-2.0-flash',7],['gemini-1.5-pro',8],['gemini-1.5-flash',9]].forEach(([m,p]) => {
+    [['gemini-2.5-pro',5],['gemini-2.5-flash',6],['gemini-2.5-flash-lite',7]].forEach(([m,p]) => {
       try { router.registerProvider(slot(vertex, p as number, m as string)); } catch {}
     });
 
     const gemini = new GeminiProvider();
-    [['gemini-2.5-flash',10],['gemini-2.0-flash',11],['gemini-1.5-pro',12]].forEach(([m,p]) => {
+    [['gemini-2.5-flash',10],['gemini-2.5-flash-lite',11]].forEach(([m,p]) => {
       try { router.registerProvider(slot(gemini, p as number, m as string)); } catch {}
     });
 
@@ -127,7 +127,7 @@ export class AIRouterManager {
 
     try {
       const gemini = new GeminiProvider();
-      router.registerProvider(slot(gemini, 2, 'gemini-2.0-flash'));
+      router.registerProvider(slot(gemini, 2, 'gemini-2.5-flash'));
     } catch {}
 
     try {

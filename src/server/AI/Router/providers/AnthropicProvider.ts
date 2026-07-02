@@ -1,6 +1,15 @@
 import { AIProvider, AIProviderResponse } from '../ProviderTypes';
 import Anthropic from '@anthropic-ai/sdk';
 
+/** Detect an image's MIME type from its base64 leading bytes (JPEG/PNG/GIF/WebP). */
+export function sniffImageMime(base64: string): string {
+  if (base64.startsWith('/9j/')) return 'image/jpeg';
+  if (base64.startsWith('iVBOR')) return 'image/png';
+  if (base64.startsWith('R0lGOD')) return 'image/gif';
+  if (base64.startsWith('UklGR')) return 'image/webp';
+  return 'image/png';
+}
+
 export class AnthropicProvider implements AIProvider {
   name: 'ANTHROPIC' = 'ANTHROPIC';
   priority = 4;
@@ -15,7 +24,9 @@ export class AnthropicProvider implements AIProvider {
   /** Token budget for extended thinking (default 8k — balanced depth vs latency). */
   thinkingBudget = 8_000;
 
-  constructor(modelId = 'claude-3-5-sonnet-20241022') {
+  // Default kept CURRENT — claude-3-5-sonnet-20241022 is retired and 404s, which silently
+  // killed every fallback chain that constructed this provider without an explicit model.
+  constructor(modelId = 'claude-sonnet-4-6') {
     this.modelId = modelId;
     console.log("ANTHROPIC_API_KEY check:", !!process.env.ANTHROPIC_API_KEY);
     // Native Anthropic endpoint only — the aicredits proxy has been removed.
@@ -30,11 +41,15 @@ export class AnthropicProvider implements AIProvider {
     let userContent: Anthropic.ContentBlockParam[] | string;
     if (images && images.length > 0) {
       const parts: Anthropic.ContentBlockParam[] = images.map(b64 => {
-        // base64 string may include a data-URL prefix — strip it
+        // base64 string may include a data-URL prefix — use its MIME when present, then strip it.
+        // (media_type was hardcoded image/png before, so every JPEG/WebP upload was rejected by
+        // the API's media-type validation.)
+        const declared = /^data:([^;]+);base64,/.exec(b64)?.[1];
         const raw = b64.replace(/^data:[^;]+;base64,/, '');
+        const media = declared || sniffImageMime(raw);
         return {
           type: 'image',
-          source: { type: 'base64', media_type: 'image/png', data: raw },
+          source: { type: 'base64', media_type: media as any, data: raw },
         } as Anthropic.ImageBlockParam;
       });
       parts.push({ type: 'text', text: prompt });

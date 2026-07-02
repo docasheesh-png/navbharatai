@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse } from '../ProviderTypes';
+import { grokVisionModels } from '../../../lib/visionModels';
 
 export class GrokProvider implements AIProvider {
   name: 'GROK' = 'GROK';
@@ -24,8 +25,9 @@ export class GrokProvider implements AIProvider {
   async execute(prompt: string, schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
     const startTime = Date.now();
     const hasImages = Array.isArray(images) && images.length > 0;
-    // Use vision model when images are supplied; fast text model otherwise
-    const model = modelOverride || (hasImages ? 'grok-2-vision-1212' : 'grok-3-fast');
+    // Use a CURRENT vision-capable model when images are supplied (grok-2-vision-1212 is
+    // retired and 404s — it silently broke every image read via this provider); fast text otherwise.
+    const model = modelOverride || (hasImages ? grokVisionModels()[0] : 'grok-3-fast');
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
     if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });

@@ -7297,3 +7297,20 @@ negative/garbage guards; rounding). Gate: frontend tsc 0, server tsc 0, vitest 4
 Remaining payment/wallet criticals (next slices): unauth /api/wallet/:userId + /api/sync/:userId IDOR
 (needs coordinated client-token + server auth, like C1); payment verify/coupon atomicity+auth (H1);
 simulator gating (NODE_ENV). Then back to v3.0 redesign (A6/A8) pending appetite.
+
+## 2026-07-02 — Security (payment/wallet closeout, cont.): unauth IDOR on /api/wallet + /api/sync
+
+Both route groups took identity from the :userId PATH param with NO auth: `GET /api/sync/:userId` and
+`POST /api/sync/:userId` let anyone read or OVERWRITE any account's entire workspace (chat sessions +
+last generated app) by uid; `GET /api/wallet/:userId` (+/logs,/transactions) leaked balance, email/name
+PII, usage logs and payment history. uids aren't secret.
+
+Coordinated client+server fix (like C1): server adds `requireUserMatch('userId')` (verifies the Firebase
+token uid === path uid; 401/403 otherwise; VITEST-skipped). Client (App.tsx) now sends the Bearer token
+on all five calls via a new `authedHeaders()` helper (sync GET/POST, wallet GET/logs/transactions) —
+these previously sent no token. Best-effort callers (sync is fire-and-forget; wallet in try/catch)
+degrade gracefully if the token is briefly unavailable. Gate: frontend tsc 0, server tsc 0, vitest
+4181/4181 PASS, boot:check PASS.
+
+Remaining payment slices: verify/coupon atomicity + auth (H1 — double-credit race, unauth coupon),
+simulator NODE_ENV→PAYMENTS_LIVE gating. Then team-RBAC, then back to v3.0 redesign (A6/A8) pending appetite.

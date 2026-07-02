@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
 import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
+import { requireUserMatch } from '../lib/authMiddleware';
 
 /**
  * Cross-device cloud sync routes (chat sessions + last generated app), stored in
@@ -22,7 +23,10 @@ const MAX_WORKSPACE_BYTES = 8_000_000;
 const chunkDocId = (userId: string, i: number) => `${userId}__c${i}`;
 
 export function registerSyncRoutes(app: Express): void {
-  app.get('/api/sync/:userId', async (req: Request, res: Response) => {
+  // SECURITY (audit): require the verified Firebase token uid to match :userId — without this any
+  // caller could read (GET) or overwrite (POST) ANY account's entire workspace by uid. The client
+  // sends the Bearer token via authedHeaders(); VITEST skips the check (see requireUserMatch).
+  app.get('/api/sync/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = req.params;
     if (!db) return res.json({ sessions: [], lastApp: '', updatedAt: null });
@@ -58,7 +62,7 @@ export function registerSyncRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/sync/:userId', async (req: Request, res: Response) => {
+  app.post('/api/sync/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });

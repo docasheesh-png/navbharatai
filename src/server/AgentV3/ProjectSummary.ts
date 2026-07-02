@@ -49,13 +49,20 @@ function detectStack(graph: ProjectGraph): string {
   return 'Web app';
 }
 
-/** Generic, safe "how to run" hint for a detected stack. Never fabricates exact commands. */
-function runHint(stack: string): string {
-  if (stack === 'Python') {
-    return 'Run: pip install -r requirements.txt, then start the server. Use the Preview tab to see it live.';
+/**
+ * Generic, safe "how to run" hint for a detected stack. Never fabricates exact commands.
+ * When `previewLive` is false, the LIVE preview did NOT come up during this build — so we do NOT
+ * claim "see it live" (the dishonest message a real build report showed while the preview never
+ * rendered). Instead we point the user at the reliable paths: In-browser preview + Diagnose.
+ */
+function runHint(stack: string, previewLive: boolean): string {
+  const runCmd = stack === 'Python'
+    ? 'Run: pip install -r requirements.txt, then start the server.'
+    : 'Run: npm install && npm run dev.';
+  if (previewLive) {
+    return `${runCmd} Use the Preview tab to see it live.`;
   }
-  // Every JS/web stack in v3.0 uses npm scripts; the Preview tab is always available.
-  return 'Run: npm install && npm run dev. Use the Preview tab to see it live.';
+  return `${runCmd} The live preview didn't start automatically — open the Preview tab, use the In-browser preview, or click "Diagnose" to boot the live server.`;
 }
 
 /**
@@ -63,9 +70,12 @@ function runHint(stack: string): string {
  * graph. PURE — no I/O, fully deterministic. Returns '' for an essentially empty
  * graph (no files) so the caller never shows an empty summary.
  */
-export function summarizeProject(graph: ProjectGraph, request: string): string {
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
+  // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
+  // preview URL was actually published this build) so the recap never claims "see it live" falsely.
+  const previewLive = opts?.previewLive !== false;
 
   const stack = detectStack(graph);
   const lines: string[] = [];
@@ -92,7 +102,7 @@ export function summarizeProject(graph: ProjectGraph, request: string): string {
     lines.push(`Routes: ${paths}${more}`);
   }
 
-  lines.push(runHint(stack));
+  lines.push(runHint(stack, previewLive));
 
   const out = lines.join('\n');
   if (out.length <= MAX_CHARS) return out;
@@ -103,6 +113,6 @@ export function summarizeProject(graph: ProjectGraph, request: string): string {
 }
 
 /** Thin wrapper — single clear entry point alias for the route/other callers. */
-export function projectSummaryNote(graph: ProjectGraph, request: string): string {
-  return summarizeProject(graph, request);
+export function projectSummaryNote(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean }): string {
+  return summarizeProject(graph, request, opts);
 }

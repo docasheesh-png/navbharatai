@@ -71,7 +71,11 @@ function isDevServerInvocation(segment: string): boolean {
   return (
     isVite ||
     /\b(?:dev|serve|watch|livereload)\b/i.test(segment) ||
-    /npm\s+run\s+(?:dev|start|serve)\b/i.test(segment) ||
+    // `npm run preview` (and pnpm/yarn) runs `vite preview` — a long-running static server that serves
+    // the built dist. Missing `preview` here made it run in the FOREGROUND and block for the full 5-min
+    // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the
+    // live preview still never came up. `npm run build` stays excluded (compiles then exits).
+    /(?:npm|pnpm|yarn)\s+run\s+(?:dev|start|serve|preview)\b/i.test(segment) ||
     /python.*http\.server|http-server|live-server/i.test(segment) ||
     /\buvicorn\b|\bgunicorn\b|\bflask\s+run\b/i.test(segment) ||
     // Shell scripts that wrap dev servers (Django, Flask, FastAPI dev.sh)

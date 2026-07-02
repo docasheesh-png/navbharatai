@@ -100,4 +100,21 @@ describe('summarizeProject', () => {
     const g = graph({ files: ['a.tsx'], components: ['A'], dependencies: ['react', 'vite'] });
     expect(projectSummaryNote(g, 'req')).toBe(summarizeProject(g, 'req'));
   });
+
+  it('does NOT claim "see it live" when the live preview never came up (no-fake-success)', () => {
+    const g = graph({ files: ['src/App.tsx'], components: ['App'], dependencies: ['react', 'vite'] });
+    const out = summarizeProject(g, 'build an app', { previewLive: false });
+    // The honest message must not falsely tell the user the app is live.
+    expect(out).not.toContain('see it live');
+    // It points them at the real, working paths instead.
+    expect(out).toContain('In-browser preview');
+    expect(out).toContain('Diagnose');
+  });
+
+  it('claims "see it live" only when a live preview actually came up', () => {
+    const g = graph({ files: ['src/App.tsx'], components: ['App'], dependencies: ['react', 'vite'] });
+    expect(summarizeProject(g, 'x', { previewLive: true })).toContain('see it live');
+    // Default (no opts) stays backward-compatible = preview-live message.
+    expect(summarizeProject(g, 'x')).toContain('see it live');
+  });
 });

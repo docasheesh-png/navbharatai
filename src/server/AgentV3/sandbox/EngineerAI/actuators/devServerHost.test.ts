@@ -138,6 +138,16 @@ describe('isLongRunningCommand', () => {
     expect(isLongRunningCommand('uvicorn main:app')).toBe(true);
   });
 
+  it('detects `npm/pnpm/yarn run preview` (the vite-preview wrapper that hit the 300s timeout in the report)', () => {
+    // Real build report: `$ npm run preview -- --host 0.0.0.0 --port 4173 → 300s deadline_exceeded`
+    // ran TWICE — 10 min wasted — because it was NOT recognized as long-running and blocked in the
+    // foreground for the full command timeout. It must be backgrounded like any other dev/preview server.
+    expect(isLongRunningCommand('npm run preview')).toBe(true);
+    expect(isLongRunningCommand('npm run preview -- --host 0.0.0.0 --port 4173')).toBe(true);
+    expect(isLongRunningCommand('pnpm run preview')).toBe(true);
+    expect(isLongRunningCommand('yarn run preview')).toBe(true);
+  });
+
   it('treats one-shot fetches and ordinary commands as NOT long-running', () => {
     expect(isLongRunningCommand('curl -s http://localhost:5173/serve')).toBe(false);
     expect(isLongRunningCommand('npm install')).toBe(false);

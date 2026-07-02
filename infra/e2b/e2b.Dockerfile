@@ -79,26 +79,28 @@ RUN mkdir -p /home/user/.e-tools \
 # only less optimal), and _npmInstall's `files.exists` guard makes the whole
 # feature a no-op on any image where this dir is absent.
 #
-# ROOT-CAUSE FIX (build failing here): the package.json used to be generated with a
-# MULTI-LINE `printf '%s\n' '{' \ '  "name"…' \ …` whose backslash-continued ARGS
-# E2B build-system v2's Dockerfile parser can mangle (real Docker joins them; a
-# naive line parser does not) → a truncated/broken package.json → `npm install`
-# fails with a JSON/parse error. It is now written with a SINGLE-LINE
-# `node -e writeFileSync(JSON.stringify(...))`, which is guaranteed-valid JSON and
-# has no multi-line continuation for the parser to mishandle. Diagnostics (node/npm
-# versions, disk, the generated package.json) print to the BUILD LOG so any residual
-# failure shows its real cause; npm errors are NEVER suppressed and there are NO
-# retries — a real failure still fails the image build loudly.
+# ROOT-CAUSE FIX (build kept failing at THIS step in ~1s — the package.json was never
+# validly written). The content used to be produced INLINE — first a multi-line
+# `printf '%s\n' '{' \ …`, then a single-line `node -e "JSON.stringify(…)"`. Both pack the
+# JSON with characters E2B build-system v2's Dockerfile parser mishandles — QUOTES, spaces
+# and the `&&` inside `"tsc && vite build"` — so the generator command itself is mangled and
+# the file is never written, and `npm install` then dies instantly on a missing/broken
+# package.json (exactly the sub-second failure seen). The fix removes ALL such characters from
+# the Dockerfile: the package.json is shipped as a single BASE64 token (only [A-Za-z0-9+/=],
+# nothing the parser or shell can touch) and decoded with `base64 -d`. The decoded bytes are
+# the exact JSON verified locally (react/react-dom/vite/@vitejs/plugin-react/typescript). A
+# `test -d` assertion fails the build loudly if the install produced nothing; diagnostics
+# print to the build log. No error suppression, no retries.
 RUN mkdir -p /home/user/.warm/vite-react \
-  && node -e "require('fs').writeFileSync('/home/user/.warm/vite-react/package.json', JSON.stringify({name:'project',version:'0.1.0',private:true,scripts:{dev:'vite',build:'tsc && vite build',preview:'vite preview'},dependencies:{react:'^18.3.1','react-dom':'^18.3.1'},devDependencies:{'@vitejs/plugin-react':'^4.3.1',typescript:'^5.5.3',vite:'^5.4.1'}}, null, 2) + '\n')" \
-  && echo '=== warm vite-react: environment ===' && node -v && npm -v && df -h \
-  && echo '=== warm vite-react: generated package.json ===' && cat /home/user/.warm/vite-react/package.json \
-  && echo '=== warm vite-react: npm install ===' \
+  && echo ewogICJuYW1lIjogInByb2plY3QiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInNjcmlwdHMiOiB7CiAgICAiZGV2IjogInZpdGUiLAogICAgImJ1aWxkIjogInRzYyAmJiB2aXRlIGJ1aWxkIiwKICAgICJwcmV2aWV3IjogInZpdGUgcHJldmlldyIKICB9LAogICJkZXBlbmRlbmNpZXMiOiB7CiAgICAicmVhY3QiOiAiXjE4LjMuMSIsCiAgICAicmVhY3QtZG9tIjogIl4xOC4zLjEiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIl40LjMuMSIsCiAgICAidHlwZXNjcmlwdCI6ICJeNS41LjMiLAogICAgInZpdGUiOiAiXjUuNC4xIgogIH0KfQo= | base64 -d > /home/user/.warm/vite-react/package.json \
+  && echo === warm vite-react: environment === && node -v && npm -v && df -h \
+  && echo === warm vite-react: generated package.json === && cat /home/user/.warm/vite-react/package.json \
+  && echo === warm vite-react: npm install === \
   && cd /home/user/.warm/vite-react \
   && npm install --no-audit --no-fund --loglevel=info \
   && test -d node_modules/react -a -d node_modules/vite \
   && npm cache clean --force \
-  && echo '=== warm vite-react: done — disk after ===' && df -h
+  && echo === warm vite-react: done === && df -h
 
 # Workspace root the actuator writes to — must match WORKSPACE_ROOT in
 # E2BActuator.ts ('/home/user/workspace').

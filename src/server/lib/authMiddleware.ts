@@ -42,6 +42,25 @@ export async function verifyFirebaseToken(req: Request): Promise<string | null> 
   }
 }
 
+/**
+ * Like verifyFirebaseToken, but returns the VERIFIED uid AND email from the decoded token (or null
+ * when no valid Bearer token). Use this where the email also drives an authorization decision (e.g.
+ * an allowlist) so the check can't be spoofed by a client-supplied `email` body field.
+ */
+export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: string; email: string | null } | null> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  const token = header.slice(7);
+  try {
+    const auth = await getAdminAuth();
+    if (!auth) return null;
+    const decoded = await auth.verifyIdToken(token);
+    return { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null };
+  } catch {
+    return null;
+  }
+}
+
 export function requireUserMatch(paramName = 'userId') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // VITEST: skip auth checks entirely

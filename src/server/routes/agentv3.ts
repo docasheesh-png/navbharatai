@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -193,6 +193,35 @@ function buildActuator(): IEngineerActuator {
  */
 export function buildSandboxUnavailableInProd(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.NODE_ENV === 'production' && !env.E2B_API_KEY && env.DOCKER_ENABLED !== 'true';
+}
+
+/**
+ * SECURITY (audit C1 / architecture A1) — resolve the caller's identity for a build. Identity comes
+ * ONLY from the VERIFIED Firebase token (`verifiedUid`), never a client-supplied body field
+ * (`claimedUid`), because the build path keys allowlist, cost, monthly-cap AND workspace access off
+ * it — a spoofable id let anyone read another user's workspace, bypass the cap, and spend
+ * NavBharatAI's own model budget under any account. Pure + exported + unit-tested.
+ *
+ * Rules (admin-approved 2026-07-02, "reject & ask refresh"):
+ *  • claim present but NO verified token → reject `reauth` (a spoof attempt, OR a real user whose
+ *    browser still has the pre-fix cached JS that didn't send the token — a refresh loads the
+ *    token-sending client; their workspace is untouched, so this is self-healing, not data loss).
+ *  • verified token present but a DIFFERENT claimed id → reject `mismatch` (spoof).
+ *  • otherwise ok; `userId` is the verified uid, or null for a genuinely anonymous caller (no token
+ *    AND no claim) — preserving the existing shared-anon path.
+ */
+export type BuildIdentity =
+  | { ok: true; userId: string | null }
+  | { ok: false; code: 'reauth' | 'mismatch'; error: string };
+
+export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: string | null): BuildIdentity {
+  if (claimedUid && !verifiedUid) {
+    return { ok: false, code: 'reauth', error: 'Your session token was not received. Please refresh the page and sign in again to continue.' };
+  }
+  if (verifiedUid && claimedUid && claimedUid !== verifiedUid) {
+    return { ok: false, code: 'mismatch', error: 'Identity mismatch — the signed-in account does not match the requested user.' };
+  }
+  return { ok: true, userId: verifiedUid };
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
@@ -1855,8 +1884,22 @@ export function registerAgentV3Routes(app: Express): void {
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
   app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
-    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
+    // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
+    // under VITEST (route handler isn't exercised by tests; the pure resolveBuildIdentity is tested
+    // directly), and a genuine anonymous caller (no token + no claim) still resolves to userId=null.
+    const claimedUid = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : null;
+    const verified = process.env.VITEST ? (claimedUid ? { uid: claimedUid, email: null } : null) : await verifyFirebaseIdentity(req);
+    const identity = resolveBuildIdentity(verified?.uid ?? null, claimedUid);
+    if (!identity.ok) {
+      res.status(401).json({ error: identity.error, code: identity.code });
+      return;
+    }
+    const userId = identity.userId;
+    // Allowlist/enable must key off the VERIFIED email when we have a token; only a genuinely
+    // anonymous caller (no verified identity) falls back to the claimed email — where there's no uid
+    // to impersonate anyway. Never trust a client `email` for an authenticated user.
+    const email = verified ? verified.email : (typeof req.body?.email === 'string' ? req.body.email : null);
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;

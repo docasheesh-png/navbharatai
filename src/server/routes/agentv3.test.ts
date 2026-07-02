@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -801,5 +801,28 @@ describe('buildSandboxUnavailableInProd — A2 prod sandbox guard (defense-in-de
     expect(buildSandboxUnavailableInProd({} as any)).toBe(false);
     expect(buildSandboxUnavailableInProd({ NODE_ENV: 'development' } as any)).toBe(false);
     expect(buildSandboxUnavailableInProd({ NODE_ENV: 'test' } as any)).toBe(false);
+  });
+});
+
+describe('resolveBuildIdentity — C1 verified-identity gate for the build path', () => {
+  it('uses the VERIFIED uid; ignores a matching claim', () => {
+    expect(resolveBuildIdentity('u1', 'u1')).toEqual({ ok: true, userId: 'u1' });
+    expect(resolveBuildIdentity('u1', null)).toEqual({ ok: true, userId: 'u1' });
+  });
+  it('genuine anonymous (no token, no claim) → ok with userId null (shared anon path preserved)', () => {
+    expect(resolveBuildIdentity(null, null)).toEqual({ ok: true, userId: null });
+  });
+  it('REJECTS a claimed userId with NO verified token (spoof, or stale pre-fix client) → reauth', () => {
+    const r = resolveBuildIdentity(null, 'victim-uid');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe('reauth');
+    expect(r.error).toMatch(/refresh/i);
+  });
+  it('REJECTS a token whose uid differs from the claimed userId → mismatch (the core spoof)', () => {
+    const r = resolveBuildIdentity('real-uid', 'victim-uid');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.code).toBe('mismatch');
   });
 });

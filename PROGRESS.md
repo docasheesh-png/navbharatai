@@ -7314,3 +7314,30 @@ degrade gracefully if the token is briefly unavailable. Gate: frontend tsc 0, se
 
 Remaining payment slices: verify/coupon atomicity + auth (H1 — double-credit race, unauth coupon),
 simulator NODE_ENV→PAYMENTS_LIVE gating. Then team-RBAC, then back to v3.0 redesign (A6/A8) pending appetite.
+
+## 2026-07-02 — Security (payment/wallet closeout, cont.): H1 — verify double-credit race + unauth coupon
+
+Two real money holes closed together (admin: "Dono karo").
+
+1) **verify-payment TOCTOU double-credit.** `verifyPaymentInternal` read `paymentStatus` with `getDoc`,
+   then later `updateDoc(SUCCESS)` and credited the wallet — a race window where N concurrent
+   `/verify-payment` calls on ONE genuinely-paid order could each pass the stale-PENDING check and each
+   credit the wallet (double/triple-spend). Fix: claim the PENDING→SUCCESS flip inside a Firestore
+   `runTransaction` — the transaction re-reads inside the tx and only the ONE caller that wins the flip
+   proceeds to credit; losers observe SUCCESS and return `alreadyProcessed`. The credit block now runs
+   exactly once per order with no further locking needed.
+
+2) **redeem-coupon unauthenticated / body-spoofable identity.** The route trusted `req.body.userId`, so
+   anyone could mint real spendable balance onto (or as) any account with an unauthenticated POST. Fix:
+   identity now comes from the VERIFIED Firebase token (`verifyFirebaseToken(req)`); a missing/invalid
+   token → 401. Redemption itself made atomic via `runTransaction` (create-if-not-exists on the
+   redemption doc) so a coupon can't be double-redeemed under concurrency. Client (App.tsx) sends the
+   Bearer token on the coupon call via `authedHeaders()`. VITEST accepts a body userId (route not
+   token-authed in tests).
+
+Test updated: redeem-coupon "userId missing" now asserts 401 ("sign in again") — the correct
+unauthenticated response, fired before the coupon-code check. Gate: frontend tsc 0, server tsc 0,
+vitest 4181/4181 PASS, boot:check PASS.
+
+Remaining payment slice: simulator NODE_ENV→explicit PAYMENTS_LIVE gating. Then team-RBAC (H2:
+getUserRole defaults everyone to 'owner'), then back to v3.0 redesign (A6/A8) pending appetite.

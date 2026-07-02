@@ -77,7 +77,10 @@ describe('Payment routes — /api/payment/verify-payment', () => {
 });
 
 describe('Payment routes — /api/payment/redeem-coupon', () => {
-  it('returns 400 when userId is missing', async () => {
+  it('returns 401 when the caller is not authenticated (no verified uid)', async () => {
+    // SECURITY (H1): the route now derives identity from the verified Firebase token, not the
+    // body. Under VITEST it accepts a body userId; with none present the caller is unauthenticated
+    // and must be rejected with 401 (before the coupon-code check).
     const register = await importPaymentRoutes();
     const routes = captureRoutes(register, () => {});
     const handler = routes.get('POST /api/payment/redeem-coupon')!;
@@ -85,8 +88,8 @@ describe('Payment routes — /api/payment/redeem-coupon', () => {
     const req = mockReq({ body: { code: 'PROMO10' } });
     const res = mockRes();
     await handler(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.error).toMatch(/not authenticated/i);
+    expect(res.statusCode).toBe(401);
+    expect(res.body?.error).toMatch(/sign in again/i);
   });
 
   it('returns 400 when coupon code is missing', async () => {

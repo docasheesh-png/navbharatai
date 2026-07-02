@@ -1053,7 +1053,7 @@ export default function App() {
         userId: user.uid,
         userEmail: user.email || '',
         userName: user.displayName || 'NavBharat Client'
-      });
+      }, { headers: await authedHeaders() }); // SECURITY (H1): server derives identity from this token
       if (res.data.success) {
         setCouponSuccess(`Successfully redeemed ₹${res.data.balanceAdded}! Added to your wallet credit.`);
         addLog(`Promo Coupon "${code.trim().toUpperCase()}" redeemed! ₹${res.data.balanceAdded} added to your wallet.`, 'success');

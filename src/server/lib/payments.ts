@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { getDb } from './db';
 import { getSecretValue } from './secrets';
 
@@ -100,10 +100,21 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     }
 
     if (isPaid) {
-      await updateDoc(txRef, {
-        paymentStatus: 'SUCCESS',
-        paymentReference: cfOrderIdRef
+      // SECURITY (H1): atomically claim the PENDING→SUCCESS flip so N concurrent /verify-payment calls
+      // on ONE genuinely-paid order can't each credit the wallet (a TOCTOU double-spend — the old
+      // getDoc-status → updateDoc → credit had a race window). Only the caller that WINS the flip
+      // proceeds to credit; the others observe SUCCESS and return alreadyProcessed. The credit block
+      // below therefore runs for exactly one caller per order and needs no further locking.
+      const claimedNow = await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(txRef);
+        if (!snap.exists()) return false;
+        if (snap.data().paymentStatus === 'SUCCESS') return false; // already claimed by a concurrent call
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef });
+        return true;
       });
+      if (!claimedNow) {
+        return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);
       const walletSnap = await getDoc(walletRef);

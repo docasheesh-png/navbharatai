@@ -1124,7 +1124,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </button>
             {historyOpen && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setHistoryOpen(false)} />
+                {/* cursor-pointer is load-bearing on iOS: without a direct listener (React delegates
+                    to the root) Safari only synthesizes click on "clickable" elements, so a bare div
+                    never closed the menu on tap-outside on iPhone. */}
+                <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryOpen(false)} aria-hidden="true" />
                 <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
                   <button
@@ -1160,33 +1163,44 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           const meta = sessionStatusMeta(c.status);
                           const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
                           const isDeleting = deletingHistoryId === c.id;
+                          // MOBILE TAP FIX: this row used to be a <div role="button"> with a NESTED
+                          // delete <button> inside it. On iOS Safari, tapping a non-interactive div
+                          // inside a scrollable (overflow-y-auto) menu is often treated as scroll
+                          // intent and never dispatches a click — so on phones "clicking an old chat
+                          // did nothing" while desktop mouse clicks worked. The open action is now a
+                          // REAL full-width <button> (guaranteed tap → click on iOS, keyboard support
+                          // for free), and delete is a SIBLING absolutely-positioned button (valid
+                          // HTML — no nested interactive). Delete was also opacity-0 until :hover,
+                          // which doesn't exist on touch — an invisible tap-eater on the row's right
+                          // edge; it now stays visible on touch layouts and hover-reveals on desktop.
                           return (
-                            <div
-                              key={c.id}
-                              role="button"
-                              tabIndex={isDeleting ? -1 : 0}
-                              onClick={() => { if (!isDeleting) openConversation(c.id); }}
-                              onKeyDown={(e) => { if (!isDeleting && (e.key === 'Enter' || e.key === ' ')) openConversation(c.id); }}
-                              title={c.title || 'Untitled build'}
-                              className={`group w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800'} ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}
-                            >
-                              <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
-                                <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />
-                              </span>
-                              <span className="flex-1 min-w-0">
-                                <span className="block truncate">{c.title || 'Untitled build'}</span>
-                                <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
-                                  {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
-                                  {meta.label && <span>{meta.label}</span>}
-                                  {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
-                                </span>
-                              </span>
+                            <div key={c.id} className={`relative group ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
                               <button
+                                type="button"
+                                onClick={() => { if (!isDeleting) openConversation(c.id); }}
+                                disabled={isDeleting}
+                                title={c.title || 'Untitled build'}
+                                className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
+                              >
+                                <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
+                                  <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />
+                                </span>
+                                <span className="flex-1 min-w-0">
+                                  <span className="block truncate">{c.title || 'Untitled build'}</span>
+                                  <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+                                    {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
+                                    {meta.label && <span>{meta.label}</span>}
+                                    {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
+                                  </span>
+                                </span>
+                              </button>
+                              <button
+                                type="button"
                                 onClick={(e) => handleDeleteConversation(e, c)}
                                 disabled={running || isDeleting}
                                 title="Delete this session"
                                 aria-label="Delete this session"
-                                className="shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
                               >
                                 {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                               </button>
@@ -1295,7 +1309,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </button>
             {historyReportOpen && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setHistoryReportOpen(false)} />
+                <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryReportOpen(false)} aria-hidden="true" />
                 <div className="absolute left-0 top-8 z-50 w-80 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
                   {selectedHistoryBuildId && (
                     <button

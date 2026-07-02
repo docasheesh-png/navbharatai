@@ -17,6 +17,8 @@
 // non-empty reply, or null when every allowed provider failed (caller shows an
 // honest message — never a fake result).
 
+import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
+
 export interface VisionAttachment {
   name: string;
   type: string;   // MIME, e.g. image/png, application/pdf
@@ -63,20 +65,27 @@ async function tryVertex(atts: VisionAttachment[], o: VisionOptions): Promise<st
   const location = process.env.GOOGLE_CLOUD_REGION || 'us-central1';
   const { VertexAI } = await import('@google-cloud/vertexai');
   const vertex = new VertexAI({ project: projectId, location });
-  const modelConfig: any = { model: 'gemini-2.0-flash-001' };
-  if (o.systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: o.systemPrompt }] };
-  const model = vertex.getGenerativeModel(modelConfig);
   const parts: any[] = [
     ...atts.map((f) => ({ inlineData: { mimeType: f.type, data: f.base64 } })),
     { text: o.prompt },
   ];
-  const result: any = await withTimeout(
-    model.generateContent({ contents: [{ role: 'user', parts }] }),
-    o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    'Vertex vision',
-  );
-  const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  return text || null;
+  for (const modelId of vertexVisionModels()) {
+    try {
+      const modelConfig: any = { model: modelId };
+      if (o.systemPrompt) modelConfig.systemInstruction = { role: 'system', parts: [{ text: o.systemPrompt }] };
+      const model = vertex.getGenerativeModel(modelConfig);
+      const result: any = await withTimeout(
+        model.generateContent({ contents: [{ role: 'user', parts }] }),
+        o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        `Vertex vision (${modelId})`,
+      );
+      const text = result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[VISION_CHAIN] Vertex ${modelId} failed: ${err?.message || err}`);
+    }
+  }
+  return null;
 }
 
 /** API-key Gemini via @google/genai (only when a real GEMINI_API_KEY is present). */
@@ -88,13 +97,20 @@ async function tryGeminiKey(atts: VisionAttachment[], o: VisionOptions): Promise
   const parts: any[] = [{ text: o.prompt }, ...atts.map((f) => ({ inlineData: { mimeType: f.type, data: f.base64 } }))];
   const config: any = { thinkingConfig: { thinkingBudget: 0 } };
   if (o.systemPrompt) config.systemInstruction = o.systemPrompt;
-  const result: any = await withTimeout(
-    ai.models.generateContent({ model: 'gemini-2.0-flash', contents: [{ parts }], config }),
-    o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    'Gemini vision',
-  );
-  const text = (result?.text as string | undefined)?.trim();
-  return text || null;
+  for (const modelId of geminiVisionModels()) {
+    try {
+      const result: any = await withTimeout(
+        ai.models.generateContent({ model: modelId, contents: [{ parts }], config }),
+        o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        `Gemini vision (${modelId})`,
+      );
+      const text = (result?.text as string | undefined)?.trim();
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[VISION_CHAIN] Gemini ${modelId} failed: ${err?.message || err}`);
+    }
+  }
+  return null;
 }
 
 /** Grok vision (images only — Grok cannot read PDFs). */
@@ -112,7 +128,7 @@ async function tryGrok(atts: VisionAttachment[], o: VisionOptions): Promise<stri
     ...(o.systemPrompt ? [{ role: 'system', content: o.systemPrompt }] : []),
     { role: 'user', content },
   ];
-  for (const model of ['grok-2-vision-1212', 'grok-2-mini-vision-1212']) {
+  for (const model of grokVisionModels()) {
     try {
       const r: any = await withTimeout(
         grok.chat.completions.create({ model, messages, max_tokens: 1500 }),
@@ -142,7 +158,7 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
   ];
   const cr: any = await withTimeout(
     claude.messages.create({
-      model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
+      model: claudeVisionAnswerModel(), max_tokens: 1500,
       system: o.systemPrompt || undefined,
       messages: [{ role: 'user', content }],
     }),

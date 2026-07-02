@@ -8,6 +8,7 @@
 // this module covers the multimodal types (images + PDF) that need a vision model.
 
 import { isVisionAttachment } from './attachmentText';
+import { claudeVisionModel, grokVisionModels, geminiVisionModels } from './visionModels';
 
 export interface RawAttachment {
   name: string;
@@ -34,12 +35,18 @@ async function describeWithGemini(att: RawAttachment): Promise<string> {
   try {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: key });
-    const r = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [{ parts: [{ text: DESCRIBE_INSTRUCTION }, { inlineData: { mimeType: att.type, data: att.base64 } }] }],
-      config: { thinkingConfig: { thinkingBudget: 0 } } as any,
-    });
-    return (r.text || '').trim();
+    for (const m of geminiVisionModels()) {
+      try {
+        const r = await ai.models.generateContent({
+          model: m,
+          contents: [{ parts: [{ text: DESCRIBE_INSTRUCTION }, { inlineData: { mimeType: att.type, data: att.base64 } }] }],
+          config: { thinkingConfig: { thinkingBudget: 0 } } as any,
+        });
+        const t = (r.text || '').trim();
+        if (t) return t;
+      } catch { /* try next model */ }
+    }
+    return '';
   } catch { return ''; }
 }
 
@@ -51,7 +58,7 @@ async function describeWithGrok(att: RawAttachment): Promise<string> {
   try {
     const { default: OpenAI } = await import('openai');
     const c = new OpenAI({ apiKey: key, baseURL: 'https://api.x.ai/v1' });
-    for (const m of ['grok-2-vision-1212', 'grok-2-mini-vision-1212']) {
+    for (const m of grokVisionModels()) {
       try {
         const r = await c.chat.completions.create({
           model: m, max_tokens: 1200,
@@ -79,7 +86,7 @@ async function describeWithClaude(att: RawAttachment): Promise<string> {
       ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: att.base64 } }
       : { type: 'image', source: { type: 'base64', media_type: att.type, data: att.base64 } };
     const r = await claude.messages.create({
-      model: 'claude-3-5-sonnet-20241022', max_tokens: 1500,
+      model: claudeVisionModel(), max_tokens: 1500,
       messages: [{ role: 'user', content: [block as any, { type: 'text', text: DESCRIBE_INSTRUCTION }] }],
     });
     return ((r.content.find((c: any) => c.type === 'text') as any)?.text || '').trim();

@@ -7412,3 +7412,35 @@ its ID token on the /chat submit (`getIdToken(true)`) so a stale/expired cached 
 of arriving unverifiable. Test updated (claim+no-token now asserts anonymous, not reauth).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4187/4187 PASS, boot:check PASS.
+
+## 2026-07-02 — Fix (admin-reported, all AIs): photos/documents returned "unable to read files"
+
+Admin: sending photos/documents to ANY AI (Free chat, Pro v3.0, Professionals) returned "unable to
+read files". ROOT CAUSE (found via full attachment-flow audit of every surface): all four vision call
+paths hardcoded 2024-era model ids that the providers have since RETIRED — `claude-3-5-sonnet-20241022`,
+`grok-2-vision-1212`, `gemini-2.0-flash(-001)`, `gemini-1.5-*`. Every image/PDF read 404'd at the
+provider, every chain fell through ALL providers, and each surface returned its honest "could not read"
+message — while plain text kept working (text paths lead with current ids).
+
+Fixes shipped together:
+1. NEW `src/server/lib/visionModels.ts` — single source of truth for vision model ids (env-overridable:
+   VISION_CLAUDE_MODEL / VISION_CLAUDE_ANSWER_MODEL / VISION_GROK_MODELS / VISION_GEMINI_MODELS /
+   VISION_VERTEX_MODELS). Current defaults: claude-haiku-4-5 (describe) / claude-sonnet-4-6 (answers),
+   grok-4, gemini-2.5-flash → 2.5-pro. Wired into visionChain.ts (Free/Pro chat), visionDescribe.ts
+   (v3.0), sda.ts (Doctor AI), pro.ts (Pro chat/plan), GrokProvider (Engineer AI images),
+   AnthropicProvider default, aiCalls.callClaude. Retired Gemini ladder tails in AIRouterManager +
+   AppEngine replaced with current ids (they were dead 404 slots adding latency).
+2. AnthropicProvider images: media_type was hardcoded image/png → every JPEG/WebP was rejected by
+   the API. Now uses the data-URL MIME or sniffs the base64 magic bytes.
+3. Config-driven Professionals (Teacher/Lawyer/CA/Mentor/…) had NO file path AT ALL (client had no
+   picker; server dropped everything except message). Added end-to-end: paperclip + paste in
+   ProfessionalChat.tsx (≤4 files, ≤10MB, images downscaled) → `attachments` in POST → server extracts
+   documents (shared extractor) + describes images/PDFs (vision chain) → honest "could not read" note
+   when nothing is extractable. AppKnowledgeBase professionals entry updated (per CLAUDE.md rule).
+4. Pro chat office files: raw utf-8 decode produced garbage for .docx/.xlsx/.pptx/.zip → now uses the
+   shared buildDocumentContext extractor.
+5. Free chat file picker accept= widened to the formats the server already reads (.docx/.xlsx/.pptx/.md
+   /code files were previously unpickable).
+
++4 unit tests (visionModels: defaults-are-current guard, env overrides, empty-override fallback).
+Gate: frontend tsc 0, server tsc 0, vitest 4191/4191 PASS, boot:check PASS.

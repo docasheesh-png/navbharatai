@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Express } from 'express';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { extractDocumentText } from '../lib/attachmentText';
+import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from '../lib/visionModels';
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
@@ -391,9 +392,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
 
-        // For images: use Grok vision model with image_url format
+        // For images: use current Grok vision-capable models (shared list, env-overridable)
         // For text: use standard Grok-3 models
-        const models = isImage ? ['grok-2-vision-1212', 'grok-2-mini-vision-1212'] : ['grok-3', 'grok-3-fast'];
+        const models = isImage ? grokVisionModels() : ['grok-3', 'grok-3-fast'];
         const userContent: any = isImage && fileData
           ? [
               { type: 'image_url', image_url: { url: `data:${fileType};base64,${fileData}` } },
@@ -414,7 +415,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (sdaGeminiKey) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
-        for (const m of ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']) {
+        for (const m of geminiVisionModels()) {
           try {
             const r = await new GoogleGenAI({ apiKey: sdaGeminiKey }).models.generateContent({ model: m, systemInstruction: SDA_SYSTEM_FINAL, contents, config: { thinkingConfig: { thinkingBudget: 0 } } } as any);
             const t = r.text || '';
@@ -467,7 +468,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
           const { VertexAI } = await import('@google-cloud/vertexai');
           const vertexAI = new VertexAI({ project: sdaProjectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
           const contents = buildGeminiContents();
-          for (const modelName of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          for (const modelName of vertexVisionModels()) {
             try {
               const model = vertexAI.getGenerativeModel({ model: modelName, systemInstruction: { role: 'system', parts: [{ text: SDA_SYSTEM_FINAL }] } });
               const result = await model.generateContent({ contents });
@@ -490,7 +491,7 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
               ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileData } }, { type: 'text', text: `[PDF Report: ${fileName}]\n${message}` }]
               : message;
             const r = await new A({ apiKey: anthropicKey }).messages.create({
-              model: 'claude-3-5-sonnet-20241022', max_tokens: 2000, system: SDA_SYSTEM_FINAL,
+              model: claudeVisionAnswerModel(), max_tokens: 2000, system: SDA_SYSTEM_FINAL,
               messages: [...historyForAI, { role: 'user', content: userContent }],
             });
             reply = (r.content.find((c: any) => c.type === 'text') as any)?.text || '';

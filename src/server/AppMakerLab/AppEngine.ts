@@ -382,7 +382,7 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
 
   // ── Sequential fallback: Gemini → Vertex ─────────────────────────────────
   if (geminiKey) {
-    for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+    for (const m of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro']) {
       try {
         const ai = new GoogleGenAI({ apiKey: geminiKey });
         const r = await ai.models.generateContent({ model: m, contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + prompt }] }] });
@@ -392,7 +392,7 @@ async function callAI(prompt: string, systemPrompt: string, maxTokens = 6000): P
   }
 
   if (projectId) {
-    for (const m of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+    for (const m of ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro']) {
       try {
         const { GoogleGenAI: VtxAI } = await import('@google/genai');
         const ai = new VtxAI({ vertexai: true, project: projectId, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });

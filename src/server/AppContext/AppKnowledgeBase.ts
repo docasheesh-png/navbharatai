@@ -1362,10 +1362,10 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
     id: 'professionals',
     name: 'Professionals Hub',
     path: 'Sidebar → Professionals',
-    description: 'The hub for specialized professional AI assistants. Currently hosts Doctor AI (clinical decision support) and Engineer AI (autonomous app builder). Future AI assistants will appear here.',
-    howToUse: 'Open Professionals from the sidebar, then choose the AI specialist you need.',
+    description: 'The hub for specialized professional AI assistants. Currently hosts Doctor AI (clinical decision support) and Engineer AI (autonomous app builder). Future AI assistants will appear here. Every config-driven professional (Teacher, Lawyer, CA, Mentor, etc.) supports FILE ATTACHMENTS: click the paperclip (or paste a file) to send images, PDFs, Word/Excel/PowerPoint documents, ZIPs, or text/code files — the AI reads their real content and answers about them.',
+    howToUse: 'Open Professionals from the sidebar, then choose the AI specialist you need. To share a file, click the paperclip button next to the message box (up to 4 files, 10 MB each) or paste an image directly.',
     relatedFeatures: ['doctor_ai', 'engineer_ai'],
-    keywords: ['professionals', 'specialists', 'experts', 'professional ai', 'specialist ai', 'doctor ai engineer ai'],
+    keywords: ['professionals', 'specialists', 'experts', 'professional ai', 'specialist ai', 'doctor ai engineer ai', 'attach file', 'upload file', 'send photo', 'send pdf', 'file bhejo', 'photo bhejo', 'document upload'],
   },
 
   // ─── SETTINGS ─────────────────────────────────────────────────────────────

@@ -1616,7 +1616,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                     onChange={handleFileSelect}
                     className="hidden"
                     multiple
-                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.json,.zip"
+                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
                   />
                   <textarea
                     ref={textareaRef}

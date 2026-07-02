@@ -11,6 +11,8 @@ import { CREATOR_IDENTITY } from '../lib/prompts';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { reviewCode, formatReviewReport } from '../pro/ProCodeReview';
 import { deployVercel, deployNetlify, deployGitHubPages, deployCloudflarePages } from '../pro/ProDeploy';
+import { buildDocumentContext } from '../lib/attachmentText';
+import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels } from '../lib/visionModels';
 
 /**
  * Pro engine routes extracted from the server.ts monolith (Phase 1, AI-core step d).
@@ -49,7 +51,7 @@ export function registerProRoutes(app: Express): void {
       try {
         const A = (await import('@anthropic-ai/sdk')).default;
         const r = await new A({ apiKey }).messages.create({
-          model: 'claude-3-5-sonnet-20241022', max_tokens: maxTokens,
+          model: claudeVisionAnswerModel(), max_tokens: maxTokens,
           system: systemPrompt, messages: msgs,
         });
         const text = (r.content.find((c: any) => c.type === 'text') as any)?.text;
@@ -85,11 +87,13 @@ export function registerProRoutes(app: Express): void {
       const isPDFFile = hasFile && fileType === 'application/pdf';
       const isTextDoc = hasFile && !isImageFile && !isPDFFile;
 
-      // Decode text/code files and prepend to message so all providers can use them
+      // Extract document content via the shared extractor (plain text/code AND Word/Excel/
+      // PowerPoint/ZIP) and prepend to the message so every provider can read it. The old raw
+      // utf-8 decode turned office/zip binaries into garbage bytes the model couldn't use.
       if (isTextDoc && fileData) {
         try {
-          const decoded = Buffer.from(fileData, 'base64').toString('utf-8').slice(0, 8000);
-          message = `[Attached document: ${fileName}]\n\`\`\`\n${decoded}\n\`\`\`\n\n${message}`;
+          const docBlock = await buildDocumentContext([{ name: fileName || 'document', type: fileType, base64: fileData }]);
+          if (docBlock) message = `${docBlock}\n\n${message}`;
         } catch { /* keep original */ }
       }
       // Ensure file-only messages have a prompt
@@ -353,8 +357,8 @@ ${CREATOR_IDENTITY}`;
       // Plan race: Grok (the aicredits Claude proxy racer has been removed).
       if (grokKeyPlan) planRacers.push(async (signal) => {
         const c = new OpenAI({ apiKey: grokKeyPlan, baseURL: 'https://api.x.ai/v1' });
-        // Use vision model for images, text model for everything else
-        const grokModels = (hasFile && isImageFile) ? ['grok-2-vision-1212', 'grok-2-mini-vision-1212'] : ['grok-3', 'grok-3-fast'];
+        // Use current vision-capable models for images (shared, env-overridable), text models otherwise
+        const grokModels = (hasFile && isImageFile) ? grokVisionModels() : ['grok-3', 'grok-3-fast'];
         const grokMsgs = [
           { role: 'system' as const, content: PLAN_PROMPT },
           ...planHistoryMsgs,
@@ -407,7 +411,7 @@ ${CREATOR_IDENTITY}`;
             parts: [{ text: String(m.text || m.content || '').slice(0, 600) }]
           }));
           while (historyContents.length > 0 && historyContents[0].role !== 'user') historyContents.shift();
-          for (const gm of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          for (const gm of geminiVisionModels()) {
             try {
               const r = await new GoogleGenAI({ apiKey: geminiKeyPlan }).models.generateContent({
                 model: gm,
@@ -424,7 +428,7 @@ ${CREATOR_IDENTITY}`;
         try {
           const { GoogleGenAI: VtxAI } = await import('@google/genai');
           const ai = new VtxAI({ vertexai: true, project: projectIdPlan, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-          for (const vm of ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']) {
+          for (const vm of geminiVisionModels()) {
             try {
               const r = await ai.models.generateContent({ model: vm, contents: [{ role: 'user', parts: buildGeminiPlanParts() }] });
               if (r.text?.trim()) return res.json({ reply: sanitizePlanningReply(r.text), files: {}, suggestBuild });

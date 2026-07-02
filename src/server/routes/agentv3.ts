@@ -117,6 +117,7 @@ function sessionCostCapUsd(): number {
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
 import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
+import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
 import '../AgentV3/VercelProvider';
@@ -2644,7 +2645,16 @@ export function registerAgentV3Routes(app: Express): void {
         // silent gap after the headers is what trips Cloud Run / mobile-Safari
         // request timeouts and surfaces as a bare "Load failed" on the client.
         events.emit({ type: 'narration', agent: 'architect', text: 'Setting up your workspace…', ts: Date.now() });
-        await actuator.ensureWorkspace(workspaceId, framework);
+        // SPEED (flag-gated) — RESUME this workspace's own warm sandbox (files + node_modules + dev
+        // server already there) instead of a cold create + restore + install. The sandbox id is stored
+        // per workspaceId, and workspaceId is derived server-side from the VERIFIED uid, so this can
+        // only ever resume THIS user's own sandbox. If the sandbox was reaped/expired, ensureWorkspace's
+        // Sandbox.connect→create fallback transparently makes a fresh one (today's behaviour), so this
+        // is safe even when the resume misses. Enable with AGENTV3_SANDBOX_RESUME=on.
+        const resumeSandboxId = sandboxResumeEnabled()
+          ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
+          : undefined;
+        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
         // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
         // build on the existing (Firestore) durability path, never blocking it.
@@ -4011,6 +4021,15 @@ export function registerAgentV3Routes(app: Express): void {
       // if this is skipped the user never loses code — it only keeps History complete.
       if (dispatcherForFlush) {
         await raceTimeout(dispatcherForFlush.flushCheckpoints(), 6_000, 'flushCheckpoints').catch(() => {});
+      }
+      // SPEED (flag-gated) — remember THIS workspace's now-warm sandbox (built app + node_modules +
+      // dev server) so the next build for the same session resumes it instead of a cold create. Recorded
+      // at the END so the id reflects the final warm sandbox. Best-effort + bounded; only when enabled.
+      if (sandboxResumeEnabled()) {
+        try {
+          const sbId = await raceTimeout(actuator.getSandboxId(workspaceId), 5_000, 'getSandboxId').catch(() => null);
+          if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
+        } catch { /* best-effort — never affects the build */ }
       }
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.

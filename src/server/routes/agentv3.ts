@@ -126,6 +126,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
+import { validateProjectForPreview } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -1358,6 +1359,16 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       const actuator = buildActuator();
       const expectedPort = oneShotDevPort(framework);
+      // STRUCTURE VALIDATION FIRST — before spending 90 s trying to boot a server that CAN'T run.
+      // Read package.json and confirm the project is actually runnable (valid JSON + a dev/start/serve
+      // script). A missing/broken package.json is reported as a clear structural issue instead of the
+      // mystery "Closed Port Error: no service on port 5173" the admin hit.
+      const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+      const structure = validateProjectForPreview(pkgRaw);
+      if (!structure.ok) {
+        res.json({ ok: false, portListening: false, reason: structure.issues.join(' '), detail: '' });
+        return;
+      }
       // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +
       // one retry can legitimately take that long on a cold sandbox; a shorter cap would report a
       // false "could not reach the sandbox" for an install that's simply still running).

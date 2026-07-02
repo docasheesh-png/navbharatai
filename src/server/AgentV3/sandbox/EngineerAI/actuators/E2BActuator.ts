@@ -4,6 +4,7 @@ import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -589,59 +590,66 @@ export class E2BActuator implements IEngineerActuator {
       await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 })
         .catch(() => {});
 
-      // Start the dev server, then POLL the port and return the moment it is up
-      // instead of sleeping a fixed budget. A server that boots in 3 s no longer
-      // costs the full wait — the single biggest wall-clock saving in a build.
-      const handle = await sandbox.commands.run(devCommand, {
-        cwd: WORKSPACE_ROOT,
-        background: true,
-        onStdout: s => { stdout += s; },
-        onStderr: s => { stderr += s; },
-      });
-      let wait = await sandbox.commands.run(buildPortWaitCommand(port, 25), { timeoutMs: 30_000 })
-        .catch(() => ({ stdout: 'PORT_DOWN' } as any));
-      await handle.disconnect().catch(() => {});
-
-      // If the port never came up, attempt one automatic restart so transient
-      // startup crashes self-heal — again polling (not a fixed sleep) for the port.
-      if (wait.stdout.includes('PORT_DOWN')) {
-        stdout += `\n[health-check] port ${port} not responding — restarting…`;
-        await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 })
-          .catch(() => {});
-        const retry = await sandbox.commands.run(devCommand, {
-          cwd: WORKSPACE_ROOT,
-          background: true,
-          onStdout: s => { stdout += s; },
-          onStderr: s => { stderr += s; },
+      // Launch the dev server + a BOUNDED, CAUSE-SPECIFIC recovery loop (production-grade). Each round:
+      // launch → poll the port (return the moment it's up) → if still down, read the dev server's own
+      // log, classify the REAL failure, and apply the ONE correct recovery — reinstall a missing dep,
+      // free a busy port, STOP on a code error the agent must fix (a restart can never help it), or
+      // plain-retry a transient crash. This replaces the old single blind restart and yields an HONEST
+      // root cause when it still can't come up (instead of a generic "check the logs").
+      const launchAndWait = async (seconds: number): Promise<boolean> => {
+        const h = await sandbox.commands.run(devCommand, {
+          cwd: WORKSPACE_ROOT, background: true,
+          onStdout: s => { stdout += s; }, onStderr: s => { stderr += s; },
         });
-        wait = await sandbox.commands.run(buildPortWaitCommand(port, 20), { timeoutMs: 25_000 })
-          .catch(() => ({ stdout: 'PORT_DOWN' } as any));
-        await retry.disconnect().catch(() => {});
+        const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
+          .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
+        await h.disconnect().catch(() => {});
+        return w.stdout.includes('PORT_UP');
+      };
+      const readDevLog = async (): Promise<string> =>
+        sandbox.commands.run(`cat ${DEV_SERVER_LOG_PATH} 2>/dev/null | tail -80`, { cwd: WORKSPACE_ROOT, timeoutMs: 5000 })
+          .then((r) => r.stdout).catch(() => '');
+
+      let portUp = await launchAndWait(25);
+      let devLog = '';
+      let lastDiagnosis: DevServerDiagnosis | undefined;
+      const MAX_RECOVERY = 2;
+      for (let attempt = 1; !portUp && attempt <= MAX_RECOVERY; attempt++) {
+        devLog = await readDevLog();
+        const diag = planDevServerRecovery(devLog, attempt, MAX_RECOVERY);
+        lastDiagnosis = diag;
+        if (diag.recovery === 'code_fix' || diag.recovery === 'give_up') {
+          // A syntax/transform error fails identically on every restart, and give_up means attempts are
+          // spent — surface the real cause and stop wasting the build budget on restarts.
+          stdout += `\n[health-check] ${diag.detail}`;
+          break;
+        }
+        stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
+        if (diag.recovery === 'reinstall') {
+          const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
+          stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
+        }
+        // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).
+        await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 }).catch(() => {});
+        portUp = await launchAndWait(20);
       }
 
-      // The dev server's output now goes to a FILE (see redirectDevServerOutput), so read the file for
-      // drift detection instead of the live stream (which is intentionally empty now). Best-effort:
-      // if the read fails we fall back to whatever the stream captured + the pinned port.
-      const devLog = await sandbox.commands
-        .run(`cat ${DEV_SERVER_LOG_PATH} 2>/dev/null | tail -50`, { cwd: WORKSPACE_ROOT, timeoutMs: 5000 })
-        .then((r) => r.stdout)
-        .catch(() => '');
+      // The dev server's output goes to a FILE (redirectDevServerOutput), so read it for drift detection
+      // instead of the live stream (intentionally empty now). Best-effort — fall back to the pinned port.
+      if (!devLog) devLog = await readDevLog();
       if (devLog) stdout += devLog;
 
-      // SOURCE OF TRUTH for the preview: the port the server ACTUALLY bound (parsed
-      // from its own output), not the assumed default. If it drifted despite pinning
-      // (a framework we don't pin), preview the REAL port. Tell the agent the exact
-      // port to pass to update_preview so the last step — connecting the preview —
-      // can never aim at the wrong port.
+      // SOURCE OF TRUTH for the preview: the port the server ACTUALLY bound (parsed from its own output),
+      // not the assumed default. If it drifted despite pinning, preview the REAL port so update_preview
+      // can never aim at the wrong one.
       const boundPort = detectDevPort(devLog || stdout, port);
-      if (boundPort !== port) {
-        const reWait = await sandbox.commands.run(buildPortWaitCommand(boundPort, 10), { timeoutMs: 15_000 })
-          .catch(() => ({ stdout: 'PORT_DOWN' } as any));
-        wait = reWait.stdout.includes('PORT_UP') ? reWait : wait;
+      if (portUp && boundPort !== port) {
+        const reUp = await sandbox.commands.run(buildPortWaitCommand(boundPort, 10), { timeoutMs: 15_000 })
+          .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
+        portUp = reUp.stdout.includes('PORT_UP') ? true : portUp;
       }
-      stdout += wait.stdout.includes('PORT_UP')
-        ? `\n[health-check] dev server is UP on port ${boundPort}. Call update_preview with port=${boundPort}.`
-        : `\n[health-check] dev server did not come up on port ${boundPort} — check the logs above, then start it again.`;
+      // Honest health line: the verified port when UP, the REAL root cause when DOWN.
+      stdout += `\n${devServerHealthLine(portUp, boundPort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;
 
       return { exitCode: 0, stdout, stderr };
     }

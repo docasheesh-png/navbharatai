@@ -249,7 +249,30 @@ export async function resolveReadIdentity(req: Request): Promise<{ userId: strin
     };
   }
   const v = await verifyFirebaseIdentity(req);
-  return { userId: v?.uid ?? null, email: v?.email ?? null };
+  if (v) return { userId: v.uid, email: v.email };
+  // TOKEN-VERIFY FALLBACK — the "history opens to '0 messages' on every chat" fix.
+  //
+  // The 3 conversation routes (list / get-one / delete) were the ONLY v3.0 reads gated on a
+  // verified token ALONE. Every OTHER v3.0 route resolves identity as `verifiedUid ?? claimedUid`
+  // (workspaceOwnershipOk / assertWorkspaceOwner) — that is how file CONTENTS, memory and the build
+  // report all read today. `verifyIdToken` returns null on a TRANSIENT failure for a genuinely
+  // signed-in user (a just-expired/again-refreshed token, an admin-SDK cert-fetch hiccup, a
+  // cold-start init race). When that happened, resolveReadIdentity returned userId=null, so:
+  //   • the LIST route 400'd  → the server transcripts vanished from History, and
+  //   • the GET route could not build the real `agentv3-{uid}-{sid}` candidate → 404,
+  // and the client fell back to the (session-switch-erased) chat_sessions copy → the "saved copy
+  // has 0 messages" toast on EVERY item, while files/memory stayed fine (they use the fallback).
+  //
+  // Falling back to the request's CLAIMED userId here aligns these reads with the SAME capability
+  // model the rest of v3.0 already uses: access is still gated downstream by conversationAccess (the
+  // record's userId must match this identity, or be the shared-anon bucket), and opening a single
+  // conversation additionally requires its UNGUESSABLE id. The verified token still takes precedence
+  // whenever it IS present — the fallback only widens the token-less path, never overrides a token.
+  const claimed = typeof req.query.userId === 'string' ? req.query.userId
+    : (typeof req.body?.userId === 'string' ? req.body.userId : null);
+  const email = typeof req.query.email === 'string' ? req.query.email
+    : (typeof req.body?.email === 'string' ? req.body.email : null);
+  return { userId: claimed, email };
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────

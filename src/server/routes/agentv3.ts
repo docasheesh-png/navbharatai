@@ -78,7 +78,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from 
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors } from '../AgentV3/TscGate';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
@@ -2497,6 +2497,10 @@ export function registerAgentV3Routes(app: Express): void {
     );
     const effectiveBuildSeconds = scaleBuildSeconds(maxBuildSeconds(), buildDepth);
     const deadlineMs = effectiveBuildSeconds * 1000;
+    // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
+    // final billing hook can fold them into the user's charge with the same markup as every other
+    // v3.0 call (NavBharatAI-Anthropic-billed). Stays {0,0} unless the blueprint step actually runs.
+    const blueprintUsage = { inputTokens: 0, outputTokens: 0 };
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -3038,6 +3042,46 @@ export function registerAgentV3Routes(app: Express): void {
         const { guidance } = dialoguePhaseContext({ intent, prompt, hasExistingFiles: isEditMode, planning: planFirst });
         if (guidance) architectSystem = `${guidance}\n\n---\n\n${architectSystem}`;
       } catch { /* dialogue phase is best-effort — a failure leaves the prompt unchanged */ }
+
+      // P-ARCH+.3 — up-front BLUEPRINT (advisory) for DEEP, agentic, NEW builds. The fast lane already
+      // freezes a file-manifest + shared contract; the agentic loop plans free-form (update_todo only),
+      // so a large app drifts (mismatched imports, missing files). This does ONE bounded, best-effort
+      // model step to propose a file manifest + shared contract and PREPENDS it as advisory guidance —
+      // the architect still owns the plan. Default OFF (opt-in AGENTV3_BLUEPRINT=on), matching the
+      // cautious rollout of AGENTV3_ESCALATION/AUTOFIX. FULLY CONTAINED: on any timeout/error the block
+      // is empty and the build runs EXACTLY as today; its tokens are billed via blueprintUsage below.
+      if (
+        !isEditMode && intent === 'new_build' && buildDepth === 'deep'
+        && !classifyForOneShot(analysis?.startTier) && process.env.AGENTV3_BLUEPRINT === 'on'
+      ) {
+        try {
+          const bpGenerate = async (system: string, user: string): Promise<string> => {
+            const startedAt = Date.now();
+            const call = new ClaudeClient(undefined, { maxRetries: 1 }).runTurn({
+              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
+            });
+            // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
+            const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('blueprint step timed out')), 30_000));
+            const t = await Promise.race([call, timeout]);
+            try {
+              buildDiag.recordLlmCall({ model: fastBuildModel(), provider: 'anthropic', promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+            } catch { /* diagnostics best-effort */ }
+            blueprintUsage.inputTokens += t.usage.inputTokens;
+            blueprintUsage.outputTokens += t.usage.outputTokens;
+            return t.text;
+          };
+          const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework), manifestUserPrompt(prompt, scaffold)));
+          if (manifest.length >= 2) {
+            const contract = ((await bpGenerate(contractSystemPrompt(framework), contractUserPrompt(prompt, manifest))) || '').trim();
+            const block = blueprintAdvisoryBlock(manifest, contract);
+            if (block) {
+              architectSystem = `${block}\n\n---\n\n${architectSystem}`;
+              events.emit({ type: 'narration', agent: 'architect', text: 'Sketching a file blueprint & shared contract to keep this larger app consistent…', ts: Date.now() });
+            }
+          }
+        } catch { /* blueprint is advisory + best-effort — on any error/timeout the build proceeds unchanged */ }
+      }
       if (isEditMode) {
         let fileTree: string[] = [];
         try {
@@ -3953,7 +3997,12 @@ export function registerAgentV3Routes(app: Express): void {
       // the user sees ₹0. Only consumed on result.ok (a failed build never burns a free credit),
       // and fail-safe — any error leaves the user billed normally. effectiveBilledUsd flows into
       // both the cost record AND the result event so the customer-facing amount matches.
-      let effectiveBilledUsd = result.billedUsd;
+      // P-ARCH+.3 — fold the optional blueprint step's tokens into the charge with the SAME markup as
+      // every other v3.0 call, so NavBharatAI never eats that cost when the build succeeds. It's added
+      // BEFORE the zeroing below, so a failed/free build (which bills ₹0) correctly doesn't charge for
+      // the blueprint either — consistent with the rest of the build's billing policy.
+      let effectiveBilledUsd = result.billedUsd
+        + billedAmountUsd({ inputTokens: blueprintUsage.inputTokens, outputTokens: blueprintUsage.outputTokens }, powerLevelReq);
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
       // zero files were created (even after the Claude retry), the build failed — bill ₹0.
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.

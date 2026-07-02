@@ -372,6 +372,23 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
 }
 
 /**
+ * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
+ * NOT per build/message.
+ *
+ * THE BUG this fixes: every build minted `conversationId: randomUUID()`, and a single build can spin up
+ * to FIVE runners (main + escalation + retry + preview-heal + auto-fix) — so one session's many messages
+ * (and even one message's retries) each became a SEPARATE conversation document → the history menu
+ * showed every message as its own "chat", and reopening/continuing landed on a fragmented transcript
+ * (so v3.0 behaved like a fresh session on each message and couldn't edit coherently). Deriving the id
+ * from the (session-stable) workspaceId makes all of them share ONE conversation: the first build
+ * creates it, every later runner/build appends its turns, and the history shows ONE entry per session
+ * with all its messages in order. Pure + exported for testing.
+ */
+export function conversationIdForWorkspace(workspaceId: string): string {
+  return workspaceId;
+}
+
+/**
  * Hard per-build cost cap (USD) — stops one runaway build from spending unbounded money.
  * TEMPORARILY DISABLED (admin decision, 2026-07-01): while build-pipeline bugs are still being found
  * and fixed, a build must be allowed to run to completion rather than being cut off mid-repair — the
@@ -3011,7 +3028,9 @@ export function registerAgentV3Routes(app: Express): void {
       };
       // Hoisted so the fast-lane fallback persistence below (SETTLED section) can reuse the SAME id —
       // if the agentic runner ends up actually persisting under it, the fallback is a no-op.
-      const mainConversationId = randomUUID();
+      // STABLE per-session id so ALL runners in this build AND every later message in this session
+      // share ONE conversation (append, don't fork) → one history entry per session, coherent editing.
+      const mainConversationId = conversationIdForWorkspace(workspaceId);
       const runner = new AgentRunner({
         ...baseRunnerOpts,
         client,
@@ -3345,7 +3364,7 @@ export function registerAgentV3Routes(app: Express): void {
               model: resolveModel(tier === 'opus' && onlyOpus),
               persistence: {
                 store: getConversationStore(),
-                conversationId: randomUUID(),
+                conversationId: mainConversationId, // same session conversation — append, don't fork
                 userId: userId ?? 'anon',
                 workspaceId,
                 title: deriveTitle(prompt),
@@ -3412,7 +3431,7 @@ export function registerAgentV3Routes(app: Express): void {
           effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
           persistence: {
             store: getConversationStore(),
-            conversationId: randomUUID(),
+            conversationId: mainConversationId, // same session conversation — append, don't fork
             userId: userId ?? 'anon',
             workspaceId,
             title: deriveTitle(prompt),
@@ -3519,7 +3538,7 @@ export function registerAgentV3Routes(app: Express): void {
               ...baseRunnerOpts,
               client: buildTurnRunner({ claudeFirst: true }),
               model: resolveModel(onlyOpus),
-              persistence: { store: getConversationStore(), conversationId: randomUUID(), userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             const healed = await healRunner.run(buildPreviewRepairPrompt(verdict.problems, consoleErrs));
             if (healed.ok) result = healed;
@@ -3552,7 +3571,7 @@ export function registerAgentV3Routes(app: Express): void {
             ...baseRunnerOpts,
             client: buildTurnRunner({ claudeFirst: true }),
             model: resolveModel(onlyOpus),
-            persistence: { store: getConversationStore(), conversationId: randomUUID(), userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
             const fix = await fixRunner.run(buildRepairPrompt(captured));
@@ -3599,22 +3618,28 @@ export function registerAgentV3Routes(app: Express): void {
         const recentForUser = await store.listByUser(userId ?? 'anon', 10);
         if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
           const now = Date.now();
-          await store.create({
-            id: mainConversationId,
-            userId: userId ?? 'anon',
-            workspaceId,
-            title: deriveTitle(prompt),
-            messages: [
-              { role: 'user', content: prompt },
-              { role: 'assistant', content: result.summary || '' },
-            ],
-            createdAt: now,
-          });
-          await store.update(mainConversationId, {
-            status: result.ok ? 'complete' : 'error',
-            billedUsd: result.billedUsd,
-            updatedAt: now,
-          });
+          const turn = [
+            { role: 'user', content: prompt },
+            { role: 'assistant', content: result.summary || '' },
+          ];
+          const patch = { status: result.ok ? ('complete' as const) : ('error' as const), billedUsd: result.billedUsd, updatedAt: now };
+          // UPSERT: the conversation id is now STABLE per session, so a later message in the same
+          // session must APPEND its turn to the existing conversation, not create() (which throws on a
+          // duplicate id and would silently drop the message). Create only the first time.
+          const existing = await store.get(mainConversationId).catch(() => null);
+          if (existing) {
+            await store.appendMessages(mainConversationId, turn, patch);
+          } else {
+            await store.create({
+              id: mainConversationId,
+              userId: userId ?? 'anon',
+              workspaceId,
+              title: deriveTitle(prompt),
+              messages: turn,
+              createdAt: now,
+            });
+            await store.update(mainConversationId, patch);
+          }
         }
       } catch { /* fallback persistence is best-effort — never affects the build result */ }
 

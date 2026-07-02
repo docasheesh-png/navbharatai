@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -120,6 +120,22 @@ describe('workspaceOwnershipOk — fixes "Forbidden: this workspace does not bel
   it('rejects a malformed / non-agentv3 workspace id', () => {
     expect(workspaceOwnershipOk('user1', null, '')).toBe(false);
     expect(workspaceOwnershipOk('user1', null, 'not-a-workspace')).toBe(false);
+  });
+});
+
+describe('conversationIdForWorkspace — one conversation per SESSION, not per message/build', () => {
+  it('is STABLE for a given workspace (every message/build in a session shares one conversation)', () => {
+    const ws = deriveWorkspaceId('user1', 'sess-abcdef');
+    // The SAME session-workspace always maps to the SAME conversation id — so build 2, 3, … append to
+    // build 1's conversation instead of forking a new history entry each time.
+    expect(conversationIdForWorkspace(ws)).toBe(conversationIdForWorkspace(ws));
+    expect(conversationIdForWorkspace(ws)).toBe(ws);
+  });
+
+  it('is DISTINCT across different sessions (a real new chat is a real new entry)', () => {
+    const a = conversationIdForWorkspace(deriveWorkspaceId('user1', 'sess-aaaaaa'));
+    const b = conversationIdForWorkspace(deriveWorkspaceId('user1', 'sess-bbbbbb'));
+    expect(a).not.toBe(b);
   });
 });
 

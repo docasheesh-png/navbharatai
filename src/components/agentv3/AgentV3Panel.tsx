@@ -388,6 +388,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // every v3.0 session is always in History and restorable. Best-effort; merge so partial writes
     // never clobber a later, fuller one.
     if (!userId || !sessionIdRef.current) return;
+    // SWITCH GUARD: never write while openConversation is mid-switch — at that moment convo is
+    // already cleared/reduced but sessionIdRef still names the PREVIOUS session, so this write
+    // used to replace the previous chat's saved messages with a shrunken thread (the erasure
+    // behind "old chat opens empty"). The post-switch state change re-runs this effect safely.
+    if (sessionSwitchRef.current) return;
     const thread = convo;
     const firstUser = thread.find((m) => m.role === 'user')?.text;
     if (!firstUser) return; // nothing meaningful to save yet
@@ -605,6 +610,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Messages for chat_sessions-only history entries (keyed by sessionId), stashed at list time so
   // opening one restores its thread without a second fetch. See loadHistory + openConversation.
   const chatSessionMsgsRef = useRef<Map<string, Array<{ text: string; sender?: string; role?: string; timestamp?: string; ts?: number }>>>(new Map());
+  // True while openConversation is switching sessions — blocks the chat_sessions save effect from
+  // firing mid-switch (stale sessionIdRef + already-reduced convo), which used to OVERWRITE the
+  // previous chat's saved doc with a shrunken thread. That gradual erasure is why old chats opened
+  // empty ("history open nahi ho rahi").
+  const sessionSwitchRef = useRef(false);
   // Reusable loader so both the initial open AND the "Try again" retry button can
   // re-fetch without duplicating the fetch/loading-state logic.
   //
@@ -676,55 +686,84 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const openConversation = async (id: string) => {
     setOpenChatError(null);
     if (tapDebug) setLastTap((prev) => `${prev} | openConversation(${id.slice(0, 24)}…) FIRED`.slice(-180));
+    // SWITCH GUARD: while a session switch is in flight, the chat_sessions save effect must NOT
+    // run — after the clears below commit, sessionIdRef still points at the PREVIOUS session while
+    // `convo` is already reduced, so the effect used to overwrite the previous chat's saved doc
+    // with a shrunken thread (AI replies erased). That day-long, gradual corruption is why old
+    // chats opened EMPTY. The finally below re-arms saving once the new session is fully adopted.
+    sessionSwitchRef.current = true;
     setHistoryOpen(false);
-    // DETACH the current build first (same as startNewSession): reset() aborts this UI's stream,
-    // clears `running` (so the opened chat's composer is enabled, not stuck disabled) and bumps the
-    // generation guard so the abandoned build can't re-attach over the one being opened. The server
-    // build, if any, keeps running in the background and stays resumable from History — nothing is
-    // killed. Without this, opening a chat during a (possibly stuck) build left `running` true and
-    // the old stream still writing into the newly-opened session.
-    reset();
-    setWorkspaceFiles(null);
-    setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
-    setSelectedFile(null);
-    setAgentHistory([]);
-    setCheckpointHistory([]);
-    setFiles([]);
-    const restored = await loadConversation({ userId, email, id });
-    if (restored) {
-      if (restored.workspaceId) {
-        const prefix = `agentv3-${normalizeUid(userId)}-`;
-        if (restored.workspaceId.startsWith(prefix)) {
-          const sid = restored.workspaceId.slice(prefix.length);
-          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+    try {
+      // DETACH the current build first (same as startNewSession): reset() aborts this UI's stream,
+      // clears `running` (so the opened chat's composer is enabled, not stuck disabled) and bumps the
+      // generation guard so the abandoned build can't re-attach over the one being opened. The server
+      // build, if any, keeps running in the background and stays resumable from History — nothing is
+      // killed. Without this, opening a chat during a (possibly stuck) build left `running` true and
+      // the old stream still writing into the newly-opened session.
+      reset();
+      setWorkspaceFiles(null);
+      setWorkspaceFilesFor(null); // clear the stale-switch tag so the new workspace's files load
+      setSelectedFile(null);
+      setAgentHistory([]);
+      setCheckpointHistory([]);
+      setFiles([]);
+      const restored = await loadConversation({ userId, email, id });
+      if (restored) {
+        if (restored.workspaceId) {
+          // The server may resolve a v3_ entry to its ANON-degraded workspace (agentv3-anon-<sid>) —
+          // adopt the session id from EITHER prefix so a follow-up continues that exact project.
+          for (const prefix of [`agentv3-${normalizeUid(userId)}-`, 'agentv3-anon-']) {
+            if (restored.workspaceId.startsWith(prefix)) {
+              const sid = restored.workspaceId.slice(prefix.length);
+              if (sid) { sessionIdRef.current = sid; persistSessionId(sid); }
+              break;
+            }
+          }
         }
+        autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
+        rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
+        setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
+        if (restored.messages.length === 0) {
+          // The record exists but its thread is empty — opening it must not LOOK like a dead click.
+          setOpenChatError(
+            'This chat opened, but its saved transcript is empty (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.',
+          );
+        }
+        return;
       }
-      autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
-      rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
-      setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
-      return;
+      // FALLBACK: the session exists only in chat_sessions (a chat, or a fast-lane build that never
+      // wrote a server transcript). Adopt its sessionId and restore its saved thread from the doc we
+      // stashed at list time; files rehydrate automatically from the derived workspaceId (S4 effect).
+      const sessionId = id.replace(/^v3_/, '');
+      const saved = chatSessionMsgsRef.current.get(sessionId);
+      if (!saved || saved.length === 0) {
+        // NEVER a silent no-op (an empty [] stash is exactly as dead as a missing one): the tap DID
+        // work and the open FAILED/restored nothing — say so, with the real reason.
+        setOpenChatError(
+          saved
+            ? 'This chat opened, but its saved copy has 0 messages (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.'
+            : 'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.',
+        );
+        if (saved) {
+          // Still adopt the session so "send a message to continue" genuinely continues THIS project.
+          sessionIdRef.current = sessionId;
+          persistSessionId(sessionId);
+          autoRestoredSessionRef.current = sessionId;
+          rehydratedWsRef.current = '';
+        }
+        return;
+      }
+      sessionIdRef.current = sessionId;
+      persistSessionId(sessionId);
+      autoRestoredSessionRef.current = sessionId;
+      rehydratedWsRef.current = '';
+      const toTs = (m: { timestamp?: string; ts?: number }) => m.ts ?? (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+      const isUser = (m: { sender?: string; role?: string }) => m.sender === 'user' || m.role === 'user';
+      setUserMsgs(saved.filter(isUser).map((m) => ({ role: 'user' as const, text: m.text, ts: toTs(m) })));
+      setAgentHistory(saved.filter((m) => !isUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: toTs(m) })));
+    } finally {
+      sessionSwitchRef.current = false;
     }
-    // FALLBACK: the session exists only in chat_sessions (a chat, or a fast-lane build that never
-    // wrote a server transcript). Adopt its sessionId and restore its saved thread from the doc we
-    // stashed at list time; files rehydrate automatically from the derived workspaceId (S4 effect).
-    const sessionId = id.replace(/^v3_/, '');
-    const saved = chatSessionMsgsRef.current.get(sessionId);
-    if (!saved) {
-      // NEVER a silent no-op: the tap DID work and the open FAILED — say so, with the real reason
-      // (server transcript unavailable/refused AND no stashed chat_sessions copy for this entry).
-      setOpenChatError(
-        'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.',
-      );
-      return;
-    }
-    sessionIdRef.current = sessionId;
-    persistSessionId(sessionId);
-    autoRestoredSessionRef.current = sessionId;
-    rehydratedWsRef.current = '';
-    const toTs = (m: { timestamp?: string; ts?: number }) => m.ts ?? (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
-    const isUser = (m: { sender?: string; role?: string }) => m.sender === 'user' || m.role === 'user';
-    setUserMsgs(saved.filter(isUser).map((m) => ({ role: 'user' as const, text: m.text, ts: toTs(m) })));
-    setAgentHistory(saved.filter((m) => !isUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: toTs(m) })));
   };
   const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —

@@ -293,8 +293,34 @@ export function conversationAccess(
   userId: string | null,
 ): 'ok' | 'not-found' | 'forbidden' {
   if (!rec) return 'not-found';
+  // ANON EXEMPTION (mirrors workspaceOwnershipOk, #829): a record saved under the literal 'anon'
+  // bucket has NO real owner to protect — it exists because the build path degraded a briefly
+  // token-less (but genuinely signed-in) caller to anonymous. Its unguessable random id/workspace
+  // is the capability. Without this, the user's OWN build transcript (saved as anon) was
+  // 'forbidden' to them → opening that chat restored an EMPTY thread.
+  if (rec.userId === 'anon') return 'ok';
   if (!userId || rec.userId !== userId) return 'forbidden';
   return 'ok';
+}
+
+/**
+ * Candidate conversation-store ids for a history entry the client asked to open. A `v3_<sessionId>`
+ * entry (from chat_sessions) has no server record under that literal id — but the SAME session's
+ * server transcript exists under its workspace id (#837: conversationId = workspaceId), which is
+ * `agentv3-{uid}-{sessionId}` — or `agentv3-anon-{sessionId}` when the build ran identity-degraded.
+ * Trying these in order lets a v3_ entry open its FULL server transcript instead of falling back to
+ * the (possibly corrupted/empty) chat_sessions copy. Pure + exported for testing.
+ */
+export function candidateConversationIds(id: string, verifiedUid: string | null): string[] {
+  const out = [id];
+  if (id.startsWith('v3_')) {
+    const sid = id.slice(3);
+    if (sid) {
+      if (verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid)) out.push(`agentv3-${verifiedUid}-${sid}`);
+      out.push(`agentv3-anon-${sid}`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -1132,7 +1158,16 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     try {
-      const rec = await getConversationStore().get(req.params.id);
+      // A v3_<sessionId> history entry has no server record under that literal id, but the SAME
+      // session's full transcript lives under its workspace id — agentv3-{uid}-{sid}, or
+      // agentv3-anon-{sid} when the build ran identity-degraded. Try the candidates in order so
+      // opening such an entry restores the REAL transcript instead of an empty local copy.
+      const store = getConversationStore();
+      let rec: Awaited<ReturnType<typeof store.get>> = null;
+      for (const cid of candidateConversationIds(req.params.id, userId)) {
+        rec = await store.get(cid).catch(() => null);
+        if (rec) break;
+      }
       const access = conversationAccess(rec, userId);
       if (access === 'not-found') {
         res.status(404).json({ error: 'Conversation not found.' });

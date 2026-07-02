@@ -10,6 +10,8 @@ import {
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { sessionStatusMeta, groupSessionsByDate } from './agentV3History';
+import { buildChatBlocks } from './activityTimeline';
+import { ActionGroupRow } from './ActivityTimeline';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
@@ -193,6 +195,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // `convo` after `running` has cleared on the terminal result).
     .filter((m) => running || !/^⏱️\s*Still building…/.test(m.text || ''))
     .sort((a, b) => a.ts - b.ts);
+
+  // Claude-style chat timeline (admin redesign): prose bubbles interleaved with COLLAPSED action
+  // rows — everything the engine did between two prose lines ("Created 33 files", "Ran `npm
+  // install`", real +N/-M from the actual patches) in one glanceable, expandable row, instead of
+  // the old flat spam of per-file ticks and ⏱ heartbeats. Pure grouping in activityTimeline.ts.
+  const chatBlocks = buildChatBlocks(convo, state.activity, state.diffs);
 
   // All checkpoints across the session (prior turns + the live build), deduped by
   // sha so the History tab keeps showing earlier checkpoints across messages.
@@ -1464,7 +1472,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.
               </div>
             )}
-            {convo.map((m, i) => <Bubble key={i} msg={m} />)}
+            {chatBlocks.map((b) => b.kind === 'msg'
+              ? <Bubble key={b.key} msg={b.msg} />
+              : <ActionGroupRow key={b.key} block={b} />)}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
             )}

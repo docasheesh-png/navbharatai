@@ -52,6 +52,22 @@ RUN corepack enable \
 RUN npm install -g create-vite@latest create-next-app@latest \
   && npm cache verify
 
+# --- Pre-bake Playwright + Chromium into the tools dir (SPEED) -------------
+# WHY: _kickoffPlaywright() in E2BActuator installs playwright (~120s cap) and
+# `playwright install chromium` (~180s cap) into /home/user/.e-tools on EVERY
+# new sandbox — competing for the 2 vCPU with the app's npm install, and the
+# first screenshot/browser_action blocks up to 90-120s waiting for it. Baking
+# it here makes _kickoffPlaywright's `files.exists` guards short-circuit to
+# instant-ready; the runtime install stays as the fallback for any drift.
+# The path + browsers dir MUST match TOOLS_DIR ('/home/user/.e-tools') and the
+# PLAYWRIGHT_BROWSERS_PATH the daemon/screenshot scripts use.
+# Pin the version so the baked scripts stay API-compatible with the binary.
+RUN mkdir -p /home/user/.e-tools \
+  && npm install playwright@1.49.1 --prefix /home/user/.e-tools --no-save \
+  && PLAYWRIGHT_BROWSERS_PATH=/home/user/.e-tools/.browsers \
+     /home/user/.e-tools/node_modules/.bin/playwright install --with-deps chromium \
+  && npm cache clean --force
+
 # Workspace root the actuator writes to — must match WORKSPACE_ROOT in
 # E2BActuator.ts ('/home/user/workspace').
 WORKDIR /home/user/workspace

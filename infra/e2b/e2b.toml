@@ -12,9 +12,13 @@ template_name = "navbharat-builder"
 dockerfile    = "e2b.Dockerfile"
 
 # Resources — sized for a real `npm install` + `vite build` of a non-trivial
-# app. Bump if large builds OOM; these are sane defaults.
-cpu_count = 2
-memory_mb = 2048
+# app. Bumped 2→4 vCPU / 2→4 GB (SPEED): npm install, `npx tsc --noEmit`,
+# `npm run build` and the baked Playwright/Chromium all share these cores, so
+# more vCPU cuts CPU-bound steps ~1.5-2x (install 30-90s→~20-50s, tsc 10-30s→
+# ~6-18s). COST NOTE: E2B bills per vCPU-second, so an ACTIVE sandbox costs ~2x
+# per second — partly offset because a faster build runs FEWER sandbox-seconds.
+cpu_count = 4
+memory_mb = 4096
 
 # No start_cmd: E2B's envd manages the sandbox lifecycle and the builders exec
 # commands on demand (npm install, npm run dev, …). A long-running dev server is

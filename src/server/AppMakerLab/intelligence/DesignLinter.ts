@@ -172,3 +172,16 @@ export function lintDesign(code: string): DesignLintResult {
     stats: { colors: colors.length, fonts: fonts.length, spacingValues: spacing.length, offGridSpacing: offGrid.length, hasTokens },
   };
 }
+
+/**
+ * One-line-plus advisory summary for the build readiness report (P-PIPE.C stage 32). Mirrors the other
+ * evaluate dimensions (seoSummary/accessibilitySummary): a clean tick when the design is cohesive, else
+ * the grade + the concrete issues. Advisory only — it never blocks a build. Pure.
+ */
+export function designSummary(result: DesignLintResult): string {
+  if (!result.violations.length) {
+    return `Design consistency: ✓ ${result.grade} (${result.score}/100) — cohesive palette, typography and spacing.`;
+  }
+  const head = `Design consistency — grade ${result.grade} (${result.score}/100), ${result.violations.length} issue(s):`;
+  return [head, ...result.violations.map((v) => `  ⚠ ${v.message}`)].join('\n');
+}

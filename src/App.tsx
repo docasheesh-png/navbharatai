@@ -63,6 +63,21 @@ export const auth = getAuth();
 setPersistence(auth, browserLocalPersistence);
 export const db = getFirestore(app, firebaseConfig.firestoreDbId);
 
+/**
+ * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
+ * routes now verify this token server-side (requireUserMatch) instead of trusting the :userId in the
+ * path — so these calls MUST send it. Best-effort: a missing token just omits the header (the server
+ * then rejects with 401, which the best-effort callers handle gracefully).
+ */
+async function authedHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...(extra || {}) };
+  try {
+    const tok = await auth.currentUser?.getIdToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* token unavailable — header omitted */ }
+  return headers;
+}
+
 // ── Eager imports — always needed on first render ───────────────────────────
 import { AIChat } from './components/ide/AIChat';
 
@@ -579,7 +594,7 @@ export default function App() {
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
     (async () => {
       try {
-        const res = await fetch(`/api/sync/${user.uid}`);
+        const res = await fetch(`/api/sync/${user.uid}`, { headers: await authedHeaders() });
         if (res.ok) {
           const data = await res.json();
           const cloud: ChatSession[] = Array.isArray(data.sessions) ? data.sessions : [];
@@ -622,11 +637,13 @@ export default function App() {
     const handle = setTimeout(() => {
       let lastApp = '';
       try { lastApp = localStorage.getItem('navbharat_last_app') || ''; } catch {}
-      fetch(`/api/sync/${user.uid}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessions, lastApp }),
-      }).catch(() => {});
+      authedHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
+        fetch(`/api/sync/${user.uid}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ sessions, lastApp }),
+        })
+      ).catch(() => {});
     }, 2500);
     return () => clearTimeout(handle);
   }, [sessions, user]);
@@ -919,13 +936,14 @@ export default function App() {
     if (!user) return;
     setLoadingWallet(true);
     try {
-      const res = await axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`);
+      const walletHeaders = await authedHeaders();
+      const res = await axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders });
       setWallet(res.data);
-      
-      const logsRes = await axios.get(`/api/wallet/${user.uid}/logs`);
+
+      const logsRes = await axios.get(`/api/wallet/${user.uid}/logs`, { headers: walletHeaders });
       setBillingLogs(Array.isArray(logsRes.data) ? logsRes.data : []);
 
-      const txsRes = await axios.get(`/api/wallet/${user.uid}/transactions`);
+      const txsRes = await axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders });
       setBillingTransactions(Array.isArray(txsRes.data) ? txsRes.data : []);
 
       // Phase 4.2 — fetch monthly AI cost (best-effort, never blocks wallet load).

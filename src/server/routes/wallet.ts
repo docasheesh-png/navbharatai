@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { getDb } from '../lib/db';
+import { requireUserMatch } from '../lib/authMiddleware';
 
 /**
  * Wallet / token-balance read routes extracted from the server.ts monolith
@@ -12,7 +13,10 @@ import { getDb } from '../lib/db';
  * - GET /api/wallet/:userId/transactions  — recent payment transactions
  */
 export function registerWalletRoutes(app: Express): void {
-  app.get('/api/wallet/:userId', async (req: Request, res: Response) => {
+  // SECURITY (audit): require the verified token uid to match :userId — these expose balance, PII
+  // (email/name), usage logs and payment history; without the check any uid could be read. Client
+  // sends the Bearer token via authedHeaders(); VITEST skips the check.
+  app.get('/api/wallet/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = req.params;
     const email = req.query.email as string || '';
@@ -86,7 +90,7 @@ export function registerWalletRoutes(app: Express): void {
     }
   });
 
-  app.get('/api/wallet/:userId/logs', async (req: Request, res: Response) => {
+  app.get('/api/wallet/:userId/logs', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = req.params;
     try {
@@ -109,7 +113,7 @@ export function registerWalletRoutes(app: Express): void {
     }
   });
 
-  app.get('/api/wallet/:userId/transactions', async (req: Request, res: Response) => {
+  app.get('/api/wallet/:userId/transactions', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = req.params;
     try {

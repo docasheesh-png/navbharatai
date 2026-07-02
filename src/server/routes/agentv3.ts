@@ -32,6 +32,7 @@ import {
   resolveApproval,
   GitManager,
   GitRepoSync,
+  sanitizeRepoUrl,
   GitHubAppClient,
   UserGitHubClient,
   githubConfigFromEnv,
@@ -2496,16 +2497,25 @@ export function registerAgentV3Routes(app: Express): void {
         // any failure emits a friendly narration and falls through to the normal empty workspace.
         if (importUrl) {
           try {
-            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${importUrl}…`, ts: Date.now() });
+            // SECURITY (C2): reject a non-GitHub / malformed importUrl up front with a clear message,
+            // and NEVER build a token-bearing URL from it (the token would otherwise be embedded into
+            // whatever the user supplied). sanitizeRepoUrl validates the plain form; the token is then
+            // injected into the SAME validated shape, and GitRepoSync re-validates at the sink.
+            const cleanImportUrl = sanitizeRepoUrl(importUrl);
+            if (!cleanImportUrl) {
+              events.emit({ type: 'narration', agent: 'architect', text: `That import URL isn't a supported GitHub repository URL (expected https://github.com/owner/repo). Starting with an empty workspace instead.`, ts: Date.now() });
+            } else {
+            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
             const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
             if (Object.keys(existing.files).length === 0) {
               const importSync = new GitRepoSync(actuator, workspaceId);
               const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
-              const cloneUrl = githubToken ? importUrl.replace('https://', `https://${githubToken}@`) : importUrl;
+              const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
               const h = await importSync.hydrateFromRepo(cloneUrl);
               if (h.hydrated) {
                 events.emit({ type: 'narration', agent: 'architect', text: `Imported your project files from the repository. I'll analyze and improve this project.`, ts: Date.now() });
               }
+            }
             }
           } catch (importErr) {
             const m = importErr instanceof Error ? importErr.message : String(importErr);

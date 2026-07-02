@@ -56,7 +56,7 @@ export { makeDeploy, FirebaseHostingDeployer, makeChannelId } from './Deployment
 export type { DeployFn } from './Deployment';
 export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStorageActive, repoNameForProject } from './GitHubAppClient';
 export type { GitHubConfig, RepoInfo, CiVerdict, PullRequestInfo } from './GitHubAppClient';
-export { GitRepoSync } from './GitRepoSync';
+export { GitRepoSync, sanitizeRepoUrl } from './GitRepoSync';
 export type { HydrateResult, PushResult } from './GitRepoSync';
 export { mergeViaPullRequest, githubPrMode } from './GitHubPrFlow';
 export type { PrCapableClient, PrFlowResult, PrFlowOptions } from './GitHubPrFlow';

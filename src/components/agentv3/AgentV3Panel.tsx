@@ -556,6 +556,44 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  // LOUD open-failure: opening a history chat must NEVER silently do nothing (the admin read the
+  // resulting no-op as "click hi nahi ho raha"). Any failed open sets this and a dismissible toast
+  // shows the real reason.
+  const [openChatError, setOpenChatError] = useState<string | null>(null);
+  // TAP TRACER (diagnostic, admin-only via ?tapdebug=1 or localStorage nbai_tapdebug=1): the history
+  // menu taps are reported dead on iPhone even after the rows became real <button>s, so hypotheses are
+  // exhausted — this captures ground truth from the device itself. While the menu is open it listens
+  // in CAPTURE phase on window (so it sees the event no matter which element wins the tap) for
+  // touchstart/pointerdown/click and shows, inside the menu, WHICH element is topmost at the tap
+  // point (document.elementFromPoint). One screenshot then names the tap-eater — or proves the click
+  // fires and the fault is downstream. Zero cost unless the flag is on AND the menu is open.
+  const [tapDebug] = useState<boolean>(() => {
+    try {
+      return new URLSearchParams(window.location.search).has('tapdebug') || localStorage.getItem('nbai_tapdebug') === '1';
+    } catch { return false; }
+  });
+  const [lastTap, setLastTap] = useState('');
+  useEffect(() => {
+    if (!tapDebug || !historyOpen) return;
+    const describe = (el: Element | null): string => {
+      if (!el) return 'nothing';
+      const cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 3).join('.');
+      return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${cls ? `.${cls}` : ''}`.slice(0, 90);
+    };
+    const at = (x: number, y: number, kind: string) =>
+      setLastTap(`${kind}@${Math.round(x)},${Math.round(y)} → ${describe(document.elementFromPoint(x, y))}`);
+    const onTouch = (e: TouchEvent) => { const t = e.touches[0]; if (t) at(t.clientX, t.clientY, 'touch'); };
+    const onPointer = (e: PointerEvent) => at(e.clientX, e.clientY, 'down');
+    const onClick = (e: MouseEvent) => setLastTap((prev) => `${prev} | click→${describe(e.target as Element)}`.slice(-180));
+    window.addEventListener('touchstart', onTouch, true);
+    window.addEventListener('pointerdown', onPointer, true);
+    window.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('touchstart', onTouch, true);
+      window.removeEventListener('pointerdown', onPointer, true);
+      window.removeEventListener('click', onClick, true);
+    };
+  }, [tapDebug, historyOpen]);
   // Messages for chat_sessions-only history entries (keyed by sessionId), stashed at list time so
   // opening one restores its thread without a second fetch. See loadHistory + openConversation.
   const chatSessionMsgsRef = useRef<Map<string, Array<{ text: string; sender?: string; role?: string; timestamp?: string; ts?: number }>>>(new Map());
@@ -628,6 +666,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // underlying server build, if any, keeps running in the background and stays resumable from History)
   // instead of silently no-op'ing until the current build finishes.
   const openConversation = async (id: string) => {
+    setOpenChatError(null);
+    if (tapDebug) setLastTap((prev) => `${prev} | openConversation(${id.slice(0, 24)}…) FIRED`.slice(-180));
     setHistoryOpen(false);
     // DETACH the current build first (same as startNewSession): reset() aborts this UI's stream,
     // clears `running` (so the opened chat's composer is enabled, not stuck disabled) and bumps the
@@ -661,7 +701,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // stashed at list time; files rehydrate automatically from the derived workspaceId (S4 effect).
     const sessionId = id.replace(/^v3_/, '');
     const saved = chatSessionMsgsRef.current.get(sessionId);
-    if (!saved) return;
+    if (!saved) {
+      // NEVER a silent no-op: the tap DID work and the open FAILED — say so, with the real reason
+      // (server transcript unavailable/refused AND no stashed chat_sessions copy for this entry).
+      setOpenChatError(
+        'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.',
+      );
+      return;
+    }
     sessionIdRef.current = sessionId;
     persistSessionId(sessionId);
     autoRestoredSessionRef.current = sessionId;
@@ -1130,6 +1177,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryOpen(false)} aria-hidden="true" />
                 <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
+                  {tapDebug && (
+                    <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
+                      {lastTap || 'tap tracer ON — ab kisi chat par tap kijiye'}
+                    </div>
+                  )}
                   <button
                     onClick={newChatFromHistory}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
@@ -1784,6 +1836,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         </div>
         )}
       </div>
+
+      {/* LOUD open-failure toast — a history chat that fails to open must say WHY, never no-op. */}
+      {openChatError && (
+        <div className="fixed inset-x-3 bottom-20 z-[70] sm:left-auto sm:right-4 sm:max-w-md rounded-xl border border-red-500/40 bg-red-950/95 text-red-100 text-xs leading-relaxed shadow-2xl p-3 pr-8">
+          {openChatError}
+          <button
+            type="button"
+            onClick={() => setOpenChatError(null)}
+            aria-label="Dismiss"
+            className="absolute top-2 right-2 p-1 rounded text-red-300 hover:text-white touch-manipulation"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Framework Picker Modal */}
       {showFrameworkPicker && (

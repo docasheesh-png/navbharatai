@@ -26,6 +26,7 @@ import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
+import { planDependencyAutoFix, dependencyAutoFixSummary } from './DependencyAutoFix';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
@@ -1059,6 +1060,11 @@ export class ToolDispatcher {
           .join('\n')
           .slice(0, 400_000);
         const design = lintDesign(designCode);
+        // P-PIPE.40 — advisory dependency auto-fix: for each imported-but-undeclared package, suggest an
+        // exact `name@^range` when it's a known npm package, else soften to "verify (may be a local
+        // alias)". Advisory only — it never mutates package.json or the install path (the builder applies
+        // fixes with edit_file under its own judgment). Pure; never a readiness blocker.
+        const depAutoFix = dependencyAutoFixSummary(planDependencyAutoFix(depIssues.filter((d) => d.kind === 'missing')));
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;
@@ -1081,7 +1087,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}${depAutoFix ? `\n\n${depAutoFix}` : ''}`;
       }
 
       case 'update_todo': {

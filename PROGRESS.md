@@ -7276,3 +7276,24 @@ Behavior change to note: when a build produces a live URL, the view no longer au
 user stays on the reliable in-browser render and can toggle to Live server. Deliberate per the approved
 A4 design (deterministic > flaky). Next redesign steps (A6 build state machine, A8 resumable manifest)
 remain deferred pending admin appetite — they're large hot-path rewrites.
+
+## 2026-07-02 — Security (out-of-v3.0 scope, admin-approved): C4 — pay ₹1, mint unlimited tokens
+
+Admin lifted the v3.0-only boundary to fix the live payment/wallet money holes; started with the
+marquee one. CRITICAL: the vishwakarma credit path minted `client tokenAmount × 100` tokens — a field
+never bound to the amount paid — so `{amount:1, tokenAmount:1_000_000}` paid ₹1 and credited 100M
+tokens. (The standard recharge path was already safe: it credits `balanceAdded × 100`, and balanceAdded
+= the paid amount reconciled against Cashfree.)
+
+Fix (server-only, no client change): new pure `creditableVishwakarmaTokens(amountPaid, buyPass)` derives
+tokens from the VERIFIED paid amount — `(paid − passPrice) × TOKENS_PER_RUPEE` — reversing the client's
+own `amount = tokenAmount₹ + (buyPass?pass:0)` formula. `payments.ts` credit now calls it instead of
+`txData.tokenAmount × 100`. Never negative; 0 on non-positive/non-numeric. Pass price (₹100) + rate
+(100 tokens/₹) are server constants that must track the client's createVishwakarmaOrder.
+
++5 tests (the ₹1 exploit now credits only 100 tokens; full-amount; pass-subtraction; pass-only=0;
+negative/garbage guards; rounding). Gate: frontend tsc 0, server tsc 0, vitest 4181/4181 PASS, boot PASS.
+
+Remaining payment/wallet criticals (next slices): unauth /api/wallet/:userId + /api/sync/:userId IDOR
+(needs coordinated client-token + server auth, like C1); payment verify/coupon atomicity+auth (H1);
+simulator gating (NODE_ENV). Then back to v3.0 redesign (A6/A8) pending appetite.

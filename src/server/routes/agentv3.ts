@@ -896,8 +896,14 @@ function grokPlanRunner(): TurnRunner | null {
   const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
   try {
-    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: 60_000, maxRetries: 0 });
-    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-3';
+    // 25s timeout matches the cheap-floor decision: a stalled plan call should fail FAST to the Claude
+    // fallback, not burn a flat 60s in front of the user-visible approval gate. Overridable via env.
+    const timeoutMs = Number(process.env.AGENTV3_GROK_PLAN_TIMEOUT_MS) || 25_000;
+    const client = new OpenAI({ apiKey, baseURL: 'https://api.x.ai/v1', timeout: timeoutMs, maxRetries: 0 });
+    // Default to a current FAST xAI tier ('grok-4-fast-non-reasoning') instead of the older/slower
+    // grok-3 — the plan is a single update_todo tool call, so a fast non-reasoning model is ideal.
+    // Overridable via AGENTV3_GROK_PLAN_MODEL; the Claude-Haiku fallback guards any model regression.
+    const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-4-fast-non-reasoning';
     const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
     const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) };
     return makeMultiProviderTurnRunner([grok, claudeFallback], {
@@ -2766,6 +2772,9 @@ export function registerAgentV3Routes(app: Express): void {
       const spawnSubAgent = makeSubAgentSpawn({
         client, actuator, workspaceId, state, events, model, onlyOpus,
         maxBudgetUsd: maxBudgetUsdForRunner, maxSteps: subAgentMaxSteps, checkpointer: git,
+        // Pass the SAME 32000-token per-turn cap the top-level runner uses (below). Without it a
+        // sub-agent falls back to 8192 and truncates large files — the top cause of incomplete apps.
+        maxTokensPerTurn: buildMaxTokensPerTurn(),
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router

@@ -34,6 +34,11 @@ export interface SubAgentDeps {
   /** Per-sub-agent caps (defaults: 40 steps; budget inherited from parent if unset). */
   maxSteps?: number;
   maxBudgetUsd?: number;
+  /** Max output tokens per turn. The Architect delegates ALL app code to sub-agents, so the top-level
+   *  runner's 32000 cap (buildMaxTokensPerTurn) MUST be passed through — otherwise a sub-agent falls
+   *  back to ClaudeClient's 8192 default and truncates large multi-file writes (the #1 cause of
+   *  incomplete complex apps), costing extra repair turns. */
+  maxTokensPerTurn?: number;
   /** Real git checkpointer, so sub-agent writes are committed too. */
   checkpointer?: Checkpointer;
 }
@@ -56,6 +61,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       onlyOpus: deps.onlyOpus,
       maxSteps: deps.maxSteps ?? 40,
       maxBudgetUsd: deps.maxBudgetUsd,
+      maxTokensPerTurn: deps.maxTokensPerTurn,
       agentRole: role,
     });
     // Give the specialist the live project map (Phase 2) so it knows the codebase

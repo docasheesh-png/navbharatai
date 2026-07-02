@@ -1,12 +1,13 @@
 import crypto from 'crypto';
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, Response, NextFunction } from 'express';
 import { audit } from '../lib/audit';
-import { requireRole, verifyFirebaseToken, setUserRole } from '../lib/authMiddleware';
+import { verifyFirebaseToken, setUserRole } from '../lib/authMiddleware';
 import {
   buildInviteRecord,
   buildMemberRecord,
   isInviteAcceptable,
   normalizeInviteRole,
+  canManageTeam,
   saveInvite,
   getInvite,
   setInviteStatus,
@@ -15,6 +16,29 @@ import {
   updateMemberRole,
   listMembers,
 } from '../lib/TeamStore';
+
+/**
+ * SECURITY (audit H2): resource-scoped team-management guard. The previous `requireRole('owner','admin')`
+ * checked only the caller's GLOBAL role, and `getUserRole` defaults role-less single-user accounts to
+ * 'owner' — so ANY authenticated account could manage ANOTHER tenant's team (list member PII, remove
+ * members, change roles, self-invite) just by passing that team's id. This binds every management action
+ * to the caller's OWN team: the verified uid must be the team owner (`uid === teamId`) or an active admin
+ * member of that team. Fail-closed; VITEST-skipped (routes are exercised via the pure `canManageTeam`
+ * helper in tests). `resolveTeamId` yields the team id for the specific route (param / body / invite token).
+ */
+function requireTeamManager(resolveTeamId: (req: Request) => string | Promise<string>) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (process.env.VITEST) { next(); return; }
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) { res.status(401).json({ error: 'Authentication required.' }); return; }
+    const teamId = String((await resolveTeamId(req)) || '');
+    if (!teamId) { res.status(400).json({ error: 'teamId required' }); return; }
+    if (uid === teamId) { next(); return; } // owner — no membership lookup needed
+    const members = await listMembers(teamId).catch(() => []);
+    if (canManageTeam({ requesterUid: uid, teamId, members })) { next(); return; }
+    res.status(403).json({ error: 'Forbidden: you do not manage this team.' });
+  };
+}
 
 /**
  * Team collaboration routes (P-COLLAB.1 — durable membership + invite lifecycle).
@@ -34,7 +58,7 @@ import {
  */
 export function registerTeamRoutes(app: Express): void {
   // Issue a durable, token-based invite (RBAC-gated: only owner/admin may invite).
-  app.post('/api/team/invite', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+  app.post('/api/team/invite', requireTeamManager((req) => String(req.body?.userId || '')), async (req: Request, res: Response) => {
     const { email, projectId, userId, role = 'viewer' } = req.body || {};
     if (!email || !userId) return res.status(400).json({ error: 'email and userId required' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -111,7 +135,7 @@ export function registerTeamRoutes(app: Express): void {
   });
 
   // List a team's members (owner/admin only).
-  app.get('/api/team/:teamId/members', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+  app.get('/api/team/:teamId/members', requireTeamManager((req) => String(req.params.teamId || '')), async (req: Request, res: Response) => {
     const teamId = String(req.params.teamId || '');
     if (!teamId) return res.status(400).json({ error: 'teamId required' });
     const members = await listMembers(teamId);
@@ -119,7 +143,10 @@ export function registerTeamRoutes(app: Express): void {
   });
 
   // Revoke a pending invite (owner/admin only).
-  app.post('/api/team/invite/:token/revoke', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+  app.post('/api/team/invite/:token/revoke', requireTeamManager(async (req) => {
+    const inv = await getInvite(String(req.params.token || '')).catch(() => null);
+    return inv?.teamId || '';
+  }), async (req: Request, res: Response) => {
     const token = String(req.params.token || '');
     if (!token) return res.status(400).json({ error: 'token required' });
     await setInviteStatus(token, 'revoked');
@@ -128,7 +155,7 @@ export function registerTeamRoutes(app: Express): void {
   });
 
   // Remove a member (owner/admin only). Soft-delete keeps the audit trail.
-  app.post('/api/team/member/remove', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+  app.post('/api/team/member/remove', requireTeamManager((req) => String(req.body?.teamId || '')), async (req: Request, res: Response) => {
     const { teamId, uid } = req.body || {};
     if (!teamId || !uid) return res.status(400).json({ error: 'teamId and uid required' });
     await removeMember(String(teamId), String(uid));
@@ -137,7 +164,7 @@ export function registerTeamRoutes(app: Express): void {
   });
 
   // Change a member's role (owner/admin only) — updates the team member record AND the RBAC role.
-  app.post('/api/team/member/role', requireRole('owner', 'admin'), async (req: Request, res: Response) => {
+  app.post('/api/team/member/role', requireTeamManager((req) => String(req.body?.teamId || '')), async (req: Request, res: Response) => {
     const { teamId, uid, role } = req.body || {};
     if (!teamId || !uid || !role) return res.status(400).json({ error: 'teamId, uid and role required' });
     const normalized = normalizeInviteRole(role);

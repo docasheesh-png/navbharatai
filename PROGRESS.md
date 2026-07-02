@@ -7341,3 +7341,39 @@ vitest 4181/4181 PASS, boot:check PASS.
 
 Remaining payment slice: simulator NODE_ENV→explicit PAYMENTS_LIVE gating. Then team-RBAC (H2:
 getUserRole defaults everyone to 'owner'), then back to v3.0 redesign (A6/A8) pending appetite.
+
+## 2026-07-02 — Simulator gating (payment slice): verified already-closed in prod, no change needed
+
+Audited the "simulator mints free balance" slice before touching it. The credit-minting path
+(`verifyPaymentInternal`) already refuses simulator credit when `NODE_ENV === 'production'`, and the
+live Cloud Run deploy DOES set `NODE_ENV=production` (cloudbuild.yaml `--update-env-vars NODE_ENV=
+production`; also package.json gcloud:deploy). So the money hole is effectively closed in production.
+Fail-closing it further (require an explicit ALLOW_PAYMENT_SIMULATOR opt-in) would break local dev
+payment preview for only defense-in-depth value — deferred rather than shipped as a disruptive change
+without clear benefit. Redundant-work check (safeguard #6): no code change made here.
+
+## 2026-07-02 — Security (audit H2): cross-tenant team-management IDOR / privilege escalation
+
+Real, live hole. All five team-management routes were gated by `requireRole('owner','admin')`, which
+checks only the caller's GLOBAL role — and `getUserRole` defaults role-less single-user accounts to
+'owner' (documented backward-compat so a solo user isn't locked out of their OWN account). Net effect:
+essentially ANY authenticated account could manage ANOTHER tenant's team just by passing that team's id
+— list a team's member emails/PII (`GET /api/team/:teamId/members`), remove members, change/escalate
+member roles, or self-invite into someone else's team. `teamId` is the owner's uid (not secret).
+
+Fix (mirrors the wallet/sync IDOR pattern, admin-approved resource-scoped auth): new pure
+`canManageTeam({requesterUid, teamId, members})` in TeamStore — owner (uid === teamId) always, else an
+ACTIVE member whose role is admin/owner. New `requireTeamManager(resolveTeamId)` middleware in team.ts
+replaces the global `requireRole` on all five routes; it verifies the Firebase token, resolves the
+route's teamId (param / body.userId / body.teamId / invite-token→teamId for revoke), and allows only the
+team owner or an active admin member. Fail-closed (membership-lookup error → denied); VITEST-skipped.
+The global `getUserRole` 'owner' default is intentionally LEFT unchanged — it's correct for one's own
+account and no longer grants cross-tenant control now that team actions are resource-scoped. No route
+became more permissive (the check is strictly tighter than before).
+
++6 pure tests for canManageTeam (owner-always, active-admin, editor/viewer denied, removed-admin denied,
+stranger denied = the core fix, null/empty fail-closed). Gate: frontend tsc 0, server tsc 0, vitest
+4187/4187 PASS, boot:check PASS.
+
+Remaining: back to v3.0 redesign (A6 build state machine, A8 resumable manifest) — large hot-path
+rewrites, pending fresh admin appetite.

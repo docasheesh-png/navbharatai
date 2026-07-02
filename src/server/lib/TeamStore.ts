@@ -121,6 +121,22 @@ export function isInviteAcceptable(invite: Pick<InviteRecord, 'status' | 'expire
   return true;
 }
 
+/**
+ * SECURITY (audit H2): may `requesterUid` manage `teamId`? A "team" is scoped to its owner's account
+ * (`teamId === owner uid`), so the owner always may. Any OTHER caller must be an ACTIVE member of that
+ * team whose role is `admin` (or `owner`). This is resource-scoped — it never trusts the caller's
+ * GLOBAL role, which `getUserRole` defaults to 'owner' for role-less single-user accounts (that default
+ * is correct for one's OWN account but must never grant cross-tenant team control). Pure + fail-closed.
+ */
+export function canManageTeam(input: { requesterUid: string | null | undefined; teamId: string; members: MemberRecord[] }): boolean {
+  const { requesterUid, teamId, members } = input;
+  if (!requesterUid || !teamId) return false;
+  if (requesterUid === teamId) return true; // team owner — teamId IS the owner's uid
+  return (members || []).some(
+    (m) => m.uid === requesterUid && m.status !== 'removed' && (m.role === 'admin' || m.role === 'owner'),
+  );
+}
+
 /** Build a member record from an accepted invite. Pure. */
 export function buildMemberRecord(input: { uid: string; email: string; role: UserRole; now: number }): MemberRecord {
   return {

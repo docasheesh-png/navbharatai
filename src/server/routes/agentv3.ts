@@ -101,6 +101,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
+import { resolvePipelineDepth, scaleBuildSeconds, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -2483,7 +2484,19 @@ export function registerAgentV3Routes(app: Express): void {
     // terminal result, aborts the run, frees the per-account slot, and ends the stream after the
     // cap. It is cleared in `finally` on normal completion — and because JS is single-threaded it
     // cannot interleave with the synchronous success/finally path, so it ONLY fires on a real overrun.
-    const deadlineMs = maxBuildSeconds() * 1000;
+    // P-ARCH+.1 — complexity-adaptive wall-clock. Compute the effective cap ONCE here (before the
+    // deadline is armed) from a prompt-derived complexity signal, and thread this SAME value into every
+    // downstream deadline/headroom check below. Threading a single value is what keeps the watchdog, the
+    // runner cap, and the four post-build headroom gates CONSISTENT — a deep build that earns more time
+    // must not then be denied its tsc-gate/preview/reviewer against a stale, unscaled deadline. Only
+    // `deep` builds are lengthened; simple/standard are unchanged; `0` (disabled) is preserved.
+    const buildComplexity = complexityFromPrompt(prompt);
+    const buildDepth: PipelineDepth = resolvePipelineDepth(
+      (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
+      onlyOpus,
+    );
+    const effectiveBuildSeconds = scaleBuildSeconds(maxBuildSeconds(), buildDepth);
+    const deadlineMs = effectiveBuildSeconds * 1000;
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -3105,7 +3118,7 @@ export function registerAgentV3Routes(app: Express): void {
         // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
         readinessGate: readinessGateEnabled(),
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
-        maxBuildMs: maxBuildSeconds() * 1000,
+        maxBuildMs: effectiveBuildSeconds * 1000,
         // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)
         // into the build report. Shared by the default build AND every escalated/retry/heal runner.
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -3562,7 +3575,7 @@ export function registerAgentV3Routes(app: Express): void {
         process.env.AGENTV3_AGENTIC_TSC_GATE !== 'off' && !fastLaneGated
         && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
         // Only with comfortable time left for install + tsc + one repair pass.
-        && (maxBuildSeconds() === 0 || Date.now() - buildStartedAt < maxBuildSeconds() * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         const runTsc = async (): Promise<{ ok: boolean; errors: string }> => {
           try {
@@ -3613,7 +3626,7 @@ export function registerAgentV3Routes(app: Express): void {
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
         // Only if there's comfortable time left before the wall-clock cap (verify + a heal pass).
-        && (maxBuildSeconds() === 0 || Date.now() - buildStartedAt < maxBuildSeconds() * 1000 - 90_000)
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         const healMax = autoFixEnabled() ? Math.max(1, autoFixMaxAttempts()) : 1; // ≥1 fix attempt
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
@@ -3633,7 +3646,7 @@ export function registerAgentV3Routes(app: Express): void {
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
-          if (attempt >= healMax || abort.signal.aborted || (maxBuildSeconds() > 0 && Date.now() - buildStartedAt > maxBuildSeconds() * 1000 - 60_000)) {
+          if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
             break;
           }
@@ -3797,7 +3810,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the wall-clock deadline ("paused at time limit"). It is purely advisory, so (a) skip it when
       // little deadline headroom remains, and (b) cap it with a hard timeout so it can never be the
       // reason a built app times out.
-      const reviewHeadroomOk = maxBuildSeconds() === 0 || (Date.now() - buildStartedAt) < (maxBuildSeconds() * 1000 - 120_000);
+      const reviewHeadroomOk = effectiveBuildSeconds === 0 || (Date.now() - buildStartedAt) < (effectiveBuildSeconds * 1000 - 120_000);
       // SPEED: skip the advisory reviewer (30-90s + 3-6 Claude calls) for FAST-LANE (simple) builds —
       // they already passed the fast lane's own `npx tsc --noEmit` type-check + CSS-consistency verify +
       // repair, so the extra multi-call review adds latency to the most common build with little value.

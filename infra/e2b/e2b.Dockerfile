@@ -68,6 +68,28 @@ RUN mkdir -p /home/user/.e-tools \
      /home/user/.e-tools/node_modules/.bin/playwright install --with-deps chromium \
   && npm cache clean --force
 
+# --- Pre-bake the vite-react baseline node_modules (BIGGEST SPEED WIN) ------
+# WHY: ~5-7 min of EVERY build today is a cold `npm install` on a fresh sandbox
+# (BuildTimeEstimator BASE_MS = 420_000). This bakes a fully-installed vite-react
+# baseline at /home/user/.warm/vite-react. E2BActuator._npmInstall (Step 0)
+# copies that tree into a fresh React workspace as a LOCAL fs copy (~1-3s) so the
+# real install runs only as a fast DELTA for generator-added deps. The
+# package.json here MUST stay in sync with ViteReactProviderContents.ts — if it
+# drifts, the copy is still just a primer that `npm install` reconciles (correct,
+# only less optimal), and _npmInstall's `files.exists` guard makes the whole
+# feature a no-op on any image where this dir is absent.
+RUN mkdir -p /home/user/.warm/vite-react \
+  && printf '%s\n' '{' \
+  '  "name": "project",' \
+  '  "version": "0.1.0",' \
+  '  "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" },' \
+  '  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },' \
+  '  "devDependencies": { "@vitejs/plugin-react": "^4.3.1", "typescript": "^5.5.3", "vite": "^5.4.1" }' \
+  '}' > /home/user/.warm/vite-react/package.json \
+  && cd /home/user/.warm/vite-react \
+  && npm install --no-audit --no-fund \
+  && npm cache clean --force
+
 # Workspace root the actuator writes to — must match WORKSPACE_ROOT in
 # E2BActuator.ts ('/home/user/workspace').
 WORKDIR /home/user/workspace

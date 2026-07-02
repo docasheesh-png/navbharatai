@@ -279,6 +279,31 @@ export class E2BActuator implements IEngineerActuator {
    * Never throws; returns success flag + combined log for the agent to read.
    */
   private async _npmInstall(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    // Step 0 (SPEED — warm node_modules primer): the custom E2B template bakes a fully-installed
+    // vite-react baseline at /home/user/.warm/vite-react (see infra/e2b/e2b.Dockerfile). When the
+    // workspace has NO node_modules yet AND declares react (a vite-react-family app), copy that baked
+    // tree in as a LOCAL fs copy (~1-3s) instead of a 30-90s cold network install. The npm ci/install
+    // steps below then run as a fast DELTA (only generator-added deps like tailwind are fetched), and
+    // reconcile any version drift. Fully guarded: if the warm dir isn't present (i.e. the template
+    // hasn't been rebuilt yet) this is a no-op and behaviour is byte-identical to today.
+    try {
+      const warmDir = '/home/user/.warm/vite-react/node_modules';
+      const [warmExists, hasModules] = await Promise.all([
+        sandbox.files.exists(warmDir).catch(() => false),
+        sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false),
+      ]);
+      if (warmExists && !hasModules) {
+        const pkgRaw = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`).catch(() => null);
+        const pkg = typeof pkgRaw === 'string' ? pkgRaw : (pkgRaw ? new TextDecoder().decode(pkgRaw as Uint8Array) : '');
+        // Only prime for React-family apps — a Vue/Next/Python workspace must NOT get a React tree.
+        if (/["']react["']\s*:/.test(pkg)) {
+          await sandbox.commands.run(`cp -a ${warmDir} ${WORKSPACE_ROOT}/node_modules`, {
+            cwd: WORKSPACE_ROOT, timeoutMs: 60_000,
+          }).catch(() => { /* copy is best-effort — a failure just falls through to a full install */ });
+        }
+      }
+    } catch { /* warm-primer is best-effort — never blocks the real install below */ }
+
     // Step 1: npm ci when a lock file exists (clean, reproducible install)
     const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
     if (hasLock) {

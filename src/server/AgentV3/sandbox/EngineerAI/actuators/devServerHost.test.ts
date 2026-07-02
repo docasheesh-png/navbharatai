@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -12,6 +12,27 @@ describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT cras
   });
   it('leaves an empty command untouched', () => {
     expect(disableDevServerAutoOpen('')).toBe('');
+  });
+});
+
+describe('redirectDevServerOutput — stop the dev server SIGPIPE-killing itself after disconnect', () => {
+  it('wraps the command in a subshell redirecting stdout+stderr to the log file', () => {
+    expect(redirectDevServerOutput('npx vite --host 0.0.0.0 --port 5173')).toBe(
+      `( npx vite --host 0.0.0.0 --port 5173 ) > ${DEV_SERVER_LOG_PATH} 2>&1`,
+    );
+  });
+  it('captures an env-prefixed / piped command whole (the report case: BROWSER=none … | cat)', () => {
+    expect(redirectDevServerOutput('BROWSER=none npx vite --host 0.0.0.0 | cat')).toBe(
+      `( BROWSER=none npx vite --host 0.0.0.0 | cat ) > ${DEV_SERVER_LOG_PATH} 2>&1`,
+    );
+  });
+  it('is idempotent — never double-redirects to the same log', () => {
+    const once = redirectDevServerOutput('npm run dev');
+    expect(redirectDevServerOutput(once)).toBe(once);
+  });
+  it('supports a custom log path and leaves an empty command untouched', () => {
+    expect(redirectDevServerOutput('vite', '/tmp/x.log')).toBe('( vite ) > /tmp/x.log 2>&1');
+    expect(redirectDevServerOutput('')).toBe('');
   });
 });
 

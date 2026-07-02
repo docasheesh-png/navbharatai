@@ -224,6 +224,25 @@ export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: str
   return { ok: true, userId: verifiedUid };
 }
 
+/**
+ * SECURITY (C1 fast-follow) — verified identity for READ/mutate v3.0 routes that take the caller from
+ * the request (conversation list/get/delete, etc.). Returns the uid+email from the VERIFIED Firebase
+ * token — never the spoofable query/body `userId` (which let one account read/delete another's build
+ * transcripts). Under VITEST the route handlers aren't token-authed, so it falls back to the request
+ * params so the existing route tests still exercise the ownership logic. The client already sends the
+ * Bearer token on all of these calls (authJsonHeaders), so this is non-breaking.
+ */
+export async function resolveReadIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
+  if (process.env.VITEST) {
+    return {
+      userId: (typeof req.query.userId === 'string' ? req.query.userId : (typeof req.body?.userId === 'string' ? req.body.userId : null)),
+      email: (typeof req.query.email === 'string' ? req.query.email : (typeof req.body?.email === 'string' ? req.body.email : null)),
+    };
+  }
+  const v = await verifyFirebaseIdentity(req);
+  return { userId: v?.uid ?? null, email: v?.email ?? null };
+}
+
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
 let sharedConversationStore: ConversationStore | null = null;
 /**
@@ -1029,8 +1048,7 @@ export function registerAgentV3Routes(app: Express): void {
   // D7 — list a user's persisted builds (most-recently-updated first) so the client can
   // reload one after a refresh/reconnect. Metadata only (no transcript) for a cheap list.
   app.get('/api/agentv3/conversations', async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
@@ -1054,8 +1072,7 @@ export function registerAgentV3Routes(app: Express): void {
 
   // D7 — load one persisted build (full transcript) for resume. Owner-only.
   app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
@@ -1099,8 +1116,7 @@ export function registerAgentV3Routes(app: Express): void {
   // conversationAccess() ownership check as the GET-one route above. The underlying store's
   // remove() is a no-op if the id doesn't exist, so this is safe to call twice (double-click).
   app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
-    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
-    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;

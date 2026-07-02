@@ -7,15 +7,17 @@ import { auth } from '../App';
 
 /**
  * Build JSON headers carrying the signed-in user's Firebase ID token when available.
- * The server prefers the verified token over any body-supplied userId for workspace
- * ownership checks; a missing token soft-falls-back to the body userId (synthetic admin).
+ * The server derives identity from the VERIFIED token; a missing/unverifiable token degrades to an
+ * anonymous build server-side (it never grants the body userId, and never hard-blocks the chat).
+ * Pass `forceRefresh` on the critical /chat path to mint a fresh token so a stale/expired cached one
+ * self-heals instead of arriving unverifiable.
  */
-async function authJsonHeaders(): Promise<Record<string, string>> {
+async function authJsonHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
-    const tok = await auth.currentUser?.getIdToken();
+    const tok = await auth.currentUser?.getIdToken(forceRefresh);
     if (tok) headers.Authorization = `Bearer ${tok}`;
-  } catch { /* no token — server soft-falls-back to body userId */ }
+  } catch { /* no token — server degrades to an anonymous build (never hard-blocks) */ }
   return headers;
 }
 
@@ -589,8 +591,9 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = await fetch('/api/agentv3/chat', {
           method: 'POST',
           // SECURITY (C1): send the Firebase ID token so the server derives identity from the VERIFIED
-          // token, not the body.userId (which it no longer trusts). Other v3.0 calls already do this.
-          headers: await authJsonHeaders(),
+          // token, not the body.userId (which it no longer trusts). forceRefresh=true mints a fresh
+          // token so a stale/expired cached one self-heals instead of arriving unverifiable.
+          headers: await authJsonHeaders(true),
           body: JSON.stringify({
             prompt,
             userId: opts?.userId,

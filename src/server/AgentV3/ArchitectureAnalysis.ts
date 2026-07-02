@@ -203,3 +203,81 @@ export function architectureSummary(report: ArchitectureReport): string {
   if (problems === 0) lines.push('No structural defects found (no unresolved imports, cycles, layering violations, browser-incompatible Node builtins, or orphan components).');
   return lines.join('\n');
 }
+
+/**
+ * Generate a real ARCHITECTURE.md from the project graph (P-PIPE.112). Unlike the README's
+ * "Project Structure" (which just counts files), this LEADS with the actual module dependency map —
+ * the resolved local-import edges between the app's own files — plus the component/route inventory
+ * and an honest "Structural notes" section (cycles / unresolved imports / layering / orphans). Purely
+ * deterministic: everything is read from the graph + report, nothing invented. Pure, never throws.
+ */
+export function generateArchitectureDoc(graph: ProjectGraph, report: ArchitectureReport): string {
+  const files = new Set(graph.files || []);
+  const L: string[] = [];
+  L.push('# Architecture');
+  L.push('');
+  L.push('_Auto-generated from the project\'s real module graph — the actual import edges between your files._');
+  L.push('');
+
+  // Resolve the real internal dependency edges (file -> local files it imports).
+  const edges: Array<{ from: string; to: string[] }> = [];
+  let edgeCount = 0;
+  for (const [file, specs] of Object.entries(graph.imports || {})) {
+    const local: string[] = [];
+    for (const spec of specs || []) {
+      const resolved = resolveLocalImport(file, spec, files);
+      if (resolved && resolved !== file) local.push(resolved);
+    }
+    const unique = [...new Set(local)].sort();
+    if (unique.length) { edges.push({ from: file, to: unique }); edgeCount += unique.length; }
+  }
+  edges.sort((a, b) => a.from.localeCompare(b.from));
+
+  L.push('## Overview');
+  L.push(`- **${(graph.files || []).length}** source files, **${edges.length}** with internal imports, **${edgeCount}** internal edges`);
+  L.push(`- **${(graph.components || []).length}** components, **${(graph.routes || []).length}** routes`);
+  if ((graph.dependencies || []).length) {
+    const deps = [...graph.dependencies].sort();
+    const shown = deps.slice(0, 30).join(', ');
+    L.push(`- **${deps.length}** external dependencies: ${shown}${deps.length > 30 ? ', …' : ''}`);
+  }
+  L.push('');
+
+  L.push('## Module dependency map');
+  if (!edges.length) {
+    L.push('_No internal import edges yet (single-file app or imports not resolvable)._');
+  } else {
+    const MAX = 60;
+    for (const e of edges.slice(0, MAX)) {
+      L.push(`- \`${e.from}\` → ${e.to.map((t) => `\`${t}\``).join(', ')}`);
+    }
+    if (edges.length > MAX) L.push(`- …and ${edges.length - MAX} more files with imports.`);
+  }
+  L.push('');
+
+  if ((graph.components || []).length) {
+    L.push(`## Components (${graph.components.length})`);
+    L.push([...graph.components].sort().slice(0, 80).map((c) => `\`${c}\``).join(', ') + (graph.components.length > 80 ? ', …' : ''));
+    L.push('');
+  }
+  if ((graph.routes || []).length) {
+    L.push(`## Routes (${graph.routes.length})`);
+    L.push([...graph.routes].sort().slice(0, 60).map((r) => `\`${r}\``).join(', ') + (graph.routes.length > 60 ? ', …' : ''));
+    L.push('');
+  }
+
+  L.push('## Structural notes');
+  const note = (label: string, items: string[], max = 15) => {
+    if (!items.length) { L.push(`- ${label}: none`); return; }
+    L.push(`- ${label}: ${items.length}`);
+    for (const it of items.slice(0, max)) L.push(`  - ${it}`);
+    if (items.length > max) L.push(`  - …and ${items.length - max} more`);
+  };
+  note('Import cycles', report.cycles.map((c) => c.join(' → ')));
+  note('Unresolved local imports', report.unresolvedImports);
+  note('Layering violations (frontend → backend)', report.layeringViolations);
+  note('Orphan components (built but imported nowhere)', report.orphanComponents);
+  L.push('');
+  L.push('_Structural notes are deterministic facts from the import graph — an empty list means none were found._');
+  return L.join('\n') + '\n';
+}

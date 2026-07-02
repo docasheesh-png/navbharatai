@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeArchitecture, resolveLocalImport, architectureSummary, findOrphanComponents } from './ArchitectureAnalysis';
+import { analyzeArchitecture, resolveLocalImport, architectureSummary, findOrphanComponents, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { WorkspaceMemory } from './WorkspaceMemory';
 import type { ProjectGraph } from './WorkspaceMemory';
 
@@ -138,5 +138,40 @@ describe('findOrphanComponents (P-REPORT.5 — "components exist but the app sti
     expect(r.orphanComponents.length).toBe(1);
     expect(architectureSummary(r)).toContain('Orphan component');
     expect(architectureSummary(r)).toContain('Hero.tsx');
+  });
+});
+
+describe('generateArchitectureDoc (P-PIPE.112 — real ARCHITECTURE.md)', () => {
+  it('LEADS with the real module dependency map (resolved import edges), not just counts', () => {
+    const g = graphOf({
+      'src/App.tsx': "import { Hero } from './components/Hero';\nimport { Footer } from './components/Footer';\nexport function App(){return null;}",
+      'src/components/Hero.tsx': 'export function Hero(){return null;}',
+      'src/components/Footer.tsx': 'export function Footer(){return null;}',
+    });
+    const doc = generateArchitectureDoc(g, analyzeArchitecture(g));
+    expect(doc).toContain('# Architecture');
+    expect(doc).toContain('## Module dependency map');
+    // A real resolved edge from App to a component file (the differentiator vs README counts).
+    expect(doc).toContain('src/App.tsx');
+    expect(doc).toContain('src/components/Hero.tsx');
+  });
+
+  it('reports honest structural notes: flags an unresolved import, clean otherwise', () => {
+    const bad = graphOf({ 'src/App.tsx': "import { X } from './Missing';\nexport function App(){return null;}" });
+    const doc = generateArchitectureDoc(bad, analyzeArchitecture(bad));
+    expect(doc).toContain('Unresolved local imports:');
+    expect(doc).toMatch(/Unresolved local imports: [1-9]/);
+
+    const clean = graphOf({ 'src/App.tsx': 'export function App(){return null;}' });
+    const cleanDoc = generateArchitectureDoc(clean, analyzeArchitecture(clean));
+    expect(cleanDoc).toContain('Import cycles: none');
+    expect(cleanDoc).toContain('Unresolved local imports: none');
+  });
+
+  it('never throws on an empty graph', () => {
+    const empty = graphOf({});
+    const doc = generateArchitectureDoc(empty, analyzeArchitecture(empty));
+    expect(doc).toContain('# Architecture');
+    expect(typeof doc).toBe('string');
   });
 });

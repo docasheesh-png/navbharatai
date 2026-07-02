@@ -6,7 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
-import { analyzeArchitecture, architectureSummary } from './ArchitectureAnalysis';
+import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
@@ -1113,6 +1113,26 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} from the project graph (${content.length} bytes).`;
+      }
+
+      case 'generate_architecture_docs': {
+        // P-PIPE.112 — write a real ARCHITECTURE.md (module dependency map + component/route inventory
+        // + honest structural notes) from the project graph. Deterministic; mirrors generate_readme.
+        const path = optStr(input, 'path') || 'ARCHITECTURE.md';
+        const graph = getWorkspaceMemory(this.workspaceId).graph();
+        const content = generateArchitectureDoc(graph, analyzeArchitecture(graph));
+        let kind: 'create' | 'modify' = 'create';
+        try {
+          await this.actuator.readFile(this.workspaceId, path);
+          kind = 'modify';
+        } catch {
+          kind = 'create';
+        }
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        this.state?.recordFileChange({ path, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+        this.scheduleCheckpoint(`${kind} ${path}`);
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${content.length} bytes).`;
       }
 
       case 'generate_env_example': {

@@ -174,6 +174,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_architecture_docs',
+      description:
+        'Generate a real ARCHITECTURE.md from the actual project graph: the module dependency ' +
+        'map (the resolved import edges between the app\'s own files), the component and route ' +
+        'inventory, and honest structural notes (import cycles, unresolved imports, layering ' +
+        'violations, orphan components). Everything is derived from the real import graph (never ' +
+        'invented). Useful on a larger app so its structure is documented. Writes to ARCHITECTURE.md.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Optional output path (defaults to ARCHITECTURE.md).' },
+        },
+      },
+    },
+    {
       name: 'generate_env_example',
       description:
         'Generate or update .env.example listing every environment variable the code ' +
@@ -665,6 +680,7 @@ export const CATALOG_TOOL_NAMES = [
   'codemod_rename',
   'codemod_add_prop',
   'generate_readme',
+  'generate_architecture_docs',
   'generate_env_example',
   'generate_gitignore',
   'generate_openapi',

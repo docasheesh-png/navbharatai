@@ -373,6 +373,8 @@ export function architectSystemPrompt(framework?: string): string {
     '  suggested fixes (analysis only — it writes nothing); apply the suggestions with edit_file.',
     '- Before finishing a real app, call generate_readme to write an accurate',
     '  README.md (stack, how to run, structure) derived from the real project.',
+    '- For a LARGER app (many files/components), also call generate_architecture_docs to write',
+    '  ARCHITECTURE.md — the real module dependency map + structure — so its design is documented.',
     '- If the app reads any env vars, call generate_env_example so .env.example',
     '  documents every variable the code needs — so it runs for other people too.',
     '- Call generate_gitignore to write a correct .gitignore so node_modules,',

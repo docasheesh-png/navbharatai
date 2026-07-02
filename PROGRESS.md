@@ -7217,3 +7217,21 @@ routes (/conversations read+delete, /attach, /status, /live) — those client ca
 token, so it's lower-risk. Then Phase-3 redesign resumes (A3 wire E2B template → unified preview + build
 state machine → resumable manifest generation → export verification). C3 (preview-iframe isolation)
 remains infra-gated (dedicated preview subdomain).
+
+## 2026-07-02 — Sec-3b (C1 fast-follow): verified identity on the conversation read/delete routes
+
+Closes the last named read-IDOR from the audit. `/api/agentv3/conversations` (list), `.../:id` (get)
+and DELETE `.../:id` derived the caller from `req.query.userId` — spoofable, so one account could list,
+read (full transcripts + generated code) or delete another account's builds by claiming their (non-
+secret) uid. New shared `resolveReadIdentity(req)` returns uid+email from the VERIFIED token (VITEST
+falls back to request params so existing route tests still exercise the ownership logic); the three
+routes now use it, so `conversationAccess`/`listByUser` compare against the real uid. The client already
+sends the Bearer token on all three calls (authJsonHeaders) → non-breaking. Gate: frontend tsc 0, server
+tsc 0, vitest 4173/4173 PASS, boot:check PASS.
+
+Remaining C1-family (separate follow-up): /attach (resume) still keys off body.userId and its client
+call is token-less — needs the same coordinated client+server change /chat got. /status and /live were
+already workspace-scoped in #804/#816. With this, the v3.0-scoped security criticals (C1, C2, A2) +
+the conversation IDOR are all closed; C3 (preview-iframe) stays infra-gated. Next: Phase-3 redesign,
+starting with A3 (wire the custom E2B template — biggest reliability win, code can land gated behind
+E2B_TEMPLATE_ID so it's a safe no-op until the admin publishes + sets the env var).

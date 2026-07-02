@@ -76,6 +76,9 @@
 | **P-COLLAB** | **Collaboration Platform Gaps** | Durable team membership, shared-workspace ACL, client share portal, team libraries, @mention, SSO | ⏳ Pending | 0% |
 | **P-MON** | **Monitoring & Analytics Gaps** | Product analytics pipeline, anomaly/forecasting, LLM observability, real health scores, AI insights, FinOps | ⏳ Pending | 0% |
 | **P-ORCH** | **Automation & Orchestration Gaps** | Cron/scheduled jobs, user workflow builder, saga/compensation (core brain = AgentV3, already DONE) | ⏳ Pending | 0% |
+| **P-PIPE** | **End-to-End Build Pipeline Completeness** | Make the full ~110-stage build pipeline a real, mostly-deterministic assembly line (not an LLM-optional tool-loop): clarification, constraints, blueprint+dependency graph, deterministic generators, runtime smoke tests, perf/a11y as gates, docs/versioning. Turns "chutkiyo me complex software" from aspiration into guaranteed flow. | ⏳ Pending | 0% |
+| **P-ARCH+** | **Architectural Upgrades (beyond the pipeline)** | Unify fast-lane under the readiness gate, a single deterministic PipelineOrchestrator, spec/blueprint contract, parallel candidate generation + selection, self-improving memory, cost/quality tiering. The structural changes that make every other phase land. | ⏳ Pending | 0% |
+| **P-FUTURE** | **Frontier / Futurist Capabilities** | What leading agentic-coding teams are shipping now: spec-driven development, subagent fan-out/verification, computer-use browser QA, LLM-as-judge gates, formal/property-based verification, self-healing production, multi-candidate tournaments, on-device/edge preview. Forward scope — pick as the market moves. | ⏳ Pending | 0% |
 
 ---
 
@@ -3278,3 +3281,188 @@ work). Building them now would be shelf-ware. Revisit after launch when there ar
   CommandGovernance, SecretRedactor, UntrustedContent. MISSING: prompt/response cache (every call = fresh
   API hit), prompt versioning/registry, jailbreak detection, token pre-call estimator, prompt A/B eval,
   prompt audit trail (partial), prompt debugger/trace, date/time context. Added as **PHASE P-PE**.
+
+---
+
+## 🏗️ PHASE P-PIPE — End-to-End Build Pipeline Completeness (added 2026-07-02)
+
+> **Source:** a full stage-by-stage audit (2026-07-02, 7 parallel read-only agents, every claim tied to
+> `file:line`) of the ~110-stage "world-class build pipeline" the admin specified
+> (USER REQUEST → … → READY FOR USER). This phase captures the **gap between that target pipeline and
+> what the v3.0 engine actually runs today**. Goal: make NavBharatAI the best app maker — build the
+> biggest, most complex software "chutkiyo me" without visible struggle.
+
+### The guiding principle (READ FIRST — this phase is NOT "force everything through one heavy gate")
+
+**Adaptive, not rigid.** Speed for simple apps, depth for complex ones. The admin's call (2026-07-02) is
+correct: *"simple apps ke liye fast generation sahi hai — jo app ke liye best ho woh karo."* So the
+target is a **complexity-adaptive pipeline**, not a one-size gate:
+
+- **Simple app (todo, landing page, small CRUD)** → stay on the **fast lane** (`SimpleBuilder`): scaffold
+  → generate → `tsc` + CSS verify → repair → preview. Fast is the feature. Do **not** drag it through
+  the 22-dimension gate, smoke tests, or perf benchmarks — that would only add latency for no quality win.
+- **Complex app (auth + DB + many pages + real backend)** → route to the **full pipeline**: blueprint +
+  dependency graph, deterministic generators, readiness gate, runtime smoke tests, a11y/security as
+  blockers, docs + versioning.
+- The router already exists (`RequestAnalyser.analyzeRequest` 0-100 score, `ComplexityClassifier`) — the
+  work is to make it **choose the right depth of pipeline**, and to make the deep pipeline actually exist.
+
+**Verdict legend:** ✅ real + wired + automatic · 🟡 exists but shallow / not wired into the build /
+LLM-optional (runs only if the model chooses) · ❌ missing. "E2B-only" = works solely when
+`E2B_API_KEY` is set; silently no-ops on the Local/Docker actuator.
+
+**Scorecard (today):** of ~110 target stages — **≈45 ✅ (41%)**, **≈38 🟡 (35%)**, **≈27 ❌ (24%)**.
+The engine is a strong LLM tool-loop with real gates around compile/security/self-heal; it is **not yet
+the deterministic assembly line the diagram implies.**
+
+### P-PIPE.A — Understanding & Planning (stages 1-12)
+| Stage | Verdict | Evidence | Action to reach best-in-class |
+|-------|---------|----------|-------------------------------|
+| 1 Intent Analysis | ✅ | `agentv3.ts` `classifyIntent`+`classifyIntentSmart` | keep |
+| 2 Requirement Extraction | 🟡 | `EntityExtractor` `entityRequirementsContext` (advisory prompt only) | promote to a structured requirement list that drives the plan |
+| 3 Missing-Requirement Detection | 🟡 | `RequirementCoverage` inside LLM-optional `evaluate` | run deterministically for complex builds |
+| 4 Interactive Clarification | ❌ | no `ask_user` tool; only approve/reject plan gate | **add a real clarify round** (bounded, complex apps only) — biggest quality lever |
+| 5 Constraint Collection (browser/mobile/desktop/offline/auth) | 🟡/❌ | only framework picker (`req.body.framework`) | capture target platform + auth/offline constraints up front |
+| 6 Scope Definition | 🟡 | `decidePlanning`; plan phase only | keep (plan-mode) |
+| 7 Feature Decomposition | 🟡 | `planRunner`+`update_todo` (LLM, plan-mode) | keep; feed the blueprint (P-ARCH+.3) |
+| 8 Complexity Estimation | ✅ | `RequestAnalyser.analyzeRequest` | keep — becomes the adaptive-depth router |
+| 9 Task Graph Generation | 🟡 | flat `update_todo` list + deterministic `PlanProgress` | upgrade flat list → real graph |
+| 10 Task Dependency Graph | ❌ | `TodoItem` has no `dependsOn` | **add task deps** → correct build order for big apps |
+| 11 Architecture Planning | 🟡 | LLM architect prompt; `ArchitectureAnalysis` is post-build + LLM-optional | add a real up-front blueprint (P-ARCH+.3) |
+| 12 Technology Selection | ✅ (user-driven) | `FrameworkRegistry` + picker | optionally let AI infer stack from the prompt |
+
+### P-PIPE.B — Scaffolding & Environment (stages 13-24) — *E2B path*
+Strong here. Deterministic template seed (package.json/tsconfig/vite/index.html/main.tsx) is guaranteed on
+E2B via `E2BActuator.ensureWorkspace` + `ViteReactProviderContents`. **Gaps:** 17 SDK Verification ❌
+(Node assumed; no Bun/Python/Java/Rust probe), 18 Package-Manager Detection ❌ (npm hard-coded), 16 Env
+Validation 🟡 (reachability only). 19 Create-Project is ❌-by-design (`ScaffoldGuard` blocks `create-*`,
+replaced by template writes — acceptable). **Action:** multi-runtime SDK/PM detection so v3.0 can build
+non-Vite/non-npm stacks (Bun, Python, etc.) — required for "biggest software" ambition.
+
+### P-PIPE.C — Code Generation & Static Validation (stages 25-40)
+The load-bearing truth: stages 26-34 (routing, state, API, DB, UI, theme) are **the LLM writing files**,
+not deterministic generators. Real deterministic generators exist but are **LLM-optional tools**
+(`generate_auth`, `generate_migration`, `generate_seed_data`, `generate_openapi`, `generate_env_example`).
+**Wired deterministic validators (the good part):** 37 Cross-file Consistency ✅ (`ContractMap`
+drift → repair; `CssConsistency` in fast verify), 38 Type Validation ✅ (`TscGate` — the strongest gate).
+🟡: 32 Design System (`DesignLinter`/`DesignAdvisor` exist but only on the `/design` route, **not the
+build**), 36 AST (`ASTAnalyzer` wired to memory, not a gate), 39 Import / 40 Dep resolution (hints + tsc,
+no resolver). ❌: 34 Assets. **Action:** (a) wire `DesignLinter` into the build as an advisory score;
+(b) a deterministic dependency reconciler (used-but-undeclared import → add to package.json); (c) optional
+deterministic generators promoted to auto-run for complex builds.
+
+### P-PIPE.D — Dependencies, Contracts & Tests (stages 41-56)
+✅ wired: 42 Install, 43 Install-verify (exit-code), 45 Security Audit (`PackageSafetyScanner` blocklist —
+note: **not** `npm audit` CVE), 56 Type Check, 51 Unit-test **scaffold** (`planAutoTests` auto-writes
+Vitest skeletons post-build — but skeletons carry `// TODO`, not real assertions). 🟡 LLM-optional:
+47 migration, 48 seed, 50 OpenAPI; 41 version-conflict (only ERESOLVE→`--legacy-peer-deps` retry);
+44 lockfile; 54 lint (`LintFixGenerator` exists but wired to `AppMakerOrchestrator`, **not** AgentV3).
+❌: 46 License validation, 52 Integration tests, 53 E2E tests, 55 Formatter. **Action:** real assertion
+generation (not skeletons), eslint+prettier wired into AgentV3, `npm audit` CVE gate, integration/E2E for
+complex apps.
+
+### P-PIPE.E — Build, Boot & Runtime Validation (stages 57-75)
+✅ strong & automatic: 57-60 compile/verify/auto-repair/retry (both paths), 61-64 dev-server boot / port /
+health / boot-verify, 66 browser scan, 72 rendering validation (`PreviewVerify.analyzePreviewHtml`) —
+**but 61-66/72 are E2B-only** and boot/render verify runs on the **agentic path only**. 🟡: 65 Console-error
+scan (real daemon, but automatic `browseUrl` uses a listener-less inline script → **console log not
+populated** unless the LLM already drove the browser; auto-fix loop is **off by default**,
+`AGENTV3_AUTOFIX=on`), 68 network validation (incidental), 73 responsive (LLM-optional),
+74 a11y (`AccessibilityAnalysis` runs in the gate but is **advisory, agentic-only, non-blocking**).
+❌: **67 Hydration, 69 API smoke test, 70 Auth smoke test, 71 DB smoke test, 75 Performance benchmark.**
+**Action (highest user-visible value):** real **runtime smoke tests** — actually hit the app's routes/API,
+click through auth, confirm DB reads — so "bana but chalta hai?" is *proven*, not assumed. Fix the console
+population gap; make a11y a blocker for complex apps.
+
+### P-PIPE.F — Performance, Optimization, Security & Cross-Platform (stages 76-91)
+✅ wired + blocking: 86 Security scan, 87 Secret detection (both block a "clean success"), 88 Env
+validation; 85 SEO ✅ (advisory). **Entire performance/optimization cluster is absent or LLM-optional:**
+76 Memory-leak ❌, 77 CPU ❌, 78 Bundle-analysis 🟡 (generator, no size analysis), 79 Tree-shaking ❌,
+80 Code-splitting 🟡, 81 Image-opt ❌, 82 Caching ❌, 83 Offline ❌, 84 PWA ❌. Cross-platform: 89 ❌,
+90 Cross-browser ❌ (single Chromium), 91 Regression ❌. **Action:** a real **bundle-size + Lighthouse
+perf gate** (deterministic, complex apps), PWA/offline validators, and a cross-browser matrix — the
+difference between "it renders" and "it's production-grade."
+
+### P-PIPE.G — Self-Heal, Docs, Git, Deploy & Final Gate (stages 101-119)
+✅ The self-heal loop is **real, automatic and bounded** (harness re-runs `tsc` → generates a patch →
+re-checks): 101-108 all ✅. **But shallow — 109 Repeat-Until-Stable is capped at 1-2 passes**, driven by
+`tsc`/CSS/preview, not by tests. ✅: 114 Git commit (auto checkpoints), 118 Readiness checklist +
+119 Final quality gate (`Readiness.assessReadiness` + `AgentRunner` downgrade — **agentic-path only**),
+117 Deploy (**real** Firebase Hosting publish, but LLM-optional + sandbox-gated). 🟡 LLM-optional:
+110 README, 111 API docs, 113 changelog, 116 deploy-validation (pre-deploy only, no post-deploy liveness
+check). ❌: 112 Architecture docs, 115 Version tag. **Action:** deepen the heal loop (more passes for
+complex builds, test-driven not just tsc-driven), post-deploy liveness check, auto version tag + changelog.
+
+---
+
+## 🧠 PHASE P-ARCH+ — Architectural Upgrades (my recommendations, beyond the pipeline)
+
+> These are the **structural** changes that make every P-PIPE item land cleanly. Ordered by leverage.
+> None of this is built yet — roadmap only.
+
+- **P-ARCH+.1 — Complexity-adaptive pipeline depth (the #1 structural change).** One router
+  (`RequestAnalyser` score + `ComplexityClassifier`) picks the *depth*: `fast` (simple → tsc+CSS, today's
+  fast lane, keep it fast), `standard` (medium → + readiness gate + smoke test), `deep` (complex → full
+  P-PIPE with blueprint, deps graph, perf/a11y/security gates, docs). **Explicitly preserves fast
+  generation for simple apps** (admin decision 2026-07-02) — depth is earned by complexity, never forced.
+- **P-ARCH+.2 — A single deterministic `PipelineOrchestrator`.** Today the flow is scattered across
+  `agentv3.ts` (2000+ lines), `SimpleBuilder`, and the LLM's tool choices. Extract one orchestrator that
+  runs the chosen depth's stages deterministically and emits a **stage-by-stage progress event** to the
+  UI (the user literally watches Intent → Blueprint → Generate → Verify → Smoke → Ready). Makes "complex
+  software in chutkiyo" *visible and trustworthy*, and makes each stage independently testable.
+- **P-ARCH+.3 — Real up-front blueprint + frozen contract.** Before the build loop: generate a file
+  manifest + shared type/API contract + task **dependency graph**, validate it, then build in dependency
+  order. Kills cross-file drift (mismatched imports, missing files) that hurts large apps most. Reuse
+  `SimpleBuilder`'s contract idea + `AppMakerLab/FilePlanningEngine` (already exists, not wired to AgentV3).
+- **P-ARCH+.4 — Parallel candidate generation + selection (for hard sub-problems).** For a genuinely
+  complex module, generate 2-3 candidates in parallel, score them (tsc-clean + readiness + a cheap
+  LLM-judge), keep the best. Beats one-shot-then-repair on the hardest 10% of work.
+- **P-ARCH+.5 — Self-improving memory that actually feeds the next build.** `Reflection`/`KnowledgeEvolution`
+  already record lessons; wire them so a recurring error ("this stack always needs X") is injected into the
+  *next* build's context automatically — the engine gets better per user, per stack, over time.
+- **P-ARCH+.6 — Runtime smoke-test harness (shared infra for P-PIPE.E 69-71).** A deterministic post-boot
+  step that hits routes, exercises auth, and probes the DB inside the sandbox — the single biggest jump
+  from "renders" to "actually works."
+- **P-ARCH+.7 — Cost/quality tiering surfaced honestly.** Tie pipeline depth to the v3.0 billing tiers
+  (standard vs Only-Opus) so users can *choose* "fast & cheap" vs "deep & guaranteed" — matches the
+  adaptive philosophy and the existing markup model.
+
+---
+
+## 🔮 PHASE P-FUTURE — Frontier / Futurist Capabilities (what leading agentic-coding teams are shipping)
+
+> Forward scope. Not "must build now" — this is where the frontier is moving (2026); pick items as the
+> market and our user base pull for them. Keeps NavBharatAI ahead, not just caught up.
+
+- **P-FUTURE.1 — Spec-driven development.** User (or the AI) writes a short spec/PRD; the spec becomes the
+  contract the build is verified against, and the source of truth for regeneration. (The direction behind
+  GitHub Spec-Kit, Kiro, and "specs as code.")
+- **P-FUTURE.2 — Subagent fan-out + adversarial verification.** Decompose a big build across parallel
+  subagents (already have `SubAgent`/`AgentRegistry`), then have independent verifier agents try to *break*
+  each result before it's accepted. (The pattern behind Claude's multi-agent research + code review.)
+- **P-FUTURE.3 — Computer-use / real browser QA.** Drive the built app like a user (click, type, navigate,
+  screenshot-diff) to catch what static checks miss — real end-to-end acceptance, not just "port is up."
+- **P-FUTURE.4 — LLM-as-judge quality gates.** A rubric-scored model reviews the finished app
+  (UX, correctness, design) and blocks/flags below threshold — an automated senior-reviewer.
+- **P-FUTURE.5 — Formal / property-based verification.** For critical logic, generate property-based tests
+  and lightweight invariants (fuzzing, type-level guarantees) — verification beyond example tests.
+- **P-FUTURE.6 — Self-healing in production.** Wire runtime errors from a deployed app back to v3.0 →
+  auto-diagnose → propose/ship a patch (closed-loop, with human approval).
+- **P-FUTURE.7 — Multi-candidate tournaments for whole apps.** For flagship builds, generate N full app
+  variants, auto-evaluate, and present the winner (with the runner-ups' best ideas grafted in).
+- **P-FUTURE.8 — On-device / edge instant preview.** WASM/edge-run the preview so it's instant and never
+  depends on an ephemeral cloud sandbox being warm (removes the E2B-only fragility at its root).
+- **P-FUTURE.9 — Fine-tuned / distilled house model for codegen.** As build data accumulates, distill a
+  cheaper specialized model for the common 80% of generation, reserving frontier models for the hard 20%
+  (cost + speed at scale).
+
+---
+
+> **2026-07-02 (Pipeline completeness audit + P-PIPE/P-ARCH+/P-FUTURE):** Ran a 7-agent stage-by-stage
+> audit of the admin-specified ~110-stage build pipeline against the real v3.0 code (every claim tied to
+> `file:line`). Result: ≈41% of stages are real+wired+automatic, ≈35% partial/LLM-optional, ≈24% missing;
+> the engine is a strong LLM tool-loop with real compile/security/self-heal gates but is **not yet a
+> deterministic assembly line**. Captured the full gap as **PHASE P-PIPE**, plus my structural
+> recommendations as **PHASE P-ARCH+** and frontier scope as **PHASE P-FUTURE**. Key admin decision baked
+> in: the pipeline must be **complexity-adaptive** — simple apps keep the fast lane (fast generation is the
+> right call), depth is applied only to complex apps. Doc-only change; no code touched.

@@ -16,3 +16,7 @@ whereami.txt
 test_environment_debug.json
 
 .boot-check.cjs
+
+# Generated Monaco editor vendor bundle (never source; the IDE editor loads Monaco
+# from a CDN — public/monaco/ is stray generated output that must not be committed).
+public/monaco/

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -94,6 +94,32 @@ describe('deriveWorkspaceId (session continuity)', () => {
   it('treats a missing/unsafe userId as anon', () => {
     expect(deriveWorkspaceId(null, 'sess-abc123')).toBe('agentv3-anon-sess-abc123');
     expect(deriveWorkspaceId('bad id!', 'sess-abc123')).toBe('agentv3-anon-sess-abc123');
+  });
+});
+
+describe('workspaceOwnershipOk — fixes "Forbidden: this workspace does not belong to you"', () => {
+  it('lets a user access their own real workspace (verified uid matches)', () => {
+    expect(workspaceOwnershipOk('user1', null, 'agentv3-user1-sess-abc123')).toBe(true);
+  });
+
+  it('still BLOCKS a real workspace when the resolved uid does not match (IDOR stays closed)', () => {
+    // A signed-in user (verified user2) must not reach user1's real workspace, even if they claim user1.
+    expect(workspaceOwnershipOk('user2', 'user1', 'agentv3-user1-sess-abc123')).toBe(false);
+    // A claimed id without a verified token does not grant access to another user's real workspace.
+    expect(workspaceOwnershipOk(null, 'user1', 'agentv3-user2-sess-abc123')).toBe(false);
+  });
+
+  it('allows an anon-bucket workspace for any caller — the real fix for the Forbidden bug', () => {
+    // The build degraded a signed-in user to anon (agentv3-anon-…); the preview call resolves them
+    // to their REAL uid. Before the fix this mismatch → Forbidden on the user's OWN build.
+    expect(workspaceOwnershipOk('user1', 'user1', 'agentv3-anon-62e136f0-0f0c')).toBe(true);
+    // And a genuinely anonymous caller (no token, no claim) still reaches the anon bucket.
+    expect(workspaceOwnershipOk(null, null, 'agentv3-anon-62e136f0-0f0c')).toBe(true);
+  });
+
+  it('rejects a malformed / non-agentv3 workspace id', () => {
+    expect(workspaceOwnershipOk('user1', null, '')).toBe(false);
+    expect(workspaceOwnershipOk('user1', null, 'not-a-workspace')).toBe(false);
   });
 });
 

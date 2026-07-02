@@ -326,17 +326,39 @@ const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
  * and anonymous sessions, which also rely on the unguessable random sessionId). Returns false for a
  * malformed id or a uid mismatch, so one user can never read/write another user's workspace.
  */
-async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
+/**
+ * PURE ownership decision for a workspaceId, extracted so it can be unit-tested without an Express
+ * request. A workspaceId is `agentv3-{uid}-{sessionId}` (deriveWorkspaceId).
+ *
+ * ANON EXEMPTION (fixes the "Forbidden: this workspace does not belong to you" bug):
+ * an `agentv3-anon-*` workspace has NO real owner to protect — it is the shared-anon bucket, scoped
+ * only by its unguessable random sessionId (exactly what this guard's own doc describes). The build
+ * path (resolveBuildIdentity) degrades a signed-in user whose token is briefly unverifiable to
+ * `anon`, creating `agentv3-anon-{session}` — but every OTHER call (preview/files) resolves that same
+ * user to their REAL uid, so the strict uid-match rejected the user from their OWN build. Treating an
+ * anon-prefixed workspace as always-accessible resolves that mismatch WITHOUT widening access to any
+ * real user's workspace (`agentv3-{realuid}-*` still requires the uid to match). No IDOR is opened:
+ * a real workspace is still uid-gated, and an anon workspace was already reachable by anyone holding
+ * its random sessionId.
+ */
+export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: string | null, workspaceId: string): boolean {
   if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
-  const verifiedUid = await verifyFirebaseToken(req);
-  // Claimed id may come from the JSON body (POST) or the query string (GET). The verified token
-  // always takes precedence over either, so this only widens the token-less admin/anon fallback.
-  const claimedUid =
-    (typeof req.body?.userId === 'string' ? req.body.userId : null) ??
-    (typeof req.query?.userId === 'string' ? req.query.userId : null);
+  // The shared-anon bucket carries no real identity to protect (sessionId-scoped only).
+  if (workspaceId.startsWith('agentv3-anon-')) return true;
+  // The verified token always takes precedence over the claimed id (only widens the token-less
+  // admin/anon fallback). A real workspace requires the resolved uid to match its id.
   const id = verifiedUid ?? claimedUid;
   const uid = id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : 'anon';
   return workspaceId.startsWith(`agentv3-${uid}-`);
+}
+
+async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
+  const verifiedUid = await verifyFirebaseToken(req);
+  // Claimed id may come from the JSON body (POST) or the query string (GET).
+  const claimedUid =
+    (typeof req.body?.userId === 'string' ? req.body.userId : null) ??
+    (typeof req.query?.userId === 'string' ? req.query.userId : null);
+  return workspaceOwnershipOk(verifiedUid, claimedUid, workspaceId);
 }
 
 export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
@@ -3548,7 +3570,10 @@ export function registerAgentV3Routes(app: Express): void {
       // Best-effort — wrapped so it can NEVER affect the build result.
       if (result.ok) {
         try {
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt);
+          // Pass the REAL preview state: a live preview URL was published this build iff lastPreviewUrl
+          // is set. Without this the recap always said "see it live" even when the preview never came up
+          // (the dishonest message a real build report showed — no-fake-success rule).
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }

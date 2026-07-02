@@ -149,7 +149,7 @@ import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWork
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
@@ -1308,6 +1308,12 @@ export function registerAgentV3Routes(app: Express): void {
       // append). Fall back to the in-memory copy only when there is no workspaceId or no durable copy.
       if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
       if (!report) report = lastDiagnostics.get(userId ?? 'anon');
+      // Durable per-USER fallback (P-REPORT.5): the workspaceId-keyed doc can be missing (a fresh
+      // session mints a NEW workspaceId with no report yet) and the in-memory map is wiped by every
+      // cold start. This Firestore doc keyed by userId alone holds the user's LAST settled build
+      // report across cold starts / instance rotation / reloads / new sessions — so the "Build report"
+      // never vanishes after a real build.
+      if (!report) report = await loadLatestForUser(userId).catch(() => null);
       if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     }
     // Human/Claude-readable plain-text render — root cause first, problems only, full AI Diagnosis
@@ -1373,6 +1379,14 @@ export function registerAgentV3Routes(app: Express): void {
         // Refresh the SAME history entry (same startedAt → same id) with the late-arriving preview
         // error, so a build's history record isn't missing evidence captured after it settled.
         await saveDiagnosticsHistory(workspaceId, withPreviewError).catch(() => {});
+        // Keep the durable per-USER "latest report" in sync too, so a preview error that arrives after
+        // the build settled still reaches the userId-keyed copy the report UI falls back to — but ONLY
+        // when this workspace IS the user's latest build (same/newer startedAt). This prevents a late
+        // preview error from an OLDER workspace regressing the per-user copy to a stale build.
+        const perUser = await loadLatestForUser(userId).catch(() => null);
+        if (!perUser || (withPreviewError.startedAt ?? 0) >= (perUser.startedAt ?? 0)) {
+          await saveLatestForUser(userId, withPreviewError).catch(() => {});
+        }
       }
       res.json({ ok: true });
     } catch {
@@ -2488,6 +2502,9 @@ export function registerAgentV3Routes(app: Express): void {
           // Also into the bounded per-workspace HISTORY so this settled report survives even after
           // a later (possibly much smaller) build overwrites the "latest" doc above.
           saveDiagnosticsHistory(workspaceId, dl).catch(() => {});
+          // Durable per-USER "latest report" — retrievable by userId alone across cold starts / new
+          // sessions, so the "Build report" never vanishes even when the client's workspaceId changed.
+          saveLatestForUser(userId, dl).catch(() => {});
         }
       } catch { /* diagnostics are best-effort */ }
       if (ok && buildResultRef) {
@@ -3981,6 +3998,9 @@ export function registerAgentV3Routes(app: Express): void {
         await Promise.all([
           saveDiagnostics(workspaceId, diagnostics).catch(() => {}),
           saveDiagnosticsHistory(workspaceId, diagnostics).catch(() => {}),
+          // Durable per-USER "latest report" — retrievable by userId alone across cold starts / new
+          // sessions, so the "Build report" never vanishes even when the client's workspaceId changed.
+          saveLatestForUser(userId, diagnostics).catch(() => {}),
         ]);
       } catch { /* diagnostics are best-effort */ }
       // P-BRE.1 — finalize the build trace: record the generate span + rich attributes, export to the
@@ -4052,6 +4072,9 @@ export function registerAgentV3Routes(app: Express): void {
           lastDiagnostics.set(buildKey, crashReport);
           saveDiagnostics(workspaceId, crashReport).catch(() => {});
           saveDiagnosticsHistory(workspaceId, crashReport).catch(() => {});
+          // Durable per-USER "latest report" so even a crashed build's report is retrievable by userId
+          // alone (across cold starts / new sessions) — the whole point of "gayab na ho".
+          saveLatestForUser(userId, crashReport).catch(() => {});
         }
       } catch { /* diagnostics are best-effort */ }
       // Same durable-file-save guarantee as the deadline-timeout path: a crash mid-build must not

@@ -7175,3 +7175,20 @@ Queued next (approved order, v3.0-scoped): C3 (preview-iframe origin isolation) 
 across the build path = architecture item A1) → Phase 3 redesign (A3 wire E2B template → A2 prod guard →
 A4/A6 unified preview + build state machine → A8 resumable manifest generation → export verification).
 Out-of-v3.0-scope, flagged for separate go-ahead: C4/payments, sync.ts, wallet.ts, team-RBAC.
+
+## 2026-07-02 — Sec-2 (A2): production sandbox guard on the v3.0 build route (defense-in-depth for C2)
+
+Follow-on to C2. `buildActuator()` (agentv3.ts) falls back E2B → Docker → LocalActuator with NO prod
+guard — unlike engineer.ts, which 503s in production without a real sandbox. LocalActuator runs the
+agent's generated + imported commands in the HOST process, which is exactly what made C2's importUrl
+injection reach the host. New pure `buildSandboxUnavailableInProd(env)` (exported, unit-tested) gates
+this; the /chat build path calls it AFTER the plain-chat early-exit (chat needs no sandbox, so it's
+unaffected) and, because the NDJSON headers are already flushed, emits a terminal error+result event
+and cleans up activeBuilds instead of res.status(). Non-prod (dev/CI/VITEST) still uses LocalActuator by
+design. +4 tests. Gate: frontend tsc 0, server tsc 0, vitest 4169/4169 PASS, boot:check PASS.
+
+NOTE: this + C2 currently ride on the same branch as PR #816 (ghost-chat) because the GitHub connector
+disconnected mid-session and #816 could not be merged first — so ghost-chat + C2 + A2 will ship together
+in one green merge once GitHub is re-authorized. C3 (preview-iframe origin isolation) is INFRA-GATED
+(needs a dedicated preview subdomain, like the APK template) — flagged, not half-fixed. C1 (verified
+identity) remains the next code workstream.

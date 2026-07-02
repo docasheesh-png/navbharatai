@@ -184,6 +184,17 @@ function buildActuator(): IEngineerActuator {
   return sharedActuator;
 }
 
+/**
+ * SECURITY (audit A2 — defense-in-depth for C2): should a BUILD be refused because no isolated
+ * sandbox is configured? In production, a build with neither E2B nor Docker would fall back to
+ * LocalActuator (host execution) — the avenue that let the importUrl injection reach the host. Pure +
+ * exported so it's unit-testable; the /chat build path calls this AFTER the plain-chat early-exit
+ * (chat needs no sandbox). Non-prod (dev/CI/VITEST) is allowed — LocalActuator is intended there.
+ */
+export function buildSandboxUnavailableInProd(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'production' && !env.E2B_API_KEY && env.DOCKER_ENABLED !== 'true';
+}
+
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
 let sharedConversationStore: ConversationStore | null = null;
 /**
@@ -2149,6 +2160,22 @@ export function registerAgentV3Routes(app: Express): void {
         // The free router failed — do NOT error out. Fall through to the normal
         // build path so the user always gets an answer. (No return here.)
       }
+    }
+
+    // SECURITY (audit A2 — defense-in-depth for C2): a BUILD needs an isolated sandbox. In production,
+    // refuse to build when neither E2B nor Docker is configured, instead of silently falling back to
+    // LocalActuator — which runs the agent's generated + imported commands in THIS host process, the
+    // exact avenue that made the importUrl injection (C2) reach the host. Mirrors the guard
+    // engineer.ts already enforces. Placed AFTER the plain-chat early-exit so a normal chat turn (no
+    // sandbox needed) is unaffected. The stream headers are already flushed, so we emit a terminal
+    // error event + clean up activeBuilds (same exit shape the chat path uses) rather than res.status().
+    if (buildSandboxUnavailableInProd()) {
+      send({ type: 'narration', agent: 'architect', text: 'The build sandbox is not available on this server right now (cloud sandbox not configured), so I did not run the build. Your account was not charged. Please try again shortly or contact the admin.', ts: Date.now() });
+      send({ type: 'error', message: 'Build sandbox (E2B) is not configured on the server — refusing to run the build on the host for safety.' });
+      send({ type: 'result', ok: false, summary: 'Build sandbox not configured on the server.', steps: 0, billedUsd: 0, billedInr: 0 });
+      activeBuilds.delete(buildKey);
+      if (!res.writableEnded) res.end();
+      return;
     }
 
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the

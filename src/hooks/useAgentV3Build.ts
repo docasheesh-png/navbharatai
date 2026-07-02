@@ -301,17 +301,22 @@ export function useAgentV3Build(): UseAgentV3Build {
       const params = new URLSearchParams();
       if (userIdRef.current) params.set('userId', userIdRef.current);
       if (emailRef.current) params.set('email', emailRef.current);
+      // SECURITY (#819): conversation reads are now gated on the VERIFIED Firebase token, not the
+      // query userId — so these GETs MUST carry the Bearer token or the server returns 403/400 and the
+      // old chat never opens (the exact "clicking an old chat does nothing" bug). forceRefresh so a
+      // stale/expired cached token self-heals (the token flakiness behind the earlier access issues).
+      const authHeaders = await authJsonHeaders(true);
       // Load a SPECIFIC conversation when an id is given (history menu); otherwise the most recent.
       let convoId = opts?.id;
       if (!convoId) {
-        const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`);
+        const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`, { headers: authHeaders });
         if (!listRes.ok) return null;
         const listJson = await listRes.json().catch(() => ({}));
         const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
         convoId = recent?.id ? String(recent.id) : undefined;
       }
       if (!convoId) return null;
-      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`);
+      const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
       if (!oneRes.ok) return null;
       const oneJson = await oneRes.json().catch(() => ({}));
       const conv = oneJson?.conversation as PersistedConversation | undefined;
@@ -378,7 +383,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       const params = new URLSearchParams();
       params.set('userId', uid);
       if (em) params.set('email', em);
-      const res = await fetch(`/api/agentv3/conversations?${params.toString()}`);
+      // #819: the list route is gated on the verified Firebase token — send it (force-refreshed so a
+      // stale cached token self-heals) or the history menu shows empty.
+      const res = await fetch(`/api/agentv3/conversations?${params.toString()}`, { headers: await authJsonHeaders(true) });
       if (!res.ok) {
         const body = await res.json().catch(() => ({} as { error?: string }));
         return { items: [], error: body?.error || `Server error (${res.status}).` };
@@ -399,7 +406,8 @@ export function useAgentV3Build(): UseAgentV3Build {
       const params = new URLSearchParams();
       params.set('userId', uid);
       if (em) params.set('email', em);
-      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?${params.toString()}`, { method: 'DELETE' });
+      // #819: delete is gated on the verified Firebase token — send it or the delete is forbidden.
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?${params.toString()}`, { method: 'DELETE', headers: await authJsonHeaders() });
       return res.ok;
     } catch {
       return false;

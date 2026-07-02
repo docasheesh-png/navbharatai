@@ -129,6 +129,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
+import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -3284,6 +3285,21 @@ export function registerAgentV3Routes(app: Express): void {
           // restored/scaffolded sandbox even after new deps were added → "Cannot find module
           // 'tailwindcss'" → dev server crash. This installs exactly when the dep set changed.
           await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install; else echo "deps present"; fi' } }, 'frontend');
+          // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
+          // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
+          // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the
+          // dev server's port is up but the app can't load. Scan the generated files for imported-but-
+          // undeclared packages and install exactly those BEFORE starting the dev server. Bounded + safe:
+          // each name is shell-quote-validated, capped, and this only ADDS missing deps (never removes).
+          try {
+            const missing = findMissingDependencies(Object.fromEntries(writtenFiles))
+              .filter((p) => /^(?:@[\w.-]+\/)?[\w.-]+$/.test(p)) // shell-safe package names only
+              .slice(0, 20);
+            if (missing.length > 0) {
+              fastLog(`📦 Installing ${missing.length} missing dependenc${missing.length === 1 ? 'y' : 'ies'} the code imports but package.json omitted: ${missing.join(', ')}`);
+              await dispatcher.dispatch({ id: 'fast-reconcile', name: 'bash', input: { command: `npm install --no-audit --no-fund ${missing.join(' ')}` } }, 'frontend');
+            }
+          } catch { /* reconcile is best-effort — a failure just falls back to the plain install above */ }
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');
           await dispatcher.dispatch({ id: 'fast-preview', name: 'update_preview', input: { port: oneShotDevPort(framework) } }, 'frontend');
         };

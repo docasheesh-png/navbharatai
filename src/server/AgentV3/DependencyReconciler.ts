@@ -1,0 +1,110 @@
+// AgentV3 — Dependency Reconciler: the fix for "code imports a package that package.json never declared".
+//
+// THE REAL BUG (found in a live build report): the AI wrote `import { restrictToVerticalAxis } from
+// "@dnd-kit/modifiers"` in a component, but only listed `@dnd-kit/core`, `@dnd-kit/sortable`,
+// `@dnd-kit/utilities` in package.json — NOT `@dnd-kit/modifiers`. So `npm install` never installed it,
+// Vite couldn't resolve the import ("The following dependencies are imported but could not be resolved:
+// @dnd-kit/modifiers"), and the preview was broken even though the dev server's PORT was up. This is a
+// common AI-codegen failure: an import with no matching dependency entry.
+//
+// This module deterministically finds every bare package a project's source imports and subtracts the
+// ones already declared in package.json (+ Node builtins) — the remainder is the MISSING set the build
+// must `npm install` before starting the dev server. PURE + dependency-free so it is fully unit-testable
+// without a sandbox; the route installs whatever it returns.
+
+/** Node.js built-in modules that are never npm dependencies (with or without the `node:` prefix). */
+const NODE_BUILTINS = new Set([
+  'assert', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console', 'constants', 'crypto',
+  'dgram', 'diagnostics_channel', 'dns', 'domain', 'events', 'fs', 'http', 'http2', 'https', 'inspector',
+  'module', 'net', 'os', 'path', 'perf_hooks', 'process', 'punycode', 'querystring', 'readline', 'repl',
+  'stream', 'string_decoder', 'sys', 'timers', 'tls', 'trace_events', 'tty', 'url', 'util', 'v8', 'vm',
+  'wasi', 'worker_threads', 'zlib',
+]);
+
+/**
+ * Resolve an import specifier to the INSTALLABLE npm package name, or null when it is not a package
+ * (a relative/absolute path, the `@/` src alias, a Node builtin, a `node:`/`virtual:`/URL specifier).
+ *   `@dnd-kit/modifiers`        → `@dnd-kit/modifiers`
+ *   `@dnd-kit/sortable/dist/x`  → `@dnd-kit/sortable`
+ *   `react-dom/client`          → `react-dom`
+ *   `lodash/fp`                 → `lodash`
+ *   `./Foo`, `../x`, `@/lib/y`  → null
+ * PURE.
+ */
+export function packageNameFromSpecifier(spec: string): string | null {
+  const s = (spec || '').trim();
+  if (!s) return null;
+  if (s.startsWith('.') || s.startsWith('/')) return null;   // relative / absolute path
+  if (s.startsWith('@/')) return null;                        // the vite/tsconfig `@ → src` path alias
+  if (s.includes(':')) return null;                           // node:, virtual:, data:, http:, etc.
+  const parts = s.split('/');
+  let pkg: string;
+  if (s.startsWith('@')) {
+    if (parts.length < 2 || !parts[0] || !parts[1]) return null; // malformed scoped specifier
+    pkg = `${parts[0]}/${parts[1]}`;                           // @scope/name (drop deep sub-path)
+  } else {
+    pkg = parts[0];                                            // name (drop sub-path)
+  }
+  if (!pkg || NODE_BUILTINS.has(pkg)) return null;
+  return pkg;
+}
+
+/**
+ * Extract every bare package name imported/required by a source file — from `import … from 'x'`,
+ * `import 'x'`, `export … from 'x'`, `require('x')`, and dynamic `import('x')`. Returns the resolved
+ * installable package names (relative paths / aliases / builtins removed, sub-paths collapsed). PURE.
+ */
+export function extractImportedPackages(content: string): string[] {
+  if (!content) return [];
+  const specs: string[] = [];
+  const push = (re: RegExp): void => {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content))) specs.push(m[1]);
+  };
+  // import X from 'y' | import {a} from 'y' | import 'y' | export {a} from 'y' | export * from 'y'
+  push(/(?:^|[\n;])\s*(?:import|export)\b[^'"\n]*?['"]([^'"]+)['"]/g);
+  push(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g);   // require('y')
+  push(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g);    // dynamic import('y')
+  const out = new Set<string>();
+  for (const spec of specs) {
+    const pkg = packageNameFromSpecifier(spec);
+    if (pkg) out.add(pkg);
+  }
+  return [...out];
+}
+
+/** Collect the dependency names declared in a package.json's dependencies + devDependencies. */
+function declaredDependencies(packageJsonRaw: string | undefined): Set<string> {
+  const declared = new Set<string>();
+  if (!packageJsonRaw) return declared;
+  try {
+    const pkg = JSON.parse(packageJsonRaw) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown>; peerDependencies?: Record<string, unknown> };
+    for (const group of [pkg.dependencies, pkg.devDependencies, pkg.peerDependencies]) {
+      if (group && typeof group === 'object') for (const name of Object.keys(group)) declared.add(name);
+    }
+  } catch { /* an unparseable package.json means nothing is declared — everything imported is "missing" */ }
+  return declared;
+}
+
+/** True for a source file whose imports we should scan (JS/TS/JSX/TSX). */
+function isScannableSource(path: string): boolean {
+  return /\.(?:m?[jt]sx?|cjs)$/i.test(path) && !/\.d\.ts$/i.test(path);
+}
+
+/**
+ * Find packages the project's source code IMPORTS but package.json does NOT declare — the set the build
+ * must `npm install` before the dev server starts, or Vite fails to resolve them and the preview breaks.
+ * `files` maps workspace-relative path → content (must include the project's package.json). PURE.
+ */
+export function findMissingDependencies(files: Record<string, string>): string[] {
+  const pkgJsonKey = Object.keys(files).find((p) => p === 'package.json' || p.endsWith('/package.json'));
+  const declared = declaredDependencies(pkgJsonKey ? files[pkgJsonKey] : undefined);
+  const missing = new Set<string>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!isScannableSource(path)) continue;
+    for (const pkg of extractImportedPackages(content)) {
+      if (!declared.has(pkg)) missing.add(pkg);
+    }
+  }
+  return [...missing].sort();
+}

@@ -51,6 +51,7 @@ import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
+import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
@@ -1676,7 +1677,24 @@ export class ToolDispatcher {
         // pure, never throws). Tells the user how heavy their shipped app is.
         let bundleLine = '';
         try { bundleLine = bundleSummaryLine(summarizeBundle(files)); } catch { /* size is best-effort */ }
-        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''} This stays live after the sandbox stops.`;
+        // P-PIPE.116 — post-deploy liveness: one bounded GET to the published URL so the user learns the
+        // site actually responds. Best-effort + honest (never claims failure for a still-propagating URL);
+        // a transport error / timeout only ADDS a soft note and never affects the deploy success above.
+        let liveLine = '';
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 5_000);
+          try {
+            const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: ctrl.signal });
+            liveLine = ` ${livenessLine({ kind: 'http', status: res.status })}`;
+          } catch (e) {
+            const reason = e instanceof Error && e.name === 'AbortError' ? 'timed out after 5s' : 'connection failed';
+            liveLine = ` ${livenessLine({ kind: 'unreachable', reason })}`;
+          } finally {
+            clearTimeout(timer);
+          }
+        } catch { /* liveness is best-effort — never affects the deploy result */ }
+        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''}${liveLine} This stays live after the sandbox stops.`;
       }
 
       case 'console_errors': {

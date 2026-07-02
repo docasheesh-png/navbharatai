@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -563,7 +563,12 @@ export class E2BActuator implements IEngineerActuator {
       // after "ready") — the root cause of the preview-restart loop and BUILD_TIMEOUT.
       // disableDevServerAutoOpen: stop Vite/CRA from spawning `xdg-open` (absent in the headless
       // sandbox) — that ENOENT can crash the server right after "ready" and leave the preview dead.
-      const devCommand = disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port));
+      // redirectDevServerOutput: send the server's output to a FILE (not the live SDK stream) so that
+      // when we disconnect below, vite writing its next log line can't SIGPIPE-kill itself — the real
+      // "vite dies on 5173 while a silent node server survives on 3333" reaping seen in the build report.
+      const devCommand = redirectDevServerOutput(
+        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port)),
+      );
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the
       // scaffold/agent declared a new dep (e.g. tailwindcss) but node_modules is stale,
@@ -614,12 +619,21 @@ export class E2BActuator implements IEngineerActuator {
         await retry.disconnect().catch(() => {});
       }
 
+      // The dev server's output now goes to a FILE (see redirectDevServerOutput), so read the file for
+      // drift detection instead of the live stream (which is intentionally empty now). Best-effort:
+      // if the read fails we fall back to whatever the stream captured + the pinned port.
+      const devLog = await sandbox.commands
+        .run(`cat ${DEV_SERVER_LOG_PATH} 2>/dev/null | tail -50`, { cwd: WORKSPACE_ROOT, timeoutMs: 5000 })
+        .then((r) => r.stdout)
+        .catch(() => '');
+      if (devLog) stdout += devLog;
+
       // SOURCE OF TRUTH for the preview: the port the server ACTUALLY bound (parsed
       // from its own output), not the assumed default. If it drifted despite pinning
       // (a framework we don't pin), preview the REAL port. Tell the agent the exact
       // port to pass to update_preview so the last step — connecting the preview —
       // can never aim at the wrong port.
-      const boundPort = detectDevPort(stdout, port);
+      const boundPort = detectDevPort(devLog || stdout, port);
       if (boundPort !== port) {
         const reWait = await sandbox.commands.run(buildPortWaitCommand(boundPort, 10), { timeoutMs: 15_000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as any));

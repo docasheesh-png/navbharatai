@@ -26,6 +26,38 @@ export function disableDevServerAutoOpen(command: string): string {
   return `BROWSER=none ${command}`;
 }
 
+/**
+ * The in-sandbox log file a backgrounded dev server's output is redirected to. Reading THIS file
+ * (instead of the live command stream) is what lets the dev server survive the actuator disconnecting.
+ */
+export const DEV_SERVER_LOG_PATH = '/tmp/nbai-devserver.log';
+
+/**
+ * Redirect a dev server's stdout+stderr to a FILE inside the sandbox (in a subshell so any internal
+ * pipes/env-prefixes are captured whole).
+ *
+ * THE BUG this fixes (confirmed from a real build report: vite on 5173 kept dying while a plain
+ * `node` http server on 3333 stayed alive — the textbook SIGPIPE signature):
+ * the actuator launches the dev server with `background:true` and streams its stdout back through the
+ * SDK connection. When it then calls `handle.disconnect()` (to return the moment the port is up), that
+ * stream closes. Vite keeps writing to stdout (HMR pings, request logs) → a write to the now-closed
+ * pipe raises SIGPIPE → vite is killed a second after "ready", the health-check restarts it, and the
+ * loop burns the whole build budget. A server that stays SILENT after boot (the bare node one) never
+ * writes again, so it never hits SIGPIPE and survives — exactly what the report showed.
+ *
+ * By sending the dev server's output to a file, its stdout is a regular file that never closes, so a
+ * disconnect can no longer SIGPIPE it. Port/drift detection then reads the file (see the actuator)
+ * instead of the live stream. PURE + unit-testable. Idempotent (never double-wraps).
+ */
+export function redirectDevServerOutput(command: string, logPath: string = DEV_SERVER_LOG_PATH): string {
+  if (!command) return command;
+  const c = command.trim();
+  if (!c) return c;
+  // Already redirected to this exact log → don't wrap again.
+  if (c.includes(`> ${logPath}`)) return c;
+  return `( ${c} ) > ${logPath} 2>&1`;
+}
+
 export function ensureHostBinding(command: string): string {
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.

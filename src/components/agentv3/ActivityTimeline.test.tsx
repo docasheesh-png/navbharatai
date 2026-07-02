@@ -1,0 +1,48 @@
+import { describe, it, expect } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ActionGroupRow } from './ActivityTimeline';
+import { buildChatBlocks } from './activityTimeline';
+import type { ActivityEntry } from './agentV3Types';
+
+const tool = (id: string, ts: number, text: string, extra: Partial<ActivityEntry> = {}): ActivityEntry =>
+  ({ id, ts, kind: 'tool', text, ...extra });
+const file = (id: string, ts: number, text: string): ActivityEntry => ({ id, ts, kind: 'file', text, ok: true });
+
+function actionsBlock(activity: ActivityEntry[], diffs: Record<string, string> = {}) {
+  const blocks = buildChatBlocks<{ role: 'user' | 'agent'; text: string; ts: number }>([], activity, diffs);
+  const b = blocks[0];
+  if (!b || b.kind !== 'actions') throw new Error('expected an actions block');
+  return b;
+}
+
+describe('ActionGroupRow — Claude-style collapsed action row (real render)', () => {
+  it('renders the summary + real diff stats in a collapsed row', () => {
+    const block = actionsBlock(
+      [file('f1', 1, 'edited src/App.tsx')],
+      { 'src/App.tsx': '+++ b/x\n+a\n+b\n-c\n' },
+    );
+    const html = renderToStaticMarkup(<ActionGroupRow block={block} />);
+    expect(html).toContain('Edited App.tsx');
+    expect(html).toContain('+2');
+    expect(html).toContain('-1');
+    expect(html).toContain('<button'); // a real button, not a div-with-onClick (the iOS lesson)
+  });
+
+  it('shows the live progress note + spinner while the group is active', () => {
+    const blocks = buildChatBlocks(
+      [{ role: 'agent' as const, ts: 20, text: '✓ src/App.tsx (12/33)' }],
+      [tool('t1', 10, 'writing src/App.tsx', { active: true })],
+      {},
+    );
+    const b = blocks[0];
+    if (b.kind !== 'actions') throw new Error('expected actions');
+    const html = renderToStaticMarkup(<ActionGroupRow block={b} />);
+    expect(html).toContain('12/33 files');
+    expect(html).toContain('animate-spin');
+  });
+
+  it('a failed group renders with the failure accent', () => {
+    const html = renderToStaticMarkup(<ActionGroupRow block={actionsBlock([tool('c1', 1, 'running: npm test', { ok: false })])} />);
+    expect(html).toContain('border-red-500/30');
+  });
+});

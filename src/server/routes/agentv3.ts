@@ -202,25 +202,30 @@ export function buildSandboxUnavailableInProd(env: NodeJS.ProcessEnv = process.e
  * it — a spoofable id let anyone read another user's workspace, bypass the cap, and spend
  * NavBharatAI's own model budget under any account. Pure + exported + unit-tested.
  *
- * Rules (admin-approved 2026-07-02, "reject & ask refresh"):
- *  • claim present but NO verified token → reject `reauth` (a spoof attempt, OR a real user whose
- *    browser still has the pre-fix cached JS that didn't send the token — a refresh loads the
- *    token-sending client; their workspace is untouched, so this is self-healing, not data loss).
- *  • verified token present but a DIFFERENT claimed id → reject `mismatch` (spoof).
- *  • otherwise ok; `userId` is the verified uid, or null for a genuinely anonymous caller (no token
- *    AND no claim) — preserving the existing shared-anon path.
+ * Rules (admin-approved 2026-07-02, revised — "graceful degrade, never hard-block"):
+ *  • verified token present but a DIFFERENT claimed id → reject `mismatch` (a genuine spoof: the caller
+ *    PROVED they are user A yet asks to act as user B).
+ *  • claim present but NO verified token → do NOT reject. The claim is simply NOT trusted: identity
+ *    degrades to anonymous (`userId=null`), so the build runs in the shared-anon workspace and can never
+ *    read/write the claimed user's data. This preserves C1's anti-spoof property (a claim alone never
+ *    grants an identity) WITHOUT hard-blocking the chat when a signed-in user's token is briefly absent
+ *    (auth-state race, synthetic/local admin, transient verify failure). The earlier "reject & ask
+ *    refresh" rule assumed a refresh always restores the token; in practice it does not always, and a
+ *    hard error that stops the app dead is worse than a functional anonymous session (safeguard: the
+ *    app must never break). The client also force-refreshes its token on the chat path to self-heal a
+ *    stale/expired token.
+ *  • otherwise ok; `userId` is the verified uid, or null for a genuinely anonymous caller.
  */
 export type BuildIdentity =
   | { ok: true; userId: string | null }
   | { ok: false; code: 'reauth' | 'mismatch'; error: string };
 
 export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: string | null): BuildIdentity {
-  if (claimedUid && !verifiedUid) {
-    return { ok: false, code: 'reauth', error: 'Your session token was not received. Please refresh the page and sign in again to continue.' };
-  }
   if (verifiedUid && claimedUid && claimedUid !== verifiedUid) {
     return { ok: false, code: 'mismatch', error: 'Identity mismatch — the signed-in account does not match the requested user.' };
   }
+  // A claim without a verified token is NOT trusted — it degrades to anonymous (userId=null) rather
+  // than granting the claimed identity, so no cross-user access is possible and the chat still works.
   return { ok: true, userId: verifiedUid };
 }
 

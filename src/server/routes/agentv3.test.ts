@@ -812,12 +812,11 @@ describe('resolveBuildIdentity — C1 verified-identity gate for the build path'
   it('genuine anonymous (no token, no claim) → ok with userId null (shared anon path preserved)', () => {
     expect(resolveBuildIdentity(null, null)).toEqual({ ok: true, userId: null });
   });
-  it('REJECTS a claimed userId with NO verified token (spoof, or stale pre-fix client) → reauth', () => {
+  it('a claimed userId with NO verified token DEGRADES to anonymous (never grants the claim, never hard-blocks)', () => {
+    // Graceful-degrade revision: the claim is NOT trusted (so no cross-user access — C1 property holds)
+    // but the build is NOT rejected either; it runs anonymously (userId=null) so the chat still works.
     const r = resolveBuildIdentity(null, 'victim-uid');
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.code).toBe('reauth');
-    expect(r.error).toMatch(/refresh/i);
+    expect(r).toEqual({ ok: true, userId: null });
   });
   it('REJECTS a token whose uid differs from the claimed userId → mismatch (the core spoof)', () => {
     const r = resolveBuildIdentity('real-uid', 'victim-uid');

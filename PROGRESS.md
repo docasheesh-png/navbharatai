@@ -7392,3 +7392,23 @@ try/catch, "never blocks wallet") degrades gracefully if the token is briefly un
 the check. Gate: frontend tsc 0, server tsc 0, vitest 4187/4187 PASS, boot:check PASS.
 
 Remaining: back to v3.0 redesign (A6/A8) — large hot-path rewrites, pending fresh admin appetite.
+
+## 2026-07-02 — HOTFIX (live break): v3.0 chat blocked by "session token was not received"
+
+Admin reported v3.0 chat dead: typing anything returned "Your session token was not received. Please
+refresh the page and sign in again to continue." (History 0 / Files 0 alongside it — all three symptoms
+= no verifiable Firebase token reaching the server for that session: synthetic/local admin, auth-state
+race, or transient verify failure). ROOT CAUSE: C1 (#818) made `/api/agentv3/chat` HARD-REJECT whenever
+a userId was claimed but no token verified. The original "reject & ask refresh" rule (admin-approved)
+assumed a refresh always restores the token; in practice it does not, so the app was fully broken with
+no self-heal — violating the one absolute rule (app must never break).
+
+Fix (admin-approved 2026-07-02, "graceful degrade + token self-heal"): `resolveBuildIdentity` no longer
+rejects a claim-without-token — it DEGRADES to anonymous (`userId=null`). The claim is still never
+trusted (C1's anti-spoof property holds: a claim alone grants no identity, so no cross-user access), but
+the chat is never hard-blocked; a token-less caller just runs in the shared-anon workspace. The genuine
+spoof case (verified token uid ≠ claimed uid) still rejects with `mismatch`. Client also force-refreshes
+its ID token on the /chat submit (`getIdToken(true)`) so a stale/expired cached token self-heals instead
+of arriving unverifiable. Test updated (claim+no-token now asserts anonymous, not reauth).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4187/4187 PASS, boot:check PASS.

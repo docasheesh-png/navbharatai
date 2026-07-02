@@ -4,7 +4,9 @@ import {
   buildInviteRecord,
   isInviteAcceptable,
   buildMemberRecord,
+  canManageTeam,
   INVITE_TTL_MS,
+  type MemberRecord,
 } from '../src/server/lib/TeamStore';
 
 /** P-COLLAB.1 — pure invite/member logic (roles, record building, acceptability). */
@@ -79,5 +81,41 @@ describe('buildMemberRecord', () => {
   it('builds an active member with a normalised email', () => {
     const m = buildMemberRecord({ uid: 'u1', email: 'X@Y.Z', role: 'editor', now: 42 });
     expect(m).toEqual({ uid: 'u1', email: 'x@y.z', role: 'editor', status: 'active', joinedAt: 42 });
+  });
+});
+
+describe('canManageTeam (audit H2 — resource-scoped team management)', () => {
+  const member = (uid: string, role: MemberRecord['role'], status: MemberRecord['status'] = 'active'): MemberRecord =>
+    ({ uid, email: `${uid}@t.co`, role, status, joinedAt: 1 });
+
+  it('the team owner (uid === teamId) always may — even with no member records', () => {
+    expect(canManageTeam({ requesterUid: 'owner1', teamId: 'owner1', members: [] })).toBe(true);
+  });
+
+  it('an active ADMIN member of the team may', () => {
+    const members = [member('admin1', 'admin'), member('ed1', 'editor')];
+    expect(canManageTeam({ requesterUid: 'admin1', teamId: 'owner1', members })).toBe(true);
+  });
+
+  it('an editor or viewer member may NOT', () => {
+    const members = [member('ed1', 'editor'), member('v1', 'viewer')];
+    expect(canManageTeam({ requesterUid: 'ed1', teamId: 'owner1', members })).toBe(false);
+    expect(canManageTeam({ requesterUid: 'v1', teamId: 'owner1', members })).toBe(false);
+  });
+
+  it('a removed admin may NOT (fail-closed on status)', () => {
+    const members = [member('admin1', 'admin', 'removed')];
+    expect(canManageTeam({ requesterUid: 'admin1', teamId: 'owner1', members })).toBe(false);
+  });
+
+  it('a stranger (not owner, not a member) may NOT manage another tenant’s team — the core H2 fix', () => {
+    const members = [member('admin1', 'admin')];
+    expect(canManageTeam({ requesterUid: 'attacker', teamId: 'owner1', members })).toBe(false);
+  });
+
+  it('fails closed on missing requesterUid / teamId', () => {
+    expect(canManageTeam({ requesterUid: null, teamId: 'owner1', members: [] })).toBe(false);
+    expect(canManageTeam({ requesterUid: 'u1', teamId: '', members: [] })).toBe(false);
+    expect(canManageTeam({ requesterUid: undefined, teamId: '', members: [] })).toBe(false);
   });
 });

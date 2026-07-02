@@ -7235,3 +7235,25 @@ already workspace-scoped in #804/#816. With this, the v3.0-scoped security criti
 the conversation IDOR are all closed; C3 (preview-iframe) stays infra-gated. Next: Phase-3 redesign,
 starting with A3 (wire the custom E2B template — biggest reliability win, code can land gated behind
 E2B_TEMPLATE_ID so it's a safe no-op until the admin publishes + sets the env var).
+
+## 2026-07-02 — Phase 3 A3: wire the custom E2B template (E2B reliability — the #1 root cause)
+
+Audit Phase-2 verdict was that E2B isn't unsuitable — it was failing because every sandbox launched
+from E2B's DEFAULT base image: `E2BActuator._opts()` passed only `{timeoutMs, apiKey}`, never a
+`template`, so the committed `navbharat-builder` image (pinned modern Node, infra/e2b/) was dead code.
+Wrong runtime = the core "v3.0 builds feel unreliable" cause.
+
+Fix: new pure exported `resolveE2bTemplate(env)` — returns `E2B_TEMPLATE_ID` (trimmed) or undefined.
+`_opts()` now includes `template` ONLY when it's set, so `Sandbox.create(this._opts())` launches the
+pinned image when configured and is an EXACT no-op (default base) when unset. e2b SDK v2.30's
+`SandboxOpts.template?` makes this a one-field addition; `Sandbox.connect` ignores `template` (reattach
+by id), so sharing _opts across create+connect is harmless. +3 tests. Gate: frontend tsc 0, server tsc
+0, vitest 4176/4176 PASS, boot:check PASS.
+
+ADMIN ACTION to activate (code is ready + safe until then): run the "Build E2B Builder Template" GitHub
+Action (template_kind: default) to publish `navbharat-builder`, then set Cloud Run env
+`E2B_TEMPLATE_ID=navbharat-builder`. Until then this changes nothing. A follow-on can then make
+ScaffoldGuard template-aware (enable MODE A `npm create vite` on the modern image) — deferred, optional.
+
+Next in the redesign order: unified preview + build state machine (A4/A6) → resumable manifest
+generation (A8) → export verification.

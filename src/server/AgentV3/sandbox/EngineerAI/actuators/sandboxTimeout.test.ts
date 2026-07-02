@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withTimeout, isIgnoredListPath } from './E2BActuator';
+import { withTimeout, isIgnoredListPath, resolveE2bTemplate } from './E2BActuator';
 
 describe('withTimeout — bounds a call that could hang forever (sandbox create/connect)', () => {
   it('resolves with the value when the promise settles in time', async () => {
@@ -30,5 +30,18 @@ describe('isIgnoredListPath — keep node_modules & build output out of the edit
     expect(isIgnoredListPath('package.json')).toBe(false);
     // a file whose NAME merely contains a substring of an ignored dir is not excluded
     expect(isIgnoredListPath('src/build-utils.ts')).toBe(false);
+  });
+});
+
+describe('resolveE2bTemplate — A3 custom E2B image wiring (env-gated, safe no-op by default)', () => {
+  it('returns undefined when E2B_TEMPLATE_ID is unset → default base image (unchanged behavior)', () => {
+    expect(resolveE2bTemplate({} as any)).toBeUndefined();
+  });
+  it('returns undefined for a blank/whitespace value', () => {
+    expect(resolveE2bTemplate({ E2B_TEMPLATE_ID: '   ' } as any)).toBeUndefined();
+  });
+  it('returns the trimmed template id when set → Sandbox.create launches the pinned image', () => {
+    expect(resolveE2bTemplate({ E2B_TEMPLATE_ID: 'navbharat-builder' } as any)).toBe('navbharat-builder');
+    expect(resolveE2bTemplate({ E2B_TEMPLATE_ID: '  navbharat-builder  ' } as any)).toBe('navbharat-builder');
   });
 });

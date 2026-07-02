@@ -75,6 +75,23 @@ export function isIgnoredListPath(relPath: string): boolean {
   return relPath.split('/').some(seg => IGNORED_LIST_DIRS.has(seg));
 }
 
+/**
+ * A3 (v3.0 redesign — E2B reliability) — resolve the custom E2B image the sandbox should launch from.
+ *
+ * Root cause the audit found: every sandbox was created from E2B's DEFAULT base image because the
+ * committed custom template (`navbharat-builder`, pinned modern Node — see infra/e2b/) was NEVER
+ * wired into Sandbox.create(). This is the #1 reason v3.0 builds felt unreliable (wrong runtime).
+ *
+ * When `E2B_TEMPLATE_ID` is set, that id is passed as SandboxOpts.template so Sandbox.create() launches
+ * the pinned image; when unset it returns undefined → no `template` field → E2B's default base, i.e. the
+ * EXACT current behavior. So this is a safe, env-gated no-op until the admin publishes the template and
+ * sets the env var (see infra/e2b/README.md). Pure + exported → unit-testable.
+ */
+export function resolveE2bTemplate(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const t = env.E2B_TEMPLATE_ID?.trim();
+  return t ? t : undefined;
+}
+
 const CDP_PORT = 9222;
 const CONSOLE_LOG = `${TOOLS_DIR}/console.log`;
 
@@ -239,9 +256,18 @@ export class E2BActuator implements IEngineerActuator {
     if (typeof timer.unref === 'function') timer.unref();
   }
 
-  /** Build the e2b SDK options, injecting the per-user key when set. */
-  private _opts(extra?: Record<string, unknown>): { timeoutMs: number; apiKey?: string } {
-    return { timeoutMs: SANDBOX_TIMEOUT_MS, ...(this.apiKey ? { apiKey: this.apiKey } : {}), ...extra };
+  /** Build the e2b SDK options, injecting the per-user key when set, and — A3 — the custom template
+   *  when E2B_TEMPLATE_ID is configured (else omitted → E2B default base image, unchanged behavior).
+   *  SandboxOpts.template is ignored by Sandbox.connect (which reattaches by id), so sharing this
+   *  across create+connect is harmless. */
+  private _opts(extra?: Record<string, unknown>): { timeoutMs: number; apiKey?: string; template?: string } {
+    const template = resolveE2bTemplate();
+    return {
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+      ...(this.apiKey ? { apiKey: this.apiKey } : {}),
+      ...(template ? { template } : {}),
+      ...extra,
+    };
   }
 
   /**

@@ -49,6 +49,7 @@ import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
 import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
+import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
@@ -1645,7 +1646,11 @@ export class ToolDispatcher {
         }
         const url = await this.deploy(this.workspaceId, files);
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
-        return `Deployed to a permanent public URL: ${url} (${files.size} files). This stays live after the sandbox stops.`;
+        // P-PIPE.78 — honest bundle size from the dist map we already downloaded (zero extra I/O,
+        // pure, never throws). Tells the user how heavy their shipped app is.
+        let bundleLine = '';
+        try { bundleLine = bundleSummaryLine(summarizeBundle(files)); } catch { /* size is best-effort */ }
+        return `Deployed to a permanent public URL: ${url} (${files.size} files).${bundleLine ? ` ${bundleLine}` : ''} This stays live after the sandbox stops.`;
       }
 
       case 'console_errors': {

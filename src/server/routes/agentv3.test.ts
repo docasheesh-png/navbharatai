@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -28,6 +28,31 @@ describe('conversationAccess (D7 ownership gate)', () => {
     expect(conversationAccess({ userId: 'u1' }, 'u2')).toBe('forbidden');
     expect(conversationAccess({ userId: 'u1' }, null)).toBe('forbidden'); // anonymous can't read an owned build
     expect(conversationAccess(null, 'u1')).toBe('not-found');
+  });
+
+  it('anon-bucket records are readable (mirrors the #829 workspace exemption) — the "own transcript forbidden" fix', () => {
+    // An identity-degraded build saved its FULL transcript under userId 'anon'; the signed-in user
+    // opening that chat was refused → the restore fell back to an empty local copy. The anon bucket
+    // has no real owner; its unguessable id is the capability.
+    expect(conversationAccess({ userId: 'anon' }, 'u1')).toBe('ok');
+    expect(conversationAccess({ userId: 'anon' }, null)).toBe('ok');
+  });
+});
+
+describe('candidateConversationIds — a v3_ history entry finds its real server transcript', () => {
+  it('tries the literal id, the signed-in workspace id, then the anon-degraded workspace id', () => {
+    expect(candidateConversationIds('v3_sess-1234', 'u1')).toEqual([
+      'v3_sess-1234',
+      'agentv3-u1-sess-1234',
+      'agentv3-anon-sess-1234',
+    ]);
+  });
+  it('skips the uid candidate when there is no (or an unsafe) verified uid', () => {
+    expect(candidateConversationIds('v3_sess-1234', null)).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234']);
+    expect(candidateConversationIds('v3_sess-1234', 'bad uid!')).toEqual(['v3_sess-1234', 'agentv3-anon-sess-1234']);
+  });
+  it('non-v3_ ids resolve only to themselves', () => {
+    expect(candidateConversationIds('agentv3-u1-sess-1234', 'u1')).toEqual(['agentv3-u1-sess-1234']);
   });
 });
 

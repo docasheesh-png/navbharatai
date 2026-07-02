@@ -1,0 +1,64 @@
+# Build the NavBharatAI Android app (Capacitor, Phase 1 — debug APK).
+#
+# WHY A WORKFLOW: building an APK needs the Android SDK + Gradle, which GitHub's
+# ubuntu runners ship preinstalled; the Claude web sandbox does not. Manual-only
+# (workflow_dispatch) so it never runs — or costs minutes — on ordinary pushes.
+#
+# HOW TO RUN:
+#   Repo → Actions → "Build Android App (Capacitor)" → Run workflow (main).
+#   When it finishes, download the `navbharatai-debug-apk` artifact and install
+#   app-debug.apk on an Android phone (allow "install from unknown sources").
+#
+# PHASE 2 (not this workflow yet): release signing (keystore via repo secrets) +
+# an .aab bundle for Play Console upload.
+
+name: Build Android App (Capacitor)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 21 (Gradle/AGP requirement)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web bundle
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: navbharatai-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          echo "## NavBharatAI Android APK built ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the **navbharatai-debug-apk** artifact above, copy \`app-debug.apk\` to an Android phone, and install it (allow installs from unknown sources)." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Phase 1 is HOSTED mode: the app is a native shell loading https://navbharatai.com — auth and all features work unchanged. Phase 2 adds release signing + the Play Store .aab." >> "$GITHUB_STEP_SUMMARY"

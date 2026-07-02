@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { makeChannelId } from './Deployment';
 import { CATALOG_TOOL_NAMES, defaultToolCatalog } from './ToolCatalog';
@@ -35,11 +35,28 @@ describe('deploy tool', () => {
     expect(makeChannelId('x'.repeat(80)).length).toBeLessThanOrEqual(33);
   });
 
-  it('deploys the built dist files and returns the public URL', async () => {
+  // The deploy case does a post-deploy liveness GET (P-PIPE.116). Stub fetch so tests are deterministic
+  // and never touch the network; unstubbed after each case.
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('deploys the built dist files and returns the public URL, plus a live liveness line (HTTP 200)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 200 })));
     const files = new Map([['index.html', Buffer.from('<h1>hi</h1>')]]);
     const r = await dispatcher(new DistActuator(files), okDeploy).dispatch(call());
     expect(r.is_error).toBe(false);
     expect(r.content).toContain('https://gen-lang-client-0866594388--v3-ws-1.web.app');
+    expect(r.content).toContain('HTTP 200');
+    expect(r.content).toContain('your site is live');
+  });
+
+  it('a still-propagating URL adds a soft "not reachable yet" note — never a deploy failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
+    const files = new Map([['index.html', Buffer.from('<h1>hi</h1>')]]);
+    const r = await dispatcher(new DistActuator(files), okDeploy).dispatch(call());
+    expect(r.is_error).toBe(false); // deploy still succeeded
+    expect(r.content).toContain('https://gen-lang-client-0866594388--v3-ws-1.web.app');
+    expect(r.content).toContain("isn't reachable yet");
+    expect(r.content).toContain('not a deploy failure');
   });
 
   it('refuses honestly when there is no built dist', async () => {

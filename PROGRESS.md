@@ -7257,3 +7257,22 @@ ScaffoldGuard template-aware (enable MODE A `npm create vite` on the modern imag
 
 Next in the redesign order: unified preview + build state machine (A4/A6) → resumable manifest
 generation (A8) → export verification.
+
+## 2026-07-02 — Phase 3 A4: unified preview — in-browser is the deterministic default
+
+Audit A4: the preview had two engines (live E2B iframe vs in-browser Babel-standalone srcDoc) with no
+unified contract. `PreviewSurface` defaulted to `url ? 'live' : 'inbrowser'` AND force-switched to live
+whenever a URL arrived — but the live URL is EPHEMERAL (dies on E2B idle-pause / recycle), so the
+preview frequently landed on a dead "No live preview yet" empty state. Structural flakiness.
+
+Fix (UI-layer, low-risk — both engines already exist): in-browser is now the DETERMINISTIC DEFAULT
+(always renders the current files instantly, no server), and "Live server" (full-fidelity, real
+runtime) is an explicit opt-in toggle. Removed the forced auto-switch-to-live effect; the Live button
+now shows a ● when a live URL is available so full-fidelity stays discoverable. Switcher reordered
+(In-browser first). Diagnose / live-empty-state / visual-editor paths unchanged. Gate: frontend tsc 0,
+server tsc 0, vitest 4176/4176 PASS, boot:check PASS.
+
+Behavior change to note: when a build produces a live URL, the view no longer auto-jumps to it — the
+user stays on the reliable in-browser render and can toggle to Live server. Deliberate per the approved
+A4 design (deterministic > flaky). Next redesign steps (A6 build state machine, A8 resumable manifest)
+remain deferred pending admin appetite — they're large hot-path rewrites.

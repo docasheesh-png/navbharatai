@@ -2,10 +2,11 @@ import crypto from 'crypto';
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { getSecretValue } from '../lib/secrets';
 import { verifyPaymentInternal } from '../lib/payments';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
 
 /**
  * Payment routes (Cashfree order creation, verification, webhook, coupon redeem)
@@ -273,8 +274,15 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
   app.post('/api/payment/redeem-coupon', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { couponCode, userId, userEmail, userName } = req.body;
-    if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
+    const { couponCode, userEmail, userName } = req.body;
+    // SECURITY (H1): identity from the VERIFIED token, never the body userId — otherwise anyone could
+    // redeem real spendable balance onto (or for) any account. VITEST skips (route not token-authed in
+    // tests); a genuine missing/invalid token → 401.
+    const verifiedUid = process.env.VITEST
+      ? (typeof req.body?.userId === 'string' ? req.body.userId : null)
+      : await verifyFirebaseToken(req);
+    if (!verifiedUid) return res.status(401).json({ error: 'Please sign in again to redeem a coupon.' });
+    const userId = verifiedUid;
     if (!couponCode || typeof couponCode !== 'string') {
       return res.status(400).json({ error: 'Promo coupon code is required' });
     }
@@ -296,24 +304,29 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     const redemptionId = `coupon_${code}_${userId}`;
 
     try {
-      // Check if user already redeemed this specific coupon
+      // SECURITY (H1): ATOMICALLY claim this one-time redemption. The old getDoc→setDoc check was a
+      // TOCTOU — concurrent requests for the same code could both pass the "already redeemed?" check
+      // and each credit `value`. The transaction creates the redemption doc only if it doesn't exist;
+      // if it already exists, exactly one caller loses and we reject. Only the winner credits below.
       const txRef = doc(db, 'payment_transactions', redemptionId);
-      const txSnap = await getDoc(txRef);
-      if (txSnap.exists()) {
+      const claimed = await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(txRef);
+        if (snap.exists()) return false;
+        tx.set(txRef, {
+          transactionId: redemptionId,
+          userId,
+          amountPaid: 0,
+          balanceAdded: value,
+          paymentProvider: 'COUPON_REDEEM',
+          paymentStatus: 'SUCCESS',
+          paymentReference: `REDEMPTION_${code}`,
+          createdAt: new Date().toISOString(),
+        });
+        return true;
+      });
+      if (!claimed) {
         return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
       }
-
-      // Add coupon transaction
-      await setDoc(txRef, {
-        transactionId: redemptionId,
-        userId,
-        amountPaid: 0,
-        balanceAdded: value,
-        paymentProvider: 'COUPON_REDEEM',
-        paymentStatus: 'SUCCESS',
-        paymentReference: `REDEMPTION_${code}`,
-        createdAt: new Date().toISOString()
-      });
 
       // Update user wallet
       const walletRef = doc(db, 'user_token_wallets', userId);

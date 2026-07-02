@@ -54,6 +54,11 @@ const V3_EXT_COLOR: Record<string, string> = {
   svg: 'text-pink-400', png: 'text-pink-400', jpg: 'text-pink-400',
 };
 
+// Last `resume` nonce actually applied — at MODULE scope on purpose, so it SURVIVES the panel
+// unmounting/remounting. A component useRef resets to 0 on every remount, which is exactly what let a
+// stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
+let lastAppliedResumeNonce = 0;
+
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
@@ -302,12 +307,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // later) to avoid a temporal-dead-zone on workspaceFiles. New chat / open / resume reset it to ''.
   const rehydratedWsRef = useRef<string>('');
 
-  // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its
-  // sessionId so the backend continues with the SAME workspace/memory (best-effort,
-  // if still warm) and restore its saved thread into the chat. Fires on each new
-  // resume request (nonce change) — including when the panel mounts already-resumed.
+  // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its sessionId and
+  // restore its saved thread into the chat.
+  //
+  // ROOT-CAUSE FIX (2026-07-02): a plain `useEffect` ALWAYS runs once on mount, and App never clears
+  // `v3Resume` back to null — so after the user opened ANY chat from History once, EVERY later remount
+  // (tab away/back, or ProV3Surface's loading→enabled transition) re-applied that stale value: it
+  // repainted the old bubbles AND reset sessionIdRef to the OLD session id, defeating the "always mint
+  // a fresh id" rule and re-attaching the old build. A component-level ref can't guard this because it
+  // resets to 0 on every remount. So we track the last-applied nonce at MODULE scope (survives
+  // remounts): a genuine History reopen mints a NEW nonce and still applies; a remount carrying the
+  // SAME already-applied nonce is ignored, so the panel keeps its fresh session instead of reloading
+  // the old chat.
   useEffect(() => {
-    if (!resume) return;
+    if (!resume || resume.nonce === lastAppliedResumeNonce) return;
+    lastAppliedResumeNonce = resume.nonce;
     sessionIdRef.current = resume.sessionId;
     persistSessionId(resume.sessionId); // keep the reopened project sticky across reloads too
     autoRestoredSessionRef.current = resume.sessionId; // explicit resume → mark handled (auto-restore must not override)

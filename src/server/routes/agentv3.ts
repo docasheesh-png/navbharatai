@@ -82,7 +82,7 @@ import { runSimpleBuild, repairSystemPrompt, repairUserPrompt } from '../AgentV3
 import { hasTscErrors } from '../AgentV3/TscGate';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { withTimeout } from '../AgentV3/asyncUtils';
+import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { billedAmountUsd } from '../AgentV3/pricing';
 import OpenAI from 'openai';
@@ -3241,9 +3241,13 @@ export function registerAgentV3Routes(app: Express): void {
           return t.text;
         };
         const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
-          for (let i = 0; i < files.length; i++) {
-            await dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: files[i].path, content: files[i].content } }, 'frontend');
-          }
+          // Write files with bounded concurrency instead of one serial E2B round trip each (SPEED).
+          // Paths are distinct by construction (de-duped by path upstream), so concurrent writes to
+          // different files never conflict; the E2B round-trip latency (~150-300ms each) now overlaps.
+          // The plan-progress ticker counts writes (order-independent), so completion order is fine.
+          await mapWithConcurrency(files, 6, (f, i) =>
+            dispatcher.dispatch({ id: `fast-w${i}`, name: 'write_file', input: { path: f.path, content: f.content } }, 'frontend'),
+          );
         };
         const fastPreview = async (): Promise<void> => {
           // Re-install when package.json is NEWER than node_modules (the generator added deps like
@@ -3668,7 +3672,12 @@ export function registerAgentV3Routes(app: Express): void {
       // little deadline headroom remains, and (b) cap it with a hard timeout so it can never be the
       // reason a built app times out.
       const reviewHeadroomOk = maxBuildSeconds() === 0 || (Date.now() - buildStartedAt) < (maxBuildSeconds() * 1000 - 120_000);
-      if (result.ok && reviewHeadroomOk) {
+      // SPEED: skip the advisory reviewer (30-90s + 3-6 Claude calls) for FAST-LANE (simple) builds —
+      // they already passed the fast lane's own `npx tsc --noEmit` type-check + CSS-consistency verify +
+      // repair, so the extra multi-call review adds latency to the most common build with little value.
+      // The reviewer still runs on the agentic path (complex builds). Force it on with AGENTV3_REVIEW_FASTLANE=on.
+      const reviewerAllowed = !fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on';
+      if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // If sandbox listFiles came back empty but the build wrote real files, use the
@@ -3881,10 +3890,12 @@ export function registerAgentV3Routes(app: Express): void {
         // DURABLE: persist the final report keyed by workspaceId so the "Build report" download
         // survives a Cloud Run instance rotation / a page reload (the in-memory cache above is
         // per-instance and was the reason reports came back EMPTY). Awaited, best-effort.
-        await saveDiagnostics(workspaceId, diagnostics).catch(() => {});
-        // Also into the bounded per-workspace HISTORY — the "latest" doc above gets overwritten by
-        // THIS build; history is what keeps a PREVIOUS build's report reachable after that happens.
-        await saveDiagnosticsHistory(workspaceId, diagnostics).catch(() => {});
+        // The "latest" and the bounded per-workspace HISTORY writes are independent Firestore docs —
+        // run them concurrently (both best-effort) instead of two sequential round trips on the result path.
+        await Promise.all([
+          saveDiagnostics(workspaceId, diagnostics).catch(() => {}),
+          saveDiagnosticsHistory(workspaceId, diagnostics).catch(() => {}),
+        ]);
       } catch { /* diagnostics are best-effort */ }
       // P-BRE.1 — finalize the build trace: record the generate span + rich attributes, export to the
       // OTLP endpoint when one is configured (Cloud Trace), and surface the traceId for log↔trace

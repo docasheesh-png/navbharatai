@@ -354,7 +354,12 @@ export interface SimpleBuildResult {
  */
 export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuildResult> {
   const minFiles = deps.minFiles ?? 2;
-  const concurrency = deps.concurrency ?? 5;
+  // Per-file generation concurrency. Raised 5 → 8 (SPEED): the per-file calls are independent within
+  // a dependency tier, so more parallelism cuts each wave's wall-clock near-linearly. Env-tunable
+  // (AGENTV3_FASTLANE_CONCURRENCY) so it can be dialed back if Anthropic 429s appear — genOne already
+  // returns null on failure and the file is dropped, so the cap trades throughput vs rate-limit risk.
+  const envConc = Number(process.env.AGENTV3_FASTLANE_CONCURRENCY);
+  const concurrency = deps.concurrency ?? (Number.isFinite(envConc) && envConc > 0 ? Math.min(envConc, 16) : 8);
   // LENS A — shared contract is ON by default (only skipped when explicitly disabled). A failed /
   // empty contract call NEVER fails the build — it just falls back to the prior contract-free path.
   const shareContract = deps.shareContract !== false;

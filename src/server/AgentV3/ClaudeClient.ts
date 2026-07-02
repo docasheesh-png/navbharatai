@@ -177,6 +177,49 @@ export function llmRequestTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
 }
 
+/**
+ * Add a prompt-cache breakpoint on the GROWING transcript (RC-2 fast-follow).
+ *
+ * The Anthropic prompt prefix is tools → system → messages. runTurn already caches the
+ * (constant) tools+system via a breakpoint on the system block. But the `messages` array — the
+ * transcript that grows every turn with full file contents, tool_results and screenshots — was
+ * NEVER cached, so every turn re-billed and re-processed the entire prior conversation as fresh
+ * input (~1-3s extra time-to-first-token past ~20-40k tokens, and the dominant input-cost leak).
+ *
+ * This stamps a single `cache_control: ephemeral` breakpoint on the LAST content block of the LAST
+ * message. Because caching is prefix-based, each turn's transcript is a prefix of the next, so the
+ * stable head is a cache READ (0.1x) and only the new suffix is a cache WRITE (1.25x) → ~5-7x
+ * cheaper input on a long build AND a faster first token. Stale breakpoints on older messages are
+ * stripped first so the total never exceeds Anthropic's 4-breakpoint limit as the transcript grows
+ * (this + the system breakpoint = 2). Returns a shallow-cloned array — never mutates the caller's
+ * transcript. A too-short prefix (< the model's cache minimum) is ignored by Anthropic gracefully.
+ */
+export function withTranscriptCacheBreakpoint(messages: unknown[]): unknown[] {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+  const cloned = messages.map((m) => {
+    const msg = m as { role?: unknown; content?: unknown };
+    if (Array.isArray(msg.content)) {
+      const blocks = msg.content.map((b) => {
+        if (b && typeof b === 'object' && 'cache_control' in (b as Record<string, unknown>)) {
+          const { cache_control: _drop, ...rest } = b as Record<string, unknown>;
+          return rest;
+        }
+        return b;
+      });
+      return { ...msg, content: blocks };
+    }
+    return { ...msg };
+  });
+  const last = cloned[cloned.length - 1] as { content?: unknown };
+  if (typeof last.content === 'string') {
+    last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
+  } else if (Array.isArray(last.content) && last.content.length > 0) {
+    const blocks = last.content as Record<string, unknown>[];
+    blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: 'ephemeral' } };
+  }
+  return cloned;
+}
+
 export class ClaudeClient implements TurnRunner {
   private client?: MessagesCreateClient;
   private readonly maxRetries: number;
@@ -223,7 +266,8 @@ export class ClaudeClient implements TurnRunner {
     const createParams: Record<string, unknown> = {
       model: params.model,
       max_tokens: params.maxTokens ?? 8192,
-      messages: params.messages,
+      // Cache the growing transcript too (not just tools+system) — see withTranscriptCacheBreakpoint.
+      messages: cache ? withTranscriptCacheBreakpoint(params.messages) : params.messages,
     };
 
     const hasTools = !!params.tools && params.tools.length > 0;

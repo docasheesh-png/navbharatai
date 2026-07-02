@@ -32,6 +32,7 @@ import {
   resolveApproval,
   GitManager,
   GitRepoSync,
+  sanitizeRepoUrl,
   GitHubAppClient,
   UserGitHubClient,
   githubConfigFromEnv,
@@ -93,7 +94,7 @@ import { audit } from '../lib/audit';
 import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
-import { liveChannel } from '../AgentV3/LiveChannel';
+import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
 import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
@@ -181,6 +182,17 @@ function buildActuator(): IEngineerActuator {
   else if (process.env.DOCKER_ENABLED === 'true') sharedActuator = new DockerActuator();
   else sharedActuator = new LocalActuator();
   return sharedActuator;
+}
+
+/**
+ * SECURITY (audit A2 — defense-in-depth for C2): should a BUILD be refused because no isolated
+ * sandbox is configured? In production, a build with neither E2B nor Docker would fall back to
+ * LocalActuator (host execution) — the avenue that let the importUrl injection reach the host. Pure +
+ * exported so it's unit-testable; the /chat build path calls this AFTER the plain-chat early-exit
+ * (chat needs no sandbox). Non-prod (dev/CI/VITEST) is allowed — LocalActuator is intended there.
+ */
+export function buildSandboxUnavailableInProd(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'production' && !env.E2B_API_KEY && env.DOCKER_ENABLED !== 'true';
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────
@@ -472,7 +484,9 @@ function broadcastBuild(rb: RunningBuild, e: unknown): void {
   for (const s of rb.subscribers) { try { s.write(e); } catch { /* drop a dead subscriber */ } }
   // Mirror to the cross-device LiveChannel (throttled, best-effort) so a SECOND device — even on a
   // different server instance — can watch this build's activity live. Never affects the build.
-  if (rb.key) { try { liveChannel.publish(rb.key, [e]); } catch { /* best-effort */ } }
+  // Stamped with the build's workspaceId so readers can refuse a DIFFERENT session's events —
+  // cross-instance too, where the runningBuilds map can't help (see /api/agentv3/live below).
+  if (rb.key) { try { liveChannel.publish(rb.key, [e], rb.workspaceId); } catch { /* best-effort */ } }
 }
 /** End every subscriber stream for a finished/stopped build. */
 function endBuild(rb: RunningBuild): void {
@@ -1401,9 +1415,7 @@ export function registerAgentV3Routes(app: Express): void {
     // actually running the build (the common case — same-instance), its in-memory `rb.workspaceId`
     // is authoritative: if it's for a DIFFERENT session than the caller asked about, report nothing —
     // otherwise a build genuinely still running in session A bleeds its progress into session B's
-    // live-mirror poll. When this instance has no local record (cross-instance — the build runs
-    // elsewhere), we can't verify the workspace without a LiveChannel schema change, so we fall back
-    // to the unfiltered account-wide read (unchanged behavior; a known, narrower follow-up gap).
+    // live-mirror poll.
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
     const localRb = runningBuilds.get(userId);
     if (workspaceId && localRb && !localRb.ended && localRb.workspaceId && localRb.workspaceId !== workspaceId) {
@@ -1411,7 +1423,18 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     try {
-      const { events, seq, gap } = await liveChannel.readSince(userId, sinceSeq);
+      const { events, seq, gap, workspaceId: eventsWorkspaceId } = await liveChannel.readSince(userId, sinceSeq);
+      // CROSS-INSTANCE workspace scoping (closes the gap the #804 fix documented): the LiveChannel
+      // now stamps events with the workspaceId of the build that produced them, so even when THIS
+      // instance has no local record of the build (it runs — or ran — on a different Cloud Run
+      // instance), a DIFFERENT session's events are refused instead of replayed into whatever chat
+      // the caller has open. Unstamped events (a pre-upgrade ghost doc — exactly the stale tail that
+      // made one stuck chat reappear everywhere, forever) are refused too when the caller asked for
+      // a specific session: conservative deny, matching isBuildRunningForWorkspace's principle.
+      if (!liveEventsAllowedFor(workspaceId, eventsWorkspaceId)) {
+        res.json({ events: [], seq, gap: false, running: false });
+        return;
+      }
       // `running` lets the watcher stop polling once the build is done on this instance; the durable
       // result then syncs via the normal conversation reload.
       res.json({ events, seq, gap, running: isBuildRunning(userId) });
@@ -2139,6 +2162,22 @@ export function registerAgentV3Routes(app: Express): void {
       }
     }
 
+    // SECURITY (audit A2 — defense-in-depth for C2): a BUILD needs an isolated sandbox. In production,
+    // refuse to build when neither E2B nor Docker is configured, instead of silently falling back to
+    // LocalActuator — which runs the agent's generated + imported commands in THIS host process, the
+    // exact avenue that made the importUrl injection (C2) reach the host. Mirrors the guard
+    // engineer.ts already enforces. Placed AFTER the plain-chat early-exit so a normal chat turn (no
+    // sandbox needed) is unaffected. The stream headers are already flushed, so we emit a terminal
+    // error event + clean up activeBuilds (same exit shape the chat path uses) rather than res.status().
+    if (buildSandboxUnavailableInProd()) {
+      send({ type: 'narration', agent: 'architect', text: 'The build sandbox is not available on this server right now (cloud sandbox not configured), so I did not run the build. Your account was not charged. Please try again shortly or contact the admin.', ts: Date.now() });
+      send({ type: 'error', message: 'Build sandbox (E2B) is not configured on the server — refusing to run the build on the host for safety.' });
+      send({ type: 'result', ok: false, summary: 'Build sandbox not configured on the server.', steps: 0, billedUsd: 0, billedInr: 0 });
+      activeBuilds.delete(buildKey);
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
     // Register this build so it can be STOPPED and RE-ATTACHED to ("Resume") after the
     // original connection is lost. The client's response is the first subscriber; if it
     // disconnects we keep the build alive (still buffering) so the user can resume it.
@@ -2485,16 +2524,25 @@ export function registerAgentV3Routes(app: Express): void {
         // any failure emits a friendly narration and falls through to the normal empty workspace.
         if (importUrl) {
           try {
-            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${importUrl}…`, ts: Date.now() });
+            // SECURITY (C2): reject a non-GitHub / malformed importUrl up front with a clear message,
+            // and NEVER build a token-bearing URL from it (the token would otherwise be embedded into
+            // whatever the user supplied). sanitizeRepoUrl validates the plain form; the token is then
+            // injected into the SAME validated shape, and GitRepoSync re-validates at the sink.
+            const cleanImportUrl = sanitizeRepoUrl(importUrl);
+            if (!cleanImportUrl) {
+              events.emit({ type: 'narration', agent: 'architect', text: `That import URL isn't a supported GitHub repository URL (expected https://github.com/owner/repo). Starting with an empty workspace instead.`, ts: Date.now() });
+            } else {
+            events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
             const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
             if (Object.keys(existing.files).length === 0) {
               const importSync = new GitRepoSync(actuator, workspaceId);
               const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
-              const cloneUrl = githubToken ? importUrl.replace('https://', `https://${githubToken}@`) : importUrl;
+              const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
               const h = await importSync.hydrateFromRepo(cloneUrl);
               if (h.hydrated) {
                 events.emit({ type: 'narration', agent: 'architect', text: `Imported your project files from the repository. I'll analyze and improve this project.`, ts: Date.now() });
               }
+            }
             }
           } catch (importErr) {
             const m = importErr instanceof Error ? importErr.message : String(importErr);

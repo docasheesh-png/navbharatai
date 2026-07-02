@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -784,5 +784,22 @@ describe('isBuildRunningForWorkspace — server-side session/workspace scoping f
   it('running build has no workspaceId recorded, but the CALLER requested a specific one → false (unknown ownership is never assumed to match)', () => {
     const rb = fakeRunningBuild({});
     expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-s1')).toBe(false);
+  });
+});
+
+describe('buildSandboxUnavailableInProd — A2 prod sandbox guard (defense-in-depth for C2 host RCE)', () => {
+  it('refuses a build in production when neither E2B nor Docker is configured', () => {
+    expect(buildSandboxUnavailableInProd({ NODE_ENV: 'production' } as any)).toBe(true);
+  });
+  it('allows the build when E2B is configured in production', () => {
+    expect(buildSandboxUnavailableInProd({ NODE_ENV: 'production', E2B_API_KEY: 'e2b_x' } as any)).toBe(false);
+  });
+  it('allows the build when Docker is enabled in production', () => {
+    expect(buildSandboxUnavailableInProd({ NODE_ENV: 'production', DOCKER_ENABLED: 'true' } as any)).toBe(false);
+  });
+  it('never blocks outside production — LocalActuator is intended in dev/CI/VITEST', () => {
+    expect(buildSandboxUnavailableInProd({} as any)).toBe(false);
+    expect(buildSandboxUnavailableInProd({ NODE_ENV: 'development' } as any)).toBe(false);
+    expect(buildSandboxUnavailableInProd({ NODE_ENV: 'test' } as any)).toBe(false);
   });
 });

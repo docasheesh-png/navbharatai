@@ -15,6 +15,51 @@
 
 import type { CommandRunner } from './GitManager';
 
+/**
+ * Validate + REBUILD a GitHub clone/push URL from its parsed parts, rejecting anything that isn't a
+ * plain `https://[token@]github.com/owner/repo[.git]`. Returns a shell-safe URL, or null when the
+ * input is not an acceptable GitHub URL.
+ *
+ * SECURITY (v3.0 audit C2 — host command injection + SSRF): `authedUrl` derives from the user's
+ * `importUrl` and is interpolated into a `git clone "…"` / `git push "…"` shell string that runs on
+ * the actuator (the HOST process when the E2B key is unset → LocalActuator). Without this guard a
+ * payload like `https://github.com/o/r"; curl 169.254.169.254/… ; echo "` breaks out of the quotes
+ * and executes arbitrary host commands + reads cloud metadata, and a `file://`/internal-IP URL is an
+ * SSRF. We do NOT sanitize the blob in place — we PARSE it and rebuild from validated components, so
+ * only a real github.com two-segment repo path (optionally with an `[A-Za-z0-9_]` token in the
+ * userinfo slot) can ever reach git. The rebuilt string contains only `[A-Za-z0-9_.:@/-]`, none of
+ * which can escape a double-quoted shell argument. (An argv-based `spawn('git',[…])` would be even
+ * stronger, but the CommandRunner port is string-command-only across all three actuators, so a
+ * validate-and-rebuild guard at the sink is the complete fix for this interface.)
+ */
+export function sanitizeRepoUrl(raw: string): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { return null; }
+  if (u.protocol !== 'https:') return null;                    // no file://, http://, git://, ssh
+  if (u.hostname.toLowerCase() !== 'github.com') return null;  // no internal hosts / SSRF targets
+  if (u.port) return null;
+  // Userinfo carries the auth token in one of two legit forms: `<token>@` (username only) or the
+  // GitHub-App form `x-access-token:<token>@` (username:password). Both parts must be strictly
+  // [A-Za-z0-9_-]; `new URL` percent-encodes any shell metachar (e.g. `"`→`%22`), and `%` is not in
+  // this class, so an injection attempt in the userinfo is rejected here.
+  const user = u.username;
+  const pass = u.password;
+  const idOk = (s: string) => /^[A-Za-z0-9_-]+$/.test(s);
+  if (user && !idOk(user)) return null;
+  if (pass && !idOk(pass)) return null;
+  if (pass && !user) return null;                              // a bare `:pass@` is not a shape we emit
+  const userinfo = user ? (pass ? `${user}:${pass}` : user) + '@' : '';
+  // Exactly two path segments (owner/repo[.git]); `new URL` has already normalized any `..`, and a
+  // normalized traversal collapses to a non-two-segment path that this regex rejects.
+  if (!/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(u.pathname)) return null;
+  const safe = `https://${userinfo}github.com${u.pathname}`;
+  // Belt-and-suspenders: the rebuilt URL must contain only shell-safe characters (none of these can
+  // escape a double-quoted shell argument).
+  if (!/^[A-Za-z0-9_.:@/-]+$/.test(safe)) return null;
+  return safe;
+}
+
 export interface HydrateResult {
   /** True when repo content was cloned into an empty sandbox this run. */
   hydrated: boolean;
@@ -54,11 +99,14 @@ export class GitRepoSync {
    * becomes a real clone. Best-effort: a clone failure is a no-op, never blocking the build.
    */
   async hydrateFromRepo(authedUrl: string): Promise<HydrateResult> {
-    if (!authedUrl) return { hydrated: false, hadFiles: false, skipped: true };
+    // SECURITY (C2): validate + rebuild the URL before it reaches the shell. An unacceptable URL
+    // (non-github host, wrong scheme, injection metachars) degrades to a safe no-op — never runs.
+    const safeUrl = sanitizeRepoUrl(authedUrl);
+    if (!safeUrl) return { hydrated: false, hadFiles: false, skipped: true };
     try {
       const cmd =
         'rm -rf /tmp/nbhydrate 2>/dev/null; ' +
-        `if git clone --depth 1 "${authedUrl}" /tmp/nbhydrate >/dev/null 2>&1; then ` +
+        `if git clone --depth 1 "${safeUrl}" /tmp/nbhydrate >/dev/null 2>&1; then ` +
         // Only overlay when the repo actually has a built project (not just an auto-init README).
         'if [ -f /tmp/nbhydrate/package.json ] || [ -d /tmp/nbhydrate/src ]; then ' +
         'cp -a /tmp/nbhydrate/. ./ >/dev/null 2>&1 && echo NB_HYDRATED || echo NB_HYDRATE_FAIL; ' +
@@ -83,7 +131,9 @@ export class GitRepoSync {
    * push time (no concurrent human edits to merge). Returns `noChange` when nothing changed.
    */
   async pushAll(authedUrl: string, branch: string, message: string): Promise<PushResult> {
-    if (!authedUrl) return { pushed: false, noChange: false, skipped: true };
+    // SECURITY (C2): same validate-and-rebuild guard as hydrateFromRepo before the URL hits `git push`.
+    const safeUrl = sanitizeRepoUrl(authedUrl);
+    if (!safeUrl) return { pushed: false, noChange: false, skipped: true };
     const safeBranch = sanitizeBranch(branch);
     const safeMsg = sanitizeMessage(message);
     try {
@@ -101,7 +151,7 @@ export class GitRepoSync {
       // Push even on "no change" the FIRST time would fail with nothing to push; only push when we
       // actually have a HEAD. Force-push the current HEAD to the target branch.
       const push = await this.run(
-        `git push --force "${authedUrl}" HEAD:${safeBranch} >/dev/null 2>&1 && echo NB_PUSHED || echo NB_PUSHFAIL`,
+        `git push --force "${safeUrl}" HEAD:${safeBranch} >/dev/null 2>&1 && echo NB_PUSHED || echo NB_PUSHFAIL`,
       );
       const pushed = (push.stdout || '').includes('NB_PUSHED');
       if (!pushed) return { pushed: false, noChange: !committed, skipped: true };

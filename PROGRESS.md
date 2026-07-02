@@ -7103,3 +7103,92 @@ use it — a real, cost-incurring cloud build step the account owner should trig
 Gate: this PR is infrastructure/CI/documentation only (no runtime app code touched) — frontend tsc 0,
 server tsc 0, vitest 4148/4148 PASS (unchanged from before this PR), `node --check` on the modified
 `build.mjs`, and the modified GitHub Actions workflow YAML validated with two independent parsers.
+
+## 2026-07-01 — The unkillable "ghost chat" finally root-caused: a permanent stale LiveChannel doc
+
+Admin: one specific chat is stuck and REAPPEARS no matter what — "+ New chat" and opening any old chat
+both fail to escape it; "claude ne 100 time try kiya woh hat nahi rahi." All the earlier fixes (#802
+generation guard, #804 workspace-scoped attach/status, #806 navigate-while-running, #809/#810/#813
+stuck-running fixes) closed real client/attach races — but the ghost survived them all because it lives
+somewhere none of those fixes touch: **Firestore**.
+
+**The confirmed mechanism (this was the documented "narrower, rarer follow-up gap" in #804 — it turned
+out to be neither narrow nor rare):**
+1. `LiveChannel.close()` only released the IN-MEMORY mirror — it **never deleted the Firestore doc**
+   (`agentv3_live/{userId}`). A finished/stuck/dead build's last 200 events sat there **forever**.
+2. The client's cross-device live-mirror poll (`subscribeLive`) starts every subscription at
+   `sinceSeq = 0`, so each (re)subscription re-reads the ENTIRE stale ring buffer.
+3. The #804 workspace filter on `/api/agentv3/live` only worked when the serving instance had the
+   build in its local `runningBuilds` map. After any Cloud Run instance recycle (constant in
+   production) there is no local record — so the read fell through to the Firestore doc UNFILTERED.
+4. The live-mirror re-arms on mount/visibility/`running` flips — i.e. **immediately after "+ New
+   chat" and after opening any old chat** — so every escape route deterministically replayed the
+   ghost's 200 events into whatever session was open. From any device. Forever.
+
+**Fix (server-side, three parts, all in `LiveChannel.ts` + the `/live` route):**
+- **Events are now stamped with the `workspaceId`** of the build that produced them
+  (`broadcastBuild` passes `rb.workspaceId` → stored in the channel doc). `/api/agentv3/live` refuses
+  a different session's events even cross-instance — the case #804 couldn't cover.
+- **Unstamped events are refused too** for a session-scoped caller (`liveEventsAllowedFor`, pure +
+  unit-tested): a pre-upgrade ghost doc is EXACTLY the unstamped case, so the existing stuck doc in
+  production is neutralized the moment this deploys — no manual Firestore cleanup needed. Conservative
+  deny, same principle as `isBuildRunningForWorkspace`.
+- **`close()` now DELETES the Firestore doc** (and discards un-flushed pending events instead of
+  writing one last stale batch) — a finished build leaves NO tail for later polls to replay. This is
+  the root-cause kill; the stamping above is defense-in-depth for the instance-recycled-mid-build case
+  where `close()` never runs.
+
+Tests: +8 (`liveEventsAllowedFor` all four quadrants incl. the ghost-doc conservative deny; the real
+in-memory channel path: workspace stamp round-trip, close-leaves-no-tail, close-discards-pending,
+cursor-past-seq returns nothing). Gate: frontend tsc 0, server tsc 0, vitest 4156/4156 PASS,
+boot:check PASS.
+
+## 2026-07-02 — v3.0 Lead-Architect program: full audit + Sec-1 (C2 importUrl host-RCE) shipped
+
+Admin commissioned a Lead-Architect-level transformation of Pro v3.0 (audit + root-cause + redesign),
+scoped to "edit only v3.0", and approved: fix security C1–C4 first, then the redesign in sequence.
+
+Delivered a prioritized v3.0 architecture audit (P0–P3) + E2B root-cause verdict. Key verified finding:
+the custom E2B template (`navbharat-builder`) is built in infra/ but NEVER wired — `E2BActuator._opts()`
+passes no `template`, so every sandbox runs E2B's DEFAULT base image (this, not E2B itself, is the core
+"E2B unreliable" cause). Verdict: keep E2B, wire the template + add a prod sandbox guard + make the
+in-browser renderer the deterministic default preview; evaluate alternatives only if it stays bad after.
+
+**Sec-1 (this commit) — C2: host command-injection + SSRF via `importUrl`.** Root cause: user `importUrl`
+was interpolated raw into `git clone "${url}"` / `git push "${url}"` shell strings run by the actuator —
+the HOST process when `E2B_API_KEY` is unset (LocalActuator fallback). A quote-breakout payload
+(`…/r"; curl 169.254.169.254 | sh; echo "`) = host RCE + cloud-metadata read; a `file://`/internal-IP URL
+= SSRF. Fix: new pure `sanitizeRepoUrl()` in `GitRepoSync.ts` PARSES the URL and REBUILDS it from
+validated components — only `https://[token@|x-access-token:token@]github.com/owner/repo[.git]` survives;
+the rebuilt string contains only `[A-Za-z0-9_.:@/-]`, none of which can escape a double-quoted shell arg.
+Applied at BOTH sinks (clone + push) and again at the route (clear message + never splices a token into a
+bad URL). The CommandRunner port is string-command-only across all three actuators, so validate-and-rebuild
+at the sink is the complete fix for this interface (argv-spawn noted as a deeper future option).
+
+Self-review caught (and fixed pre-gate) that the first draft wrongly rejected the legit GitHub-App
+`x-access-token:TOKEN@` auth form — which would have broken push. Tests: +9 (injection payload, SSRF/
+non-github/scheme/look-alike-host/port/ssh, path-segment count, both legit token forms round-trip, and the
+sink refusing an unsafe URL before any shell call). Gate: frontend tsc 0, server tsc 0, vitest 4165/4165
+PASS, boot:check PASS.
+
+Queued next (approved order, v3.0-scoped): C3 (preview-iframe origin isolation) → C1 (verified identity
+across the build path = architecture item A1) → Phase 3 redesign (A3 wire E2B template → A2 prod guard →
+A4/A6 unified preview + build state machine → A8 resumable manifest generation → export verification).
+Out-of-v3.0-scope, flagged for separate go-ahead: C4/payments, sync.ts, wallet.ts, team-RBAC.
+
+## 2026-07-02 — Sec-2 (A2): production sandbox guard on the v3.0 build route (defense-in-depth for C2)
+
+Follow-on to C2. `buildActuator()` (agentv3.ts) falls back E2B → Docker → LocalActuator with NO prod
+guard — unlike engineer.ts, which 503s in production without a real sandbox. LocalActuator runs the
+agent's generated + imported commands in the HOST process, which is exactly what made C2's importUrl
+injection reach the host. New pure `buildSandboxUnavailableInProd(env)` (exported, unit-tested) gates
+this; the /chat build path calls it AFTER the plain-chat early-exit (chat needs no sandbox, so it's
+unaffected) and, because the NDJSON headers are already flushed, emits a terminal error+result event
+and cleans up activeBuilds instead of res.status(). Non-prod (dev/CI/VITEST) still uses LocalActuator by
+design. +4 tests. Gate: frontend tsc 0, server tsc 0, vitest 4169/4169 PASS, boot:check PASS.
+
+NOTE: this + C2 currently ride on the same branch as PR #816 (ghost-chat) because the GitHub connector
+disconnected mid-session and #816 could not be merged first — so ghost-chat + C2 + A2 will ship together
+in one green merge once GitHub is re-authorized. C3 (preview-iframe origin isolation) is INFRA-GATED
+(needs a dedicated preview subdomain, like the APK template) — flagged, not half-fixed. C1 (verified
+identity) remains the next code workstream.

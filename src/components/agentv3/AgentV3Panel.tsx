@@ -150,11 +150,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   const sessionIdRef = useRef<string>('');
   if (!sessionIdRef.current) {
-    let restored = '';
-    try { restored = localStorage.getItem(sessionStorageKey) || ''; } catch { /* ignore */ }
-    if (!restored) { try { restored = sessionStorage.getItem(sessionStorageKey) || ''; } catch { /* ignore */ } }
-    sessionIdRef.current = restored || newSessionId();
-    if (!restored) persistSessionId(sessionIdRef.current);
+    // ADMIN RULE (2026-07-01): opening NavBharatAI Pro v3.0 ALWAYS starts a brand-new chat. We do NOT
+    // restore the last session id from storage anymore — a reload or reopen must NEVER reload the old
+    // (or a stuck) chat into the box. Every past chat is still saved and reachable from the ☰ History
+    // menu to reopen on demand; it just never auto-loads.
+    sessionIdRef.current = newSessionId();
+    persistSessionId(sessionIdRef.current);
   }
   // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
   // only auto-attaches/mirrors a build that actually belongs to THIS session, never one still running
@@ -284,41 +285,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const freshOpenHandledRef = useRef<number>(0);
   useEffect(() => {
     if (running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
-    // PLAIN OPEN → new chat: a fresh (unhandled) nonce means the user opened the tab on purpose.
-    // Start a clean session and do NOT auto-restore the previous project (that was Bug 1). Returning
-    // here also means no id-less "most-recent" load is in flight, which removes the ~2s revert (Bug 3).
+    // ADMIN RULE (2026-07-01): opening v3.0 ALWAYS starts a brand-new chat — the previous chat is
+    // NEVER auto-loaded into the box, on a plain open OR a reload. The old "restore most-recent
+    // conversation" path is removed entirely, so a stuck/old chat can never reappear here. A deliberate
+    // re-open (freshOpenNonce, bumped by toggleTab) still forces a clean session over any leftover
+    // state. Past chats stay in the ☰ History menu (openConversation) / the History page to reopen on
+    // demand — they simply never load themselves.
     if (freshOpenNonce && freshOpenHandledRef.current !== freshOpenNonce) {
       freshOpenHandledRef.current = freshOpenNonce;
       startNewSession();
-      return;
     }
-    if (autoRestoredSessionRef.current === sessionIdRef.current) return; // this session already handled
-    const sidAtStart = sessionIdRef.current;
-    autoRestoredSessionRef.current = sidAtStart;
-    void (async () => {
-      const restored = await loadConversation({ userId, email });
-      if (!restored) return;
-      // CANCELLATION TOKEN: if the user started a New chat / opened another session while we were
-      // loading, the live sessionId no longer matches — discard so the deliberate choice wins.
-      if (sessionIdRef.current !== sidAtStart) return;
-      // RESUME THE SAME SESSION: adopt the sessionId of the restored (most-recent) conversation so a
-      // follow-up message continues THAT exact workspace/memory. sessionId is the tail of the
-      // workspaceId: `agentv3-{uid}-{sessionId}`. Only "New" starts fresh.
-      if (restored.workspaceId) {
-        const prefix = `agentv3-${normalizeUid(userId)}-`;
-        if (restored.workspaceId.startsWith(prefix)) {
-          const sid = restored.workspaceId.slice(prefix.length);
-          if (sid) { sessionIdRef.current = sid; persistSessionId(sid); autoRestoredSessionRef.current = sid; }
-        }
-      }
-      // Restore the user's OWN messages too — the narration path only rebuilds the agent side, so
-      // without this the user's bubbles vanish on reload (only AI replies would remain).
-      if (restored.messages.length > 0) {
-        setUserMsgs((cur) => (cur.length > 0 ? cur : restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }))));
-      }
-    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, email, running, state.narration.length, userMsgs.length, loadConversation, freshOpenNonce]);
+  }, [userId, running, state.narration.length, userMsgs.length, freshOpenNonce]);
 
   // S4 — re-armed per workspace; the rehydrate EFFECT itself lives below loadWorkspaceFiles (declared
   // later) to avoid a temporal-dead-zone on workspaceFiles. New chat / open / resume reset it to ''.

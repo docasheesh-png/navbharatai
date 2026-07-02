@@ -588,7 +588,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       try {
         const res = await fetch('/api/agentv3/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // SECURITY (C1): send the Firebase ID token so the server derives identity from the VERIFIED
+          // token, not the body.userId (which it no longer trusts). Other v3.0 calls already do this.
+          headers: await authJsonHeaders(),
           body: JSON.stringify({
             prompt,
             userId: opts?.userId,

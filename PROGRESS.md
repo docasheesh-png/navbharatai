@@ -7192,3 +7192,28 @@ disconnected mid-session and #816 could not be merged first — so ghost-chat + 
 in one green merge once GitHub is re-authorized. C3 (preview-iframe origin isolation) is INFRA-GATED
 (needs a dedicated preview subdomain, like the APK template) — flagged, not half-fixed. C1 (verified
 identity) remains the next code workstream.
+
+## 2026-07-02 — Sec-3 (C1 / architecture A1): verified identity on the v3.0 build path
+
+The #1 audit finding. `/api/agentv3/chat` derived identity from `req.body.userId` — and the build call
+was the ONE v3.0 client call that never sent the Firebase token — so a spoofed userId gave cross-user
+workspace access, monthly-cap bypass, and spend on NavBharatAI's own model budget under any account.
+
+Coordinated client+server fix (admin-approved transition: reject token-less-with-claim & ask refresh):
+- Server: new pure `resolveBuildIdentity(verifiedUid, claimedUid)` (exported, unit-tested) — identity
+  is the VERIFIED token uid only; a claim with no token → 401 `reauth` ("refresh & sign in"); a
+  token/claim mismatch → 401 `mismatch`; genuine anonymous (no token + no claim) → userId=null (shared
+  anon path preserved). Runs before flushHeaders() so rejects are clean HTTP 401s. New
+  `verifyFirebaseIdentity(req)` returns the verified uid AND email so `isAgentV3Enabled`'s allowlist
+  can't be spoofed via a client `email` field either.
+- Client: `useAgentV3Build.start()` now sends `authJsonHeaders()` (Bearer token) like every other v3.0
+  call. Transient self-healing behavior for a stale cached client: one refresh loads the token-sending
+  bundle; the user's workspace is untouched (no data loss).
+
++4 tests. Gate: frontend tsc 0, server tsc 0, vitest 4173/4173 PASS, boot:check PASS.
+
+Fast-follow (separate PR, same principle): apply verified-identity to the remaining v3.0 read/mutate
+routes (/conversations read+delete, /attach, /status, /live) — those client calls already send the
+token, so it's lower-risk. Then Phase-3 redesign resumes (A3 wire E2B template → unified preview + build
+state machine → resumable manifest generation → export verification). C3 (preview-iframe isolation)
+remains infra-gated (dedicated preview subdomain).

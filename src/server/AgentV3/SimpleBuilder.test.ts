@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -378,5 +378,31 @@ describe('runSimpleBuild — LENS B staged generation', () => {
     for (const p of Object.values(h.prompts)) {
       expect(p).not.toContain('ALREADY-WRITTEN FILES YOU CAN IMPORT');
     }
+  });
+});
+
+describe('blueprintAdvisoryBlock (P-ARCH+.3 — advisory blueprint for the agentic architect)', () => {
+  const manifest = [
+    { path: 'src/App.tsx', purpose: 'root shell' },
+    { path: 'src/components/Hero.tsx', purpose: 'hero section' },
+  ];
+  it('returns empty for an empty manifest', () => {
+    expect(blueprintAdvisoryBlock([])).toBe('');
+  });
+  it('renders the file list and is framed ADVISORY, never FROZEN', () => {
+    const b = blueprintAdvisoryBlock(manifest);
+    expect(b).toContain('SUGGESTED BLUEPRINT (advisory)');
+    expect(b).toContain('src/App.tsx — root shell');
+    expect(b).toContain('src/components/Hero.tsx — hero section');
+    expect(b).toContain('NOT frozen');
+    // Must NOT reuse the fast lane's frozen-contract language (that would over-constrain the architect).
+    expect(b).not.toContain('FROZEN and SHARED');
+  });
+  it('includes the shared contract when provided, and omits it when absent', () => {
+    const withC = blueprintAdvisoryBlock(manifest, 'export enum Role { Admin, User }');
+    expect(withC).toContain('Proposed shared contract');
+    expect(withC).toContain('export enum Role');
+    const withoutC = blueprintAdvisoryBlock(manifest, '   ');
+    expect(withoutC).not.toContain('Proposed shared contract');
   });
 });

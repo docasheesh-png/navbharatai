@@ -228,6 +228,31 @@ export function contractBlock(contract: string | undefined): string {
   ].join('\n');
 }
 
+/**
+ * Render an ADVISORY blueprint block for the AGENTIC architect (P-ARCH+.3). Unlike contractBlock —
+ * which FREEZES the contract for the fast lane's isolated per-file calls — this is guidance the
+ * architect may refine; it keeps ownership of the plan via update_todo. Reusing the proposed file
+ * paths + shared symbol names is what avoids the mismatched-import / missing-file drift that breaks
+ * large apps. Returns '' when there is no manifest. Pure.
+ */
+export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: string): string {
+  if (!manifest || manifest.length === 0) return '';
+  const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
+  const parts = [
+    'SUGGESTED BLUEPRINT (advisory) — a proposed file manifest and shared type/API contract to keep a',
+    'larger app internally consistent. Treat it as a starting point you may refine as you build; you',
+    'still own the plan (update_todo). It is NOT frozen — but reusing these exact file paths and shared',
+    'symbol names avoids the mismatched-import / missing-file drift that breaks big apps.',
+    '',
+    `Proposed files:\n${fileList}`,
+  ];
+  const c = (contract || '').trim();
+  if (c) {
+    parts.push('', 'Proposed shared contract (types / enums / interfaces):', '```ts', c.slice(0, 12_000), '```');
+  }
+  return parts.join('\n');
+}
+
 export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string): string {
   const fileList = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`).join('\n');
   return [

@@ -48,6 +48,7 @@ import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
 import { analyzeRunnability, runnabilitySummary } from './RunnabilityAnalysis';
 import { analyzeSeo, seoSummary } from './SeoAnalysis';
+import { lintDesign, designSummary } from '../AppMakerLab/intelligence/DesignLinter';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
@@ -1046,6 +1047,17 @@ export class ToolDispatcher {
         for (const f of reqCoverage.findings) extra.push({ severity: 'medium', label: `Requested feature not found: ${f.feature}` });
         if (errorBoundary.findings.length) extra.push({ severity: 'medium', label: 'React app has no error boundary' });
         if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
+        // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
+        // spacing/token consistency so a build reports its visual polish, not just its correctness.
+        // Pure + never throws. Not pushed into `extra`, so it can never fail an otherwise-ready build.
+        const DESIGN_EXT = /\.(css|scss|sass|less|tsx|jsx|vue|svelte|html?)$/i;
+        const designCode = snap.sources
+          .filter((s) => DESIGN_EXT.test(s.path))
+          .map((s) => s.content)
+          .join('\n')
+          .slice(0, 400_000);
+        const design = lintDesign(designCode);
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;
@@ -1068,7 +1080,7 @@ export class ToolDispatcher {
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
         });
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}`;
       }
 
       case 'update_todo': {

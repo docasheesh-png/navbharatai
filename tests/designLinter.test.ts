@@ -6,6 +6,7 @@ import {
   extractSpacingPx,
   offGridSpacing,
   lintDesign,
+  designSummary,
   MAX_COLORS,
 } from '../src/server/AppMakerLab/intelligence/DesignLinter';
 
@@ -104,5 +105,22 @@ describe('lintDesign', () => {
     expect(r.score).toBeGreaterThanOrEqual(0);
     expect(r.score).toBeLessThanOrEqual(100);
     expect(['A', 'B', 'C', 'D']).toContain(r.grade);
+  });
+});
+
+describe('designSummary (P-PIPE.C stage 32 — advisory build-report line)', () => {
+  it('gives a clean tick with grade + score when the design is cohesive', () => {
+    const s = designSummary(lintDesign('.a{color:#112233;padding:8px}'));
+    expect(s).toMatch(/Design consistency: ✓ [A-D] \(\d+\/100\)/);
+    expect(s).not.toContain('⚠');
+  });
+  it('lists concrete issues (grade + count) when the design is inconsistent', () => {
+    // Many one-off colours → a color-count violation.
+    const many = Array.from({ length: 20 }, (_, i) => `.c${i}{color:#${(i + 16).toString(16).padStart(2, '0')}0000}`).join('\n');
+    const r = lintDesign(many);
+    const s = designSummary(r);
+    expect(s).toContain(`Design consistency — grade ${r.grade}`);
+    expect(s).toContain(`${r.violations.length} issue(s)`);
+    expect(s).toContain('⚠');
   });
 });

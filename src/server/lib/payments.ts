@@ -3,6 +3,24 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { getDb } from './db';
 import { getSecretValue } from './secrets';
 
+// SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is
+// `tokenAmount₹ + (buyPass ? pass : 0)` (client: createVishwakarmaOrder in App.tsx). The credit path
+// used to mint `client tokenAmount × 100` tokens — a value NEVER bound to what was actually paid — so
+// a `{amount: 1, tokenAmount: 1_000_000}` order paid ₹1 and minted 100M tokens. We now DERIVE the
+// creditable tokens from the VERIFIED paid amount instead: tokens = (paid − pass) × TOKENS_PER_RUPEE.
+// (The standard, non-vishwakarma path already binds to paid ₹ via balanceAdded.) Pass price + rate must
+// match the client's createVishwakarmaOrder; change both together if pricing ever changes.
+export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
+export const TOKENS_PER_RUPEE = 100;
+
+/** Tokens a vishwakarma order may credit, derived ONLY from the amount actually paid. Pure + tested. */
+export function creditableVishwakarmaTokens(amountPaidRupees: unknown, buyPass: boolean): number {
+  const paid = Number(amountPaidRupees);
+  if (!Number.isFinite(paid) || paid <= 0) return 0;
+  const tokenRupees = Math.max(0, paid - (buyPass ? VISHWAKARMA_PASS_PRICE_RUPEES : 0));
+  return Math.round(tokenRupees * TOKENS_PER_RUPEE);
+}
+
 /**
  * Reusable internal payment verification + wallet-credit service.
  * Extracted from the server.ts monolith (Phase 1) with behavior unchanged.
@@ -110,7 +128,8 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       let walletUpdate: any = {};
       const isVishwakarmaOrder = !!txData.isVishwakarmaOrder;
       const buyPass = !!txData.buyPass;
-      const tokensToCredit = (txData.tokenAmount || 0) * 100;
+      // SECURITY (C4): derive from the VERIFIED paid amount, NOT the client-supplied txData.tokenAmount.
+      const tokensToCredit = creditableVishwakarmaTokens(txData.amountPaid, buyPass);
 
       // PROMO HANDLING
       const promoSnap = await getDoc(doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`));

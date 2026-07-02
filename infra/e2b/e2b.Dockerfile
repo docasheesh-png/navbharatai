@@ -78,17 +78,27 @@ RUN mkdir -p /home/user/.e-tools \
 # drifts, the copy is still just a primer that `npm install` reconciles (correct,
 # only less optimal), and _npmInstall's `files.exists` guard makes the whole
 # feature a no-op on any image where this dir is absent.
+#
+# ROOT-CAUSE FIX (build failing here): the package.json used to be generated with a
+# MULTI-LINE `printf '%s\n' '{' \ '  "name"…' \ …` whose backslash-continued ARGS
+# E2B build-system v2's Dockerfile parser can mangle (real Docker joins them; a
+# naive line parser does not) → a truncated/broken package.json → `npm install`
+# fails with a JSON/parse error. It is now written with a SINGLE-LINE
+# `node -e writeFileSync(JSON.stringify(...))`, which is guaranteed-valid JSON and
+# has no multi-line continuation for the parser to mishandle. Diagnostics (node/npm
+# versions, disk, the generated package.json) print to the BUILD LOG so any residual
+# failure shows its real cause; npm errors are NEVER suppressed and there are NO
+# retries — a real failure still fails the image build loudly.
 RUN mkdir -p /home/user/.warm/vite-react \
-  && printf '%s\n' '{' \
-  '  "name": "project",' \
-  '  "version": "0.1.0",' \
-  '  "scripts": { "dev": "vite", "build": "tsc && vite build", "preview": "vite preview" },' \
-  '  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },' \
-  '  "devDependencies": { "@vitejs/plugin-react": "^4.3.1", "typescript": "^5.5.3", "vite": "^5.4.1" }' \
-  '}' > /home/user/.warm/vite-react/package.json \
+  && node -e "require('fs').writeFileSync('/home/user/.warm/vite-react/package.json', JSON.stringify({name:'project',version:'0.1.0',private:true,scripts:{dev:'vite',build:'tsc && vite build',preview:'vite preview'},dependencies:{react:'^18.3.1','react-dom':'^18.3.1'},devDependencies:{'@vitejs/plugin-react':'^4.3.1',typescript:'^5.5.3',vite:'^5.4.1'}}, null, 2) + '\n')" \
+  && echo '=== warm vite-react: environment ===' && node -v && npm -v && df -h \
+  && echo '=== warm vite-react: generated package.json ===' && cat /home/user/.warm/vite-react/package.json \
+  && echo '=== warm vite-react: npm install ===' \
   && cd /home/user/.warm/vite-react \
-  && npm install --no-audit --no-fund \
-  && npm cache clean --force
+  && npm install --no-audit --no-fund --loglevel=info \
+  && test -d node_modules/react -a -d node_modules/vite \
+  && npm cache clean --force \
+  && echo '=== warm vite-react: done — disk after ===' && df -h
 
 # Workspace root the actuator writes to — must match WORKSPACE_ROOT in
 # E2BActuator.ts ('/home/user/workspace').

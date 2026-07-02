@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { trimReportForStorage, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem } from './DiagnosticsStore';
+import { trimReportForStorage, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -89,5 +89,23 @@ describe('saveDiagnosticsHistory / listDiagnosticsHistory / getDiagnosticsHistor
 
   it('getDiagnosticsHistoryItem resolves to null (never throws) when Firestore is unreachable', async () => {
     await expect(getDiagnosticsHistoryItem('ws-1', '2000')).resolves.toBeNull();
+  });
+});
+
+// P-REPORT.5 — durable per-USER "latest report" (the "Build report gayab na ho" fix). Same VITEST-skip
+// best-effort contract: Firestore is unreachable under VITEST, so these confirm never-throws + safe
+// nulls (real persistence is verified against real Firestore, like the workspace/history paths above).
+describe('saveLatestForUser / loadLatestForUser (VITEST-skip, best-effort)', () => {
+  it('saveLatestForUser never throws with no reachable Firestore', async () => {
+    await expect(saveLatestForUser('user-1', baseReport({ endedAt: 2000, ok: true }))).resolves.toBeUndefined();
+  });
+
+  it('saveLatestForUser tolerates a null userId (falls back to the "anon" bucket) without throwing', async () => {
+    await expect(saveLatestForUser(null, baseReport({ endedAt: 2000 }))).resolves.toBeUndefined();
+  });
+
+  it('loadLatestForUser resolves to null (never throws) when Firestore is unreachable', async () => {
+    await expect(loadLatestForUser('user-1')).resolves.toBeNull();
+    await expect(loadLatestForUser(null)).resolves.toBeNull();
   });
 });

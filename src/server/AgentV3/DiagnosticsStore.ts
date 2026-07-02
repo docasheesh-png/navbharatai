@@ -101,6 +101,48 @@ export async function loadDiagnostics(workspaceId: string): Promise<BuildDiagnos
   }
 }
 
+// ── Durable per-USER "latest report" (P-REPORT.5 — "the report vanishes on every message/reload") ──
+//
+// saveDiagnostics()/loadDiagnostics() key ONLY by workspaceId. The only per-USER fallback in the route
+// was the IN-MEMORY `lastDiagnostics` map — which is wiped on every Cloud Run cold start (min-instances
+// =0) AND is per-instance. Combined with "a fresh session mints a new workspaceId", the client would
+// fetch a workspaceId that has no saved report and fall through to that empty in-memory map → the
+// "No build report yet" the user saw right after a real build. This durable per-user doc is the fix:
+// the user's LAST settled build report is always retrievable by userId alone, across cold starts,
+// instance rotation, reloads and new sessions — until the next build overwrites it. Best-effort.
+const USER_COLLECTION = 'user_diagnostics_v3';
+
+/** Persist the user's LATEST settled build report, retrievable by userId alone. Best-effort. */
+export async function saveLatestForUser(userId: string | null, report: BuildDiagnosticsReport): Promise<void> {
+  const db = getDb();
+  const uid = userId || 'anon';
+  if (!db || !report) return;
+  try {
+    let stored = trimReportForStorage(report);
+    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
+      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
+      stored = { ...stored, commands: undefined, llmCalls: undefined, issues: furtherTrimmedIssues, problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')) };
+    }
+    await db.collection(USER_COLLECTION).doc(uid).set({ report: stored, savedAt: Date.now() }, { merge: false });
+  } catch {
+    /* best-effort — never blocks or breaks a build */
+  }
+}
+
+/** Load the user's LATEST settled build report (durable, cold-start-proof), or null. Never throws. */
+export async function loadLatestForUser(userId: string | null): Promise<BuildDiagnosticsReport | null> {
+  const db = getDb();
+  const uid = userId || 'anon';
+  if (!db) return null;
+  try {
+    const doc = await db.collection(USER_COLLECTION).doc(uid).get();
+    if (!doc.exists) return null;
+    return (doc.data()?.report as BuildDiagnosticsReport) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── History (P-REPORT.4 — "the report disappears the moment the next build starts") ────────────
 //
 // saveDiagnostics()/loadDiagnostics() above keep only ONE doc per workspace: the LATEST settled

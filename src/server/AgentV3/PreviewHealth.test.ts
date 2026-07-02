@@ -1,0 +1,92 @@
+import { describe, it, expect } from 'vitest';
+import { classifyPreviewHealth, shouldAutoRebootPreview, previewHealthContextLine, type PreviewHealthSignals } from './PreviewHealth';
+
+const base: PreviewHealthSignals = {
+  hasFiles: true, liveBackend: true, livePortUp: null, everPublished: false, lastError: null, booting: false,
+};
+
+describe('classifyPreviewHealth — v3.0 knows the REAL preview state', () => {
+  it('empty when no files exist yet (nothing to preview)', () => {
+    const h = classifyPreviewHealth({ ...base, hasFiles: false });
+    expect(h.status).toBe('empty');
+    expect(h.canReboot).toBe(false);
+  });
+
+  it('inbrowser_only when no live backend is configured (E2B off)', () => {
+    const h = classifyPreviewHealth({ ...base, liveBackend: false });
+    expect(h.status).toBe('inbrowser_only');
+    expect(h.canReboot).toBe(false);
+  });
+
+  it('live when a port probe currently succeeds', () => {
+    expect(classifyPreviewHealth({ ...base, livePortUp: true }).status).toBe('live');
+  });
+
+  it('booting takes precedence while a boot/heal is in progress', () => {
+    expect(classifyPreviewHealth({ ...base, booting: true, livePortUp: false }).status).toBe('booting');
+  });
+
+  it('sleeping (EXPECTED) when the port is down/cold with NO error — idle-recycled, rebootable', () => {
+    // The core "reopen years later" case: files saved, sandbox long gone, no crash — just asleep.
+    const h = classifyPreviewHealth({ ...base, livePortUp: false, everPublished: true, lastError: null });
+    expect(h.status).toBe('sleeping');
+    expect(h.canReboot).toBe(true);
+    expect(h.summary).toMatch(/saved/i);
+  });
+
+  it('sleeping when never probed (null) — cold reopen, rebootable from saved files', () => {
+    expect(classifyPreviewHealth({ ...base, livePortUp: null }).status).toBe('sleeping');
+  });
+
+  it('crashed (distinct from sleeping) when the port went down WITH an error → heal', () => {
+    const h = classifyPreviewHealth({ ...base, livePortUp: false, everPublished: true, lastError: "Missing dependency 'tailwindcss'" });
+    expect(h.status).toBe('crashed');
+    expect(h.canReboot).toBe(true);
+    expect(h.summary).toContain('tailwindcss');
+  });
+});
+
+describe('shouldAutoRebootPreview — bounded, cooldown-gated, idle-vs-crash aware', () => {
+  const sleeping = classifyPreviewHealth({ ...base, livePortUp: false, everPublished: true });
+  const crashed = classifyPreviewHealth({ ...base, livePortUp: false, everPublished: true, lastError: 'boom' });
+  const live = classifyPreviewHealth({ ...base, livePortUp: true });
+
+  it('reboots a sleeping/crashed rebootable preview when attempts + cooldown allow', () => {
+    expect(shouldAutoRebootPreview(sleeping, 0, 2, Infinity, 30_000)).toBe(true);
+    expect(shouldAutoRebootPreview(crashed, 0, 2, 60_000, 30_000)).toBe(true);
+  });
+
+  it('never reboots a live preview', () => {
+    expect(shouldAutoRebootPreview(live, 0, 2, Infinity, 30_000)).toBe(false);
+  });
+
+  it('stops once attempts are exhausted (never loops)', () => {
+    expect(shouldAutoRebootPreview(sleeping, 2, 2, Infinity, 30_000)).toBe(false);
+  });
+
+  it('respects the cooldown between attempts', () => {
+    expect(shouldAutoRebootPreview(sleeping, 1, 3, 5_000, 30_000)).toBe(false);
+  });
+
+  it('never reboots when the preview cannot be rebooted (no backend/files)', () => {
+    const noBackend = classifyPreviewHealth({ ...base, liveBackend: false });
+    expect(shouldAutoRebootPreview(noBackend, 0, 2, Infinity, 30_000)).toBe(false);
+  });
+});
+
+describe('previewHealthContextLine — real state for the AI, never a guess', () => {
+  it('is empty for an empty project (nothing to say)', () => {
+    expect(previewHealthContextLine(classifyPreviewHealth({ ...base, hasFiles: false }))).toBe('');
+  });
+
+  it('states RUNNING with the never-guess instruction when live', () => {
+    const line = previewHealthContextLine(classifyPreviewHealth({ ...base, livePortUp: true }));
+    expect(line).toContain('RUNNING');
+    expect(line).toContain('never guess');
+  });
+
+  it('states ASLEEP for the reopen-years-later case', () => {
+    const line = previewHealthContextLine(classifyPreviewHealth({ ...base, livePortUp: false, everPublished: true }));
+    expect(line).toContain('ASLEEP');
+  });
+});

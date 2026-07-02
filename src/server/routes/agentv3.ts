@@ -127,6 +127,7 @@ import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/Workspace
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -1401,6 +1402,54 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
+  // PREVIEW HEALTH — v3.0's self-awareness of whether the preview is actually running. Gathers REAL
+  // signals (durable file count → the app survives years; live backend configured?; a warm sandbox's
+  // port probe) and classifies the true state: live / sleeping (idle-recycled — reboots on demand) /
+  // crashed / inbrowser_only / empty. Deliberately does NOT create a sandbox just to check (that would
+  // be wasteful and slow) — a cold workspace reports `sleeping` (rebootable from saved files), which is
+  // exactly the "reopen an old chat years later" case: files are safe, the live preview boots on demand.
+  app.post('/api/agentv3/preview-health', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    try {
+      // hasFiles is DURABLE (Firestore) — true even years later on a long-dead sandbox.
+      const fileCount = await raceTimeout(countWorkspaceFiles(workspaceId), 4_000, 'previewHealthFiles').catch(() => 0);
+      const diag = sandboxDiag();
+      // Only probe the live port when a sandbox is ALREADY warm — never spin one up just to check.
+      let livePortUp: boolean | null = null;
+      if (diag.livePreviewAvailable) {
+        try {
+          const actuator = buildActuator();
+          const sandboxId = actuator.getSandboxId ? await raceTimeout(actuator.getSandboxId(workspaceId), 4_000, 'previewHealthSandbox').catch(() => null) : null;
+          if (sandboxId) {
+            const port = oneShotDevPort(framework);
+            const probe = await raceTimeout(
+              actuator.runCommand(workspaceId, `curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:${port} 2>/dev/null || echo 000`),
+              8_000, 'previewHealthProbe',
+            ).catch(() => ({ stdout: '000', stderr: '', exitCode: -1 }));
+            livePortUp = /\b(?:200|301|302|304)\b/.test(probe.stdout || '');
+          }
+        } catch { /* probe is best-effort — a failure just means "not currently up" (null/false) */ }
+      }
+      const health = classifyPreviewHealth({
+        hasFiles: fileCount > 0,
+        liveBackend: diag.livePreviewAvailable,
+        livePortUp,
+        everPublished: fileCount > 0, // files exist ⇒ a build ran ⇒ a preview was attempted
+        lastError: null,             // a specific crash error only comes from a live boot (Diagnose)
+        booting: false,
+      });
+      res.json({ ...health, fileCount });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
   app.post('/api/agentv3/respond', (req: Request, res: Response) => {
     const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
@@ -2191,13 +2240,25 @@ export function registerAgentV3Routes(app: Express): void {
         // lane never loaded any workspace context. projectFileCount was already computed above for
         // intent classification (no extra Firestore call needed here).
         const chatWorkspaceContext = chatWorkspaceContextLine(projectFileCount);
+        // v3.0 preview self-awareness: so "kya preview chal raha hai?" is answered from REAL state, not a
+        // guess. No sandbox probe here (that would slow every chat message) — classify from the durable
+        // file count + whether a live backend exists. This never falsely claims RUNNING; when files exist
+        // it honestly says the app is SAVED and reboots on demand (the reopen-years-later guarantee).
+        const chatPreviewHealth = previewHealthContextLine(classifyPreviewHealth({
+          hasFiles: projectFileCount > 0,
+          liveBackend: sandboxDiag().livePreviewAvailable,
+          livePortUp: null,
+          everPublished: projectFileCount > 0,
+          lastError: null,
+          booting: false,
+        }));
         // P-PE.1 — plain-chat response cache. A reply is cacheable ONLY when it's a pure function of the
         // prompt text alone (no per-workspace/per-user data injected) — identical prompts WITHOUT an
         // attachment AND without workspace context can be served from an in-memory TTL+LRU cache: instant
         // and free, no behaviour change. Once real file-count context is injected, the reply depends on
         // THIS project's state, so it must bypass the cache (a stale/wrong count is worse than a cache
         // miss). Build/edit turns never reach this path, and attachment turns are skipped (unique prompt).
-        const cacheable = !attachmentContext && !chatWorkspaceContext && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -2214,7 +2275,7 @@ export function registerAgentV3Routes(app: Express): void {
               LANGUAGE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext + chatPreviewHealth +
                 (ambiguousBuildAsk
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "

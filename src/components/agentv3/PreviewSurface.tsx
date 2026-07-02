@@ -31,7 +31,12 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
 export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
-  const [mode, setMode] = useState<'live' | 'inbrowser'>(url ? 'live' : 'inbrowser');
+  // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
+  // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
+  // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
+  // an explicit opt-in toggle the user picks (or auto-selects via Diagnose). Root cause: the live URL
+  // dies on sandbox idle-pause / recycle, so defaulting to it made the preview flaky.
+  const [mode, setMode] = useState<'live' | 'inbrowser'>('inbrowser');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -45,7 +50,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [diagResult, setDiagResult] = useState<{ ok: boolean; reason: string; detail: string } | null>(null);
   const [foundUrl, setFoundUrl] = useState<string>('');
 
-  useEffect(() => { if (url) setMode('live'); }, [url]);
+  // A4: do NOT force the view to "live" just because a live URL arrived — that yanked the user off the
+  // reliable in-browser render onto an ephemeral sandbox URL (the flakiness source). Live is opt-in via
+  // the toggle; the "Live server" button lights up as available whenever `effectiveUrl` exists.
   useEffect(() => { setFoundUrl(''); setDiagResult(null); }, [workspaceId]); // a new workspace never inherits a stale diagnosis
 
   const runDiagnose = useCallback(async () => {
@@ -202,10 +209,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   useEffect(() => { if (mode !== 'inbrowser') setEditMode(false); }, [mode]);
   useEffect(() => { setEditMode(false); }, [html]);
 
+  // In-browser first (the default). "Live server" shows a ● when a live URL is available so the
+  // full-fidelity view is discoverable even though we no longer auto-switch to it.
   const switcher = (
     <div className="flex items-center gap-1">
-      <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity)">Live server</button>
-      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="A self-contained preview rendered in your browser — no server needed">In-browser</button>
+      <button onClick={() => setMode('inbrowser')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'inbrowser' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="Instant, always-available preview rendered in your browser — no server needed (default)">In-browser</button>
+      <button onClick={() => setMode('live')} className={`px-2 py-0.5 rounded text-[11px] border ${mode === 'live' ? 'bg-zinc-800 text-white border-zinc-600' : 'text-zinc-400 border-zinc-700 hover:text-zinc-200'}`} title="The running app in the cloud sandbox (full fidelity — real npm/runtime)">{effectiveUrl ? '● ' : ''}Live server</button>
     </div>
   );
 

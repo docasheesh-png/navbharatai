@@ -7,7 +7,7 @@
 // admin-chosen "chat + git-restore" approach). Replaying these events through the existing,
 // tested agentV3Reducer rebuilds the narration feed + workspaceId with no new reducer logic.
 
-import type { AgentV3WireEvent } from './agentV3Types';
+import type { AgentV3WireEvent, AgentRole } from './agentV3Types';
 
 /** The shape returned by GET /api/agentv3/conversations/:id (mirror of the server record). */
 export interface PersistedConversation {
@@ -18,6 +18,14 @@ export interface PersistedConversation {
   messages: unknown[];
   billedUsd?: number;
   updatedAt?: number;
+  /** Eternal sessions: the durable evidence layer (compact server TimelineEvents) — see below. */
+  timeline?: unknown[];
+  /** Terminal facts of the last finished build turn (billedInr/tokens/buildHealth). */
+  finalState?: { ok?: boolean; billedUsd?: number; billedInr?: number; tokens?: number; buildHealth?: unknown };
+  /** The framework this session builds with (restored so follow-up builds stay correct). */
+  framework?: string;
+  /** Cumulative token usage (older field, still returned by the server). */
+  usage?: { inputTokens?: number; outputTokens?: number };
 }
 
 /** Extract the visible text from a Claude message's `content` (a string or a block array). */
@@ -35,32 +43,112 @@ export function messageText(content: unknown): string {
   return '';
 }
 
+/** The timestamp a persisted message restores with: its real wall-clock time when the server
+ * stamped one (eternal sessions), else its transcript POSITION (idx+1 — legacy records). */
+function restoredTs(m: unknown, idx: number): number {
+  const ts = (m as { ts?: unknown } | null)?.ts;
+  return typeof ts === 'number' && ts > 0 ? ts : idx + 1;
+}
+
+/** Map one persisted timeline event (compact server shape) back to its live wire event. */
+function timelineToWireEvent(e: unknown): AgentV3WireEvent | null {
+  if (!e || typeof e !== 'object') return null;
+  const t = e as Record<string, unknown>;
+  const ts = typeof t.ts === 'number' ? t.ts : 0;
+  // Persisted agent names are plain strings; unknown ones degrade to 'architect' rendering-wise
+  // (the reducer only uses the role as a map key + label, so this cast is display-safe).
+  const agent = (typeof t.agent === 'string' && t.agent ? t.agent : 'architect') as AgentRole;
+  switch (t.t) {
+    case 'tool_call':
+      if (typeof t.id !== 'string' || typeof t.tool !== 'string') return null;
+      return { type: 'tool_call', agent, tool: t.tool, input: t.input ?? {}, callId: t.id, ts };
+    case 'tool_result':
+      if (typeof t.id !== 'string') return null;
+      return { type: 'tool_result', agent, callId: t.id, ok: t.ok !== false, summary: String(t.summary ?? ''), ts };
+    case 'file': {
+      if (typeof t.path !== 'string') return null;
+      const kind = t.kind === 'modify' || t.kind === 'delete' ? t.kind : 'create';
+      return { type: 'file_changed', agent, change: { path: t.path, kind }, ts };
+    }
+    case 'agent':
+      if (typeof t.agent !== 'string') return null;
+      return { type: 'agent_spawned', agent, task: String(t.task ?? ''), ts };
+    case 'preview':
+      if (typeof t.url !== 'string' || !t.url) return null;
+      return { type: 'preview', url: t.url, ts };
+    case 'diff':
+      if (typeof t.path !== 'string' || typeof t.patch !== 'string') return null;
+      return { type: 'diff', agent, diff: { path: t.path, patch: t.patch }, ts };
+    default:
+      return null;
+  }
+}
+
 /**
  * Rebuild the wire events that re-display a persisted build's chat history. Emits a `workspace`
- * event (so History → restore works), one `narration` line per assistant turn, and — for a build
- * that already finished — a `done` event so the UI is not stuck showing "building". A build whose
- * status is still `running` is left open (no `done`) so the user can Resume it.
+ * event (so History → restore works), one `narration` line per assistant turn, the durable
+ * TIMELINE events (eternal sessions — tool calls/results, file changes, diffs, preview), and —
+ * for a build that already finished — `done` (+ a synthetic `result` carrying the durable
+ * billing/token facts) so the reopened session shows the SAME action rows, Diff/Terminal tabs
+ * and done-footer it showed live. A `running` build is left open (no `done`) for Resume.
  */
 export function conversationToEvents(conv: PersistedConversation): AgentV3WireEvent[] {
   const events: AgentV3WireEvent[] = [];
   if (conv.workspaceId) events.push({ type: 'workspace', workspaceId: conv.workspaceId, ts: 0 });
   const msgs = conv.messages ?? [];
-  // Timestamp by TRANSCRIPT POSITION (idx+1), not by assistant-only counter, so restored agent
-  // narration interleaves correctly with the restored USER messages (which use the same scheme).
+  const replayed: AgentV3WireEvent[] = [];
   msgs.forEach((m, idx) => {
     if (!m || typeof m !== 'object') return;
     const msg = m as { role?: unknown; content?: unknown };
     if (msg.role !== 'assistant') return;
     const text = messageText(msg.content).trim();
-    if (text) events.push({ type: 'narration', agent: 'architect', text, ts: idx + 1 });
+    if (text) replayed.push({ type: 'narration', agent: 'architect', text, ts: restoredTs(m, idx) });
   });
+  for (const raw of conv.timeline ?? []) {
+    const wire = timelineToWireEvent(raw);
+    if (wire) replayed.push(wire);
+  }
+  // Close ORPHANED tool calls (their result fell past the recorder's cap, or the build died
+  // mid-tool): an unmatched replayed tool_call keeps its activity entry active forever — a
+  // spinner running on every reopen of a session that finished long ago. Synthesize a closing
+  // result whose ok mirrors the build outcome; a still-`running` build is left open on purpose.
+  if (conv.status !== 'running') {
+    const resolved = new Set(
+      replayed.filter((e) => e.type === 'tool_result').map((e) => (e as { callId: string }).callId),
+    );
+    for (const e of replayed.slice()) {
+      if (e.type !== 'tool_call') continue;
+      if (resolved.has(e.callId)) continue;
+      replayed.push({ type: 'tool_result', agent: e.agent, callId: e.callId, ok: conv.status === 'complete', summary: '', ts: e.ts + 1 });
+    }
+  }
+  // Chronological replay: the reducer's activity feed keeps array order, and the chat timeline
+  // groups activity between prose by timestamp — both need the merged stream sorted by ts. Every
+  // event pushed into `replayed` is a ts-bearing kind (never `result`), so `ts` is always present.
+  const tsOf = (e: AgentV3WireEvent): number => ('ts' in e ? e.ts : 0);
+  replayed.sort((a, b) => tsOf(a) - tsOf(b));
+  events.push(...replayed);
+  const lastTs = replayed.reduce((max, e) => Math.max(max, tsOf(e)), msgs.length);
   if (conv.status === 'complete' || conv.status === 'stopped' || conv.status === 'error') {
-    events.push({
-      type: 'done',
-      ok: conv.status === 'complete',
-      summary: `Reloaded a previous build (${conv.status}).`,
-      ts: msgs.length + 1,
-    });
+    const final = conv.finalState ?? {};
+    const buildHealth = final.buildHealth as { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+    const summary = `Reloaded a previous build (${conv.status}).`;
+    const ok = conv.status === 'complete';
+    events.push({ type: 'done', ok, summary, ts: lastTs + 1, ...(buildHealth ? { readiness: buildHealth } : {}) });
+    // Synthetic `result` restores the done-footer from durable facts (₹ badge, token badge). The
+    // data always survived on the record — it was simply dropped here before eternal sessions.
+    const billedUsd = typeof final.billedUsd === 'number' ? final.billedUsd : (conv.billedUsd ?? 0);
+    const billedInr = typeof final.billedInr === 'number' ? final.billedInr : undefined;
+    const tokens = typeof final.tokens === 'number'
+      ? final.tokens
+      : (conv.usage ? (conv.usage.inputTokens ?? 0) + (conv.usage.outputTokens ?? 0) : 0);
+    if (billedUsd > 0 || (billedInr ?? 0) > 0 || tokens > 0) {
+      events.push({
+        type: 'result', ok, summary, steps: 0, billedUsd,
+        ...(billedInr !== undefined ? { billedInr } : {}),
+        ...(tokens > 0 ? { tokens } : {}),
+      });
+    }
   }
   return events;
 }
@@ -84,10 +172,24 @@ export function cleanRestoredUserPrompt(text: string): string {
 }
 
 /**
+ * ENGINE-INJECTED user turns: prompts the ENGINE pushed into the transcript as `role:'user'` to
+ * steer the model — never typed by the human. Restoring them as user bubbles shows internal
+ * instructions as "things the user said" (a transcript-integrity defect found in the reopen
+ * audit). Matched by their stable leading text.
+ */
+const ENGINE_INJECTED_USER_PREFIXES = [
+  'You described a plan but have not created any files yet.',
+];
+export function isEngineInjectedUserText(text: string): boolean {
+  return ENGINE_INJECTED_USER_PREFIXES.some((p) => text.startsWith(p));
+}
+
+/**
  * Rebuild the user's OWN chat messages from a persisted conversation (the part conversationToEvents
- * deliberately omits). Returns them as user-role chat rows with transcript-position timestamps so the
- * UI can merge them with the restored agent narration in the right order. Tool-result "user" turns
- * (no visible text) are skipped — only real prompts are kept.
+ * deliberately omits). Returns them as user-role chat rows timestamped with their real wall-clock
+ * time when the server stamped one (position fallback for legacy records) so the UI can merge them
+ * with the restored agent narration in the right order. Tool-result "user" turns (no visible text)
+ * and engine-injected steering prompts are skipped — only what the human typed is kept.
  */
 export function conversationToUserMessages(conv: PersistedConversation): Array<{ role: 'user'; text: string; ts: number }> {
   const out: Array<{ role: 'user'; text: string; ts: number }> = [];
@@ -97,7 +199,7 @@ export function conversationToUserMessages(conv: PersistedConversation): Array<{
     const msg = m as { role?: unknown; content?: unknown };
     if (msg.role !== 'user') return;
     const text = cleanRestoredUserPrompt(messageText(msg.content).trim());
-    if (text) out.push({ role: 'user', text, ts: idx + 1 });
+    if (text && !isEngineInjectedUserText(text)) out.push({ role: 'user', text, ts: restoredTs(m, idx) });
   });
   return out;
 }

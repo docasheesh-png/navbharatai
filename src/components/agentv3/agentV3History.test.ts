@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, isEngineInjectedUserText, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
 
@@ -64,6 +64,86 @@ describe('conversationToEvents', () => {
     expect(state.ok).toBe(true);
   });
 
+  it('replays durable timeline events into live wire events (eternal sessions)', () => {
+    const c = conv({
+      status: 'complete',
+      timeline: [
+        { t: 'tool_call', id: 'x1', tool: 'bash', agent: 'architect', ts: 100, input: { command: 'npm install' } },
+        { t: 'tool_result', id: 'x1', ok: true, summary: 'installed', agent: 'architect', ts: 200 },
+        { t: 'file', path: 'src/App.tsx', kind: 'create', agent: 'frontend', ts: 300 },
+        { t: 'diff', path: 'src/App.tsx', patch: '+hello', ts: 400 },
+        { t: 'preview', url: 'https://x.e2b.dev', ts: 500 },
+        { t: 'agent', agent: 'frontend', task: 'build UI', ts: 50 },
+      ],
+    });
+    const events = conversationToEvents(c);
+    const types = events.map((e) => e.type);
+    expect(types).toContain('tool_call');
+    expect(types).toContain('tool_result');
+    expect(types).toContain('file_changed');
+    expect(types).toContain('diff');
+    expect(types).toContain('preview');
+    expect(types).toContain('agent_spawned');
+    // Replayed through the reducer, the restored session rebuilds activity + diffs (the evidence
+    // layer that used to vanish on reopen).
+    let state = initialAgentV3State();
+    for (const e of events) state = agentV3Reducer(state, e);
+    expect(state.activity.length).toBeGreaterThan(0);
+    expect(state.diffs['src/App.tsx']).toBe('+hello');
+    expect(state.previewUrl).toBe('https://x.e2b.dev');
+    expect(state.terminal.join('\n')).toContain('npm install');
+  });
+
+  it('closes orphaned tool_calls so a finished session never restores with a live spinner', () => {
+    const c = conv({
+      status: 'complete',
+      timeline: [
+        { t: 'tool_call', id: 'orphan', tool: 'bash', agent: 'architect', ts: 100, input: { command: 'npm run build' } },
+        // its tool_result fell past the recorder's cap — never persisted
+      ],
+    });
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
+    expect(state.activity.some((a) => a.active)).toBe(false); // no permanent spinner
+    // A still-running build is left open on purpose (it is genuinely in flight).
+    const running = conv({ status: 'running', timeline: c.timeline });
+    let s2 = initialAgentV3State();
+    for (const e of conversationToEvents(running)) s2 = agentV3Reducer(s2, e);
+    expect(s2.activity.some((a) => a.active)).toBe(true);
+  });
+
+  it('synthesizes a result event from durable finalState (restores the ₹/token footer)', () => {
+    const c = conv({ status: 'complete', finalState: { ok: true, billedUsd: 0.5, billedInr: 42, tokens: 12345 } });
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
+    expect(state.billedInr).toBe(42);
+    expect(state.tokens).toBe(12345);
+  });
+
+  it('falls back to top-level billedUsd/usage when finalState is absent (legacy records)', () => {
+    const c = conv({ status: 'complete', billedUsd: 0.3, usage: { inputTokens: 100, outputTokens: 50 } });
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
+    expect(state.billedUsd).toBe(0.3);
+    expect(state.tokens).toBe(150);
+  });
+
+  it('emits no result event when there are no billing/token facts at all', () => {
+    const c = conv({ status: 'complete', billedUsd: 0 });
+    expect(conversationToEvents(c).some((e) => e.type === 'result')).toBe(false);
+  });
+
+  it('restores real wall-clock timestamps when the server stamped them', () => {
+    const c = conv({
+      messages: [
+        { role: 'user', content: 'build a todo app', ts: 1_700_000_000_000 },
+        { role: 'assistant', content: 'Done.', ts: 1_700_000_001_000 },
+      ],
+    });
+    const narration = conversationToEvents(c).find((e) => e.type === 'narration') as { ts: number };
+    expect(narration.ts).toBe(1_700_000_001_000);
+  });
+
   it('handles an empty / malformed transcript without throwing', () => {
     expect(conversationToEvents(conv({ messages: [] })).filter((e) => e.type === 'narration')).toHaveLength(0);
     expect(conversationToEvents(conv({ messages: [null, 1, 'x', { role: 'assistant' }] as unknown[] })).filter((e) => e.type === 'narration')).toHaveLength(0);
@@ -114,6 +194,21 @@ describe('conversationToUserMessages (R5 reload fix — user bubbles no longer v
 
   it('returns [] for an empty transcript', () => {
     expect(conversationToUserMessages(conv({ messages: [] }))).toEqual([]);
+  });
+
+  it('drops engine-injected steering prompts so they never render as user bubbles', () => {
+    const nudge = 'You described a plan but have not created any files yet. Do NOT just describe or delegate in prose — ACT NOW.';
+    const c = conv({
+      messages: [
+        { role: 'user', content: 'build a todo app' },
+        { role: 'assistant', content: 'Planning.' },
+        { role: 'user', content: nudge }, // engine-injected — NOT typed by the human
+        { role: 'assistant', content: 'Done.' },
+      ],
+    });
+    expect(conversationToUserMessages(c).map((u) => u.text)).toEqual(['build a todo app']);
+    expect(isEngineInjectedUserText(nudge)).toBe(true);
+    expect(isEngineInjectedUserText('build a todo app')).toBe(false);
   });
 });
 

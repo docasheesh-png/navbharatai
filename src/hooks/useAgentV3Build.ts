@@ -66,7 +66,7 @@ export interface UseAgentV3Build {
    * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null>;
+  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null>;
   /**
    * List the user's saved v3.0 conversations (metadata only) for the history menu.
    * Always returns an honest result: `error` is set (and `items` is []) whenever the list
@@ -295,7 +295,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // Allowed even while a build is actively streaming HERE (opening a different saved conversation is
   // navigation, same as "+ New chat" — see reset()/start()'s generation-guard comments). Detaches from
   // whatever's currently attached; the underlying server build, if any, keeps running in the background.
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string } | null> => {
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null> => {
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     try {
       const params = new URLSearchParams();
@@ -366,10 +366,11 @@ export function useAgentV3Build(): UseAgentV3Build {
         })();
       }
       // Return the user's OWN messages so the panel can restore them too (the reducer/narration
-      // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload), AND
-      // the restored workspaceId so the panel can adopt the SAME session id → a follow-up continues
-      // this exact project/memory instead of opening a fresh one.
-      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId };
+      // path only rebuilds the AGENT side — without this the user's bubbles vanish on reload), the
+      // restored workspaceId so the panel can adopt the SAME session id → a follow-up continues
+      // this exact project/memory, AND the durable framework so a reopened non-Vite session's next
+      // build doesn't silently reset to vite-react (the framework-reset defect from the reopen audit).
+      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework };
     } catch {
       return null; // best-effort — never disrupt the panel on a load failure
     }

@@ -29,6 +29,10 @@ import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 const COLLECTION = 'agentv3_conversations';
 const ZERO_USAGE: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+// Cross-turn bound on the evidence layer: one chunk per build turn (each ≤500 events / ≤300KB),
+// oldest chunk deleted once the cap is passed — an eternal session keeps its newest ~40 turns of
+// action rows without growing Firestore (or the GET response) without limit.
+const MAX_TIMELINE_CHUNKS = 40;
 
 /** Metadata persisted in the main document (everything except the transcript itself). */
 interface ConversationMeta {
@@ -44,6 +48,12 @@ interface ConversationMeta {
   nextSeq: number;
   /** Total messages across all turns (for cheap listing). */
   messageCount: number;
+  /** Next timeline chunk sequence number to write (monotonic; absent on legacy docs). */
+  nextTimelineSeq?: number;
+  /** Terminal facts of the last finished build turn (billing/tokens/build health). */
+  finalState?: Record<string, unknown>;
+  /** The framework this session builds with. */
+  framework?: string;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -67,6 +77,10 @@ export class FirestoreConversationStore implements ConversationStore {
 
   private turnsCol(id: string) {
     return this.mainDoc(id).collection('turns');
+  }
+
+  private timelineCol(id: string) {
+    return this.mainDoc(id).collection('timeline');
   }
 
   async create(input: CreateConversationInput): Promise<ConversationRecord> {
@@ -95,13 +109,34 @@ export class FirestoreConversationStore implements ConversationStore {
     return { id: input.id, ...meta, usage: { ...meta.usage }, messages: seed };
   }
 
-  async get(id: string): Promise<ConversationRecord | null> {
+  async get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null> {
     const snap = await this.mainDoc(id).get();
     if (!snap.exists) return null;
     const meta = snap.data() as ConversationMeta;
     const turns = await this.turnsCol(id).orderBy('seq').get();
-    const messages = turns.docs.flatMap((d) => (d.data().messages as unknown[]) ?? []);
-    return this.toRecord(id, meta, messages);
+    // Attach each turn's wall-clock `ts` to its messages (never overwriting an explicit one) —
+    // the client needs real timestamps to interleave restored prose with the durable timeline.
+    const messages = turns.docs.flatMap((d) => {
+      const data = d.data() as { messages?: unknown[]; ts?: number };
+      const ts = typeof data.ts === 'number' ? data.ts : undefined;
+      return (data.messages ?? []).map((m) =>
+        ts !== undefined && m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined
+          ? { ...m, ts }
+          : m,
+      );
+    });
+    // Timeline chunks are read ONLY when asked for (the reopen/GET path) — hot paths (existence
+    // probes, transcript recaps) skip the extra reads. Optional on legacy docs; a failure to
+    // read them must never break opening the transcript itself.
+    let timeline: unknown[] | undefined;
+    if (opts?.includeTimeline) {
+      try {
+        const chunks = await this.timelineCol(id).orderBy('seq').get();
+        const events = chunks.docs.flatMap((d) => (d.data().events as unknown[]) ?? []);
+        if (events.length > 0) timeline = events;
+      } catch { /* evidence layer is best-effort */ }
+    }
+    return this.toRecord(id, meta, messages, timeline);
   }
 
   async appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void> {
@@ -112,12 +147,21 @@ export class FirestoreConversationStore implements ConversationStore {
       const meta = snap.data() as ConversationMeta;
       const seq = meta.nextSeq ?? 0;
       tx.set(this.turnsCol(id).doc(String(seq)), { seq, messages, ts: patch.updatedAt });
+      // A patch may also carry timeline events (eternal sessions) — written as an append-only
+      // chunk in the same transaction so evidence and transcript can never drift apart.
+      const timelineSeq = meta.nextTimelineSeq ?? 0;
+      const hasTimeline = !!patch.timelineAppend && patch.timelineAppend.length > 0;
+      if (hasTimeline) {
+        tx.set(this.timelineCol(id).doc(String(timelineSeq)), { seq: timelineSeq, events: patch.timelineAppend, ts: patch.updatedAt });
+        if (timelineSeq >= MAX_TIMELINE_CHUNKS) tx.delete(this.timelineCol(id).doc(String(timelineSeq - MAX_TIMELINE_CHUNKS)));
+      }
       tx.set(
         ref,
         {
           ...this.patchToMeta(patch),
           nextSeq: seq + 1,
           messageCount: (meta.messageCount ?? 0) + messages.length,
+          ...(hasTimeline ? { nextTimelineSeq: timelineSeq + 1 } : {}),
         },
         { merge: true },
       );
@@ -126,6 +170,22 @@ export class FirestoreConversationStore implements ConversationStore {
 
   async update(id: string, patch: ConversationPatch): Promise<void> {
     const ref = this.mainDoc(id);
+    if (patch.timelineAppend && patch.timelineAppend.length > 0) {
+      // Timeline chunks mirror the turns layout: one append-only doc per write, ordered by a
+      // monotonic seq claimed transactionally — so per-chunk size stays bounded and two
+      // concurrent build turns can never overwrite each other's evidence.
+      const events = patch.timelineAppend;
+      await this.db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) throw new Error(`ConversationStore: unknown conversation id "${id}"`);
+        const meta = snap.data() as ConversationMeta;
+        const seq = meta.nextTimelineSeq ?? 0;
+        tx.set(this.timelineCol(id).doc(String(seq)), { seq, events, ts: patch.updatedAt });
+        if (seq >= MAX_TIMELINE_CHUNKS) tx.delete(this.timelineCol(id).doc(String(seq - MAX_TIMELINE_CHUNKS)));
+        tx.set(ref, { ...this.patchToMeta(patch), nextTimelineSeq: seq + 1 }, { merge: true });
+      });
+      return;
+    }
     const snap = await ref.get();
     if (!snap.exists) throw new Error(`ConversationStore: unknown conversation id "${id}"`);
     await ref.set(this.patchToMeta(patch), { merge: true });
@@ -161,14 +221,16 @@ export class FirestoreConversationStore implements ConversationStore {
 
   async remove(id: string): Promise<void> {
     const turns = await this.turnsCol(id).get();
+    const timeline = await this.timelineCol(id).get().catch(() => null);
     const batch = this.db.batch();
     turns.docs.forEach((d) => batch.delete(d.ref));
+    timeline?.docs.forEach((d) => batch.delete(d.ref));
     batch.delete(this.mainDoc(id));
     await batch.commit();
   }
 
   /** Build a ConversationRecord from stored metadata + (possibly empty) messages. */
-  private toRecord(id: string, meta: ConversationMeta, messages: unknown[]): ConversationRecord {
+  private toRecord(id: string, meta: ConversationMeta, messages: unknown[], timeline?: unknown[]): ConversationRecord {
     return {
       id,
       userId: meta.userId,
@@ -180,6 +242,9 @@ export class FirestoreConversationStore implements ConversationStore {
       billedUsd: meta.billedUsd ?? 0,
       createdAt: meta.createdAt,
       updatedAt: meta.updatedAt,
+      ...(timeline ? { timeline } : {}),
+      ...(meta.finalState ? { finalState: meta.finalState } : {}),
+      ...(meta.framework ? { framework: meta.framework } : {}),
     };
   }
 
@@ -189,6 +254,8 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.status !== undefined) out.status = patch.status;
     if (patch.usage !== undefined) out.usage = { ...patch.usage };
     if (patch.billedUsd !== undefined) out.billedUsd = patch.billedUsd;
+    if (patch.finalState !== undefined) out.finalState = { ...patch.finalState };
+    if (patch.framework !== undefined) out.framework = patch.framework;
     return out;
   }
 }

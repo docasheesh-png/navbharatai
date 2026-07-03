@@ -38,6 +38,16 @@ export interface ConversationRecord {
   createdAt: number;
   /** Epoch ms — bumped on every mutation. */
   updatedAt: number;
+  /**
+   * Eternal sessions — the durable Claude-style evidence layer (compact TimelineEvent[] from
+   * SessionTimeline). Replayed on reopen so a restored session shows the same action rows,
+   * diffs and terminal output it showed live. Absent on records from before the feature.
+   */
+  timeline?: unknown[];
+  /** Terminal facts of the last finished build turn (billing/tokens/build health). */
+  finalState?: Record<string, unknown>;
+  /** The framework this session builds with — restored so follow-up builds stay correct. */
+  framework?: string;
 }
 
 /** Fields a caller provides to start a persisted build. */
@@ -57,6 +67,12 @@ export interface ConversationPatch {
   usage?: TurnUsage;
   billedUsd?: number;
   updatedAt: number;
+  /** Append these compact timeline events to the record's durable evidence layer. */
+  timelineAppend?: unknown[];
+  /** Replace the record's terminal facts (billing/tokens/build health) for the done-footer. */
+  finalState?: Record<string, unknown>;
+  /** Persist the session's framework so a reopened session's follow-up builds stay correct. */
+  framework?: string;
 }
 
 /**
@@ -67,8 +83,12 @@ export interface ConversationPatch {
 export interface ConversationStore {
   /** Create a new record. Throws if `id` already exists (a build id must be unique). */
   create(input: CreateConversationInput): Promise<ConversationRecord>;
-  /** Fetch a record, or null if it does not exist. */
-  get(id: string): Promise<ConversationRecord | null>;
+  /**
+   * Fetch a record, or null if it does not exist. The timeline (evidence layer) is returned
+   * ONLY when `opts.includeTimeline` is set — hot paths (existence probes, transcript recaps)
+   * read conversations far more often than anything renders the timeline, and it can be large.
+   */
+  get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null>;
   /** Append transcript turns and apply a patch (usage/status/billing). Throws if id is unknown. */
   appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void>;
   /** Apply a patch without appending messages (e.g. finalize status). Throws if id is unknown. */
@@ -84,13 +104,34 @@ export interface ConversationStore {
   remove(id: string): Promise<void>;
 }
 
+/**
+ * Cross-turn bound on a record's total timeline events (newest kept). The Firestore store bounds
+ * the same growth by chunk count (MAX_TIMELINE_CHUNKS × ≤500 events/chunk ≈ this figure).
+ */
+export const MAX_TIMELINE_EVENTS_TOTAL = 20_000;
+
 /** Deep-ish clone so stored records never alias a caller's mutable arrays/objects. */
 function cloneRecord(rec: ConversationRecord): ConversationRecord {
   return {
     ...rec,
     messages: rec.messages.slice(),
     usage: { ...rec.usage },
+    ...(rec.timeline ? { timeline: rec.timeline.slice() } : {}),
+    ...(rec.finalState ? { finalState: { ...rec.finalState } } : {}),
   };
+}
+
+/**
+ * Stamp a wall-clock timestamp onto persisted message copies (object messages only, never
+ * overwriting an existing ts). The transcript is stored as Claude-API-shaped {role, content}
+ * turns with no time — but a faithful reopen must interleave prose with the timeline's real
+ * timestamps, so every message carries the epoch time of the write that persisted it. Mirrors
+ * the Firestore store, which derives the same value from its per-turn `ts` field.
+ */
+export function stampMessageTs(messages: unknown[], ts: number): unknown[] {
+  return messages.map((m) =>
+    m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined ? { ...m, ts } : m,
+  );
 }
 
 /**
@@ -112,7 +153,7 @@ export class InMemoryConversationStore implements ConversationStore {
       workspaceId: input.workspaceId,
       title: input.title,
       status: 'running',
-      messages: (input.messages ?? []).slice(),
+      messages: stampMessageTs((input.messages ?? []).slice(), input.createdAt),
       usage: { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
       billedUsd: 0,
       createdAt: input.createdAt,
@@ -122,14 +163,17 @@ export class InMemoryConversationStore implements ConversationStore {
     return cloneRecord(rec);
   }
 
-  async get(id: string): Promise<ConversationRecord | null> {
+  async get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null> {
     const rec = this.records.get(id);
-    return rec ? cloneRecord(rec) : null;
+    if (!rec) return null;
+    const clone = cloneRecord(rec);
+    if (!opts?.includeTimeline) delete clone.timeline; // mirror the Firestore store's read shape
+    return clone;
   }
 
   async appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void> {
     const rec = this.mustGet(id);
-    rec.messages = rec.messages.concat(messages);
+    rec.messages = rec.messages.concat(stampMessageTs(messages, patch.updatedAt));
     this.applyPatch(rec, patch);
     this.records.set(id, rec);
   }
@@ -162,6 +206,16 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.status !== undefined) rec.status = patch.status;
     if (patch.usage !== undefined) rec.usage = { ...patch.usage };
     if (patch.billedUsd !== undefined) rec.billedUsd = patch.billedUsd;
+    if (patch.timelineAppend && patch.timelineAppend.length > 0) {
+      rec.timeline = (rec.timeline ?? []).concat(patch.timelineAppend);
+      // Cross-turn bound (mirrors the Firestore store's chunk cap): an eternal session must not
+      // grow its evidence layer without limit — keep the newest events, drop the oldest.
+      if (rec.timeline.length > MAX_TIMELINE_EVENTS_TOTAL) {
+        rec.timeline = rec.timeline.slice(rec.timeline.length - MAX_TIMELINE_EVENTS_TOTAL);
+      }
+    }
+    if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
+    if (patch.framework !== undefined) rec.framework = patch.framework;
     rec.updatedAt = patch.updatedAt;
   }
 }

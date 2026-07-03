@@ -4,6 +4,7 @@ import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from '
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
+import { compactMessagesForPersist } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
 
 /**
@@ -214,6 +215,12 @@ export class AgentRunner {
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
+    // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
+    // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
+    // session interleaves prose with the timeline in the LIVE order: the assistant message is
+    // created BEFORE its tools run, but the whole turn is only written AFTER they finish — an
+    // end-of-write stamp made every reopened turn read backwards (action rows above their prose).
+    const messageTs: number[] = [Date.now()];
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -236,7 +243,9 @@ export class AgentRunner {
           userId: persistence.userId,
           workspaceId: persistence.workspaceId,
           title: persistence.title,
-          messages: messages.slice(),
+          messages: compactMessagesForPersist(messages).map((m, i) =>
+            m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined ? { ...m, ts: messageTs[i] ?? now() } : m,
+          ),
           createdAt: now(),
         });
         persistedCount = messages.length;
@@ -244,18 +253,54 @@ export class AgentRunner {
         /* persistence is best-effort */
       }
     };
+    // Stamp persisted message COPIES with their real creation time (from messageTs) so a reopened
+    // session interleaves prose with the durable timeline in the LIVE order. The live `messages`
+    // array is never touched — it stays exactly the Claude-API shape the model consumes.
+    const stampForPersist = (msgs: unknown[], startIdx: number, fallback: number): unknown[] =>
+      msgs.map((m, i) =>
+        m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined
+          ? { ...m, ts: messageTs[startIdx + i] ?? fallback }
+          : m,
+      );
     // Persist any transcript turns added since the last call, plus the latest usage/billing and
     // (optionally) a terminal status. Uses appendMessages when there are new turns, else update.
+    // Every persisted turn is COMPACTED first (base64 screenshots stripped, giant tool payloads
+    // truncated) so a single turn can't exceed the store's per-write limit — and if a write still
+    // fails, an unwritable (poison) slice is SKIPPED with an honest marker instead of stalling
+    // persistence forever. A tiny marker write is the discriminator between "this slice is
+    // unwritable" and "the store is down": if even the marker fails, persistedCount is NOT
+    // advanced, so the next persist retries the whole slice — a transient outage self-heals
+    // exactly like it did before this hardening.
     const persist = async (status?: ConversationStatus): Promise<void> => {
       if (!persistence) return;
-      try {
-        const fresh = messages.slice(persistedCount);
-        const patch = { usage: { ...usage }, billedUsd: billed(), updatedAt: now(), ...(status ? { status } : {}) };
-        if (fresh.length) await persistence.store.appendMessages(persistence.conversationId, fresh, patch);
+      const startIdx = persistedCount;
+      const fresh = messages.slice(startIdx);
+      const patch = { usage: { ...usage }, billedUsd: billed(), updatedAt: now(), ...(status ? { status } : {}) };
+      const append = async (payload: unknown[]): Promise<void> => {
+        if (payload.length) await persistence.store.appendMessages(persistence.conversationId, stampForPersist(payload, startIdx, patch.updatedAt), patch);
         else await persistence.store.update(persistence.conversationId, patch);
         persistedCount = messages.length;
+      };
+      try {
+        await append(compactMessagesForPersist(fresh));
       } catch {
-        /* persistence is best-effort */
+        try {
+          // Second chance: much smaller payload bounds.
+          await append(compactMessagesForPersist(fresh, { aggressive: true }));
+        } catch {
+          if (fresh.length) {
+            try {
+              await persistence.store.appendMessages(
+                persistence.conversationId,
+                [{ role: 'assistant', content: `[${fresh.length} build step(s) were too large to save and were omitted from the saved transcript]`, ts: patch.updatedAt }],
+                patch,
+              );
+              // The store accepted a write → the slice itself is the problem. Skip it so the
+              // transcript keeps growing and the final status lands.
+              persistedCount = messages.length;
+            } catch { /* store unreachable — keep persistedCount so the next persist retries */ }
+          }
+        }
       }
     };
     await persistCreate();
@@ -343,8 +388,10 @@ export class AgentRunner {
           events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });
         }
 
-        // Record the assistant turn verbatim so tool_use ids resolve next turn.
+        // Record the assistant turn verbatim so tool_use ids resolve next turn. Its creation time
+        // is NOW — before its tools run — which is what keeps the reopened order faithful.
         messages.push({ role: 'assistant', content: turn.rawContent });
+        messageTs.push(Date.now());
 
         // No tools requested → the model has finished its turn.
         if (turn.toolUses.length === 0) {
@@ -363,6 +410,7 @@ export class AgentRunner {
                 'commands as needed) to actually create the project files this turn. Start by writing ' +
                 'the entry file (e.g. index.html or src/main). Output tool calls, not a description.',
             });
+            messageTs.push(Date.now());
             continue; // give the model another turn to actually build
           }
           // A build/edit that NEVER called a single tool produced nothing — that is a FAILED
@@ -436,6 +484,7 @@ export class AgentRunner {
           });
         }
         messages.push({ role: 'user', content: resultBlocks });
+        messageTs.push(Date.now());
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
         if (maxBudgetUsd !== undefined && billed() >= maxBudgetUsd) {

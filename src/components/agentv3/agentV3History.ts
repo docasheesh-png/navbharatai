@@ -102,6 +102,34 @@ export function conversationToUserMessages(conv: PersistedConversation): Array<{
   return out;
 }
 
+/**
+ * HISTORY REBUILD (single source of truth) — legacy-thread continuity for sessions that straddle
+ * the cutover. The server ConversationStore is now the ONLY transcript writer, but sessions from
+ * before the cutover have their thread only in the (frozen, read-only) client-side chat_sessions
+ * copy. When such a session is CONTINUED after the cutover, the server record holds only the new
+ * turns — so on open, the frozen legacy turns must be shown BEFORE the server transcript.
+ *
+ * Safety rule (duplication is worse than omission): the legacy copy is prepended ONLY when it is
+ * provably DISJOINT from the server transcript — i.e. no legacy user message matches any server
+ * user message. Old BUILD sessions have overlapping copies in both stores (the server has
+ * persisted build turns since the stable-id fix), so they overlap → return [] → server-only
+ * (exactly today's behavior). Returned messages get NEGATIVE transcript-position timestamps so
+ * they sort before the server-restored messages (which use positions 1..N).
+ */
+export function legacyPrependMessages(
+  legacy: Array<{ text: string; isUser: boolean }>,
+  serverUserTexts: string[],
+): Array<{ role: 'user' | 'agent'; text: string; ts: number }> {
+  const clean = (s: unknown) => (typeof s === 'string' ? s.trim() : '');
+  const serverSet = new Set(serverUserTexts.map(clean).filter(Boolean));
+  if (serverSet.size === 0) return []; // empty server thread → the caller's legacy-fallback path owns this
+  const kept = legacy.filter((m) => clean(m.text));
+  if (kept.length === 0) return [];
+  const overlaps = kept.some((m) => m.isUser && serverSet.has(clean(m.text)));
+  if (overlaps) return [];
+  return kept.map((m, idx) => ({ role: m.isUser ? ('user' as const) : ('agent' as const), text: m.text, ts: idx - kept.length }));
+}
+
 // ── Session-history menu (the 3-line hamburger menu's dropdown) ──────────────────────────────
 //
 // Was a flat list of raw truncated first-prompt text with no structure — indistinguishable from

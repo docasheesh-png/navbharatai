@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
-import { sessionStatusMeta, groupSessionsByDate } from './agentV3History';
+import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
 import { trackEvent } from '../../lib/analytics';
@@ -30,7 +30,7 @@ async function authJsonHeaders(): Promise<Record<string, string>> {
   } catch { /* no token — server soft-falls-back */ }
   return headers;
 }
-import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 /**
  * AgentV3Panel — NavBharatAI Pro v3.0 (Vargen 3.0), a Claude-Code-style chat
@@ -330,15 +330,40 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (!resume || resume.nonce === lastAppliedResumeNonce) return;
     lastAppliedResumeNonce = resume.nonce;
-    sessionIdRef.current = resume.sessionId;
-    persistSessionId(resume.sessionId); // keep the reopened project sticky across reloads too
-    autoRestoredSessionRef.current = resume.sessionId; // explicit resume → mark handled (auto-restore must not override)
-    rehydratedWsRef.current = '';                       // re-arm file rehydrate for the resumed workspace
+    const sid = resume.sessionId;
+    sessionIdRef.current = sid;
+    persistSessionId(sid); // keep the reopened project sticky across reloads too
+    autoRestoredSessionRef.current = sid; // explicit resume → mark handled (auto-restore must not override)
+    rehydratedWsRef.current = '';         // re-arm file rehydrate for the resumed workspace
     reset();
+    // Seed instantly from the passed thread (legacy chat_sessions copy — may be empty for sessions
+    // saved after the metadata-only cutover), then replace with the SERVER transcript below: the
+    // server ConversationStore is the single source of truth for what was actually said.
     setUserMsgs(resume.messages.filter((m) => m.role === 'user'));
     setAgentHistory(resume.messages.filter((m) => m.role !== 'user'));
     setCheckpointHistory([]);
     setFiles([]);
+    const fetchStarted = Date.now();
+    void (async () => {
+      const restored = await loadConversation({ userId, email, id: `v3_${sid}` });
+      // Apply only if the user hasn't already switched away meanwhile.
+      if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
+      // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
+      // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
+      // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
+      const prepend = legacyPrependMessages(
+        resume.messages.map((m) => ({ text: m.text, isUser: m.role === 'user' })),
+        restored.messages.map((m) => m.text),
+      );
+      setUserMsgs((prev) => {
+        // If the user already SENT a new message while the transcript was loading (its ts is a
+        // fresh epoch stamp), keep the live thread — the new turn is persisted server-side and
+        // will be restored on the next open; never hide what the user just typed.
+        if (prev.some((m) => m.ts >= fetchStarted)) return prev;
+        return [...prepend.filter((m) => m.role === 'user'), ...restored.messages].map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts }));
+      });
+      setAgentHistory(prepend.filter((m) => m.role !== 'user').map((m) => ({ role: 'agent' as const, text: m.text, ts: m.ts })));
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resume?.nonce]);
 
@@ -375,26 +400,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, resume?.nonce, state.workspaceId, state.done, tab]);
 
-  // Persist the v3.0 conversation into NavBharatAI's MAIN History (the sidebar
-  // "History" option), using the SAME chat_sessions shape as Free/Pro/SDA chats.
-  // Additive + best-effort: it only writes a new doc tagged 'agentv3' (so it shows
-  // under All/Apps and never collides with other sources) when a turn completes
-  // and the user is signed in; it never touches the shared history code paths.
+  // HISTORY REBUILD (single source of truth, admin order 2026-07-02): the server ConversationStore
+  // is the ONLY transcript writer — the client persists NO messages, ever. This effect now writes a
+  // METADATA-ONLY row into chat_sessions (title/tags/lastUpdated, keyed by the stable sessionId) so
+  // (a) the main sidebar History still lists v3.0 sessions and (b) sessions whose server record is
+  // anon-degraded still get a list row here. It deliberately writes NO `messages` field: with
+  // `{ merge: true }` an existing legacy transcript in the doc is left untouched (read-only legacy
+  // data), and no client write can ever again shrink/erase a thread — the root cause of the
+  // "old chat opens empty" corruption is structurally gone, not just guarded against.
   useEffect(() => {
-    // Persist into the main History as soon as the build has a workspace + a first user message —
-    // NOT only on completion. A timed-out / interrupted v3.0 build used to be saved ONLY on
-    // state.done, so reopening it from History showed "Session not found". Now the same doc (keyed
-    // by the stable sessionId) is written on build start AND updated on finish / stop / timeout, so
-    // every v3.0 session is always in History and restorable. Best-effort; merge so partial writes
-    // never clobber a later, fuller one.
     if (!userId || !sessionIdRef.current) return;
-    // SWITCH GUARD: never write while openConversation is mid-switch — at that moment convo is
-    // already cleared/reduced but sessionIdRef still names the PREVIOUS session, so this write
-    // used to replace the previous chat's saved messages with a shrunken thread (the erasure
-    // behind "old chat opens empty"). The post-switch state change re-runs this effect safely.
+    // SWITCH GUARD: never write while openConversation is mid-switch — sessionIdRef still names the
+    // PREVIOUS session while `convo` is already reduced, so a write here would retitle the previous
+    // session's row from the wrong thread. The post-switch state change re-runs this effect safely.
     if (sessionSwitchRef.current) return;
-    const thread = convo;
-    const firstUser = thread.find((m) => m.role === 'user')?.text;
+    const firstUser = convo.find((m) => m.role === 'user')?.text;
     if (!firstUser) return; // nothing meaningful to save yet
     const title = firstUser.slice(0, 40) + (firstUser.length > 40 ? '…' : '');
     const docId = `v3_${sessionIdRef.current}`;
@@ -408,27 +428,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         original_agent: 'agentv3',
         current_agent: 'agentv3',
         title,
-        memory_summary: '',
-        edit_log: [],
-        restoredMessages: [],
-        messages: thread.map((m) => ({
-          id: String(m.ts),
-          text: m.text,
-          sender: m.role === 'user' ? 'user' : 'ai',
-          timestamp: new Date(m.ts).toISOString(),
-        })),
-        files: {},
         lastUpdated: new Date().toISOString(),
-        isPinned: false,
         mode: 'build',
       }),
       { merge: true },
     ).catch(() => { /* history save is best-effort — never blocks the UI */ });
-    // Fires on the FIRST user message (userMsgs.length — so a CHAT-only session is saved to History
-    // too, not just builds), on build start (workspaceId), completion (done), and stop/timeout
-    // (running). `convo` is read at that moment. userMsgs.length changes only when the user sends a
-    // message (never during streaming — state.narration isn't a dep), so writes stay bounded and the
-    // `{ merge: true }` write just updates the same doc.
+    // Fires on the FIRST user message (userMsgs.length — so a CHAT-only session gets a row too),
+    // on build start (workspaceId), completion (done), and stop/timeout (running). Writes stay
+    // bounded (userMsgs.length changes only when the user sends) and idempotent (same doc, merge).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.workspaceId, state.done, running, userId, userMsgs.length]);
 
@@ -607,8 +614,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       window.removeEventListener('click', onClick, true);
     };
   }, [tapDebug, historyOpen]);
-  // Messages for chat_sessions-only history entries (keyed by sessionId), stashed at list time so
-  // opening one restores its thread without a second fetch. See loadHistory + openConversation.
+  // READ-ONLY legacy transcripts (keyed by sessionId), stashed at list time. Since the
+  // single-source-of-truth cutover the client writes NO messages — new chat_sessions rows are
+  // metadata-only and the server ConversationStore holds every transcript. This stash exists purely
+  // so PRE-cutover sessions (whose thread lives only in the frozen doc copy) still open with their
+  // messages. It is never written back. See loadHistory + openConversation.
   const chatSessionMsgsRef = useRef<Map<string, Array<{ text: string; sender?: string; role?: string; timestamp?: string; ts?: number }>>>(new Map());
   // True while openConversation is switching sessions — blocks the chat_sessions save effect from
   // firing mid-switch (stale sessionIdRef + already-reduced convo), which used to OVERWRITE the
@@ -618,12 +628,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Reusable loader so both the initial open AND the "Try again" retry button can
   // re-fetch without duplicating the fetch/loading-state logic.
   //
-  // Two sources are merged so EVERY v3.0 session shows (this fixes "History (0)" even though
-  // builds/chats happened): (1) the server conversation store (/api/agentv3/conversations) —
-  // rich transcripts, but only builds that reached the agentic persistence path land there; and
-  // (2) the Firestore `chat_sessions` collection, where AgentV3Panel durably writes EVERY v3.0
-  // session (any session with a first user message, chat OR build) as a `v3_<sessionId>` doc.
-  // Dedup by sessionId, preferring the conversation-store record when both exist.
+  // Two sources are merged so EVERY v3.0 session shows: (1) the server conversation store
+  // (/api/agentv3/conversations) — the single source of truth for transcripts, but its LIST is
+  // keyed to the verified uid, so sessions persisted while identity degraded to anon don't list
+  // there; and (2) the Firestore `chat_sessions` metadata rows (`v3_<sessionId>`), which this
+  // panel writes for every session and which cover exactly that gap (opening resolves the server
+  // record via candidate ids). Dedup by sessionId, preferring the server record when both exist.
   const loadHistory = async () => {
     setHistoryLoading(true);
     setHistoryError(null);
@@ -722,8 +732,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         }
         autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
         rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
-        setUserMsgs(restored.messages.map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
-        if (restored.messages.length === 0) {
+        // Cross-cutover continuity: a pre-cutover session continued after the server became the
+        // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
+        // When that legacy copy is provably disjoint from the server transcript, show it in front;
+        // when it overlaps (old build sessions — copies in both stores), the server transcript wins.
+        const legacy = chatSessionMsgsRef.current.get(sessionIdRef.current) ?? [];
+        const legacyIsUser = (m: { sender?: string; role?: string }) => m.sender === 'user' || m.role === 'user';
+        const legacyTs = (m: { timestamp?: string; ts?: number }) => m.ts ?? (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+        if (restored.messages.length > 0) {
+          const prepend = legacyPrependMessages(
+            legacy.map((m) => ({ text: m.text, isUser: legacyIsUser(m) })),
+            restored.messages.map((m) => m.text),
+          );
+          setUserMsgs([
+            ...prepend.filter((m) => m.role === 'user'),
+            ...restored.messages,
+          ].map((m) => ({ role: 'user' as const, text: m.text, ts: m.ts })));
+          setAgentHistory(prepend.filter((m) => m.role !== 'user').map((m) => ({ role: 'agent' as const, text: m.text, ts: m.ts })));
+        } else if (legacy.length > 0) {
+          // The server record exists but returned no visible thread — the frozen legacy copy still
+          // has it (pre-cutover session). Restore from it, read-only.
+          setUserMsgs(legacy.filter(legacyIsUser).map((m) => ({ role: 'user' as const, text: m.text, ts: legacyTs(m) })));
+          setAgentHistory(legacy.filter((m) => !legacyIsUser(m)).map((m) => ({ role: 'agent' as const, text: m.text, ts: legacyTs(m) })));
+        } else {
+          setUserMsgs([]);
           // The record exists but its thread is empty — opening it must not LOOK like a dead click.
           setOpenChatError(
             'This chat opened, but its saved transcript is empty (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.',
@@ -731,9 +763,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         }
         return;
       }
-      // FALLBACK: the session exists only in chat_sessions (a chat, or a fast-lane build that never
-      // wrote a server transcript). Adopt its sessionId and restore its saved thread from the doc we
-      // stashed at list time; files rehydrate automatically from the derived workspaceId (S4 effect).
+      // FALLBACK: no server record — a PRE-cutover chat session (the plain-chat lane only started
+      // persisting server-side at the single-source-of-truth cutover). Adopt its sessionId and
+      // restore the frozen legacy thread stashed at list time (read-only); files rehydrate
+      // automatically from the derived workspaceId (S4 effect).
       const sessionId = id.replace(/^v3_/, '');
       const saved = chatSessionMsgsRef.current.get(sessionId);
       if (!saved || saved.length === 0) {
@@ -777,7 +810,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const ok = await deleteConversation(c.id, { userId, email });
       if (ok) {
-        setHistoryItems((prev) => prev.filter((item) => item.id !== c.id));
+        // Also remove the chat_sessions row (list metadata + any frozen legacy transcript copy)
+        // so the deleted session can't ghost back into either history list. Best-effort — the
+        // server record (the source of truth) is already gone.
+        const anonPrefix = 'agentv3-anon-';
+        const ownPrefix = `agentv3-${normalizeUid(userId)}-`;
+        const sid = c.workspaceId?.startsWith(ownPrefix) ? c.workspaceId.slice(ownPrefix.length)
+          : c.workspaceId?.startsWith(anonPrefix) ? c.workspaceId.slice(anonPrefix.length)
+          : c.id.replace(/^v3_/, '');
+        void deleteDoc(doc(db, 'chat_sessions', `v3_${sid}`)).catch(() => { /* best-effort */ });
+        chatSessionMsgsRef.current.delete(sid);
+        setHistoryItems((prev) => prev.filter((item) => item.id !== c.id && item.id !== `v3_${sid}`));
         if (c.workspaceId && c.workspaceId === state.workspaceId) startNewSession();
       }
     } finally {

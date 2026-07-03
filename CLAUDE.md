@@ -46,6 +46,55 @@ absolute rules. The admin wants the truth and the best technical judgement, not
 approval — disagreement delivered with clear reasoning is more valuable than empty
 "yes".
 
+## The fourth absolute rule: Root-cause fixes only — never surface patches (admin-mandated, 2026-07-03)
+
+**Whenever the task is an edit, a bug fix, or an error fix — of ANY size — do not just make
+the visible symptom go away. Go deep, find the true origin, and eliminate the problem at its
+root, professionally.** A patch that hides the symptom while the cause survives is not a fix;
+it is a scheduled repeat of the same failure. This rule applies to every "fix this", "edit
+this", "yeh error aa raha hai" request, no matter how small it looks.
+
+**The mandatory root-cause method (every fix follows all six steps):**
+
+1. **Investigate before touching code.** Read the actual failing code path end-to-end and
+   reproduce/trace the failure from real evidence (logs, diagnostics reports, stack traces,
+   git history). Identify the EXACT line/design decision where the problem originates — do
+   not fix from guesses, symptom descriptions, or assumptions. If the evidence contradicts
+   the reported theory, follow the evidence.
+
+2. **Ask "why does this class of bug exist?" — fix the class, not the instance.** If the
+   root cause is duplicated code that drifted, CENTRALIZE it (one shared, tested
+   implementation). If it is a stale hardcoded value, make it a single source of truth with
+   an override. If it is a missing invariant, enforce the invariant where the data enters —
+   not at one call site. (Real examples from this repo: 4 drifted copies of `safeRelPath` →
+   one shared `workspacePath.ts`; retired AI model ids hardcoded in 5 files → one
+   `visionModels.ts`.)
+
+3. **Hunt the siblings.** The same root cause almost always lives in more than one place.
+   After finding it once, grep the whole repo for every other occurrence of the pattern and
+   fix them ALL in the same change — an IDOR found on one route means auditing every route;
+   a stale model id in one file means sweeping every file.
+
+4. **Lock it with regression tests.** Every root-cause fix ships with tests that encode the
+   exact failure case (the real input/scenario that broke) plus the boundary cases, so the
+   bug class can never silently return. A fix without a test is a fix on borrowed time.
+
+5. **Fix the system's honesty too.** If the bug produced a wrong verdict (fake success,
+   working-thing-reported-as-failed, misleading error message), fixing the code is not
+   enough — fix the reporting so the system tells the truth about that state forever after.
+
+6. **Say honestly when the root is out of reach.** If the true root cause lives in
+   infrastructure that cannot be changed right now (a third-party service, a missing env,
+   admin-only console), do NOT quietly ship a cosmetic patch as if it were the fix. Ship the
+   best honest mitigation, state clearly what the real root cause is and what is needed to
+   kill it, and record it in `PROGRESS.md` as an open root cause.
+
+**Forbidden as "fixes":** silencing an error without understanding it; try/catching a
+symptom away; special-casing one input while the general case stays broken; retry loops
+around code that deterministically fails; changing a test to match broken behavior; "it
+works now" without knowing WHY it broke. Time pressure never justifies a surface patch —
+a surface patch is future breakage on the one absolute rule.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every

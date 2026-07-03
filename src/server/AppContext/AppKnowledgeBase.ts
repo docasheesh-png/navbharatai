@@ -154,6 +154,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_github_import',
+    name: 'Import an existing app from GitHub into v3.0',
+    path: 'NavBharatAI Pro v3.0 → chat composer → options (⚙) → "GitHub / URL" → paste https://github.com/owner/repo → send your message',
+    description: 'Bring an app that lives in a GitHub repository into NavBharatAI Pro v3.0: set the repo URL in the composer options and send a message. The repo is really cloned into your workspace and lands the same way a zip import does — files appear in the Files tab and Code Studio (IDE), the framework is detected from package.json and locked to the session, the live preview is set up automatically in the background, and the AI reads the real project before your first edit request. Private repos work when you signed in with GitHub (your token is used only for the clone). Only https://github.com/owner/repo URLs are accepted.',
+    howToUse: 'Open NavBharatAI Pro v3.0 → tap the options (⚙) button next to the chat box → choose "GitHub / URL" → paste your repository URL (https://github.com/owner/repo) → Set Import → type what you want (e.g. "analyze this app" or "make the header blue") and send. The import summary appears in chat; files show in Files/IDE and the preview boots in the background.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_zip_import', 'agentv3_files'],
+    keywords: ['github import', 'import from github', 'repo import', 'clone repo', 'github url', 'import repository', 'github se app', 'repo se import', 'apni github app', 'private repo', 'github wali app', 'repository import karo'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_continuity',
     name: 'Build survives reload & tab switch (no lost work)',
     path: 'NavBharatAI Pro v3.0 — automatic; the build keeps running and re-attaches on its own',

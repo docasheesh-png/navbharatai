@@ -309,16 +309,12 @@ export class BuildDiagnostics {
         stderr: capTail(rec.stderr, CMD_OUTPUT_CAP),
       });
     }
-    // A command explicitly shell-guarded with `|| true` (e.g. `pkill -f "vite" || true`) has already
-    // told the shell its own outcome must never matter. That guard only covers a normal non-zero exit
-    // from the command's own bash — it can't stop an EXTERNAL signal (e.g. E2B's sandbox daemon SIGTERM-
-    // ing the wrapper process, observed as exitCode -1 / "signal: terminated" with no NavBharatAI code
-    // involved) from still being reported as a raw exit code by the actuator. Either way, the caller's
-    // `|| true` is unambiguous intent: this command's result should never surface as an unresolved build
-    // problem. Root-caused 2026-07-01 (previously only theorized) — confirmed via the E2B SDK/daemon,
-    // not a NavBharatAI bug; see PROGRESS.md.
-    const guarded = /\|\|\s*true\s*(?:;)?\s*$/.test(rec.command.trimEnd());
-    const failed = !guarded && rec.exitCode !== 0 && rec.exitCode !== null;
+    // A non-zero exit is a build FAILURE only when it's a REAL failure — not a routine probe. See
+    // isExpectedNonzeroExit: `|| true` guards, inspector tools whose exit 1 = "no match" (grep / pkill /
+    // ss / …), and a health-probe curl hitting a not-yet-ready port all return non-zero WITHOUT anything
+    // being wrong. Flagging those made a clean, successful build look error-ridden (a real report showed
+    // 12 "errors", 6 of them just `grep`/`curl`/`ss` no-match exits). Admin-authorized 2026-07-03.
+    const failed = rec.exitCode !== 0 && rec.exitCode !== null && !isExpectedNonzeroExit(rec.command, rec.exitCode);
     const cmdHead = rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     this.record({
@@ -606,6 +602,36 @@ export class BuildDiagnostics {
  * the system recovering on its own) was chosen as root cause ahead of a genuine unresolved
  * `pkill` command failure later in the same build — backwards; the unresolved one is the real signal.
  */
+/**
+ * True when a command's NON-ZERO exit is EXPECTED/routine and must NOT be recorded as a build failure.
+ * PURE & unit-tested. A real failure (npm install / tsc / vite build exiting non-zero) is NEVER covered
+ * here — only:
+ *   1. an explicit `… || true` guard (the caller declared the outcome irrelevant);
+ *   2. an inspector whose exit 1 means "nothing matched/found" — grep/egrep/fgrep, pkill/pgrep/killall,
+ *      ss/netstat/lsof/fuser, ps/which/test — or a negative code (an EXTERNAL signal, e.g. E2B's daemon
+ *      SIGTERM-ing the wrapper, exit -1). A PIPELINE's exit code is its LAST segment's, so
+ *      `tsc --noEmit | grep -v test` exiting 1 is grep finding no lines, not a tsc failure;
+ *   3. a health-probe `curl` hitting a not-yet-ready dev server (connection refused 7 / can't resolve 6
+ *      / timeout 28) — probing an unready port is not a build failure.
+ */
+export function isExpectedNonzeroExit(command: string, exitCode: number | null): boolean {
+  if (exitCode === 0 || exitCode === null) return false;
+  const cmd = (command || '').trim();
+  if (/\|\|\s*true\s*(?:;)?\s*$/.test(cmd)) return true;
+  // The exit code of a pipeline reflects its LAST segment — split on a single `|` (never `||`). Strip
+  // quoted regions first so a `|` INSIDE a pattern (e.g. `grep -v "test|vitest"`) can't be mistaken for
+  // a pipe (the segment's BASE command is never itself quoted, so this is safe).
+  const unquoted = cmd.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
+  const segments = unquoted.split(/(?<!\|)\|(?!\|)/);
+  const last = (segments[segments.length - 1] || '').trim();
+  const base = (last.split(/\s+/)[0] || '').replace(/^.*\//, ''); // strip any path prefix
+  if (/^(grep|egrep|fgrep|pkill|pgrep|killall|ss|netstat|lsof|fuser|ps|which|test)$/.test(base)) {
+    return exitCode === 1 || exitCode < 0;
+  }
+  if (base === 'curl') return exitCode === 7 || exitCode === 6 || exitCode === 28 || exitCode < 0;
+  return false;
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];

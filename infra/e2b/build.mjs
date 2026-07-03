@@ -28,7 +28,10 @@ import { Template, defaultBuildLogger } from 'e2b';
 const name = process.env.TEMPLATE_NAME || 'navbharat-builder';
 const dockerfileName = process.env.DOCKERFILE || 'e2b.Dockerfile';
 const cpuCount = Number(process.env.CPU_COUNT) || 2;
-const memoryMB = Number(process.env.MEMORY_MB) || 2048;
+// 4 GB default (was 2 GB): the Vite dev server was getting OOM-killed at 2 GB in real builds — the
+// server died mid-build and the preview went blank even though the build itself was clean. Override
+// with MEMORY_MB for other templates (the Android builder passes 8192).
+const memoryMB = Number(process.env.MEMORY_MB) || 4096;
 
 // Reuse the committed Dockerfile (FROM/RUN/WORKDIR only — all v2-supported).
 const dockerfile = readFileSync(new URL(`./${dockerfileName}`, import.meta.url), 'utf8');

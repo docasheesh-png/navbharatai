@@ -7598,3 +7598,37 @@ Run streams-extracts from the bucket, then the same landing endpoint). New infra
 Also raise WorkspaceFiles MAX_FILES 2000→4000 to match zip.ts when Tier 2 lands (measure Firestore
 write cost first). Resume point: extract landImportedProject into src/server/AgentV3 module +
 /api/agentv3/import-land endpoint, then the fflate client filter in AgentV3Panel's addFiles zip path.
+
+## MILESTONE (2026-07-03, session 01KDmsCZ): E2B LIVE-PREVIEW BUG-HUNT — 5 root-cause fixes, all merged
+
+Admin pain: "e2b live preview chal hi nahi raha hai" while config was confirmed correct
+(preview-status: actuator=e2b, e2bKeySet=true, livePreviewAvailable=true). A read-only bug hunt of
+the preview / dev-server-boot path (config was NOT the cause) found five real runtime bugs. All
+shipped as separate branch→CI-green→squash-merge PRs, each with the full gate (tsc app+server,
+vitest, build, boot):
+
+- **#887 (A)** — the preview **Diagnose** button called `readFile('package.json')` on a COLD sandbox,
+  which `getSandbox()` spins up EMPTY, so it reported "No package.json found — no dependencies" for a
+  project whose files were intact in the durable store. Fix: hydrate first (sandboxStore.get →
+  ensureWorkspace(resumeSandboxId) → loadWorkspaceFiles → writeWorkspaceFiles), same as the chat path.
+- **#888 (B)** — `browseUrl` (the preview self-check's DOM fetch) ran `node -e "require('playwright')"`
+  from WORKSPACE_ROOT with no PLAYWRIGHT_BROWSERS_PATH, but Playwright lives under TOOLS_DIR, so the
+  require ALWAYS failed and it silently fell back to a curl of the static shell — the self-check never
+  saw the client-rendered DOM (rubber-stamped broken apps AND "healed" working ones). Fix: run from
+  cwd TOOLS_DIR with PLAYWRIGHT_BROWSERS_PATH set (mirroring the working screenshot path).
+- **#889 (C+D)** — a bare `npm run dev` was assumed to be Vite for EVERY framework: it got Vite-only
+  `--strictPort` (which astro/nuxt/ng reject → crash) and Vite-style `--host` (next wants `-H` → exits).
+  Fix: resolve the pm-script to its real tool from package.json (new pure resolvePmScript +
+  detectDevFramework), make ensureHostBinding/pinDevServerPort framework-aware; Vite/unknown path kept
+  BYTE-IDENTICAL (asserted by tests). Also fired the Vite allowedHosts patch for resolved-Vite dev (D).
+- **#900 (E)** — the dev-server health line reported the port the server ACTUALLY bound (boundPort) but
+  only re-verified it when the ASSUMED port had already read UP (`portUp && boundPort !== port`); a
+  drifted-but-healthy server whose assumed port was down was reported DOWN forever, so the agent never
+  published the working preview. Fix (4th-rule root-cause): pure shouldReprobeBoundPort() — re-probe
+  whenever the bound port differs, independent of the assumed-port result; re-probe only ever UPGRADES
+  to UP (safe). Sibling sweep: pattern exists only in E2BActuator.
+
+Note: #897 (other session) built on #889 — declared-port ground truth for preview-diagnose + import
+boot — composing cleanly, not colliding. Preview track is now EXHAUSTED (no clean findings remain).
+Deliberately NOT touching the build-engine rebuild (#892–#896) or the big-app-import next phase (#898)
+— those are the other session's active locked territory (safeguard #2).

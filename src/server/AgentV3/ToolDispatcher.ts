@@ -1948,7 +1948,14 @@ export interface EditResult {
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
   const exact = existing.split(oldStr).length - 1;
   if (exact === 1) {
-    return { updated: existing.replace(oldStr, newStr), matchedOld: oldStr, note: '' };
+    // Slice-concatenate (NOT String.replace) so a `$` in newStr is inserted LITERALLY. JS's
+    // String.prototype.replace treats `$&`, `$1`, `` $` ``, `$'`, `$$` in the replacement string as
+    // SPECIAL patterns — and those are everywhere in real code (template literals `${x}`, jQuery `$`,
+    // regex, Tailwind arbitrary values). Using replace here silently corrupted any edit whose
+    // new_string contained a `$` (the "editing gadbad kar deta hai" bug). Mirrors the whitespace-
+    // flexible path below, which already concatenates safely.
+    const idx = existing.indexOf(oldStr);
+    return { updated: existing.slice(0, idx) + newStr + existing.slice(idx + oldStr.length), matchedOld: oldStr, note: '' };
   }
   if (exact > 1) {
     throw new Error(

@@ -994,6 +994,28 @@ describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () 
     expect(r.updated).toBe('const re = /done/;\nconst ok = 1;');
     expect(r.note).toBe('');
   });
+
+  it('inserts a `$` in new_string LITERALLY — the "editing gadbad kar deta hai" regression', () => {
+    // JS String.replace treats $&, $1, $`, $', $$ in the REPLACEMENT as special patterns. new_string
+    // is real code, so it must be inserted verbatim. Exact-match path (the common "clean" edit).
+    const dollarAmp = applyEdit('const a = OLD;', 'OLD', 'total$&price'); // $& used to expand to the match
+    expect(dollarAmp.updated).toBe('const a = total$&price;');
+
+    const template = applyEdit('const a = OLD;', 'OLD', '`${user.name}`'); // template literal
+    expect(template.updated).toBe('const a = `${user.name}`;');
+
+    const backref = applyEdit('x = OLD', 'OLD', 'a.replace(/(\\d)/, "$1!")'); // $1 backref
+    expect(backref.updated).toBe('x = a.replace(/(\\d)/, "$1!")');
+
+    const doubleDollar = applyEdit('p(OLD)', 'OLD', 'cost$$total'); // $$ → literal $$
+    expect(doubleDollar.updated).toBe('p(cost$$total)');
+  });
+
+  it('inserts a `$` LITERALLY on the whitespace-flexible path too', () => {
+    // file has single-space indent; supplied old_string is differently spaced → flexible path.
+    const r = applyEdit('fn(a) {\n  OLD;\n}', 'fn(a) {\n      OLD;\n}', 'fn(a) {\n  x = `${v}`;\n}');
+    expect(r.updated).toBe('fn(a) {\n  x = `${v}`;\n}');
+  });
 });
 
 describe('ToolDispatcher — secret redaction on the user-visible event surface (R1.1)', () => {

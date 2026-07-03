@@ -77,12 +77,47 @@ export const indexHtml = `<!DOCTYPE html>
 export const mainTsx = `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import ErrorBoundary from './ErrorBoundary';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 );
+`;
+
+// Ships in EVERY vite-react app so a single component crash shows a friendly fallback instead of a
+// blank white screen (the #1 "built but the preview is blank" class), and the readiness gate's
+// "no error boundary" warning never fires. A real class boundary (getDerivedStateFromError +
+// componentDidCatch) — the exact signals ErrorBoundaryAnalysis looks for.
+export const errorBoundaryTsx = `import React from 'react';
+
+interface Props { children: React.ReactNode; }
+interface State { error: Error | null; }
+
+/** Catches render errors in the tree below so one broken component can't white-screen the whole app. */
+export class ErrorBoundary extends React.Component<Props, State> {
+  state: State = { error: null };
+  static getDerivedStateFromError(error: Error): State { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('App crashed:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif', maxWidth: 640, margin: '40px auto' }}>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>Something went wrong</h1>
+          <p style={{ color: '#666', marginBottom: 16 }}>{this.state.error.message}</p>
+          <button onClick={() => this.setState({ error: null })} style={{ padding: '8px 16px', cursor: 'pointer' }}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+export default ErrorBoundary;
 `;
 
 export const appTsx = `function App() {

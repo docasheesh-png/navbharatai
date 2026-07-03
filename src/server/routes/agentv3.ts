@@ -241,38 +241,44 @@ export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: str
  * params so the existing route tests still exercise the ownership logic. The client already sends the
  * Bearer token on all of these calls (authJsonHeaders), so this is non-breaking.
  */
+/**
+ * PURE read-identity resolution: the VERIFIED Firebase identity when the token verified, else a
+ * fallback to the request's CLAIMED (query/body) userId+email. Extracted + exported so the
+ * regression contract behind the "history opens to '0 messages'" fix is locked by a unit test.
+ *
+ * WHY THE FALLBACK EXISTS (do not revert to verified-only): the 3 conversation routes (list /
+ * get-one / delete) were the ONLY v3.0 reads gated on a verified token ALONE. Every OTHER v3.0 route
+ * resolves identity as `verifiedUid ?? claimedUid` (workspaceOwnershipOk) — that is how file
+ * CONTENTS, memory and the build report all read today. `verifyIdToken` returns null on a TRANSIENT
+ * failure for a genuinely signed-in user (a just-expired/again-refreshed token, an admin-SDK
+ * cert-fetch hiccup, a cold-start init race). Verified-only then returned userId=null, so the LIST
+ * route 400'd (transcripts vanished from History) and the GET route could not build the real
+ * `agentv3-{uid}-{sid}` candidate (404) — the client fell back to the session-switch-erased
+ * chat_sessions copy and showed "saved copy has 0 messages" on EVERY item, while files/memory stayed
+ * fine. The claimed-userId fallback aligns these reads with the rest of v3.0; access is still gated
+ * downstream by conversationAccess (the record's userId must match this identity, or be the
+ * shared-anon bucket), and opening a single conversation additionally requires its UNGUESSABLE id.
+ * The verified token ALWAYS takes precedence when present — the fallback only widens the token-less
+ * path, it never overrides a token.
+ */
+export function resolveIdentityWithFallback(
+  verified: { uid: string; email: string | null } | null,
+  claimedUserId: string | null,
+  claimedEmail: string | null,
+): { userId: string | null; email: string | null } {
+  if (verified) return { userId: verified.uid, email: verified.email };
+  return { userId: claimedUserId, email: claimedEmail };
+}
+
 export async function resolveReadIdentity(req: Request): Promise<{ userId: string | null; email: string | null }> {
-  if (process.env.VITEST) {
-    return {
-      userId: (typeof req.query.userId === 'string' ? req.query.userId : (typeof req.body?.userId === 'string' ? req.body.userId : null)),
-      email: (typeof req.query.email === 'string' ? req.query.email : (typeof req.body?.email === 'string' ? req.body.email : null)),
-    };
-  }
-  const v = await verifyFirebaseIdentity(req);
-  if (v) return { userId: v.uid, email: v.email };
-  // TOKEN-VERIFY FALLBACK — the "history opens to '0 messages' on every chat" fix.
-  //
-  // The 3 conversation routes (list / get-one / delete) were the ONLY v3.0 reads gated on a
-  // verified token ALONE. Every OTHER v3.0 route resolves identity as `verifiedUid ?? claimedUid`
-  // (workspaceOwnershipOk / assertWorkspaceOwner) — that is how file CONTENTS, memory and the build
-  // report all read today. `verifyIdToken` returns null on a TRANSIENT failure for a genuinely
-  // signed-in user (a just-expired/again-refreshed token, an admin-SDK cert-fetch hiccup, a
-  // cold-start init race). When that happened, resolveReadIdentity returned userId=null, so:
-  //   • the LIST route 400'd  → the server transcripts vanished from History, and
-  //   • the GET route could not build the real `agentv3-{uid}-{sid}` candidate → 404,
-  // and the client fell back to the (session-switch-erased) chat_sessions copy → the "saved copy
-  // has 0 messages" toast on EVERY item, while files/memory stayed fine (they use the fallback).
-  //
-  // Falling back to the request's CLAIMED userId here aligns these reads with the SAME capability
-  // model the rest of v3.0 already uses: access is still gated downstream by conversationAccess (the
-  // record's userId must match this identity, or be the shared-anon bucket), and opening a single
-  // conversation additionally requires its UNGUESSABLE id. The verified token still takes precedence
-  // whenever it IS present — the fallback only widens the token-less path, never overrides a token.
-  const claimed = typeof req.query.userId === 'string' ? req.query.userId
+  const claimedUserId = typeof req.query.userId === 'string' ? req.query.userId
     : (typeof req.body?.userId === 'string' ? req.body.userId : null);
-  const email = typeof req.query.email === 'string' ? req.query.email
+  const claimedEmail = typeof req.query.email === 'string' ? req.query.email
     : (typeof req.body?.email === 'string' ? req.body.email : null);
-  return { userId: claimed, email };
+  // Unit tests never reach real Firebase — treat them as the token-less (fallback) path, which
+  // returns exactly the claimed query/body identity the tests already rely on.
+  const verified = process.env.VITEST ? null : await verifyFirebaseIdentity(req);
+  return resolveIdentityWithFallback(verified, claimedUserId, claimedEmail);
 }
 
 // ── Conversation persistence (D7) ──────────────────────────────────────────────

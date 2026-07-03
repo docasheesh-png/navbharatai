@@ -82,6 +82,7 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
+import { judgeBuild, judgeRepairPrompt } from '../AgentV3/BuildJudge';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -3628,11 +3629,22 @@ export function registerAgentV3Routes(app: Express): void {
       }
 
       if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+        // STRONG JUDGE (admin 2026-07-03): the cheap floor (GLM/Kimi) builds attempt 1; a SONNET judge
+        // reviews it — a cheap model can't reliably catch its own gaps (a cosmetic feature, a subtle
+        // bug). Only on a judge FAIL do we spend Sonnet, and then to REPAIR the judge's specific
+        // findings (edit the existing files), never a rebuild. Disable with AGENTV3_SONNET_JUDGE=off.
+        let judgeFindings: string[] = [];
+        let lastAttempt = 0;
+        const judgeOn = process.env.AGENTV3_SONNET_JUDGE !== 'off';
         const esc = await runWithEscalation(analysis.escalationPath, {
           buildOnTier: async (tier, attempt) => {
-            if (attempt === 1) return runner.run(buildPrompt); // reuse the start-tier runner
-            // Escalated attempt: a stronger, Claude-first runner on the same workspace/stream.
-            events.emit({ type: 'narration', agent: 'architect', text: `Escalating to a stronger model to finish the build…`, ts: Date.now() });
+            lastAttempt = attempt;
+            if (attempt === 1) return runner.run(buildPrompt); // cheap-first start-tier runner
+            // Escalated attempt: a stronger (Sonnet), Claude-first runner on the same workspace/stream.
+            // When the judge produced findings, hand them over as a REPAIR task (fix these; edit the
+            // existing files), never a rebuild-from-scratch.
+            const repairing = judgeFindings.length > 0;
+            events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Escalating to Sonnet to fix the issues found in review…' : 'Escalating to a stronger model to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider }),
@@ -3647,9 +3659,25 @@ export function registerAgentV3Routes(app: Express): void {
                 title: deriveTitle(prompt),
               },
             });
-            return escRunner.run(buildPrompt);
+            return escRunner.run(repairing ? judgeRepairPrompt(prompt, judgeFindings) : buildPrompt);
           },
-          gate: async (build) => escalationGate(build.ok),
+          gate: async (build) => {
+            const base = escalationGate(build.ok);
+            if (!base.pass) return base; // build broken / readiness failed → escalate (rebuild, as before)
+            // The cheap build PASSED the free deterministic gate — now the STRONG judge looks deeper.
+            // Only judge the CHEAP first attempt (never re-judge Sonnet's own repair), and only when the
+            // cheap floor actually delivered it (no point judging a Claude-built app).
+            const deliveredCheap = /^(GLM|KIMI)$/i.test(dominantProvider(providerTurns) || '');
+            if (!judgeOn || lastAttempt !== 1 || !deliveredCheap) return base;
+            const files = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
+            const verdict = await judgeBuild(prompt, files, (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text })), sonnetModel());
+            try {
+              buildDiag.record({ phase: 'build', severity: verdict.pass ? 'info' : 'warning', code: 'SONNET_JUDGE', message: verdict.pass ? `Sonnet judge: PASS (score ${verdict.score})` : `Sonnet judge: FAIL (score ${verdict.score}) — ${verdict.findings.slice(0, 3).join('; ')}`, autoResolved: true });
+            } catch { /* diagnostics best-effort */ }
+            if (verdict.pass) return base; // cheap build is genuinely good → keep it (no Sonnet spend)
+            judgeFindings = verdict.findings; // hand these to Sonnet as a repair list on the next attempt
+            return { pass: false, score: verdict.score, reason: `Sonnet review found issues: ${verdict.findings.slice(0, 2).join('; ')}` };
+          },
           onAttempt: (tier, attempt) => console.log(`[AGENTV3] escalation attempt ${attempt} on tier ${tier}`),
           onEscalate: (from, to, reason) => console.log(`[AGENTV3] escalate ${from} → ${to}: ${reason}`),
         });

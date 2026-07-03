@@ -14,3 +14,15 @@ export function hasTscErrors(output: string | null | undefined): boolean {
   if (!output) return false;
   return /error TS\d+/.test(output);
 }
+
+/**
+ * True when `tsc --noEmit` output is the CLI HELP/version page rather than a real compile result —
+ * what `tsc` prints when there is no tsconfig.json AND no input files, exiting 0. Treating that as a
+ * clean pass is a FALSE pass: the type-check never actually ran (a real report hit exactly this — a
+ * config-less project's `tsc` "passed" while runtime types were broken). Callers should ensure a
+ * tsconfig exists (so tsc really verifies) instead of trusting this output. Pure.
+ */
+export function looksLikeTscHelpOutput(output: string | null | undefined): boolean {
+  if (!output) return false;
+  return /tsc:\s*The TypeScript Compiler|COMMON COMMANDS|Compiles the current project|tsc \[options\]|Version\s+\d+\.\d+\.\d+[\s\S]*Syntax:/.test(output);
+}

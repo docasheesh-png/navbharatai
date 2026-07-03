@@ -1,4 +1,4 @@
-import { packageJson, viteConfig, tsconfig, tsconfigNode, indexHtml, mainTsx, appTsx } from './ViteReactProviderContents';
+import { packageJson, viteConfig, tsconfig, tsconfigNode, indexHtml, mainTsx, appTsx, errorBoundaryTsx } from './ViteReactProviderContents';
 
 export interface ITemplateProvider {
   getFiles(features: string[]): Record<string, string>;
@@ -14,6 +14,7 @@ export class ViteReactProvider implements ITemplateProvider {
       'index.html': indexHtml,
       'src/main.tsx': mainTsx,
       'src/App.tsx': appTsx,
+      'src/ErrorBoundary.tsx': errorBoundaryTsx,
     };
   }
 }

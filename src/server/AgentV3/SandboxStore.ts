@@ -80,7 +80,18 @@ class SandboxStore {
 
 export const sandboxStore = new SandboxStore();
 
-/** Feature flag — sandbox resume is OFF by default; enable with AGENTV3_SANDBOX_RESUME=on after live testing. */
+/**
+ * Feature flag — warm sandbox RESUME (A3). ON by default (admin 2026-07-03): with min-instances=0 the
+ * in-process sandbox cache is wiped on every cold start, so the cross-instance resume (reconnect to the
+ * user's OWN paused sandbox via SandboxStore + Sandbox.connect) is what actually keeps node_modules +
+ * a warm dev server across turns → instant edits instead of a cold rebuild.
+ *
+ * SAFE to default on: the resume id is keyed by workspaceId (`agentv3-{uid}-{sessionId}`), so a user
+ * can only ever reconnect to their OWN sandbox — never another user's. And E2BActuator wraps
+ * Sandbox.connect in a try/catch that falls back to a fresh Sandbox.create if the target was
+ * killed/expired, so the worst case is byte-identical to today (a fresh sandbox). Disable with
+ * AGENTV3_SANDBOX_RESUME=off for an instant rollback.
+ */
 export function sandboxResumeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AGENTV3_SANDBOX_RESUME === 'on';
+  return env.AGENTV3_SANDBOX_RESUME !== 'off';
 }

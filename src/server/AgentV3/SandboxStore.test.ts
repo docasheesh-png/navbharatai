@@ -13,21 +13,21 @@ describe('SandboxStore (VITEST-safe, best-effort)', () => {
   });
 });
 
-describe('sandboxResumeEnabled — flag gating (default OFF)', () => {
+describe('sandboxResumeEnabled — flag gating (default ON, A3)', () => {
   const original = process.env.AGENTV3_SANDBOX_RESUME;
   afterEach(() => {
     if (original === undefined) delete process.env.AGENTV3_SANDBOX_RESUME;
     else process.env.AGENTV3_SANDBOX_RESUME = original;
   });
 
-  it('is OFF by default', () => {
-    expect(sandboxResumeEnabled({} as NodeJS.ProcessEnv)).toBe(false);
-    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'false' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  it('is ON by default (fallback-protected + own-workspace-keyed)', () => {
+    expect(sandboxResumeEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'on' } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'anything' } as unknown as NodeJS.ProcessEnv)).toBe(true);
   });
 
-  it('is ON only for the exact value "on"', () => {
-    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'on' } as unknown as NodeJS.ProcessEnv)).toBe(true);
-    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'ON' } as unknown as NodeJS.ProcessEnv)).toBe(false);
-    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: '1' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  it('is OFF only for the exact rollback value "off"', () => {
+    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+    expect(sandboxResumeEnabled({ AGENTV3_SANDBOX_RESUME: 'OFF' } as unknown as NodeJS.ProcessEnv)).toBe(true); // case-sensitive: only lowercase 'off' disables
   });
 });

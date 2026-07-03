@@ -33,6 +33,35 @@ export interface CodemodeResult {
 let TsMorphProject: any;
 const IDENTIFIER_KIND = 80; // ts-morph SyntaxKind.Identifier
 
+/** Escape regex metacharacters so a component name like `List<T>`, `Foo.Bar` or `Btn$` can't produce
+ *  a RegExp SyntaxError or a wrong match when interpolated into a pattern. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Insert `insertion` immediately before the MATCHING close brace of `interface <Component>Props { … }`,
+ * located by brace-counting. The old `[^}]*` regex stopped at the FIRST `}`, so any nested object/
+ * generic type in the interface body (e.g. `meta: { id: string }`) ended the capture early and produced
+ * invalid TypeScript. Returns the content unchanged if the interface isn't found or braces are
+ * unbalanced. Pure.
+ */
+export function insertPropBeforeInterfaceClose(content: string, componentName: string, insertion: string): string {
+  const header = new RegExp(`interface\\s+${escapeRegExp(componentName)}Props\\s*\\{`);
+  const m = header.exec(content);
+  if (!m || m.index === undefined) return content;
+  let depth = 1;
+  let i = m.index + m[0].length;
+  for (; i < content.length && depth > 0; i++) {
+    const ch = content[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+  }
+  if (depth !== 0) return content; // unbalanced — never write a corrupt file
+  const closeIdx = i - 1; // index of the matching `}`
+  return content.slice(0, closeIdx) + insertion + content.slice(closeIdx);
+}
+
 async function loadTsMorph(): Promise<boolean> {
   if (TsMorphProject) return true;
   try {
@@ -41,6 +70,35 @@ async function loadTsMorph(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * True when this identifier is a PROPERTY NAME, not a reference to a value binding — the `.name` of a
+ * property access, the key of an object literal, or an interface/class member name. Renaming those
+ * corrupts unrelated same-named properties. Compares by source position so it is robust to ts-morph
+ * wrapper identity. Never throws.
+ */
+function isNonReferenceIdentifier(id: any): boolean {
+  try {
+    const parent = id.getParent?.();
+    if (!parent) return false;
+    const kind: string = parent.getKindName?.() ?? '';
+    const NAME_BEARING = new Set([
+      'PropertyAccessExpression', // obj.NAME
+      'PropertyAssignment', // { NAME: value }
+      'PropertySignature', // interface { NAME: T }
+      'PropertyDeclaration', // class { NAME = … }
+      'MethodSignature',
+      'MethodDeclaration',
+      'EnumMember',
+    ]);
+    if (!NAME_BEARING.has(kind)) return false;
+    const nameNode = parent.getNameNode?.();
+    if (!nameNode) return false;
+    return nameNode.getStart?.() === id.getStart?.() && nameNode.getEnd?.() === id.getEnd?.();
+  } catch {
+    return false; // on any API mismatch, don't skip — preserve prior behaviour rather than crash
   }
 }
 
@@ -80,10 +138,14 @@ export async function renameSymbol(
       let touched = false;
       // Traverse in reverse so replacements don't invalidate earlier positions.
       for (const id of [...identifiers].reverse()) {
-        if (id.getText?.() === oldName) {
-          id.replaceWithText?.(newName);
-          touched = true;
-        }
+        if (id.getText?.() !== oldName) continue;
+        // Skip positions that are NOT a reference to the renamed value binding — the `.name` side of
+        // `obj.oldName`, an object-literal key `{ oldName: … }`, and interface/class member names.
+        // Renaming those mangled unrelated same-named properties (the reported corruption); they are a
+        // different symbol from the local binding, so they must be left alone.
+        if (isNonReferenceIdentifier(id)) continue;
+        id.replaceWithText?.(newName);
+        touched = true;
       }
       if (touched) {
         const after = sf.getFullText?.() ?? '';
@@ -126,20 +188,15 @@ export async function addComponentProp(
     for (const { path, content } of files) {
       let newContent = content;
 
-      // Update `interface <Component>Props { ... }` — add the new prop.
-      const propsRe = new RegExp(
-        `(interface\\s+${componentName}Props\\s*\\{)([^}]*)\\}`,
-        's',
-      );
-      newContent = newContent.replace(propsRe, (_m, open: string, body: string) => {
-        const optional = defaultValue ? '?' : '';
-        const insertion = `  ${propName}${optional}: ${propType};`;
-        return `${open}${body}  ${insertion}\n}`;
-      });
+      // Update `interface <Component>Props { ... }` — add the new prop before the MATCHING close brace
+      // (brace-counted, so a nested object/generic type in the body doesn't corrupt the interface).
+      const optional = defaultValue ? '?' : '';
+      const insertion = `  ${propName}${optional}: ${propType};\n`;
+      newContent = insertPropBeforeInterfaceClose(newContent, componentName, insertion);
 
       // Update every JSX opening tag `<ComponentName ...>` to include the prop.
       if (defaultValue) {
-        const jsxRe = new RegExp(`(<${componentName})(\\s[^>]*?)?(\\s*\/?>)`, 'g');
+        const jsxRe = new RegExp(`(<${escapeRegExp(componentName)})(\\s[^>]*?)?(\\s*\/?>)`, 'g');
         newContent = newContent.replace(jsxRe, (m, open: string, attrs: string, close: string) => {
           if ((attrs ?? '').includes(`${propName}=`)) return m; // already present
           return `${open}${attrs ?? ''} ${propName}={${defaultValue}}${close}`;

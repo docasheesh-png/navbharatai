@@ -58,7 +58,57 @@ export function redirectDevServerOutput(command: string, logPath: string = DEV_S
   return `( ${c} ) > ${logPath} 2>&1`;
 }
 
-export function ensureHostBinding(command: string): string {
+/**
+ * The dev-server framework a concrete command string represents. Used to give the host/port
+ * flag helpers the framework signal a bare `npm run dev` cannot reveal on its own — a Vite
+ * scaffold and a Next/Astro/Nuxt/Angular scaffold both run `npm run dev`, but they need
+ * DIFFERENT flags (Next uses `-H`/`-p`, and `--strictPort` is Vite-only and crashes the others).
+ * `undefined` = unknown → callers keep the historical Vite-assumption behaviour.
+ */
+export type DevFramework = 'vite' | 'next' | 'astro' | 'nuxt' | 'angular' | 'cra' | undefined;
+
+/** Identify the dev-server framework from a CONCRETE command string (e.g. a resolved package.json
+ *  script body like `vite` or `astro dev`). Returns `undefined` for anything unrecognized so the
+ *  flag helpers fall back to today's Vite assumption. PURE + unit-testable. */
+export function detectDevFramework(command: string): DevFramework {
+  if (!command) return undefined;
+  if (/\bnext\b/.test(command)) return 'next';
+  if (/\bvite(?:\.js)?\b/.test(command)) return 'vite';
+  if (/\bastro\b/.test(command)) return 'astro';
+  if (/\bnux(?:t|i)\b/.test(command)) return 'nuxt'; // `nuxt` (v2) or `nuxi` (v3 CLI)
+  if (/\bng\s+serve\b/.test(command) || /@angular\b/.test(command)) return 'angular';
+  if (/\breact-scripts\b/.test(command)) return 'cra';
+  return undefined;
+}
+
+/**
+ * Resolve a package-manager run command (`npm run dev`, `pnpm dev`, `yarn serve`, `bun run dev`,
+ * `npm start`) to the CONCRETE underlying tool string from the project's `scripts` map, so the
+ * flag/port helpers can see the real framework instead of assuming Vite. Any explicit args the
+ * user passed after `--` (e.g. `npm run dev -- --port 8080`) are carried through so port detection
+ * still sees them. Returns the command unchanged when it is not a pm-run form, the script is
+ * absent, or no scripts were provided. PURE + unit-testable.
+ */
+export function resolvePmScript(command: string, scripts: Record<string, string> | null | undefined): string {
+  if (!command || !scripts) return command;
+  const m = command.trim().match(/^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([a-zA-Z0-9:_-]+)(.*)$/);
+  if (!m) return command;
+  const body = scripts[m[1]];
+  if (!body || typeof body !== 'string') return command;
+  // Preserve args the user forwarded after `--` (npm) so an explicit --port isn't lost.
+  const dd = (m[2] ?? '').match(/(?:^|\s)--\s+(.*)$/);
+  const passthrough = dd ? ` ${dd[1].trim()}` : '';
+  return `${body}${passthrough}`.trim();
+}
+
+/**
+ * Force a dev server to listen on 0.0.0.0 so it is reachable through the E2B preview URL.
+ * `framework` (resolved from package.json) disambiguates a bare `npm run dev`: Next.js needs
+ * `-H` (it errors on the Vite-style `--host`), and CRA reads `HOST=` from the env rather than a
+ * flag. When `framework` is undefined the historical Vite-style `--host` pass-through is kept, so
+ * existing callers and the common Vite scaffold are byte-for-byte unchanged.
+ */
+export function ensureHostBinding(command: string, framework?: DevFramework): string {
   if (!command) return command;
   // Already binds a host (any interface / explicit flag) — leave untouched.
   if (/--host|-H\b|HOST=|0\.0\.0\.0/.test(command)) return command;
@@ -66,10 +116,14 @@ export function ensureHostBinding(command: string): string {
   if (/\bnext\b/.test(command)) return `${command} -H 0.0.0.0`;
   // Vite invoked directly.
   if (/\bvite\b/.test(command)) return `${command} --host 0.0.0.0`;
-  // Vite via a package-manager script (npm/pnpm/yarn/bun run dev|serve): pass the
-  // host flag through to the underlying tool with `--`. `start` is intentionally
-  // excluded — it is ambiguous with CRA, which needs HOST= instead of --host.
+  // Package-manager script (npm/pnpm/yarn/bun run dev|serve): the underlying tool is only known via
+  // `framework`. `start` is intentionally excluded — it is ambiguous with CRA, which needs HOST=.
   if (/\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command)) {
+    // Next.js wants `-H`, not `--host` (an unknown `--host` flag makes `next dev` exit).
+    if (framework === 'next') return `${command} -- -H 0.0.0.0`;
+    // CRA (react-scripts) reads HOST= from the env, not a flag — don't inject a --host it ignores/rejects.
+    if (framework === 'cra') return command;
+    // vite / astro / nuxt / angular (and unknown, kept as the historical default) all accept --host.
     return `${command} -- --host 0.0.0.0`;
   }
   return command;
@@ -234,16 +288,29 @@ export function buildPreKillPortCommand(port: number): string {
  * Vite/Next commands — anything else is left for runtime port DETECTION. PURE +
  * unit-testable.
  */
-export function pinDevServerPort(command: string, port: number): string {
+export function pinDevServerPort(command: string, port: number, framework?: DevFramework): string {
   if (!command) return command;
   if (/--port[=\s]|[\s]-p[\s]/.test(command)) return command; // already pinned — respect it
-  if (/\bnext\b/.test(command)) return `${command} -p ${port}`;
-  // Bare `vite`, OR a package-manager dev/serve script (npm/pnpm/yarn/bun run dev|serve),
-  // which the v3.0 scaffold uses for Vite — the same pm-script ⇒ vite assumption
-  // ensureHostBinding already makes when it appends `--host`.
-  if (/\bvite\b/.test(command) || /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command)) {
+  if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
+  const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
+  // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run
+  // script — the v3.0 scaffold's case): pin with the Vite-only `--strictPort` so it binds EXACTLY
+  // this port or fails loudly instead of silently drifting 5173→5174.
+  if (/\bvite\b/.test(command) || framework === 'vite') {
     return `${command} --port ${port} --strictPort`;
   }
+  // A resolved NON-Vite framework (astro/nuxt/angular): pin the port but DROP `--strictPort`, which
+  // those CLIs reject as an unknown flag — passing it crashed the dev server right after start, so
+  // the preview never came up (blank). They accept a plain `--port`; if the port still drifts,
+  // detectDevPort downstream re-points the preview at the REAL bound port.
+  if (isPmDev && (framework === 'astro' || framework === 'nuxt' || framework === 'angular')) {
+    return `${command} --port ${port}`;
+  }
+  // CRA (react-scripts) takes neither `--port` nor `--strictPort` (it reads PORT= from the env) —
+  // leave its command untouched rather than append flags it ignores/rejects.
+  if (framework === 'cra') return command;
+  // Ambiguous pm-run dev/serve with no framework signal → keep the historical Vite assumption.
+  if (isPmDev) return `${command} --port ${port} --strictPort`;
   return command;
 }
 

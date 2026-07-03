@@ -7,6 +7,7 @@ import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDe
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
+import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -17,17 +18,14 @@ const IDLE_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 const WORKSPACE_ROOT = '/home/user/workspace';
 
 /**
- * Sanitize an AI/agent-supplied relative path so it can never escape WORKSPACE_ROOT.
- * Drops traversal ("..") / empty / "." segments; legitimate nested paths are unaffected.
+ * Sanitize an AI/agent-supplied path so it can never escape WORKSPACE_ROOT. Delegates to the shared
+ * normalizer, which ALSO accepts an absolute in-workspace path ("/home/user/workspace/src/App.tsx" →
+ * "src/App.tsx"). The old segment-only filter kept the root as literal segments, so the file ops'
+ * `${WORKSPACE_ROOT}/${...}` join DOUBLED the root and every such read/write/edit failed with
+ * "path does not exist" (build-diagnostics root cause, 2026-07-03).
  */
 function safeRelPath(filePath: string): string {
-  const cleaned = String(filePath ?? '')
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter((s) => s && s !== '.' && s !== '..')
-    .join('/');
-  if (!cleaned) throw new Error(`Unsafe workspace path: ${JSON.stringify(filePath)}`);
-  return cleaned;
+  return toWorkspaceRelPath(filePath, WORKSPACE_ROOT);
 }
 
 /** Reject identifiers that are not safe to interpolate into a shell command. */

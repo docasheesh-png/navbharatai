@@ -58,13 +58,17 @@ describe('buildReactPreview', () => {
     });
     const html = buildReactPreview(vfs);
     expect(html).toContain('<script type="importmap">');
-    // Non-react deps are starred (`*`) so esm.sh externalizes react/react-dom and every
-    // package shares the ONE React from the importmap (no "Invalid hook call" second copy).
-    expect(html).toContain('esm.sh/*react-router-dom@6.26.0');
-    expect(html).toContain('esm.sh/*zustand@4.5.0');
-    // React itself stays UN-starred — it is the shared copy the others externalize to.
+    // Non-react deps externalize ONLY react/react-dom (?external=…) so every package shares the
+    // ONE React from the importmap (no "Invalid hook call" second copy) while esm.sh BUNDLES
+    // their other internals (firebase's @firebase/app etc.) as absolute URLs — the old `*`
+    // (external-ALL) flag left those as bare specifiers the browser could not resolve, killing
+    // the preview for any app using such packages.
+    expect(html).toContain('esm.sh/react-router-dom@6.26.0?external=react,react-dom');
+    expect(html).toContain('esm.sh/zustand@4.5.0?external=react,react-dom');
+    expect(html).not.toContain('esm.sh/*');
+    // React itself stays plain — it IS the shared copy the others externalize to.
     expect(html).toMatch(/esm\.sh\/react@18\.3\.1/);
-    expect(html).not.toContain('esm.sh/*react@');
+    expect(html).not.toContain('esm.sh/react@18.3.1?external');
   });
 
   it('uses the JSX automatic runtime (no React-in-scope requirement)', () => {

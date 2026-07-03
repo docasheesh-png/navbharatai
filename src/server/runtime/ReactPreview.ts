@@ -55,6 +55,9 @@ const BABEL_FALLBACKS = [
   'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js',
 ];
 const ESM = 'https://esm.sh/';
+// Externalize ONLY react/react-dom on esm.sh (single shared React); everything else a package
+// needs is bundled by esm.sh with absolute URLs — see the note in buildImportmap.
+const EXTERNAL_REACT_Q = '?external=react,react-dom';
 
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 const CSS_EXT = ['.css'];
@@ -340,13 +343,17 @@ ${babelTag}
   function specUrl(spec) {
     if (IMAP[spec]) return IMAP[spec];
     var root = spec.charAt(0) === '@' ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
-    // The importmap entry already carries the star external prefix for non-react packages;
-    // appending the sub-path keeps it (no query string to break), so a deep import like
-    // 'react-router-dom/server' stays externalized too.
-    if (IMAP[root]) return IMAP[root] + spec.slice(root.length);
-    // Unknown dep (not in package.json): star it too so it shares the single React.
+    // Sub-path import of a mapped package ('firebase/app', 'react-router-dom/server'): insert
+    // the sub-path BEFORE the entry's ?external=… query so the deep import keeps the same
+    // single-shared-React externalization.
+    if (IMAP[root]) {
+      var base = IMAP[root], qi = base.indexOf('?');
+      if (qi < 0) return base + spec.slice(root.length);
+      return base.slice(0, qi) + spec.slice(root.length) + base.slice(qi);
+    }
+    // Unknown dep (not in package.json): same targeted external so it shares the single React.
     var isReactPkg = root === 'react' || root === 'react-dom';
-    return ESM + (isReactPkg ? '' : '*') + spec;
+    return ESM + spec + (isReactPkg ? '' : ${JSON.stringify(EXTERNAL_REACT_Q)});
   }
 
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
@@ -516,15 +523,21 @@ function buildImportmap(vfs: VirtualFileSystem): Record<string, string> {
     'react/jsx-runtime': ESM + 'react' + reactVer + '/jsx-runtime',
     'react/jsx-dev-runtime': ESM + 'react' + reactVer + '/jsx-dev-runtime',
   };
-  // CRITICAL for any React library (react-router-dom, @mui, framer-motion, …): prefix the
-  // esm.sh path with `*` so esm.sh marks ALL of the package's dependencies — react and
-  // react-dom included — as EXTERNAL. Those bare `import "react"` specifiers then resolve
-  // through THIS importmap to the single React above, instead of esm.sh bundling a second
-  // private copy of React. Two React copies is the #1 cause of "Invalid hook call" → a blank
-  // or crashing preview for router/state/UI-library apps. React's own entries stay un-starred
+  // CRITICAL for any React library (react-router-dom, @mui, framer-motion, …): externalize
+  // react + react-dom (`?external=react,react-dom`) so those bare `import "react"` specifiers
+  // resolve through THIS importmap to the single React above, instead of esm.sh bundling a
+  // second private copy. Two React copies is the #1 cause of "Invalid hook call" → a blank or
+  // crashing preview for router/state/UI-library apps.
+  //
+  // Deliberately NOT the old `*` (external-ALL) flag: `*` also externalized every OTHER
+  // dependency of the package — e.g. firebase's internal `@firebase/app` — leaving bare
+  // specifiers this importmap doesn't contain, so the browser failed with 'Failed to resolve
+  // module specifier "@firebase/app"' and the whole imported-app preview died (admin bug,
+  // 2026-07-04). With the targeted external list, esm.sh bundles those internals as absolute
+  // URLs while the single shared React is still preserved. React's own entries stay plain
   // (they ARE the shared copy).
   for (const name of Object.keys(deps)) {
-    if (!imap[name]) imap[name] = ESM + '*' + name + ver(name);
+    if (!imap[name]) imap[name] = ESM + name + ver(name) + EXTERNAL_REACT_Q;
   }
   return imap;
 }

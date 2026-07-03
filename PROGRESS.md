@@ -7444,3 +7444,44 @@ Fixes shipped together:
 
 +4 unit tests (visionModels: defaults-are-current guard, env overrides, empty-override fallback).
 Gate: frontend tsc 0, server tsc 0, vitest 4191/4191 PASS, boot:check PASS.
+
+## 2026-07-03 — History rebuild (#862) + Eternal Sessions (#867) — MERGED, auto-deployed
+
+**PR #862 — single-source-of-truth history rebuild** (admin order: "history system pura delete
+kar ke wapas banao… ek dam Claude jaise"). Root cause of the recurring "old chat opens empty /
+sticky chat" corruption: THREE overlapping stores (server ConversationStore + client-written
+chat_sessions transcript copies + in-memory stash) with multiple writers and id schemes. Now:
+- Server ConversationStore is the ONLY transcript writer. Plain-chat turns persist server-side
+  (upsert on the stable per-session id — same record builds append to → one session = one thread).
+- chat_sessions rows are METADATA-ONLY (title/tags/lastUpdated); the `messages` field is never
+  written by any client path again — the eraser bug class is structurally gone. Frozen legacy
+  transcripts remain readable (read-only fallback + tested disjoint-prepend merge for sessions
+  continued across the cutover).
+- DELETE resolves candidate ids (v3_/uid/anon) — ghost rows actually delete, from both surfaces.
+- App.tsx generic NBI/Pro chat_sessions writers hard-skip v3_ docs; main-History delete also
+  removes the server record.
+- Honest limit: transcripts already destroyed by the pre-fix eraser cannot be recovered.
+
+**PR #867 — Eternal Sessions** (admin order: "chahe 10 saal baad chat kholo — wahi memory, wahi
+UX, jaisa Claude Code me"). A 5-agent audit workflow mapped everything a reopened session LOST
+vs live (verified adversarially): all Claude-style action rows, diffs, terminal, ₹/token/health
+footer, framework (silently reset to vite-react → mislabeled follow-up builds), plus a silent
+durability bug (one oversized turn permanently stalled transcript persistence). Shipped:
+- NEW SessionTimeline.ts: bounded timeline recorder (tool calls/results, files, diffs, preview +
+  billing/tokens/health), transcript compaction (base64 screenshots stripped, whole-file payloads
+  truncated), and durable episodic recall for the plain-chat prompt (AI answers "hum kya bana
+  rahe the?" from real history).
+- Stores: timeline chunk subcollection (40-chunk cross-turn cap), finalState/framework fields,
+  per-message CREATION timestamps (live interleave order preserved on reopen), get() timeline
+  opt-in (hot paths skip the reads).
+- AgentRunner: compaction on every persist + marker-gated poison-skip (transient outages
+  self-heal; unwritable turns skipped with an honest omission marker — final status always lands).
+- Route: emit-tap recorder; delta-cursored persist from BOTH the finally and the hard-deadline
+  finalizer. Client: full timeline replay through the existing reducer + orphan tool_call closure
+  (no immortal spinner) + engine-nudge bubbles filtered + framework adoption on open/resume.
+- Built → adversarially reviewed by a 16-agent workflow → all 6 confirmed defects fixed pre-merge.
+- Honest limit: pre-#867 sessions have no recorded timeline (they reopen as before, files/plan/
+  checkpoints intact); the full evidence layer applies from this deploy onward. First-turn
+  plan-rejection still persists no record (pre-existing, deliberate).
+
+Gate both PRs: tsc (app+server) 0 errors, vitest 4356/4356 → 4375/4375, build + boot:check PASS.

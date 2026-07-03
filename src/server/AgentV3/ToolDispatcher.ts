@@ -176,6 +176,12 @@ export class ToolDispatcher {
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
   ) {}
 
+  // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
+  // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
+  // unreachable preview). Counted per dispatcher (= per build for the Architect).
+  private previewFails = 0;
+  private previewGaveUp = false;
+
   /**
    * The structured readiness verdict from the most recent `evaluate` run. Captured as a
    * side-effect so the mandatory end-of-build gate (assessBuildReadiness) can reuse the exact
@@ -1608,32 +1614,62 @@ export class ToolDispatcher {
         if (!this.actuator.getPortUrl) {
           throw new Error('Live preview is not available in this sandbox.');
         }
+        // LOOP-BREAKER (build-diagnostics root cause): once preview has DEFINITIVELY failed —
+        // including a managed dev-server start — stop the retry loop cold. Without this the model
+        // re-ran update_preview / npm run dev until the step cap (~10 min burned, build reported
+        // failed even though the code was finished).
+        if (this.previewGaveUp) {
+          return 'FINAL: the live preview could not be brought up in this sandbox (a managed dev-server start was already attempted). Do NOT call update_preview or restart the dev server again. Finish the build now and tell the user honestly: the files are complete and saved, but the live preview is unavailable in this environment.';
+        }
         // Verify the port is actually listening before publishing. Bounded TWO ways so this tool can
         // NEVER hang the whole build (the real freeze we saw: a single sandbox runCommand stalled and
         // update_preview sat in-flight for 15 min until the wall-clock cap). (1) Each port check is
         // wrapped in withTimeout so one stalled `nc` can't block forever; (2) the whole poll has a
         // hard wall-clock budget so it always exits regardless of how the actuator behaves.
-        let portReady = false;
-        const PORT_POLL_BUDGET_MS = 15_000;
-        const pollDeadline = Date.now() + PORT_POLL_BUDGET_MS;
-        for (let attempt = 0; attempt < 30 && !portReady && Date.now() < pollDeadline; attempt++) {
-          try {
-            // Tool-agnostic, IPv4-forced check (same fix as the dev-server launcher): the old
-            // `nc -z localhost` read a HEALTHY server as DOWN when the sandbox image lacks `nc`, or
-            // when `localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0 — so update_preview
-            // returned a WARNING and emitted NO preview event → the client showed "No live preview yet"
-            // even though the dev server was up. Try nc → curl → bash /dev/tcp, all against 127.0.0.1.
-            const chk = await withTimeout(
-              this.actuator.runCommand(
-                this.workspaceId,
-                `if nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null; then echo PORT_UP; else echo PORT_DOWN; fi`,
-              ),
-              4_000,
-              'preview-port-check',
-            );
-            if (chk.stdout.includes('PORT_UP')) { portReady = true; break; }
-          } catch { /* a stalled/failed check just counts as not-ready — keep polling within budget */ }
-          if (!portReady && Date.now() < pollDeadline) await new Promise(r => setTimeout(r, 500));
+        // Tool-agnostic, IPv4-forced check (same fix as the dev-server launcher): the old
+        // `nc -z localhost` read a HEALTHY server as DOWN when the sandbox image lacks `nc`, or
+        // when `localhost` resolves to IPv6 ::1 while Vite binds IPv4 0.0.0.0. nc → curl → /dev/tcp.
+        const pollPort = async (budgetMs: number): Promise<boolean> => {
+          const deadline = Date.now() + budgetMs;
+          for (let attempt = 0; attempt < 30 && Date.now() < deadline; attempt++) {
+            try {
+              const chk = await withTimeout(
+                this.actuator.runCommand(
+                  this.workspaceId,
+                  `if nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null; then echo PORT_UP; else echo PORT_DOWN; fi`,
+                ),
+                4_000,
+                'preview-port-check',
+              );
+              if (chk.stdout.includes('PORT_UP')) return true;
+            } catch { /* a stalled/failed check just counts as not-ready — keep polling within budget */ }
+            if (Date.now() < deadline) await new Promise(r => setTimeout(r, 500));
+          }
+          return false;
+        };
+        let portReady = await pollPort(6_000);
+        // SELF-HEAL: the preview must not depend on the model having started the dev server
+        // correctly (running `npm run dev` as a plain foreground bash returns in ~2s and the
+        // process dies — the diagnostics' exact loop). When the port is down and this is a node
+        // project, launch the dev server through the actuator's managed long-running path
+        // (backgrounded + deps check + port pin + recovery), then re-poll. Bounded.
+        let healNote = '';
+        if (!portReady) {
+          const hasPkg = await this.actuator.readFile(this.workspaceId, 'package.json').then(() => true).catch(() => false);
+          if (hasPkg) {
+            try {
+              const heal = await withTimeout(
+                this.actuator.runCommand(this.workspaceId, `PORT=${port} npm run dev`),
+                240_000,
+                'preview-managed-dev-start',
+              );
+              const tail = String(heal.stdout || heal.stderr || '').trim().slice(-200);
+              healNote = ` A managed dev-server start was attempted${tail ? ` (${tail})` : ''}.`;
+            } catch (err) {
+              healNote = ` A managed dev-server start was attempted but did not finish in time (${err instanceof Error ? err.message : String(err)}).`;
+            }
+            portReady = await pollPort(10_000);
+          }
         }
         // §12: v3.0-built apps are previewed under the platform's E2B custom domain
         // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
@@ -1647,9 +1683,15 @@ export class ToolDispatcher {
         const url = applyPreviewDomain(rawUrl);
         if (!portReady) {
           // Audit P2: do NOT emit a preview URL the user would click into a blank/502 page — the
-          // "preview is EARNED" rule. Tell the agent to bring the dev server up and re-publish.
-          return `WARNING: port ${port} did not respond after 15 s — preview NOT published. Check that the dev server started correctly, then call update_preview again.`;
+          // "preview is EARNED" rule.
+          this.previewFails++;
+          if (this.previewFails >= 2) {
+            this.previewGaveUp = true;
+            return `WARNING: port ${port} is still not responding even after a managed dev-server start.${healNote} Preview NOT published. Do NOT retry update_preview or the dev server — finish the build now and tell the user honestly that the live preview is unavailable; their files are complete and saved.`;
+          }
+          return `WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`;
         }
+        this.previewFails = 0;
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         return `Live preview published at ${url} (port ${port} verified UP)`;
       }

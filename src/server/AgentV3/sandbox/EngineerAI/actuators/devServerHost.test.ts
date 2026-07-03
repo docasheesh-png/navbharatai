@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -212,6 +212,25 @@ describe('detectDevPort', () => {
   it('falls back when no port is present in the output', () => {
     expect(detectDevPort('starting…', 5173)).toBe(5173);
     expect(detectDevPort('', 3000)).toBe(3000);
+  });
+});
+
+describe('shouldReprobeBoundPort — re-verify a drifted port even when the assumed port read DOWN', () => {
+  it('re-probes when the server bound a DIFFERENT port than assumed (the false-DOWN root case)', () => {
+    // The regression: assumed 5173 polled DOWN, but the server actually bound 5174 and is healthy.
+    // The old `portUp && …` guard skipped this re-probe, so the health line said DOWN forever.
+    expect(shouldReprobeBoundPort(5173, 5174)).toBe(true);
+    expect(shouldReprobeBoundPort(3000, 5173)).toBe(true);
+  });
+  it('does NOT re-probe when the bound port matches the assumed port (no drift, no wasted poll)', () => {
+    expect(shouldReprobeBoundPort(5173, 5173)).toBe(false);
+    expect(shouldReprobeBoundPort(3000, 3000)).toBe(false);
+  });
+  it('does NOT re-probe on a bogus bound port (detectDevPort fallback / parse noise)', () => {
+    expect(shouldReprobeBoundPort(5173, 0)).toBe(false);
+    expect(shouldReprobeBoundPort(5173, -1)).toBe(false);
+    expect(shouldReprobeBoundPort(5173, NaN)).toBe(false);
+    expect(shouldReprobeBoundPort(5173, 5173.5)).toBe(false);
   });
 });
 

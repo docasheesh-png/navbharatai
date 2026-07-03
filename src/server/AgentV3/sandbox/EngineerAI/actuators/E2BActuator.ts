@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
@@ -701,10 +701,15 @@ export class E2BActuator implements IEngineerActuator {
       // not the assumed default. If it drifted despite pinning, preview the REAL port so update_preview
       // can never aim at the wrong one.
       const boundPort = detectDevPort(devLog || stdout, port);
-      if (portUp && boundPort !== port) {
+      // Re-probe the REAL bound port whenever it drifted from the assumed one — NOT only when the
+      // assumed port already read UP. The old `portUp &&` guard meant a drifted-but-healthy server
+      // whose assumed port was down was reported DOWN forever (the agent then never published the
+      // working port). The re-probe can only ever UPGRADE portUp to true — it can never mark a
+      // healthy server down — so this is safe. (root-cause helper: shouldReprobeBoundPort.)
+      if (shouldReprobeBoundPort(port, boundPort)) {
         const reUp = await sandbox.commands.run(buildPortWaitCommand(boundPort, 10), { timeoutMs: 15_000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
-        portUp = reUp.stdout.includes('PORT_UP') ? true : portUp;
+        if (reUp.stdout.includes('PORT_UP')) portUp = true;
       }
       // Honest health line: the verified port when UP, the REAL root cause when DOWN.
       stdout += `\n${devServerHealthLine(portUp, boundPort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;

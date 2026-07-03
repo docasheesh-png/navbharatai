@@ -73,20 +73,26 @@ export function assessReadiness(
     warnings.push(`${arch.orphanComponents.length} component(s) created but never used: ${arch.orphanComponents.slice(0, 3).join(', ')}${arch.orphanComponents.length > 3 ? ', …' : ''}`);
   }
 
-  const high = security.filter((f) => f.severity === 'high').length;
-  const medium = security.filter((f) => f.severity === 'medium').length;
-  const low = security.filter((f) => f.severity === 'low').length;
-  if (high) {
-    score -= PENALTY.securityHigh * high;
-    blockers.push(`${high} high-severity security issue(s)`);
+  // Surface the ACTUAL finding (rule @ file:line — message), not just a count, so the build report
+  // tells the reader WHAT the security issue is and WHERE — otherwise "1 high-severity security
+  // issue(s)" is un-actionable (you can't fix what you can't see). Bounded to the first few per tier
+  // so a noisy scan can't bloat the report.
+  const fmtFinding = (f: SecurityFinding): string => `${f.rule} @ ${f.file}:${f.line} — ${f.message}`;
+  const detail = (fs: SecurityFinding[]): string => `${fs.slice(0, 5).map(fmtFinding).join(' | ')}${fs.length > 5 ? ' | …' : ''}`;
+  const high = security.filter((f) => f.severity === 'high');
+  const medium = security.filter((f) => f.severity === 'medium');
+  const low = security.filter((f) => f.severity === 'low');
+  if (high.length) {
+    score -= PENALTY.securityHigh * high.length;
+    blockers.push(`${high.length} high-severity security issue(s): ${detail(high)}`);
   }
-  if (medium) {
-    score -= PENALTY.securityMedium * medium;
-    warnings.push(`${medium} medium-severity security issue(s)`);
+  if (medium.length) {
+    score -= PENALTY.securityMedium * medium.length;
+    warnings.push(`${medium.length} medium-severity security issue(s): ${detail(medium)}`);
   }
-  if (low) {
-    score -= PENALTY.securityLow * low;
-    warnings.push(`${low} low-severity security issue(s)`);
+  if (low.length) {
+    score -= PENALTY.securityLow * low.length;
+    warnings.push(`${low.length} low-severity security issue(s): ${detail(low)}`);
   }
 
   // Extra signals from the rest of the evaluate suite. High = hard blocker.

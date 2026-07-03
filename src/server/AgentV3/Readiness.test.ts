@@ -29,6 +29,15 @@ describe('assessReadiness', () => {
     expect(r.blockers.join(' ')).toContain('high-severity');
   });
 
+  it('surfaces the ACTUAL security finding (rule @ file:line — message), not just a count', () => {
+    const finding: SecurityFinding = { file: 'src/Login.tsx', line: 42, severity: 'high', rule: 'credentials-in-localstorage', message: 'Password stored in localStorage — anyone with XSS can read it.' };
+    const r = assessReadiness(cleanArch, [finding]);
+    const blocker = r.blockers.find((b) => b.includes('high-severity')) ?? '';
+    expect(blocker).toContain('credentials-in-localstorage');
+    expect(blocker).toContain('src/Login.tsx:42');
+    expect(blocker).toContain('Password stored in localStorage');
+  });
+
   it('cycles and low/medium issues lower the score but do not block', () => {
     const r = assessReadiness(
       { ...cleanArch, cycles: [['a', 'b', 'a']] },

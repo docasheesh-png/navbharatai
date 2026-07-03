@@ -23,6 +23,7 @@ import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts } from './ViteConfigGuard';
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
@@ -850,6 +851,20 @@ export class ToolDispatcher {
           );
           this.state?.appendTerminal(msg);
           return msg;
+        }
+        // Preview guard: the live preview is MANAGED (E2BActuator detects `npm run dev` and binds
+        // host / pins port / sets allowedHosts / health-checks / publishes the URL). When it looks
+        // blank the agent tends to improvise — `pkill -f vite`, `serve dist`, `vite preview`,
+        // port-hopping — none of which the preview proxy serves (two real reports burned 8+ min in
+        // this loop). Redirect those to the one managed path instead of running them.
+        const preview = previewGuard(command);
+        if (preview.redirect) {
+          const pmsg = previewGuardMessage(preview.reason ?? '');
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `preview-guard redirected manual preview command: ${command.slice(0, 160)}`,
+          );
+          this.state?.appendTerminal(pmsg);
+          return pmsg;
         }
         // Governance (Layer 58): classify the command's risk BEFORE execution.
         // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate

@@ -834,6 +834,14 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
  */
 export function cheapFloorAllowedForTier(startTier?: string): boolean {
   if (process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS === '1') return true;
+  // SMART CHEAP-FIRST (admin 2026-07-03): when ESCALATION is on, EVERY app — simple OR complex —
+  // tries the cheap floor (GLM/Kimi) FIRST, because a weak cheap build is caught by the mandatory
+  // readiness gate (it downgrades ok:false) and RETRIED on Sonnet. So all apps get the cheap-first
+  // cost saving AND the Sonnet safety net. WITHOUT escalation there is no stronger retry, so we keep
+  // the conservative split (complex → strong directly) — a complex app must never ship a weak cheap
+  // build with no way to escalate. This makes "all apps cheap-first → gate → Sonnet-on-fail" the
+  // behaviour precisely when it is safe.
+  if (escalationEnabled()) return true;
   const tier = (startTier || '').toLowerCase();
   return tier === 'gemini' || tier === 'haiku' || tier === '';
 }

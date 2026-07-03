@@ -7,6 +7,7 @@ import {
   detectImportedFramework,
   validateImportedProject,
   importSummaryLine,
+  droppedDetailNote,
   IMPORT_MAX_FILES,
 } from './ProjectImport';
 
@@ -145,6 +146,19 @@ describe('validateImportedProject', () => {
     const v = validateImportedProject({ 'notes.txt': 'hello' });
     expect(v.ok).toBe(true);
     expect(v.issues[0]).toContain('does not look like a runnable web project');
+  });
+});
+
+describe('droppedDetailNote', () => {
+  it('is empty when nothing was dropped', () => {
+    expect(droppedDetailNote({ files: { 'a.ts': 'x' }, dropped: { dir: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0 }, totalEntries: 1, strippedRoot: null })).toBe('');
+  });
+  it('lists every drop reason honestly', () => {
+    const note = droppedDetailNote({ files: {}, dropped: { dir: 5, secret: 1, binary: 0, tooLarge: 2, unsafe: 1, overCap: 0 }, totalEntries: 9, strippedRoot: null });
+    expect(note).toContain('5 from node_modules');
+    expect(note).toContain('1 secret file');
+    expect(note).toContain('2 over the 900KB');
+    expect(note).toContain('1 with unsafe paths');
   });
 });
 

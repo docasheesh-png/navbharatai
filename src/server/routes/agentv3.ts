@@ -64,7 +64,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, importSummaryLine } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote } from '../AgentV3/ProjectImport';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2466,9 +2466,12 @@ export function registerAgentV3Routes(app: Express): void {
     if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt)) {
       intent = 'edit_existing';
     }
-    // A zip-import turn must NEVER take the cheap chat early-exit — the import pipeline (and the
-    // follow-up survey/edit) lives in the build path below.
-    const isPlainChatTurn = intent === 'chat' && zipImports.length === 0;
+    // An import turn (zip attachment OR a set GitHub import URL) must NEVER take the cheap chat
+    // early-exit — the Landing Pipeline (and the follow-up survey/edit) lives in the build path
+    // below. Without this, "is app ko analyze karo" + an import could classify as small-talk and
+    // exit before anything was imported.
+    const hasImportIntent = zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '');
+    const isPlainChatTurn = intent === 'chat' && !hasImportIntent;
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the
     // current files and makes minimum targeted edits instead of rebuilding everything.
@@ -2657,70 +2660,88 @@ export function registerAgentV3Routes(app: Express): void {
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
-    // ── PROJECT LANDING PIPELINE (zip → workspace) — admin master plan, phase 1 ──────────────
-    // The attached zip lands as a REAL project before the AI turn runs: extract + sanitize →
-    // validate → write to BOTH stores (E2B sandbox for the live preview, durable file store for
-    // Files/IDE/reopen) → adopt the detected framework → force edit mode. The live-preview boot
-    // (npm install + dev server) runs in the BACKGROUND so the AI's survey/edit reply streams
-    // immediately; the boot's honest outcome lands in the same stream when it finishes, and the
-    // finally awaits it so Cloud Run can't throttle it away mid-install.
+    // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────
+    // Whatever door an existing app comes in by (zip attachment here, GitHub repo URL below in
+    // the build body), it must LAND the same way: validate → both stores (E2B sandbox for the
+    // live preview, durable file store for Files/IDE/reopen) → files_restored event → detected
+    // framework adopted → edit mode forced (never scaffold over an imported app) → sources
+    // indexed into project memory → live preview booted in the BACKGROUND with an honest
+    // outcome in the stream. The finally awaits the boot so Cloud Run can't throttle it away.
     let importPreviewBoot: Promise<void> | undefined;
+    const landImportedProject = async (
+      importedFiles: Record<string, string>,
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string },
+    ): Promise<boolean> => {
+      const validation = validateImportedProject(importedFiles);
+      if (!validation.ok) {
+        emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });
+        return false;
+      }
+      let written: string[];
+      if (opts.writeToSandbox) {
+        // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
+        // template scaffold files mixed in (mirrors the import-files route).
+        try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
+        written = (await writeWorkspaceFiles(actuator, workspaceId, importedFiles)).written;
+      } else {
+        written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
+      }
+      // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
+      // empty": without it the import lives only in the ephemeral sandbox.
+      try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
+      framework = validation.framework;
+      isEditMode = true;
+      emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
+      emit({
+        type: 'narration', agent: 'architect', ts: Date.now(),
+        text: `📦 Imported ${written.length} file${written.length === 1 ? '' : 's'} from ${opts.source} (framework: ${framework})`
+          + (opts.droppedNote ? ` ${opts.droppedNote}` : '')
+          + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
+      });
+      // Project memory: the import is a durable fact of this session, and the imported sources
+      // are indexed so the very first edit request works with real context.
+      try {
+        const mem = getWorkspaceMemory(workspaceId);
+        mem.recordNote(`Imported an existing app from ${opts.source}: ${written.length} files, framework ${framework}.`);
+        for (const [p, c] of Object.entries(importedFiles).slice(0, 300)) mem.indexFile(p, c);
+        void saveWorkspaceMemory(workspaceId, mem.snapshot()).catch(() => {});
+      } catch { /* memory is best-effort */ }
+      // The AI turn must work WITH the landed app — never scaffold over it, and answer a plain
+      // "read/analyze my app" ask with an honest survey of the real files.
+      attachmentContext += `\n\n[APP IMPORT — already completed] The user's app from ${opts.source} has ALREADY been imported into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze it, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
+      // Background live-preview boot (the actuator handles install + start + health-check).
+      if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
+        const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+        importPreviewBoot = (async () => {
+          try {
+            emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
+            const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 120_000, 'import-preview-boot');
+            const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+            const { up, port } = parseDevServerHealthCheck(combined);
+            if (up) {
+              const bootPort = port ?? oneShotDevPort(framework);
+              const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
+              if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+              emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
+            } else {
+              emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
+            }
+          } catch {
+            emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
+          }
+        })();
+      }
+      return true;
+    };
     if (zipImports.length > 0) {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
-        const validation = validateImportedProject(extracted.files);
-        if (!validation.ok) {
-          emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });
-        } else {
-          // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
-          // template scaffold files mixed in (mirrors the import-files route).
-          try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
-          const { written } = await writeWorkspaceFiles(actuator, workspaceId, extracted.files);
-          // DURABLE PERSIST — the other half of the dual write: without it the import lives only
-          // in the ephemeral sandbox and Files/IDE/reopen show nothing (the reported bug).
-          try { await mergeWorkspaceFiles(workspaceId, extracted.files); } catch { /* durable persist is best-effort */ }
-          framework = validation.framework;
-          isEditMode = true;
-          emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
-          emit({
-            type: 'narration', agent: 'architect', ts: Date.now(),
-            text: importSummaryLine(extracted, framework) + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
-          });
-          // Project memory: the import is a durable fact of this session, and the imported
-          // sources are indexed so the very first edit request works with real context.
-          try {
-            const mem = getWorkspaceMemory(workspaceId);
-            mem.recordNote(`Imported an existing app from a zip: ${written.length} files, framework ${framework}.`);
-            for (const [p, c] of Object.entries(extracted.files).slice(0, 300)) mem.indexFile(p, c);
-            void saveWorkspaceMemory(workspaceId, mem.snapshot()).catch(() => {});
-          } catch { /* memory is best-effort */ }
-          // The AI turn must work WITH the landed app — never scaffold over it, and answer a
-          // plain "read/analyze my zip" ask with an honest survey of the real files.
-          attachmentContext += `\n\n[APP IMPORT — already completed] The user's attached zip has ALREADY been unpacked into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze the zip, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
-          // Background live-preview boot (the actuator handles install + start + health-check).
-          if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
-            const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
-            importPreviewBoot = (async () => {
-              try {
-                emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
-                const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 120_000, 'import-preview-boot');
-                const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
-                const { up, port } = parseDevServerHealthCheck(combined);
-                if (up) {
-                  const bootPort = port ?? oneShotDevPort(framework);
-                  const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
-                  if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
-                  emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
-                } else {
-                  emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
-                }
-              } catch {
-                emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
-              }
-            })();
-          }
-        }
+        await landImportedProject(extracted.files, {
+          source: zipImports[0].name || 'your zip',
+          writeToSandbox: true,
+          droppedNote: droppedDetailNote(extracted),
+        });
       } catch (err) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ Could not unpack the zip (${err instanceof Error ? err.message : String(err)}) — nothing was imported. Please re-export the archive and try again.`, ts: Date.now() });
       }
@@ -3113,7 +3134,16 @@ export function registerAgentV3Routes(app: Express): void {
               const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
               const h = await importSync.hydrateFromRepo(cloneUrl);
               if (h.hydrated) {
-                events.emit({ type: 'narration', agent: 'architect', text: `Imported your project files from the repository. I'll analyze and improve this project.`, ts: Date.now() });
+                // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX
+                // only. Land them properly — durable store (Files/IDE/reopen), files_restored
+                // event, framework lock, edit mode, memory index, background preview boot —
+                // instead of the old narration-only "imported" that left everything else empty.
+                const cloned = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+                if (Object.keys(cloned.files).length > 0) {
+                  await landImportedProject(cloned.files, { source: cleanImportUrl, writeToSandbox: false });
+                } else {
+                  events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
+                }
               }
             }
             }

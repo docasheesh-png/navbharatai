@@ -163,21 +163,23 @@ export function validateImportedProject(files: Record<string, string>): ImportVa
   return { ok: true, issues, framework, hasPackageJson };
 }
 
+/** The honest "— skipped …" tail explaining every entry an extraction dropped, or ''. Pure. */
+export function droppedDetailNote(extracted: ExtractedProject): string {
+  const d = extracted.dropped;
+  if (d.dir + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap === 0) return '';
+  const why: string[] = [];
+  if (d.dir) why.push(`${d.dir} from node_modules/build folders (re-created by npm install)`);
+  if (d.secret) why.push(`${d.secret} secret file${d.secret === 1 ? '' : 's'} (.env/keys — re-enter your own secrets)`);
+  if (d.binary) why.push(`${d.binary} binary asset${d.binary === 1 ? '' : 's'}`);
+  if (d.tooLarge) why.push(`${d.tooLarge} over the 900KB per-file limit`);
+  if (d.unsafe) why.push(`${d.unsafe} with unsafe paths`);
+  if (d.overCap) why.push(`${d.overCap} over the ${IMPORT_MAX_FILES}-file cap`);
+  return `— skipped ${why.join(', ')}`;
+}
+
 /** One honest, human-readable import summary line for the chat stream. Pure. */
 export function importSummaryLine(extracted: ExtractedProject, framework: string): string {
   const n = Object.keys(extracted.files).length;
-  const d = extracted.dropped;
-  const droppedTotal = d.dir + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap;
-  const parts = [`📦 Imported ${n} file${n === 1 ? '' : 's'} from your zip (framework: ${framework})`];
-  if (droppedTotal > 0) {
-    const why: string[] = [];
-    if (d.dir) why.push(`${d.dir} from node_modules/build folders (re-created by npm install)`);
-    if (d.secret) why.push(`${d.secret} secret file${d.secret === 1 ? '' : 's'} (.env/keys — re-enter your own secrets)`);
-    if (d.binary) why.push(`${d.binary} binary asset${d.binary === 1 ? '' : 's'}`);
-    if (d.tooLarge) why.push(`${d.tooLarge} over the 900KB per-file limit`);
-    if (d.unsafe) why.push(`${d.unsafe} with unsafe paths`);
-    if (d.overCap) why.push(`${d.overCap} over the ${IMPORT_MAX_FILES}-file cap`);
-    parts.push(`— skipped ${why.join(', ')}`);
-  }
-  return parts.join(' ');
+  const tail = droppedDetailNote(extracted);
+  return `📦 Imported ${n} file${n === 1 ? '' : 's'} from your zip (framework: ${framework})` + (tail ? ` ${tail}` : '');
 }

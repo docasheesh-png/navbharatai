@@ -144,6 +144,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_zip_import',
+    name: 'Import an existing app (.zip) into v3.0',
+    path: 'NavBharatAI Pro v3.0 → chat composer → 📎 attach → pick your app\'s .zip → send',
+    description: 'Bring an app you already built (exported from any tool — Lovable, Bolt, v0, VS Code, or an earlier NavBharatAI export) into NavBharatAI Pro v3.0 by attaching its .zip in the chat. The archive is really unpacked into your workspace: the files appear in the Files tab and Code Studio (IDE), the framework (React/Vite, Next.js, Vue, …) is detected from package.json and locked to the session, the live preview is set up automatically in the background (npm install + dev server), and the AI reads the real project so your first edit request works with full context. Safety: node_modules/build folders are skipped (re-created by install), and secret files (.env, keys) are never imported — re-enter your own secrets. Per-file limit 900KB, up to 2000 files.',
+    howToUse: 'Open NavBharatAI Pro v3.0, tap the 📎 paperclip in the chat box, choose your app\'s .zip and send (with or without a message). Watch the import summary appear in chat; your files show in the Files tab and the IDE, and the preview boots in the background. Then simply tell v3.0 what to change.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_export', 'agentv3_files'],
+    keywords: ['import', 'import app', 'import zip', 'zip upload', 'upload zip', 'existing app', 'purani app', 'apni app', 'app import karo', 'zip se app', 'zip dalo', 'bring my app', 'migrate app', 'lovable', 'bolt', 'v0', 'edit my existing app', 'meri bani hui app', 'zip import'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_continuity',
     name: 'Build survives reload & tab switch (no lost work)',
     path: 'NavBharatAI Pro v3.0 — automatic; the build keeps running and re-attaches on its own',

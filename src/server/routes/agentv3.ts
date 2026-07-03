@@ -133,7 +133,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { renderPreview } from '../runtime/renderPreview';
@@ -1571,6 +1571,11 @@ export function registerAgentV3Routes(app: Express): void {
       sendStage('Checking the project structure', 10);
       const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
       const structure = validateProjectForPreview(pkgRaw);
+      // PORT TRUTH: the app's own dev script beats the framework guess — a real imported app
+      // declared `--port 5173 --strictPort` while the framework guess waited on 3000, so a
+      // healthy boot could never be seen as up (admin evidence, 2026-07-04).
+      const scriptPort = devScriptPort(pkgRaw);
+      const effectivePort = scriptPort ?? expectedPort;
       if (!structure.ok) {
         finish({ ok: false, portListening: false, reason: structure.issues.join(' '), detail: '' });
         return;
@@ -1591,7 +1596,7 @@ export function registerAgentV3Routes(app: Express): void {
       sendStage('Running the health check', 85);
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       const { up, port } = parseDevServerHealthCheck(combined);
-      const boundPort = port ?? expectedPort;
+      const boundPort = port ?? effectivePort;
       if (up) {
         sendStage('Resolving the public preview URL', 95);
         let previewUrl: string | undefined;
@@ -2719,7 +2724,7 @@ export function registerAgentV3Routes(app: Express): void {
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
-              const bootPort = port ?? oneShotDevPort(framework);
+              const bootPort = port ?? devScriptPort(importedFiles['package.json'] ?? null) ?? oneShotDevPort(framework);
               const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
               if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
               emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });

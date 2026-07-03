@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -124,5 +124,24 @@ describe('devServerHealthLine — honest UP / DOWN summary with real root cause'
     expect(line).toContain('did not come up on port 5173');
     expect(line).toContain('Root cause');
     expect(line).toContain('tailwindcss');
+  });
+});
+
+describe('devScriptPort (port truth from the app\'s own dev script)', () => {
+  const pkg = (dev: string) => JSON.stringify({ scripts: { dev } });
+  it('parses --port N, --port=N, -p N and a PORT= env prefix', () => {
+    expect(devScriptPort(pkg('tsx server.ts --host 0.0.0.0 --port 5173 --strictPort'))).toBe(5173);
+    expect(devScriptPort(pkg('next dev --port=4000'))).toBe(4000);
+    expect(devScriptPort(pkg('vite -p 8080'))).toBe(8080);
+    expect(devScriptPort(pkg('PORT=3005 node server.js'))).toBe(3005);
+  });
+  it('falls back to start/serve when dev is absent', () => {
+    expect(devScriptPort(JSON.stringify({ scripts: { start: 'node app.js --port 9000' } }))).toBe(9000);
+  });
+  it('returns null when no explicit port, bad JSON, or missing input', () => {
+    expect(devScriptPort(pkg('vite'))).toBeNull();
+    expect(devScriptPort('{broken')).toBeNull();
+    expect(devScriptPort(null)).toBeNull();
+    expect(devScriptPort(pkg('serve --port 999999'))).toBeNull(); // out of range
   });
 });

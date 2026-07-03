@@ -63,6 +63,30 @@ export function validateProjectForPreview(packageJsonRaw: string | null): { ok: 
   return { ok: issues.length === 0, issues, runScript };
 }
 
+/**
+ * The port the project's OWN dev script declares — the ground truth the health check must wait
+ * on. Framework-based guessing waited on the wrong port for real imported apps (admin evidence,
+ * 2026-07-04: the app's script was `tsx server.ts --port 5173 --strictPort` while the check
+ * waited on port 3000 — the boot could never be seen as up). Parses `--port N`, `-p N`,
+ * `--port=N` and a leading `PORT=N` env prefix from the dev/start/serve script. PURE; null when
+ * the script names no explicit port (callers then fall back to the framework default).
+ */
+export function devScriptPort(packageJsonRaw: string | null): number | null {
+  if (!packageJsonRaw) return null;
+  let scripts: Record<string, unknown> = {};
+  try {
+    const pkg = JSON.parse(packageJsonRaw) as { scripts?: Record<string, unknown> };
+    if (pkg && typeof pkg.scripts === 'object' && pkg.scripts) scripts = pkg.scripts;
+  } catch {
+    return null;
+  }
+  const script = ['dev', 'start', 'serve'].map((s) => scripts[s]).find((v): v is string => typeof v === 'string' && v.trim() !== '');
+  if (!script) return null;
+  const m = script.match(/(?:--port[=\s]+|(?:^|\s)-p\s+|(?:^|\s)PORT=)(\d{2,5})/);
+  const port = m ? Number(m[1]) : NaN;
+  return Number.isInteger(port) && port > 0 && port < 65_536 ? port : null;
+}
+
 /** cause → the deterministic recovery action for it. */
 function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
   switch (cause) {

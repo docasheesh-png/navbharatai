@@ -23,6 +23,7 @@ import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
+import { ensureViteAllowedHosts } from './ViteConfigGuard';
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
@@ -706,7 +707,10 @@ export class ToolDispatcher {
 
       case 'write_file': {
         const path = reqStr(input, 'path');
-        const content = reqStr(input, 'content');
+        // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
+        // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
+        // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
+        const content = ensureViteAllowedHosts(path, reqStr(input, 'content'));
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -764,7 +768,9 @@ export class ToolDispatcher {
         const batchFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
           const obj = f as Record<string, unknown>;
-          return { path: reqStr(obj, 'path'), content: reqStr(obj, 'content') };
+          const p = reqStr(obj, 'path');
+          // Same Vite-preview-host backstop as write_file, applied per batched file.
+          return { path: p, content: ensureViteAllowedHosts(p, reqStr(obj, 'content')) };
         });
         // Sort by import dependencies: files that import others go after their deps.
         const sorted = topoSortBatch(batchFiles);
@@ -793,7 +799,9 @@ export class ToolDispatcher {
         // Exact match first, with a whitespace-tolerant fallback so a patch whose
         // indentation/spacing is slightly off still applies (still required to be
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
-        const { updated, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
+        const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
+        // If an edit to a Vite config left it without allowedHosts, restore the preview-host backstop.
+        const updated = ensureViteAllowedHosts(path, edited);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);

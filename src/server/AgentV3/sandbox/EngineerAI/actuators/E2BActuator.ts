@@ -5,6 +5,7 @@ import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
+import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -592,6 +593,27 @@ export class E2BActuator implements IEngineerActuator {
       // redirectDevServerOutput: send the server's output to a FILE (not the live SDK stream) so that
       // when we disconnect below, vite writing its next log line can't SIGPIPE-kill itself — the real
       // "vite dies on 5173 while a silent node server survives on 3333" reaping seen in the build report.
+      // DETERMINISTIC PREVIEW-HOST GATE: before a Vite dev server starts, guarantee its config allows
+      // the E2B preview host. Even with the write-time backstop (ToolDispatcher/ViteConfigGuard), a
+      // config written BEFORE this safeguard existed would still 502 the preview with "Blocked
+      // request … is not allowed". This last-line net reads the on-disk config and, only if it lacks
+      // allowedHosts AND can be safely patched, writes it back — so the very next preview loads.
+      // Best-effort: a read/write hiccup must never block the dev server from starting.
+      if (/\bvite\b/.test(command)) {
+        for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts']) {
+          try {
+            const full = `${WORKSPACE_ROOT}/${cfg}`;
+            if (!(await sandbox.files.exists(full).catch(() => false))) continue;
+            const current = await sandbox.files.read(full);
+            const patched = ensureViteAllowedHosts(cfg, current);
+            if (patched !== current) {
+              await sandbox.files.write(full, patched);
+              stdout += `\n[preview-host] patched ${cfg} to allow the E2B preview host (allowedHosts).`;
+            }
+            break; // only one vite config is loaded by Vite — stop at the first that exists
+          } catch { /* best-effort — never block the dev server on a config patch */ }
+        }
+      }
       const devCommand = redirectDevServerOutput(
         disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port)),
       );

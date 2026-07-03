@@ -976,7 +976,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const params = new URLSearchParams({ workspaceId: state.workspaceId, format: 'text' });
       if (userId) params.set('userId', userId);
       if (email) params.set('email', email);
+      // Default download = the WHOLE session (every build 0 → last, stitched together) so the report is
+      // the complete "kaccha chittha", not just the last message's build. A specific build picked from
+      // the history list still downloads only that one.
       if (selectedHistoryBuildId) params.set('buildId', selectedHistoryBuildId);
+      else params.set('scope', 'session');
       const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
       if (!res.ok) { alert('No build report yet — build an app first, then download the report.'); return; }
       const text = await res.text();
@@ -1003,26 +1007,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // useful at a glance — not just a wall of raw data.
   const [copyingDiag, setCopyingDiag] = useState(false);
   const copyDiagnostics = async () => {
-    if (copyingDiag) return;
+    if (copyingDiag || !state.workspaceId) { if (!state.workspaceId) alert('No build report yet — build an app first.'); return; }
     setCopyingDiag(true);
     try {
-      const diagnostics = await getLatestDiagnostics(selectedHistoryBuildId) as {
-        rootCause?: string; problems?: Array<{ severity: string; message: string }>; counts?: { total: number; errors: number; warnings: number };
-      } | null;
-      if (!diagnostics) { alert('No build report yet — build an app first.'); return; }
-      const lines: string[] = [];
-      if (diagnostics.rootCause) lines.push(`Root cause: ${diagnostics.rootCause}`);
-      const problems = diagnostics.problems ?? [];
-      if (problems.length) {
-        lines.push(`Problems (${problems.length}):`);
-        problems.slice(0, 10).forEach((p, i) => lines.push(`  ${i + 1}. [${p.severity.toUpperCase()}] ${p.message}`));
-        if (problems.length > 10) lines.push(`  …and ${problems.length - 10} more (see full JSON below).`);
-      } else {
-        lines.push('No problems recorded.');
-      }
-      const summary = lines.join('\n');
-      await navigator.clipboard.writeText(`${summary}\n\n--- Full report (JSON) ---\n${JSON.stringify(diagnostics, null, 2)}`);
-      alert('Build report copied — paste it into the chat to share it.');
+      // Copy the SAME full readable report the Text download produces — the whole session (0 → last)
+      // by default, or one specific build when picked from history. Complete + human/Claude-readable,
+      // so it can be pasted straight into a chat to hand off the entire "kaccha chittha".
+      const params = new URLSearchParams({ workspaceId: state.workspaceId, format: 'text' });
+      if (userId) params.set('userId', userId);
+      if (email) params.set('email', email);
+      if (selectedHistoryBuildId) params.set('buildId', selectedHistoryBuildId);
+      else params.set('scope', 'session');
+      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (!res.ok) { alert('No build report yet — build an app first.'); return; }
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      alert('Full build report copied — paste it into the chat to share it.');
     } catch (e) {
       alert(`Could not copy the report: ${e instanceof Error ? e.message : String(e)}.`);
     } finally {

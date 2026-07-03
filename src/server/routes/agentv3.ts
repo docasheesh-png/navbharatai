@@ -77,7 +77,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
-import { BuildDiagnostics, renderDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors } from '../AgentV3/TscGate';
@@ -1332,6 +1332,29 @@ export function registerAgentV3Routes(app: Express): void {
       if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
       const history = await listDiagnosticsHistory(workspaceId).catch(() => []);
       res.json({ history });
+      return;
+    }
+    // FULL SESSION report (scope=session): stitch EVERY settled build of this session together, oldest
+    // → newest, instead of only the latest. Each build's report is overwritten in the "latest" doc but
+    // durably retained in the per-workspace history; here we aggregate that history so the download/copy
+    // carries the whole "0 → last" record ("pura kaccha chittha"). Read-only — no build path touched.
+    if (req.query.scope === 'session') {
+      if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+      const meta = await listDiagnosticsHistory(workspaceId, 20).catch(() => []);
+      const full = (await Promise.all(meta.map((h) => getDiagnosticsHistoryItem(workspaceId, h.id).catch(() => null)))).filter(Boolean) as BuildDiagnosticsReport[];
+      // Include the current "latest" doc too, in case the newest build hasn't landed in history yet, and
+      // dedup by startedAt so a build present in both is not shown twice.
+      const latest = await loadDiagnostics(workspaceId).catch(() => null);
+      const byStart = new Map<number, BuildDiagnosticsReport>();
+      for (const r of full) if (r) byStart.set(r.startedAt, r);
+      if (latest) byStart.set(latest.startedAt, latest);
+      const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+      if (ordered.length === 0) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+      if (req.query.format === 'text') {
+        res.type('text/plain').send(renderSessionDiagnosticsText(ordered));
+        return;
+      }
+      res.json({ session: { builds: ordered, count: ordered.length } });
       return;
     }
     // Resolve the report: a SPECIFIC past build (buildId) or the latest one — shared by both the

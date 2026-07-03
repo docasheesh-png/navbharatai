@@ -83,6 +83,7 @@ import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from 
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt } from '../AgentV3/BuildJudge';
+import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -3966,6 +3967,16 @@ export function registerAgentV3Routes(app: Express): void {
           episodes: reflectMem.snapshot().episodes,
         });
         reflectMem.recordNote(reflectionNote(reflection));
+        // D10 SELF-LEARNING: distil the actual BUILD REPORT (root cause + the real unresolved problems +
+        // the Sonnet judge's findings) into ONE concrete lesson and record it — so the SPECIFIC mistake
+        // (OOM, cosmetic feature, missing tsconfig, blank preview) becomes a durable lesson the next
+        // build recalls, instead of a generic summary. Flows to session memory now, and to the
+        // cross-project user brain below. Best-effort.
+        try {
+          const diag = buildDiag.report();
+          const lesson = buildLessonFromDiagnostics({ ok: result.ok, rootCause: diag.rootCause, problems: diag.problems });
+          if (lesson) reflectMem.recordNote(lesson);
+        } catch { /* lesson distillation is best-effort */ }
         // P-PME.5 — on a FAILED build, capture a structured retrospective (classified failure +
         // root-cause hint + reusable warning) and promote it into the SAME project memory the next
         // build recalls — so repeated failure patterns are learned, not re-hit. Best-effort.
@@ -4054,14 +4065,21 @@ export function registerAgentV3Routes(app: Express): void {
       // Cross-Project Lesson Brain: promote THIS build's transferable lessons (proven fixes + the
       // reflection note recorded above) into the user's per-user brain so they carry to future
       // projects. Best-effort and gated on a successful build — never blocks or affects the outcome.
-      if (result.ok && userId) {
+      if (userId) {
         try {
           // Only THIS build's episodes (created at/after the pre-run watermark) — never the prior
           // builds' episodes that restoreWorkspaceMemory replayed, which would inflate confidence.
           const episodes = getWorkspaceMemory(workspaceId)
             .snapshot()
             .episodes.filter((e) => typeof e.ts === 'number' && e.ts >= brainBaselineTs);
-          userLessonBrainStore.recordBuildLessons(userId, episodes, new Date().toISOString()).catch(() => {});
+          // D10 — LEARN FROM MISTAKES TOO: previously only a SUCCESSFUL build promoted lessons, so the
+          // most valuable signal (what a FAILED build did wrong) was dropped from the cross-project
+          // brain. Now a failed build ALSO teaches the user brain — but only its curated NOTE lessons
+          // (the distilled "what went wrong / avoid this"), NEVER its `fix` episodes (a fix on a failed
+          // build is unproven, so promoting it as a "proven fix" would be a bad lesson). A successful
+          // build still promotes everything (proven fixes + notes), unchanged.
+          const promotable = result.ok ? episodes : episodes.filter((e) => (e as { kind?: string }).kind === 'note');
+          userLessonBrainStore.recordBuildLessons(userId, promotable, new Date().toISOString()).catch(() => {});
         } catch { /* brain promotion is best-effort */ }
       }
 

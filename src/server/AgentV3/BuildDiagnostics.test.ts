@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -467,5 +467,42 @@ describe('provider delivery — "kaun sa reply kis provider se aaya" in the buil
     const d = new BuildDiagnostics({ now: () => clock });
     expect(d.report().providerDelivery).toBeUndefined();
     expect(renderDiagnosticsText(d.report())).not.toContain('Built by');
+  });
+});
+
+describe('renderSessionDiagnosticsText — the FULL SESSION report (0 → last), not just the last build', () => {
+  const mk = (over: Partial<BuildDiagnosticsReport>): BuildDiagnosticsReport => ({
+    schema: 'navbharatai.v3.build-diagnostics/1',
+    startedAt: 1000,
+    counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 },
+    issues: [],
+    problems: [],
+    ...over,
+  });
+
+  it('stitches every build in order, with a per-build message header and a session total', () => {
+    const b1 = mk({ prompt: 'make a note app', startedAt: 1000, endedAt: 2000, ok: true, counts: { total: 1, errors: 1, warnings: 0, autoResolved: 0, unresolved: 1 } });
+    const b2 = mk({ prompt: 'add a login button', startedAt: 3000, endedAt: 4000, ok: false, counts: { total: 2, errors: 0, warnings: 2, autoResolved: 0, unresolved: 0 } });
+    const out = renderSessionDiagnosticsText([b1, b2]);
+    expect(out).toContain('FULL SESSION BUILD REPORT');
+    expect(out).toContain('Builds in this session : 2');
+    expect(out).toContain('BUILD 1 of 2');
+    expect(out).toContain('BUILD 2 of 2');
+    expect(out).toContain('Message: make a note app');
+    expect(out).toContain('Message: add a login button');
+    // session totals sum across builds: 1 error + (2 warnings) + 1 unresolved
+    expect(out).toContain('1 error(s), 2 warning(s), 1 unresolved');
+    // build 1 appears before build 2 (oldest → newest order preserved)
+    expect(out.indexOf('make a note app')).toBeLessThan(out.indexOf('add a login button'));
+  });
+
+  it('handles an empty session without throwing', () => {
+    expect(renderSessionDiagnosticsText([])).toContain('No builds recorded');
+  });
+
+  it('a single-build session still renders with the session header', () => {
+    const out = renderSessionDiagnosticsText([mk({ prompt: 'solo build', ok: true })]);
+    expect(out).toContain('Builds in this session : 1');
+    expect(out).toContain('Message: solo build');
   });
 });

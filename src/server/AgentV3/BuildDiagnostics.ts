@@ -738,3 +738,48 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   }
   return lines.join('\n') + '\n';
 }
+
+/**
+ * Render the FULL SESSION report — every settled build in this session, oldest → newest — as one
+ * plain-text document. The per-build report (renderDiagnosticsText) only ever shows the LATEST build
+ * because each new message overwrites the "latest" doc; this stitches the durable per-build history
+ * back into the complete "0 → last" record the admin asked for ("pura kaccha chittha, gayab na ho"),
+ * so a single download/copy carries the whole session's story to hand to Claude. PURE + testable.
+ *
+ * `reports` must already be ordered oldest → newest by the caller (the route sorts the history by
+ * startedAt). A single-build session degrades to essentially the per-build report with a session header.
+ */
+export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsReport[]): string {
+  if (!reports || reports.length === 0) {
+    return 'NavBharatAI Pro v3.0 — Full Session Build Report\n' + '='.repeat(52) + '\nNo builds recorded in this session yet.\n';
+  }
+  const n = reports.length;
+  const totals = reports.reduce(
+    (acc, r) => ({
+      errors: acc.errors + (r.counts?.errors ?? 0),
+      warnings: acc.warnings + (r.counts?.warnings ?? 0),
+      unresolved: acc.unresolved + (r.counts?.unresolved ?? 0),
+    }),
+    { errors: 0, warnings: 0, unresolved: 0 },
+  );
+  const firstStart = reports[0]?.startedAt;
+  const lastEnd = reports[n - 1]?.endedAt ?? reports[n - 1]?.startedAt;
+  const head: string[] = [];
+  head.push('NavBharatAI Pro v3.0 — FULL SESSION BUILD REPORT');
+  head.push('='.repeat(52));
+  head.push(`Builds in this session : ${n} (oldest → newest)`);
+  if (typeof firstStart === 'number' && typeof lastEnd === 'number') {
+    head.push(`Session span           : ${Math.max(0, Math.round((lastEnd - firstStart) / 1000))}s across ${n} build(s)`);
+  }
+  head.push(`Session totals         : ${totals.errors} error(s), ${totals.warnings} warning(s), ${totals.unresolved} unresolved (summed across all builds)`);
+  head.push('');
+  head.push('Each build below is the message that produced it, in order. Send this WHOLE report to');
+  head.push('Claude to debug the full session — nothing is trimmed to just the last build.');
+  head.push('');
+  const bodies = reports.map((r, i) => {
+    const banner = `${'━'.repeat(20)} BUILD ${i + 1} of ${n} ${'━'.repeat(20)}`;
+    const promptLine = `Message: ${r.prompt ?? '(n/a)'}`;
+    return `${banner}\n${promptLine}\n\n${renderDiagnosticsText(r)}`;
+  });
+  return head.join('\n') + '\n' + bodies.join('\n') + '\n';
+}

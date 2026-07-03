@@ -63,6 +63,7 @@ import {
   upsertConversationTurn,
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
+import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2389,13 +2390,20 @@ export function registerAgentV3Routes(app: Express): void {
           lastError: null,
           booting: false,
         }));
+        // ETERNAL SESSIONS ("same memory"): recall context from the project's durable episodic
+        // memory — hydrated at intent-time above, survives instance recycles and years of absence —
+        // so "what were we building?" is answered from real session history, never blind. Empty for
+        // a fresh session (keeps the response cache usable). Best-effort.
+        const chatSessionRecall = (() => {
+          try { return sessionRecallContextLine(getWorkspaceMemory(intentWorkspaceId).snapshot().episodes); } catch { return ''; }
+        })();
         // P-PE.1 — plain-chat response cache. A reply is cacheable ONLY when it's a pure function of the
         // prompt text alone (no per-workspace/per-user data injected) — identical prompts WITHOUT an
         // attachment AND without workspace context can be served from an in-memory TTL+LRU cache: instant
         // and free, no behaviour change. Once real file-count context is injected, the reply depends on
         // THIS project's state, so it must bypass the cache (a stale/wrong count is worse than a cache
         // miss). Build/edit turns never reach this path, and attachment turns are skipped (unique prompt).
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -2412,7 +2420,7 @@ export function registerAgentV3Routes(app: Express): void {
               LANGUAGE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext + chatPreviewHealth +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
                 (ambiguousBuildAsk
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
@@ -2508,7 +2516,12 @@ export function registerAgentV3Routes(app: Express): void {
     rb.subscribers.add(primary);
     runningBuilds.set(buildKey, rb);
     req.on('close', () => { rb.subscribers.delete(primary); });
-    const emit = (e: unknown): void => broadcastBuild(rb, e);
+    // ETERNAL SESSIONS: tap every outgoing build event into a compact durable timeline (tool
+    // calls, file changes, diffs, preview, terminal facts). Persisted once in the finally below
+    // and replayed on reopen, so a restored session shows the SAME Claude-style action rows,
+    // Diff/Terminal tabs and done-footer it showed live — not a bare prose transcript.
+    const sessionTimeline = createTimelineRecorder();
+    const emit = (e: unknown): void => { sessionTimeline.record(e); broadcastBuild(rb, e); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
     let dispatcherForFlush: { flushCheckpoints: () => Promise<void> } | undefined;
@@ -4240,6 +4253,29 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
+      // ETERNAL SESSIONS: persist this turn's evidence layer onto the conversation record — the
+      // compact timeline recorded by the emit tap above, the terminal facts (billing/tokens/build
+      // health) for the done-footer, and the session's framework (so a reopened session's
+      // follow-up builds don't silently reset to vite-react). Runs on EVERY exit path (success,
+      // crash, stop) BEFORE the stream ends, so Cloud Run cannot throttle the write away.
+      // Best-effort + bounded — a store failure never affects the build or the stream.
+      try {
+        await raceTimeout((async () => {
+          const store = getConversationStore();
+          const convId = conversationIdForWorkspace(workspaceId); // mainConversationId is try-scoped
+          const rec = await store.get(convId).catch(() => null);
+          if (!rec) return; // no record even after the fallback upsert — nothing to attach to
+          const timelineEvents = sessionTimeline.events();
+          const finalState = sessionTimeline.final();
+          if (timelineEvents.length === 0 && !finalState && rec.framework === framework) return;
+          await store.update(convId, {
+            updatedAt: Date.now(),
+            ...(timelineEvents.length > 0 ? { timelineAppend: timelineEvents } : {}),
+            ...(finalState ? { finalState } : {}),
+            framework,
+          });
+        })(), 8_000, 'persistSessionTimeline');
+      } catch { /* the evidence layer is best-effort — never affects the build */ }
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);

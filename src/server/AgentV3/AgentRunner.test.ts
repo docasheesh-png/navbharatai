@@ -245,6 +245,73 @@ describe('AgentRunner persistence (D7)', () => {
     const result = await runner.run('plain build');
     expect(result.ok).toBe(true);
   });
+
+  it('recovers from an oversized turn via aggressive compaction (second-chance write)', async () => {
+    // The store rejects writes over a size limit — like Firestore's 1MB/doc. The build writes a
+    // file large enough that NORMAL compaction stays over the limit but AGGRESSIVE fits.
+    const inner = new InMemoryConversationStore();
+    const store = {
+      ...inner,
+      create: inner.create.bind(inner),
+      get: inner.get.bind(inner),
+      update: inner.update.bind(inner),
+      listByUser: inner.listByUser.bind(inner),
+      remove: inner.remove.bind(inner),
+      appendMessages: async (id: string, msgs: unknown[], patch: { updatedAt: number }) => {
+        if (JSON.stringify(msgs).length > 6_000) throw new Error('payload too large');
+        return inner.appendMessages(id, msgs, patch);
+      },
+    };
+    const bigTurn = [
+      {
+        content: [
+          { type: 'text', text: 'Writing a big file.' },
+          { type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'big.ts', content: 'x'.repeat(50_000) } },
+        ],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 10 },
+      },
+      { content: [{ type: 'text', text: 'Done.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+    ];
+    const { runner } = buildRunner(bigTurn, {
+      persistence: { store, conversationId: 'b5', userId: 'u1', workspaceId: 'ws-1', title: 'x', now: () => 1 },
+    });
+    const result = await runner.run('build with a big write');
+    expect(result.ok).toBe(true);
+    const rec = await inner.get('b5');
+    expect(rec?.status).toBe('complete');
+    // All 4 transcript messages landed — the oversized turn was persisted in compacted form.
+    expect(rec?.messages).toHaveLength(4);
+    expect(JSON.stringify(rec?.messages)).toContain('truncated for storage');
+  });
+
+  it('skips a poison turn with an honest marker so the transcript and final status still land', async () => {
+    const inner = new InMemoryConversationStore();
+    const store = {
+      ...inner,
+      create: inner.create.bind(inner),
+      get: inner.get.bind(inner),
+      update: inner.update.bind(inner),
+      listByUser: inner.listByUser.bind(inner),
+      remove: inner.remove.bind(inner),
+      // Rejects ANY payload carrying a tool_use — both compaction attempts fail for that turn.
+      appendMessages: async (id: string, msgs: unknown[], patch: { updatedAt: number }) => {
+        if (JSON.stringify(msgs).includes('"tool_use"')) throw new Error('unwritable turn');
+        return inner.appendMessages(id, msgs, patch);
+      },
+    };
+    const { runner } = buildRunner(twoTurn, {
+      persistence: { store, conversationId: 'b6', userId: 'u1', workspaceId: 'ws-1', title: 'x', now: () => 1 },
+    });
+    const result = await runner.run('build with an unwritable turn');
+    expect(result.ok).toBe(true);
+    const rec = await inner.get('b6');
+    // Seed + omission marker + final assistant turn — persistence never stalled, status landed.
+    expect(rec?.status).toBe('complete');
+    const texts = JSON.stringify(rec?.messages);
+    expect(texts).toContain('omitted from the saved transcript');
+    expect(texts).toContain('Done — the app is built.');
+  });
 });
 
 describe('AgentRunner parallel tool execution (capped)', () => {

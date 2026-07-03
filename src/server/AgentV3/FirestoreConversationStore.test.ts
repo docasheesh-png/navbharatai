@@ -101,7 +101,8 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     const rec = await store.get('b1');
     expect(rec?.status).toBe('running');
     expect(rec?.userId).toBe('u1');
-    expect(rec?.messages).toEqual([{ role: 'user', content: 'hi' }]);
+    // get() attaches each turn's wall-clock ts to its messages (eternal-sessions interleave).
+    expect(rec?.messages).toEqual([{ role: 'user', content: 'hi', ts: 1000 }]);
     expect(rec?.billedUsd).toBe(0);
     expect(rec?.createdAt).toBe(1000);
   });
@@ -120,9 +121,9 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     await store.appendMessages('b1', [{ role: 'user', content: 'r' }], { status: 'complete', billedUsd: 0.2, updatedAt: 3000 });
     const rec = await store.get('b1');
     expect(rec?.messages).toEqual([
-      { role: 'user', content: 'hi' },
-      { role: 'assistant', content: 'a' },
-      { role: 'user', content: 'r' },
+      { role: 'user', content: 'hi', ts: 1000 },
+      { role: 'assistant', content: 'a', ts: 2000 },
+      { role: 'user', content: 'r', ts: 3000 },
     ]);
     expect(rec?.status).toBe('complete');
     expect(rec?.billedUsd).toBe(0.2);
@@ -191,5 +192,46 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
     await store.remove('b1');
     expect(await store.get('b1')).toBeNull();
+  });
+
+  it('stores timeline chunks + finalState/framework and get() reassembles them in order', async () => {
+    const { store } = newStore();
+    await store.create({ ...base, messages: [{ role: 'user', content: 'hi' }] });
+    // Turn-coupled chunk (appendMessages patch) then an end-of-build chunk (update patch).
+    await store.appendMessages('b1', [{ role: 'assistant', content: 'a' }], {
+      updatedAt: 2000,
+      timelineAppend: [{ t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1500 }],
+    });
+    await store.update('b1', {
+      updatedAt: 3000,
+      status: 'complete',
+      timelineAppend: [{ t: 'preview', url: 'https://x', ts: 2500 }],
+      finalState: { billedInr: 42, tokens: 999 },
+      framework: 'nextjs',
+    });
+    const rec = await store.get('b1');
+    expect(rec?.timeline).toEqual([
+      { t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1500 },
+      { t: 'preview', url: 'https://x', ts: 2500 },
+    ]);
+    expect(rec?.finalState).toEqual({ billedInr: 42, tokens: 999 });
+    expect(rec?.framework).toBe('nextjs');
+    expect(rec?.status).toBe('complete');
+    // Legacy docs (no timeline) simply omit the field.
+    const { store: fresh } = newStore();
+    await fresh.create({ ...base, id: 'legacy' });
+    expect((await fresh.get('legacy'))?.timeline).toBeUndefined();
+  });
+
+  it('remove() also deletes timeline chunks', async () => {
+    const { store, fake } = newStore();
+    await store.create({ ...base });
+    await store.update('b1', { updatedAt: 2, timelineAppend: [{ t: 'preview', url: 'https://x', ts: 1 }] });
+    await store.remove('b1');
+    expect(await store.get('b1')).toBeNull();
+    // Re-creating the same id must not resurrect old timeline chunks.
+    await store.create({ ...base });
+    expect((await store.get('b1'))?.timeline).toBeUndefined();
+    void fake;
   });
 });

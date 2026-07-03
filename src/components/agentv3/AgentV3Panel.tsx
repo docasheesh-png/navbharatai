@@ -348,6 +348,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const restored = await loadConversation({ userId, email, id: `v3_${sid}` });
       // Apply only if the user hasn't already switched away meanwhile.
       if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
+      // Adopt the durable framework so a reopened non-Vite session's follow-up build stays correct.
+      if (restored.framework) setFramework(restored.framework);
       // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
       // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
       // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
@@ -732,6 +734,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         }
         autoRestoredSessionRef.current = sessionIdRef.current; // explicit open → mark handled so auto-restore can't swap in the most-recent chat
         rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
+        // Adopt the session's durable framework so a follow-up build/edit/deploy on a reopened
+        // non-Vite session doesn't silently reset to vite-react (the framework-reset defect).
+        if (restored.framework) setFramework(restored.framework);
         // Cross-cutover continuity: a pre-cutover session continued after the server became the
         // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
         // When that legacy copy is provably disjoint from the server transcript, show it in front;

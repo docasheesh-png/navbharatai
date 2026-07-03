@@ -4,6 +4,7 @@ import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from '
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
+import { compactMessagesForPersist } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
 
 /**
@@ -236,7 +237,7 @@ export class AgentRunner {
           userId: persistence.userId,
           workspaceId: persistence.workspaceId,
           title: persistence.title,
-          messages: messages.slice(),
+          messages: compactMessagesForPersist(messages),
           createdAt: now(),
         });
         persistedCount = messages.length;
@@ -246,16 +247,39 @@ export class AgentRunner {
     };
     // Persist any transcript turns added since the last call, plus the latest usage/billing and
     // (optionally) a terminal status. Uses appendMessages when there are new turns, else update.
+    // Every persisted turn is COMPACTED first (base64 screenshots stripped, giant tool payloads
+    // truncated) so a single turn can't exceed the store's per-write limit — and if a write still
+    // fails, the poison slice is SKIPPED with an honest marker instead of stalling persistence:
+    // previously one oversized turn made the un-persisted slice grow forever, every later write
+    // failed on it, and the durable transcript (and final status) silently ended at that point.
     const persist = async (status?: ConversationStatus): Promise<void> => {
       if (!persistence) return;
-      try {
-        const fresh = messages.slice(persistedCount);
-        const patch = { usage: { ...usage }, billedUsd: billed(), updatedAt: now(), ...(status ? { status } : {}) };
-        if (fresh.length) await persistence.store.appendMessages(persistence.conversationId, fresh, patch);
+      const fresh = messages.slice(persistedCount);
+      const patch = { usage: { ...usage }, billedUsd: billed(), updatedAt: now(), ...(status ? { status } : {}) };
+      const append = async (payload: unknown[]): Promise<void> => {
+        if (payload.length) await persistence.store.appendMessages(persistence.conversationId, payload, patch);
         else await persistence.store.update(persistence.conversationId, patch);
         persistedCount = messages.length;
+      };
+      try {
+        await append(compactMessagesForPersist(fresh));
       } catch {
-        /* persistence is best-effort */
+        try {
+          // Second chance: much smaller payload bounds.
+          await append(compactMessagesForPersist(fresh, { aggressive: true }));
+        } catch {
+          // Skip the poison slice so the transcript keeps growing and the final status lands.
+          if (fresh.length) {
+            persistedCount = messages.length;
+            try {
+              await persistence.store.appendMessages(
+                persistence.conversationId,
+                [{ role: 'assistant', content: `[${fresh.length} build step(s) were too large to save and were omitted from the saved transcript]` }],
+                patch,
+              );
+            } catch { /* persistence stays best-effort */ }
+          }
+        }
       }
     };
     await persistCreate();

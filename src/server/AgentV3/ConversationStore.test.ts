@@ -18,7 +18,9 @@ describe('InMemoryConversationStore', () => {
     expect(rec.status).toBe('running');
     expect(rec.billedUsd).toBe(0);
     expect(rec.usage).toEqual({ inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 });
-    expect(rec.messages).toEqual([{ role: 'user', content: 'hi' }]);
+    // Messages are stamped with the wall-clock time of the write that persisted them (eternal
+    // sessions: reopen interleaves prose with the timeline by real timestamps).
+    expect(rec.messages).toEqual([{ role: 'user', content: 'hi', ts: 1000 }]);
     expect(rec.createdAt).toBe(1000);
     expect(rec.updatedAt).toBe(1000);
   });
@@ -97,6 +99,46 @@ describe('InMemoryConversationStore', () => {
     const fresh = await store.get('build-1');
     expect(fresh?.messages).toHaveLength(1);
     expect(fresh?.status).toBe('running');
+  });
+
+  it('stamps appended messages with the patch time, never overwriting an explicit ts', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create(base());
+    await store.appendMessages('build-1', [
+      { role: 'assistant', content: 'a' },
+      { role: 'user', content: 'b', ts: 42 },
+    ], patch({ updatedAt: 7000 }));
+    const rec = await store.get('build-1');
+    expect(rec?.messages).toEqual([
+      { role: 'assistant', content: 'a', ts: 7000 },
+      { role: 'user', content: 'b', ts: 42 },
+    ]);
+  });
+
+  it('appends timeline events and sets finalState/framework via patches (eternal sessions)', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create(base());
+    await store.appendMessages('build-1', [{ role: 'assistant', content: 'turn 1' }], patch({
+      timelineAppend: [{ t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1 }],
+    }));
+    await store.update('build-1', patch({
+      updatedAt: 3000,
+      timelineAppend: [{ t: 'preview', url: 'https://x', ts: 2 }],
+      finalState: { billedInr: 42, tokens: 999 },
+      framework: 'nextjs',
+    }));
+    const rec = await store.get('build-1');
+    expect(rec?.timeline).toEqual([
+      { t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1 },
+      { t: 'preview', url: 'https://x', ts: 2 },
+    ]);
+    expect(rec?.finalState).toEqual({ billedInr: 42, tokens: 999 });
+    expect(rec?.framework).toBe('nextjs');
+    // A later patch without these fields leaves them untouched.
+    await store.update('build-1', patch({ updatedAt: 4000, status: 'complete' }));
+    const later = await store.get('build-1');
+    expect(later?.timeline).toHaveLength(2);
+    expect(later?.framework).toBe('nextjs');
   });
 });
 

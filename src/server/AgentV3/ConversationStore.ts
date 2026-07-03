@@ -38,6 +38,16 @@ export interface ConversationRecord {
   createdAt: number;
   /** Epoch ms — bumped on every mutation. */
   updatedAt: number;
+  /**
+   * Eternal sessions — the durable Claude-style evidence layer (compact TimelineEvent[] from
+   * SessionTimeline). Replayed on reopen so a restored session shows the same action rows,
+   * diffs and terminal output it showed live. Absent on records from before the feature.
+   */
+  timeline?: unknown[];
+  /** Terminal facts of the last finished build turn (billing/tokens/build health). */
+  finalState?: Record<string, unknown>;
+  /** The framework this session builds with — restored so follow-up builds stay correct. */
+  framework?: string;
 }
 
 /** Fields a caller provides to start a persisted build. */
@@ -57,6 +67,12 @@ export interface ConversationPatch {
   usage?: TurnUsage;
   billedUsd?: number;
   updatedAt: number;
+  /** Append these compact timeline events to the record's durable evidence layer. */
+  timelineAppend?: unknown[];
+  /** Replace the record's terminal facts (billing/tokens/build health) for the done-footer. */
+  finalState?: Record<string, unknown>;
+  /** Persist the session's framework so a reopened session's follow-up builds stay correct. */
+  framework?: string;
 }
 
 /**
@@ -90,7 +106,22 @@ function cloneRecord(rec: ConversationRecord): ConversationRecord {
     ...rec,
     messages: rec.messages.slice(),
     usage: { ...rec.usage },
+    ...(rec.timeline ? { timeline: rec.timeline.slice() } : {}),
+    ...(rec.finalState ? { finalState: { ...rec.finalState } } : {}),
   };
+}
+
+/**
+ * Stamp a wall-clock timestamp onto persisted message copies (object messages only, never
+ * overwriting an existing ts). The transcript is stored as Claude-API-shaped {role, content}
+ * turns with no time — but a faithful reopen must interleave prose with the timeline's real
+ * timestamps, so every message carries the epoch time of the write that persisted it. Mirrors
+ * the Firestore store, which derives the same value from its per-turn `ts` field.
+ */
+export function stampMessageTs(messages: unknown[], ts: number): unknown[] {
+  return messages.map((m) =>
+    m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined ? { ...m, ts } : m,
+  );
 }
 
 /**
@@ -112,7 +143,7 @@ export class InMemoryConversationStore implements ConversationStore {
       workspaceId: input.workspaceId,
       title: input.title,
       status: 'running',
-      messages: (input.messages ?? []).slice(),
+      messages: stampMessageTs((input.messages ?? []).slice(), input.createdAt),
       usage: { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
       billedUsd: 0,
       createdAt: input.createdAt,
@@ -129,7 +160,7 @@ export class InMemoryConversationStore implements ConversationStore {
 
   async appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void> {
     const rec = this.mustGet(id);
-    rec.messages = rec.messages.concat(messages);
+    rec.messages = rec.messages.concat(stampMessageTs(messages, patch.updatedAt));
     this.applyPatch(rec, patch);
     this.records.set(id, rec);
   }
@@ -162,6 +193,11 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.status !== undefined) rec.status = patch.status;
     if (patch.usage !== undefined) rec.usage = { ...patch.usage };
     if (patch.billedUsd !== undefined) rec.billedUsd = patch.billedUsd;
+    if (patch.timelineAppend && patch.timelineAppend.length > 0) {
+      rec.timeline = (rec.timeline ?? []).concat(patch.timelineAppend);
+    }
+    if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
+    if (patch.framework !== undefined) rec.framework = patch.framework;
     rec.updatedAt = patch.updatedAt;
   }
 }

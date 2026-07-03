@@ -7485,3 +7485,35 @@ durability bug (one oversized turn permanently stalled transcript persistence). 
   plan-rejection still persists no record (pre-existing, deliberate).
 
 Gate both PRs: tsc (app+server) 0 errors, vitest 4356/4356 → 4375/4375, build + boot:check PASS.
+
+## 2026-07-03/04 — History durability root cause + reattach + preview UX + app-import pipeline (all MERGED)
+
+- **#870** — provably-dead pre-rebuild sessions are labeled honestly in the history list
+  ("Transcript lost (old bug) — files safe") instead of looking like chats that "won't open".
+- **#873 — THE week-long history mystery solved.** All server stores share ONE Firestore
+  instance; settings() may only be called once on it. FirestoreConversationStore's constructor
+  threw on the second call and getConversationStore() silently fell back to the IN-MEMORY store
+  for the life of that Cloud Run instance → transcripts lived in RAM only ("works while the tab
+  is open, gone after a reload"). 2-line guard + regression test (mocked firebase-admin); same
+  landmine fixed in FirestoreJobStore. This unblocked the durability of #862/#867 in prod —
+  admin confirmed history now survives reload/browser restart.
+- **#882** — reopening a session whose build is still running re-attaches the live stream
+  automatically; the 409 "build already running" is no longer a dead end (auto-reattach with an
+  honest in-thread notice, or exact guidance when the build belongs to another chat).
+- **#883** — preview speed + honesty: live-sandbox file reads bounded to 2.5s with durable
+  fallback (cold-open in-browser preview ~10-30s → ~1-3s), per-instance render cache keyed by
+  content hash, streamed stage-based Diagnose progress (real %, seconds heartbeat, never
+  time-faked), elapsed counters + slow-notes, live-iframe onLoad strip.
+- **#886 — Project Landing Pipeline phase 1 (admin master plan).** A .zip attached in v3.0 chat
+  used to be read as a DOCUMENT (text into context, never unpacked) → Files/IDE/Preview all
+  empty. New ProjectImport.ts (zip-slip guard, root-strip, honest skip counts, secrets NEVER
+  imported, framework detection to FrameworkPicker ids; 16 tests) + chat-route landing: dual
+  write (E2B + durable), files_restored, framework lock, edit-mode force, memory index,
+  background preview boot with honest outcome, survey-not-scaffold context.
+- **#890 — phases 2/3.** GitHub repo import (composer "GitHub / URL") now lands through the SAME
+  shared landImportedProject pipeline (it used to clone into the sandbox and stop — no durable
+  persist/framework/preview). Chat early-exit guard covers import turns. AppKnowledgeBase
+  entries added for both import doors (agentv3_zip_import, agentv3_github_import).
+
+Gate on every PR: tsc (app+server) 0 errors, vitest green (4385→4439 tests), build + boot:check
+PASS, CI green before merge.

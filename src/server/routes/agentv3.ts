@@ -4049,6 +4049,29 @@ export function registerAgentV3Routes(app: Express): void {
             // above is truncated to a 400-char timeline line, this keeps the complete findings.
             try { buildDiag.recordReview(reviewText); } catch { /* best-effort */ }
           }
+          // C9 — the reviewer's CRITICAL findings are no longer merely advisory: FIX them in the same
+          // build. A [CRITICAL] means a feature is missing or broken (e.g. the calculator's Operator
+          // logic bug a real report's reviewer caught but never fixed). This complements the Sonnet
+          // judge (#876, which only guards CHEAP-floor builds) — the reviewer runs on every agentic
+          // build, so this catches a strong build's critical bug too. ONE bounded repair pass, gated by
+          // autoFixEnabled(), best-effort — never blocks/fails the build; the fix's writes are saved.
+          const criticals = (review.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
+          if (criticals.length && autoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted) {
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${criticals.length} critical issue(s) — fixing them now…`, ts: Date.now() });
+            const critFixRunner = new AgentRunner({
+              ...baseRunnerOpts,
+              client: buildTurnRunner({ claudeFirst: true }),
+              model: resolveModel(onlyOpus),
+              persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+            });
+            try {
+              const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, criticals)), 120_000, 'reviewer-critical-autofix');
+              if (fix.ok) result = fix;
+              // Persist the repair's writes (the reviewer runs AFTER the main save, so save again).
+              if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${criticals.length} reviewer critical issue(s)`, autoResolved: true }); } catch { /* best-effort */ }
+            } catch (e) { console.log(`[AGENTV3] reviewer-critical auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
+          }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }
 

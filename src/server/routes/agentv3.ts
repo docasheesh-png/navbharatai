@@ -81,7 +81,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
-import { hasTscErrors } from '../AgentV3/TscGate';
+import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -3730,8 +3730,18 @@ export function registerAgentV3Routes(app: Express): void {
       ) {
         const runTsc = async (): Promise<{ ok: boolean; errors: string }> => {
           try {
-            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
+            // ENSURE A TSCONFIG FIRST: an imported/older project can have NO tsconfig.json, in which case
+            // `tsc --noEmit` prints its HELP page and exits 0 — a FALSE "clean" pass while real type
+            // errors (e.g. a missing enum export) slip through to a blank-screen runtime crash (seen in a
+            // real report). For a TS project (a .ts/.tsx under src) with no config, write a minimal,
+            // PERMISSIVE tsconfig (strict:false, skipLibCheck) so tsc actually verifies — without
+            // introducing new strictness errors. Never overwrites an existing config. Best-effort.
+            const ensureCfg = "if [ ! -f tsconfig.json ] && [ ! -f tsconfig.app.json ] && find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | head -1 | grep -q .; then printf '%s' '{\"compilerOptions\":{\"target\":\"ES2020\",\"lib\":[\"ES2020\",\"DOM\",\"DOM.Iterable\"],\"module\":\"ESNext\",\"moduleResolution\":\"bundler\",\"jsx\":\"react-jsx\",\"strict\":false,\"skipLibCheck\":true,\"noEmit\":true,\"esModuleInterop\":true,\"allowSyntheticDefaultImports\":true,\"isolatedModules\":true},\"include\":[\"src\"]}' > tsconfig.json; fi";
+            const r = await actuator.runCommand(workspaceId, `${ensureCfg}; if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+            // A help-page result means tsc STILL didn't really run (e.g. no src TS files) — treat as
+            // "unverified, don't block", never as a clean pass (no fake success).
+            if (looksLikeTscHelpOutput(out)) return { ok: true, errors: '' };
             return hasTscErrors(out) ? { ok: false, errors: out.slice(0, 6000) } : { ok: true, errors: '' };
           } catch {
             return { ok: true, errors: '' }; // couldn't verify (no real sandbox / tooling) → don't block

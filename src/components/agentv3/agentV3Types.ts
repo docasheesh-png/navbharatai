@@ -50,6 +50,7 @@ export type AgentV3WireEvent =
   | { type: 'todo_updated'; todos: TodoItem[]; ts: number }
   | { type: 'plan_updated'; plan: string; ts: number }
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
+  | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }

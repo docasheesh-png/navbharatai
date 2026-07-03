@@ -486,6 +486,65 @@ describe('AgentRunner — empty-build detection (fake-success fix)', () => {
   });
 });
 
+describe('AgentRunner — evidence-based step-limit verdict (working app ≠ failure)', () => {
+  const looping = {
+    content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }],
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+
+  function cappedRunner(opts: { readiness?: boolean; readinessGate?: boolean; expectsArtifacts?: boolean }, events?: AgentEvent[]) {
+    const stream = new AgentEventStream();
+    if (events) stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const dispatcher = {
+      dispatch: async (tu: { id: string }) => ({ tool_use_id: tu.id, content: 'ok', is_error: false }),
+      assessBuildReadiness: async () =>
+        opts.readiness
+          ? { score: 92, ready: true, blockers: [] as string[], warnings: [] as string[] }
+          : { score: 35, ready: false, blockers: ['blank preview — the app does not render'], warnings: [] as string[] },
+    };
+    const client = new ClaudeClient(scriptedClient(Array.from({ length: 6 }, () => looping)));
+    return new AgentRunner({
+      client, dispatcher: dispatcher as never, state, events: stream,
+      model: 'm', system: 's', tools: defaultToolCatalog(),
+      maxSteps: 2,
+      expectsArtifacts: opts.expectsArtifacts ?? true,
+      readinessGate: opts.readinessGate ?? false,
+    });
+  }
+
+  it('a build that WROTE files and then hit the cap is ok:true (files saved, resumable) — no gate', async () => {
+    const result = await cappedRunner({}).run('build an app');
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain('Step limit');
+    expect(result.summary).toMatch(/saved/i);
+  });
+
+  it('with the readiness gate ON, the cap verdict is EARNED: ready → ok:true with the health card', async () => {
+    const events: AgentEvent[] = [];
+    const result = await cappedRunner({ readiness: true, readinessGate: true }, events).run('build an app');
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain('READY');
+    const done = events.find((e) => e.type === 'done') as { readiness?: { ready: boolean; score: number } } | undefined;
+    expect(done?.readiness?.ready).toBe(true);
+    expect(done?.readiness?.score).toBe(92);
+  });
+
+  it('with the readiness gate ON, a NOT-ready capped build stays an honest ok:false', async () => {
+    const result = await cappedRunner({ readiness: false, readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('NOT ready');
+    expect(result.summary).toContain('blank preview');
+  });
+
+  it('a capped NON-build run (no artifacts expected) keeps the old honest failure', async () => {
+    const result = await cappedRunner({ expectsArtifacts: false }).run('chat that loops');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('Stopped without completing');
+  });
+});
+
 describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
   // A stub dispatcher with a controllable readiness verdict, isolating the gate's
   // ok-downgrade logic from the full evaluate scan.

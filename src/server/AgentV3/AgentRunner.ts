@@ -499,10 +499,36 @@ export class AgentRunner {
         await persist('running');
       }
 
-      const summary = `Step limit reached (${maxSteps}). Stopped without completing.`;
-      await persist('stopped');
-      events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-      return { ok: false, summary, steps, usage, billedUsd: billed() };
+      // Step cap — judge by EVIDENCE, not by how the loop ended. The old unconditional ok:false
+      // reported a build whose files were written (and whose compile/readiness checks pass) as a
+      // FAILURE just because the model kept polishing until the cap — the "working app shown as
+      // failed" bug from the admin's build diagnostics. The wall-clock watchdog above already
+      // treats builtSomething as success; this exit now applies the SAME policy, and when the
+      // readiness gate is enabled the success claim must still be EARNED by the objective scan.
+      {
+        const builtSomething = totalToolUses > 0;
+        let ok = expectsArtifacts && builtSomething;
+        let summary = ok
+          ? `Step limit reached (${maxSteps}) — stopping here. Your files are saved; send another message to continue.`
+          : `Step limit reached (${maxSteps}). Stopped without completing.`;
+        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+        if (ok && readinessGate) {
+          try {
+            const readiness = await dispatcher.assessBuildReadiness();
+            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+            if (readiness.ready) {
+              summary = `Step limit reached (${maxSteps}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
+            } else {
+              ok = false;
+              const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
+              summary = `Step limit reached (${maxSteps}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+            }
+          } catch { /* gate is best-effort — a scan error never flips the evidence verdict */ }
+        }
+        await persist(ok ? 'complete' : 'stopped');
+        events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
+        return { ok, summary, steps, usage, billedUsd: billed() };
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await persist('error');

@@ -7544,3 +7544,18 @@ traversal-safe, +7 tests); all four actuators delegate to it — the 4-way copy 
 
 Next slices (same rebuild): self-healing preview + loop-breaker; shared verification ledger
 (sub-agent redundancy).
+
+## 2026-07-03 — Deep rebuild slice 3: self-healing preview + hard loop-breaker
+
+The diagnostics' single biggest time sink (~10 min + the step cap): the model ran `npm run dev` as a
+plain foreground bash (returns in ~2s, process dies), then looped update_preview × 14 + curl/ps/pgrep
+until the cap. Two root fixes in `update_preview` (ToolDispatcher):
+1. SELF-HEAL — preview no longer depends on the model having started the dev server correctly. Port
+   down + node project → the tool itself launches the dev server through the actuator's managed
+   long-running path (backgrounded, deps check, port pin, recovery), then re-polls. Bounded (240s cap).
+2. LOOP-BREAKER — cross-call state on the dispatcher: first definitive failure allows ONE more bounded
+   retry; the second sets gave-up; every later call short-circuits instantly with a FINAL "stop
+   retrying, finish the build, tell the user honestly" instruction. No more step-cap burn on an
+   unreachable preview. "Preview is EARNED" unchanged (no URL published on a dead port).
++3 tests (self-heal round-trip, 2-strike loop-breaker + instant FINAL, static-project skip).
+Gate: tsc 0/0, vitest 4469/4469 PASS, boot PASS.

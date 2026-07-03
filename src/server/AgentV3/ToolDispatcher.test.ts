@@ -482,6 +482,102 @@ describe('ToolDispatcher', () => {
     }
   });
 
+  it('update_preview SELF-HEALS: port down → managed dev-server start → port up → published', async () => {
+    vi.useFakeTimers();
+    try {
+      // Port is DOWN until the managed `npm run dev` has been launched, then UP — the exact
+      // "server died because the model ran it as a foreground bash" scenario from the diagnostics.
+      let devStarted = false;
+      const commands: string[] = [];
+      const healing = {
+        readFile: async (_w: string, p: string) => {
+          if (p === 'package.json') return '{"scripts":{"dev":"vite"}}';
+          throw new Error(`ENOENT: ${p}`);
+        },
+        writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act),
+        runCommand: async (_w: string, command: string) => {
+          commands.push(command);
+          if (command.includes('npm run dev')) { devStarted = true; return { exitCode: 0, stdout: 'VITE ready', stderr: '' }; }
+          if (command.includes('PORT_UP')) return { exitCode: 0, stdout: devStarted ? 'PORT_UP' : 'PORT_DOWN', stderr: '' };
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+        getPortUrl: async (_w: string, port: number) => `https://sandbox-${port}.example.dev`,
+      };
+      const dd = new ToolDispatcher(healing, 'ws-1', state, stream);
+      const p = dd.dispatch(call('update_preview', { port: 5173 }));
+      await vi.advanceTimersByTimeAsync(9_000); // 6s failing poll → heal → next poll sees PORT_UP
+      const res = await p;
+      expect(res.is_error).toBe(false);
+      expect(res.content).toContain('Live preview published');
+      expect(commands.some((c) => c.includes('PORT=5173 npm run dev'))).toBe(true);
+      expect(events.find((e) => e.type === 'preview')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('update_preview LOOP-BREAKER: two definitive failures → gave-up, third call short-circuits FINAL', async () => {
+    vi.useFakeTimers();
+    try {
+      const deadPort = {
+        readFile: async (_w: string, p: string) => {
+          if (p === 'package.json') return '{"scripts":{"dev":"vite"}}';
+          throw new Error(`ENOENT: ${p}`);
+        },
+        writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act),
+        runCommand: async (_w: string, command: string) =>
+          command.includes('PORT_UP')
+            ? { exitCode: 0, stdout: 'PORT_DOWN', stderr: '' }
+            : { exitCode: 0, stdout: '', stderr: '' },
+        getPortUrl: async (_w: string, port: number) => `https://sandbox-${port}.example.dev`,
+      };
+      const dd = new ToolDispatcher(deadPort, 'ws-1', state, stream);
+
+      const p1 = dd.dispatch(call('update_preview', { port: 5173 }));
+      await vi.advanceTimersByTimeAsync(20_000);
+      const r1 = await p1;
+      expect(r1.content).toContain('ONE more time'); // first failure — one bounded retry allowed
+
+      const p2 = dd.dispatch(call('update_preview', { port: 5173 }, 't2'));
+      await vi.advanceTimersByTimeAsync(20_000);
+      const r2 = await p2;
+      expect(r2.content).toContain('Do NOT retry'); // second failure — definitive, stop retrying
+
+      // Third call must NOT poll/heal again — it short-circuits instantly (no timer advance needed).
+      const r3 = await dd.dispatch(call('update_preview', { port: 5173 }, 't3'));
+      expect(r3.content).toContain('FINAL');
+      expect(r3.content).toContain('Do NOT call update_preview');
+      // No fake-success preview was ever emitted.
+      expect(events.find((e) => e.type === 'preview')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('update_preview skips the managed dev-server start for a static (no package.json) project', async () => {
+    vi.useFakeTimers();
+    try {
+      const commands: string[] = [];
+      const staticProj = {
+        readFile: async (_w: string, p: string) => { throw new Error(`ENOENT: ${p}`); },
+        writeFile: act.writeFile.bind(act), listFiles: act.listFiles.bind(act),
+        runCommand: async (_w: string, command: string) => {
+          commands.push(command);
+          return command.includes('PORT_UP') ? { exitCode: 0, stdout: 'PORT_DOWN', stderr: '' } : { exitCode: 0, stdout: '', stderr: '' };
+        },
+        getPortUrl: async (_w: string, port: number) => `https://sandbox-${port}.example.dev`,
+      };
+      const dd = new ToolDispatcher(staticProj, 'ws-1', state, stream);
+      const p = dd.dispatch(call('update_preview', { port: 8080 }));
+      await vi.advanceTimersByTimeAsync(10_000);
+      const res = await p;
+      expect(res.content).toContain('WARNING');
+      expect(commands.some((c) => c.includes('npm run dev'))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('update_preview maps an *.e2b.app sandbox host to a configured custom preview domain (§12)', async () => {
     const prev = process.env.E2B_PREVIEW_DOMAIN;
     process.env.E2B_PREVIEW_DOMAIN = 'mitrify.xyz'; // custom domain configured → swap applies

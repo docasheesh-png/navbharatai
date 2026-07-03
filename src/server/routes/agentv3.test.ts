@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -36,6 +36,31 @@ describe('conversationAccess (D7 ownership gate)', () => {
     // has no real owner; its unguessable id is the capability.
     expect(conversationAccess({ userId: 'anon' }, 'u1')).toBe('ok');
     expect(conversationAccess({ userId: 'anon' }, null)).toBe('ok');
+  });
+});
+
+describe('resolveIdentityWithFallback — the "history opens to 0 messages" regression lock', () => {
+  it('uses the VERIFIED identity when the token verified — and it OVERRIDES a (possibly spoofed) claimed id', () => {
+    // Token present + valid → the verified uid/email win, ignoring whatever the client claimed.
+    expect(resolveIdentityWithFallback({ uid: 'real', email: 'real@x.com' }, 'spoofed', 'spoof@x.com'))
+      .toEqual({ userId: 'real', email: 'real@x.com' });
+  });
+
+  it('falls back to the CLAIMED id when the token did NOT verify (the transient-failure path)', () => {
+    // verifyIdToken returned null (expired/again-refreshed token, admin-SDK cert hiccup, cold start).
+    // WITHOUT this fallback the conversation routes returned userId=null → list 400'd + get-one 404'd
+    // → every history chat opened to "saved copy has 0 messages". Reverting to verified-only here
+    // reintroduces that bug — this test is the guard.
+    expect(resolveIdentityWithFallback(null, 'u1', 'u1@x.com')).toEqual({ userId: 'u1', email: 'u1@x.com' });
+  });
+
+  it('is fully anonymous (null identity) only when the token fails AND nothing was claimed', () => {
+    expect(resolveIdentityWithFallback(null, null, null)).toEqual({ userId: null, email: null });
+  });
+
+  it('a verified token with no email still wins over a claimed email (no email spoofing)', () => {
+    expect(resolveIdentityWithFallback({ uid: 'real', email: null }, 'x', 'claimed@x.com'))
+      .toEqual({ userId: 'real', email: null });
   });
 });
 

@@ -6,23 +6,20 @@ import os from 'os';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 
 const exec = promisify(execCb);
 
 const WORKSPACE_DIR = '/workspace';
 
 /**
- * Sanitize an agent-supplied relative path before it is interpolated into a shell command.
- * Drops traversal segments AND rejects shell metacharacters so the path can neither escape
- * the workspace nor break out of the command. Legitimate code-file paths are unaffected.
+ * Sanitize an agent-supplied path before it is interpolated into a shell command. Delegates to the
+ * shared normalizer (also accepts an absolute in-workspace path — the doubled-path root cause), then
+ * ADDITIONALLY rejects shell metacharacters so the path can neither escape the workspace nor break
+ * out of the command. Legitimate code-file paths are unaffected.
  */
 function safeRelPath(filePath: string): string {
-  const cleaned = String(filePath ?? '')
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter((s) => s && s !== '.' && s !== '..')
-    .join('/');
-  if (!cleaned) throw new Error(`Unsafe workspace path: ${JSON.stringify(filePath)}`);
+  const cleaned = toWorkspaceRelPath(filePath, WORKSPACE_DIR);
   if (/[`$"'\\;|&<>(){}\n\r*?]/.test(cleaned)) {
     throw new Error(`Unsafe characters in path: ${JSON.stringify(filePath)}`);
   }

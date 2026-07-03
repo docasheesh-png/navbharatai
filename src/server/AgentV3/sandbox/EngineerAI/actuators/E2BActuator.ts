@@ -714,8 +714,27 @@ export class E2BActuator implements IEngineerActuator {
 
   async browseUrl(workspaceId: string, url: string): Promise<{ html: string }> {
     const sandbox = await this.getSandbox(workspaceId);
-    // Try Playwright if installed, fall back to curl.
-    const playwrightScript = `node -e "
+
+    // Ensure the shared Playwright install (same one the screenshot path uses) has been kicked
+    // off, then wait briefly for it. This method used to run `node -e "require('playwright')"`
+    // from WORKSPACE_ROOT with no PLAYWRIGHT_BROWSERS_PATH — but Playwright lives under TOOLS_DIR,
+    // not the workspace, so the require ALWAYS failed and browseUrl silently degraded to a curl of
+    // the static HTML shell. The preview self-check then only ever saw the un-hydrated shell (never
+    // the client-rendered DOM), which made it both rubber-stamp broken apps and "heal" working ones.
+    // Bounded so a slow/failed install degrades to curl instead of hanging the self-check.
+    if (!this._playwrightReady.has(workspaceId)) {
+      this._kickoffPlaywright(sandbox, workspaceId);
+    }
+    const ready = await Promise.race([
+      this._playwrightReady.get(workspaceId)!,
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 60_000)),
+    ]).catch(() => false);
+
+    if (ready) {
+      // Rendered DOM via the real headless browser. Runs from TOOLS_DIR (where playwright is
+      // installed) with PLAYWRIGHT_BROWSERS_PATH set, exactly like the screenshot scripts — so
+      // `require('playwright')` resolves and Chromium actually launches.
+      const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
 const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
@@ -725,11 +744,13 @@ const {chromium}=require('playwright');
   await b.close();
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});
 " 2>/dev/null`;
-    const pw = await sandbox.commands.run(playwrightScript, {
-      cwd: WORKSPACE_ROOT, timeoutMs: 25_000,
-    });
-    if (pw.exitCode === 0 && pw.stdout.trim()) return { html: pw.stdout };
+      const pw = await sandbox.commands.run(playwrightScript, {
+        cwd: TOOLS_DIR, timeoutMs: 25_000,
+      }).catch(() => null);
+      if (pw && pw.exitCode === 0 && pw.stdout.trim()) return { html: pw.stdout };
+    }
 
+    // Fallback: raw HTML via curl (static shell only — no client-rendered DOM).
     const result = await sandbox.commands.run(
       `curl -s -L --max-time 20 -A "Mozilla/5.0" "${url}" 2>/dev/null | head -c 30000`,
       { cwd: WORKSPACE_ROOT, timeoutMs: 30_000 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renameSymbol, addComponentProp } from './CodemodeExecutor';
+import { renameSymbol, addComponentProp, insertPropBeforeInterfaceClose } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
 
 const file = (path: string, content: string): CodemodeFile => ({ path, content });
@@ -105,5 +105,57 @@ describe('addComponentProp', () => {
       'string',
     );
     expect(result.summary).toBeTruthy();
+  });
+
+  it('does NOT corrupt an interface whose body contains a nested object type (the [^}]* bug)', async () => {
+    // meta: { id: string } has an inner `}` that the old regex mistook for the interface close.
+    const content = 'interface CardProps {\n  meta: { id: string };\n  title: string;\n}\n';
+    const result = await addComponentProp([file('src/Card.tsx', content)], 'Card', 'onClick', '() => void', '() => {}');
+    expect(result.ok).toBe(true);
+    const after = result.changes[0]?.after ?? content;
+    // The new prop lands INSIDE the interface, before its real close; the nested type is intact.
+    expect(after).toContain('meta: { id: string };');
+    expect(after).toContain('title: string;');
+    expect(after).toContain('onClick?: () => void;');
+    // The nested `}` was NOT treated as the interface close: everything after it survives.
+    const idx = after.indexOf('onClick?');
+    expect(after.indexOf('title: string;')).toBeLessThan(idx); // title still precedes the inserted prop's close
+  });
+});
+
+describe('insertPropBeforeInterfaceClose (pure, brace-matched)', () => {
+  it('inserts before the MATCHING close, not the first nested one', () => {
+    const src = 'interface XProps {\n  a: { b: number };\n}\n';
+    const out = insertPropBeforeInterfaceClose(src, 'X', '  c: string;\n');
+    expect(out).toBe('interface XProps {\n  a: { b: number };\n  c: string;\n}\n');
+  });
+  it('leaves content unchanged when the interface is absent or braces are unbalanced', () => {
+    expect(insertPropBeforeInterfaceClose('const x = 1;', 'X', '  c: string;\n')).toBe('const x = 1;');
+    expect(insertPropBeforeInterfaceClose('interface XProps { a: {', 'X', '  c: string;\n')).toBe('interface XProps { a: {');
+  });
+  it('escapes a regex-special component name', () => {
+    // A `$`/`.` in the name must not blow up the RegExp.
+    expect(() => insertPropBeforeInterfaceClose('x', 'Foo.Bar', '  c: string;\n')).not.toThrow();
+  });
+});
+
+describe('renameSymbol — reference-aware (does not mangle same-named properties)', () => {
+  it('does NOT rename the property side of obj.oldName', async () => {
+    const src = 'const id = 1;\nuser.id = id;\nconst obj = { id };\n';
+    const result = await renameSymbol([file('a.ts', src)], 'id', 'key');
+    expect(result.ok).toBe(true);
+    const after = result.changes[0]?.after ?? src;
+    expect(after).toContain('const key = 1');   // the value binding IS renamed
+    expect(after).toContain('user.id = ');       // the PROPERTY access is NOT renamed
+    expect(after).not.toContain('user.key');     // regression guard
+  });
+
+  it('does NOT rename an object-literal key `{ oldName: value }`', async () => {
+    const src = 'const id = 5;\nconst payload = { id: id, name: "x" };\n';
+    const result = await renameSymbol([file('a.ts', src)], 'id', 'key');
+    const after = result.changes[0]?.after ?? src;
+    expect(after).toContain('const key = 5');
+    expect(after).toContain('id: key');   // KEY name stays `id`; only the value REFERENCE is renamed
+    expect(after).not.toContain('key: key');
   });
 });

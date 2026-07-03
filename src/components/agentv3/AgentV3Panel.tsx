@@ -665,6 +665,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 status: (data.status as string) || 'complete',
                 workspaceId: `${prefix}${sessionId}`,
                 updatedAt: data.lastUpdated ? (Date.parse(data.lastUpdated) || 0) : 0,
+                // Marked when a previous open PROVED this pre-rebuild session's transcript is gone
+                // everywhere — rendered honestly as lost instead of a chat that "won't open".
+                deadTranscript: data.deadTranscript === true,
               } as ConversationMeta;
             });
         } catch { /* best-effort — the conversation-store list still shows below */ }
@@ -785,11 +788,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (why) console.error('[v3-open] could not restore:', why, 'id=', id);
         setOpenChatError(
           (saved
-            ? 'This chat opened, but its saved copy has 0 messages (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.'
+            ? 'This is an OLD chat from before the history fix — its messages were destroyed by the earlier bug and cannot be recovered. It is now marked "Transcript lost" in the list. Your project files and memory are safe; every chat from today onward is saved permanently. Send a message to continue this project.'
             : 'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.')
           + (why ? `\n\nDiagnostic (send this to support): ${why}` : ''),
         );
         if (saved) {
+          // PROVABLY dead: no server record under any candidate id AND the legacy copy is empty —
+          // a pre-rebuild session the old eraser destroyed. Mark the row durably (metadata field —
+          // the single-writer rule only forbids transcript writes) so the list stops presenting it
+          // as an ordinary chat that mysteriously "won't open" on every future visit.
+          void setDoc(doc(db, 'chat_sessions', `v3_${sessionId}`), { deadTranscript: true }, { merge: true })
+            .catch(() => { /* best-effort */ });
+          setHistoryItems((prev) => prev.map((item) => (
+            item.id === `v3_${sessionId}` || item.id === id ? { ...item, deadTranscript: true } : item
+          )));
           // Still adopt the session so "send a message to continue" genuinely continues THIS project.
           sessionIdRef.current = sessionId;
           persistSessionId(sessionId);
@@ -1333,17 +1345,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                                 type="button"
                                 onClick={() => { if (!isDeleting) openConversation(c.id); }}
                                 disabled={isDeleting}
-                                title={c.title || 'Untitled build'}
-                                className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
+                                title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
+                                className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
                               >
                                 <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
-                                  <span className={`w-2 h-2 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} title={meta.label} />
+                                  <span className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''}`} title={meta.label} />
                                 </span>
                                 <span className="flex-1 min-w-0">
                                   <span className="block truncate">{c.title || 'Untitled build'}</span>
                                   <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
                                     {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
-                                    {meta.label && <span>{meta.label}</span>}
+                                    {c.deadTranscript
+                                      ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
+                                      : meta.label && <span>{meta.label}</span>}
                                     {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
                                   </span>
                                 </span>

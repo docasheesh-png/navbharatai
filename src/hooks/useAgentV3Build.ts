@@ -103,6 +103,12 @@ export interface ConversationMeta {
   billedUsd?: number;
   createdAt?: number;
   updatedAt?: number;
+  /**
+   * True when opening this session PROVED its transcript is gone everywhere (no server record,
+   * legacy copy 0 messages — a pre-rebuild session destroyed by the old session-switch eraser).
+   * The list renders it honestly as lost instead of an ordinary chat that "won't open".
+   */
+  deadTranscript?: boolean;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {

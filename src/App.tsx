@@ -1774,6 +1774,11 @@ export default function App() {
     if (!user) return;
     const session = sessions.find(s => s.id === currentSessionId);
     if (!session || !session.messages?.length) return;
+    // v3.0 (AgentV3) sessions are single-writer: their transcript lives ONLY in the server
+    // conversation store, and their chat_sessions row is metadata-only, written by AgentV3Panel.
+    // Never let this generic writer touch a v3_ doc — a stale full-doc write here would re-add a
+    // messages copy and reintroduce the transcript-corruption class of bugs.
+    if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
     clearTimeout(fsNBIDebounceRef.current);
     fsNBIDebounceRef.current = setTimeout(() => {
       const sessionRef = doc(db, 'chat_sessions', session.id);
@@ -1816,6 +1821,9 @@ export default function App() {
     if (!user) return;
     const session = sessions.find(s => s.id === currentProSessionId);
     if (!session || !session.messages?.length) return;
+    // v3.0 (AgentV3) docs are single-writer (server transcript + panel-owned metadata row) —
+    // same rule as the NBI writer above: this generic writer must never touch a v3_ doc.
+    if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
     clearTimeout(fsProDebounceRef.current);
     fsProDebounceRef.current = setTimeout(() => {
       const sessionRef = doc(db, 'chat_sessions', session.id);
@@ -4881,6 +4889,18 @@ ${buildLanguageRule(preferredLanguage)}`;
         await deleteDoc(doc(db, 'chat_sessions', id));
       } catch (err) {
         console.error('Error deleting session from Firestore:', err);
+      }
+      // A v3.0 session's transcript lives in the SERVER conversation store (single source of
+      // truth) — deleting only the chat_sessions metadata row would leave the real record behind,
+      // still listed inside the v3.0 History menu. The server resolves the v3_ id to its stored
+      // record(s) and removes them; owner-checked server-side. Best-effort.
+      if (id.startsWith('v3_')) {
+        try {
+          await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?userId=${encodeURIComponent(user.uid)}`, {
+            method: 'DELETE',
+            headers: await authedHeaders(),
+          });
+        } catch { /* best-effort — metadata row is already gone */ }
       }
     }
     if (currentSessionId === id) {

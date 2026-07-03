@@ -172,3 +172,43 @@ export function deriveTitle(prompt: string, max = 80): string {
   if (!oneLine) return 'Untitled build';
   return oneLine.length > max ? oneLine.slice(0, max - 1).trimEnd() + '…' : oneLine;
 }
+
+/**
+ * UPSERT one chat turn onto a conversation with a STABLE per-session id: the first turn of a
+ * session creates the record, every later turn appends to it. This is the ONE write shape used by
+ * every server-side history writer (build fast-lane fallback AND the plain-chat lane) so the
+ * server store stays the single source of truth for transcripts. Race-safe: if two turns race and
+ * both see "no record", the loser's create() throws on the duplicate id and is retried as an
+ * append instead of dropping the turn.
+ */
+export async function upsertConversationTurn(
+  store: ConversationStore,
+  opts: {
+    conversationId: string;
+    userId: string;
+    workspaceId: string;
+    title: string;
+    turn: unknown[];
+    patch: ConversationPatch;
+  },
+): Promise<void> {
+  const existing = await store.get(opts.conversationId).catch(() => null);
+  if (existing) {
+    await store.appendMessages(opts.conversationId, opts.turn, opts.patch);
+    return;
+  }
+  try {
+    await store.create({
+      id: opts.conversationId,
+      userId: opts.userId,
+      workspaceId: opts.workspaceId,
+      title: opts.title,
+      messages: opts.turn,
+      createdAt: opts.patch.updatedAt,
+    });
+    await store.update(opts.conversationId, opts.patch);
+  } catch {
+    // Lost a create race (or create is flaky): the record exists now — append the turn instead.
+    await store.appendMessages(opts.conversationId, opts.turn, opts.patch);
+  }
+}

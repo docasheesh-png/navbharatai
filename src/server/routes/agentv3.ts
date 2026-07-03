@@ -60,6 +60,7 @@ import { randomUUID } from 'crypto';
 import {
   InMemoryConversationStore,
   deriveTitle,
+  upsertConversationTurn,
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -1236,18 +1237,27 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const store = getConversationStore();
-      const rec = await store.get(req.params.id);
-      const access = conversationAccess(rec, userId);
-      if (access === 'not-found') {
-        res.json({ ok: true }); // already gone — idempotent
-        return;
+      // Resolve the SAME candidate ids the GET route uses (v3_<sid> → agentv3-<uid>-<sid> →
+      // agentv3-anon-<sid>) and remove EVERY accessible match — a history row deleted by its
+      // legacy v3_ id must actually delete the underlying server record(s), not silently no-op
+      // and reappear on the next list (the "ghost row" bug).
+      let removed = false;
+      let forbidden = false;
+      for (const cid of candidateConversationIds(req.params.id, userId)) {
+        const rec = await store.get(cid).catch(() => null);
+        const access = conversationAccess(rec, userId);
+        if (access === 'ok') {
+          await store.remove(cid);
+          removed = true;
+        } else if (access === 'forbidden') {
+          forbidden = true;
+        }
       }
-      if (access === 'forbidden') {
+      if (!removed && forbidden) {
         res.status(403).json({ error: 'This build belongs to another account.' });
         return;
       }
-      await store.remove(req.params.id);
-      res.json({ ok: true });
+      res.json({ ok: true }); // removed, or already gone — idempotent
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -2409,6 +2419,26 @@ export function registerAgentV3Routes(app: Express): void {
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
+        // HISTORY (single-source-of-truth rebuild): persist this chat turn to the SAME server
+        // ConversationStore every build turn uses. The plain-chat lane previously saved NOTHING
+        // server-side — the root reason the client kept its own (bug-prone) transcript copies in
+        // chat_sessions, which is what kept corrupting history. Runs AFTER the reply is flushed
+        // (no user-visible latency) and BEFORE res.end() — Cloud Run can throttle CPU once the
+        // response ends, so a fire-and-forget write here could be silently lost. Bounded +
+        // best-effort: a slow or failed store never affects the reply the user already has.
+        try {
+          await raceTimeout(upsertConversationTurn(getConversationStore(), {
+            conversationId: conversationIdForWorkspace(intentWorkspaceId),
+            userId: userId ?? 'anon',
+            workspaceId: intentWorkspaceId,
+            title: deriveTitle(prompt),
+            turn: [
+              { role: 'user', content: prompt },
+              { role: 'assistant', content: reply },
+            ],
+            patch: { status: 'complete', updatedAt: Date.now() },
+          }), 8_000, 'persistChatTurn');
+        } catch { /* persistence is best-effort — never blocks the reply */ }
         activeBuilds.delete(buildKey);
         if (!res.writableEnded) res.end();
         return;
@@ -3779,29 +3809,20 @@ export function registerAgentV3Routes(app: Express): void {
         const store = getConversationStore();
         const recentForUser = await store.listByUser(userId ?? 'anon', 10);
         if (needsFallbackConversationPersist(recentForUser, workspaceId, buildStartedAt)) {
-          const now = Date.now();
-          const turn = [
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: result.summary || '' },
-          ];
-          const patch = { status: result.ok ? ('complete' as const) : ('error' as const), billedUsd: result.billedUsd, updatedAt: now };
-          // UPSERT: the conversation id is now STABLE per session, so a later message in the same
-          // session must APPEND its turn to the existing conversation, not create() (which throws on a
-          // duplicate id and would silently drop the message). Create only the first time.
-          const existing = await store.get(mainConversationId).catch(() => null);
-          if (existing) {
-            await store.appendMessages(mainConversationId, turn, patch);
-          } else {
-            await store.create({
-              id: mainConversationId,
-              userId: userId ?? 'anon',
-              workspaceId,
-              title: deriveTitle(prompt),
-              messages: turn,
-              createdAt: now,
-            });
-            await store.update(mainConversationId, patch);
-          }
+          // UPSERT on the stable per-session id (shared helper — the ONE server write shape for
+          // history): first turn creates the record, later turns append; a create race retries
+          // as an append so a turn is never silently dropped.
+          await upsertConversationTurn(store, {
+            conversationId: mainConversationId,
+            userId: userId ?? 'anon',
+            workspaceId,
+            title: deriveTitle(prompt),
+            turn: [
+              { role: 'user', content: prompt },
+              { role: 'assistant', content: result.summary || '' },
+            ],
+            patch: { status: result.ok ? ('complete' as const) : ('error' as const), billedUsd: result.billedUsd, updatedAt: Date.now() },
+          });
         }
       } catch { /* fallback persistence is best-effort — never affects the build result */ }
 

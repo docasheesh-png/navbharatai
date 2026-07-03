@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
 
@@ -177,5 +177,39 @@ describe('groupSessionsByDate (history-menu grouping — a real session list, no
   it('treats a missing updatedAt as "now" (falls into Today)', () => {
     const groups = groupSessionsByDate<TestSession>([{ id: 'no-ts' }], now);
     expect(groups[0].label).toBe('Today');
+  });
+});
+
+describe('legacyPrependMessages', () => {
+  const legacy = [
+    { text: 'old question', isUser: true },
+    { text: 'old answer', isUser: false },
+  ];
+
+  it('prepends a disjoint legacy thread with negative position timestamps', () => {
+    const out = legacyPrependMessages(legacy, ['new question after the cutover']);
+    expect(out).toEqual([
+      { role: 'user', text: 'old question', ts: -2 },
+      { role: 'agent', text: 'old answer', ts: -1 },
+    ]);
+    // Every prepended ts sorts BEFORE the server transcript positions (1..N).
+    expect(out.every((m) => m.ts < 1)).toBe(true);
+  });
+
+  it('returns [] when the legacy copy overlaps the server transcript (old build sessions)', () => {
+    expect(legacyPrependMessages(legacy, ['old question', 'later prompt'])).toEqual([]);
+  });
+
+  it('returns [] when the server thread is empty (legacy-fallback path owns that case)', () => {
+    expect(legacyPrependMessages(legacy, [])).toEqual([]);
+  });
+
+  it('returns [] for an empty or blank legacy copy', () => {
+    expect(legacyPrependMessages([], ['q'])).toEqual([]);
+    expect(legacyPrependMessages([{ text: '   ', isUser: true }], ['q'])).toEqual([]);
+  });
+
+  it('ignores whitespace differences when checking overlap', () => {
+    expect(legacyPrependMessages([{ text: '  old question  ', isUser: true }], ['old question'])).toEqual([]);
   });
 });

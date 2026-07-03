@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryConversationStore, deriveTitle } from './ConversationStore';
+import { InMemoryConversationStore, deriveTitle, upsertConversationTurn } from './ConversationStore';
 
 const base = (over: Partial<{ id: string; userId: string; workspaceId: string; title: string; createdAt: number }> = {}) => ({
   id: over.id ?? 'build-1',
@@ -97,6 +97,59 @@ describe('InMemoryConversationStore', () => {
     const fresh = await store.get('build-1');
     expect(fresh?.messages).toHaveLength(1);
     expect(fresh?.status).toBe('running');
+  });
+});
+
+describe('upsertConversationTurn', () => {
+  const turnOpts = (over: Record<string, unknown> = {}) => ({
+    conversationId: 'agentv3-user1-sess1',
+    userId: 'user-1',
+    workspaceId: 'agentv3-user1-sess1',
+    title: 'hello there',
+    turn: [
+      { role: 'user', content: 'hello there' },
+      { role: 'assistant', content: 'hi! how can I help?' },
+    ],
+    patch: { status: 'complete' as const, updatedAt: 5000 },
+    ...over,
+  });
+
+  it('creates the record on the first turn of a session', async () => {
+    const store = new InMemoryConversationStore();
+    await upsertConversationTurn(store, turnOpts());
+    const rec = await store.get('agentv3-user1-sess1');
+    expect(rec?.userId).toBe('user-1');
+    expect(rec?.workspaceId).toBe('agentv3-user1-sess1');
+    expect(rec?.title).toBe('hello there');
+    expect(rec?.status).toBe('complete');
+    expect(rec?.messages).toHaveLength(2);
+  });
+
+  it('appends later turns to the existing record instead of failing on the duplicate id', async () => {
+    const store = new InMemoryConversationStore();
+    await upsertConversationTurn(store, turnOpts());
+    await upsertConversationTurn(store, turnOpts({
+      turn: [
+        { role: 'user', content: 'and another thing' },
+        { role: 'assistant', content: 'sure' },
+      ],
+      patch: { status: 'complete' as const, updatedAt: 6000 },
+    }));
+    const rec = await store.get('agentv3-user1-sess1');
+    expect(rec?.messages).toHaveLength(4);
+    expect(rec?.updatedAt).toBe(6000);
+    expect(rec?.title).toBe('hello there'); // first turn's title is kept
+  });
+
+  it('recovers from a lost create race by appending the turn', async () => {
+    const store = new InMemoryConversationStore();
+    // Simulate the race: get() sees nothing, but the record appears before create() runs.
+    const racy: typeof store = Object.create(store);
+    racy.get = async () => null;
+    await store.create({ id: 'agentv3-user1-sess1', userId: 'user-1', workspaceId: 'agentv3-user1-sess1', title: 't', messages: [{ role: 'user', content: 'first' }], createdAt: 1000 });
+    await upsertConversationTurn(racy, turnOpts());
+    const rec = await store.get('agentv3-user1-sess1');
+    expect(rec?.messages).toHaveLength(3); // seed + the raced turn, nothing dropped
   });
 });
 

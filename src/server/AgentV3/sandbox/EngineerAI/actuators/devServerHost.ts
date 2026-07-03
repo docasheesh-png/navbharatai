@@ -341,6 +341,23 @@ export function detectDevPort(output: string, fallback: number): number {
 }
 
 /**
+ * Decide whether the port the dev server ACTUALLY bound must be re-probed before the health
+ * verdict can be trusted.
+ *
+ * ROOT CAUSE of a real false-DOWN: the initial liveness poll targets the ASSUMED port, but when the
+ * server binds a DIFFERENT port (drift — e.g. a tool that ignores `--port`, or a non-strict server
+ * that hopped 5173→5174), a DOWN on the assumed port says nothing about the port the server is
+ * really on — yet the health line reports `boundPort`. The old inline guard `portUp && boundPort !==
+ * port` only re-probed when the ASSUMED port was already UP, so a drifted-but-healthy server whose
+ * assumed port was down got reported "did not come up on port {boundPort}" forever and the agent
+ * never published the working port. Re-probe whenever the bound port is a real, DIFFERENT port —
+ * independent of the assumed-port result. PURE + unit-testable.
+ */
+export function shouldReprobeBoundPort(assumedPort: number, boundPort: number): boolean {
+  return Number.isInteger(boundPort) && boundPort > 0 && boundPort !== assumedPort;
+}
+
+/**
  * Poll a TCP port until it is listening, returning the MOMENT it comes up instead
  * of sleeping a fixed wall-clock budget. A Vite/Next server that boots in 3 s no
  * longer costs the full fixed wait — across the many dev-server (re)starts in a

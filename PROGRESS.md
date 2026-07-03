@@ -7571,3 +7571,30 @@ counts), touching package.json invalidates "deps installed". SubAgent injects `v
 into every specialist's instruction ("ALREADY INSTALLED — do NOT re-run…"), so the team shares one
 verified state. Conservative-by-design: a stale claim can only cause one redundant run, never a
 skipped needed check. +7 tests. Gate: tsc 0/0, vitest 4476/4476 PASS, boot PASS.
+
+## NEXT PHASE (admin-ordered, 2026-07-04): BIG-APP IMPORT — "10GB-ready" tiered plan (NOT built yet)
+
+Admin: Replit/Bolt users will bring apps 20x bigger; be ready up to 10GB. Expert framing agreed in
+session: a 10GB export is ~99% node_modules/.git/builds/media — the pipeline already excludes those;
+only SOURCE must travel. So "10GB-ready" = extract source from a 10GB package WITHOUT uploading 10GB.
+
+TIER 1 (live today): chat-attach zip ≤15MB (base64) + GitHub import (#886/#890/#894/#897).
+  **GitHub is the RECOMMENDED big-app door**: Replit AND Bolt both one-click-push to GitHub; our
+  server-side `git clone --depth 1` never ships an archive at all — size of the export is irrelevant.
+  Surface this guidance in the UI when a too-big zip is picked.
+
+TIER 2 (build next): CLIENT-SIDE STREAMING PRE-FILTER for big zips. Use fflate's streaming unzip in
+the browser to read a multi-GB zip WITHOUT loading it into RAM, apply the SAME skip rules as
+ProjectImport (node_modules/.git/builds/secrets/binaries/900KB/2000 files), and send ONLY the
+resulting compact source map to the existing landing flow (a new /api/agentv3/import-land endpoint
+that wraps landImportedProject's steps: dual write + files_restored + framework + memory + preview
+boot — extract that closure into a callable module first). Client cap ~2GB zips (browser File API
+comfortably streams these). Honest progress UI (entries scanned / source found).
+
+TIER 3 (only if real demand): >2GB zips via GCS direct upload (signed URL from the client, Cloud
+Run streams-extracts from the bucket, then the same landing endpoint). New infra: bucket + lifecycle
++ signed-URL route. Do NOT build speculatively — Tier 1+2 cover the realistic Replit/Bolt cases.
+
+Also raise WorkspaceFiles MAX_FILES 2000→4000 to match zip.ts when Tier 2 lands (measure Firestore
+write cost first). Resume point: extract landImportedProject into src/server/AgentV3 module +
+/api/agentv3/import-land endpoint, then the fflate client filter in AgentV3Panel's addFiles zip path.

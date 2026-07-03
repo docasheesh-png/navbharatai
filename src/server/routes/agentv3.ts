@@ -64,6 +64,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
+import { isZipAttachment, extractZipProject, validateImportedProject, importSummaryLine } from '../AgentV3/ProjectImport';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2362,14 +2363,22 @@ export function registerAgentV3Routes(app: Express): void {
             (a: any) => a && typeof a.base64 === 'string' && a.base64 && typeof a.type === 'string',
           )
         : [];
+    // PROJECT LANDING PIPELINE, entry split (admin master plan): a .zip attached in chat is an
+    // APP IMPORT, not a document. It used to fall into the generic attachment path — its text was
+    // extracted into the model's CONTEXT and the archive was never unpacked into the workspace,
+    // so Files/IDE stayed empty and there was nothing to preview. Zips are diverted to the real
+    // import pipeline below (extract → validate → dual-write → preview boot); every OTHER
+    // attachment keeps the existing document/vision path.
+    const zipImports = rawAttachments.filter((a) => isZipAttachment(a));
+    const docAttachments = rawAttachments.filter((a) => !isZipAttachment(a));
     let attachmentContext = '';
-    if (rawAttachments.length > 0) {
-      send({ type: 'narration', agent: 'architect', text: `📎 Reading ${rawAttachments.length} file(s)…`, ts: Date.now() });
+    if (docAttachments.length > 0) {
+      send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
-        const docs = await buildDocumentContext(rawAttachments);
+        const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(rawAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
         // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content
@@ -2441,11 +2450,15 @@ export function registerAgentV3Routes(app: Express): void {
     if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt)) {
       intent = 'edit_existing';
     }
-    const isPlainChatTurn = intent === 'chat';
+    // A zip-import turn must NEVER take the cheap chat early-exit — the import pipeline (and the
+    // follow-up survey/edit) lives in the build path below.
+    const isPlainChatTurn = intent === 'chat' && zipImports.length === 0;
     // Surgical edit mode: the user is modifying an existing app (fix/change/update/
     // refactor/…), not building from scratch. When true, the build loop reads the
     // current files and makes minimum targeted edits instead of rebuilding everything.
-    const isEditMode = intent === 'edit_existing';
+    // `let` — a successful zip import below forces edit mode so the turn works WITH the imported
+    // app instead of scaffolding a fresh build over it.
+    let isEditMode = intent === 'edit_existing';
     if (isPlainChatTurn) {
       try {
         // "Text reply > build app" (admin decision, 2026-07-01): the TRUE last-resort classifier
@@ -2623,8 +2636,79 @@ export function registerAgentV3Routes(app: Express): void {
       const evt = e as { type?: string; checkpoint?: unknown };
       if (evt?.type === 'checkpoint' && evt.checkpoint) saveCheckpoint(workspaceId, evt.checkpoint).catch(() => {});
     }, false);
-    const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
+    // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
+    let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
+
+    // ── PROJECT LANDING PIPELINE (zip → workspace) — admin master plan, phase 1 ──────────────
+    // The attached zip lands as a REAL project before the AI turn runs: extract + sanitize →
+    // validate → write to BOTH stores (E2B sandbox for the live preview, durable file store for
+    // Files/IDE/reopen) → adopt the detected framework → force edit mode. The live-preview boot
+    // (npm install + dev server) runs in the BACKGROUND so the AI's survey/edit reply streams
+    // immediately; the boot's honest outcome lands in the same stream when it finishes, and the
+    // finally awaits it so Cloud Run can't throttle it away mid-install.
+    let importPreviewBoot: Promise<void> | undefined;
+    if (zipImports.length > 0) {
+      try {
+        emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
+        const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
+        const validation = validateImportedProject(extracted.files);
+        if (!validation.ok) {
+          emit({ type: 'narration', agent: 'architect', text: `⚠️ ${validation.issues.join(' ')}`, ts: Date.now() });
+        } else {
+          // Best-effort: an 'import'-type workspace starts EMPTY so the imported app never gets
+          // template scaffold files mixed in (mirrors the import-files route).
+          try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
+          const { written } = await writeWorkspaceFiles(actuator, workspaceId, extracted.files);
+          // DURABLE PERSIST — the other half of the dual write: without it the import lives only
+          // in the ephemeral sandbox and Files/IDE/reopen show nothing (the reported bug).
+          try { await mergeWorkspaceFiles(workspaceId, extracted.files); } catch { /* durable persist is best-effort */ }
+          framework = validation.framework;
+          isEditMode = true;
+          emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
+          emit({
+            type: 'narration', agent: 'architect', ts: Date.now(),
+            text: importSummaryLine(extracted, framework) + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
+          });
+          // Project memory: the import is a durable fact of this session, and the imported
+          // sources are indexed so the very first edit request works with real context.
+          try {
+            const mem = getWorkspaceMemory(workspaceId);
+            mem.recordNote(`Imported an existing app from a zip: ${written.length} files, framework ${framework}.`);
+            for (const [p, c] of Object.entries(extracted.files).slice(0, 300)) mem.indexFile(p, c);
+            void saveWorkspaceMemory(workspaceId, mem.snapshot()).catch(() => {});
+          } catch { /* memory is best-effort */ }
+          // The AI turn must work WITH the landed app — never scaffold over it, and answer a
+          // plain "read/analyze my zip" ask with an honest survey of the real files.
+          attachmentContext += `\n\n[APP IMPORT — already completed] The user's attached zip has ALREADY been unpacked into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze the zip, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
+          // Background live-preview boot (the actuator handles install + start + health-check).
+          if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
+            const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+            importPreviewBoot = (async () => {
+              try {
+                emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
+                const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 120_000, 'import-preview-boot');
+                const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
+                const { up, port } = parseDevServerHealthCheck(combined);
+                if (up) {
+                  const bootPort = port ?? oneShotDevPort(framework);
+                  const bootUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, bootPort), 10_000, 'import-preview-url'));
+                  if (bootUrl) emitLive({ type: 'preview', url: bootUrl, ts: Date.now() });
+                  emitLive({ type: 'narration', agent: 'architect', text: `✅ Live preview is up on port ${bootPort} — open the Preview tab (Live server).`, ts: Date.now() });
+                } else {
+                  emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview did not boot automatically — the In-browser preview works from your imported files, and the Preview tab\'s Diagnose button shows the exact boot log.', ts: Date.now() });
+                }
+              } catch {
+                emitLive({ type: 'narration', agent: 'architect', text: '⚠️ The live preview setup ran out of time — use the In-browser preview, or press Diagnose in the Preview tab to boot it with a visible log.', ts: Date.now() });
+              }
+            })();
+          }
+        }
+      } catch (err) {
+        emit({ type: 'narration', agent: 'architect', text: `⚠️ Could not unpack the zip (${err instanceof Error ? err.message : String(err)}) — nothing was imported. Please re-export the archive and try again.`, ts: Date.now() });
+      }
+    }
     // ETERNAL SESSIONS: persist this turn's evidence layer onto the conversation record — the
     // compact timeline recorded by the emit tap above, the terminal facts (billing/tokens/build
     // health) for the done-footer, and the session's framework (so a reopened session's follow-up
@@ -4427,6 +4511,12 @@ export function registerAgentV3Routes(app: Express): void {
           const sbId = await raceTimeout(actuator.getSandboxId(workspaceId), 5_000, 'getSandboxId').catch(() => null);
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
+      }
+      // A zip import's background preview boot must finish BEFORE the response ends — Cloud Run
+      // throttles CPU after the stream closes, which would silently kill the npm install mid-way.
+      // Bounded (the boot itself is already capped at 120s) + best-effort.
+      if (importPreviewBoot) {
+        await raceTimeout(importPreviewBoot, 125_000, 'importPreviewBoot').catch(() => {});
       }
       // ETERNAL SESSIONS: persist this turn's evidence layer (shared closure, delta-cursored —
       // also called by the hard-deadline finalizer whose builds never reach this finally). Runs

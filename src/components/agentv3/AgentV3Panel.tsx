@@ -350,6 +350,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
       // Adopt the durable framework so a reopened non-Vite session's follow-up build stays correct.
       if (restored.framework) setFramework(restored.framework);
+      // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
+      // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
+      if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
       // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
       // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
       // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
@@ -740,6 +743,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         // Adopt the session's durable framework so a follow-up build/edit/deploy on a reopened
         // non-Vite session doesn't silently reset to vite-react (the framework-reset defect).
         if (restored.framework) setFramework(restored.framework);
+        // REATTACH-ON-REOPEN (test #5): if THIS session's build is still running server-side (the
+        // user closed the tab/browser mid-build — the build keeps going by design), detect it now
+        // so the auto-resume effect re-attaches its live stream immediately — instead of the user
+        // discovering it via a "build already running" error when they try to type.
+        if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
         // Cross-cutover continuity: a pre-cutover session continued after the server became the
         // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
         // When that legacy copy is provably disjoint from the server transcript, show it in front;

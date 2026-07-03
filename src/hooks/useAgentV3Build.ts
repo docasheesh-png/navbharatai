@@ -54,7 +54,7 @@ export interface UseAgentV3Build {
   /** Re-attach to a build that is already running for this account (replays its events so the UI
    *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
    *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
-  resume: (opts?: { userId?: string; email?: string; workspaceId?: string }) => Promise<void>;
+  resume: (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string }) => Promise<void>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -442,12 +442,19 @@ export function useAgentV3Build(): UseAgentV3Build {
   // `workspaceId`, when given, must be the CALLER's current session — the server refuses to attach
   // if the running build belongs to a different session under the same account (see /attach route).
   // Omit it only for a truly account-wide manual "Resume" (no session context to check against).
-  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string }) => {
+  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string }) => {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
     setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
+    // An honest caller-supplied note shown at the top of the reattached stream (e.g. "your typed
+    // message was not sent — this build was already running"). Folded as a narration line so it
+    // survives the state reset above and reads in-thread, not as a scary error banner.
+    if (opts?.notice) {
+      const noticeEvent: AgentV3WireEvent = { type: 'narration', agent: 'architect', text: opts.notice, ts: Date.now() };
+      setState((prev) => agentV3Reducer(prev, noticeEvent));
+    }
     setError(null);
     setServerBuildRunning(false);
     setRunning(true);
@@ -654,11 +661,36 @@ export function useAgentV3Build(): UseAgentV3Build {
 
         if (!res.ok || !res.body) {
           let msg = `AgentV3 request failed (${res.status}).`;
+          let resumable = false;
           try {
             const j = await res.json();
             if (j && typeof j.error === 'string') msg = j.error;
+            resumable = (j as { resumable?: unknown })?.resumable === true;
           } catch {
             /* non-JSON error body */
+          }
+          // AUTO-REATTACH on "a build is already running" (test #5): the user closed the tab
+          // mid-build, reopened, and typed a message — their OWN build from before the reload is
+          // still running server-side. Dead-ending with "stop it first" hid a build they couldn't
+          // even see. When THIS session has a known workspace, re-attach its live stream instead
+          // (workspace-scoped — the attach route refuses a different session's build, so this can
+          // never hijack another chat). The typed message was NOT queued into the running build —
+          // the notice says so honestly, in-thread.
+          if (res.status === 409 && resumable && workspaceIdRef.current) {
+            setRunning(false);
+            await resume({
+              userId: opts?.userId,
+              email: opts?.email,
+              workspaceId: workspaceIdRef.current,
+              notice: 'Your build from before the reload was still running — I re-attached to it live below. The message you just typed was NOT sent to it; once the build finishes, send it again.',
+            });
+            return;
+          }
+          if (res.status === 409 && resumable) {
+            // A build is running for this account but in a DIFFERENT (or unknown) session —
+            // attaching it here would pour another chat's build into this one. Point the user at
+            // the right place instead of a dead end.
+            msg = 'A build from another chat on your account is still running. Open that chat from the ☰ History menu to watch or stop it, then try again here.';
           }
           setError(msg);
           setRunning(false);

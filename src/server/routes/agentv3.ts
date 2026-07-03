@@ -1547,6 +1547,22 @@ export function registerAgentV3Routes(app: Express): void {
     try {
       const actuator = buildActuator();
       const expectedPort = oneShotDevPort(framework);
+      // COLD-SANDBOX HYDRATION (fixes the bogus "No package.json found" on a perfectly-saved project):
+      // the Diagnose button is used precisely when the Live-server preview is empty — i.e. when the
+      // sandbox has idle-paused / expired / been recycled. Without this, getSandbox() spins up a FRESH
+      // EMPTY sandbox, the readFile('package.json') below fails, and we wrongly tell the user their
+      // intact project has no files. Resume the user's own sandbox and re-seed the durable files first,
+      // exactly like the chat build path (deriveWorkspaceId → ensureWorkspace(resumeSandboxId) → hydrate).
+      // Best-effort: on any failure we fall through to the structure check — never worse than today.
+      sendStage('Restoring your project into the sandbox', 6);
+      try {
+        const resumeSandboxId = sandboxResumeEnabled()
+          ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
+          : undefined;
+        await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        if (Object.keys(saved).length > 0) await writeWorkspaceFiles(actuator, workspaceId, saved);
+      } catch { /* hydration is best-effort — the structure check below still runs */ }
       // STRUCTURE VALIDATION FIRST — before spending 90 s trying to boot a server that CAN'T run.
       // Read package.json and confirm the project is actually runnable (valid JSON + a dev/start/serve
       // script). A missing/broken package.json is reported as a clear structural issue instead of the

@@ -12,7 +12,13 @@ export class FirestoreJobStore implements JobStore {
             admin.initializeApp({});
         }
         this.db = admin.firestore();
-        this.db.settings({ databaseId: firestoreDatabaseId() });
+        // Same shared-instance rule as FirestoreConversationStore: settings() may only be called
+        // once per process-wide Firestore instance, and every store passes the same databaseId —
+        // a second call throwing means it is already configured. Without this guard the
+        // constructor throw silently demoted job persistence to whatever fallback the caller had.
+        try {
+            this.db.settings({ databaseId: firestoreDatabaseId() });
+        } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
     }
 
     async saveJob(job: BuildJob): Promise<void> {

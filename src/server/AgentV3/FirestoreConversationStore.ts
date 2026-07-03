@@ -68,7 +68,19 @@ export class FirestoreConversationStore implements ConversationStore {
       admin.initializeApp({});
     }
     this.db = admin.firestore();
-    this.db.settings({ databaseId: firestoreDatabaseId() });
+    // The default Firestore instance is SHARED by every store in this process, and settings()
+    // may only be called ONCE on it — whichever store initializes first wins the call. Every
+    // store passes the same firestoreDatabaseId(), so a second settings() throwing simply means
+    // the instance is ALREADY pointed at the right database. This guard is what keeps durable
+    // history durable: letting the throw propagate made getConversationStore()'s catch demote
+    // the whole conversation store to IN-MEMORY for the life of the instance — transcripts then
+    // existed only in that instance's RAM ("history works while the tab is open, gone after a
+    // reload that lands on a fresh/recycled Cloud Run instance"). The other stores survive the
+    // same throw by caching their db reference BEFORE calling settings(); this constructor's
+    // exception instead discarded the store entirely.
+    try {
+      this.db.settings({ databaseId: firestoreDatabaseId() });
+    } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
   }
 
   private mainDoc(id: string) {

@@ -41,6 +41,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [kind, setKind] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
+  // Honest elapsed counter while the in-browser preview loads — "loading vs stuck" must be
+  // visible at a glance, with a slow-note once it crosses the typical fast path.
+  const [loadSeconds, setLoadSeconds] = useState(0);
+  useEffect(() => {
+    if (!loading) { setLoadSeconds(0); return; }
+    const started = Date.now();
+    const t = setInterval(() => setLoadSeconds(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [loading]);
+  // Live-server iframe load indicator: the sandbox page itself can take seconds to answer after
+  // a boot — show a thin working strip until the iframe actually finishes loading.
+  const [liveLoading, setLiveLoading] = useState(false);
   const [sandbox, setSandbox] = useState<{ livePreviewAvailable: boolean; actuator: string; previewDomainWarning: string | null } | null>(null);
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   // "Diagnose" — reuses the build loop's real dev-server boot sequence (install/pre-kill/start/
@@ -48,6 +60,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // reason the live preview isn't up (and self-heal + restore the URL when it actually comes up).
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagResult, setDiagResult] = useState<{ ok: boolean; reason: string; detail: string } | null>(null);
+  // Live progress of the streamed diagnose: REAL stage labels + stage-based percentage from the
+  // server (never a fake time-based bar) + a seconds heartbeat proving the boot is still alive.
+  const [diagStage, setDiagStage] = useState<{ label: string; pct: number; seconds: number } | null>(null);
   const [foundUrl, setFoundUrl] = useState<string>('');
 
   // A4: do NOT force the view to "live" just because a live URL arrived — that yanked the user off the
@@ -59,13 +74,44 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     if (!workspaceId) return;
     setDiagnosing(true);
     setDiagResult(null);
+    setDiagStage({ label: 'Contacting the sandbox', pct: 5, seconds: 0 });
     try {
       const res = await fetch('/api/agentv3/preview-diagnose', {
         method: 'POST',
         headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId, userId, email, framework }),
+        // stream:true → NDJSON: real stage events (+ seconds heartbeat during the long
+        // install/boot step) followed by the terminal result — so a 30-90s cold boot shows
+        // WHAT is happening and that it is alive, instead of one silent spinner.
+        body: JSON.stringify({ workspaceId, userId, email, framework, stream: true }),
       });
-      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data?.error === 'string' ? data.error : `server returned ${res.status}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let terminal: Record<string, unknown> | null = null;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt: { type?: string; label?: string; pct?: number; seconds?: number } & Record<string, unknown>;
+          try { evt = JSON.parse(line); } catch { continue; }
+          if (evt.type === 'stage' && typeof evt.label === 'string') {
+            setDiagStage((prev) => ({ label: evt.label as string, pct: typeof evt.pct === 'number' ? evt.pct : prev?.pct ?? 0, seconds: prev?.seconds ?? 0 }));
+          } else if (evt.type === 'tick' && typeof evt.seconds === 'number') {
+            setDiagStage((prev) => (prev ? { ...prev, seconds: evt.seconds as number } : prev));
+          } else if (evt.type === 'result') {
+            terminal = evt;
+          }
+        }
+      }
+      const data = terminal ?? {};
       const reason = typeof data?.reason === 'string' ? data.reason : (typeof data?.error === 'string' ? data.error : 'Diagnosis failed — no details returned.');
       const detail = typeof data?.detail === 'string' ? data.detail : '';
       setDiagResult({ ok: !!data?.ok, reason, detail });
@@ -77,10 +123,14 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setDiagResult({ ok: false, reason: e instanceof Error ? e.message : 'Network error — could not reach the server.', detail: '' });
     } finally {
       setDiagnosing(false);
+      setDiagStage(null);
     }
   }, [workspaceId, userId, email, framework]);
 
   const effectiveUrl = url || foundUrl;
+  // Arm the live-iframe working strip whenever the live view (re)loads a URL; the iframe's own
+  // onLoad clears it — real load state, not a timer.
+  useEffect(() => { if (mode === 'live' && effectiveUrl) setLiveLoading(true); }, [mode, effectiveUrl, liveReloadKey]);
 
   const refreshSandbox = useCallback(async () => {
     try {
@@ -227,7 +277,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
         </div>
-        <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        {liveLoading && (
+          <div className="h-0.5 bg-zinc-800 overflow-hidden">
+            <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
+          </div>
+        )}
+        <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
       </div>
     );
   }
@@ -265,8 +320,24 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                       title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"
                     >
                       {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Stethoscope className="w-3.5 h-3.5" />}
-                      {diagnosing ? 'Diagnosing…' : 'Diagnose'}
+                      {diagnosing ? 'Starting the live server…' : 'Diagnose'}
                     </button>
+                  </div>
+                )}
+                {diagnosing && diagStage && (
+                  // REAL staged progress from the server stream (stage-based %, never time-faked) +
+                  // a live seconds counter proving the long install/boot step is still alive.
+                  <div className="mt-3 text-left space-y-1 max-w-sm mx-auto">
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                      <span className="truncate">{diagStage.label}…</span>
+                      <span className="shrink-0 pl-2 font-mono">{diagStage.pct}%{diagStage.seconds > 0 ? ` · ${diagStage.seconds}s` : ''}</span>
+                    </div>
+                    <div className="h-1.5 rounded bg-zinc-800 overflow-hidden">
+                      <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${diagStage.pct}%` }} />
+                    </div>
+                    {diagStage.seconds >= 30 && (
+                      <p className="text-[10px] text-zinc-600">A cold sandbox install can take up to ~90s — this is a real install, not a stuck screen.</p>
+                    )}
                   </div>
                 )}
                 {diagResult && (
@@ -310,7 +381,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
       )}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Building preview…</div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-zinc-500 text-sm">
+          <div className="flex items-center"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading files &amp; compiling preview…{loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}</div>
+          {loadSeconds >= 8 && (
+            <p className="text-[11px] text-zinc-600 max-w-xs text-center">Still working — the first load after a long gap fetches your saved files from storage, which can take a few extra seconds. Repeat opens are much faster.</p>
+          )}
+        </div>
       ) : err ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6">
           <Empty>Couldn't build the in-browser preview: {err}</Empty>

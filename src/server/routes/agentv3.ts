@@ -557,11 +557,20 @@ export function raceTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 async function collectFilesWithSavedFallback(
   actuator: IEngineerActuator,
   workspaceId: string,
+  opts?: { liveTimeoutMs?: number },
 ): Promise<{ files: Record<string, string>; skipped: string[]; source: 'live' | 'saved' }> {
   try {
-    const live = await collectWorkspaceFiles(actuator, workspaceId);
+    // READ paths (preview / files tab / visual edit) pass a short bound: on a COLD workspace the
+    // live collect first has to reconnect/create an E2B sandbox, which can take 10-30s before it
+    // fails — the whole reason "preview loading me bahut time lag raha hai". The durable saved
+    // files are written on every build/edit and are equally correct for reads, so when the live
+    // side isn't answering quickly we serve them instead. A WARM sandbox still answers well
+    // within the bound, so fresh mid-build files keep winning.
+    const live = opts?.liveTimeoutMs
+      ? await withTimeout(collectWorkspaceFiles(actuator, workspaceId), opts.liveTimeoutMs, 'collectFiles-live')
+      : await collectWorkspaceFiles(actuator, workspaceId);
     if (Object.keys(live.files).length > 0) return { files: live.files, skipped: live.skipped, source: 'live' };
-  } catch { /* live sandbox gone/empty/errored — fall through to the durable saved files */ }
+  } catch { /* live sandbox gone/empty/slow/errored — fall through to the durable saved files */ }
   const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
   return { files: saved, skipped: [], source: 'saved' };
 }
@@ -1502,11 +1511,39 @@ export function registerAgentV3Routes(app: Express): void {
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // STREAMED PROGRESS (opt-in via body.stream) — the boot legitimately takes 30-90s on a cold
+    // sandbox, and a single silent POST gave the user no way to tell "loading" from "stuck". The
+    // stream emits REAL stage events (stage-count-based percentages — never a fake time-based bar)
+    // plus a seconds heartbeat during the long install/boot stage, then the same terminal payload
+    // the JSON mode returns. Non-stream callers keep the original single-JSON contract.
+    const wantsStream = req.body?.stream === true;
+    let streaming = false;
+    const sendStage = (label: string, pct: number): void => {
+      if (streaming && !res.writableEnded) res.write(JSON.stringify({ type: 'stage', label, pct }) + '\n');
+    };
+    const finish = (payload: Record<string, unknown>, status = 200): void => {
+      if (streaming) {
+        if (!res.writableEnded) {
+          res.write(JSON.stringify({ type: 'result', ...payload }) + '\n');
+          res.end();
+        }
+        return;
+      }
+      res.status(status).json(payload);
+    };
+    if (wantsStream) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      streaming = true;
+    }
     const diag = sandboxDiag();
     if (!diag.livePreviewAvailable) {
-      res.json({ ok: false, portListening: false, reason: 'Live server preview isn\'t available on this deployment — no cloud sandbox (E2B) is configured. Use the In-browser preview instead.', detail: '' });
+      finish({ ok: false, portListening: false, reason: 'Live server preview isn\'t available on this deployment — no cloud sandbox (E2B) is configured. Use the In-browser preview instead.', detail: '' });
       return;
     }
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
     try {
       const actuator = buildActuator();
       const expectedPort = oneShotDevPort(framework);
@@ -1514,23 +1551,35 @@ export function registerAgentV3Routes(app: Express): void {
       // Read package.json and confirm the project is actually runnable (valid JSON + a dev/start/serve
       // script). A missing/broken package.json is reported as a clear structural issue instead of the
       // mystery "Closed Port Error: no service on port 5173" the admin hit.
+      sendStage('Checking the project structure', 10);
       const pkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
       const structure = validateProjectForPreview(pkgRaw);
       if (!structure.ok) {
-        res.json({ ok: false, portListening: false, reason: structure.issues.join(' '), detail: '' });
+        finish({ ok: false, portListening: false, reason: structure.issues.join(' '), detail: '' });
         return;
       }
       // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +
       // one retry can legitimately take that long on a cold sandbox; a shorter cap would report a
       // false "could not reach the sandbox" for an install that's simply still running).
+      sendStage('Installing dependencies & starting the dev server', 35);
+      const bootStartedAt = Date.now();
+      if (streaming) {
+        heartbeat = setInterval(() => {
+          if (!res.writableEnded) res.write(JSON.stringify({ type: 'tick', seconds: Math.round((Date.now() - bootStartedAt) / 1000) }) + '\n');
+          else if (heartbeat) clearInterval(heartbeat);
+        }, 5_000);
+      }
       const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-diagnose');
+      if (heartbeat) clearInterval(heartbeat);
+      sendStage('Running the health check', 85);
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       const { up, port } = parseDevServerHealthCheck(combined);
       const boundPort = port ?? expectedPort;
       if (up) {
+        sendStage('Resolving the public preview URL', 95);
         let previewUrl: string | undefined;
         try { previewUrl = applyPreviewDomain(await withTimeout(actuator.getPortUrl(workspaceId, boundPort), 10_000, 'preview-diagnose-url')); } catch { /* URL resolution best-effort — the boot itself already succeeded */ }
-        res.json({
+        finish({
           ok: true,
           portListening: true,
           port: boundPort,
@@ -1540,7 +1589,7 @@ export function registerAgentV3Routes(app: Express): void {
         });
         return;
       }
-      res.json({
+      finish({
         ok: false,
         portListening: false,
         port: boundPort,
@@ -1548,7 +1597,8 @@ export function registerAgentV3Routes(app: Express): void {
         detail: combined.slice(-4000),
       });
     } catch (err) {
-      res.status(500).json({ ok: false, portListening: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox to diagnose the preview.', detail: '' });
+      if (heartbeat) clearInterval(heartbeat);
+      finish({ ok: false, portListening: false, reason: err instanceof Error ? err.message : 'Could not reach the sandbox to diagnose the preview.', detail: '' }, 500);
     }
   });
 
@@ -1901,7 +1951,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const actuator = buildActuator();
-      const { files, skipped } = await collectFilesWithSavedFallback(actuator, workspaceId);
+      const { files, skipped } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
@@ -1913,6 +1963,12 @@ export function registerAgentV3Routes(app: Express): void {
   // runtime renderers) and returns it for the client to render in an <iframe srcdoc>. This needs NO
   // running dev server, so it works even when the E2B sandbox preview is unavailable (the "Blocked
   // request" / sandbox-down case) — the second of the two preview paths the builder offers.
+  // In-browser preview render cache (see the RENDER CACHE note inside the route). Insertion-order
+  // Map doubles as a simple LRU-ish bound: oldest entry evicted once over MAX.
+  const inbrowserPreviewCache = new Map<string, { hash: string; html: string; kind: string; ts: number }>();
+  const INBROWSER_CACHE_TTL_MS = 5 * 60_000;
+  const INBROWSER_CACHE_MAX = 30;
+
   app.post('/api/agentv3/inbrowser-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -1931,12 +1987,11 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const actuator = buildActuator();
-      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId);
+      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       if (Object.keys(files).length === 0) {
         res.status(404).json({ error: 'No files to preview yet — build something first.' });
         return;
       }
-      const vfs = VirtualFileSystem.fromRecord(files);
       // The client's own origin (sent in the body, validated to an http/https URL) is used to load
       // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
       // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
@@ -1945,9 +2000,26 @@ export function registerAgentV3Routes(app: Express): void {
       const hdrHost = req.get('host');
       const hdrOrigin = hdrHost ? `${(req.headers['x-forwarded-proto'] as string) || req.protocol || 'https'}://${hdrHost}` : '';
       const previewOrigin = bodyOrigin || hdrOrigin || undefined;
+      // RENDER CACHE — reopening the preview with UNCHANGED files returns the identical compiled
+      // HTML, so a cached render is a pure speed win (zero quality trade-off: any file change
+      // produces a different hash → fresh render). Per-instance, bounded, TTL'd; keyed by the
+      // exact file contents + the origin baked into the HTML.
+      const cacheKey = `${workspaceId}|${previewOrigin ?? ''}`;
+      const filesHash = hashKey(Object.entries(files).flatMap(([p, c]) => [p, c]));
+      const cached = inbrowserPreviewCache.get(cacheKey);
+      if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true });
+        return;
+      }
+      const vfs = VirtualFileSystem.fromRecord(files);
       const html = renderPreview(vfs, previewOrigin);
       // Detect the renderer used so the client can label the mode honestly.
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
+      inbrowserPreviewCache.set(cacheKey, { hash: filesHash, html, kind, ts: Date.now() });
+      if (inbrowserPreviewCache.size > INBROWSER_CACHE_MAX) {
+        const oldest = inbrowserPreviewCache.keys().next().value;
+        if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
+      }
       res.json({ html, kind, count: Object.keys(files).length });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
@@ -1982,7 +2054,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const actuator = buildActuator();
-      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId);
+      const { files } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       const source = files[filePath];
       if (source == null) {
         res.status(404).json({ error: `${filePath} was not found in this workspace's current files.` });

@@ -67,6 +67,7 @@ export interface UseAgentV3Build {
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
   loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null>;
+  conversationLoadDiag: () => string | null;
   /**
    * List the user's saved v3.0 conversations (metadata only) for the history menu.
    * Always returns an honest result: `error` is set (and `items` is []) whenever the list
@@ -128,6 +129,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   // it; every async apply path re-checks it before calling setState and stops cold if it no longer
   // matches — so a stale resume/mirror can never silently repopulate a session the user has since left.
   const generationRef = useRef(0);
+  // Why the LAST loadConversation() returned null — so "opening an old chat shows 0 messages" stops
+  // being an opaque dead end. Every failure branch records a precise reason (HTTP 404 vs 403 vs empty
+  // vs network) that the panel surfaces in the error toast + console, turning a 5th guess into a fact.
+  const lastLoadDiagRef = useRef<string | null>(null);
   /** Has the session moved on since `gen` was captured? Named so every async apply site reads the
    *  same intent instead of re-deriving the ref comparison. */
   const isStale = (gen: number): boolean => gen !== generationRef.current;
@@ -297,6 +302,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // whatever's currently attached; the underlying server build, if any, keeps running in the background.
   const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null> => {
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
+    lastLoadDiagRef.current = null;
     try {
       const params = new URLSearchParams();
       if (userIdRef.current) params.set('userId', userIdRef.current);
@@ -310,17 +316,24 @@ export function useAgentV3Build(): UseAgentV3Build {
       let convoId = opts?.id;
       if (!convoId) {
         const listRes = await fetch(`/api/agentv3/conversations?${params.toString()}`, { headers: authHeaders });
-        if (!listRes.ok) return null;
+        if (!listRes.ok) { lastLoadDiagRef.current = `history list failed (HTTP ${listRes.status})`; return null; }
         const listJson = await listRes.json().catch(() => ({}));
         const recent = Array.isArray(listJson?.conversations) ? listJson.conversations[0] : undefined;
         convoId = recent?.id ? String(recent.id) : undefined;
       }
-      if (!convoId) return null;
+      if (!convoId) { lastLoadDiagRef.current = 'no conversation id to load (history was empty)'; return null; }
       const oneRes = await fetch(`/api/agentv3/conversations/${encodeURIComponent(convoId)}?${params.toString()}`, { headers: authHeaders });
-      if (!oneRes.ok) return null;
+      if (!oneRes.ok) {
+        // THE key signal: 404 = no server transcript stored for this session's candidate ids;
+        // 403 = the record exists but the verified/claimed identity does not own it; 400 = missing id.
+        const body = await oneRes.json().catch(() => ({} as { error?: string }));
+        lastLoadDiagRef.current = `server refused the transcript (HTTP ${oneRes.status}${body?.error ? `: ${body.error}` : ''}) for id ${convoId}`;
+        return null;
+      }
       const oneJson = await oneRes.json().catch(() => ({}));
       const conv = oneJson?.conversation as PersistedConversation | undefined;
-      if (!conv || !Array.isArray(conv.messages)) return null;
+      if (!conv || !Array.isArray(conv.messages)) { lastLoadDiagRef.current = 'server returned no conversation record (or a malformed one)'; return null; }
+      if (conv.messages.length === 0) lastLoadDiagRef.current = `transcript loaded but has 0 turns (id ${convoId})`;
       let next = initialAgentV3State();
       for (const e of conversationToEvents(conv)) next = agentV3Reducer(next, e);
       // Cold-resume fix: the live plan/todos were lost when the server instance recycled (~15-min
@@ -371,10 +384,15 @@ export function useAgentV3Build(): UseAgentV3Build {
       // this exact project/memory, AND the durable framework so a reopened non-Vite session's next
       // build doesn't silently reset to vite-react (the framework-reset defect from the reopen audit).
       return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework };
-    } catch {
+    } catch (e) {
+      lastLoadDiagRef.current = `network/exception while loading (${e instanceof Error ? e.message : String(e)})`;
       return null; // best-effort — never disrupt the panel on a load failure
     }
   }, []);
+
+  /** The reason the LAST loadConversation() failed (or null on success) — surfaced by the panel so an
+   *  "old chat won't open" is diagnosable in one click instead of an opaque "0 messages". */
+  const conversationLoadDiag = useCallback((): string | null => lastLoadDiagRef.current, []);
 
   const listConversations = useCallback(async (opts?: { userId?: string; email?: string }): Promise<{ items: ConversationMeta[]; error?: string }> => {
     const uid = opts?.userId ?? userIdRef.current;
@@ -774,5 +792,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

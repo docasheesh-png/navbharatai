@@ -914,6 +914,12 @@ export class ToolDispatcher {
         // Remember real failures so the team can recall what went wrong (error memory).
         if (exitCode !== 0) {
           getWorkspaceMemory(this.workspaceId).recordError(`bash failed (exit ${exitCode}): ${command}\n${stderr.slice(0, 300)}`);
+        } else {
+          // Verification ledger (slice 4): record successful installs/typechecks so delegated
+          // specialists don't redundantly re-run them (they receive verificationStatus()).
+          const mem = getWorkspaceMemory(this.workspaceId);
+          if (/\bnpm\s+(ci|install|i)\b/.test(command) || /\b(pnpm|yarn)\s+(install|add)\b/.test(command)) mem.markDepsInstalled();
+          if (/\btsc\b[^&|;]*--noEmit/.test(command)) mem.markTscClean();
         }
         return out;
       }

@@ -236,3 +236,43 @@ describe('warmIndexFiles (edit-session resume pre-indexing)', () => {
     expect(indexed).toEqual(['src/ok.ts']);
   });
 });
+
+describe('WorkspaceMemory — verification ledger (slice 4: no redundant install/tsc across the team)', () => {
+  it('is empty until something is verified', () => {
+    const mem = new WorkspaceMemory();
+    expect(mem.verificationStatus()).toBe('');
+  });
+
+  it('reports deps installed and tsc clean, prompt-ready', () => {
+    const mem = new WorkspaceMemory();
+    mem.markDepsInstalled();
+    mem.markTscClean();
+    const s = mem.verificationStatus();
+    expect(s).toContain('ALREADY INSTALLED');
+    expect(s).toContain('checked CLEAN');
+    expect(s).toContain('do not repeat verified work');
+  });
+
+  it('a file write AFTER a clean tsc downgrades the claim to "run tsc ONCE at the end"', () => {
+    const mem = new WorkspaceMemory();
+    mem.markTscClean();
+    mem.indexFile('src/App.tsx', 'export const x = 1;');
+    const s = mem.verificationStatus();
+    expect(s).not.toContain('checked CLEAN');
+    expect(s).toContain('run tsc ONCE at the end');
+  });
+
+  it('touching package.json invalidates "deps installed" (conservative by design)', () => {
+    const mem = new WorkspaceMemory();
+    mem.markDepsInstalled();
+    mem.indexFile('package.json', '{"dependencies":{}}');
+    expect(mem.verificationStatus()).not.toContain('ALREADY INSTALLED');
+  });
+
+  it('writing an ORDINARY file does NOT invalidate deps installed', () => {
+    const mem = new WorkspaceMemory();
+    mem.markDepsInstalled();
+    mem.indexFile('src/main.tsx', 'x');
+    expect(mem.verificationStatus()).toContain('ALREADY INSTALLED');
+  });
+});

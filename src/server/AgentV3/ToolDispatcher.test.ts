@@ -418,6 +418,23 @@ describe('ToolDispatcher', () => {
     expect(state.snapshot().terminalLines.length).toBe(1);
   });
 
+  it('bash records successful npm install / tsc --noEmit into the shared verification ledger (slice 4)', async () => {
+    const { getWorkspaceMemory, _clearWorkspaceMemory } = await import('./WorkspaceMemory');
+    _clearWorkspaceMemory();
+    act.commandResult = { exitCode: 0, stdout: 'ok', stderr: '' };
+    await d.dispatch(call('bash', { command: 'npm install' }));
+    await d.dispatch(call('bash', { command: 'npx tsc --noEmit' }, 't2'));
+    const status = getWorkspaceMemory('ws-1').verificationStatus();
+    expect(status).toContain('ALREADY INSTALLED');
+    expect(status).toContain('checked CLEAN');
+    // A FAILED tsc must not be recorded as clean.
+    _clearWorkspaceMemory();
+    act.commandResult = { exitCode: 2, stdout: '', stderr: 'TS2304' };
+    await d.dispatch(call('bash', { command: 'npx tsc --noEmit' }, 't3'));
+    expect(getWorkspaceMemory('ws-1').verificationStatus()).not.toContain('checked CLEAN');
+    _clearWorkspaceMemory();
+  });
+
   it('grep shells out with a quoted pattern', async () => {
     act.commandResult = { exitCode: 0, stdout: 'a.ts:1:foo', stderr: '' };
     const res = await d.dispatch(call('grep', { pattern: 'foo' }));

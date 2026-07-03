@@ -7559,3 +7559,15 @@ until the cap. Two root fixes in `update_preview` (ToolDispatcher):
    unreachable preview. "Preview is EARNED" unchanged (no URL published on a dead port).
 +3 tests (self-heal round-trip, 2-strike loop-breaker + instant FINAL, static-project skip).
 Gate: tsc 0/0, vitest 4469/4469 PASS, boot PASS.
+
+## 2026-07-03 — Deep rebuild slice 4: shared verification ledger (no redundant install/tsc)
+
+The diagnostics' second time sink: 3 delegated specialists = 941s (55% of the build), each starting
+blind — re-checking the workspace and re-running `npm install` + `npx tsc --noEmit` because nothing
+told them the work was already done. Fix: a verification ledger on WorkspaceMemory (per workspace) —
+the dispatcher's bash case records successful installs (`npm install|ci`, pnpm/yarn) and clean
+typechecks (`tsc --noEmit`, exit 0); any file write invalidates "tsc clean" (strict — same-ms write
+counts), touching package.json invalidates "deps installed". SubAgent injects `verificationStatus()`
+into every specialist's instruction ("ALREADY INSTALLED — do NOT re-run…"), so the team shares one
+verified state. Conservative-by-design: a stale claim can only cause one redundant run, never a
+skipped needed check. +7 tests. Gate: tsc 0/0, vitest 4476/4476 PASS, boot PASS.

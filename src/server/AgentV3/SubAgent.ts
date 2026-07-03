@@ -83,9 +83,18 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // Give the specialist the live project map (Phase 2) so it knows the codebase
     // the Architect has built so far — what files/components/routes exist and what
     // has failed — instead of working blind. Empty early in a build (no-op then).
-    const projectMap = getWorkspaceMemory(deps.workspaceId).projectMap();
-    const fullInstruction = projectMap
-      ? `Current project context:\n${projectMap}\n\n---\nYour task: ${instruction}`
+    // Plus the shared VERIFICATION LEDGER (slice 4): "deps already installed / tsc already
+    // clean" — the diagnostics showed each specialist re-running npm install + tsc from
+    // scratch because nothing told it the work was already done.
+    const mem = getWorkspaceMemory(deps.workspaceId);
+    const projectMap = mem.projectMap();
+    const verification = mem.verificationStatus();
+    const contextBlocks = [
+      projectMap ? `Current project context:\n${projectMap}` : '',
+      verification,
+    ].filter(Boolean);
+    const fullInstruction = contextBlocks.length
+      ? `${contextBlocks.join('\n\n')}\n\n---\nYour task: ${instruction}`
       : instruction;
 
     // Record the real lifecycle of this delegated run (Agent Health Monitor).

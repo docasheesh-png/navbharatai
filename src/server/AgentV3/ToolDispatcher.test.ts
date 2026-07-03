@@ -79,6 +79,35 @@ describe('ToolDispatcher', () => {
     expect(res.content).not.toContain('edit_file');
   });
 
+  it('write_files_batch records create vs modify honestly and warns on a wholesale overwrite', async () => {
+    // One brand-new file + one that already exists → the batch must record the second as a MODIFY
+    // and surface a full-rewrite warning naming it (not silently record both as "create").
+    act.files.set('src/Existing.tsx', 'old content');
+    const res = await d.dispatch(
+      call('write_files_batch', { files: [
+        { path: 'src/New.tsx', content: 'brand new' },
+        { path: 'src/Existing.tsx', content: 'REPLACED' },
+      ] }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('src/Existing.tsx')).toBe('REPLACED');
+    const changes = state.snapshot().files;
+    expect(changes).toContainEqual({ path: 'src/New.tsx', kind: 'create' });
+    expect(changes).toContainEqual({ path: 'src/Existing.tsx', kind: 'modify' });
+    expect(res.content).toContain('FULL-REWRITE WARNING');
+    expect(res.content).toContain('src/Existing.tsx');
+  });
+
+  it('write_files_batch on all-new files gives NO overwrite warning', async () => {
+    const res = await d.dispatch(
+      call('write_files_batch', { files: [{ path: 'a.ts', content: '1' }, { path: 'b.ts', content: '2' }] }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(res.content).not.toContain('FULL-REWRITE WARNING');
+  });
+
   it('generate_openapi writes an OpenAPI 3.0.3 contract from the given routes', async () => {
     const res = await d.dispatch(
       call('generate_openapi', { routes: [{ method: 'GET', path: '/users/:id', summary: 'Get a user' }], title: 'My API' }),

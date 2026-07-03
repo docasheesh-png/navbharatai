@@ -776,20 +776,32 @@ export class ToolDispatcher {
         // Sort by import dependencies: files that import others go after their deps.
         const sorted = topoSortBatch(batchFiles);
         const written: string[] = [];
+        const overwritten: string[] = []; // existing files this batch REPLACED wholesale
         const batchMem = getWorkspaceMemory(this.workspaceId);
         for (const file of sorted) {
+          // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
+          // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
           await this.actuator.writeFile(this.workspaceId, file.path, file.content);
-          this.state?.recordFileChange({ path: file.path, kind: 'create' }, agent);
+          // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
+          // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
+          this.onFileWrite?.(file.path, file.content);
+          this.state?.recordFileChange({ path: file.path, kind }, agent);
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
           written.push(file.path);
+          if (kind === 'modify') overwritten.push(file.path);
         }
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
         // is one logical change) and fast.
-        this.scheduleCheckpoint(`create ${written.length} file(s): ${written.slice(0, 5).join(', ')}${written.length > 5 ? '…' : ''}`);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.`;
+        this.scheduleCheckpoint(`write ${written.length} file(s): ${written.slice(0, 5).join(', ')}${written.length > 5 ? '…' : ''}`);
+        const overwriteWarning = overwritten.length
+          ? `\n⚠️  FULL-REWRITE WARNING: ${overwritten.length} of these already existed and were REPLACED wholesale (${overwritten.slice(0, 8).join(', ')}${overwritten.length > 8 ? '…' : ''}). Unless a full rewrite was intended, use edit_file (old_string → new_string) for surgical changes so unrelated code isn't dropped.`
+          : '';
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}`;
       }
 
       case 'edit_file': {

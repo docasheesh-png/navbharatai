@@ -74,8 +74,8 @@ class FakeFirestore {
     if (!c) { c = new FakeCollection(); this.cols.set(name, c); }
     return c;
   }
-  async runTransaction<T>(fn: (tx: { get: (r: DocRef) => Promise<unknown>; set: (r: DocRef, d: Record<string, unknown>, o?: { merge?: boolean }) => void }) => Promise<T>): Promise<T> {
-    return fn({ get: (r) => r.get(), set: (r, d, o) => { void r.set(d, o); } });
+  async runTransaction<T>(fn: (tx: { get: (r: DocRef) => Promise<unknown>; set: (r: DocRef, d: Record<string, unknown>, o?: { merge?: boolean }) => void; delete: (r: DocRef) => void }) => Promise<T>): Promise<T> {
+    return fn({ get: (r) => r.get(), set: (r, d, o) => { void r.set(d, o); }, delete: (r) => { r.col.docs.delete(r.id); } });
   }
   batch() {
     const ops: Array<() => void> = [];
@@ -209,7 +209,7 @@ describe('FirestoreConversationStore (faithful fake)', () => {
       finalState: { billedInr: 42, tokens: 999 },
       framework: 'nextjs',
     });
-    const rec = await store.get('b1');
+    const rec = await store.get('b1', { includeTimeline: true });
     expect(rec?.timeline).toEqual([
       { t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1500 },
       { t: 'preview', url: 'https://x', ts: 2500 },
@@ -220,7 +220,7 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     // Legacy docs (no timeline) simply omit the field.
     const { store: fresh } = newStore();
     await fresh.create({ ...base, id: 'legacy' });
-    expect((await fresh.get('legacy'))?.timeline).toBeUndefined();
+    expect((await fresh.get('legacy', { includeTimeline: true }))?.timeline).toBeUndefined();
   });
 
   it('remove() also deletes timeline chunks', async () => {
@@ -231,7 +231,7 @@ describe('FirestoreConversationStore (faithful fake)', () => {
     expect(await store.get('b1')).toBeNull();
     // Re-creating the same id must not resurrect old timeline chunks.
     await store.create({ ...base });
-    expect((await store.get('b1'))?.timeline).toBeUndefined();
+    expect((await store.get('b1', { includeTimeline: true }))?.timeline).toBeUndefined();
     void fake;
   });
 });

@@ -108,6 +108,20 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     const wire = timelineToWireEvent(raw);
     if (wire) replayed.push(wire);
   }
+  // Close ORPHANED tool calls (their result fell past the recorder's cap, or the build died
+  // mid-tool): an unmatched replayed tool_call keeps its activity entry active forever — a
+  // spinner running on every reopen of a session that finished long ago. Synthesize a closing
+  // result whose ok mirrors the build outcome; a still-`running` build is left open on purpose.
+  if (conv.status !== 'running') {
+    const resolved = new Set(
+      replayed.filter((e) => e.type === 'tool_result').map((e) => (e as { callId: string }).callId),
+    );
+    for (const e of replayed.slice()) {
+      if (e.type !== 'tool_call') continue;
+      if (resolved.has(e.callId)) continue;
+      replayed.push({ type: 'tool_result', agent: e.agent, callId: e.callId, ok: conv.status === 'complete', summary: '', ts: e.ts + 1 });
+    }
+  }
   // Chronological replay: the reducer's activity feed keeps array order, and the chat timeline
   // groups activity between prose by timestamp — both need the merged stream sorted by ts. Every
   // event pushed into `replayed` is a ts-bearing kind (never `result`), so `ts` is always present.

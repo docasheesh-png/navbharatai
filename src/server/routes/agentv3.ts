@@ -1197,7 +1197,9 @@ export function registerAgentV3Routes(app: Express): void {
       const store = getConversationStore();
       let rec: Awaited<ReturnType<typeof store.get>> = null;
       for (const cid of candidateConversationIds(req.params.id, userId)) {
-        rec = await store.get(cid).catch(() => null);
+        // This is THE reopen path — the one consumer that renders the evidence layer, so it alone
+        // asks for the timeline (hot-path get() calls elsewhere skip those reads).
+        rec = await store.get(cid, { includeTimeline: true }).catch(() => null);
         if (rec) break;
       }
       const access = conversationAccess(rec, userId);
@@ -2541,6 +2543,35 @@ export function registerAgentV3Routes(app: Express): void {
     }, false);
     const framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
+    // ETERNAL SESSIONS: persist this turn's evidence layer onto the conversation record — the
+    // compact timeline recorded by the emit tap above, the terminal facts (billing/tokens/build
+    // health) for the done-footer, and the session's framework (so a reopened session's follow-up
+    // builds don't silently reset to vite-react). Called from BOTH the hard-deadline finalizer (a
+    // hung build's finally may never run) and the normal finally; the delta cursor keeps the two
+    // calls from double-appending events. Best-effort + bounded — a store failure never affects
+    // the build or the stream.
+    let timelinePersistCursor = 0;
+    const persistSessionTimeline = async (): Promise<void> => {
+      try {
+        await raceTimeout((async () => {
+          const store = getConversationStore();
+          const convId = conversationIdForWorkspace(workspaceId); // mainConversationId is try-scoped
+          const rec = await store.get(convId).catch(() => null);
+          if (!rec) return; // no record even after the fallback upsert — nothing to attach to
+          const all = sessionTimeline.events();
+          const freshEvents = all.slice(timelinePersistCursor);
+          const finalState = sessionTimeline.final();
+          if (freshEvents.length === 0 && !finalState && rec.framework === framework) return;
+          timelinePersistCursor = all.length;
+          await store.update(convId, {
+            updatedAt: Date.now(),
+            ...(freshEvents.length > 0 ? { timelineAppend: freshEvents } : {}),
+            ...(finalState ? { finalState } : {}),
+            framework,
+          });
+        })(), 8_000, 'persistSessionTimeline');
+      } catch { /* the evidence layer is best-effort — never affects the build */ }
+    };
     // Held outside the try so a build CRASH (caught below) is still captured in the diagnostics report.
     let buildDiagRef: BuildDiagnostics | undefined;
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
@@ -2628,6 +2659,10 @@ export function registerAgentV3Routes(app: Express): void {
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
         emit({ type: 'result', ok: false, resumable: true, summary: 'Build paused at the time limit — your files are saved. Continuing automatically…', steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
       }
+      // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
+      // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has
+      // captured the result facts. The delta cursor makes a later finally call a no-op.
+      await persistSessionTimeline();
       activeBuilds.delete(buildKey);
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
@@ -3859,9 +3894,13 @@ export function registerAgentV3Routes(app: Express): void {
             userId: userId ?? 'anon',
             workspaceId,
             title: deriveTitle(prompt),
+            // Explicit creation stamps: the prompt was said at build START, the summary at the
+            // end — so on reopen the user's bubble sorts ABOVE the timeline action rows it
+            // caused, and the summary below them (the live order). A single end-of-write stamp
+            // put the prompt underneath its own build's activity.
             turn: [
-              { role: 'user', content: prompt },
-              { role: 'assistant', content: result.summary || '' },
+              { role: 'user', content: prompt, ts: buildStartedAt },
+              { role: 'assistant', content: result.summary || '', ts: Date.now() },
             ],
             patch: { status: result.ok ? ('complete' as const) : ('error' as const), billedUsd: result.billedUsd, updatedAt: Date.now() },
           });
@@ -4253,29 +4292,10 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
-      // ETERNAL SESSIONS: persist this turn's evidence layer onto the conversation record — the
-      // compact timeline recorded by the emit tap above, the terminal facts (billing/tokens/build
-      // health) for the done-footer, and the session's framework (so a reopened session's
-      // follow-up builds don't silently reset to vite-react). Runs on EVERY exit path (success,
-      // crash, stop) BEFORE the stream ends, so Cloud Run cannot throttle the write away.
-      // Best-effort + bounded — a store failure never affects the build or the stream.
-      try {
-        await raceTimeout((async () => {
-          const store = getConversationStore();
-          const convId = conversationIdForWorkspace(workspaceId); // mainConversationId is try-scoped
-          const rec = await store.get(convId).catch(() => null);
-          if (!rec) return; // no record even after the fallback upsert — nothing to attach to
-          const timelineEvents = sessionTimeline.events();
-          const finalState = sessionTimeline.final();
-          if (timelineEvents.length === 0 && !finalState && rec.framework === framework) return;
-          await store.update(convId, {
-            updatedAt: Date.now(),
-            ...(timelineEvents.length > 0 ? { timelineAppend: timelineEvents } : {}),
-            ...(finalState ? { finalState } : {}),
-            framework,
-          });
-        })(), 8_000, 'persistSessionTimeline');
-      } catch { /* the evidence layer is best-effort — never affects the build */ }
+      // ETERNAL SESSIONS: persist this turn's evidence layer (shared closure, delta-cursored —
+      // also called by the hard-deadline finalizer whose builds never reach this finally). Runs
+      // BEFORE the stream ends so Cloud Run cannot throttle the write away.
+      await persistSessionTimeline();
       // Normal completion reached the finally synchronously → cancel the wall-clock deadline so it
       // can't fire after a clean finish (no double terminal event), and stop the heartbeat timer.
       if (deadlineTimer) clearTimeout(deadlineTimer);

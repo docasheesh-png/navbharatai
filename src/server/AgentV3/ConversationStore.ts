@@ -83,8 +83,12 @@ export interface ConversationPatch {
 export interface ConversationStore {
   /** Create a new record. Throws if `id` already exists (a build id must be unique). */
   create(input: CreateConversationInput): Promise<ConversationRecord>;
-  /** Fetch a record, or null if it does not exist. */
-  get(id: string): Promise<ConversationRecord | null>;
+  /**
+   * Fetch a record, or null if it does not exist. The timeline (evidence layer) is returned
+   * ONLY when `opts.includeTimeline` is set — hot paths (existence probes, transcript recaps)
+   * read conversations far more often than anything renders the timeline, and it can be large.
+   */
+  get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null>;
   /** Append transcript turns and apply a patch (usage/status/billing). Throws if id is unknown. */
   appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void>;
   /** Apply a patch without appending messages (e.g. finalize status). Throws if id is unknown. */
@@ -99,6 +103,12 @@ export interface ConversationStore {
   /** Delete a build. No-op if it does not exist. */
   remove(id: string): Promise<void>;
 }
+
+/**
+ * Cross-turn bound on a record's total timeline events (newest kept). The Firestore store bounds
+ * the same growth by chunk count (MAX_TIMELINE_CHUNKS × ≤500 events/chunk ≈ this figure).
+ */
+export const MAX_TIMELINE_EVENTS_TOTAL = 20_000;
 
 /** Deep-ish clone so stored records never alias a caller's mutable arrays/objects. */
 function cloneRecord(rec: ConversationRecord): ConversationRecord {
@@ -153,9 +163,12 @@ export class InMemoryConversationStore implements ConversationStore {
     return cloneRecord(rec);
   }
 
-  async get(id: string): Promise<ConversationRecord | null> {
+  async get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null> {
     const rec = this.records.get(id);
-    return rec ? cloneRecord(rec) : null;
+    if (!rec) return null;
+    const clone = cloneRecord(rec);
+    if (!opts?.includeTimeline) delete clone.timeline; // mirror the Firestore store's read shape
+    return clone;
   }
 
   async appendMessages(id: string, messages: unknown[], patch: ConversationPatch): Promise<void> {
@@ -195,6 +208,11 @@ export class InMemoryConversationStore implements ConversationStore {
     if (patch.billedUsd !== undefined) rec.billedUsd = patch.billedUsd;
     if (patch.timelineAppend && patch.timelineAppend.length > 0) {
       rec.timeline = (rec.timeline ?? []).concat(patch.timelineAppend);
+      // Cross-turn bound (mirrors the Firestore store's chunk cap): an eternal session must not
+      // grow its evidence layer without limit — keep the newest events, drop the oldest.
+      if (rec.timeline.length > MAX_TIMELINE_EVENTS_TOTAL) {
+        rec.timeline = rec.timeline.slice(rec.timeline.length - MAX_TIMELINE_EVENTS_TOTAL);
+      }
     }
     if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) rec.framework = patch.framework;

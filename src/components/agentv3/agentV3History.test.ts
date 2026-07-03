@@ -94,6 +94,24 @@ describe('conversationToEvents', () => {
     expect(state.terminal.join('\n')).toContain('npm install');
   });
 
+  it('closes orphaned tool_calls so a finished session never restores with a live spinner', () => {
+    const c = conv({
+      status: 'complete',
+      timeline: [
+        { t: 'tool_call', id: 'orphan', tool: 'bash', agent: 'architect', ts: 100, input: { command: 'npm run build' } },
+        // its tool_result fell past the recorder's cap — never persisted
+      ],
+    });
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
+    expect(state.activity.some((a) => a.active)).toBe(false); // no permanent spinner
+    // A still-running build is left open on purpose (it is genuinely in flight).
+    const running = conv({ status: 'running', timeline: c.timeline });
+    let s2 = initialAgentV3State();
+    for (const e of conversationToEvents(running)) s2 = agentV3Reducer(s2, e);
+    expect(s2.activity.some((a) => a.active)).toBe(true);
+  });
+
   it('synthesizes a result event from durable finalState (restores the ₹/token footer)', () => {
     const c = conv({ status: 'complete', finalState: { ok: true, billedUsd: 0.5, billedInr: 42, tokens: 12345 } });
     let state = initialAgentV3State();

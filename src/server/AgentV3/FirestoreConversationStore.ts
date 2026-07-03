@@ -29,6 +29,10 @@ import { firestoreDatabaseId } from '../lib/firestoreDb';
 
 const COLLECTION = 'agentv3_conversations';
 const ZERO_USAGE: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+// Cross-turn bound on the evidence layer: one chunk per build turn (each ≤500 events / ≤300KB),
+// oldest chunk deleted once the cap is passed — an eternal session keeps its newest ~40 turns of
+// action rows without growing Firestore (or the GET response) without limit.
+const MAX_TIMELINE_CHUNKS = 40;
 
 /** Metadata persisted in the main document (everything except the transcript itself). */
 interface ConversationMeta {
@@ -105,7 +109,7 @@ export class FirestoreConversationStore implements ConversationStore {
     return { id: input.id, ...meta, usage: { ...meta.usage }, messages: seed };
   }
 
-  async get(id: string): Promise<ConversationRecord | null> {
+  async get(id: string, opts?: { includeTimeline?: boolean }): Promise<ConversationRecord | null> {
     const snap = await this.mainDoc(id).get();
     if (!snap.exists) return null;
     const meta = snap.data() as ConversationMeta;
@@ -121,14 +125,17 @@ export class FirestoreConversationStore implements ConversationStore {
           : m,
       );
     });
-    // Timeline chunks are optional (legacy docs have none) — a failure to read them must never
-    // break opening the transcript itself.
+    // Timeline chunks are read ONLY when asked for (the reopen/GET path) — hot paths (existence
+    // probes, transcript recaps) skip the extra reads. Optional on legacy docs; a failure to
+    // read them must never break opening the transcript itself.
     let timeline: unknown[] | undefined;
-    try {
-      const chunks = await this.timelineCol(id).orderBy('seq').get();
-      const events = chunks.docs.flatMap((d) => (d.data().events as unknown[]) ?? []);
-      if (events.length > 0) timeline = events;
-    } catch { /* evidence layer is best-effort */ }
+    if (opts?.includeTimeline) {
+      try {
+        const chunks = await this.timelineCol(id).orderBy('seq').get();
+        const events = chunks.docs.flatMap((d) => (d.data().events as unknown[]) ?? []);
+        if (events.length > 0) timeline = events;
+      } catch { /* evidence layer is best-effort */ }
+    }
     return this.toRecord(id, meta, messages, timeline);
   }
 
@@ -146,6 +153,7 @@ export class FirestoreConversationStore implements ConversationStore {
       const hasTimeline = !!patch.timelineAppend && patch.timelineAppend.length > 0;
       if (hasTimeline) {
         tx.set(this.timelineCol(id).doc(String(timelineSeq)), { seq: timelineSeq, events: patch.timelineAppend, ts: patch.updatedAt });
+        if (timelineSeq >= MAX_TIMELINE_CHUNKS) tx.delete(this.timelineCol(id).doc(String(timelineSeq - MAX_TIMELINE_CHUNKS)));
       }
       tx.set(
         ref,
@@ -173,6 +181,7 @@ export class FirestoreConversationStore implements ConversationStore {
         const meta = snap.data() as ConversationMeta;
         const seq = meta.nextTimelineSeq ?? 0;
         tx.set(this.timelineCol(id).doc(String(seq)), { seq, events, ts: patch.updatedAt });
+        if (seq >= MAX_TIMELINE_CHUNKS) tx.delete(this.timelineCol(id).doc(String(seq - MAX_TIMELINE_CHUNKS)));
         tx.set(ref, { ...this.patchToMeta(patch), nextTimelineSeq: seq + 1 }, { merge: true });
       });
       return;

@@ -53,13 +53,30 @@ describe('createTimelineRecorder', () => {
     expect(result.summary.length).toBeLessThanOrEqual(401);
   });
 
-  it('caps the event count and reports drops in finalState', () => {
+  it('caps the event count by dropping the OLDEST (the tail must survive) and reports drops', () => {
     const rec = createTimelineRecorder();
     for (let i = 0; i < 620; i++) {
       rec.record({ type: 'file_changed', agent: 'architect', change: { path: `f${i}.ts`, kind: 'create' }, ts: i });
     }
-    expect(rec.events()).toHaveLength(500);
+    const events = rec.events();
+    expect(events).toHaveLength(500);
+    // The newest events survive — a long build's closing preview/diffs/results matter most.
+    expect(events[events.length - 1]).toMatchObject({ t: 'file', path: 'f619.ts' });
+    expect(events[0]).toMatchObject({ t: 'file', path: 'f120.ts' });
     expect(rec.final()).toMatchObject({ timelineDropped: 120 });
+  });
+
+  it('final() is ALWAYS fully populated so Firestore merge behaves like replace (no stale leak)', () => {
+    const rec = createTimelineRecorder();
+    rec.record({ type: 'done', ok: false, summary: 's', ts: 1 }); // failed turn — no billing facts
+    expect(rec.final()).toEqual({
+      ok: false,
+      billedUsd: 0,
+      billedInr: 0,
+      tokens: 0,
+      buildHealth: null,
+      timelineDropped: 0,
+    });
   });
 
   it('enforces the serialized budget by shrinking the largest diffs first', () => {

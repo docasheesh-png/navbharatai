@@ -36,7 +36,7 @@ export type TimelineEvent =
  * finalState field without a manual index signature.
  */
 export type TimelineFinalState = {
-  ok?: boolean;
+  ok?: boolean | null;
   billedUsd?: number;
   billedInr?: number;
   tokens?: number;
@@ -91,11 +91,14 @@ export function createTimelineRecorder(): TimelineRecorder {
   let final: TimelineFinalState | null = null;
 
   const push = (e: TimelineEvent): void => {
-    if (events.length >= MAX_EVENTS) {
-      dropped++;
-      return;
-    }
     events.push(e);
+    if (events.length > MAX_EVENTS) {
+      // Drop the OLDEST — the tail of a long build (preview link, final diffs, closing
+      // tool_results) is what a reopened session needs most. Dropping newest also orphaned
+      // in-flight tool_calls, freezing a spinner into the restored session forever.
+      events.shift();
+      dropped++;
+    }
   };
 
   return {
@@ -185,7 +188,19 @@ export function createTimelineRecorder(): TimelineRecorder {
 
     final(): TimelineFinalState | null {
       if (final === null && dropped === 0) return null;
-      return { ...(final ?? {}), ...(dropped > 0 ? { timelineDropped: dropped } : {}) };
+      const f: TimelineFinalState = final ?? {};
+      // ALWAYS fully populated: Firestore set(..., {merge:true}) deep-merges map fields, so a
+      // PARTIAL object here would let a previous turn's billing/tokens/buildHealth silently leak
+      // into a later failed turn's restored footer (production-only staleness the in-memory
+      // store's replace semantics would never show). Full population makes merge ≡ replace.
+      return {
+        ok: f.ok ?? null,
+        billedUsd: f.billedUsd ?? 0,
+        billedInr: f.billedInr ?? 0,
+        tokens: f.tokens ?? 0,
+        buildHealth: f.buildHealth ?? null,
+        timelineDropped: dropped,
+      };
     },
   };
 }

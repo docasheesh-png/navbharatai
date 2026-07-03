@@ -127,7 +127,7 @@ describe('InMemoryConversationStore', () => {
       finalState: { billedInr: 42, tokens: 999 },
       framework: 'nextjs',
     }));
-    const rec = await store.get('build-1');
+    const rec = await store.get('build-1', { includeTimeline: true });
     expect(rec?.timeline).toEqual([
       { t: 'file', path: 'a.ts', kind: 'create', agent: 'architect', ts: 1 },
       { t: 'preview', url: 'https://x', ts: 2 },
@@ -136,7 +136,7 @@ describe('InMemoryConversationStore', () => {
     expect(rec?.framework).toBe('nextjs');
     // A later patch without these fields leaves them untouched.
     await store.update('build-1', patch({ updatedAt: 4000, status: 'complete' }));
-    const later = await store.get('build-1');
+    const later = await store.get('build-1', { includeTimeline: true });
     expect(later?.timeline).toHaveLength(2);
     expect(later?.framework).toBe('nextjs');
   });

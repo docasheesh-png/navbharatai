@@ -62,7 +62,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
@@ -762,8 +762,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         } else {
           setUserMsgs([]);
           // The record exists but its thread is empty — opening it must not LOOK like a dead click.
+          const why = conversationLoadDiag();
+          if (why) console.error('[v3-open] empty transcript:', why);
           setOpenChatError(
-            'This chat opened, but its saved transcript is empty (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.',
+            'This chat opened, but its saved transcript is empty (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.'
+            + (why ? `\n\nDiagnostic (send this to support): ${why}` : ''),
           );
         }
         return;
@@ -776,11 +779,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const saved = chatSessionMsgsRef.current.get(sessionId);
       if (!saved || saved.length === 0) {
         // NEVER a silent no-op (an empty [] stash is exactly as dead as a missing one): the tap DID
-        // work and the open FAILED/restored nothing — say so, with the real reason.
+        // work and the open FAILED/restored nothing — say so, with the REAL server reason so this is
+        // diagnosable in one click (404 = no transcript stored; 403 = ownership/token; empty = 0 turns).
+        const why = conversationLoadDiag();
+        if (why) console.error('[v3-open] could not restore:', why, 'id=', id);
         setOpenChatError(
-          saved
+          (saved
             ? 'This chat opened, but its saved copy has 0 messages (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.'
-            : 'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.',
+            : 'This chat could not be opened: its saved transcript was not returned by the server (it may belong to a different sign-in state) and no local copy was stashed. Pull down to refresh, sign in again, or send a new message to continue the project.')
+          + (why ? `\n\nDiagnostic (send this to support): ${why}` : ''),
         );
         if (saved) {
           // Still adopt the session so "send a message to continue" genuinely continues THIS project.

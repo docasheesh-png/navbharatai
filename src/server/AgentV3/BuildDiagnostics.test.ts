@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -320,12 +320,31 @@ describe('BuildDiagnostics — AI Diagnosis Bundle (raw logs, LLM I/O, full erro
     expect(r.commands![0].exitCode).toBe(-1);
   });
 
-  it('#3 a normal command WITHOUT a "|| true" guard still surfaces a non-zero exit as an unresolved failure', () => {
+  it('#3 a REAL command failure (npm/tsc/vite non-zero) still surfaces as an unresolved failure', () => {
     const d = fresh();
-    d.recordCommand({ command: 'pkill -f "vite"', exitCode: -1, stdout: '', stderr: 'signal: terminated' });
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'Build failed' });
     const marker = d.report().issues.find((i) => i.code === 'SANDBOX_CMD_FAILED');
     expect(marker?.severity).toBe('error');
     expect(marker?.autoResolved).toBe(false);
+  });
+
+  it('#3 a routine inspector/probe exit is NOT a failure (grep no-match, pkill no-proc, ss/curl probe) — admin-authorized 2026-07-03', () => {
+    // These all return non-zero WITHOUT anything being wrong. Flagging them made a clean build look
+    // error-ridden (a real report showed 12 "errors", 6 of them just grep/curl/ss no-match exits).
+    const routines: Array<{ command: string; exitCode: number }> = [
+      { command: 'pkill -f "vite"', exitCode: -1 },                                  // no process / external signal
+      { command: 'grep -c "ButtonType" dist/assets/index-abc.js', exitCode: 1 },      // grep: 0 matches
+      { command: 'npx tsc --noEmit 2>&1 | grep -v "test|vitest"', exitCode: 1 },       // pipeline exit = grep's, not tsc's
+      { command: 'ss -tlnp | grep -E "5173"', exitCode: 1 },                            // nothing listening
+      { command: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:5173/', exitCode: 7 }, // conn refused (probe)
+    ];
+    for (const r of routines) {
+      const d = fresh();
+      d.recordCommand({ command: r.command, exitCode: r.exitCode, stdout: '', stderr: '' });
+      const rep = d.report();
+      expect(rep.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED'), r.command).toBeUndefined();
+      expect(rep.issues.find((i) => i.code === 'SANDBOX_CMD')?.severity, r.command).toBe('info');
+    }
   });
 
   it('#3 caps very large command output (keeps the tail where the error lives)', () => {
@@ -504,5 +523,38 @@ describe('renderSessionDiagnosticsText — the FULL SESSION report (0 → last),
     const out = renderSessionDiagnosticsText([mk({ prompt: 'solo build', ok: true })]);
     expect(out).toContain('Builds in this session : 1');
     expect(out).toContain('Message: solo build');
+  });
+});
+
+describe('isExpectedNonzeroExit — routine non-zero exits that are NOT build failures', () => {
+  it('exit 0 / null is never "expected non-zero"', () => {
+    expect(isExpectedNonzeroExit('grep x f', 0)).toBe(false);
+    expect(isExpectedNonzeroExit('grep x f', null)).toBe(false);
+  });
+  it('an explicit "|| true" guard is always routine', () => {
+    expect(isExpectedNonzeroExit('pkill -f vite || true', -1)).toBe(true);
+    expect(isExpectedNonzeroExit('anything-here || true', 3)).toBe(true);
+  });
+  it('inspector exit 1 (no match) and negative signals are routine; other codes are NOT', () => {
+    for (const base of ['grep', 'pkill', 'pgrep', 'ss', 'netstat', 'lsof', 'fuser', 'ps', 'which']) {
+      expect(isExpectedNonzeroExit(`${base} something`, 1), base).toBe(true);
+      expect(isExpectedNonzeroExit(`${base} something`, -1), base).toBe(true);
+      expect(isExpectedNonzeroExit(`${base} something`, 2), base).toBe(false); // a real syntax/other error still counts
+    }
+  });
+  it('uses the LAST pipeline segment (grep-tailed tsc is grep, not tsc)', () => {
+    expect(isExpectedNonzeroExit('npx tsc --noEmit 2>&1 | grep -v test', 1)).toBe(true);
+    expect(isExpectedNonzeroExit('cat dist/x.js | grep -c Foo', 1)).toBe(true);
+  });
+  it('curl connection-probe exits (7/6/28) are routine; a real curl error (22) is not', () => {
+    expect(isExpectedNonzeroExit('curl -s http://localhost:5173/', 7)).toBe(true);
+    expect(isExpectedNonzeroExit('curl -s http://localhost:5173/', 28)).toBe(true);
+    expect(isExpectedNonzeroExit('curl -f http://x/', 22)).toBe(false);
+  });
+  it('a genuine build command failing is NEVER routine', () => {
+    expect(isExpectedNonzeroExit('npm install', 1)).toBe(false);
+    expect(isExpectedNonzeroExit('npm run build', 1)).toBe(false);
+    expect(isExpectedNonzeroExit('npx tsc --noEmit', 2)).toBe(false);
+    expect(isExpectedNonzeroExit('vite build', 1)).toBe(false);
   });
 });

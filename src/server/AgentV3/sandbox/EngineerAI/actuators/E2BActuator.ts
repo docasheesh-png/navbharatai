@@ -3,7 +3,8 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 
@@ -581,7 +582,19 @@ export class E2BActuator implements IEngineerActuator {
       // set) passes the `nc -z localhost` check below yet 502s on the public
       // preview — the #1 "built but the preview is blank" cause. No-op if the
       // command already binds a host (e.g. our vite-react template's host:true).
-      const port = extractDevPort(command);
+      // Resolve `npm run dev` → its CONCRETE underlying tool (best-effort, from package.json) so the
+      // host/port flags match the ACTUAL framework. A Vite scaffold is byte-for-byte unchanged; a
+      // Next/Astro/Nuxt/Angular scaffold no longer gets Vite-only flags (`--strictPort`, Vite-style
+      // `--host`) that its dev server rejects on boot → blank preview ("preview never comes up").
+      // Any failure falls back to the raw command (today's Vite-assumption behaviour).
+      const strippedForResolve = stripDevServerBackgrounding(command);
+      let resolvedCommand = strippedForResolve;
+      try {
+        const pkgRaw = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`);
+        resolvedCommand = resolvePmScript(strippedForResolve, JSON.parse(pkgRaw)?.scripts);
+      } catch { /* no package.json / parse error — keep the raw command (unchanged behaviour) */ }
+      const framework: DevFramework = detectDevFramework(resolvedCommand);
+      const port = extractDevPort(resolvedCommand);
       // Pin the port so the server binds EXACTLY `port` (or fails loudly) instead of
       // silently drifting to 5174 when 5173 is busy — the drift is what made the
       // preview connect to a dead port and the build loop until the time-limit cap.
@@ -599,7 +612,7 @@ export class E2BActuator implements IEngineerActuator {
       // request … is not allowed". This last-line net reads the on-disk config and, only if it lacks
       // allowedHosts AND can be safely patched, writes it back — so the very next preview loads.
       // Best-effort: a read/write hiccup must never block the dev server from starting.
-      if (/\bvite\b/.test(command)) {
+      if (framework === 'vite' || /\bvite\b/.test(command)) {
         for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts']) {
           try {
             const full = `${WORKSPACE_ROOT}/${cfg}`;
@@ -615,7 +628,7 @@ export class E2BActuator implements IEngineerActuator {
         }
       }
       const devCommand = redirectDevServerOutput(
-        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(stripDevServerBackgrounding(command)), port)),
+        disableDevServerAutoOpen(pinDevServerPort(ensureHostBinding(strippedForResolve, framework), port, framework)),
       );
 
       // Ensure dependencies are installed BEFORE starting the dev server. If the

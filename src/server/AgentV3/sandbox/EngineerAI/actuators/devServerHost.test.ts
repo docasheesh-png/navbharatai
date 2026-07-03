@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -68,6 +68,84 @@ describe('ensureHostBinding (v3.0 actuator)', () => {
     expect(ensureHostBinding('npm install')).toBe('npm install');
     expect(ensureHostBinding('npm run build')).toBe('npm run build');
     expect(ensureHostBinding('')).toBe('');
+  });
+});
+
+describe('detectDevFramework — identify the tool from a concrete command', () => {
+  it('recognizes each supported framework', () => {
+    expect(detectDevFramework('vite')).toBe('vite');
+    expect(detectDevFramework('node node_modules/vite/bin/vite.js')).toBe('vite');
+    expect(detectDevFramework('next dev')).toBe('next');
+    expect(detectDevFramework('astro dev')).toBe('astro');
+    expect(detectDevFramework('nuxt dev')).toBe('nuxt');
+    expect(detectDevFramework('nuxi dev')).toBe('nuxt');
+    expect(detectDevFramework('ng serve')).toBe('angular');
+    expect(detectDevFramework('react-scripts start')).toBe('cra');
+  });
+  it('returns undefined for an unrecognized or empty command (caller keeps the Vite default)', () => {
+    expect(detectDevFramework('npm run dev')).toBeUndefined();
+    expect(detectDevFramework('python -m http.server')).toBeUndefined();
+    expect(detectDevFramework('')).toBeUndefined();
+  });
+});
+
+describe('resolvePmScript — map `npm run dev` to its real underlying tool', () => {
+  it('resolves a pm-run script to its body from package.json scripts', () => {
+    expect(resolvePmScript('npm run dev', { dev: 'astro dev' })).toBe('astro dev');
+    expect(resolvePmScript('pnpm dev', { dev: 'vite' })).toBe('vite');
+    expect(resolvePmScript('yarn serve', { serve: 'ng serve' })).toBe('ng serve');
+    expect(resolvePmScript('bun run dev', { dev: 'next dev' })).toBe('next dev');
+    expect(resolvePmScript('npm start', { start: 'react-scripts start' })).toBe('react-scripts start');
+  });
+  it('carries through explicit args passed after `--` so port detection still sees them', () => {
+    expect(resolvePmScript('npm run dev -- --port 8080', { dev: 'vite' })).toBe('vite --port 8080');
+  });
+  it('returns the command unchanged when it is not a pm-run, the script is missing, or no scripts given', () => {
+    expect(resolvePmScript('vite --host', { dev: 'vite' })).toBe('vite --host');
+    expect(resolvePmScript('npm run dev', { build: 'vite build' })).toBe('npm run dev');
+    expect(resolvePmScript('npm run dev', null)).toBe('npm run dev');
+    expect(resolvePmScript('', { dev: 'vite' })).toBe('');
+  });
+});
+
+describe('ensureHostBinding — framework-aware host flag', () => {
+  it('is BYTE-IDENTICAL to the historical Vite behaviour when no framework is given', () => {
+    expect(ensureHostBinding('npm run dev')).toBe('npm run dev -- --host 0.0.0.0');
+    expect(ensureHostBinding('npm run dev', 'vite')).toBe('npm run dev -- --host 0.0.0.0');
+  });
+  it('uses `-H` (not the Vite `--host`) for a Next.js pm-run script', () => {
+    // `next dev` errors on an unknown `--host` flag — passing it left the preview down.
+    expect(ensureHostBinding('npm run dev', 'next')).toBe('npm run dev -- -H 0.0.0.0');
+  });
+  it('keeps --host for astro/nuxt/angular (they accept it)', () => {
+    expect(ensureHostBinding('npm run dev', 'astro')).toBe('npm run dev -- --host 0.0.0.0');
+    expect(ensureHostBinding('npm run dev', 'nuxt')).toBe('npm run dev -- --host 0.0.0.0');
+    expect(ensureHostBinding('yarn dev', 'angular')).toBe('yarn dev -- --host 0.0.0.0');
+  });
+  it('leaves a CRA pm-run script untouched (react-scripts reads HOST= from the env, not a flag)', () => {
+    expect(ensureHostBinding('npm run dev', 'cra')).toBe('npm run dev');
+  });
+});
+
+describe('pinDevServerPort — framework-aware port pinning (no Vite-only --strictPort on other tools)', () => {
+  it('is BYTE-IDENTICAL to the historical Vite behaviour when no framework is given', () => {
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 5173)).toBe('npm run dev -- --host 0.0.0.0 --port 5173 --strictPort');
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 5173, 'vite')).toBe('npm run dev -- --host 0.0.0.0 --port 5173 --strictPort');
+  });
+  it('pins a Next.js pm-run script with -p (never --strictPort)', () => {
+    expect(pinDevServerPort('npm run dev -- -H 0.0.0.0', 3000, 'next')).toBe('npm run dev -- -H 0.0.0.0 -p 3000');
+  });
+  it('pins astro/nuxt/angular with a plain --port and DROPS the Vite-only --strictPort (which crashes them)', () => {
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 4321, 'astro')).toBe('npm run dev -- --host 0.0.0.0 --port 4321');
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 3000, 'nuxt')).toBe('npm run dev -- --host 0.0.0.0 --port 3000');
+    expect(pinDevServerPort('yarn dev -- --host 0.0.0.0', 4200, 'angular')).toBe('yarn dev -- --host 0.0.0.0 --port 4200');
+    expect(pinDevServerPort('npm run dev -- --host 0.0.0.0', 4321, 'astro')).not.toContain('--strictPort');
+  });
+  it('leaves a CRA pm-run script untouched (react-scripts takes neither --port nor --strictPort)', () => {
+    expect(pinDevServerPort('npm run dev', 3000, 'cra')).toBe('npm run dev');
+  });
+  it('still respects an already-pinned port regardless of framework', () => {
+    expect(pinDevServerPort('npm run dev -- --port 4000', 5173, 'astro')).toBe('npm run dev -- --port 4000');
   });
 });
 

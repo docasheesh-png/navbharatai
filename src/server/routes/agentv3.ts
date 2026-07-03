@@ -2715,7 +2715,7 @@ export function registerAgentV3Routes(app: Express): void {
         importPreviewBoot = (async () => {
           try {
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
-            const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 120_000, 'import-preview-boot');
+            const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 240_000, 'import-preview-boot');
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {
@@ -4585,7 +4585,7 @@ export function registerAgentV3Routes(app: Express): void {
       // throttles CPU after the stream closes, which would silently kill the npm install mid-way.
       // Bounded (the boot itself is already capped at 120s) + best-effort.
       if (importPreviewBoot) {
-        await raceTimeout(importPreviewBoot, 125_000, 'importPreviewBoot').catch(() => {});
+        await raceTimeout(importPreviewBoot, 245_000, 'importPreviewBoot').catch(() => {});
       }
       // ETERNAL SESSIONS: persist this turn's evidence layer (shared closure, delta-cursored —
       // also called by the hard-deadline finalizer whose builds never reach this finally). Runs

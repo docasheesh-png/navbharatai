@@ -167,11 +167,48 @@ export class WorkspaceMemory {
   /** Index (or re-index) a file's content into the project graph. */
   indexFile(file: string, content: string): void {
     this.fileFacts.set(file, extractFacts(file, content));
+    // Verification ledger: any (re)write invalidates "tsc clean"; touching package.json
+    // invalidates "deps installed". Conservative-by-design — a stale claim would make the
+    // team SKIP a needed check, which is worse than one redundant run.
+    this.lastWriteAt = Date.now();
+    if (/(^|\/)package\.json$/.test(file)) this.depsInstalledAt = 0;
   }
 
   /** Drop a deleted file from the graph. */
   removeFile(file: string): void {
     this.fileFacts.delete(file);
+    this.lastWriteAt = Date.now();
+  }
+
+  // ── Verification ledger (deep-rebuild slice 4) ───────────────────────────────
+  // The diagnostics showed each delegated specialist independently re-running `npm install` and
+  // `npx tsc --noEmit` because NOTHING told it the work was already done (3 sub-agents ≈ 15.7 min,
+  // 55% of the build). The dispatcher records successful installs/typechecks here; the sub-agent
+  // spawn injects `verificationStatus()` into every specialist's instruction so the whole team
+  // shares one verified state instead of re-deriving it.
+  private depsInstalledAt = 0;
+  private tscCleanAt = 0;
+  private lastWriteAt = 0;
+
+  markDepsInstalled(): void { this.depsInstalledAt = Date.now(); }
+  markTscClean(): void { this.tscCleanAt = Date.now(); }
+
+  /** Prompt-ready shared verification state; '' when nothing is verified yet. */
+  verificationStatus(): string {
+    const lines: string[] = [];
+    if (this.depsInstalledAt) {
+      lines.push('- npm dependencies are ALREADY INSTALLED in this workspace — do NOT run npm install again unless you change package.json.');
+    }
+    // Strict > : a write in the SAME millisecond as the clean check must invalidate it
+    // (conservative — one redundant re-check is cheaper than skipping a needed one).
+    if (this.tscCleanAt && this.tscCleanAt > this.lastWriteAt) {
+      lines.push('- TypeScript already checked CLEAN (npx tsc --noEmit) and no file has changed since — do NOT re-run tsc until you edit files.');
+    } else if (this.tscCleanAt) {
+      lines.push('- tsc was clean earlier but files have changed since; run tsc ONCE at the end of your edits, not per file.');
+    }
+    return lines.length
+      ? `Verification status (shared across the team — do not repeat verified work):\n${lines.join('\n')}`
+      : '';
   }
 
   // `ts` is optional so a RESTORE from durable storage can preserve each episode's ORIGINAL time

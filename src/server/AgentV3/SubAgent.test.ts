@@ -102,6 +102,41 @@ describe('makeSubAgentSpawn — specialist sub-agents', () => {
     _clearWorkspaceMemory();
   });
 
+  it('injects the shared VERIFICATION LEDGER so specialists do not redo npm install / tsc (slice 4)', async () => {
+    _clearWorkspaceMemory();
+    const mem = getWorkspaceMemory('ws-ledger');
+    mem.markDepsInstalled();
+    mem.markTscClean();
+
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const actuator = new FakeActuator();
+    let seenPrompt = '';
+    const recording: MessagesCreateClient = {
+      messages: {
+        create: async (params: Record<string, unknown>) => {
+          const msgs = params.messages as Array<{ role: string; content: unknown }>;
+          const first = msgs[0];
+          if (typeof first?.content === 'string') seenPrompt = first.content;
+          else if (Array.isArray(first?.content)) {
+            seenPrompt = (first.content as Array<{ type?: string; text?: string }>)
+              .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+              .map((b) => b.text)
+              .join('');
+          }
+          return { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } as never;
+        },
+      },
+    };
+    const spawn = makeSubAgentSpawn({ client: new ClaudeClient(recording), actuator, workspaceId: 'ws-ledger', state, events: stream, model: 'm' });
+    await spawn('frontend', 'Build the header');
+
+    expect(seenPrompt).toContain('Verification status');
+    expect(seenPrompt).toContain('ALREADY INSTALLED');
+    expect(seenPrompt).toContain('Your task: Build the header');
+    _clearWorkspaceMemory();
+  });
+
   it("translates the specialist's terminal 'done' into agent_done — never a build-level done", async () => {
     const actuator = new FakeActuator();
     const stream = new AgentEventStream();

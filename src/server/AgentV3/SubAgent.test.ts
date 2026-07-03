@@ -102,6 +102,49 @@ describe('makeSubAgentSpawn — specialist sub-agents', () => {
     _clearWorkspaceMemory();
   });
 
+  it("translates the specialist's terminal 'done' into agent_done — never a build-level done", async () => {
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const events: AgentEvent[] = [];
+    stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(
+      scriptedClient([{ content: [{ type: 'text', text: 'navbar built.' }], stop_reason: 'end_turn' }]),
+    );
+    const spawn = makeSubAgentSpawn({ client, actuator, workspaceId: 'ws', state, events: stream, model: 'm' });
+    await spawn('frontend', 'Build a navbar');
+
+    // The shared stream must NOT contain a build-terminal 'done' from the specialist…
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    // …but an attributed, non-terminal agent_done instead.
+    const ad = events.find((e) => e.type === 'agent_done');
+    expect(ad && ad.type === 'agent_done' && ad.agent === 'frontend' && ad.ok).toBe(true);
+  });
+
+  it("a step-capped specialist emits agent_done ok:false — the 'Step limit reached (40) overwrote the build' fix", async () => {
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const events: AgentEvent[] = [];
+    stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const looping = {
+      content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+    const client = new ClaudeClient(scriptedClient([looping, looping, looping]));
+    const spawn = makeSubAgentSpawn({ client, actuator, workspaceId: 'ws', state, events: stream, model: 'm', maxSteps: 1 });
+    const result = await spawn('frontend', 'loop forever');
+
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('Step limit');
+    // The cap message reaches the surfaces ONLY as the specialist's own agent_done — the client
+    // reducer must never mark the whole build done/failed from it.
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    const ad = events.find((e) => e.type === 'agent_done');
+    expect(ad && ad.type === 'agent_done' && ad.agent === 'frontend' && !ad.ok).toBe(true);
+  });
+
   it('a spawned worker cannot itself spawn (no task tool → honest error)', async () => {
     const actuator = new FakeActuator();
     const stream = new AgentEventStream();

@@ -50,11 +50,27 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     const childDispatcher = new ToolDispatcher(
       deps.actuator, deps.workspaceId, deps.state, deps.events, undefined, deps.checkpointer,
     );
+    // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
+    // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client
+    // reducer set done:true and overwrote the top-level summary (the "Step limit reached (40)"
+    // shown while the Architect, cap 80, was still working). Translate the specialist's terminal
+    // events into non-terminal `agent_done`; everything else (files, diffs, tool calls, narration)
+    // passes through unchanged so the merged surfaces stay live.
+    const childEvents = Object.create(deps.events) as AgentEventStream;
+    childEvents.emit = (event) => {
+      if (event.type === 'done') {
+        deps.events.emit({ type: 'agent_done', agent: role, ok: event.ok, summary: event.summary, ts: event.ts });
+      } else if (event.type === 'error') {
+        deps.events.emit({ type: 'agent_done', agent: role, ok: false, summary: event.message, ts: event.ts });
+      } else {
+        deps.events.emit(event);
+      }
+    };
     const runner = new AgentRunner({
       client: deps.client,
       dispatcher: childDispatcher,
       state: deps.state,
-      events: deps.events,
+      events: childEvents,
       model: deps.model,
       system: cfg.system,
       tools: catalogForTools(cfg.tools),

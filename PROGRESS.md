@@ -7517,3 +7517,30 @@ Gate both PRs: tsc (app+server) 0 errors, vitest 4356/4356 → 4375/4375, build 
 
 Gate on every PR: tsc (app+server) 0 errors, vitest green (4385→4439 tests), build + boot:check
 PASS, CI green before merge.
+
+## 2026-07-03 — Deep build-engine rebuild (admin-directed, from the uploaded build diagnostics)
+
+Admin uploaded a real Notes-app build report (28.7 min, ok:false "Step limit reached", 6 tool errors)
+and directed: "upar upar se bas error fix nahi — jad se theek/rebuild karo". Four ground-truth
+investigations mapped the exact code paths. Shipping as verified slices:
+
+**Slice 1 (#892, merged): doubled workspace path.** All four actuator safeRelPath copies only dropped
+""/"."/".." segments, so an ABSOLUTE in-workspace path from a (sub-)agent kept the root as literal
+segments and `${WORKSPACE_ROOT}/${...}` DOUBLED it → every read/write/edit for that file failed. New
+shared pure `toWorkspaceRelPath` (src/server/lib/workspacePath.ts, boundary-guarded root-strip,
+traversal-safe, +7 tests); all four actuators delegate to it — the 4-way copy drift is gone.
+
+**Slice 2: evidence-based build verdict + sub-agent terminal-event isolation.**
+- AgentRunner's step-limit exit was an unconditional ok:false — a build whose files were written (and
+  whose npm build/tsc passed) was reported as FAILED just because the model polished until the cap.
+  Now the cap verdict is judged by EVIDENCE (same policy as the wall-clock watchdog): artifacts
+  written → ok:true ("files saved, send another message to continue"), and when the readiness gate is
+  ON the claim must still be EARNED (ready → ok:true + health card; not-ready → honest ok:false).
+- The "(40) vs (80)" mystery: a delegated specialist (cap 40) shares the build's event stream, and its
+  own terminal done/error flowed to every surface as if the WHOLE build finished — the client reducer
+  set done:true and overwrote the top-level summary mid-build. SubAgent now translates specialist
+  terminal events into a new non-terminal `agent_done` (agent-attributed); the reducer updates only
+  that agent's card/activity. +6 tests (4 verdict, 2 isolation).
+
+Next slices (same rebuild): self-healing preview + loop-breaker; shared verification ledger
+(sub-agent redundancy).

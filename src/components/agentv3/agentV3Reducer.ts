@@ -151,6 +151,16 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         activity: pushActivity(state.activity, { id: `a-${event.ts}-${event.agent}`, ts: event.ts, kind: 'agent', text: `${event.agent} — ${event.task}`, agent: event.agent }),
       };
 
+    // A DELEGATED specialist finished — updates only that agent's card/activity, NEVER the
+    // build's done/ok/summary (a sub-agent's own step cap used to overwrite the top-level
+    // result as "Step limit reached (40)" while the Architect was still building).
+    case 'agent_done':
+      return {
+        ...state,
+        agents: touchAgent(state.agents, event.agent, event.ok ? 'finished' : `stopped: ${event.summary.slice(0, 80)}`, false, event.ts),
+        activity: pushActivity(state.activity, { id: `ad-${event.ts}-${event.agent}`, ts: event.ts, kind: 'agent', text: `${event.agent} ${event.ok ? 'finished' : 'stopped'}`, agent: event.agent }),
+      };
+
     case 'file_changed': {
       const verb = event.change.kind === 'create' ? 'created' : event.change.kind === 'delete' ? 'deleted' : 'edited';
       return {

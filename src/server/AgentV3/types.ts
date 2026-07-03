@@ -135,6 +135,11 @@ export type AgentEvent =
   | { type: 'todo_updated'; todos: TodoItem[]; ts: number }
   | { type: 'plan_updated'; plan: string; ts: number }
   | { type: 'agent_spawned'; agent: AgentRole; task: string; ts: number }
+  // A DELEGATED specialist finished (or was step-capped). Deliberately distinct from 'done':
+  // a sub-agent's terminal event must never mark the whole BUILD as finished/failed in the UI —
+  // that is how a specialist hitting its own 40-step cap overwrote the top-level summary with
+  // "Step limit reached (40)" while the Architect (cap 80) was still running.
+  | { type: 'agent_done'; agent: AgentRole; ok: boolean; summary: string; ts: number }
   | { type: 'permission_request'; agent: AgentRole; action: string; callId: string; ts: number }
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }

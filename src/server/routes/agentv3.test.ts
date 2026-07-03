@@ -421,21 +421,35 @@ describe('parseModelLadder — comma-separated newest→older model ladder', () 
 
 describe('cheapFloorAllowedForTier — cheap floor leads only simple/medium (complex → strong model)', () => {
   const saved = process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
-  afterEach(() => { if (saved === undefined) delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS; else process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = saved; });
+  const savedEsc = process.env.AGENTV3_ESCALATION;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS; else process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = saved;
+    if (savedEsc === undefined) delete process.env.AGENTV3_ESCALATION; else process.env.AGENTV3_ESCALATION = savedEsc;
+  });
 
   it('allows the floor for simple/medium tiers (gemini, haiku) and unknown', () => {
     delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    delete process.env.AGENTV3_ESCALATION;
     expect(cheapFloorAllowedForTier('gemini')).toBe(true);
     expect(cheapFloorAllowedForTier('haiku')).toBe(true);
     expect(cheapFloorAllowedForTier(undefined)).toBe(true); // cost-ladder off → allowed (Claude backstops)
   });
-  it('SKIPS the floor for complex/power tiers (sonnet, opus)', () => {
+  it('SKIPS the floor for complex/power tiers (sonnet, opus) when escalation is OFF (no Sonnet safety net)', () => {
     delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    delete process.env.AGENTV3_ESCALATION;
     expect(cheapFloorAllowedForTier('sonnet')).toBe(false);
     expect(cheapFloorAllowedForTier('opus')).toBe(false);
   });
+  it('ESCALATION on → ALL apps cheap-first (complex too), because a weak cheap build is caught + retried on Sonnet', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    process.env.AGENTV3_ESCALATION = 'on';
+    expect(cheapFloorAllowedForTier('sonnet')).toBe(true);
+    expect(cheapFloorAllowedForTier('opus')).toBe(true);
+    expect(cheapFloorAllowedForTier('gemini')).toBe(true);
+  });
   it('AGENTV3_CHEAP_FLOOR_ALL_TIERS=1 overrides → floor allowed on every tier', () => {
     process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = '1';
+    delete process.env.AGENTV3_ESCALATION;
     expect(cheapFloorAllowedForTier('sonnet')).toBe(true);
     expect(cheapFloorAllowedForTier('opus')).toBe(true);
   });

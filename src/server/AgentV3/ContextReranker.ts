@@ -22,6 +22,17 @@ export function tokenize(text: string): string[] {
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
 }
 
+/**
+ * Salient CONTENT-SEARCH terms from a request — meaningful words long enough to grep the codebase
+ * for without over-matching (drops the short common words that would match half the files). Bounded.
+ * Used to find the relevant files by CONTENT (e.g. the file where "credits" are decremented), not
+ * just by filename — essential for editing a large imported app where the right file's NAME may not
+ * echo the request. PURE.
+ */
+export function contentSearchTerms(text: string, max = 6): string[] {
+  return [...new Set(tokenize(text).filter((t) => t.length >= 4))].slice(0, Math.max(0, max));
+}
+
 export interface RankedDoc {
   path: string;
   score: number;

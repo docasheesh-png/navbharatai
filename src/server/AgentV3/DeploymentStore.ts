@@ -14,6 +14,8 @@
 import * as admin from 'firebase-admin';
 import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
 import { hostingUsageStore } from '../lib/HostingUsageStore';
+import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
+import { audit } from '../lib/audit';
 
 /** Lifecycle status of a published app (registry — enables takedown/report in later slices). */
 export type DeploymentStatus = 'active' | 'held' | 'taken_down';
@@ -32,6 +34,8 @@ export interface DeploymentRecord {
   sizeMb?: number;
   /** Registry status; defaults to 'active'. */
   status?: DeploymentStatus;
+  /** True when the content-safety scanner flagged this app in WARN mode (published, but surfaced). */
+  flagged?: boolean;
 }
 
 class DeploymentStore {
@@ -56,7 +60,7 @@ class DeploymentStore {
     userId: string | null,
     url: string,
     fileCount: number,
-    extra?: { providerId?: string; firstParty?: boolean; sizeMb?: number; status?: DeploymentStatus },
+    extra?: { providerId?: string; firstParty?: boolean; sizeMb?: number; status?: DeploymentStatus; flagged?: boolean },
   ): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !url) return;
@@ -70,6 +74,7 @@ class DeploymentStore {
           ...(extra?.providerId ? { providerId: extra.providerId } : {}),
           ...(typeof extra?.firstParty === 'boolean' ? { firstParty: extra.firstParty } : {}),
           ...(typeof extra?.sizeMb === 'number' ? { sizeMb: extra.sizeMb } : {}),
+          ...(typeof extra?.flagged === 'boolean' ? { flagged: extra.flagged } : {}),
           status: extra?.status ?? 'active',
           updatedAt: Date.now(),
         },
@@ -179,6 +184,29 @@ export function withDeploymentPersistence(
       }
     }
 
+    // CONTENT-SAFETY scan (Phase A): inspect the built page for phishing / wallet-drainer / brand-
+    // impersonation signatures BEFORE it goes live. Pure + never throws. Default = WARN-ONLY (audit +
+    // narration, publish proceeds) so a legit login for the user's own product is never wrongly
+    // blocked; set AGENTV3_PUBLISH_SCAN=block to hard-block an unsafe verdict (marks status='held').
+    let heldByScan = false;
+    try {
+      const scan = scanPublishedContent(files);
+      if (!scan.safe) {
+        audit('APP_PUBLISH_FLAGGED', { workspaceId, userId: userId ?? 'anon', findings: scan.findings.map((f) => `${f.severity}:${f.rule}`).join(',') });
+        if (publishScanBlocks()) {
+          void deploymentStore.setStatus(workspaceId, 'held');
+          throw new Error(
+            `This app was held for review: it looks like it may ${scan.findings[0]?.description || 'contain unsafe content'} ` +
+            `Publishing is paused pending review. If this is a mistake (a legitimate login for your own product), contact support.`,
+          );
+        }
+        heldByScan = true; // warn mode: record the flag on the registry, but still publish
+      }
+    } catch (err) {
+      if (publishScanBlocks() && err instanceof Error && /held for review/.test(err.message)) throw err;
+      /* warn-mode scan error is best-effort — never block a real publish */
+    }
+
     const url = await base(workspaceId, files);
     const firstParty = isFirstPartyProvider(providerId);
     // Count only platform-paid (first-party) publishes toward the free quota.
@@ -188,6 +216,7 @@ export function withDeploymentPersistence(
       firstParty,
       sizeMb: Math.round(deployBytesMb(files) * 100) / 100,
       status: 'active',
+      ...(heldByScan ? { flagged: true } : {}),
     });
     return url;
   };

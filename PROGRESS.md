@@ -7942,3 +7942,21 @@ empties; taken-down republish blocked, base never called; active allowed; BYO sk
 AppKnowledgeBase entry deferred to Phase A slice 5 (with the user-facing Report button). Gate: frontend
 tsc 0, server tsc 0, vitest 4608/4608 PASS, boot PASS. Admin note: takedown needs the Cloud Run SA to
 have the Firebase Hosting Admin role (deploy already uses it → present).
+
+## 2026-07-04 — HOSTING Phase A, Slice 4: content-safety scanner (published-page abuse detection)
+
+The genuinely-missing scanner class (the 3 existing scanners inspect SOURCE for builder-machine
+threats; none inspect the SHIPPED page for end-user harm). NEW src/server/AgentV3/ContentSafetyScanner.ts
+reuses the CodeSafetyScanner rule-engine shape to scan the built dist HTML/JS/text for the clearest
+abuse signatures: crypto seed-phrase / private-key harvest (wallet drainers), brand-impersonation
+"account suspended / verify" phishing lures, and sensitive-financial (CVV/OTP) capture. Pure, bounded,
+never throws. Wired into the deploy choke point (withDeploymentPersistence) AFTER the takedown guard:
+default WARN-ONLY (audit APP_PUBLISH_FLAGGED + registry `flagged:true`, publish proceeds) so a
+legitimate login for the user's OWN product is never wrongly blocked; env AGENTV3_PUBLISH_SCAN=block
+hard-holds an unsafe verdict (status='held', honest throw, nothing published). +10 tests with REAL
+phishing/drainer fixtures (must flag) + REAL legit-login/CRUD fixtures (must NOT flag) + block/warn
+wiring. Gate: frontend tsc 0, server tsc 0, vitest 4631/4631 PASS, boot PASS.
+
+Phase A remaining: public Report button + /api/report-app (slice 5, client + route + AppKnowledgeBase);
+GitHub Pages free-tier provider + Cloudflare .navbharatai.app subdomain (need admin Cloudflare
+account/token/domain + the subdomain-root decision).

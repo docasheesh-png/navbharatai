@@ -7991,3 +7991,22 @@ ADMIN ACTION for Cap ④ live test: set AGENTV3_PROJECT_MODE to your uid/email (
 `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com`) on Cloud Run to enable SPM for your account only,
 then send a real mega-prompt (200+ screens / a long feature list). Flip to `on` for all users once
 happy; `off`/unset is the kill switch.
+
+## 2026-07-04 — INFRA MEMORY: hosting domains + mitrify.in Hostinger capabilities (admin-provided)
+
+Admin owns 3 domains: (1) navbharatai.com — the live app (Cloud Run + Firebase Hosting); (2) mitrify.xyz;
+(3) mitrify.in — has a PAID Hostinger web-hosting plan (1yr prepaid), currently idle.
+
+mitrify.in Hostinger plan is NODE.JS-CAPABLE (NOT basic static — corrected from an earlier wrong "Single"
+assumption; the hPanel dashboard is ground truth):
+- Node.js apps: 3/5 used (2 free slots), Node 22.x, Express framework supported.
+- Deploy: git/zip upload + a real BUILD pipeline (Redeploy, build logs, build/output settings); root dir "mitrify".
+- Disk 3.33/50 GB; inodes 139K/600K. SSL ✓, malware protection ✓, daily backups, DB-connect, file manager,
+  runtime logs. CDN AVAILABLE but currently OFF (can enable free).
+- CURRENT STATE: last deployment (2026-06-02, file 1526mitrify.zip, Express, Node 22) = BUILD FAILED → that
+  is why nothing runs on mitrify.in and the money is idle. Root cause TBD (need the build logs / zip contents).
+
+Hosting strategy (agreed direction, pending final A/B + the mitrify.in build fix): user apps → Cloudflare
+Pages (free, unlimited, CDN, custom domains) for scale; mitrify.in (already paid, Node-capable, 2 free Node
+slots + 50GB static room + enable CDN) is genuinely usable for the platform's own showcase/report page AND/OR
+a bounded free-tier host. Do NOT paste FTP/hosting passwords in chat — wire as Cloud Run secrets/env.

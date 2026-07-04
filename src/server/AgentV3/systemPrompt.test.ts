@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { editModePrefix, architectSystemPrompt, planSystemPrompt, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
+import { editModePrefix, summarizeFileTree, architectSystemPrompt, planSystemPrompt, dateContextBlock, LANGUAGE_RULE } from './systemPrompt';
 
 describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
   it('is blunt about mirroring the user and not defaulting to Hindi', () => {
@@ -13,7 +13,57 @@ describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
   });
 });
 
+describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
+  it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
+    const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);
+    expect(out).toBe('src/App.tsx\npackage.json\nsrc/lib/util.ts');
+  });
+
+  it('SUMMARIZES a large project by directory instead of dumping every path', () => {
+    // 1,000 files across many dirs — the full list would be ~40KB+ in EVERY turn's prompt.
+    const paths: string[] = ['package.json', 'tsconfig.json'];
+    for (let d = 0; d < 30; d++) for (let f = 0; f < 40; f++) paths.push(`client/src/pages/dir${d}/file${f}.tsx`);
+    const out = summarizeFileTree(paths);
+    // It must NOT contain every individual deep file…
+    expect(out).not.toContain('file39.tsx');
+    // …but MUST convey scale, structure, and how to navigate.
+    expect(out).toContain(`${paths.length} files`);
+    expect(out).toContain('directories');
+    expect(out).toContain('search_files');
+    // Root files are surfaced (they are few + important: config/entry).
+    expect(out).toContain('package.json');
+    expect(out).toContain('tsconfig.json');
+    // A representative directory with its count appears.
+    expect(out).toMatch(/client\/src\/pages\/dir\d+\/ — 40/);
+    // The whole summary stays far smaller than the raw list would be.
+    expect(out.length).toBeLessThan(paths.join('\n').length / 2);
+  });
+
+  it('caps the number of directory lines and says how many were elided', () => {
+    const paths: string[] = [];
+    for (let d = 0; d < 500; d++) paths.push(`pkg/mod${d}/index.ts`);
+    const out = summarizeFileTree(paths, { maxDirLines: 50 });
+    expect(out).toContain('and 450 more director');
+  });
+
+  it('respects a custom fullListMax and handles empty input', () => {
+    expect(summarizeFileTree([])).toBe('');
+    // With fullListMax=2, three files trigger the summary path.
+    const out = summarizeFileTree(['a/x.ts', 'a/y.ts', 'b/z.ts'], { fullListMax: 2 });
+    expect(out).toContain('3 files');
+  });
+});
+
 describe('editModePrefix', () => {
+  it('injects a bounded directory SUMMARY (not every path) for a large imported app', () => {
+    const paths: string[] = ['package.json'];
+    for (let i = 0; i < 800; i++) paths.push(`server/routes/handler${i}.ts`);
+    const p = editModePrefix(paths);
+    expect(p).toContain('<<<EXISTING_FILES>>>');
+    expect(p).toContain('801 files');
+    expect(p).not.toContain('handler799.ts'); // the deep list is summarized away
+  });
+
   it('declares EDIT MODE and instructs reading before writing', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('EDIT MODE');

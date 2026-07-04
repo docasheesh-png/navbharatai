@@ -82,6 +82,26 @@ function trimSnippet(line: string): string {
  * using the exported detectors above, because they need the whole project.
  * Returns [] for skipped/non-code/clean files.
  */
+/** The full `res.cookie(...)` call text starting at `lines[i]`, extended across following lines until
+ *  its parentheses balance (bounded window). Express cookies are routinely written multi-line —
+ *  `res.cookie('sid', v, {\n httpOnly: true,\n secure: true,\n })` — so the httpOnly/secure/sameSite
+ *  options live on LATER lines. Evaluating the flags line-locally false-flagged fully-secure cookies
+ *  as missing them. PURE. */
+function cookieCallText(lines: string[], i: number): string {
+  let depth = 0;
+  let started = false;
+  let text = '';
+  for (let j = i; j < lines.length && j < i + 12; j++) {
+    text += lines[j] + '\n';
+    for (const ch of lines[j]) {
+      if (ch === '(') { depth++; started = true; }
+      else if (ch === ')') depth--;
+    }
+    if (started && depth <= 0) break;
+  }
+  return text;
+}
+
 export function scanCompliance(file: string, content: string): ComplianceIssue[] {
   if (!CODE_EXT.test(file) || SKIP_PATH.test(file)) return [];
   const issues: ComplianceIssue[] = [];
@@ -113,17 +133,18 @@ export function scanCompliance(file: string, content: string): ComplianceIssue[]
       push('cookie-no-samesite', 'medium');
     }
 
-    // ── medium: server cookie set without httpOnly — readable by any script, so an
-    // XSS can steal the session/auth token (DPDP/GDPR security-of-processing) ───────
-    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/httponly/i.test(line) && !isCookieDeletion) {
-      push('cookie-no-httponly', 'medium');
-    }
-
-    // ── medium: server cookie set without the Secure flag — the browser will send it
-    // over plain http where it can be intercepted on the wire (DPDP/GDPR security-of-
-    // processing). The `secure:` option (or a "Secure" attribute) resolves it. ───────
-    if (/\bres(?:ponse)?\.cookie\s*\(/.test(line) && !/\bsecure\b/i.test(line) && !isCookieDeletion) {
-      push('cookie-no-secure', 'medium');
+    // ── medium: server cookie set without httpOnly / Secure. Evaluate the flags over the WHOLE
+    // res.cookie(...) call (its options object usually spans several lines) so a fully-secure
+    // multi-line cookie isn't false-flagged as missing them (which could downgrade the app to
+    // CONDITIONAL). Only compute the window when this line actually opens a res.cookie( call. ───────
+    const isResCookie = /\bres(?:ponse)?\.cookie\s*\(/.test(line);
+    if (isResCookie) {
+      const call = cookieCallText(lines, i);
+      const cookieDeleted =
+        /\bmax-?age\s*[:=]\s*-?0\b|expires\s*[:=][^;,)]*(?:1970|Thu,\s*0?1\s*Jan)/i.test(call);
+      if (!/httponly/i.test(call) && !cookieDeleted) push('cookie-no-httponly', 'medium');
+      // XSS can steal a non-httpOnly session/auth token (DPDP/GDPR security-of-processing).
+      if (!/\bsecure\b/i.test(call) && !cookieDeleted) push('cookie-no-secure', 'medium');
     }
 
     // ── medium: a secret/credential carried in a URL query string — it leaks into

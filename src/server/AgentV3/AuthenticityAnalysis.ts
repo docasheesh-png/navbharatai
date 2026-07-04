@@ -168,8 +168,12 @@ const RULES: Rule[] = [
  */
 function emptyHandlerLine(lines: string[]): number {
   for (let i = 0; i < lines.length; i++) {
-    // An opening brace that looks like a function/arrow/handler body start.
-    if (!/(\)\s*(=>)?\s*\{|\bfunction\b[^{]*\{)\s*$/.test(lines[i])) continue;
+    // An opening brace that starts an actual FUNCTION/ARROW body — `) => {` or `function … {`. The
+    // `=>` is REQUIRED (not optional): without it, a bare `) {` matched every control-flow header
+    // (`if (…) {`, `for (…) {`, `while (…) {`, `catch (…) {`), so a legitimate guard whose body is a
+    // single `console.log` was mislabeled an "empty handler". A real handler here is an arrow or a
+    // function, never an `if`/`for`/`while`.
+    if (!/(\)\s*=>\s*\{|\bfunction\b[^{]*\{)\s*$/.test(lines[i])) continue;
     // Collect the body until the matching close brace at the same indent feel.
     const body: { text: string; line: number }[] = [];
     let closed = false;

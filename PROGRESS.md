@@ -8169,3 +8169,34 @@ rendered → empty dead strip. FIX: gate the `pb-14` on the SAME `!focusMode` co
 the reservation and the nav stay in lock-step (padding exists iff the nav does). Composer's own
 `pb-[env(safe-area-inset-bottom)]` stays → sits just above the browser bar without hiding behind it.
 Gate: frontend tsc 0, vitest 4650/4650 PASS, build PASS.
+
+## MILESTONE (2026-07-04, session 01KDmsCZ): BUG-HUNT ROUND 4 — security + design fixes + deferred deploy backlog
+
+Fourth read-only hunt over fresh isolated surfaces (deploy providers, security scanners, design linter).
+Merged:
+- **#941** — DesignLinter.extractFontFamilies advertised Tailwind `font-[...]` coverage in its JSDoc but
+  only parsed CSS `font-family:` → a Tailwind app that sets fonts via classes reported 0 fonts and the
+  too-many-fonts check never fired. Now scans `font-[...]` arbitrary utilities (family-name: hint, `_`→
+  space, numeric-weight excluded).
+- **#943** — TWO HIGH security-scanner FALSE-NEGATIVES (scanner said "clean" while a real secret was
+  exposed): (a) SecurityAnalysis PLACEHOLDER guard tested the WHOLE LINE, so `<` (every JSX line) and
+  `test` (in latest/fastest/a comment) suppressed real secrets — secret detection was effectively
+  disabled on .tsx. Fixed by testing the captured VALUE (ignore guard now gets the match array).
+  (b) SecretLeakAnalysis `\.env\b` matched inside `.env.local`, so a CRA gitignore (only `.env.local`,
+  never bare `.env`) made a committed `.env` report "gitignored". Fixed to accept only rules that
+  actually cover bare `.env`.
+
+DEFERRED — deploy findings that are REAL but NOT clean/isolated (need verification or touch hot files;
+recorded so the next session can pick them up, NOT blind-fixed per safeguard #3):
+- Angular deploy: AngularProvider.ts:77 `outputPath:'dist/app'` + the `application` builder emits
+  `dist/app/browser/index.html`, but the deploy collector reads `dist/`-root → deployed site 404s at `/`
+  while `ng serve` preview works. The correct fix (normalize the collected tree to the index.html dir)
+  lives in the deploy collector inside E2BActuator (HOT); reachability (does v3.0 actually scaffold+build+
+  deploy Angular?) depends on hot framework-resolution code — VERIFY before fixing. (Deploy PROVIDERS
+  themselves — Netlify/Vercel/Cloudflare/Firebase — were audited and are clean: binary-safe uploads,
+  honest error propagation, real quota/takedown gates, no false-success.)
+- Deploy has no per-framework output-dir map: Next/SvelteKit/Nuxt/Remix (.next/build/.output) and
+  backends (node-express/nestjs/fastify/python) have no correct static target; `kind:'fullstack'` in the
+  provider interface is dead (no fullstack provider registered). Capability gap, not a single-line bug.
+- Firebase deploy applies an unconditional SPA catch-all rewrite (`glob:'**'→/index.html`) to every
+  deploy → an MPA/static site soft-404s. (LOW.)

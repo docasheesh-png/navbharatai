@@ -13,6 +13,15 @@ describe('ProductTour', () => {
     expect(html).not.toContain('role="dialog"');
   });
 
+  it('shows the launcher on the home view but hides it on every other view', () => {
+    // Home → launcher visible (onboarding entry point).
+    expect(renderToStaticMarkup(<ProductTour currentView="home" />)).toContain('Take a quick product tour');
+    // Any non-home view → launcher hidden, so its fixed bottom-left button never overlaps that
+    // surface's controls (the v3.0 chat composer was the reported case).
+    expect(renderToStaticMarkup(<ProductTour currentView="nbi_pro_chat" />)).toBe('');
+    expect(renderToStaticMarkup(<ProductTour currentView="billing" />)).toBe('');
+  });
+
   it('ships the 5 documented steps, each targeting a data-tour selector', () => {
     expect(DEFAULT_TOUR_STEPS).toHaveLength(5);
     const sels = DEFAULT_TOUR_STEPS.map((s) => s.selector);

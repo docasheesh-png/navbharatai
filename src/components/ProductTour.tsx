@@ -39,9 +39,14 @@ const TOOLTIP_W = 320;
 export function ProductTour({
   onNavigate,
   steps = DEFAULT_TOUR_STEPS,
+  currentView,
 }: {
   onNavigate?: (view: string) => void;
   steps?: TourStep[];
+  /** The app's active view. The launcher shows ONLY on 'home' so its fixed bottom-left button
+   *  never overlaps the controls on other surfaces (e.g. the v3.0 chat composer). Undefined keeps
+   *  the launcher visible everywhere (backward-compatible default for standalone use). */
+  currentView?: string;
 }) {
   const [active, setActive] = useState(false);
   const [stepIdx, setStepIdx] = useState(0);
@@ -137,7 +142,12 @@ export function ProductTour({
   }, [active, finish, advance, back]);
 
   // Launcher (desktop only — the tour spotlights the desktop layout). User-initiated; never auto-runs.
+  // Shown ONLY on the home view: its fixed bottom-left button would otherwise float over the controls
+  // on other surfaces (e.g. it overlapped the v3.0 chat composer's buttons). A returning user starts
+  // the tour from home; once active, the overlay below renders on every view the tour navigates to, so
+  // gating only the launcher (not the active overlay) keeps the multi-view walkthrough working.
   if (!active) {
+    if (currentView !== undefined && currentView !== 'home') return null;
     return (
       <button
         onClick={start}

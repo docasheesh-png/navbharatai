@@ -173,6 +173,17 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(ok.resumable).toBe(false);
   });
 
+  it('carries planRemaining from a project-mode module result (SPM-3 auto-continue guard)', () => {
+    const moduleTurn = agentV3Reducer(initialAgentV3State(), {
+      type: 'result', ok: true, summary: 'module done', steps: 12, billedUsd: 0.4, resumable: true, planRemaining: 7,
+    });
+    expect(moduleTurn.resumable).toBe(true);
+    expect(moduleTurn.planRemaining).toBe(7);
+    // A non-project result carries no plan signal (classic pause budget applies).
+    const classic = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: false, summary: 'paused', steps: 0, billedUsd: 0, resumable: true });
+    expect(classic.planRemaining).toBeUndefined();
+  });
+
   it('keeps the diagnostics report delivered with the result event (for the "Build report" button)', () => {
     const report = { schema: 'navbharatai.v3.build-diagnostics/1', issues: [{ code: 'TOOL_CALL' }] };
     const withDiag = agentV3Reducer(initialAgentV3State(), {

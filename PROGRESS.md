@@ -7745,3 +7745,21 @@ to today; full suite green proves it). What ships:
   plan needs a typed "continue" (restore doesn't re-emit resumable); client
   auto-continue budget still 2 — SPM-3 raises it progress-monotonically for plan mode.
 Gate: tsc 0/0 both configs, vitest 4526/4526, build + boot PASS.
+
+## 2026-07-04 — SPM-3 BUILT: progress-monotone auto-continue drives the whole module plan
+
+The classic Layer-3 budget (2 continues per user message, built for wall-clock pauses) would
+strangle a 40-module plan — the user would type "continue" twenty times through a build they
+asked to run unattended. SPM-3 replaces the fixed number with a DIFFERENT guard, in a pure,
+fully-tested module (src/components/agentv3/planAutoContinue.ts — decideAutoContinue):
+- A plan-mode result (planRemaining on the result event, carried through the reducer into
+  state) auto-continues ONLY while planRemaining STRICTLY DECREASES — real progress runs the
+  whole plan unattended; a stall (same/growing remaining) stops with an honest hand-back.
+- Every completed module RESETS the pause budget, so module 30 gets the same time-limit
+  tolerance module 1 had; mid-module deadline pauses still use the classic bounded budget.
+- Absolute backstop PLAN_CONTINUE_MAX=100 (server MAX_MODULES=60) can never bind on a real
+  plan but caps any pathological chain. A fresh user message resets all three refs.
+AgentV3Panel's effect now consumes the pure decision (thin wiring); agentV3Reducer carries
+planRemaining. 9 new tests (8 decision + 1 reducer carry).
+Gate: tsc 0/0 both configs, vitest 4535/4535, build + boot PASS.
+Next: SPM-4 — per-module verification gate + AppKnowledgeBase entry once admin enables the flag.

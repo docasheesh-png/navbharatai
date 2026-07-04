@@ -127,6 +127,22 @@ describe('scanSecurity', () => {
     expect(scanSecurity('a.ts', 'db.query("SELECT id FROM " + "users");').some((f) => f.rule === 'sql-injection')).toBe(false);
   });
 
+  it('sql-injection does NOT fire on UI English that merely starts with a SQL verb (the Hospital-build false positive)', () => {
+    // THE exact line that blocked a real build (readiness 0/100): an accessibility label.
+    expect(scanSecurity('src/pages/Medicines.tsx', 'aria-label={`Delete ${med.name}`}').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.tsx', 'const msg = `Update ${item.name} saved successfully`;').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.tsx', 'const hint = `Select ${count} items from the dropdown`;').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.tsx', 'toast(`Insert ${qty} units into inventory`);').some((f) => f.rule === 'sql-injection')).toBe(false);
+    expect(scanSecurity('a.tsx', 'confirm("Delete " + med.name + "?");').some((f) => f.rule === 'sql-injection')).toBe(false);
+  });
+
+  it('sql-injection still fires on REAL SQL skeletons with interpolation/concatenation', () => {
+    expect(scanSecurity('a.ts', 'db.run(`DELETE FROM sessions WHERE user_id = ${uid}`);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'db.query(`SELECT ${cols} FROM orders WHERE status = ${s}`);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'db.exec(`INSERT INTO logs (msg) VALUES (${m})`);').some((f) => f.rule === 'sql-injection')).toBe(true);
+    expect(scanSecurity('a.ts', 'db.query("UPDATE users SET name=" + name + " WHERE id=1");').some((f) => f.rule === 'sql-injection')).toBe(true);
+  });
+
   it('flags a hardcoded Authorization Bearer/Basic header but not the env form', () => {
     expect(scanSecurity('a.ts', "fetch(u, { headers: { Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9' } });").some((f) => f.rule === 'hardcoded-auth-header')).toBe(true);
     expect(scanSecurity('a.ts', 'const h = { "Authorization": "Basic dXNlcjpwYXNzd29yZA==" };').some((f) => f.rule === 'hardcoded-auth-header')).toBe(true);

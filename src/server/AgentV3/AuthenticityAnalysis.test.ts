@@ -44,6 +44,20 @@ describe('scanAuthenticity', () => {
     expect(mock.some((x) => x.kind === 'fake-data-identifier' && x.severity === 'high')).toBe(true);
   });
 
+  it('stub-marker does NOT fire on Tailwind placeholder utilities (the Hospital-build false positive)', () => {
+    // Real UI styling from the blocked build — quoted class strings beginning with the word.
+    expect(scanAuthenticity('src/ui/Input.tsx', "const cls = 'placeholder:text-gray-400 dark:placeholder:text-gray-500';").some((x) => x.kind === 'stub-marker')).toBe(false);
+    expect(scanAuthenticity('src/ui/Input.tsx', "clsx('placeholder-gray-400 focus:ring-2', className)").some((x) => x.kind === 'stub-marker')).toBe(false);
+    // A genuine left-in stub marker is still flagged.
+    expect(scanAuthenticity('src/api.ts', '// placeholder until the real API lands').some((x) => x.kind === 'stub-marker')).toBe(true);
+    expect(scanAuthenticity('src/api.ts', 'return "this is a stub";').some((x) => x.kind === 'stub-marker')).toBe(true);
+  });
+
+  it('coming-soon flags filler but NOT the honest "not available yet" state the constitution mandates', () => {
+    expect(scanAuthenticity('src/Page.tsx', '<p>Analytics coming soon</p>').some((x) => x.kind === 'coming-soon')).toBe(true);
+    expect(scanAuthenticity('src/Page.tsx', "<p>Live preview is not available yet in this environment.</p>").some((x) => x.kind === 'coming-soon')).toBe(false);
+  });
+
   it('returns [] for clean, real code (no false positives)', () => {
     const clean = scanAuthenticity(
       'src/math.ts',

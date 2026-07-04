@@ -7632,3 +7632,33 @@ Note: #897 (other session) built on #889 — declared-port ground truth for prev
 boot — composing cleanly, not colliding. Preview track is now EXHAUSTED (no clean findings remain).
 Deliberately NOT touching the build-engine rebuild (#892–#896) or the big-app-import next phase (#898)
 — those are the other session's active locked territory (safeguard #2).
+
+## 2026-07-04 — Readiness-gate false positives: working Hospital-OPD app scored 0/100 (root-caused from the admin's new build report)
+
+Admin re-ran a real build after the engine rebuild. GOOD: 0 doubled-path errors, no step-limit death,
+tsc clean, npm run build exit 0, 31 files. BAD: the readiness gate blocked the working app with
+score 0/100 on THREE false-positive "high" blockers. Each root-caused to its exact line and fixed
+at the class level (fourth absolute rule):
+
+1. **"SQL injection" on `aria-label={`Delete ${med.name}`}`** — SecurityAnalysis's sql-injection
+   regex matched ANY template string starting with an English word that is also a SQL verb. Now it
+   requires a REAL SQL skeleton (INSERT INTO / DELETE FROM…WHERE / UPDATE…SET= / SELECT…FROM[…WHERE])
+   plus interpolation/concat. UI English ("Delete …?", "Select … from the list") no longer flags;
+   all real-SQL cases still do.
+2. **"fake/incomplete code (placeholder)" on Tailwind `placeholder:`/`placeholder-*` classes** —
+   AuthenticityAnalysis's stub-marker rule treated quoted class strings as fake-code markers. Added
+   `(?![-:])`; genuine `// placeholder` / "this is a stub" still flag. Same class: the coming-soon
+   rule flagged "not available yet" — the EXACT honest-state text the constitution mandates —
+   narrowed to "coming soon" only.
+3. **"serious privacy/compliance issue" = missing privacy policy** — virtually every CRUD app collects
+   form PII, so this high hard-blocked a huge class of complete apps the user never asked a privacy
+   page for. Downgraded to an honest ADVISORY (medium, still in the report; never a blocker).
+4. **RequirementCoverage false negatives** — artifact /register/ does not match "Registration.tsx"
+   (fully-built OPD Registration reported "not found"); → /regist/. notifications now accept
+   toast/snackbar (ToastContext IS the notification surface); search accepts filter.
+
++9 regression tests encoding the EXACT failure lines from the build report. Gate: tsc 0/0,
+vitest 4485/4485 PASS, boot PASS.
+
+Known remaining (next slice, separate): the gate still does not weigh the RENDERED preview verdict
+(the build's real issue — a blank page — was never a readiness input). Recorded as an open root cause.

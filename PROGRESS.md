@@ -7763,3 +7763,27 @@ AgentV3Panel's effect now consumes the pure decision (thin wiring); agentV3Reduc
 planRemaining. 9 new tests (8 decision + 1 reducer carry).
 Gate: tsc 0/0 both configs, vitest 4535/4535, build + boot PASS.
 Next: SPM-4 — per-module verification gate + AppKnowledgeBase entry once admin enables the flag.
+
+## 2026-07-04 — SPM-4 BUILT: knowledge-base entry + verification audit — SOFTWARE PROJECT MODE march COMPLETE (server-side)
+
+SPM-4 closes the march. Audit findings (verified in code, not assumed):
+- Modules-as-todos: already shipped in SPM-2 (projectPlanTodos → state.setTodos on select AND
+  settle; PLAN_STATE note persists them durably, so a reopened session restores the module plan).
+- Per-module verification: already REAL — every module turn is a top-level build and therefore
+  passes the mandatory readiness gate (readinessGateEnabled() default ON, AGENTV3_READINESS_GATE
+  !== 'off'); a gate failure → result.ok false → module marked failed with the honest reason.
+  tsc runs whole-workspace each turn, which catches cross-module drift EARLY by design.
+- New in this PR: AppKnowledgeBase entry `agentv3_project_mode` (mandatory rule — every AI in
+  NavBharatAI can now answer "big app kaise banau"), with English + Hinglish keywords.
+
+STATE: Software Project Mode is fully built and dormant behind AGENTV3_PROJECT_MODE (default
+OFF; kill-switch by unsetting). ADMIN DECISION NEEDED (asked in chat, safeguard #3): set
+AGENTV3_PROJECT_MODE=on on the Cloud Run service to activate. Recommendation: enable, then run
+one real mega-prompt test (e.g. "an app with 200+ screens for hospital + pharmacy + lab +
+billing + HR, features listed") and watch the module plan appear and advance. Detection is
+high-precision, so ordinary builds are untouched even with the flag on.
+
+Open (recorded, not blocking): imported-repo mega-conversion doesn't create a plan (creation
+fires only on fresh new_build); a reopened incomplete plan needs a typed "continue" (restore
+doesn't re-emit resumable); contract drift (a built module deviating from its frozen contract)
+is caught by the whole-workspace tsc gate, not by a dedicated contract check.

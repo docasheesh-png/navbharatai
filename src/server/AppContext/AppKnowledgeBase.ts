@@ -164,6 +164,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_project_mode',
+    name: 'Software Project Mode — build very large software (hundreds of files) module by module',
+    path: 'NavBharatAI Pro v3.0 → chat — automatic for large software requests (a full ERP/CRM/management system, an explicit "200+ screens" scale, or a spec listing many features)',
+    description: 'For software too big for one build round, v3.0 first decomposes the request into independently-buildable modules with frozen interface contracts, saves that plan durably (it survives reloads, closed tabs and new sessions), and then builds ONE module per round in dependency order — continuing automatically round after round while real progress is being made, until every module is done. The module plan is shown as the plan list above the chat box and ticks off live. If a module fails, the build pauses honestly with the reason and its dependent modules wait; typing "continue" retries the failed module. Requires the admin to have enabled project mode on the server (AGENTV3_PROJECT_MODE).',
+    howToUse: 'Describe the full software in one message — an explicit scale ("an app with 200+ screens") or a detailed numbered/bulleted feature list is what triggers project mode. Watch the module plan appear and tick off as rounds complete; it continues by itself while progressing. To resume later (after a reload, a new session, or a failed module), just type "continue".',
+    relatedFeatures: ['agentv3_builder', 'agentv3_build_continuity', 'agentv3_files'],
+    keywords: ['big app', 'large app', 'badi app', 'bada software', '1000 files', '5000 files', 'full software', 'complete software', 'erp', 'crm', 'management system', 'module', 'modules', 'project mode', 'module by module', 'big project', 'bade project', 'pura software banao', 'complex app', 'complex software', 'enterprise app', 'bahut badi app'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_continuity',
     name: 'Build survives reload & tab switch (no lost work)',
     path: 'NavBharatAI Pro v3.0 — automatic; the build keeps running and re-attaches on its own',

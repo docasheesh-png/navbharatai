@@ -48,6 +48,19 @@ describe('extractFontFamilies', () => {
   it('ignores keyword/var families', () => {
     expect(extractFontFamilies('a{font-family:inherit} b{font-family:var(--f)}')).toEqual([]);
   });
+  it('captures Tailwind arbitrary font utilities (the promised-but-missing coverage)', () => {
+    // A Tailwind app that sets fonts ONLY via classes reported [] fonts, so the too-many-fonts
+    // check never fired despite 3 competing display fonts.
+    const code = `<h1 className="font-['Playfair_Display']">t</h1><p className="font-[Inter]">b</p><span className="font-[family-name:'Roboto']">c</span>`;
+    const fonts = extractFontFamilies(code);
+    expect(fonts).toContain('playfair display');
+    expect(fonts).toContain('inter');
+    expect(fonts).toContain('roboto');
+    expect(fonts.length).toBe(3);
+  });
+  it('does NOT count a numeric arbitrary font utility (font-[600] is a weight, not a family)', () => {
+    expect(extractFontFamilies('<p className="font-[600]">x</p>')).toEqual([]);
+  });
 });
 
 describe('extractSpacingPx + offGridSpacing', () => {

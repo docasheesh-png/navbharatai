@@ -73,6 +73,17 @@ export function extractFontFamilies(code: string): string[] {
     const first = m[1].split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
     if (first && !/^(inherit|initial|unset|var\()/.test(first)) out.add(first);
   }
+  // Tailwind arbitrary font-family utilities: `font-['Playfair_Display']`, `font-[Inter]`,
+  // `font-[family-name:'Roboto']`. The JSDoc promised this but it was never implemented, so a
+  // Tailwind app that sets fonts ONLY via classes (no `font-family:` anywhere) reported [] fonts and
+  // the too-many-fonts check never fired. Underscore = space in Tailwind arbitrary values; a numeric
+  // arbitrary value (`font-[600]` = weight) is excluded — a real family name always has a letter.
+  const tw = /font-\[([^\]]+)\]/gi;
+  while ((m = tw.exec(code)) !== null) {
+    const raw = (m[1].split(':').pop() ?? '')      // drop a `family-name:` type hint
+      .replace(/_/g, ' ').replace(/['"]/g, '').trim().toLowerCase();
+    if (raw && /[a-z]/.test(raw) && !/^(inherit|initial|unset)$/.test(raw)) out.add(raw);
+  }
   return [...out];
 }
 

@@ -10,10 +10,19 @@ import {
   droppedDetailNote,
   chooseMonorepoAppRoot,
   envTemplateNote,
+  assetMimeFor,
+  parseDataUri,
   IMPORT_MAX_FILES,
 } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
+  const zip = new JSZip();
+  for (const [path, content] of Object.entries(entries)) zip.file(path, content);
+  return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
+/** Zip with binary entries (Buffers) for asset tests. */
+async function makeZipBinary(entries: Record<string, Buffer | string>): Promise<Buffer> {
   const zip = new JSZip();
   for (const [path, content] of Object.entries(entries)) zip.file(path, content);
   return Buffer.from(await zip.generateAsync({ type: 'nodebuffer' }));
@@ -63,7 +72,7 @@ describe('extractZipProject', () => {
     expect(out.files['package.json']).toBe('{}');
   });
 
-  it('drops node_modules/build dirs, live secrets, and binaries — with honest counts', async () => {
+  it('drops node_modules/build dirs, live secrets, and large binaries — with honest counts', async () => {
     const buf = await makeZip({
       'package.json': '{}',
       'node_modules/react/index.js': 'x',
@@ -71,14 +80,14 @@ describe('extractZipProject', () => {
       '.env': 'API_KEY=supersecret',
       '.env.example': 'API_KEY=',
       'certs/server.pem': 'x',
-      'logo.png': 'x',
+      'video.mp4': 'x', // a non-asset binary → dropped
       'src/main.ts': 'console.log(1)',
     });
     const out = await extractZipProject(buf);
     expect(Object.keys(out.files).sort()).toEqual(['.env.example', 'package.json', 'src/main.ts']);
     expect(out.dropped.dir).toBe(2);
     expect(out.dropped.secret).toBe(2);
-    expect(out.dropped.binary).toBe(1);
+    expect(out.dropped.binary).toBe(1); // the .mp4 (a small .png would be KEPT as an asset — see below)
     expect(out.files['.env']).toBeUndefined(); // live secrets NEVER land in the workspace
   });
 
@@ -154,6 +163,7 @@ describe('validateImportedProject', () => {
 /** Build an ExtractedProject literal for note/summary tests without repeating every zero. */
 function extracted(over: {
   files?: Record<string, string>;
+  assets?: Record<string, string>;
   sandboxOnly?: Record<string, string>;
   dropped?: Partial<import('./ProjectImport').ExtractedProject['dropped']>;
   totalEntries?: number;
@@ -162,6 +172,7 @@ function extracted(over: {
 }): import('./ProjectImport').ExtractedProject {
   return {
     files: over.files ?? {},
+    assets: over.assets ?? {},
     sandboxOnly: over.sandboxOnly ?? {},
     dropped: { dir: 0, junk: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0, outsideAppRoot: 0, ...(over.dropped ?? {}) },
     totalEntries: over.totalEntries ?? 0,
@@ -269,6 +280,56 @@ describe('extractZipProject — Tier-2 additions', () => {
     }));
     expect(noApp.appRoot).toBeNull();
     expect(noApp.files['notes/readme.md']).toBe('x');
+  });
+});
+
+describe('small binary assets', () => {
+  it('assetMimeFor maps keepable image/font extensions, rejects the rest', () => {
+    expect(assetMimeFor('src/logo.PNG')).toBe('image/png');
+    expect(assetMimeFor('a/b/icon.svg')).toBeNull(); // svg is text, imported as a normal file
+    expect(assetMimeFor('fonts/Inter.woff2')).toBe('font/woff2');
+    expect(assetMimeFor('media/intro.mp4')).toBeNull(); // video is not a small asset
+    expect(assetMimeFor('README')).toBeNull();
+  });
+
+  it('parseDataUri round-trips a data URI, rejects non-data strings', () => {
+    expect(parseDataUri('data:image/png;base64,AAAA')).toEqual({ mime: 'image/png', base64: 'AAAA' });
+    expect(parseDataUri('not a data uri')).toBeNull();
+    expect(parseDataUri('data:image/png,rawtext')).toBeNull(); // not base64
+  });
+
+  it('keeps a small image asset as a decodable data URI and drops a large one + a video', async () => {
+    const smallPng = Buffer.alloc(10 * 1024, 7); // 10KB — kept
+    const bigPng = Buffer.alloc(300 * 1024, 9);  // 300KB > 200KB cap — dropped
+    const video = Buffer.alloc(5 * 1024, 1);     // small but not a keepable asset type — dropped
+    const out = await extractZipProject(await makeZipBinary({
+      'package.json': '{}',
+      'public/logo.png': smallPng,
+      'public/hero.png': bigPng,
+      'media/clip.mp4': video,
+      'src/main.ts': 'ok',
+    }));
+    // The small asset is kept OUT of `files` and IN `assets` as a data URI.
+    expect(out.files['public/logo.png']).toBeUndefined();
+    const uri = out.assets['public/logo.png'];
+    expect(uri).toMatch(/^data:image\/png;base64,/);
+    const parsed = parseDataUri(uri);
+    expect(parsed).not.toBeNull();
+    expect(Buffer.from(parsed!.base64, 'base64').equals(smallPng)).toBe(true); // real bytes, uncorrupted
+    // The oversized image and the video are dropped (counted as binary), not kept.
+    expect(out.assets['public/hero.png']).toBeUndefined();
+    expect(out.assets['media/clip.mp4']).toBeUndefined();
+    expect(out.dropped.binary).toBe(2);
+    // Text files still land normally.
+    expect(out.files['src/main.ts']).toBe('ok');
+  });
+
+  it('importSummaryLine mentions kept assets', () => {
+    const line = importSummaryLine(
+      extracted({ files: { 'a.ts': 'x' }, assets: { 'logo.png': 'data:image/png;base64,AA', 'i.ico': 'data:image/x-icon;base64,BB' } }),
+      'vite-react',
+    );
+    expect(line).toContain('2 image/font assets');
   });
 });
 

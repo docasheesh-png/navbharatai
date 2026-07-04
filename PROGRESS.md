@@ -7960,3 +7960,34 @@ wiring. Gate: frontend tsc 0, server tsc 0, vitest 4631/4631 PASS, boot PASS.
 Phase A remaining: public Report button + /api/report-app (slice 5, client + route + AppKnowledgeBase);
 GitHub Pages free-tier provider + Cloudflare .navbharatai.app subdomain (need admin Cloudflare
 account/token/domain + the subdomain-root decision).
+## 2026-07-04 — "handle Mitrify x50" program (admin mandate): 4 capabilities driven autonomously
+
+Admin: "mujhe ek strong rock solid app builder chahiye jo 5000 files software bhi bina atke bana de …
+Mitrify x50 level tak ki app handel karne wala ai bana ke do." Answered "all" to the priority
+question → drove all four capabilities, most-value-first, one tested PR each:
+
+- Cap ① EDIT/UNDERSTAND at scale (core value, not infra-bound):
+  - #925 summarizeFileTree — edit-mode injected the ENTIRE flat file tree every turn (~1MB for a
+    15k-file app → context-window blast); now a small app lists all paths, a large one gets a
+    bounded directory summary + agent uses grep/glob/search_files.
+  - #926 contentSearchTerms — RAG grounding ranked candidates by FILENAME only; added content grep
+    (actuator.searchFiles) so the right file is found by CONTENT (e.g. "credits" logic in storage.ts).
+- Cap ② HEAVY-APP PREVIEW (#928): imported full-stack app crashed on bare `npm run dev` (no
+  DATABASE_URL / undefined env). New ImportPreview module: detectNeedsDatabase → provision local
+  Postgres (existing provisionBackend) → write dev .env (DB URL + NODE_ENV + placeholders) → boot
+  (cap 245→380s). DB+.env persist so Diagnose re-boot works too. Honest: external paid services
+  can't be faked → reported, preview is partial by design.
+- Cap ③ IMPORT SCALE (#929): raised IMPORT_MAX_FILES 2000→16000 and collectWorkspaceFiles MAX_FILES
+  4000→16000 (Mitrify x50 ≈ 16k). Guarded the durable path index (capPathsToDocLimit) so a
+  pathological huge repo can't blow the 1MB Firestore metadata doc — graceful cap, not a failed
+  save. Honest open: >16k needs path-index sharding / git-as-durable-source (future phase).
+- Cap ④ SOFTWARE PROJECT MODE (build big from scratch): already built (SPM-1..4), dormant behind
+  AGENTV3_PROJECT_MODE. Hardened the gate for a SAFE rollout: projectModeEnabled now supports 'on'
+  (all), 'off'/unset (disabled), OR a per-user ALLOWLIST (comma/space uids/emails) so the admin can
+  enable SPM for their OWN account first and test a real mega-build before all users. Cap ③'s raised
+  file caps were a prerequisite — before it, a 5000-file SPM build would truncate on durable save.
+
+ADMIN ACTION for Cap ④ live test: set AGENTV3_PROJECT_MODE to your uid/email (e.g.
+`AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com`) on Cloud Run to enable SPM for your account only,
+then send a real mega-prompt (200+ screens / a long feature list). Flip to `on` for all users once
+happy; `off`/unset is the kill switch.

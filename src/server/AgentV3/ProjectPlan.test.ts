@@ -42,10 +42,23 @@ const mod = (over: Partial<ProjectModule> = {}): ProjectModule => ({
 const plan = (modules: ProjectModule[]): ProjectPlan => createProjectPlan('build a big app', 'vite-react', modules, 1_000);
 
 describe('project-mode gating', () => {
-  it('projectModeEnabled requires the exact flag value', () => {
+  it("projectModeEnabled: 'on' = all users, 'off'/unset = disabled", () => {
     expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'on' } as NodeJS.ProcessEnv)).toBe(true);
-    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'true' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'off' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'true' } as NodeJS.ProcessEnv)).toBe(false); // not an allowlisted identity
     expect(projectModeEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it('projectModeEnabled: a non-on/off value is a per-user ALLOWLIST (safe gradual rollout)', () => {
+    const env = { AGENTV3_PROJECT_MODE: 'admin@nav.ai, uid-123' } as NodeJS.ProcessEnv;
+    // Listed identity → enabled; everyone else → disabled.
+    expect(projectModeEnabled(env, { email: 'admin@nav.ai' })).toBe(true);
+    expect(projectModeEnabled(env, { userId: 'uid-123' })).toBe(true);
+    expect(projectModeEnabled(env, { email: 'ADMIN@NAV.AI' })).toBe(true); // case-insensitive
+    expect(projectModeEnabled(env, { userId: 'someone-else', email: 'other@x.io' })).toBe(false);
+    expect(projectModeEnabled(env, {})).toBe(false);
+    // 'on' still beats the allowlist parsing (everyone).
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'on' } as NodeJS.ProcessEnv, { email: 'anyone@x.io' })).toBe(true);
   });
 
   it('detectMegaProject fires on an explicit large scale', () => {

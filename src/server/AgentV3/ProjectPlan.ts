@@ -81,9 +81,26 @@ function slugify(s: string, fallback: string): string {
  *  then runs the normal path (project mode must never make a small build slower/costlier). */
 export const MIN_PROJECT_MODULES = 3;
 
-/** Master kill-switch: Software Project Mode runs ONLY when AGENTV3_PROJECT_MODE=on. */
-export function projectModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AGENTV3_PROJECT_MODE === 'on';
+/**
+ * Master gate for Software Project Mode. AGENTV3_PROJECT_MODE:
+ *   • 'on'          → enabled for ALL users,
+ *   • 'off' / unset → disabled (default — the kill switch),
+ *   • anything else → treated as an ALLOWLIST of user ids/emails (comma/space separated), so the
+ *     admin can enable SPM for their OWN account first and test a real mega-build safely before
+ *     turning it on for everyone. A gradual, reversible rollout for a heavyweight feature.
+ * PURE.
+ */
+export function projectModeEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  identity?: { userId?: string | null; email?: string | null },
+): boolean {
+  const flag = (env.AGENTV3_PROJECT_MODE || '').trim();
+  if (flag === 'on') return true;
+  if (!flag || flag === 'off') return false;
+  const allow = new Set(flag.split(/[\s,]+/).filter(Boolean).map((s) => s.toLowerCase()));
+  const uid = (identity?.userId || '').toLowerCase();
+  const email = (identity?.email || '').toLowerCase();
+  return (!!uid && allow.has(uid)) || (!!email && allow.has(email));
 }
 
 /**

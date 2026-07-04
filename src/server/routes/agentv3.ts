@@ -3802,7 +3802,7 @@ export function registerAgentV3Routes(app: Express): void {
       // markup as every other v3.0 call).
       let projectPlanRef: ProjectPlan | null = null;
       let projectModuleRef: ProjectModule | null = null;
-      if (projectModeEnabled() && !planFirst) {
+      if (projectModeEnabled(process.env, { userId, email }) && !planFirst) {
         try {
           let pPlan = await loadProjectPlan(workspaceId);
           const planPreExisted = !!pPlan;

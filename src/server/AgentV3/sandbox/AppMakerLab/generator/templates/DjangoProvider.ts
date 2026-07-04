@@ -62,6 +62,8 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'myproject.urls'
 
+WSGI_APPLICATION = 'myproject.wsgi.application'
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -134,6 +136,19 @@ class ApiConfig(AppConfig):
 
 const INIT_PY = '';
 
+// The Procfile boots gunicorn against `myproject.wsgi`, so this module MUST exist — without it the
+// production deploy dies with `ModuleNotFoundError: No module named 'myproject.wsgi'` and serves no
+// traffic. (The sandbox preview hid this because dev.sh uses `runserver`, which supplies its own WSGI
+// app.) Standard Django wsgi entrypoint.
+const WSGI_PY = `import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
+
+application = get_wsgi_application()
+`;
+
 const PROCFILE = `web: gunicorn myproject.wsgi --bind 0.0.0.0:$PORT
 `;
 
@@ -154,6 +169,7 @@ export class DjangoProvider implements ITemplateProvider {
       'myproject/__init__.py': INIT_PY,
       'myproject/settings.py': SETTINGS_PY,
       'myproject/urls.py': URLS_PY,
+      'myproject/wsgi.py': WSGI_PY,
       'api/__init__.py': INIT_PY,
       'api/apps.py': API_APPS_PY,
       'api/views.py': API_VIEWS_PY,

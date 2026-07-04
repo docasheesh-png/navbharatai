@@ -44,7 +44,10 @@ function textContent(html: string): string {
 }
 
 function hasAttr(tag: string, attr: string): boolean {
-  return new RegExp(`\\b${attr}\\s*=`, 'i').test(tag);
+  // `(?<![-\w])` (NOT `\b`) so a different attribute ending in `attr` — e.g. `data-alt` for `alt` —
+  // isn't mistaken for it: `\b` matches after a hyphen, so `<img data-alt="x">` was wrongly read as
+  // HAVING alt and the missing-alt count silently skipped it.
+  return new RegExp(`(?<![-\\w])${attr}\\s*=`, 'i').test(tag);
 }
 
 /** `<img>` tags with no `alt` attribute (WCAG 1.1.1). Returns [total, missing]. Pure. */

@@ -64,7 +64,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote } from '../AgentV3/ProjectImport';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2678,7 +2678,7 @@ export function registerAgentV3Routes(app: Express): void {
     let importPreviewBoot: Promise<void> | undefined;
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string> },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -2691,6 +2691,12 @@ export function registerAgentV3Routes(app: Express): void {
         // template scaffold files mixed in (mirrors the import-files route).
         try { await actuator.ensureWorkspace(workspaceId, 'import'); } catch { /* reuse existing sandbox */ }
         written = (await writeWorkspaceFiles(actuator, workspaceId, importedFiles)).written;
+        // Sandbox-only extras (big text lockfiles): the live sandbox gets them so `npm install`
+        // reproduces the app's exact dependency tree; the durable store skips them by design
+        // (over its per-doc cap — the import summary says so honestly). Best-effort.
+        for (const [p, c] of Object.entries(opts.sandboxOnly ?? {})) {
+          try { await actuator.writeFile(workspaceId, p, c); } catch { /* install falls back to fresh resolution */ }
+        }
       } else {
         written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
       }
@@ -2706,6 +2712,12 @@ export function registerAgentV3Routes(app: Express): void {
           + (opts.droppedNote ? ` ${opts.droppedNote}` : '')
           + (validation.issues.length > 0 ? `\n⚠️ ${validation.issues.join(' ')}` : ''),
       });
+      // Surface the env-variable names the app expects (from its committed .env template) — the
+      // live .env was deliberately not imported, so the user must know what to re-enter.
+      try {
+        const envNote = envTemplateNote(importedFiles);
+        if (envNote) emit({ type: 'narration', agent: 'architect', text: envNote, ts: Date.now() });
+      } catch { /* the env note is best-effort */ }
       // Project memory: the import is a durable fact of this session, and the imported sources
       // are indexed so the very first edit request works with real context.
       try {
@@ -2745,10 +2757,16 @@ export function registerAgentV3Routes(app: Express): void {
       try {
         emit({ type: 'narration', agent: 'architect', text: `📦 Unpacking ${zipImports[0].name || 'your zip'} into the workspace…`, ts: Date.now() });
         const extracted = await extractZipProject(Buffer.from(zipImports[0].base64, 'base64'));
+        const lockKept = Object.keys(extracted.sandboxOnly);
         await landImportedProject(extracted.files, {
           source: zipImports[0].name || 'your zip',
           writeToSandbox: true,
-          droppedNote: droppedDetailNote(extracted),
+          droppedNote: [
+            extracted.appRoot ? `— landed the app from its "${extracted.appRoot}/" folder` : '',
+            lockKept.length > 0 ? `— kept ${lockKept.join(', ')} for exact dependency versions (sandbox only, over the durable-store size cap)` : '',
+            droppedDetailNote(extracted),
+          ].filter(Boolean).join(' '),
+          sandboxOnly: extracted.sandboxOnly,
         });
       } catch (err) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ Could not unpack the zip (${err instanceof Error ? err.message : String(err)}) — nothing was imported. Please re-export the archive and try again.`, ts: Date.now() });

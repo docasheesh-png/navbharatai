@@ -15,22 +15,42 @@
 //  • live secrets (.env and friends) are NEVER imported — the user re-enters their own secrets.
 //  • binary and oversized entries are skipped with an honest count, not silently.
 
-const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output)(\/|$)/;
+// Derived/vendor folders across the stacks users actually migrate from (Node, Python, Rust/Java,
+// mobile/Expo, PHP) — all re-created by the stack's own install/build, never worth importing.
+const SKIP_DIR_RE = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.nuxt|\.svelte-kit|coverage|\.cache|\.turbo|\.vercel|\.output|venv|\.venv|__pycache__|\.pytest_cache|\.mypy_cache|target|\.gradle|Pods|DerivedData|\.expo|\.dart_tool|vendor|\.idea)(\/|$)/;
+// OS/editor junk files that ride along in almost every user-made zip.
+const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 // Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.
 const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
 const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
+// Text lockfiles pin the EXACT dependency tree the app was built with — losing them makes
+// `npm install` re-resolve versions and can break an imported app in ways the user never had.
+// (bun.lockb is binary and stays excluded.)
+const LOCKFILE_RE = /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 
 export const IMPORT_MAX_FILES = 2_000;
 export const IMPORT_MAX_FILE_BYTES = 900 * 1024; // durable store cap (Firestore 1MB/doc)
 export const IMPORT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+/** A lockfile larger than the durable cap is still written to the SANDBOX (npm install needs it);
+ *  only truly enormous ones are dropped. */
+export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
 
 export interface ExtractedProject {
   files: Record<string, string>;
+  /**
+   * Files that exceed the durable-store cap but are still worth having in the LIVE sandbox
+   * (today: big text lockfiles, so `npm install` reproduces the app's exact dependency tree).
+   * Written to the sandbox only — the durable store skips them by design (honest, not silent:
+   * the summary says so), and a restore simply re-resolves via install.
+   */
+  sandboxOnly: Record<string, string>;
   /** Paths intentionally not imported, grouped by the honest reason. */
-  dropped: { dir: number; secret: number; binary: number; tooLarge: number; unsafe: number; overCap: number };
+  dropped: { dir: number; junk: number; secret: number; binary: number; tooLarge: number; unsafe: number; overCap: number; outsideAppRoot: number };
   totalEntries: number;
   /** The single root folder stripped from every path (GitHub-style "repo-main/"), if any. */
   strippedRoot: string | null;
+  /** Monorepo landing: the nested app folder the import was re-rooted to (e.g. "apps/web"), if any. */
+  appRoot: string | null;
 }
 
 /** Is this chat attachment a .zip archive (by extension or MIME)? Pure. */
@@ -57,7 +77,7 @@ export function safeImportPath(raw: string): string | null {
 export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buf);
-  const dropped = { dir: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0 };
+  const dropped = { dir: 0, junk: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0, outsideAppRoot: 0 };
 
   // Collect candidate entries first so the root-strip decision sees the full listing.
   const entries: Array<{ path: string; entry: import('jszip').JSZipObject }> = [];
@@ -79,21 +99,100 @@ export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> 
     for (const e of entries) e.path = e.path.slice(strippedRoot.length + 1);
   }
 
+  // MONOREPO LANDING: no root package.json but nested app(s) → re-root the import to the most
+  // app-like nested folder (e.g. "apps/web"), so what lands is a RUNNABLE app instead of a pile
+  // of folders no preview can boot. The candidates' package.json contents are read up-front
+  // (bounded) so the choice is scored on real evidence, not folder names alone.
+  let appRoot: string | null = null;
+  if (!entries.some((e) => e.path === 'package.json')) {
+    const pkgEntries = entries.filter((e) => /(^|\/)package\.json$/.test(e.path) && !SKIP_DIR_RE.test(e.path)).slice(0, 20);
+    const candidates: Array<{ path: string; content: string }> = [];
+    for (const e of pkgEntries) {
+      try { candidates.push({ path: e.path, content: await e.entry.async('string') }); } catch { /* unreadable candidate — scored out */ }
+    }
+    appRoot = chooseMonorepoAppRoot(candidates);
+    if (appRoot) {
+      const prefix = `${appRoot}/`;
+      for (const e of entries) {
+        if (e.path.startsWith(prefix)) e.path = e.path.slice(prefix.length);
+        else { e.path = ''; dropped.outsideAppRoot++; } // outside the chosen app — not imported
+      }
+    }
+  }
+
   const files: Record<string, string> = {};
+  const sandboxOnly: Record<string, string> = {};
   let totalBytes = 0;
   for (const { path, entry } of entries) {
+    if (!path) continue; // re-rooted away above (already counted)
     if (SKIP_DIR_RE.test(path)) { dropped.dir++; continue; }
+    if (JUNK_FILE_RE.test(path)) { dropped.junk++; continue; }
     if (SECRET_FILE_RE.test(path)) { dropped.secret++; continue; }
     if (BINARY_EXT_RE.test(path)) { dropped.binary++; continue; }
     if (Object.keys(files).length >= IMPORT_MAX_FILES) { dropped.overCap++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
-    if (bytes > IMPORT_MAX_FILE_BYTES) { dropped.tooLarge++; continue; }
+    if (bytes > IMPORT_MAX_FILE_BYTES) {
+      // A big text lockfile still goes to the live sandbox so `npm install` reproduces the
+      // exact dependency tree; anything else oversized is dropped with an honest count.
+      if (LOCKFILE_RE.test(path) && bytes <= IMPORT_MAX_LOCKFILE_BYTES) { sandboxOnly[path] = content; continue; }
+      dropped.tooLarge++;
+      continue;
+    }
     if (totalBytes + bytes > IMPORT_MAX_TOTAL_BYTES) { dropped.overCap++; continue; }
     totalBytes += bytes;
     files[path] = content;
   }
-  return { files, dropped, totalEntries, strippedRoot };
+  return { files, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
+}
+
+/**
+ * Pick the nested folder that is most likely THE runnable app when a zip has no root
+ * package.json (monorepo / multi-folder export). Scored on real evidence: a dev/start script,
+ * a known framework dependency, a conventional "apps/…" home, and shallowness. Returns the
+ * folder (e.g. "apps/web") or null when there is no clear app (no candidates, or nothing
+ * scores above zero — a plain file dump should NOT be re-rooted). Pure + tested.
+ */
+export function chooseMonorepoAppRoot(candidates: Array<{ path: string; content: string }>): string | null {
+  let best: { root: string; score: number; depth: number } | null = null;
+  for (const c of candidates) {
+    if (!/\//.test(c.path)) continue; // a root package.json is handled by the normal path
+    const root = c.path.slice(0, -'/package.json'.length);
+    const depth = root.split('/').length;
+    let pkg: { scripts?: Record<string, unknown>; dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown>; workspaces?: unknown } = {};
+    try { pkg = JSON.parse(c.content); } catch { continue; }
+    if (pkg.workspaces) continue; // a nested WORKSPACE root is a container, not the app
+    let score = 0;
+    const scripts = (pkg.scripts && typeof pkg.scripts === 'object') ? pkg.scripts : {};
+    if (['dev', 'start', 'serve'].some((s) => typeof (scripts as Record<string, unknown>)[s] === 'string')) score += 3;
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    if (['next', 'react', 'vue', 'svelte', 'astro', '@angular/core', 'vite'].some((d) => Object.prototype.hasOwnProperty.call(deps, d))) score += 2;
+    if (/^apps?\//.test(root)) score += 1;
+    if (score === 0) continue;
+    if (!best || score > best.score || (score === best.score && depth < best.depth)) {
+      best = { root, score, depth };
+    }
+  }
+  return best ? best.root : null;
+}
+
+/**
+ * The honest "set your own secrets" note for an imported app that ships a .env template —
+ * surfaces the variable NAMES the app expects (values are the user's own; live .env files are
+ * never imported). '' when the project has no template. Pure + tested.
+ */
+export function envTemplateNote(files: Record<string, string>): string {
+  const raw = files['.env.example'] ?? files['.env.sample'] ?? files['.env.template'];
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+  const names: string[] = [];
+  for (const line of raw.split('\n')) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (m && !names.includes(m[1])) names.push(m[1]);
+  }
+  if (names.length === 0) return '';
+  const shown = names.slice(0, 12);
+  const more = names.length - shown.length;
+  return `🔑 This app expects ${names.length} environment variable${names.length === 1 ? '' : 's'} (from its .env template): ${shown.join(', ')}${more > 0 ? ` +${more} more` : ''}. Live secret files are never imported — tell me your values (or add them later) and I will wire them in.`;
 }
 
 export interface ImportValidation {
@@ -146,8 +245,13 @@ export function validateImportedProject(files: Record<string, string>): ImportVa
   const framework = detectImportedFramework(files);
   if (hasPackageJson) {
     try {
-      const pkg = JSON.parse(pkgRaw as string) as { scripts?: Record<string, unknown> };
+      const pkg = JSON.parse(pkgRaw as string) as { scripts?: Record<string, unknown>; workspaces?: unknown };
       const scripts = pkg.scripts ?? {};
+      if (pkg.workspaces) {
+        // A workspace ROOT landed as the project (the re-root above only fires when there is NO
+        // root package.json). Installing may work, but there is no single app to boot — say so.
+        issues.push('This project is a monorepo workspace root — tell me which app inside it to run (e.g. "run the app in apps/web") and I will set it up.');
+      }
       if (!['dev', 'start', 'serve', 'preview'].some((s) => typeof scripts[s] === 'string')) {
         issues.push('package.json has no dev/start/serve script — the live preview cannot boot it automatically (the in-browser preview and AI editing still work).');
       }
@@ -166,20 +270,27 @@ export function validateImportedProject(files: Record<string, string>): ImportVa
 /** The honest "— skipped …" tail explaining every entry an extraction dropped, or ''. Pure. */
 export function droppedDetailNote(extracted: ExtractedProject): string {
   const d = extracted.dropped;
-  if (d.dir + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap === 0) return '';
+  if (d.dir + d.junk + d.secret + d.binary + d.tooLarge + d.unsafe + d.overCap + d.outsideAppRoot === 0) return '';
   const why: string[] = [];
-  if (d.dir) why.push(`${d.dir} from node_modules/build folders (re-created by npm install)`);
+  if (d.dir) why.push(`${d.dir} from dependency/build folders (re-created by install)`);
+  if (d.junk) why.push(`${d.junk} OS/editor junk file${d.junk === 1 ? '' : 's'}`);
   if (d.secret) why.push(`${d.secret} secret file${d.secret === 1 ? '' : 's'} (.env/keys — re-enter your own secrets)`);
   if (d.binary) why.push(`${d.binary} binary asset${d.binary === 1 ? '' : 's'}`);
   if (d.tooLarge) why.push(`${d.tooLarge} over the 900KB per-file limit`);
   if (d.unsafe) why.push(`${d.unsafe} with unsafe paths`);
   if (d.overCap) why.push(`${d.overCap} over the ${IMPORT_MAX_FILES}-file cap`);
+  if (d.outsideAppRoot) why.push(`${d.outsideAppRoot} outside the detected app folder`);
   return `— skipped ${why.join(', ')}`;
 }
 
 /** One honest, human-readable import summary line for the chat stream. Pure. */
 export function importSummaryLine(extracted: ExtractedProject, framework: string): string {
   const n = Object.keys(extracted.files).length;
+  const parts = [`📦 Imported ${n} file${n === 1 ? '' : 's'} from your zip (framework: ${framework})`];
+  if (extracted.appRoot) parts.push(`— landed the app from its "${extracted.appRoot}/" folder`);
+  const lockfiles = Object.keys(extracted.sandboxOnly);
+  if (lockfiles.length > 0) parts.push(`— kept ${lockfiles.join(', ')} for exact dependency versions (sandbox only, too large for durable storage)`);
   const tail = droppedDetailNote(extracted);
-  return `📦 Imported ${n} file${n === 1 ? '' : 's'} from your zip (framework: ${framework})` + (tail ? ` ${tail}` : '');
+  if (tail) parts.push(tail);
+  return parts.join(' ');
 }

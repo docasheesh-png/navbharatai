@@ -7787,3 +7787,27 @@ Open (recorded, not blocking): imported-repo mega-conversion doesn't create a pl
 fires only on fresh new_build); a reopened incomplete plan needs a typed "continue" (restore
 doesn't re-emit resumable); contract drift (a built module deviating from its frozen contract)
 is caught by the whole-workspace tsc gate, not by a dedicated contract check.
+
+## 2026-07-04 — Tier-2a BUILT: 4 of the 5 approved import additions (zip landing hardening)
+
+From the admin-approved additions list (10GB-ready plan):
+- Stack ignore-lists: SKIP_DIR_RE now also drops venv/.venv/__pycache__/.pytest_cache/
+  .mypy_cache/target/.gradle/Pods/DerivedData/.expo/.dart_tool/vendor/.idea; new JUNK_FILE_RE
+  drops .DS_Store/Thumbs.db/desktop.ini (exact-name), all counted honestly.
+- Lockfile exception: a text lockfile (package-lock.json/pnpm-lock.yaml/yarn.lock) over the
+  900KB durable cap (≤3MB) lands SANDBOX-ONLY via a new ExtractedProject.sandboxOnly map —
+  npm install reproduces the exact dependency tree; the durable store skips it BY DESIGN and
+  the summary says so (restore re-resolves via install). bun.lockb stays excluded (binary).
+- Monorepo landing: when a zip has NO root package.json, chooseMonorepoAppRoot picks the most
+  app-like nested folder (scored on dev/start script + framework dep + apps/ home + depth;
+  nested workspace containers excluded) and the import re-roots to it, with an honest
+  outsideAppRoot count. A root WORKSPACE package.json instead gets a validation warning
+  ("tell me which app to run") — never a silent guess.
+- .env template surfacing: envTemplateNote lists the variable NAMES from .env.example/.sample/
+  .template in chat right after landing (live .env is still never imported).
+DEFERRED (recorded, next candidate): small binary assets (<200KB images/fonts) — doing it
+honestly needs base64-aware writes in the actuator + WorkspaceFileStore + restore path, else
+assets survive the live sandbox but silently vanish on durable restore (a half-state the
+second absolute rule forbids). Own designed PR.
+10 new tests (28 total in ProjectImport.test.ts). Gate: tsc 0/0 both, vitest 4545/4545,
+build + boot PASS.

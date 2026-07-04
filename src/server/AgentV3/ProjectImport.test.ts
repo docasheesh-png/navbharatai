@@ -8,6 +8,8 @@ import {
   validateImportedProject,
   importSummaryLine,
   droppedDetailNote,
+  chooseMonorepoAppRoot,
+  envTemplateNote,
   IMPORT_MAX_FILES,
 } from './ProjectImport';
 
@@ -149,29 +151,161 @@ describe('validateImportedProject', () => {
   });
 });
 
+/** Build an ExtractedProject literal for note/summary tests without repeating every zero. */
+function extracted(over: {
+  files?: Record<string, string>;
+  sandboxOnly?: Record<string, string>;
+  dropped?: Partial<import('./ProjectImport').ExtractedProject['dropped']>;
+  totalEntries?: number;
+  strippedRoot?: string | null;
+  appRoot?: string | null;
+}): import('./ProjectImport').ExtractedProject {
+  return {
+    files: over.files ?? {},
+    sandboxOnly: over.sandboxOnly ?? {},
+    dropped: { dir: 0, junk: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0, outsideAppRoot: 0, ...(over.dropped ?? {}) },
+    totalEntries: over.totalEntries ?? 0,
+    strippedRoot: over.strippedRoot ?? null,
+    appRoot: over.appRoot ?? null,
+  };
+}
+
 describe('droppedDetailNote', () => {
   it('is empty when nothing was dropped', () => {
-    expect(droppedDetailNote({ files: { 'a.ts': 'x' }, dropped: { dir: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0 }, totalEntries: 1, strippedRoot: null })).toBe('');
+    expect(droppedDetailNote(extracted({ files: { 'a.ts': 'x' }, totalEntries: 1 }))).toBe('');
   });
   it('lists every drop reason honestly', () => {
-    const note = droppedDetailNote({ files: {}, dropped: { dir: 5, secret: 1, binary: 0, tooLarge: 2, unsafe: 1, overCap: 0 }, totalEntries: 9, strippedRoot: null });
-    expect(note).toContain('5 from node_modules');
+    const note = droppedDetailNote(extracted({ dropped: { dir: 5, junk: 2, secret: 1, tooLarge: 2, unsafe: 1, outsideAppRoot: 4 }, totalEntries: 15 }));
+    expect(note).toContain('5 from dependency/build folders');
+    expect(note).toContain('2 OS/editor junk files');
     expect(note).toContain('1 secret file');
     expect(note).toContain('2 over the 900KB');
     expect(note).toContain('1 with unsafe paths');
+    expect(note).toContain('4 outside the detected app folder');
   });
 });
 
 describe('importSummaryLine', () => {
   it('reports counts and skip reasons honestly', () => {
     const line = importSummaryLine(
-      { files: { 'a.ts': 'x', 'b.ts': 'y' }, dropped: { dir: 3, secret: 1, binary: 2, tooLarge: 0, unsafe: 0, overCap: 0 }, totalEntries: 8, strippedRoot: 'app-main' },
+      extracted({ files: { 'a.ts': 'x', 'b.ts': 'y' }, dropped: { dir: 3, secret: 1, binary: 2 }, totalEntries: 8, strippedRoot: 'app-main' }),
       'vite-react',
     );
     expect(line).toContain('Imported 2 files');
     expect(line).toContain('vite-react');
-    expect(line).toContain('3 from node_modules');
+    expect(line).toContain('3 from dependency/build folders');
     expect(line).toContain('1 secret file');
     expect(line).toContain('2 binary assets');
+  });
+  it('mentions the re-rooted app folder and sandbox-only lockfiles', () => {
+    const line = importSummaryLine(
+      extracted({ files: { 'a.ts': 'x' }, sandboxOnly: { 'package-lock.json': 'big' }, appRoot: 'apps/web' }),
+      'vite-react',
+    );
+    expect(line).toContain('apps/web');
+    expect(line).toContain('package-lock.json');
+    expect(line).toContain('sandbox only');
+  });
+});
+
+describe('extractZipProject — Tier-2 additions', () => {
+  it('drops stack-specific vendor dirs (Python/Rust/Expo) and OS junk files with honest counts', async () => {
+    const buf = await makeZip({
+      'package.json': '{}',
+      'venv/lib/python3.11/site.py': 'x',
+      '__pycache__/mod.cpython.pyc.txt': 'x',
+      'target/release/notes.txt': 'x',
+      '.expo/settings.json': '{}',
+      '.idea/workspace.xml': '<xml/>',
+      '.DS_Store.txt': 'keepme', // NOT junk — junk match is exact-name
+      '.DS_Store': 'x',
+      'src/Thumbs.db': 'x',
+      'src/main.ts': 'ok',
+    });
+    const out = await extractZipProject(buf);
+    expect(Object.keys(out.files).sort()).toEqual(['.DS_Store.txt', 'package.json', 'src/main.ts']);
+    expect(out.dropped.dir).toBe(5);
+    expect(out.dropped.junk).toBe(2);
+  });
+
+  it('keeps an oversized text lockfile sandbox-only instead of dropping it', async () => {
+    const bigLock = `{"name":"app","packages":{${'"x":1,'.repeat(160_000)}"y":1}}`; // > 900KB
+    expect(Buffer.byteLength(bigLock, 'utf8')).toBeGreaterThan(900 * 1024);
+    const buf = await makeZip({ 'package.json': '{}', 'package-lock.json': bigLock, 'src/big.ts': 'x'.repeat(950 * 1024) });
+    const out = await extractZipProject(buf);
+    expect(out.sandboxOnly['package-lock.json']).toBe(bigLock);
+    expect(out.files['package-lock.json']).toBeUndefined();
+    // A non-lockfile over the cap is still dropped (this is a lockfile exception, not a cap raise).
+    expect(out.files['src/big.ts']).toBeUndefined();
+    expect(out.dropped.tooLarge).toBe(1);
+  });
+
+  it('re-roots a monorepo zip to the most app-like nested folder', async () => {
+    const buf = await makeZip({
+      'apps/web/package.json': '{"scripts":{"dev":"vite"},"dependencies":{"react":"18"}}',
+      'apps/web/src/App.tsx': 'app',
+      'packages/utils/package.json': '{"name":"utils"}',
+      'packages/utils/index.ts': 'x',
+      'README.md': 'root readme',
+    });
+    const out = await extractZipProject(buf);
+    expect(out.appRoot).toBe('apps/web');
+    expect(Object.keys(out.files).sort()).toEqual(['package.json', 'src/App.tsx']);
+    expect(out.dropped.outsideAppRoot).toBe(3); // utils pkg + index + README
+  });
+
+  it('does NOT re-root when a root package.json exists, or when nothing looks like an app', async () => {
+    const withRoot = await extractZipProject(await makeZip({
+      'package.json': '{"workspaces":["apps/*"]}',
+      'apps/web/package.json': '{"scripts":{"dev":"vite"}}',
+    }));
+    expect(withRoot.appRoot).toBeNull();
+    expect(withRoot.files['package.json']).toContain('workspaces');
+    // Two top-level folders so the single-root strip doesn't apply; the only nested
+    // package.json is metadata-only (scores 0) → no re-root, everything lands as-is.
+    const noApp = await extractZipProject(await makeZip({
+      'docs/package.json': '{"name":"just-metadata"}',
+      'notes/readme.md': 'x',
+    }));
+    expect(noApp.appRoot).toBeNull();
+    expect(noApp.files['notes/readme.md']).toBe('x');
+  });
+});
+
+describe('chooseMonorepoAppRoot', () => {
+  it('prefers a runnable app over a bare package, and apps/ over other homes', () => {
+    const root = chooseMonorepoAppRoot([
+      { path: 'packages/ui/package.json', content: '{"dependencies":{"react":"18"}}' },
+      { path: 'apps/web/package.json', content: '{"scripts":{"dev":"next dev"},"dependencies":{"next":"14"}}' },
+    ]);
+    expect(root).toBe('apps/web');
+  });
+  it('skips nested workspace containers and unparseable candidates; null when nothing scores', () => {
+    expect(chooseMonorepoAppRoot([
+      { path: 'sub/package.json', content: '{"workspaces":["a"],"scripts":{"dev":"x"}}' },
+      { path: 'broken/package.json', content: '{nope' },
+      { path: 'plain/package.json', content: '{"name":"meta-only"}' },
+    ])).toBeNull();
+    expect(chooseMonorepoAppRoot([])).toBeNull();
+  });
+});
+
+describe('envTemplateNote', () => {
+  it('surfaces the variable NAMES from a .env template (values never imported)', () => {
+    const note = envTemplateNote({ '.env.example': 'API_URL=https://x\nexport SUPABASE_KEY=\n# comment\nDB_URL=postgres://' });
+    expect(note).toContain('3 environment variables');
+    expect(note).toContain('API_URL');
+    expect(note).toContain('SUPABASE_KEY');
+    expect(note).toContain('DB_URL');
+  });
+  it('is empty without a template or without variables', () => {
+    expect(envTemplateNote({ 'src/main.ts': 'x' })).toBe('');
+    expect(envTemplateNote({ '.env.example': '# only comments\n' })).toBe('');
+  });
+  it('caps the shown list honestly', () => {
+    const vars = Array.from({ length: 20 }, (_, i) => `VAR_${i}=x`).join('\n');
+    const note = envTemplateNote({ '.env.sample': vars });
+    expect(note).toContain('20 environment variables');
+    expect(note).toContain('+8 more');
   });
 });

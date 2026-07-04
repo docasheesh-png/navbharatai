@@ -46,6 +46,10 @@ describe('analyzeSeo', () => {
     // a real, descriptive title is fine.
     const real = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Budaun Grocery Store</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
     expect(real.findings.some((f) => /template default/.test(f.message))).toBe(false);
+    // "Home" is a DELIBERATE homepage title, not a scaffold placeholder — must NOT be flagged
+    // (regression: `home` was wrongly in the default-title alternation).
+    const home = analyzeSeo('<html lang="en"><head><meta charset="utf-8"><title>Home</title><meta name="viewport" content="x"><meta name="description" content="y"><meta property="og:title" content="X"><link rel="icon" href="/f.ico"></head></html>');
+    expect(home.findings.some((f) => /template default/.test(f.message))).toBe(false);
   });
 
   it('flags a missing/empty title as high', () => {

@@ -35,6 +35,18 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, maximum-scale=1.0" />').some((x) => x.kind === 'zoom-disabled')).toBe(true);
     // a normal, zoomable viewport is fine.
     expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, initial-scale=1" />').some((x) => x.kind === 'zoom-disabled')).toBe(false);
+    // maximum-scale=1.5 / 1.25 PERMITS zoom (up to 1.5×) — must NOT be flagged as zoom-disabled
+    // (regression: `1(?:\.0)?\b` matched the `1` in `1.5` via the decimal-point word boundary).
+    expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, maximum-scale=1.5" />').some((x) => x.kind === 'zoom-disabled')).toBe(false);
+    expect(scanAccessibility('index.html', '<meta name="viewport" content="width=device-width, maximum-scale=1.25" />').some((x) => x.kind === 'zoom-disabled')).toBe(false);
+  });
+
+  it('does NOT flag control-unlabeled when the control is WRAPPED by a <label> on the same line', () => {
+    // `<label>Email <input/></label>` is a common React pattern; the label text names the input.
+    expect(scanAccessibility('src/F.tsx', '<label>Email <input type="email" /></label>').some((x) => x.kind === 'control-unlabeled')).toBe(false);
+    expect(scanAccessibility('src/F.tsx', '<label>Search <input type="text" /></label>').some((x) => x.kind === 'control-unlabeled')).toBe(false);
+    // but a bare input with no labelling hint at all is still flagged.
+    expect(scanAccessibility('src/F.tsx', '<input type="text" />').some((x) => x.kind === 'control-unlabeled')).toBe(true);
   });
 
   it('flags autoplaying audio / unmuted autoplay video (WCAG 1.4.2), but not muted video autoplay', () => {

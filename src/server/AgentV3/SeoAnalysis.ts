@@ -38,7 +38,10 @@ export function analyzeSeo(indexHtml: string | null | undefined): SeoReport {
       level: 'high',
       message: 'No non-empty <title> in the HTML entry — set a descriptive page title (browser tab, search results and link previews all use it).',
     });
-  } else if (titleMatch && /^(?:vite(?:\s*\+\s*react(?:\s*\+\s*ts)?)?(?:\s+app)?|react\s+app|create\s+react\s+app|document|untitled|home)$/i.test(titleMatch[1].trim())) {
+  // NB: "Home" is intentionally NOT treated as a leftover default — it is a normal, deliberate
+  // homepage title. Scaffolds ship "Vite + React" / "React App"; an untitled doc defaults to
+  // "Document". Flagging "Home" as a template placeholder was a false positive.
+  } else if (titleMatch && /^(?:vite(?:\s*\+\s*react(?:\s*\+\s*ts)?)?(?:\s+app)?|react\s+app|create\s+react\s+app|document|untitled)$/i.test(titleMatch[1].trim())) {
     // A leftover scaffold/template default title — the page shipped with a placeholder.
     findings.push({
       level: 'medium',

@@ -42,7 +42,9 @@ export function assetMimeFor(path: string): string | null {
 // (bun.lockb is binary and stays excluded.)
 const LOCKFILE_RE = /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 
-export const IMPORT_MAX_FILES = 2_000;
+// Raised 2000 → 16000 so a large real app (Mitrify-scale and up to ~50×) imports without being
+// truncated. The 80 MB total-bytes ceiling below is the real memory guard and usually binds first.
+export const IMPORT_MAX_FILES = 16_000;
 export const IMPORT_MAX_FILE_BYTES = 900 * 1024; // durable store cap (Firestore 1MB/doc)
 export const IMPORT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 /** A lockfile larger than the durable cap is still written to the SANDBOX (npm install needs it);
@@ -100,7 +102,8 @@ export function safeImportPath(raw: string): string | null {
  * (counted honestly in `dropped`), strips a single shared root folder ("repo-main/…" → "…"),
  * and never lets a traversal path through.
  */
-export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> {
+export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number }): Promise<ExtractedProject> {
+  const maxFiles = opts?.maxFiles ?? IMPORT_MAX_FILES;
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buf);
   const dropped = { dir: 0, junk: 0, secret: 0, binary: 0, tooLarge: 0, unsafe: 0, overCap: 0, outsideAppRoot: 0 };
@@ -171,7 +174,7 @@ export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> 
       dropped.binary++;
       continue;
     }
-    if (Object.keys(files).length >= IMPORT_MAX_FILES) { dropped.overCap++; continue; }
+    if (Object.keys(files).length >= maxFiles) { dropped.overCap++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > IMPORT_MAX_FILE_BYTES) {

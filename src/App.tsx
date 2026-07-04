@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallbac
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { ProductTour } from './components/ProductTour';
+import { resolveGithubConnectionForUser } from './lib/githubConnection';
 // AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
@@ -208,6 +209,22 @@ function safeLS(key: string, value: string): void {
 }
 
 // sanitizeFirestoreData → imported from src/lib/firestoreUtils.ts (re-exported below imports)
+
+// The GitHub OAuth connection is bound to the NavBharatAI user who authorized it (see
+// src/lib/githubConnection.ts). 'gh_owner_uid' records that owner so a token can never carry to a
+// different user on the same browser. Stamp the owner whenever a token is stored; clear the whole
+// connection on logout or when a different user signs in.
+const GH_OWNER_KEY = 'gh_owner_uid';
+function rememberGithubOwner(uid: string | null | undefined): void {
+  try { localStorage.setItem(GH_OWNER_KEY, uid || ''); } catch { /* storage unavailable */ }
+}
+function clearGithubConnection(): void {
+  try {
+    localStorage.removeItem('gh_token');
+    localStorage.removeItem('gh_token_signal');
+    localStorage.removeItem(GH_OWNER_KEY);
+  } catch { /* storage unavailable */ }
+}
 
 export default function App() {
   // ── Phase 1 hooks ──────────────────────────────────────────────────────
@@ -1373,6 +1390,7 @@ export default function App() {
             const ghCred = GithubAuthProvider.credentialFromResult(result);
             if (ghCred?.accessToken) {
               localStorage.setItem('gh_token', ghCred.accessToken);
+              rememberGithubOwner(result.user.uid); // this token belongs to THIS user
               setGithubToken(ghCred.accessToken);
             }
           } catch { /* not a GitHub sign-in — ignore */ }
@@ -1394,9 +1412,22 @@ export default function App() {
       setLoadingUser(false);
       if (currentUser) {
         setShowAuth(false);
-        // Pick up a GitHub OAuth token captured during social sign-in (popup or
-        // redirect) so the rest of the app sees the connection without a reload.
-        try { const t = localStorage.getItem('gh_token'); if (t) setGithubToken(t); } catch { /* ignore */ }
+        // GITHUB CONNECTION IS PER-USER: pick up this user's OWN GitHub token, but NEVER inherit a
+        // token authorized by a different NavBharatAI user on this browser (the "every user sees my
+        // account" bug). resolveGithubConnectionForUser decides keep / claim / clear.
+        try {
+          const stored = localStorage.getItem('gh_token');
+          const owner = localStorage.getItem(GH_OWNER_KEY);
+          const r = resolveGithubConnectionForUser(currentUser.uid, stored, owner);
+          if (r.reason === 'cleared-different-user') {
+            clearGithubConnection();
+            setGithubToken(null);
+            setGithubUser(null);
+          } else if (r.token) {
+            if (r.changed) rememberGithubOwner(r.ownerUid); // claim a legacy/unowned token
+            setGithubToken(r.token);
+          }
+        } catch { /* connection guard is best-effort — never blocks sign-in */ }
       }
     });
     return unsubscribe;
@@ -2747,6 +2778,7 @@ ${buildLanguageRule(preferredLanguage)}`;
       const newToken = patMatch[1];
       setGithubToken(newToken);
       localStorage.setItem('gh_token', newToken);
+      rememberGithubOwner(auth.currentUser?.uid);
       addLog('GitHub: PAT detected and saved.', 'success');
     }
 
@@ -5014,6 +5046,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         const token = e.data.token;
         setGithubToken(token);
         localStorage.setItem('gh_token', token);
+        rememberGithubOwner(auth.currentUser?.uid);
         addLog('GitHub connected successfully.', 'success');
         fetchGitHubUser(token);
       } else if (e.data.type === 'GITHUB_AUTH_ERROR') {
@@ -5044,6 +5077,7 @@ ${buildLanguageRule(preferredLanguage)}`;
         const token = e.newValue;
         setGithubToken(token);
         localStorage.setItem('gh_token', token);
+        rememberGithubOwner(auth.currentUser?.uid);
         addLog('GitHub connected successfully via cross-tab channel.', 'success');
         fetchGitHubUser(token);
         localStorage.removeItem('gh_token_signal');
@@ -5068,6 +5102,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     if (fragmentToken) {
       setGithubToken(fragmentToken);
       localStorage.setItem('gh_token', fragmentToken);
+      rememberGithubOwner(auth.currentUser?.uid);
       addLog('GitHub connected (via redirect).', 'success');
       fetchGitHubUser(fragmentToken);
       // Clean URL
@@ -5178,7 +5213,7 @@ ${buildLanguageRule(preferredLanguage)}`;
     setGithubToken(null);
     setGithubUser(null);
     setRepositories([]);
-    localStorage.removeItem('gh_token');
+    clearGithubConnection(); // gh_token + gh_token_signal + gh_owner_uid
     addLog('GitHub account disconnected.', 'info');
   };
 
@@ -6223,6 +6258,9 @@ ${buildLanguageRule(preferredLanguage)}`;
                   }
                   localStorage.removeItem('navbharat_admin_v1');
                   sessionStorage.removeItem('admin_token');
+                  // The GitHub connection must NOT outlive the session — else the next user on this
+                  // browser would inherit it (and see/push to this user's GitHub account).
+                  clearGithubConnection();
                 } catch { /* ignore */ }
                 try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
                 window.location.reload();

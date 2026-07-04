@@ -112,11 +112,26 @@ export async function loadDiagnostics(workspaceId: string): Promise<BuildDiagnos
 // instance rotation, reloads and new sessions — until the next build overwrites it. Best-effort.
 const USER_COLLECTION = 'user_diagnostics_v3';
 
+/**
+ * The per-user durable-report doc id, or null when there is NO real user identity.
+ *
+ * PRIVACY: this must NEVER collapse anonymous callers into a single shared `'anon'` doc. It used to
+ * (`userId || 'anon'`), so every anonymous build overwrote one global doc and any other anonymous
+ * caller reading the per-user fallback got the LAST anon build's full report — its generated SOURCE,
+ * errors and command output. Anonymous sessions are still served their own report via the
+ * unguessable workspace-keyed path (`agentv3-anon-{sessionId}`); the per-user durable fallback simply
+ * does not apply to them. Pure + unit-testable.
+ */
+export function perUserDiagnosticsDocId(userId: string | null | undefined): string | null {
+  const id = (userId ?? '').trim();
+  return id ? id : null;
+}
+
 /** Persist the user's LATEST settled build report, retrievable by userId alone. Best-effort. */
 export async function saveLatestForUser(userId: string | null, report: BuildDiagnosticsReport): Promise<void> {
   const db = getDb();
-  const uid = userId || 'anon';
-  if (!db || !report) return;
+  const uid = perUserDiagnosticsDocId(userId);
+  if (!db || !report || !uid) return; // no real user → no shared 'anon' bucket (privacy)
   try {
     let stored = trimReportForStorage(report);
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
@@ -132,8 +147,8 @@ export async function saveLatestForUser(userId: string | null, report: BuildDiag
 /** Load the user's LATEST settled build report (durable, cold-start-proof), or null. Never throws. */
 export async function loadLatestForUser(userId: string | null): Promise<BuildDiagnosticsReport | null> {
   const db = getDb();
-  const uid = userId || 'anon';
-  if (!db) return null;
+  const uid = perUserDiagnosticsDocId(userId);
+  if (!db || !uid) return null; // no real user → never read the shared 'anon' bucket (would leak another anon's report)
   try {
     const doc = await db.collection(USER_COLLECTION).doc(uid).get();
     if (!doc.exists) return null;

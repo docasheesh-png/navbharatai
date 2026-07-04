@@ -307,10 +307,16 @@ class UserPreferenceStore {
         return null;
       }
       const ref = db.collection('userPrefs').doc(userId);
-      const snap = await ref.get();
-      const prev = snap.exists ? (snap.data() as StoredPreferences) : null;
-      const next = mergePreferences(prev, observed, nowIso);
-      await ref.set(next, { merge: false });
+      // Read-modify-write inside a TRANSACTION. Without it, two builds finishing near-simultaneously
+      // for the same user (two tabs) both read the same `prev`, and the second `set(merge:false)`
+      // clobbers the first — permanently dropping a build's learned signal + totalBuilds increment.
+      const next = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const prev = snap.exists ? (snap.data() as StoredPreferences) : null;
+        const merged = mergePreferences(prev, observed, nowIso);
+        tx.set(ref, merged, { merge: false });
+        return merged;
+      });
       return next;
     } catch (err) {
       console.error('[USER-PREF] recordBuild failed:', err);

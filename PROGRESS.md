@@ -7675,3 +7675,45 @@ self-check runs exactly when it should. Duplicating browse-verification INSIDE t
 redundant work at the wrong layer — not built, by design. Policy note (unchanged, deliberate): a
 build whose preview still fails after heal ships ok:true WITH a loud honest warning (files are real;
 PREVIEW_FAILED ≠ build failure).
+
+## NEW MARCH (admin-mandated, 2026-07-04): SOFTWARE PROJECT MODE — the 5000-file builder
+
+Admin's verbatim mandate: "mujhe ek strong rock solid app builder chahiye, jo 5000 files software
+bhi bina atke easyli bana de... chahe pura system hi kyu na badalna pade, agar need ho to, (need
+nahi ho to isi ko theek karo) par mujhe complex task bhi simply ho jaye, aisa v3.0 bana ke do".
+
+Why the system change is needed (code-verified analysis, delivered to admin): every v3.0 build
+runs in ONE agentic conversation, which imposes five ceilings no prompt can fix — C1 single
+context window (~40-80 files), C2 AGENTV3_MAX_STEPS 80, C3 wall clock 1800-3600s, C4 budget cap,
+C5 small-app-tuned verification. A 1000+ file project can never fit; the architecture must change.
+
+The architecture (approved direction): decompose ONCE into modules with explicit dependencies and
+FROZEN export contracts → persist the plan durably → each build turn constructs ONE module in a
+FRESH context containing only that module's spec + done modules' contracts (never the transcript)
+→ existing bounded auto-continue drives turn after turn until the plan completes → modules surface
+through the EXISTING todos/PLAN_STATE UI (zero new client surface) → per-module tsc gate + final
+full verification. Context stays constant regardless of project size.
+
+Phase plan (each = its own PR, autonomous cycle, flag-gated additive — kill switch
+AGENTV3_PROJECT_MODE, default off, existing builds byte-identical while off):
+- SPM-1 (DONE, PR #906): pure data layer. src/server/AgentV3/ProjectPlan.ts (types; tolerant
+  planner-JSON parse with unsafe-path drops + dependency aliasing + honest caps MAX_MODULES=60;
+  nextBuildableModule resumes in_progress first, else first pending with deps done;
+  planBlockedReason distinguishes failed-dep vs cycle honestly; markModuleStatus immutable;
+  projectPlanTodos maps failed→blocked onto existing TodoItem UI; moduleBuildContext = goal +
+  this module + DONE contracts only; strict serialize/parse — corrupt storage → null → re-plan)
+  + ProjectPlanStore.ts (Firestore doc per workspace in project_plans_v3 behind a write-through
+  in-process cache; #873 settings-guard; dedicated doc because the workspace-memory snapshot caps
+  episodes at 100 and would silently evict a note-stored plan mid-mega-build) + 31 tests.
+  Gate: tsc 0/0 both configs, vitest 4519/4519, build+boot PASS.
+- SPM-2 (NEXT — exact resume point): route wiring. Detect mega-build intent (classification),
+  generate the module plan via projectPlanSystemPrompt/parsePlannedModules (one planner call,
+  reuse the bpGenerate/fastBuildModel pattern from the #858 blueprint step at
+  routes/agentv3.ts~3374), save via saveProjectPlan, then make each build turn architect ONE
+  module using moduleBuildContext instead of the full prompt. Flag-gated AGENTV3_PROJECT_MODE.
+- SPM-3: plan-driven continuation — a finished module turn with plan incomplete returns a
+  resumable result so the existing Layer-3 client auto-continue (AgentV3Panel autoContinueRef,
+  AUTO_CONTINUE_MAX) drives the next module; raise/parametrize the budget in project mode;
+  per-module billing recorded per turn as today.
+- SPM-4: modules as todos via todo_updated/PLAN_STATE + phased verification (per-module tsc,
+  full gate at plan completion). Then AppKnowledgeBase entry for the user-facing capability.

@@ -7853,3 +7853,36 @@ isn't full of broken images.
   deploy collector — a separate, larger change; recorded, not half-built.
 14 new tests (ProjectImport asset extraction + WorkspaceAssetStore materialize/restore). AppKnowledgeBase
 zip-import entry updated (sync rule). Gate: tsc 0/0 both, vitest 4554/4554, build + boot PASS.
+
+## MILESTONE (2026-07-04, session 01KDmsCZ): PARALLEL BUG-HUNT ROUND 2 — 6 root-cause fixes across isolated surfaces, all merged
+
+After the preview track (#887–#901), ran read-only bug-hunters across the ISOLATED (non-hot) parts of
+the v3.0 flow — deliberately avoiding the other session's actively-rewritten core (build-engine
+#892–#896, big-app import #898, and the hot files agentv3.ts/E2BActuator/ToolDispatcher/DevServerRecovery).
+Every fix follows the 4th rule (root-cause, class-level, siblings-hunted, regression-locked) and passed
+the full gate before merge:
+
+- **#914** — Complex apps ("SaaS CRM", "e-commerce", "social network") were routed to the FAST build
+  lane. Root cause: two complexity detectors drifted — RequestAnalyser.RE.complexApp called them
+  complex_app, but BuildTimeEstimator.complexityFromPrompt scored magnitude 2 → fast. Centralized the
+  signal in one shared src/server/lib/appComplexitySignals.ts (superset + crm/erp/marketplace/food-
+  delivery); complexityFromPrompt now floors a named category to the deep threshold. Directly targets
+  the admin's original "complex app bana nahi pa raha" pain.
+- **#916** — A real build/edit request was answered as CHAT when its verb was embedded in an earlier
+  word ("add" in "ladder", "change" in "exchange"). Root cause: 3 copies of a first-occurrence-only
+  word check. Centralized into containsSignalWord (scans ALL occurrences).
+- **#915** — PWA report false-404 on the standard `site.webmanifest`; SimpleBuilder manifest parser
+  corrupted `2fa/…` paths and dropped `.env.example` (greedy bullet-strip).
+- **#917** — Three report-analyzer FALSE POSITIVES (honesty bugs): a11y zoom-disabled on
+  `maximum-scale=1.5`; a11y control-unlabeled on a wrapping `<label>`; SEO "Home" title as a "template
+  default".
+- **#918** — Fast-lane contract/parse: ContractMap missed DESTRUCTURED exports (Zustand/Context) →
+  false drift fed to repair; same-named enums aggregated first-wins → false enum drift; parseFileBlocks
+  merged+dropped a file on a missing `<<<ENDFILE>>>`.
+
+Also verified CLEAN (honest negatives, no churn): the async/util helpers (asyncUtils, ClaudeClient,
+orchestrators, LiveEventBuffer, numeric helpers) and the CORE build pass/fail classifier
+(classifyBuildOutcome, TscGate, BuildJudge, assessReadiness) — no fake-success / fake-failure.
+Intentionally deferred: ContractMap enum SCOPE-aware resolution (did the conservative skip instead) and
+the low-value ContractMap advisory edge. Isolated-surface hunting is now at diminishing returns; the
+remaining high-value work lives in the other session's hot core (hold per safeguard #2).

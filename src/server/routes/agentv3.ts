@@ -689,6 +689,20 @@ export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspa
 }
 
 /**
+ * Should a NEW build request RECLAIM the account's build lock instead of being 409'd? (Root-cause fix,
+ * 2026-07-04.) The `activeBuilds` account lock is released by the build handler's `finally` — but if a
+ * network blip leaves the build body stuck on an un-abortable await, that `finally` never runs and the
+ * lock is only released at the long wall-clock deadline, TRAPPING the account for minutes with a
+ * dead-end 409. Reclaim when the existing build is a ZOMBIE (no live registry entry — a crash cleared
+ * `runningBuilds` but not the lock) or ABANDONED (its client dropped, so it has NO attached subscriber,
+ * and it has been running past the stall window). A build with a live watcher, or a freshly-started one,
+ * is genuinely active → keep the honest 409 (the client re-attaches, or the user Stops it). Pure + tested. */
+export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = 30_000): boolean {
+  if (!existing || existing.ended) return true;
+  return existing.subscribers.size === 0 && now - existing.startedTs > staleMs;
+}
+
+/**
  * The v3.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
  * Claude reliably does REAL tool-use (actually calls write_file). Gemini/Vertex HALLUCINATE in
  * the tool loop — they describe creating files but never call the tools, so the build finishes
@@ -2322,8 +2336,21 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const buildKey = userId ?? 'anon';
     if (activeBuilds.has(buildKey)) {
-      res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
-      return;
+      const existing = runningBuilds.get(buildKey);
+      if (shouldReclaimBuildLock(existing, Date.now())) {
+        // Abandoned/zombie lock (its client dropped on a network blip and the build hung, or it crashed
+        // without clearing the lock) — RECLAIM it so the account is never trapped until the wall-clock
+        // deadline. Tear the old build down cleanly, then fall through to start the fresh one.
+        if (existing) {
+          try { existing.abort.abort(); } catch { /* best-effort */ }
+          try { endBuild(existing); } catch { /* best-effort */ }
+          if (runningBuilds.get(buildKey) === existing) runningBuilds.delete(buildKey);
+        }
+        activeBuilds.delete(buildKey);
+      } else {
+        res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
+        return;
+      }
     }
     activeBuilds.add(buildKey);
     // Power level (admin override 2026-06-27): 'off' | 'mini' (5×) | 'medium' (10×) |

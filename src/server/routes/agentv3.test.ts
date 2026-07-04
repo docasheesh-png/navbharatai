@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -890,6 +890,41 @@ describe('isBuildRunningForWorkspace — server-side session/workspace scoping f
   it('running build has no workspaceId recorded, but the CALLER requested a specific one → false (unknown ownership is never assumed to match)', () => {
     const rb = fakeRunningBuild({});
     expect(isBuildRunningForWorkspace(rb, 'agentv3-u1-s1')).toBe(false);
+  });
+});
+
+describe('shouldReclaimBuildLock — never trap the account behind a dead/hung build', () => {
+  const rb = (overrides: Partial<RunningBuild> = {}): RunningBuild => ({
+    abort: new AbortController(),
+    buffer: [],
+    subscribers: new Set(),
+    ended: false,
+    startedTs: 1_000_000,
+    ...overrides,
+  });
+  const NOW = 1_000_000;
+
+  it('no registry entry for the lock (crash desync) → reclaim immediately', () => {
+    expect(shouldReclaimBuildLock(undefined, NOW)).toBe(true);
+  });
+
+  it('an already-ended build still holding the lock → reclaim', () => {
+    expect(shouldReclaimBuildLock(rb({ ended: true }), NOW + 5_000)).toBe(true);
+  });
+
+  it('ABANDONED: no attached subscriber and past the stall window → reclaim (the hung-build / dropped-client case)', () => {
+    const build = rb({ startedTs: NOW, subscribers: new Set() });
+    expect(shouldReclaimBuildLock(build, NOW + 31_000)).toBe(true);
+  });
+
+  it('a genuinely-active build WITH a live watcher → NEVER reclaim (keep the honest 409)', () => {
+    const build = rb({ startedTs: NOW, subscribers: new Set([{ write() {}, end() {} }]) });
+    expect(shouldReclaimBuildLock(build, NOW + 10 * 60_000)).toBe(false);
+  });
+
+  it('a freshly-started build with no watcher yet (client mid-connect) → do NOT reclaim before the stall window', () => {
+    const build = rb({ startedTs: NOW, subscribers: new Set() });
+    expect(shouldReclaimBuildLock(build, NOW + 5_000)).toBe(false);
   });
 });
 

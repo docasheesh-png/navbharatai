@@ -105,6 +105,18 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     expect(res).toEqual({ hydrated: false, hadFiles: false, skipped: false });
   });
 
+  it('for an EXPLICIT import, overlays ANY repo content — not just package.json/src', async () => {
+    // The import path (overlayAnyContent) must clone+overlay a repo with no root package.json or
+    // src/ (e.g. a Python/static/monorepo project) — the auto-hydrate guard would wrongly skip it.
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { overlayAnyContent: true });
+    expect(res).toEqual({ hydrated: true, hadFiles: false, skipped: false });
+    // The content test is the "any file besides .git" form, NOT the package.json/src form.
+    expect(commands[0]).toContain('-not -name .git');
+    expect(commands[0]).not.toContain('/tmp/nbhydrate/package.json');
+    expect(commands[0]).toContain('git clone');
+  });
+
   it('degrades to skipped on a clone failure (no network / no git)', async () => {
     const { runner } = fakeRunner(() => ({ stdout: 'NB_CLONE_FAIL' }));
     const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);

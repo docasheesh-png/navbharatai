@@ -3168,24 +3168,33 @@ export function registerAgentV3Routes(app: Express): void {
               events.emit({ type: 'narration', agent: 'architect', text: `That import URL isn't a supported GitHub repository URL (expected https://github.com/owner/repo). Starting with an empty workspace instead.`, ts: Date.now() });
             } else {
             events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
-            const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-            if (Object.keys(existing.files).length === 0) {
-              const importSync = new GitRepoSync(actuator, workspaceId);
-              const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
-              const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
-              const h = await importSync.hydrateFromRepo(cloneUrl);
-              if (h.hydrated) {
-                // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX
-                // only. Land them properly — durable store (Files/IDE/reopen), files_restored
-                // event, framework lock, edit mode, memory index, background preview boot —
-                // instead of the old narration-only "imported" that left everything else empty.
-                const cloned = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-                if (Object.keys(cloned.files).length > 0) {
-                  await landImportedProject(cloned.files, { source: cleanImportUrl, writeToSandbox: false });
-                } else {
-                  events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
-                }
+            // NOTE: do NOT gate the clone on "the sandbox is empty" — ensureWorkspace ALWAYS
+            // pre-scaffolds a fresh workspace (a .gitignore + package-lock.json), so an empty check
+            // never fires and the import silently did nothing (the reported "GitHub connect hua par
+            // 0 files aayi" bug). hydrateFromRepo clones into a TEMP dir and overlays, so it handles
+            // a scaffolded workspace by design — just run it whenever the user asked to import.
+            const importSync = new GitRepoSync(actuator, workspaceId);
+            const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+            const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
+            const h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
+            if (h.hydrated) {
+              // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX
+              // only. Land them properly — durable store (Files/IDE/reopen), files_restored
+              // event, framework lock, edit mode, memory index, background preview boot —
+              // instead of the old narration-only "imported" that left everything else empty.
+              const cloned = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+              if (Object.keys(cloned.files).length > 0) {
+                await landImportedProject(cloned.files, { source: cleanImportUrl, writeToSandbox: false });
+              } else {
+                events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
               }
+            } else if (h.skipped) {
+              // The clone itself failed — the honest cause is a bad URL, a PRIVATE repo without
+              // access, or git being unavailable. Say so instead of silently building empty.
+              events.emit({ type: 'narration', agent: 'architect', text: `I couldn't clone ${cleanImportUrl}. If it's private, connect the GitHub account that owns it (⚙ → GitHub) so I have access; otherwise check the URL. Starting with an empty workspace for now.`, ts: Date.now() });
+            } else {
+              // Cloned successfully but the repo had no content beyond .git (a brand-new empty repo).
+              events.emit({ type: 'narration', agent: 'architect', text: `${cleanImportUrl} looks like an empty repository — there was nothing to import. Tell me what you'd like to build in it.`, ts: Date.now() });
             }
             }
           } catch (importErr) {

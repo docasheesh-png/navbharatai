@@ -8010,3 +8010,24 @@ Hosting strategy (agreed direction, pending final A/B + the mitrify.in build fix
 Pages (free, unlimited, CDN, custom domains) for scale; mitrify.in (already paid, Node-capable, 2 free Node
 slots + 50GB static room + enable CDN) is genuinely usable for the platform's own showcase/report page AND/OR
 a bounded free-tier host. Do NOT paste FTP/hosting passwords in chat — wire as Cloud Run secrets/env.
+
+## 2026-07-04 — HOSTING: Cloudflare Pages registered as an env-gated first-party DeployProvider
+
+The scalable user-app engine (free, unlimited bandwidth, CDN, custom domains). NEW
+src/server/AgentV3/CloudflareProvider.ts — mirrors the binary-safe NetlifyProvider/VercelProvider
+pattern and self-registers (side-effect import added in agentv3.ts after NetlifyProvider). Env-gated on
+CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID: until BOTH are set it reports configured:false with an
+honest requirement and deploy() throws an honest "not configured" error — never a fake URL, no
+hardcoded creds. Selectable via deployProvider='cloudflare'.
+
+CRITICAL correctness (caught by the design workflow's adversarial verify — both reviewers rejected the
+first spec): the obvious "reuse ProDeploy.deployCloudflarePages" path does `buf.toString('utf8')` which
+CORRUPTS every binary asset (images/fonts/favicons) — it would serve a broken site while reporting
+success (a rule-#2 fake). CloudflareProvider is instead BUFFER-NATIVE: it hashes the RAW bytes
+(sha256) and uploads `new Blob([buffer])` (raw bytes), byte-for-byte intact. +7 tests incl. an explicit
+binary round-trip (0xFF/0x00 bytes survive; hash ≠ utf8-hash), both-creds-required, token-never-leaked,
+project-name ≤58 chars/DNS-safe. Because 'cloudflare' is already in FIRST_PARTY_PROVIDERS, the Phase 0
+size+count quota + takedown guard + content scan apply with ZERO extra wiring. AppKnowledgeBase
+agentv3_deploy entry updated (Cloudflare added). Gate: frontend tsc 0, server tsc 0, vitest 4643/4643
+PASS, boot PASS. Admin: set CLOUDFLARE_API_TOKEN (Pages:Edit) + CLOUDFLARE_ACCOUNT_ID as Cloud Run
+secrets to activate.

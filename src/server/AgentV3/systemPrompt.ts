@@ -85,11 +85,56 @@ export function planSystemPrompt(): string {
  *
  * @param fileTree - list of paths currently in the workspace (injected for context)
  */
+/**
+ * Render the workspace file tree for the edit-mode prompt so it scales to a LARGE imported
+ * codebase. A small app lists every path (the agent sees the whole tree, unchanged). But a big
+ * project (a real production app — hundreds to thousands of files) would inject ~1MB of paths into
+ * EVERY turn's system prompt: it blows the context window, costs a fortune, and slows every turn.
+ * So above a threshold we emit a COMPACT DIRECTORY SUMMARY (folders + file counts + root files) and
+ * rely on the agent's grep/glob/search_files tools to locate exact files — the same way a human (or
+ * Claude Code) navigates a big repo. Per-turn context then stays small and roughly constant no
+ * matter how big the project is, which is what makes editing a Mitrify-scale app viable. PURE.
+ */
+export function summarizeFileTree(
+  paths: string[],
+  opts?: { fullListMax?: number; maxDirLines?: number },
+): string {
+  const fullListMax = opts?.fullListMax ?? 400;
+  const maxDirLines = opts?.maxDirLines ?? 240;
+  const files = [...new Set((paths || []).filter((p) => typeof p === 'string' && p.trim()))];
+  if (files.length === 0) return '';
+  // Small project → the full flat list (today's behaviour, byte-for-byte for small apps).
+  if (files.length <= fullListMax) return files.join('\n');
+
+  // Large project → a bounded directory summary + the (usually few, usually important) root files.
+  const rootFiles = files.filter((p) => !p.includes('/')).sort();
+  const dirCounts = new Map<string, number>();
+  for (const p of files) {
+    const i = p.lastIndexOf('/');
+    if (i < 0) continue;
+    const dir = p.slice(0, i);
+    dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+  }
+  const dirs = [...dirCounts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const shownDirs = dirs.slice(0, maxDirLines);
+  const lines: string[] = [
+    `${files.length} files across ${dirCounts.size} directories. This is a LARGE project, so the full`,
+    'file list is summarized below by directory — use grep / glob / search_files / read_file to locate',
+    'and read the exact files you need before editing (do NOT assume a file exists or its contents):',
+  ];
+  if (rootFiles.length > 0) {
+    lines.push('', 'Root files:', ...rootFiles.map((f) => `  ${f}`));
+  }
+  lines.push('', 'Directories (path — file count):', ...shownDirs.map(([d, c]) => `  ${d}/ — ${c}`));
+  if (dirs.length > shownDirs.length) {
+    lines.push(`  …and ${dirs.length - shownDirs.length} more director${dirs.length - shownDirs.length === 1 ? 'y' : 'ies'} (use search_files/glob to reach them).`);
+  }
+  return lines.join('\n');
+}
+
 export function editModePrefix(fileTree: string[] = []): string {
-  const treeSection =
-    fileTree.length > 0
-      ? `\n\n<<<EXISTING_FILES>>>\n${fileTree.join('\n')}\n<<<END_FILES>>>`
-      : '';
+  const treeBody = summarizeFileTree(fileTree);
+  const treeSection = treeBody ? `\n\n<<<EXISTING_FILES>>>\n${treeBody}\n<<<END_FILES>>>` : '';
   return [
     `**EDIT MODE — you are modifying an existing app, not building from scratch.**${treeSection}`,
     '',
@@ -131,8 +176,8 @@ export function editModePrefix(fileTree: string[] = []): string {
     '   it alone.',
     '',
     '6. NEVER REBUILD FROM SCRATCH: a "fix the button" request must NOT result in all',
-    '   source files being overwritten or deleted. The file tree above is the authoritative',
-    '   list of what already exists — treat every listed file as built and working.',
+    '   source files being overwritten or deleted. The file tree/summary above shows the',
+    '   existing project — treat all of it as already built and working.',
     '',
     '7. CONFIRM SCOPE: if the user\'s request is ambiguous (which file? which function?)',
     '   make a conservative targeted change to the most likely location and explain',

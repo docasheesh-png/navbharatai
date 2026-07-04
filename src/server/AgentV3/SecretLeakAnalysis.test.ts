@@ -26,6 +26,23 @@ describe('analyzeSecretLeak', () => {
     expect(r.findings).toHaveLength(0);
   });
 
+  it('FLAGS a committed .env when the gitignore only covers .env.local (CRA default) — not bare .env', () => {
+    // Regression: `\.env\b` matched inside `.env.local`, so a CRA gitignore (which lists
+    // `.env.local`, `.env.*.local` but never bare `.env`) was wrongly read as covering `.env`.
+    const cra = '/node_modules\n.env.local\n.env.development.local\n.env.test.local\n.env.production.local';
+    const r = analyzeSecretLeak(['.env', 'src/App.tsx'], cra);
+    expect(r.assessed).toBe(true);
+    expect(r.exposed).toContain('.env');
+    expect(r.findings.length).toBeGreaterThan(0);
+  });
+
+  it('still covers bare .env via an any-dir (**/.env) or *.env rule, but NOT via .env.* or .env/ (dir)', () => {
+    expect(analyzeSecretLeak(['.env'], '**/.env').findings).toHaveLength(0);       // any-dir → covered
+    expect(analyzeSecretLeak(['.env'], '*.env').findings).toHaveLength(0);          // suffix glob → covered
+    expect(analyzeSecretLeak(['.env'], '.env.*').findings.length).toBeGreaterThan(0); // only .env.<x> → NOT covered
+    expect(analyzeSecretLeak(['.env'], '.env/').findings.length).toBeGreaterThan(0);  // directory rule → NOT covered
+  });
+
   it('ignores templates/examples as non-secret', () => {
     const r = analyzeSecretLeak(['.env.example', '.env.sample', '.env.template'], null);
     expect(r.assessed).toBe(false);

@@ -15,6 +15,23 @@ describe('scanSecurity', () => {
     expect(scanSecurity('c.ts', 'const password = "Hunter2Pass99";').some((f) => f.rule === 'hardcoded-secret')).toBe(true);
   });
 
+  it('does NOT go blind on a secret inside JSX or on a line with a test-suffixed word (the placeholder-guard scope bug)', () => {
+    // The guard used to test the WHOLE line: a `<` (every JSX line) or a word like "latest"/"fastest"
+    // (contains "test") suppressed the finding — so a real credential in a .tsx prop / on a commented
+    // line reported clean. (Random non-format values are used so this test file carries no scannable
+    // secret; NavBharatAI's hardcoded-secret rule flags any 8+ non-space value under a secret key.)
+    const V = 'aB3xK9mP2qR7sT1uV4wZ'; // 20 non-space chars, no known-provider prefix, no placeholder token
+    expect(scanSecurity('src/Pay.tsx', `<PayButton apiKey="${V}" />`)
+      .some((f) => f.rule === 'hardcoded-secret' && f.severity === 'high')).toBe(true);
+    expect(scanSecurity('src/g.ts', `const password = "${V}"; // fastest path`)
+      .some((f) => f.rule === 'hardcoded-secret')).toBe(true);
+    expect(scanSecurity('src/a.ts', `const apiKey = "${V}"; // latest key`)
+      .some((f) => f.rule === 'hardcoded-secret')).toBe(true);
+    // …but a genuine placeholder VALUE (or an env form) is still suppressed.
+    expect(scanSecurity('src/b.tsx', '<Cfg apiKey="your-api-key-here" />').some((f) => f.rule === 'hardcoded-secret')).toBe(false);
+    expect(scanSecurity('src/c.tsx', '<Cfg apiKey="test-placeholder-123" />').some((f) => f.rule === 'hardcoded-secret')).toBe(false);
+  });
+
   it('flags the global eval() but not member methods named eval (FP fix)', () => {
     expect(scanSecurity('a.ts', 'const r = eval(userCode);').some((f) => f.rule === 'eval-usage')).toBe(true);
     // mathjs / mongo / other library .eval() methods are not the dangerous global eval.

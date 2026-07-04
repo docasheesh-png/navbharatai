@@ -33,7 +33,10 @@ export interface ImportedFiles {
   skipped: string[];
 }
 
-const MAX_FILES = 4000;
+// Raised 4000 → 16000 so a Mitrify-scale (and up to ~50×) imported/collected app is not truncated
+// (the "handle a huge app" goal). The 120 MB total-bytes ceiling is the real memory guard and
+// usually binds first; the file count is the hard backstop.
+const MAX_FILES = 16000;
 const MAX_TOTAL_BYTES = 120 * 1024 * 1024; // 120 MB — same ceiling as the ZIP export.
 const MAX_FILE_BYTES = 5 * 1024 * 1024;     // 5 MB per text file — larger is almost certainly an asset.
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
-import { fileDocId, loadWorkspaceFiles } from './WorkspaceFileStore';
+import { fileDocId, loadWorkspaceFiles, capPathsToDocLimit } from './WorkspaceFileStore';
 import type { ToolUse } from './ClaudeClient';
 
 const call = (name: string, input: Record<string, unknown>): ToolUse => ({ id: 't1', name, input });
@@ -61,5 +61,29 @@ describe('WorkspaceFileStore helpers', () => {
 
   it('loadWorkspaceFiles is a safe no-op without Firestore (returns {})', async () => {
     await expect(loadWorkspaceFiles('ws-x')).resolves.toEqual({});
+  });
+});
+
+describe('capPathsToDocLimit (huge-repo durable-index safety)', () => {
+  it('keeps every path when the list fits under the 1MB metadata-doc limit', () => {
+    const paths = Array.from({ length: 16_000 }, (_, i) => `client/src/pages/module${i}/file${i}.tsx`);
+    const r = capPathsToDocLimit(paths);
+    // ~16k realistic paths (~45 bytes each ≈ 720KB) fit comfortably — nothing dropped.
+    expect(r.capped).toBe(0);
+    expect(r.paths.length).toBe(paths.length);
+  });
+
+  it('caps gracefully (never exceeds the budget) for a pathological oversized list', () => {
+    const paths = Array.from({ length: 60_000 }, (_, i) => `very/deeply/nested/directory/structure/path/segment/file-${i}.tsx`);
+    const r = capPathsToDocLimit(paths, 100_000);
+    expect(r.capped).toBeGreaterThan(0);
+    expect(r.paths.length + r.capped).toBe(paths.length);
+    // The kept set stays under the byte budget (this is the whole point — no failed Firestore write).
+    const bytes = r.paths.reduce((n, p) => n + Buffer.byteLength(p, 'utf8') + 8, 40);
+    expect(bytes).toBeLessThanOrEqual(100_000);
+  });
+
+  it('handles an empty list', () => {
+    expect(capPathsToDocLimit([])).toEqual({ paths: [], capped: 0 });
   });
 });

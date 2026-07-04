@@ -46,6 +46,25 @@ export function fileDocId(path: string): string {
 }
 
 /**
+ * The authoritative `paths` list lives in ONE metadata doc, which Firestore caps at 1 MB. A very
+ * large imported app (tens of thousands of files) could push the array past that and fail the WHOLE
+ * durable write. So cap the list to a safe byte budget: keep as many paths as fit, report how many
+ * were dropped. The dropped files' CONTENT docs still exist and the sandbox still has every file —
+ * for a git-imported app the repo itself is the durable source — so this degrades gracefully instead
+ * of failing. PURE + tested.
+ */
+export function capPathsToDocLimit(paths: string[], maxBytes = 950_000): { paths: string[]; capped: number } {
+  const kept: string[] = [];
+  let bytes = 40; // field overhead headroom
+  for (const p of paths) {
+    bytes += Buffer.byteLength(p, 'utf8') + 8; // string bytes + per-element array overhead
+    if (bytes > maxBytes) break;
+    kept.push(p);
+  }
+  return { paths: kept, capped: paths.length - kept.length };
+}
+
+/**
  * Persist the current set of workspace source files. The `paths` metadata list is authoritative:
  * a file removed from `files` won't be returned by loadWorkspaceFiles even if its content doc
  * lingers. Best-effort — never throws.
@@ -65,7 +84,9 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
       }
       await batch.commit();
     }
-    await root.set({ paths: entries.map(([p]) => p), count: entries.length, savedAt: Date.now() }, { merge: false });
+    const safe = capPathsToDocLimit(entries.map(([p]) => p));
+    if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${entries.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
+    await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: false });
   } catch (e) {
     // Best-effort — a save failure never blocks a build — but it is the exact "reload pe data gayab"
     // trigger (e.g. free-tier daily write quota exhausted), so make it visible instead of silent.
@@ -101,7 +122,9 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
     const meta = await root.get();
     const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
     const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
-    await root.set({ paths: union, count: union.length, savedAt: Date.now() }, { merge: true });
+    const safe = capPathsToDocLimit(union);
+    if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${union.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
+    await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: true });
   } catch (e) {
     // Best-effort — a merge failure never blocks anything — but surface it (see saveWorkspaceFiles).
     notePersistenceFailure('workspace_files', 'write', e);

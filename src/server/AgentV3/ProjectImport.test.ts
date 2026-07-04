@@ -106,11 +106,18 @@ describe('extractZipProject', () => {
   });
 
   it('enforces the file-count cap with an honest overCap count', async () => {
+    // Uses an injected small cap (the real IMPORT_MAX_FILES is 16000 — building that many entries
+    // in a test zip is needlessly slow; the cap LOGIC is identical regardless of the number).
+    const cap = 50;
     const entries: Record<string, string> = {};
-    for (let i = 0; i < IMPORT_MAX_FILES + 25; i++) entries[`src/f${i}.ts`] = 'x';
-    const out = await extractZipProject(await makeZip(entries));
-    expect(Object.keys(out.files)).toHaveLength(IMPORT_MAX_FILES);
+    for (let i = 0; i < cap + 25; i++) entries[`src/f${i}.ts`] = 'x';
+    const out = await extractZipProject(await makeZip(entries), { maxFiles: cap });
+    expect(Object.keys(out.files)).toHaveLength(cap);
     expect(out.dropped.overCap).toBe(25);
+  });
+
+  it('the production file cap is raised to handle a large (Mitrify-scale) app', () => {
+    expect(IMPORT_MAX_FILES).toBeGreaterThanOrEqual(16_000);
   });
 });
 

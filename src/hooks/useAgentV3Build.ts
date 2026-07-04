@@ -3,6 +3,7 @@ import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
+import { shouldSurfaceStreamError } from './agentV3StreamError';
 import { auth } from '../App';
 
 /**
@@ -180,7 +181,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   // generationRef above) — every event is dropped once it no longer matches the LIVE generation (the
   // user has since reset/started a new session), instead of silently repopulating a session the user
   // has left. Surfaces a non-event body so silent failures show.
-  const pumpStream = useCallback(async (res: Response, gen: number): Promise<void> => {
+  // `sink` (optional, per-call — never a shared ref, so no cross-generation bleed) records whether
+  // this stream saw the build's terminal `result`, so resume()'s catch can tell a genuine failure
+  // from a post-result tail drop (see shouldSurfaceStreamError).
+  const pumpStream = useCallback(async (res: Response, gen: number, sink?: { sawResult: boolean }): Promise<void> => {
     if (!res.body) return;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -213,6 +217,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         // result is in. Key ONLY on `result` (build-terminal, once per build) — NOT `done`, which
         // sub-agents also emit on this shared stream. See the same guard in start()'s stream loop.
         if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+          if (sink) sink.sawResult = true; // build is terminal — a later stream drop is not a failure
           setRunning(false);
           setServerBuildRunning(false);
         }
@@ -442,7 +447,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // `workspaceId`, when given, must be the CALLER's current session — the server refuses to attach
   // if the running build belongs to a different session under the same account (see /attach route).
   // Omit it only for a truly account-wide manual "Resume" (no session context to check against).
-  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string }) => {
+  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; resultAlreadySeen?: boolean }) => {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
@@ -460,6 +465,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(true);
     const controller = new AbortController();
     abortRef.current = controller;
+    // `sink` tracks whether the (re)attached stream saw the terminal `result`. Seeded true when a
+    // caller reconnects a build that ALREADY produced its result (start()'s post-result reconnect):
+    // the re-attach buffer may or may not replay that result, so a tail drop on the reattached stream
+    // must never resurface a "network error" for a finished build. Declared before `try` so the
+    // `catch` can read it.
+    const sink = { sawResult: opts?.resultAlreadySeen === true };
     try {
       const res = await fetch('/api/agentv3/attach', {
         method: 'POST',
@@ -474,9 +485,10 @@ export function useAgentV3Build(): UseAgentV3Build {
         setRunning(false);
         return;
       }
-      await pumpStream(res, gen);
+      await pumpStream(res, gen, sink);
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      if (shouldSurfaceStreamError({ isAbort, isStale: isStale(gen), sawResult: sink.sawResult, reconnected: false })) {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
@@ -626,6 +638,12 @@ export function useAgentV3Build(): UseAgentV3Build {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      // Tracks whether THIS build emitted its terminal `result`. Once it has, the build is done —
+      // any later stream throw (a mobile blip, or Cloud Run's request timeout during the up-to-~6-min
+      // post-result import-preview boot the server runs before it closes the stream) is a tail drop,
+      // NOT a build failure, so it must never surface as a "network error" banner. Declared out here
+      // so the `catch` below can read it (see shouldSurfaceStreamError).
+      let sawResult = false;
 
       try {
         const res = await fetch('/api/agentv3/chat', {
@@ -744,6 +762,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             // soon as the result is known. A resumable (deadline-paused) result clears running too — the
             // bounded auto-continue re-arms it via state.resumable.
             if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
+              sawResult = true; // build is terminal — a later stream drop is not a failure
               setRunning(false);
               setServerBuildRunning(false);
             }
@@ -790,14 +809,24 @@ export function useAgentV3Build(): UseAgentV3Build {
               if (isStale(gen)) break;
               if (j?.buildRunning === true) {
                 reconnected = true;
-                await resume({ userId: userIdRef.current, email: emailRef.current });
+                // Pass whether this build already produced its terminal result. After the result the
+                // build IS done and the server is only running the best-effort import-preview boot —
+                // reconnecting catches its tail (e.g. the live preview URL), but a further drop on the
+                // reattached stream must not resurface an error for a finished build.
+                await resume({ userId: userIdRef.current, email: emailRef.current, resultAlreadySeen: sawResult });
               } else if (j && j.buildRunning === false) {
                 break; // server reached + build genuinely ended — stop retrying, show the real result/error
               }
               // else: probe reached but shape was unexpected → try again after backoff
             } catch { /* still offline — back off and retry */ }
           }
-          if (!reconnected && !isStale(gen)) setError(err instanceof Error ? err.message : String(err));
+          // A stream error AFTER the terminal `result` (`sawResult`) is a post-result tail drop, not a
+          // build failure — the server holds the stream open for up to ~6 min of import-preview boot
+          // after the result, and Cloud Run's request timeout / a mobile blip can sever it. Never show
+          // a "network error" for a build that already succeeded.
+          if (shouldSurfaceStreamError({ isAbort: false, isStale: isStale(gen), sawResult, reconnected })) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
         }
       } finally {
         // Only clear shared flags if THIS build is still the current generation — otherwise a

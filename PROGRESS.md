@@ -8059,3 +8059,43 @@ FIXES (three layers so it can't recur):
    ABANDONED (no subscriber + past the 30s stall window) or ZOMBIE (no live registry entry) lock,
    tearing the old build down cleanly, so a hung/dropped build can never trap the account beyond ~30s.
    +5 unit tests. Gate: frontend tsc 0, server tsc 0, vitest 4648/4648 PASS, boot:check PASS.
+
+## 2026-07-04 — HOTFIX (admin-reported): "network error" banner after a SUCCESSFUL v3.0 build/survey
+
+Symptom (admin imported a GitHub repo — mitrify — for a survey): the survey completed ("✓ Done · 24
+steps · 4m 8s"), then a "network error" banner appeared, making a build that had ALREADY SUCCEEDED
+look broken. (Second, separate symptom — the heavy full-stack app's live preview did not auto-boot —
+is a partial-by-nature runtime limit, not this bug; see the honest note below.)
+
+ROOT CAUSE (client stream handling, not the build): a v3.0 build emits its terminal `result`, and THEN
+the server holds the NDJSON stream open for up to ~6 min of post-result work — a heavy import's
+local-Postgres provision + `npm install` + dev-server boot (routes/agentv3.ts `finally` awaits
+`importPreviewBoot` at line ~4844 AFTER emitting `result` at ~4790, before `endBuild`). If the
+connection is severed during that long post-result window — a mobile blip, or Cloud Run's request
+timeout on the long-open stream — the client reader throws. The old catch treated that throw as a
+build failure and surfaced the raw error (`start()` line ~819 and `resume()` line ~488), even though
+the terminal `result` had already arrived. A stream error AFTER the result is a best-effort tail drop,
+never a build failure.
+
+FIX (one rule, both stream consumers, no drift):
+- NEW pure `src/hooks/agentV3StreamError.ts` — `shouldSurfaceStreamError({isAbort,isStale,sawResult,
+  reconnected})`: a stream error surfaces ONLY when it is a genuine failure — never on an intentional
+  abort, a stale/abandoned session, a successful transparent reconnect, or (the fix) a drop after the
+  terminal `result`. Single source of truth used by BOTH consumers so they can't drift.
+- `useAgentV3Build.ts`: `start()` tracks `sawResult` (set when the `result` event arrives) and gates
+  its final `setError` through the helper; `pumpStream()`/`resume()` thread a per-call `sink` so a
+  reattached stream carries the same fact. start()'s post-result reconnect passes
+  `resultAlreadySeen:true` so the reattach (which catches the import-boot tail — e.g. the live preview
+  URL) also never resurfaces an error for a finished build. The reconnect logic is PRESERVED, so a drop
+  while the import boot is still running still transparently re-attaches and picks up the preview URL.
+- +8 unit tests (tests/agentV3StreamError.test.ts) encoding the exact failure case + every boundary.
+
+HONEST NOTE on the 2nd symptom (heavy full-stack live preview didn't auto-boot): the import DID land +
+survey succeeded; the live preview for a full backend app (Express + Postgres + external paid services
+like payments/auth) is PARTIAL by nature — external keys can't be faked in the sandbox, and the exact
+boot outcome is in the Preview tab's Diagnose log (a manual re-boot with a visible log). Port detection
+already has log-drift recovery (detectDevPort) + package.json `--port` parsing (devScriptPort). Not
+shipping a speculative boot fix without the Diagnose log would be guessing (rule 1); the In-browser
+preview + Diagnose remain the honest fallbacks.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4660/4660 PASS, boot:check PASS.

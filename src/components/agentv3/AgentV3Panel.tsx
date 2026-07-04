@@ -178,6 +178,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   }, []);
 
+  // "Wrong account?" — drop the current GitHub connection so the user can connect a DIFFERENT one
+  // (without logging out of NavBharatAI). Clears the same keys App.tsx binds to the user, then
+  // returns the picker to its Connect state.
+  const disconnectGh = useCallback(() => {
+    try {
+      localStorage.removeItem('gh_token');
+      localStorage.removeItem('gh_token_signal');
+      localStorage.removeItem('gh_owner_uid');
+    } catch { /* storage unavailable */ }
+    setGhRepos(null);
+    setGhReposError('auth');
+  }, []);
+
   // 1-CLICK IMPORT: picking a repo sends the import message itself — the user just watches the
   // clone → Files/IDE → preview → AI survey happen (the #886/#890 Landing Pipeline server-side).
   // Deliberately a PLAIN function (not useCallback): it must close over the CURRENT render's
@@ -2185,7 +2198,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       </button>
                     ))}
                 </div>
-                <p className="text-[10px] text-[#484f58]">Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] text-[#484f58]">Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.</p>
+                  <button type="button" onClick={disconnectGh} className="shrink-0 text-[10px] text-[#8b949e] hover:text-white underline underline-offset-2 touch-manipulation">Wrong account?</button>
+                </div>
               </div>
             ) : null}
 

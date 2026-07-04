@@ -23,9 +23,13 @@ const CODE_RE = /\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte)$/i;
 // test files (hit a local test server) and build/tooling config (e.g. a Vite dev-server
 // proxy → http://localhost:3000). Scanning them just produces false positives.
 const SKIP_PATH = /(?:\.test\.|\.spec\.|(?:^|[\\/])(?:__tests__|tests?|e2e)[\\/]|\.config\.[cm]?[jt]s$|(?:^|[\\/])(?:setupTests|vite\.config|vitest\.config|playwright\.config|webpack\.config|next\.config))/i;
-const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i;
+// `wss?` too, not just `https?`: a hardcoded `ws://localhost:8080` / `wss://10.0.0.5` (common for
+// chat / live-update features) points at the container's own loopback in production and breaks 100%
+// — yet it was flagged by NEITHER this analyzer nor the security scanner (which excludes local
+// sockets). Matching the WebSocket schemes closes that gap.
+const LOCALHOST_RE = /(?:https?|wss?):\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i;
 // RFC 1918 private-network ranges as a URL host: 10/8, 172.16–31/12, 192.168/16.
-const PRIVATE_IP_RE = /https?:\/\/(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?/i;
+const PRIVATE_IP_RE = /(?:https?|wss?):\/\/(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d+)?/i;
 // If the line reads configuration, the address is (almost always) a safe default.
 const ENV_RE = /process\.env\.|import\.meta\.env\.|getenv|process\.env\[/i;
 

@@ -14,7 +14,7 @@ type V3Resume = { sessionId: string; messages: Array<{ role: 'user' | 'agent'; t
  *  • not yet  → an honest "rolling out" message (NEVER a broken/empty builder, so the app never
  *    looks broken for a user who isn't on the v3.0 batch yet).
  */
-export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps }) {
+export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: V3Resume; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
   const [state, setState] = useState<'loading' | 'enabled' | 'disabled'>('loading');
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSyn
   }
 
   if (state === 'enabled') {
-    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} pendingFix={pendingFix} filesPanel={filesPanel} />;
+    return <AgentV3Panel userId={userId} email={email} resume={resume} freshOpenNonce={freshOpenNonce} onFilesSync={onFilesSync} onBeforeBuild={onBeforeBuild} onOpenInIDE={onOpenInIDE} onPreviewState={onPreviewState} pendingFix={pendingFix} filesPanel={filesPanel} focusMode={focusMode} />;
   }
 
   return (

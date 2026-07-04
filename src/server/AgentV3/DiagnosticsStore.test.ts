@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { trimReportForStorage, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser } from './DiagnosticsStore';
+import { trimReportForStorage, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -100,12 +100,30 @@ describe('saveLatestForUser / loadLatestForUser (VITEST-skip, best-effort)', () 
     await expect(saveLatestForUser('user-1', baseReport({ endedAt: 2000, ok: true }))).resolves.toBeUndefined();
   });
 
-  it('saveLatestForUser tolerates a null userId (falls back to the "anon" bucket) without throwing', async () => {
+  it('saveLatestForUser tolerates a null userId (no shared "anon" bucket) without throwing', async () => {
     await expect(saveLatestForUser(null, baseReport({ endedAt: 2000 }))).resolves.toBeUndefined();
   });
 
   it('loadLatestForUser resolves to null (never throws) when Firestore is unreachable', async () => {
     await expect(loadLatestForUser('user-1')).resolves.toBeNull();
     await expect(loadLatestForUser(null)).resolves.toBeNull();
+  });
+});
+
+describe('perUserDiagnosticsDocId — no cross-user "anon" bucket (privacy)', () => {
+  it('returns null for a null/empty/whitespace user so anonymous reports are never shared', () => {
+    expect(perUserDiagnosticsDocId(null)).toBeNull();
+    expect(perUserDiagnosticsDocId(undefined)).toBeNull();
+    expect(perUserDiagnosticsDocId('')).toBeNull();
+    expect(perUserDiagnosticsDocId('   ')).toBeNull();
+  });
+  it('returns the real user id (trimmed) for a signed-in user', () => {
+    expect(perUserDiagnosticsDocId('user-1')).toBe('user-1');
+    expect(perUserDiagnosticsDocId('  user-2  ')).toBe('user-2');
+  });
+  it('never collapses different anonymous callers onto one shared id', () => {
+    // The bug: `userId || 'anon'` gave every anon caller the SAME doc → one anon read another's
+    // generated source/errors. A null id now yields null (skip the per-user store entirely).
+    expect(perUserDiagnosticsDocId(null)).not.toBe('anon');
   });
 });

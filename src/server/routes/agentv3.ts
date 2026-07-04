@@ -2681,6 +2681,12 @@ export function registerAgentV3Routes(app: Express): void {
     // indexed into project memory → live preview booted in the BACKGROUND with an honest
     // outcome in the stream. The finally awaits the boot so Cloud Run can't throttle it away.
     let importPreviewBoot: Promise<void> | undefined;
+    // True once THIS turn imported a project (zip or GitHub URL). An import turn's deliverable is the
+    // LANDED project — the agent then SURVEYS it and, per the user's "do not change any files yet",
+    // creates no new files. So an import turn must NOT be judged like a build: producing no files is
+    // success (not a failed/escalated build), and the mandatory readiness gate must not audit the
+    // user's freshly-imported existing code and declare it "NOT READY". Set by the zip + URL landers.
+    let isImportTurn = false;
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
@@ -2719,6 +2725,7 @@ export function registerAgentV3Routes(app: Express): void {
       try { await mergeWorkspaceFiles(workspaceId, importedFiles); } catch { /* durable persist is best-effort */ }
       framework = validation.framework;
       isEditMode = true;
+      isImportTurn = true; // this turn's job was to import + survey, not to build (see the flag decl)
       emit({ type: 'files_restored', files: written.map((path) => ({ path, kind: 'create' as const })), ts: Date.now() });
       emit({
         type: 'narration', agent: 'architect', ts: Date.now(),
@@ -3176,20 +3183,26 @@ export function registerAgentV3Routes(app: Express): void {
             const importSync = new GitRepoSync(actuator, workspaceId);
             const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
             const cloneUrl = githubToken ? cleanImportUrl.replace('https://', `https://${githubToken}@`) : cleanImportUrl;
+            // TRUST THE FILESYSTEM, not the shell echo. On a LARGE repo (real evidence: a 316-file
+            // import) hydrateFromRepo's success marker was not captured, so it reported "skipped" and
+            // we printed a false "couldn't clone" AND skipped the landing pipeline — even though the
+            // files were actually on disk. So we measure the workspace BEFORE and AFTER: if the clone
+            // added real files, the import SUCCEEDED regardless of what the echo said, and we land them.
+            const beforePaths = new Set(Object.keys((await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files));
             const h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
-            if (h.hydrated) {
-              // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX
-              // only. Land them properly — durable store (Files/IDE/reopen), files_restored
-              // event, framework lock, edit mode, memory index, background preview boot —
-              // instead of the old narration-only "imported" that left everything else empty.
-              const cloned = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-              if (Object.keys(cloned.files).length > 0) {
-                await landImportedProject(cloned.files, { source: cleanImportUrl, writeToSandbox: false });
+            const after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            const addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            if (h.hydrated || addedReal.length > 0) {
+              // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX only.
+              // Land them properly — durable store (Files/IDE/reopen), files_restored event,
+              // framework lock, edit mode, memory index, background preview boot.
+              if (Object.keys(after.files).length > 0) {
+                await landImportedProject(after.files, { source: cleanImportUrl, writeToSandbox: false });
               } else {
                 events.emit({ type: 'narration', agent: 'architect', text: 'The repository cloned but contained no readable source files — starting with an empty workspace instead.', ts: Date.now() });
               }
             } else if (h.skipped) {
-              // The clone itself failed — the honest cause is a bad URL, a PRIVATE repo without
+              // The clone genuinely failed AND added no files — a bad URL, a PRIVATE repo without
               // access, or git being unavailable. Say so instead of silently building empty.
               events.emit({ type: 'narration', agent: 'architect', text: `I couldn't clone ${cleanImportUrl}. If it's private, connect the GitHub account that owns it (⚙ → GitHub) so I have access; otherwise check the URL. Starting with an empty workspace for now.`, ts: Date.now() });
             } else {
@@ -3509,7 +3522,15 @@ export function registerAgentV3Routes(app: Express): void {
       // escalated build streams to the same surfaces and writes to the same workspace.
       // A new build or an edit MUST produce files — tell the runner so it reports a no-tool
       // "I'm preparing a plan…" reply as a FAILED build (ok:false) instead of a fake success.
-      const expectsArtifacts = intent === 'new_build' || intent === 'edit_existing';
+      // EXCEPT an IMPORT turn: its deliverable is the just-landed project, and the user asked for a
+      // SURVEY ("do not change any files yet"), so creating no new files is the correct, successful
+      // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
+      // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
+      const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
+      // The mandatory readiness gate audits code v3.0 BUILT — it must NOT judge a freshly-imported
+      // existing app (its pre-existing hardcoded keys / SQL patterns are the user's, not this build's,
+      // and surfacing "NOT READY 0/100" on their working production app is wrong + alarming).
+      const runReadinessGate = readinessGateEnabled() && !isImportTurn;
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -3531,8 +3552,9 @@ export function registerAgentV3Routes(app: Express): void {
         // every escalated/retry runner that spreads baseRunnerOpts.
         maxTokensPerTurn: buildMaxTokensPerTurn(),
         // R2 §1.1 — top-level build runners (which spread baseRunnerOpts) get the mandatory
-        // readiness gate; sub-agents (SubAgent.ts, separate opts) never do.
-        readinessGate: readinessGateEnabled(),
+        // readiness gate; sub-agents (SubAgent.ts, separate opts) never do. An import+survey turn
+        // opts out (runReadinessGate) so the gate never audits the user's freshly-imported code.
+        readinessGate: runReadinessGate,
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
         maxBuildMs: effectiveBuildSeconds * 1000,
         // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)
@@ -3820,7 +3842,7 @@ export function registerAgentV3Routes(app: Express): void {
       // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
       // Project mode (SPM-2): a module turn always runs the agentic loop — the fast lane's isolated
       // per-file generation has no tool loop to honor the module's frozen contracts and file scope.
-      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier) && !projectModuleRef) {
+      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))

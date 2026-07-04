@@ -8200,3 +8200,35 @@ recorded so the next session can pick them up, NOT blind-fixed per safeguard #3)
   provider interface is dead (no fullstack provider registered). Capability gap, not a single-line bug.
 - Firebase deploy applies an unconditional SPA catch-all rewrite (`glob:'**'→/index.html`) to every
   deploy → an MPA/static site soft-404s. (LOW.)
+
+## MILESTONE (2026-07-04, session 01KDmsCZ): BUG-HUNT ROUND 5 — readiness/architecture honesty + analyzer false-positives
+
+Fifth read-only hunt (build-verdict/readiness + remaining analyzers). Merged:
+- **#945** — THREE interlocking verdict bugs (shipped together): (a) HIGH — assessReadiness never read
+  arch.nodeBuiltinsInFrontend, so a React app with `import fs from 'fs'` (browser-build-breaker) reported
+  READY 100/100 (fake success) → now a hard blocker. (b) MEDIUM — isFrontendFile matched the app/pages
+  segment, so a Next.js server route (`app/api/**/route.ts`, `pages/api`) with a legit `import fs` was
+  flagged a browser-build-breaker; with (a) making that a BLOCKER it would falsely fail a valid Next.js
+  app → now excludes server routes. (c) HIGH — resolveLocalImport returned null for the ubiquitous `@/…`
+  / `~/…` path aliases, so EVERY alias-imported component was a false "orphan the app won't render" → now
+  resolves aliases to the src-rooted file.
+- **#946** — TWO analyzer false-positives: AuthenticityAnalysis empty-handler matched any `) {` so a
+  guard `if (!data) { console.log }` (and for/while/catch) was mislabeled an empty handler → now requires
+  a real arrow/function body. ComplianceAnalysis cookie-no-httponly/secure were line-local → a fully-
+  secure MULTI-LINE `res.cookie({...})` (standard Express) reported both flags missing → now evaluates
+  over the whole parens-balanced call.
+
+DEFERRED (real HIGH, but fix site is the HOT ToolDispatcher — record for next session, do NOT blind-fix):
+- Missing npm deps never reach the readiness gate: DependencyAnalysis flags an imported-but-undeclared
+  package (`import axios` with no axios in package.json — "the #1 silent build-breaker") as high, but
+  ToolDispatcher only threads its `missing` subset into the ADVISORY dependencyAutoFixSummary + the
+  confidence metric — it is never pushed into `extra`, and assessReadiness(arch, findings, extra) is the
+  only thing that sets `ready`. So a "Cannot find module" build passes as READY. FIX: in ToolDispatcher's
+  extra-assembly, push missing deps into `extra` as a high blocker (pure DependencyAnalysis + Readiness
+  are already correct — only the wiring drops the signal). Blocked here because ToolDispatcher.ts is the
+  other session's hot file (safeguard #2).
+Round-5 cleared (no wrong verdict): ErrorBoundaryAnalysis, RunnabilityAnalysis, DependencyAnalysis,
+EnvVarAnalysis, ViteEnvAnalysis, AsyncPatternAnalysis, TestCoverageAnalysis, EnvSecretValueAnalysis,
+SecurityConfigAnalysis, ProjectHygieneAnalysis, ASTAnalyzer; deploy PROVIDERS (Netlify/Vercel/Cloudflare/
+Firebase) all correct. (The Angular dist-dir + no-per-framework-output-map deploy gaps remain deferred
+from round 4.)

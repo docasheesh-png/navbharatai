@@ -36,7 +36,12 @@ export function analyzePwa(
 
   const hasPlugin = dependencies.some((d) => PWA_PLUGINS.includes(d));
   const hasManifestLink = /<link[^>]+rel\s*=\s*["']?manifest/i.test(allCode);
-  const hasManifestFile = fileSet.some((f) => /(^|\/)manifest\.(json|webmanifest)$/.test(f));
+  // The `.webmanifest` EXTENSION is what's standardized, not the stem — favicon generators and most
+  // hand-written PWAs ship `site.webmanifest` / `app.webmanifest`, not `manifest.webmanifest`. Match
+  // ANY stem for `.webmanifest`; keep the conventional `manifest.json` for the generic `.json`
+  // extension so an unrelated `data.json` can't be mistaken for the manifest. (Without this, a real
+  // `site.webmanifest` was missed → a FALSE "the link will 404" finding on a perfectly valid PWA.)
+  const hasManifestFile = fileSet.some((f) => /(^|\/)(?:[\w.-]+\.webmanifest|manifest\.json)$/.test(f));
   const hasSwFile = fileSet.some((f) => /(^|\/)(sw|service-worker)\.(js|ts)$/.test(f));
   const registersSw = /navigator\s*\.\s*serviceWorker\s*\.\s*register\s*\(/.test(allCode);
   const hasServiceWorker = hasSwFile || registersSw;

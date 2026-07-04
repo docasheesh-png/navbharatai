@@ -35,7 +35,11 @@ export function parseFileManifest(text: string): SimpleFileSpec[] {
   const out: SimpleFileSpec[] = [];
   const seen = new Set<string>();
   for (const raw of (text || '').split('\n')) {
-    const line = raw.trim().replace(/^[-*\d.)\s]+/, ''); // strip list bullets/numbers
+    // Strip a REAL list marker only — a bullet (`-`/`*`/`•`) or an ordinal (`1.`/`2)`) followed by
+    // whitespace. The old greedy class `[-*\d.)\s]+` ate the START of legit paths: `2fa/verify.tsx`
+    // lost its leading `2` → `fa/verify.tsx` (wrong folder), and `.env`/`.gitignore` lost the leading
+    // `.` → then failed the extension test below and were DROPPED entirely.
+    const line = raw.trim().replace(/^(?:[-*•]|\d+[.)])\s+/, ''); // strip a list bullet/number marker
     if (!line || !line.includes('::')) continue;
     const [pathPart, ...rest] = line.split('::');
     const path = pathPart.trim().replace(/^["'`]|["'`]$/g, '');

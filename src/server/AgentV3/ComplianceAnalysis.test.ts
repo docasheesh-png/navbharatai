@@ -37,6 +37,18 @@ describe('scanCompliance — file-local rules', () => {
     expect(scanCompliance('src/auth.ts', `app.use(res.cookieParser());`).some((i) => i.kind === 'cookie-no-secure')).toBe(false);
   });
 
+  it('does NOT false-flag a MULTI-LINE res.cookie() whose httpOnly/secure options are on later lines', () => {
+    // Regression: the flag check was line-local, so a fully-secure multi-line cookie (the standard
+    // Express form) reported cookie-no-httponly + cookie-no-secure.
+    const multi = `res.cookie('sid', token, {\n  httpOnly: true,\n  secure: true,\n  sameSite: 'strict',\n});`;
+    const out = scanCompliance('src/auth.ts', multi);
+    expect(out.some((i) => i.kind === 'cookie-no-httponly')).toBe(false);
+    expect(out.some((i) => i.kind === 'cookie-no-secure')).toBe(false);
+    // …but a multi-line cookie genuinely MISSING the flags is still flagged.
+    const insecure = `res.cookie('sid', token, {\n  maxAge: 3600000,\n  path: '/',\n});`;
+    expect(scanCompliance('src/auth.ts', insecure).some((i) => i.kind === 'cookie-no-httponly')).toBe(true);
+  });
+
   it('does not flag a cookie being DELETED (logout) for missing SameSite/Secure/httpOnly', () => {
     // document.cookie clear via Max-Age=0 / 1970 expiry.
     expect(scanCompliance('a.ts', `document.cookie = 'sid=; Max-Age=0; path=/';`).some((i) => i.kind === 'cookie-no-samesite')).toBe(false);

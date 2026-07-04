@@ -37,6 +37,18 @@ describe('scanAuthenticity', () => {
     expect(issues.some((x) => x.kind === 'empty-handler' && x.severity === 'medium')).toBe(true);
   });
 
+  it('does NOT flag a control block (if/for/while) whose body is a single console.log', () => {
+    // Regression: the body-start regex matched any `) {`, so a legit guard `if (!data) { log }`
+    // was mislabeled an empty handler. Only a real arrow/function body counts.
+    expect(scanAuthenticity('src/a.ts', 'function check(data) {\n  if (!data) {\n    console.log("missing");\n  }\n}')
+      .some((x) => x.kind === 'empty-handler')).toBe(false);
+    expect(scanAuthenticity('src/b.ts', 'for (const x of xs) {\n  console.log(x);\n}')
+      .some((x) => x.kind === 'empty-handler')).toBe(false);
+    // …but a real arrow handler whose body is only a log is STILL flagged.
+    expect(scanAuthenticity('src/c.tsx', 'const onClick = () => {\n  console.log("clicked");\n};')
+      .some((x) => x.kind === 'empty-handler')).toBe(true);
+  });
+
   it('flags lorem-ipsum and mockData stubs as high', () => {
     const lorem = scanAuthenticity('src/page.tsx', 'const body = "Lorem ipsum dolor sit amet";');
     expect(lorem.some((x) => x.kind === 'lorem-ipsum' && x.severity === 'high')).toBe(true);

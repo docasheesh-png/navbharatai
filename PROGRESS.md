@@ -7717,3 +7717,31 @@ AGENTV3_PROJECT_MODE, default off, existing builds byte-identical while off):
   per-module billing recorded per turn as today.
 - SPM-4: modules as todos via todo_updated/PLAN_STATE + phased verification (per-module tsc,
   full gate at plan completion). Then AppKnowledgeBase entry for the user-facing capability.
+
+## 2026-07-04 — SPM-2 BUILT: module-scoped build turns wired into the route (flag-gated)
+
+Software Project Mode is now wired end-to-end server-side, entirely behind
+AGENTV3_PROJECT_MODE=on (default OFF — with the flag off every build is byte-identical
+to today; full suite green proves it). What ships:
+- Pure gating (ProjectPlan.ts): projectModeEnabled; detectMegaProject (HIGH-precision:
+  explicit ">=100 files/pages/screens/modules", big-software noun + >=8 enumerated
+  features, or >=14 bullets); isContinuationMessage (matches the client's literal
+  auto-continue 'continue' + English/Hinglish phrasings, rejects substantive asks so a
+  mid-project edit request is NEVER steamrolled into "build module N"). 7 new tests.
+- Route (routes/agentv3.ts, after the plan-first gate): on a mega new_build with no
+  existing plan → one planner call (fastBuildModel, 60s hard timeout, billed via the
+  existing blueprintUsage fold) → parsePlannedModules → >=3 modules or honest fallback
+  to a normal build → saveProjectPlan. With an incomplete plan + continuation message →
+  nextBuildableModule (retries a failed module on EXPLICIT continue), mark in_progress,
+  todos projection, buildPrompt gets moduleBuildContext (goal + this module + DONE
+  contracts only). One-shot fast lane skipped for module turns (no tool loop there to
+  honor contracts). After the result settles: module → done, or failed with the honest
+  reason; plan saved BEFORE the PLAN_STATE note capture. Final result emit adds
+  resumable+planRemaining on a successful module turn with buildable modules left, so
+  the EXISTING Layer-3 client auto-continue drives the next module (bounded at
+  AUTO_CONTINUE_MAX=2 per user message until SPM-3).
+- Known limits (deliberate, recorded honestly): plan creation only on new_build
+  (an imported-repo mega-conversion doesn't create a plan yet); a reopened incomplete
+  plan needs a typed "continue" (restore doesn't re-emit resumable); client
+  auto-continue budget still 2 — SPM-3 raises it progress-monotonically for plan mode.
+Gate: tsc 0/0 both configs, vitest 4526/4526, build + boot PASS.

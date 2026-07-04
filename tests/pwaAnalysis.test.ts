@@ -27,6 +27,17 @@ describe('analyzePwa — flags the concrete missing piece when intent is present
     expect(r.findings.some((f) => f.level === 'medium' && /404/.test(f.message))).toBe(true);
   });
 
+  it('does NOT false-flag a 404 when the linked manifest is the standard site.webmanifest / app.webmanifest', () => {
+    // Regression: favicon generators + most hand-written PWAs ship `site.webmanifest`, not
+    // `manifest.webmanifest`. The old regex only matched the literal `manifest` stem, so a present
+    // `site.webmanifest` was missed and the report falsely claimed the link would 404.
+    for (const mf of ['site.webmanifest', 'public/site.webmanifest', 'app.webmanifest']) {
+      const r = analyzePwa([src('index.html', `<link rel="manifest" href="/${mf.split('/').pop()}">`)], ['index.html', mf], []);
+      expect(r.findings.some((f) => /404/.test(f.message))).toBe(false); // the file exists → no 404
+      expect(r.findings.some((f) => /not linked/.test(f.message))).toBe(false); // it IS linked
+    }
+  });
+
   it('manifest file present but not linked → medium (undiscoverable)', () => {
     const r = analyzePwa([src('index.html', '<html></html>')], ['index.html', 'public/manifest.json'], []);
     expect(r.findings.some((f) => /not linked/.test(f.message))).toBe(true);

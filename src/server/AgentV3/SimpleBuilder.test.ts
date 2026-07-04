@@ -30,6 +30,25 @@ describe('parseFileManifest', () => {
     const many = Array.from({ length: 60 }, (_, i) => `src/f${i}.tsx :: file ${i}`).join('\n');
     expect(parseFileManifest(many)).toHaveLength(40);
   });
+
+  it('does NOT eat a leading digit/dot that is part of a real path (only strips true list markers)', () => {
+    // The old greedy `[-*\d.)\s]+` strip corrupted `2fa/verify.tsx` → `fa/verify.tsx` and dropped
+    // dotfiles like `.env` (→ `env`, then failed the extension test). Real markers still strip.
+    const text = [
+      '2fa/verify.tsx :: two-factor page',
+      '3d/Scene.tsx :: 3d scene',
+      '.env.example :: sample env',
+      '- src/App.tsx :: bullet still stripped',
+      '1) src/main.tsx :: ordinal still stripped',
+    ].join('\n');
+    expect(parseFileManifest(text).map((f) => f.path)).toEqual([
+      '2fa/verify.tsx',
+      '3d/Scene.tsx',
+      '.env.example',
+      'src/App.tsx',
+      'src/main.tsx',
+    ]);
+  });
 });
 
 describe('prompts', () => {

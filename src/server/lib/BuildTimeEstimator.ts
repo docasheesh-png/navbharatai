@@ -8,6 +8,8 @@
 // HONESTY: with no history it falls back to the heuristic and says so (`basis: 'heuristic'`,
 // lower confidence). It never reads the clock — `predictDeadline` takes the start time as input.
 
+import { isComplexAppPrompt } from './appComplexitySignals';
+
 export interface Complexity {
   /** Number of modules / pages / screens in the blueprint. */
   moduleCount: number;
@@ -142,7 +144,18 @@ export function complexityFromPrompt(prompt: string): Complexity {
   const moduleMatches = text.match(/\b(page|pages|screen|screens|view|views|dashboard|section|sections|tab|tabs|route|routes)\b/gi);
   // Feature signals: list separators + common feature verbs/nouns.
   const featureMatches = text.match(/(?:,|\band\b|\bwith\b|\bplus\b|\n[-*•]|\b(auth|login|signup|search|filter|chart|payment|upload|export|profile|admin|cart|checkout|notification|comment|like|follow)\w*)/gi);
-  const moduleCount = clamp((moduleMatches?.length ?? 0) + 1, 1, 20);
-  const featureCount = clamp(featureMatches?.length ?? 0, 1, 30);
+  let moduleCount = clamp((moduleMatches?.length ?? 0) + 1, 1, 20);
+  let featureCount = clamp(featureMatches?.length ?? 0, 1, 30);
+  // A NAMED complex-app category (SaaS, CRM, e-commerce, social, full-stack, …) is inherently
+  // multi-module/multi-feature, but a SHORT prompt like "build a SaaS CRM" has no page/feature words
+  // to count → it scored magnitude 2 (fast lane) and a wildly optimistic ETA, contradicting the
+  // request analyser that already calls the same prompt `complex_app`. Floor the counts so the
+  // magnitude (moduleCount + featureCount) reaches the DEEP threshold (≥ 12), giving these builds the
+  // deep pipeline + realistic ETA. Simple apps (todo/calculator) don't match → unchanged fast lane.
+  // Safe: this only ever RAISES the estimate/headroom (a build stops the moment it is done).
+  if (isComplexAppPrompt(text)) {
+    moduleCount = clamp(Math.max(moduleCount, 6), 1, 20);
+    featureCount = clamp(Math.max(featureCount, 6), 1, 30);
+  }
   return { moduleCount, featureCount };
 }

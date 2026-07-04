@@ -4,6 +4,7 @@ import {
   complexityFromPrompt,
   type HistoricalBuild,
 } from './BuildTimeEstimator';
+import { resolvePipelineDepth } from '../AgentV3/PipelineDepth';
 
 describe('BuildTimeEstimator (P-PME.4)', () => {
   describe('complexityFromPrompt', () => {
@@ -24,6 +25,23 @@ describe('BuildTimeEstimator (P-PME.4)', () => {
       const c = complexityFromPrompt('');
       expect(c.moduleCount).toBe(1);
       expect(c.featureCount).toBe(1);
+    });
+    it('floors a NAMED complex-app category into the DEEP lane even with no page/feature words', () => {
+      // The bug: a short prompt like "build a SaaS CRM" scored magnitude 2 → the `fast` lane and a
+      // wildly optimistic ETA, while the request analyser already called it complex_app. Now the
+      // magnitude (moduleCount + featureCount) must reach the deep threshold (≥ 12).
+      for (const p of ['build a SaaS CRM', 'make an e-commerce store', 'a food delivery app', 'build a social network', 'full-stack booking system']) {
+        const c = complexityFromPrompt(p);
+        expect(c.moduleCount + c.featureCount).toBeGreaterThanOrEqual(12);
+        expect(resolvePipelineDepth(c.moduleCount + c.featureCount)).toBe('deep');
+      }
+    });
+    it('leaves a genuinely simple app in the FAST lane (the admin\'s "simple stays fast" rule)', () => {
+      for (const p of ['a todo app', 'a calculator', 'a stopwatch', 'a dice roller']) {
+        const c = complexityFromPrompt(p);
+        expect(c.moduleCount + c.featureCount).toBeLessThanOrEqual(4);
+        expect(resolvePipelineDepth(c.moduleCount + c.featureCount)).toBe('fast');
+      }
     });
   });
   describe('complexityScore + heuristic', () => {

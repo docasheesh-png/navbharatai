@@ -47,6 +47,26 @@ describe('parseFileBlocks', () => {
     const files = parseFileBlocks(text);
     expect(files).toEqual([{ path: 'a.ts', content: 'second' }]);
   });
+  it('recovers the next file when one <<<ENDFILE>>> is missing (no silent merge / drop)', () => {
+    // Regression: a dropped ENDFILE made file A's content run through the next FILE header until the
+    // following ENDFILE, merging both into one corrupt file and losing B. Now the next `<<<FILE`
+    // terminates A's content and B is parsed on its own.
+    const text = [
+      '<<<FILE a.ts>>>',
+      'content A',
+      '<<<FILE b.ts>>>',       // A's ENDFILE is MISSING
+      'content B',
+      '<<<ENDFILE>>>',
+    ].join('\n');
+    const files = parseFileBlocks(text);
+    expect(files.map((f) => f.path)).toEqual(['a.ts', 'b.ts']);
+    expect(files[0].content).toBe('content A');
+    expect(files[1].content).toBe('content B');
+  });
+  it('recovers a lone trailing file that has no <<<ENDFILE>>> at all', () => {
+    const files = parseFileBlocks('<<<FILE a.ts>>>\njust this');
+    expect(files).toEqual([{ path: 'a.ts', content: 'just this' }]);
+  });
   it('returns [] for text with no blocks', () => {
     expect(parseFileBlocks('I am an AI, I have no file system')).toEqual([]);
     expect(parseFileBlocks('')).toEqual([]);

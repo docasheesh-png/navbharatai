@@ -47,6 +47,23 @@ export function extractModuleContract(content: string): ModuleContract {
   const declRe = /export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
   for (let m = declRe.exec(src); m; m = declRe.exec(src)) exports.add(m[1]);
 
+  // DESTRUCTURED exports — `export const { a, b: c } = …` and `export const [ x ] = …`. The `declRe`
+  // above requires an identifier after `const`, so it misses these entirely — and then a valid
+  // consumer `import { a } from …` was reported as drift. This is a COMMON generated-React pattern
+  // (Zustand `export const { useStore } = create(...)`, Context `export const { Provider, useX } =
+  // createContext(...)`). Each bound local name is what consumers import.
+  const destructRe = /export\s+(?:const|let|var)\s*(\{[^}]*\}|\[[^\]]*\])\s*=/g;
+  for (let m = destructRe.exec(src); m; m = destructRe.exec(src)) {
+    for (const raw of m[1].slice(1, -1).split(',')) {
+      let seg = raw.trim();
+      if (!seg) continue;
+      seg = seg.replace(/=.*$/, '').trim();               // drop a default value
+      const local = seg.includes(':') ? seg.slice(seg.indexOf(':') + 1) : seg; // `key: local` → local
+      const id = local.replace(/^\.\.\./, '').trim();     // rest element `...rest`
+      if (/^[A-Za-z_$][\w$]*$/.test(id)) exports.add(id);
+    }
+  }
+
   // `export { a, b as c }` — the OUTER name (after `as`) is what consumers import.
   const listRe = /export\s*\{([^}]*)\}/g;
   for (let m = listRe.exec(src); m; m = listRe.exec(src)) {
@@ -110,8 +127,21 @@ function lookup(map: ContractMap, key: string): ModuleContract | null {
  */
 export function contractDriftReport(files: Record<string, string>): string | null {
   const map = extractContract(files);
+  // Aggregate enums by name — but if the SAME name is declared in multiple files with DIFFERENT
+  // members (generic names like Status/Type/Role/Size recur per-feature in larger apps), we cannot
+  // tell by name alone which enum a given file's `Status.X` refers to. The old "first-wins" map
+  // checked every file's reference against ONE arbitrary definition → a file with its OWN `Status`
+  // enum got its valid members falsely reported as drift (and that false line was fed to the repair
+  // model). Mark such names ambiguous and SKIP them rather than emit an untrustworthy drift line.
   const enumNames = new Map<string, Set<string>>();
-  for (const c of map.values()) for (const [n, mem] of c.enums) if (!enumNames.has(n)) enumNames.set(n, mem);
+  const ambiguousEnums = new Set<string>();
+  const sameMembers = (a: Set<string>, b: Set<string>): boolean =>
+    a.size === b.size && [...a].every((x) => b.has(x));
+  for (const c of map.values()) for (const [n, mem] of c.enums) {
+    const existing = enumNames.get(n);
+    if (!existing) enumNames.set(n, mem);
+    else if (!sameMembers(existing, mem)) ambiguousEnums.add(n);
+  }
 
   const lines: string[] = [];
   const seen = new Set<string>();
@@ -142,6 +172,7 @@ export function contractDriftReport(files: Record<string, string>): string | nul
 
     // (2) Enum.Member references whose member the enum does not declare.
     for (const [enumName, members] of enumNames) {
+      if (ambiguousEnums.has(enumName)) continue; // same name, conflicting members across files → can't resolve
       const refRe = new RegExp(`\\b${enumName}\\.([A-Za-z_$][\\w$]*)`, 'g');
       for (let m = refRe.exec(src); m; m = refRe.exec(src)) {
         const member = m[1];

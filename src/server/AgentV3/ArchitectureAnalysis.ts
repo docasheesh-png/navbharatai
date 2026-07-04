@@ -44,20 +44,46 @@ const SERVER_ONLY_BUILTINS = new Set<string>([
 
 /** A client/front-end module by its path (src/client|components|pages|app, or App.tsx). */
 function isFrontendFile(file: string): boolean {
+  // Server-only files are NOT front-end even when they sit under an `app/`/`pages/` segment: Next.js
+  // API routes (`(app|pages)/api/…`), App-Router route handlers (`route.ts`), `*.server.*` files, and
+  // anything under a `server/` dir run ONLY on the server — importing `fs`/back-end modules there is
+  // correct, so they must not be flagged as a browser-build-breaker or a layering violation.
+  if (
+    /(^|\/)(app|pages)\/api\//i.test(file) ||
+    /(^|\/)route\.(t|j)sx?$/i.test(file) ||
+    /\.server\.(t|j)sx?$/i.test(file) ||
+    /(^|\/)server\//i.test(file)
+  ) {
+    return false;
+  }
   return /(^|\/)(src\/)?(client|components|pages|app)\b/i.test(file) || /App\.(t|j)sx?$/.test(file);
 }
 
-/** Resolve a local import specifier (./x, ../y) to a known workspace file, or null. */
+/** Resolve a local import specifier (`./x`, `../y`, or the conventional `@/x` / `~/x` alias) to a
+ *  known workspace file, or null. The alias forms map to the project source root — without them,
+ *  alias-imported components (near-ubiquitous in Vite/Next/shadcn scaffolds) were resolved to null,
+ *  so EVERY such component was falsely reported as an "orphan the app will never render". An unknown
+ *  bare specifier (an npm package) is still null. */
 export function resolveLocalImport(fromFile: string, spec: string, files: Set<string>): string | null {
-  if (!spec.startsWith('.')) return null; // not a local import
-  const baseDir = path.posix.dirname(fromFile);
-  const target = path.posix.normalize(path.posix.join(baseDir, spec)).replace(/^\.\//, '');
-  const candidates = [
-    target,
-    ...CODE_EXTS.map((e) => target + e),
-    ...CODE_EXTS.map((e) => path.posix.join(target, 'index' + e)),
-  ];
-  for (const c of candidates) if (files.has(c)) return c;
+  const bases: string[] = [];
+  if (spec.startsWith('.')) {
+    const baseDir = path.posix.dirname(fromFile);
+    bases.push(path.posix.normalize(path.posix.join(baseDir, spec)).replace(/^\.\//, ''));
+  } else {
+    const alias = /^(?:@|~)\/(.+)$/.exec(spec);
+    if (!alias) return null; // an npm package or unknown bare specifier — not a local file
+    // Try both `src/`-rooted and bare, so it works whether the workspace stores `src/components/X`
+    // or `components/X`.
+    bases.push(path.posix.normalize('src/' + alias[1]), path.posix.normalize(alias[1]));
+  }
+  for (const base of bases) {
+    const candidates = [
+      base,
+      ...CODE_EXTS.map((e) => base + e),
+      ...CODE_EXTS.map((e) => path.posix.join(base, 'index' + e)),
+    ];
+    for (const c of candidates) if (files.has(c)) return c;
+  }
   return null;
 }
 

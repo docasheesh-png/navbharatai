@@ -35,6 +35,7 @@ export interface ExtraFinding {
 // Per-defect penalties (points off 100).
 const PENALTY = {
   unresolvedImport: 25, // breaks the build
+  nodeBuiltin: 25, // a server-only Node builtin imported by front-end code breaks the browser build
   cycle: 8,
   layering: 5,
   orphanComponent: 6, // the app compiles, but a generated component is never shown to the user
@@ -55,6 +56,14 @@ export function assessReadiness(
   if (arch.unresolvedImports.length) {
     score -= PENALTY.unresolvedImport * arch.unresolvedImports.length;
     blockers.push(`${arch.unresolvedImports.length} unresolved import(s) — the build will fail`);
+  }
+  if (arch.nodeBuiltinsInFrontend.length) {
+    // A server-only Node builtin (fs/child_process/net/…) imported by front-end code breaks the
+    // browser build (Vite externalizes it → runtime crash / build failure). This is a hard
+    // build-breaker like an unresolved import — it must BLOCK, not silently pass as READY. It was
+    // computed by ArchitectureAnalysis and shown in the report, but the readiness gate never read it.
+    score -= PENALTY.nodeBuiltin * arch.nodeBuiltinsInFrontend.length;
+    blockers.push(`${arch.nodeBuiltinsInFrontend.length} server-only Node builtin import(s) in front-end code — these break the browser build: ${arch.nodeBuiltinsInFrontend.slice(0, 3).join(', ')}${arch.nodeBuiltinsInFrontend.length > 3 ? ', …' : ''}`);
   }
   if (arch.cycles.length) {
     score -= PENALTY.cycle * arch.cycles.length;

@@ -21,6 +21,11 @@ describe('resolveLocalImport', () => {
     expect(resolveLocalImport('src/App.tsx', 'react', files)).toBeNull();
     expect(resolveLocalImport('src/App.tsx', './Missing', files)).toBeNull();
   });
+  it('resolves the conventional `@/` and `~/` path aliases to the src-rooted file', () => {
+    expect(resolveLocalImport('src/App.tsx', '@/Button', files)).toBe('src/Button.tsx');
+    expect(resolveLocalImport('src/App.tsx', '~/utils', files)).toBe('src/utils/index.ts');
+    expect(resolveLocalImport('src/App.tsx', '@/Missing', files)).toBeNull(); // alias to a missing file → still null
+  });
 });
 
 describe('analyzeArchitecture', () => {
@@ -68,6 +73,25 @@ describe('analyzeArchitecture', () => {
     const r = analyzeArchitecture(g);
     expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Trace.tsx') && v.includes('async_hooks'))).toBe(true);
     expect(r.nodeBuiltinsInFrontend.some((v) => v.includes('Perf.tsx') && v.includes('perf_hooks'))).toBe(true);
+  });
+
+  it('does NOT flag a Node builtin in a Next.js server route (route.ts / pages/api) as a browser-build-breaker', () => {
+    // Regression: isFrontendFile matched the `app`/`pages` segment, so a server-only route (which is
+    // supposed to use fs) was flagged "breaks the browser build" (and — now that it's a readiness
+    // blocker — would falsely fail a valid Next.js app).
+    const appRoute = graphOf({ 'src/app/api/health/route.ts': "import fs from 'fs';\nexport function GET(){ return fs.readFileSync('x'); }" });
+    expect(analyzeArchitecture(appRoute).nodeBuiltinsInFrontend).toEqual([]);
+    const pagesApi = graphOf({ 'pages/api/users.ts': "import fs from 'fs';\nexport default function handler(){ fs.readFileSync('x'); }" });
+    expect(analyzeArchitecture(pagesApi).nodeBuiltinsInFrontend).toEqual([]);
+  });
+
+  it('does NOT flag an alias-imported component (@/…) as an orphan (it IS rendered)', () => {
+    // Regression: @/ imports resolved to null, so every alias-imported component was a false orphan.
+    const g = graphOf({
+      'src/App.tsx': "import { Hero } from '@/components/Hero';\nexport function App(){ return <Hero/>; }",
+      'src/components/Hero.tsx': 'export function Hero(){ return null; }',
+    });
+    expect(findOrphanComponents(g).some((o) => o.includes('Hero.tsx'))).toBe(false);
   });
 
   it('does NOT flag a server-only builtin imported by back-end code', () => {

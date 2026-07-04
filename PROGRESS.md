@@ -8059,3 +8059,26 @@ FIXES (three layers so it can't recur):
    ABANDONED (no subscriber + past the 30s stall window) or ZOMBIE (no live registry entry) lock,
    tearing the old build down cleanly, so a hung/dropped build can never trap the account beyond ~30s.
    +5 unit tests. Gate: frontend tsc 0, server tsc 0, vitest 4648/4648 PASS, boot:check PASS.
+
+## 2026-07-04 — v3.0 focus-mode composer polish (admin UX request, PR #936)
+
+Admin request (IMG_5706, confirmed in chat before building): in v3.0 chat, when the header is hidden
+(focus mode), the composer footer's outer "paid-looking" frame should disappear so the input reads as
+a clean floating popup — while the three inner controls (filter/settings, attach, textarea) stay
+exactly as they are, and the composer never hides behind the phone browser's bottom search bar. Plus:
+move the Exit-Focus button from the bottom to the top-right corner (admin picked option A: fixed,
+top-most layer, always visible; panel controls may shift to make room).
+
+CHANGES (focus-mode-only; normal mode byte-for-byte unchanged):
+- AgentV3Panel: new optional `focusMode` prop. Composer footer outer container drops
+  `bg-zinc-950 border-t border-zinc-800` when focusMode is on; `pb-[env(safe-area-inset-bottom)]`
+  always stays (never hides behind the phone bottom bar). Inner element borders untouched. Header row
+  reserves `pr-14` in focus mode so its trailing Stop/Resume controls don't sit under the fixed exit
+  button.
+- ProV3Surface: threads focusMode through to the panel.
+- App.tsx: passes focusMode to ProV3Surface; Exit-Focus button moved from bottom-4 right-4 to fixed
+  top-3 right-3, z-[9999], env(safe-area-inset-top)-aware.
+
+Gate: frontend tsc 0, vitest 4650/4650 PASS, build PASS, boot:check PASS. Additive + reversible
+(focusMode absent = today's exact behaviour). No server code touched → no AppKnowledgeBase change
+needed (pure visual polish, no new navigation/feature surface).

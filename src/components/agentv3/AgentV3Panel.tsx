@@ -62,7 +62,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
@@ -1404,7 +1404,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
-        <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+        {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
+            room on the right so the header's own trailing controls (Stop/Resume) don't sit under it. */}
+        <div className={`flex items-center gap-2 pl-4 pt-3 pb-2 ${focusMode ? 'pr-14' : 'pr-4'}`}>
           {/* History menu (3-line): this account's saved chats + New chat. Per-user (Firestore), so the
               same list and the same project/memory continue from any device the user signs in on. */}
           <div className="relative">
@@ -1763,8 +1765,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {state.done && state.ok && state.workspaceId && <BuildFeedback workspaceId={state.workspaceId} />}
           </div>
 
-          {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom) */}
-          <div className="shrink-0 sticky bottom-0 bg-zinc-950 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
+          {/* Bottom: live AI-team chips + input (Claude-Code style — at the bottom).
+              In focus mode (header hidden) the composer's outer frame — the solid bg-zinc-950
+              block + the top border line — is dropped so the input/attach/filter read as a clean
+              floating popup touching the lower edge. The inner elements keep their own borders,
+              and pb-[env(safe-area-inset-bottom)] always stays so the composer never hides behind
+              the phone browser's bottom search/address bar. Normal mode is unchanged. */}
+          <div className={`shrink-0 sticky bottom-0 pb-[env(safe-area-inset-bottom)] ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}>
             {/* Live plan progress (only when there's no pending plan-approval gate, which shows its
                 own copy) — lets the user watch the AI work through its real todo list as it builds. */}
             {state.todos.length > 0 && !state.pendingPermission && (

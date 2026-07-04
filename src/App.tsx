@@ -5653,6 +5653,9 @@ ${buildLanguageRule(preferredLanguage)}`;
               email={user?.email}
               resume={v3Resume}
               freshOpenNonce={v3OpenNonce}
+              /* In focus mode (header hidden) the v3.0 composer drops its outer frame so the
+                 input reads as a clean floating popup — see AgentV3Panel's footer. */
+              focusMode={focusMode}
               onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
               /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
@@ -6530,17 +6533,18 @@ ${buildLanguageRule(preferredLanguage)}`;
         </nav>
       )}
 
-      {/* Focus Mode — floating "bring the header back" button. Always visible (works on both mouse and
-          touch, unlike a hover-reveal) at a fixed corner so it's discoverable and never lost behind
-          other UI; safe-area-aware for notch/gesture-bar devices. Esc does the same thing (see the
-          keydown effect above). */}
+      {/* Focus Mode — floating "bring the header back" button. Pinned to the TOP-right corner (admin
+          request) so it never collides with the composer at the bottom edge; always visible (works on
+          both mouse and touch, unlike a hover-reveal) on the top-most layer so it's discoverable and
+          never lost behind other UI; safe-area-aware for the notch / browser chrome up top. Esc does
+          the same thing (see the keydown effect above). */}
       {focusMode && (
         <button
           onClick={() => setFocusMode(false)}
           title="Exit Focus Mode (Esc)"
           aria-label="Exit Focus Mode — show header"
-          className="fixed z-[300] bottom-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/15 text-white/70 hover:text-white shadow-lg transition-all active:scale-90"
-          style={{ marginBottom: 'env(safe-area-inset-bottom, 0px)', marginRight: 'env(safe-area-inset-right, 0px)' }}
+          className="fixed z-[9999] top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/15 text-white/70 hover:text-white shadow-lg transition-all active:scale-90"
+          style={{ marginTop: 'env(safe-area-inset-top, 0px)', marginRight: 'env(safe-area-inset-right, 0px)' }}
         >
           <Minimize2 className="w-4 h-4" />
         </button>

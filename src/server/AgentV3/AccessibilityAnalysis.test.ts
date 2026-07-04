@@ -12,6 +12,11 @@ describe('scanAccessibility', () => {
     expect(scanAccessibility('src/Page.tsx', '<img src="/d.png" alt="" />')).toEqual([]);
   });
 
+  it('a `data-alt`-only <img> is STILL flagged missing-alt (data-alt is not a real alt)', () => {
+    // Regression: `\balt=` matched inside `data-alt=`, so this was wrongly treated as having alt.
+    expect(scanAccessibility('src/Page.tsx', '<img src="/logo.png" data-alt="x" />').some((x) => x.kind === 'img-missing-alt')).toBe(true);
+  });
+
   it('flags <input type="image"> with no alt as high, but not one with alt', () => {
     expect(scanAccessibility('src/Form.tsx', '<input type="image" src="/go.png" />').some((x) => x.kind === 'input-image-missing-alt' && x.severity === 'high')).toBe(true);
     expect(scanAccessibility('src/Form.tsx', '<input type="image" src="/go.png" alt="Submit" />').some((x) => x.kind === 'input-image-missing-alt')).toBe(false);

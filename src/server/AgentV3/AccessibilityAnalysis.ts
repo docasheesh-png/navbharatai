@@ -32,7 +32,11 @@ const SNIPPET_MAX = 120;
 /** Does a tag's attribute text contain a given boolean/any-value attribute? */
 function hasAttr(tag: string, attr: string): boolean {
   // matches `attr=`, `attr =`, or a bare boolean `attr` followed by space/>/end.
-  return new RegExp(`\\b${attr}\\s*=`, 'i').test(tag) || new RegExp(`\\b${attr}(\\s|>|/|$)`, 'i').test(tag);
+  // `(?<![-\w])` (NOT the old `\b`) so a DIFFERENT attribute that merely ENDS in `attr` — e.g.
+  // `data-alt` for `alt`, `formaction` for `action` — is not mistaken for it (the `\b` after a
+  // hyphen matched `alt` inside `data-alt`, so `<img data-alt="x">` was wrongly read as HAVING alt
+  // and the missing-alt finding was silently skipped).
+  return new RegExp(`(?<![-\\w])${attr}\\s*=`, 'i').test(tag) || new RegExp(`(?<![-\\w])${attr}(\\s|>|/|$)`, 'i').test(tag);
 }
 
 /** The element name of an opening tag like `<input ...>` → "input" (lowercased). */

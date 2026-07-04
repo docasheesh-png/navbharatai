@@ -18,6 +18,11 @@ describe('imagesMissingAlt', () => {
   it('no images → [0,0]', () => {
     expect(imagesMissingAlt('<div/>')).toEqual([0, 0]);
   });
+  it('a `data-alt` (or other -alt-suffixed) attribute does NOT count as a real alt', () => {
+    // Regression: `\balt\s*=` matched `alt=` inside `data-alt=`, so this image was wrongly counted
+    // as HAVING alt and its missing-alt was skipped. It has no real alt → must count as missing.
+    expect(imagesMissingAlt('<img src="x.png" data-alt="y">')).toEqual([1, 1]);
+  });
 });
 
 describe('inputsMissingLabel', () => {

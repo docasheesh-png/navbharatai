@@ -7886,3 +7886,59 @@ orchestrators, LiveEventBuffer, numeric helpers) and the CORE build pass/fail cl
 Intentionally deferred: ContractMap enum SCOPE-aware resolution (did the conservative skip instead) and
 the low-value ContractMap advisory edge. Isolated-surface hunting is now at diminishing returns; the
 remaining high-value work lives in the other session's hot core (hold per safeguard #2).
+
+## 2026-07-04 — HOSTING Phase 0, Slice 1: HostingQuota policy + usage store (pure, no wiring)
+
+Admin approved building the hosting product (host users' apps) in phases: Phase 0 (quota + abuse
+guard) → A (GitHub Pages free + Cloudflare subdomain) → C (wallet billing) → B (custom domain). A
+map+design workflow (10 agents, adversarial) produced the plan; who-pays reality: NavBharatAI pays for
+every FIRST-PARTY deploy (its own Firebase Hosting today, Cloudflare later) and there was NO size or
+count cap = open cost/abuse hole.
+
+Slice 1 (pure modules, zero wiring — cannot break anything):
+- NEW src/server/lib/HostingUsageStore.ts — clone of UserCostStore (collection hosting_usage, doc
+  {userId}_{YYYY-MM}, deployCount, transactional increment, VITEST-skip, best-effort never-throws).
+  SEPARATE from user_costs so it never clobbers the billing total.
+- NEW src/server/lib/HostingQuota.ts — single source of truth for who-pays/how-much: FIRST_PARTY_
+  PROVIDERS {firebase,cloudflare} + isFirstPartyProvider; hostingDeployCap() (env
+  AGENTV3_USER_MONTHLY_DEPLOY_CAP, 0=DISABLED default → zero behaviour change until admin opts in);
+  maxDeployMb() (env AGENTV3_DEPLOY_MAX_MB, default 50 = safe ON); pure hostingWithinCap/deployBytesMb;
+  async enforceHostingQuota() — BYO providers always allowed (user's own cost); first-party enforces
+  size ceiling then monthly count; FAIL-OPEN on any store error/missing userId/disabled cap; honest
+  hard-stop over-limit message pointing to free BYO hosting.
+- +14 unit tests (classification, env parsing, size boundary at/over cap, fail-open under VITEST,
+  BYO-always-allowed, anon).
+
+Not yet wired (Slice 2): enforcement at the withDeploymentPersistence choke point. Gate: frontend
+tsc 0, server tsc 0, vitest 4559/4559 PASS, boot PASS.
+
+## 2026-07-04 — HOSTING Phase 0, Slice 2: enforce the quota at the deploy choke point
+
+Wired Slice 1's HostingQuota into the ONE place every AgentV3 deploy funnels through —
+withDeploymentPersistence (DeploymentStore.ts). Before base() publishes: a 5s-bounded, FAIL-OPEN
+enforceHostingQuota() runs; over-limit throws an honest Error that propagates to the deploy tool's
+error result (verified path: ToolDispatcher deploy case 1767 → general dispatch catch 656 → is_error
+result) so NOTHING is published, no `preview` event, no URL, no fake success. On success, first-party
+publishes increment hostingUsageStore.recordDeploy(userId) and the agentv3_deployments registry doc is
+extended with providerId/firstParty/sizeMb/status:'active' (the takedown/report spine for later slices).
+BYO deploys pass straight through (user's own host/cost). withDeploymentPersistence gained a providerId
+param; agentv3.ts:3309 passes chosenProviderId. record() extended additively (only 2 callers; the
+get-consumer is additive-safe). +5 gate tests (normal passes; oversized first-party blocks before
+publish, base never called; env-lowered cap; BYO never blocked; count-cap fails-open under VITEST).
+Gate: frontend tsc 0, server tsc 0, vitest 4604/4604 PASS, boot PASS.
+
+## 2026-07-04 — HOSTING Phase 0, Slice 3: registry queries + REAL Firebase takedown (Phase 0 complete)
+
+Completes Phase 0 (the abuse/takedown spine on top of the quota core). DeploymentStore gains
+list()/listByUser()/setStatus() (best-effort, in-memory status filter → no composite Firestore index).
+FirebaseHostingDeployer.deleteChannel(workspaceId) is a REAL unpublish via Firebase Hosting
+channels.delete keyed by the SAME makeChannelId as deploy — idempotent (404=already-gone=success),
+honest 403 (missing Firebase Hosting Admin IAM). admin.ts adds verifyAdminToken routes: GET
+/api/admin/deployments (list, ?status=/?userId=), POST .../:workspaceId/takedown (deleteChannel FIRST
+then setStatus('taken_down') + audit ADMIN_APP_TAKEDOWN; honest 502 if the live channel wasn't confirmed
+removed — never a fake "taken down"), POST .../restore. The deploy choke point re-checks status
+(bounded 3s, fail-open) so a taken_down app can never silently re-publish. +4 tests (registry no-throw
+empties; taken-down republish blocked, base never called; active allowed; BYO skips the guard).
+AppKnowledgeBase entry deferred to Phase A slice 5 (with the user-facing Report button). Gate: frontend
+tsc 0, server tsc 0, vitest 4608/4608 PASS, boot PASS. Admin note: takedown needs the Cloud Run SA to
+have the Firebase Hosting Admin role (deploy already uses it → present).

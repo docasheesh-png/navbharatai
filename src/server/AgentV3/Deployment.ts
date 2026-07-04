@@ -87,6 +87,39 @@ export class FirebaseHostingDeployer {
     return `https://${site}--${channelId}.web.app`;
   }
 
+  /**
+   * TAKEDOWN — unpublish a workspace's live site by deleting its Firebase Hosting channel (the exact
+   * channel the deploy created, keyed by makeChannelId). Real + idempotent: a 404 (already gone) is
+   * treated as success; a 403 is surfaced honestly (the service account lacks the Firebase Hosting
+   * Admin role). Returns true when the channel is gone (deleted or already absent).
+   */
+  async deleteChannel(workspaceId: string): Promise<boolean> {
+    const token = await this.auth.getAccessToken();
+    if (!token) {
+      throw new Error(
+        'Could not obtain a Google auth token for takedown. On Cloud Run this works automatically; ' +
+        'locally set GOOGLE_APPLICATION_CREDENTIALS to a service-account JSON with the Firebase Hosting Admin role.',
+      );
+    }
+    const site = FIREBASE_PROJECT;
+    const channelId = makeChannelId(workspaceId);
+    try {
+      await axios.delete(`${HOSTING_API}/sites/${site}/channels/${channelId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return true;
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status;
+      if (status === 404) return true; // already gone → idempotent success
+      const data = (err as AxiosError)?.response?.data;
+      const msg = data ? JSON.stringify(data) : String(err);
+      throw new Error(
+        `Firebase Hosting takedown failed (HTTP ${status}): ${msg}\n` +
+        'Ensure the Cloud Run service account has the "Firebase Hosting Admin" IAM role.',
+      );
+    }
+  }
+
   private async ensureChannel(site: string, channelId: string, headers: Record<string, string>): Promise<void> {
     try {
       await axios.post(

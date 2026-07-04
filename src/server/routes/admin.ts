@@ -19,6 +19,8 @@ import { logStore } from '../lib/logStore';
 import { eventStore } from '../lib/eventStore';
 import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/secrets';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
+import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
+import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -577,6 +579,51 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       await setDoc(walletRef, { banned: !!banned, banReason: reason || '', bannedAt: new Date().toISOString() }, { merge: true });
       audit(banned ? 'ADMIN_USER_BANNED' : 'ADMIN_USER_UNBANNED', { userId, reason, ip: req.ip });
       res.json({ ok: true, banned: !!banned });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // ── Hosting registry + takedown (Phase 0 abuse guard) ─────────────────────
+  // List published apps for moderation. Optional ?status=active|held|taken_down and ?userId=.
+  app.get('/api/admin/deployments', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const status = typeof req.query.status === 'string' ? (req.query.status as DeploymentStatus) : undefined;
+      const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;
+      const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 100));
+      const deployments = userId
+        ? await deploymentStore.listByUser(userId, limit)
+        : await deploymentStore.list({ status, limit });
+      res.json({ deployments });
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // Take a live app down: delete its real Firebase Hosting channel, then mark it taken_down so it can
+  // never republish (the deploy choke point re-checks status). Honest — reports the real result.
+  app.post('/api/admin/deployments/:workspaceId/takedown', verifyAdminToken, async (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    const { reason } = req.body || {};
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    try {
+      // Delete the live channel FIRST (real unpublish); idempotent (404 = already gone). If it throws
+      // (e.g. missing IAM role), surface it honestly and do NOT claim the app was taken down.
+      await new FirebaseHostingDeployer().deleteChannel(workspaceId);
+      const marked = await deploymentStore.setStatus(workspaceId, 'taken_down');
+      audit('ADMIN_APP_TAKEDOWN', { workspaceId, reason: reason || '', ip: req.ip });
+      res.json({ ok: true, workspaceId, status: 'taken_down', registryUpdated: marked });
+    } catch (e: any) {
+      console.error('[ADMIN] Takedown error:', e?.message);
+      res.status(502).json({ error: 'Takedown failed — the live site was NOT confirmed removed.', detail: e?.message || String(e) });
+    }
+  });
+
+  // Restore a held/taken-down app to active (reverses an over-eager takedown/hold). Does NOT
+  // re-publish — the owner must redeploy; this only clears the registry block.
+  app.post('/api/admin/deployments/:workspaceId/restore', verifyAdminToken, async (req: Request, res: Response) => {
+    const { workspaceId } = req.params;
+    if (!workspaceId) return res.status(400).json({ error: 'workspaceId required' });
+    try {
+      const ok = await deploymentStore.setStatus(workspaceId, 'active');
+      audit('ADMIN_APP_RESTORED', { workspaceId, ip: req.ip });
+      res.json({ ok, workspaceId, status: 'active' });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 

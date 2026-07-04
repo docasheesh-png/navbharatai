@@ -1,0 +1,130 @@
+/**
+ * HostingQuota — the SINGLE source of truth for NavBharatAI's "who-pays / how-much" hosting rules.
+ *
+ * WHY (build-diagnostics + admin cost review, 2026-07-04): the platform pays for every FIRST-PARTY
+ * deploy (its own Firebase Hosting today, Cloudflare later) and there was NO size cap and NO count
+ * cap — an open cost/abuse hole (one user could publish unlimited / huge apps on the platform's bill).
+ * This module owns the policy; it is ENFORCED at one physical choke point (withDeploymentPersistence
+ * in DeploymentStore.ts) so the rule lives in exactly one place and every first-party deploy passes it.
+ *
+ * Design invariants (cloned from the proven checkMonthlyCap / userMonthlyCapUsd template):
+ *   • The COUNT cap is env-gated and DISABLED by default (0 = off) → zero behaviour change until the
+ *     admin opts in with a number. The SIZE cap ships ON with a safe 50MB default (a normal SPA dist
+ *     is <20MB, so no legitimate app is blocked, and it closes the oversized-upload vector with no
+ *     admin config).
+ *   • FAIL-OPEN: any missing userId / disabled cap / store error / timeout resolves to allowed=true —
+ *     a quota-store outage must NEVER wrongly block a legitimate deploy (rule #1: never break the app).
+ *   • Only FIRST-PARTY providers (platform pays) are counted; BYO-token deploys (the user's own
+ *     GitHub/Netlify/Vercel/Cloudflare token) are the user's own cost and are never counted here.
+ *   • Over-limit returns an HONEST message (specific used/cap + reset + a real BYO alternative) — the
+ *     caller throws it as the deploy result; nothing is published, no fake success.
+ */
+import { hostingUsageStore } from './HostingUsageStore';
+
+/** Providers where NavBharatAI foots the hosting bill (so the quota + size cap apply). */
+export const FIRST_PARTY_PROVIDERS = new Set<string>(['firebase', 'cloudflare']);
+
+export function isFirstPartyProvider(providerId: string | null | undefined): boolean {
+  return !!providerId && FIRST_PARTY_PROVIDERS.has(String(providerId).toLowerCase());
+}
+
+/** Monthly free first-party deploy cap. Env AGENTV3_USER_MONTHLY_DEPLOY_CAP; 0 / unset = DISABLED. */
+export function hostingDeployCap(): number {
+  const raw = Number(process.env.AGENTV3_USER_MONTHLY_DEPLOY_CAP);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+}
+
+/** Per-deploy bundle ceiling in MB. Env AGENTV3_DEPLOY_MAX_MB; default 50 (safe ON). 0 = disabled. */
+export function maxDeployMb(): number {
+  const raw = Number(process.env.AGENTV3_DEPLOY_MAX_MB);
+  if (Number.isFinite(raw) && raw >= 0) return raw; // allow explicit 0 (disable) or a custom value
+  return 50;
+}
+
+/** Pure: is `used` within `cap`? A cap of 0 (or negative) means DISABLED → always within. */
+export function hostingWithinCap(used: number, cap: number): boolean {
+  if (!Number.isFinite(cap) || cap <= 0) return true;
+  return (Number.isFinite(used) ? used : 0) < cap;
+}
+
+/** Pure: total decoded size of a file map, in MB. */
+export function deployBytesMb(files: Map<string, Buffer> | null | undefined): number {
+  if (!files || files.size === 0) return 0;
+  let bytes = 0;
+  for (const buf of files.values()) bytes += buf?.byteLength ?? 0;
+  return bytes / (1024 * 1024);
+}
+
+export interface HostingQuotaVerdict {
+  allowed: boolean;
+  /** deploys already used this month (first-party); 0 when disabled/unknown. */
+  used: number;
+  /** the active monthly cap; 0 = disabled. */
+  cap: number;
+  /** this deploy's bundle size in MB (rounded to 2dp). */
+  byteMb: number;
+  /** honest, human-readable denial reason when !allowed; '' when allowed. */
+  message: string;
+}
+
+const ALLOW = (used: number, cap: number, byteMb: number): HostingQuotaVerdict =>
+  ({ allowed: true, used, cap, byteMb: Math.round(byteMb * 100) / 100, message: '' });
+
+/**
+ * Enforce the hosting policy for one deploy. Pure-ish: the only I/O is a best-effort monthly-count
+ * read (fail-open). Call this BEFORE publishing. For a BYO provider it is a no-op allow in Phase 0
+ * (content-safety + rate limiting land in a later slice); for a first-party provider it enforces the
+ * size ceiling then the monthly count cap.
+ */
+export async function enforceHostingQuota(input: {
+  userId: string | null | undefined;
+  workspaceId: string;
+  providerId: string | null | undefined;
+  files: Map<string, Buffer>;
+}): Promise<HostingQuotaVerdict> {
+  const byteMb = deployBytesMb(input.files);
+
+  // BYO / non-platform providers: user's own host + cost → no size/count quota here.
+  if (!isFirstPartyProvider(input.providerId)) return ALLOW(0, 0, byteMb);
+
+  // Size ceiling (ships ON, deterministic, fail-SAFE — a genuinely oversized bundle is refused).
+  const sizeCap = maxDeployMb();
+  if (sizeCap > 0 && byteMb > sizeCap) {
+    return {
+      allowed: false,
+      used: 0,
+      cap: 0,
+      byteMb: Math.round(byteMb * 100) / 100,
+      message:
+        `This app's built files are ${byteMb.toFixed(1)} MB, over the ${sizeCap} MB per-publish hosting limit. ` +
+        `Reduce the bundle (code-split, drop large images/assets into a CDN) and publish again, ` +
+        `or connect your own host (GitHub Pages / Netlify / Vercel) to publish larger apps.`,
+    };
+  }
+
+  // Monthly free first-party deploy count — DISABLED by default (fail-open, best-effort read).
+  const cap = hostingDeployCap();
+  if (cap <= 0 || !input.userId) return ALLOW(0, cap, byteMb);
+
+  let used = 0;
+  try {
+    const usage = await hostingUsageStore.get(input.userId);
+    used = usage?.deployCount ?? 0;
+  } catch {
+    return ALLOW(0, cap, byteMb); // store error → fail OPEN, never wrongly block a real deploy
+  }
+
+  if (!hostingWithinCap(used, cap)) {
+    return {
+      allowed: false,
+      used,
+      cap,
+      byteMb: Math.round(byteMb * 100) / 100,
+      message:
+        `You've used all ${cap} free publishes this month (${used}/${cap}). Your free hosting resets at ` +
+        `the start of next month. To publish now, connect your own free host (GitHub Pages / Netlify / ` +
+        `Vercel) in Settings, or upgrade your hosting plan.`,
+    };
+  }
+  return ALLOW(used, cap, byteMb);
+}

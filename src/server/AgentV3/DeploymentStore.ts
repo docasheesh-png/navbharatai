@@ -12,6 +12,11 @@
 // Pattern mirrors UserCostStore: VITEST-skip (tests never touch Firestore), best-effort (never
 // throws, never blocks a deploy), set+merge so a missing doc is created atomically.
 import * as admin from 'firebase-admin';
+import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
+import { hostingUsageStore } from '../lib/HostingUsageStore';
+
+/** Lifecycle status of a published app (registry — enables takedown/report in later slices). */
+export type DeploymentStatus = 'active' | 'held' | 'taken_down';
 
 export interface DeploymentRecord {
   workspaceId: string;
@@ -19,6 +24,14 @@ export interface DeploymentRecord {
   url: string;
   fileCount: number;
   updatedAt: number;
+  /** Hosting provider id (e.g. 'firebase'). Present on records written after the Phase 0 quota wiring. */
+  providerId?: string;
+  /** True when NavBharatAI paid for this deploy (first-party host). */
+  firstParty?: boolean;
+  /** Published bundle size in MB (2dp). */
+  sizeMb?: number;
+  /** Registry status; defaults to 'active'. */
+  status?: DeploymentStatus;
 }
 
 class DeploymentStore {
@@ -38,7 +51,13 @@ class DeploymentStore {
   }
 
   /** Record (or update) the latest live deployment for a workspace. Best-effort. */
-  async record(workspaceId: string, userId: string | null, url: string, fileCount: number): Promise<void> {
+  async record(
+    workspaceId: string,
+    userId: string | null,
+    url: string,
+    fileCount: number,
+    extra?: { providerId?: string; firstParty?: boolean; sizeMb?: number; status?: DeploymentStatus },
+  ): Promise<void> {
     const db = this.getDb();
     if (!db || !workspaceId || !url) return;
     try {
@@ -48,6 +67,10 @@ class DeploymentStore {
           userId: userId ?? 'anon',
           url,
           fileCount: Number.isFinite(fileCount) ? fileCount : 0,
+          ...(extra?.providerId ? { providerId: extra.providerId } : {}),
+          ...(typeof extra?.firstParty === 'boolean' ? { firstParty: extra.firstParty } : {}),
+          ...(typeof extra?.sizeMb === 'number' ? { sizeMb: extra.sizeMb } : {}),
+          status: extra?.status ?? 'active',
           updatedAt: Date.now(),
         },
         { merge: true },
@@ -67,6 +90,54 @@ class DeploymentStore {
       return null;
     }
   }
+
+  /**
+   * List published deployments (admin registry). Best-effort; returns [] when unavailable. Orders by
+   * updatedAt desc and filters `status` in memory so NO composite Firestore index is required.
+   */
+  async list(opts?: { status?: DeploymentStatus; limit?: number }): Promise<DeploymentRecord[]> {
+    const db = this.getDb();
+    if (!db) return [];
+    const limit = Math.max(1, Math.min(500, opts?.limit ?? 100));
+    try {
+      const snap = await db.collection('agentv3_deployments').orderBy('updatedAt', 'desc').limit(limit).get();
+      let recs = snap.docs.map((d) => d.data() as DeploymentRecord);
+      if (opts?.status) recs = recs.filter((r) => (r.status ?? 'active') === opts.status);
+      return recs;
+    } catch {
+      return [];
+    }
+  }
+
+  /** List a single user's deployments (admin registry). Best-effort. */
+  async listByUser(userId: string, limit = 100): Promise<DeploymentRecord[]> {
+    const db = this.getDb();
+    if (!db || !userId) return [];
+    const cap = Math.max(1, Math.min(500, limit));
+    try {
+      const snap = await db.collection('agentv3_deployments').where('userId', '==', userId).limit(cap).get();
+      return snap.docs
+        .map((d) => d.data() as DeploymentRecord)
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Set a deployment's registry status (takedown / hold / restore). Best-effort. Returns success. */
+  async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return false;
+    try {
+      await db.collection('agentv3_deployments').doc(workspaceId).set(
+        { status, updatedAt: Date.now() },
+        { merge: true },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export const deploymentStore = new DeploymentStore();
@@ -79,10 +150,45 @@ export const deploymentStore = new DeploymentStore();
 export function withDeploymentPersistence(
   base: (workspaceId: string, files: Map<string, Buffer>) => Promise<string>,
   userId: string | null,
+  providerId?: string | null,
 ): (workspaceId: string, files: Map<string, Buffer>) => Promise<string> {
   return async (workspaceId, files) => {
+    // HOSTING QUOTA GATE (Phase 0): enforce the per-publish size ceiling + monthly free-deploy count
+    // for FIRST-PARTY (platform-paid) deploys BEFORE publishing. Bounded to 5s and FAIL-OPEN — a
+    // quota-store hang or error must NEVER wrongly block a legitimate deploy (rule #1). Over-limit
+    // throws an honest Error that propagates to the deploy tool's error result (no `preview` event,
+    // no URL, no fake success). BYO providers (user's own host/cost) pass straight through.
+    const verdict = await Promise.race([
+      enforceHostingQuota({ userId, workspaceId, providerId, files }),
+      new Promise<{ allowed: boolean; message?: string }>((r) => setTimeout(() => r({ allowed: true }), 5_000)),
+    ]).catch(() => ({ allowed: true as boolean, message: '' }));
+    if (verdict && verdict.allowed === false) {
+      throw new Error(('message' in verdict && verdict.message) ? verdict.message : 'Hosting limit reached.');
+    }
+
+    // TAKEDOWN re-publish guard: an app an admin took down for a policy violation must not be
+    // silently re-published. Bounded (3s) + fail-OPEN — a store outage must never block a legit
+    // deploy (blocking a taken-down republish during a rare outage is an acceptable trade vs rule #1).
+    if (isFirstPartyProvider(providerId)) {
+      const existing = await Promise.race([
+        deploymentStore.get(workspaceId),
+        new Promise<DeploymentRecord | null>((r) => setTimeout(() => r(null), 3_000)),
+      ]).catch(() => null);
+      if (existing?.status === 'taken_down') {
+        throw new Error('This app was taken down for a policy violation and cannot be re-published. Contact support if you believe this is a mistake.');
+      }
+    }
+
     const url = await base(workspaceId, files);
-    void deploymentStore.record(workspaceId, userId, url, files.size);
+    const firstParty = isFirstPartyProvider(providerId);
+    // Count only platform-paid (first-party) publishes toward the free quota.
+    if (firstParty) void hostingUsageStore.recordDeploy(userId);
+    void deploymentStore.record(workspaceId, userId, url, files.size, {
+      providerId: providerId ?? undefined,
+      firstParty,
+      sizeMb: Math.round(deployBytesMb(files) * 100) / 100,
+      status: 'active',
+    });
     return url;
   };
 }

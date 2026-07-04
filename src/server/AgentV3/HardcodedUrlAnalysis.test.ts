@@ -13,6 +13,14 @@ describe('scanHardcodedUrls', () => {
     expect(scanHardcodedUrls('src/a.ts', "fetch('http://127.0.0.1:8080/x')")).toHaveLength(1);
   });
 
+  it('flags a hardcoded ws:// / wss:// local socket (breaks in production, was missed entirely)', () => {
+    const ws = scanHardcodedUrls('src/chat.ts', "const socket = new WebSocket('ws://localhost:8080');");
+    expect(ws).toHaveLength(1);
+    expect(ws[0].kind).toBe('localhost');
+    expect(ws[0].url).toBe('ws://localhost:8080');
+    expect(scanHardcodedUrls('src/live.ts', "new WebSocket('wss://10.0.0.5:9000/feed')")[0]?.kind).toBe('private-ip');
+  });
+
   it('flags hardcoded private-network IP URLs (192.168 / 10 / 172.16-31)', () => {
     const a = scanHardcodedUrls('src/a.ts', "const API = 'http://192.168.1.50:3000/api';");
     expect(a).toHaveLength(1);

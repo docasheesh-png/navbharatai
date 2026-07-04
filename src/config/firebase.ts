@@ -15,11 +15,22 @@
 //     secrets and are NOT in client code.)
 // The env vars still take precedence when present (override without a code change).
 
-// Always use Firebase's own authDomain. Using a custom domain (navbharatai.com)
-// requires a server-side /__/auth proxy AND the domain to be in Firebase's
-// Authorized Domains list — both must work perfectly or signInWithRedirect silently
-// returns logged-out. Firebase's own domain is always authorized, no proxy needed.
-const AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0866594388.firebaseapp.com';
+// authDomain = OUR OWN domain (navbharatai.com). This is what the Google consent screen shows
+// ("continue to navbharatai.com", not the raw *.firebaseapp.com project host) and it makes the
+// WHOLE auth flow same-origin with the app.
+//
+// The custom authDomain was previously reverted because signInWithRedirect returned logged-out —
+// the ROOT CAUSE was that authDomain (firebaseapp.com) ≠ app origin (navbharatai.com), so the auth
+// handler's session storage was cross-origin-partitioned away from the app. Pointing authDomain at
+// navbharatai.com makes them SAME-origin, which removes that partitioning entirely (and sign-in is
+// popup-first regardless). All prerequisites are now in place and verified (2026-07-04):
+//   • server.ts reverse-proxies /__/auth/* + /__/firebase/* to the Firebase host (serves the handler),
+//   • navbharatai.com is a Firebase Authorized Domain (current logins from it already succeed), and
+//   • the Google OAuth Web client lists https://navbharatai.com/__/auth/handler as a redirect URI
+//     AND https://navbharatai.com as a JavaScript origin.
+// Override per-env with VITE_FIREBASE_AUTH_DOMAIN. NOTE: server.ts's FIREBASE_AUTH_HOST must stay the
+// real *.firebaseapp.com host — that is the proxy's upstream, not the client authDomain.
+const AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'navbharatai.com';
 
 export const firebaseConfig = {
   projectId:        import.meta.env.VITE_FIREBASE_PROJECT_ID       || 'gen-lang-client-0866594388',

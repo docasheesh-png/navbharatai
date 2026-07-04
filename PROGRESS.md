@@ -7662,3 +7662,16 @@ vitest 4485/4485 PASS, boot PASS.
 
 Known remaining (next slice, separate): the gate still does not weigh the RENDERED preview verdict
 (the build's real issue — a blank page — was never a readiness input). Recorded as an open root cause.
+
+## 2026-07-04 — Open root cause CLOSED by analysis: "gate never weighs the rendered preview"
+
+Investigated before building anything (safeguard #6). The rendered-preview verify + one-shot heal
+ALREADY exists at the right layer (routes/agentv3.ts post-build: browseUrl → analyzePreviewHtml →
+repair pass → honest ⚠️ narration + PREVIEW_NOT_RENDERED diagnostic). In the Hospital build it never
+ran because its guard is `result.ok && lastPreviewUrl` — and the readiness gate's FALSE POSITIVES
+(#903) had already flipped ok:false, while the pre-#895 preview path had never published a URL. Both
+legs of that cascade are now fixed (#903 gate honesty + #895 self-healing preview), so the existing
+self-check runs exactly when it should. Duplicating browse-verification INSIDE the gate would be
+redundant work at the wrong layer — not built, by design. Policy note (unchanged, deliberate): a
+build whose preview still fails after heal ships ok:true WITH a loud honest warning (files are real;
+PREVIEW_FAILED ≠ build failure).

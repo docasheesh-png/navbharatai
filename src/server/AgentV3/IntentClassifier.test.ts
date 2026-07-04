@@ -331,3 +331,28 @@ describe('classifyIntent', () => {
     expect(classifyIntent('FIX THE BUG')).toBe('edit_existing');
   });
 });
+
+describe('classifyIntentWithConfidence — whole-word scan across ALL occurrences (embedded first hit no longer hides a valid standalone one)', () => {
+  it('an EDIT signal embedded in an earlier word still matches its standalone occurrence', () => {
+    // "change" appears first INSIDE "exchange" (boundary-fail); the old first-occurrence-only logic
+    // abandoned the signal there and mis-routed a real edit request to chat. The standalone "change"
+    // must now be found.
+    const r = classifyIntentWithConfidence('the exchange rate widget — change the currency');
+    expect(r.intent).toBe('edit_existing');
+    expect(r.confidence).toBe('high');
+    expect(r.signal).toBe('change');
+  });
+  it('a NEW_BUILD signal embedded in an earlier word still matches its standalone occurrence', () => {
+    // "style" appears first inside "lifestyle" (boundary-fail); the standalone "style" must match.
+    const r = classifyIntentWithConfidence('a lifestyle blog — style the hero section');
+    expect(r.intent).toBe('new_build');
+    expect(r.confidence).toBe('high');
+    expect(r.signal).toBe('style');
+  });
+  it('does NOT match when the signal only ever appears embedded (no standalone occurrence)', () => {
+    // "exchange" alone must NOT trigger an edit via the embedded "change" — the whole-word check
+    // still governs every occurrence, so a pure substring never counts.
+    const r = classifyIntentWithConfidence('explain the exchange rate concept');
+    expect(r.signal).not.toBe('change');
+  });
+});

@@ -228,11 +228,17 @@ const SOCIAL_PATTERNS: readonly RegExp[] = [
   /\b(ok|okay|okey|k|nice|great|cool|wow|good|awesome|amazing|perfect|fine|alright|nope|yep|yes|no|haan|haa|nahi|theek|thik|achha|acha|accha|badhiya|bye|byee|goodbye|see\s+ya|ttyl|good\s+night|good\s+morning|gn|gm|lol|haha|hehe)\b/,
 ];
 
-/** Returns true if the lowercased message contains any signal using word-boundary-ish matching. */
-function matchesSignal(lower: string, signals: readonly string[]): boolean {
-  for (const signal of signals) {
-    const idx = lower.indexOf(signal);
-    if (idx === -1) continue;
+/**
+ * True if `lower` contains `signal` as a whole word at ANY position (word-boundary-ish, kept loose
+ * for Hinglish). ROOT-CAUSE of a real mis-route: the old logic (duplicated in THREE places) looked
+ * up only the FIRST occurrence via `indexOf` — so when the first hit was embedded in a longer word
+ * (e.g. `add` inside "l**add**er", `change` inside "ex**change**"), the boundary check failed and the
+ * signal was abandoned, even though a valid STANDALONE occurrence appeared later. A genuine
+ * build/edit request then fell through to the chat default. This scans every occurrence, so a later
+ * whole-word hit still counts. Centralized so the fix lives in ONE place, not three. Pure.
+ */
+function containsSignalWord(lower: string, signal: string): boolean {
+  for (let idx = lower.indexOf(signal); idx !== -1; idx = lower.indexOf(signal, idx + 1)) {
     const before = idx === 0 ? '' : lower[idx - 1];
     const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
     const beforeOk = before === '' || !/[a-z0-9]/.test(before);
@@ -240,6 +246,19 @@ function matchesSignal(lower: string, signals: readonly string[]): boolean {
     if (beforeOk && afterOk) return true;
   }
   return false;
+}
+
+/** The FIRST signal in `signals` that appears as a whole word in `lower`, or undefined. Pure. */
+function firstSignalWord(lower: string, signals: readonly string[]): string | undefined {
+  for (const signal of signals) {
+    if (containsSignalWord(lower, signal)) return signal;
+  }
+  return undefined;
+}
+
+/** Returns true if the lowercased message contains any signal using word-boundary-ish matching. */
+function matchesSignal(lower: string, signals: readonly string[]): boolean {
+  return firstSignalWord(lower, signals) !== undefined;
 }
 
 /** Strip a trailing fenced code block check / file path / URL detection helper. */
@@ -278,25 +297,12 @@ export function classifyIntentWithConfidence(message: string): IntentWithConfide
 
   const lower = text.toLowerCase();
 
-  // Steps 1–4 → high confidence (strong, explicit signals)
-  for (const signal of NEW_BUILD_SIGNALS) {
-    const idx = lower.indexOf(signal);
-    if (idx === -1) continue;
-    const before = idx === 0 ? '' : lower[idx - 1];
-    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
-    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
-      return { intent: 'new_build', confidence: 'high', signal };
-    }
-  }
-  for (const signal of EDIT_SIGNALS) {
-    const idx = lower.indexOf(signal);
-    if (idx === -1) continue;
-    const before = idx === 0 ? '' : lower[idx - 1];
-    const after = idx + signal.length >= lower.length ? '' : lower[idx + signal.length];
-    if ((before === '' || !/[a-z0-9]/.test(before)) && (after === '' || !/[a-z0-9]/.test(after))) {
-      return { intent: 'edit_existing', confidence: 'high', signal };
-    }
-  }
+  // Steps 1–4 → high confidence (strong, explicit signals). Uses the shared whole-word scanner so an
+  // embedded first occurrence can't hide a valid standalone one later (the mis-route root cause).
+  const nbSignal = firstSignalWord(lower, NEW_BUILD_SIGNALS);
+  if (nbSignal) return { intent: 'new_build', confidence: 'high', signal: nbSignal };
+  const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
+  if (editSignal) return { intent: 'edit_existing', confidence: 'high', signal: editSignal };
   // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
   // noun in passing. High confidence so length/code-heuristics below can't override it either.
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) {

@@ -65,6 +65,7 @@ import {
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote } from '../AgentV3/ProjectImport';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote } from '../AgentV3/ImportPreview';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2753,8 +2754,30 @@ export function registerAgentV3Routes(app: Express): void {
       // Background live-preview boot (the actuator handles install + start + health-check).
       if (validation.hasPackageJson && sandboxDiag().livePreviewAvailable) {
         const emitLive = (e: unknown): void => { if (!rb.ended) emit(e); };
+        // HEAVY-APP PREVIEW (capability ②): a full-stack imported app (Express + Postgres + env-driven
+        // config, like Mitrify) crashes on a bare `npm run dev` — no DATABASE_URL, undefined env vars.
+        // Provision a local DB + write a dev .env FIRST so the server has a real chance to boot; the
+        // setup persists in the sandbox, so even if the background boot is slow, the Diagnose button
+        // (which re-boots) now succeeds too. External paid services can't be faked — reported honestly.
+        const needsDb = detectNeedsDatabase(importedFiles);
+        const declaredEnvVars = envVarNames(importedFiles);
         importPreviewBoot = (async () => {
           try {
+            const provided: Record<string, string> = {};
+            if (needsDb && typeof actuator.provisionBackend === 'function') {
+              emitLive({ type: 'narration', agent: 'architect', text: '🗄️ Your app needs a database — provisioning a local PostgreSQL in the sandbox so it can boot…', ts: Date.now() });
+              try {
+                const prov = await withTimeout(actuator.provisionBackend(workspaceId, ['db']), 130_000, 'import-db-provision');
+                Object.assign(provided, prov.envVars ?? {}); // DATABASE_URL
+              } catch { /* DB provision is best-effort — the boot still tries without it */ }
+            }
+            // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
+            // provisioned DATABASE_URL plus empty placeholders for everything the app documents.
+            if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
+              try { await actuator.writeFile(workspaceId, '.env', buildDevEnvContent(declaredEnvVars, provided)); } catch { /* env write best-effort */ }
+              const extNote = externalServiceNote(declaredEnvVars);
+              if (extNote) emitLive({ type: 'narration', agent: 'architect', text: extNote, ts: Date.now() });
+            }
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
             const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 240_000, 'import-preview-boot');
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
@@ -4782,11 +4805,14 @@ export function registerAgentV3Routes(app: Express): void {
           if (sbId) await sandboxStore.record(workspaceId, userId, sbId);
         } catch { /* best-effort — never affects the build */ }
       }
-      // A zip import's background preview boot must finish BEFORE the response ends — Cloud Run
-      // throttles CPU after the stream closes, which would silently kill the npm install mid-way.
-      // Bounded (the boot itself is already capped at 120s) + best-effort.
+      // A zip/GitHub import's background preview boot must finish BEFORE the response ends — Cloud
+      // Run throttles CPU after the stream closes, which would silently kill npm install mid-way.
+      // Bounded + best-effort. The cap covers a HEAVY full-stack app: up to ~130s to provision a
+      // local Postgres + ~240s to install & boot the dev server. Even if this is cut off, the DB +
+      // dev .env are already set up in the sandbox, so the Diagnose button (a manual re-boot)
+      // succeeds afterwards.
       if (importPreviewBoot) {
-        await raceTimeout(importPreviewBoot, 245_000, 'importPreviewBoot').catch(() => {});
+        await raceTimeout(importPreviewBoot, 380_000, 'importPreviewBoot').catch(() => {});
       }
       // ETERNAL SESSIONS: persist this turn's evidence layer (shared closure, delta-cursored —
       // also called by the hard-deadline finalizer whose builds never reach this finally). Runs

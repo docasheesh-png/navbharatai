@@ -110,6 +110,86 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  // ── GitHub repo picker (1-click import, admin plan 2026-07-04) ────────────────────────────
+  // ghRepos: null = not loaded yet; [] = loaded but the account has no repos.
+  const [ghRepos, setGhRepos] = useState<Array<{ fullName: string; url: string; isPrivate: boolean; updatedAt: number; description: string }> | null>(null);
+  const [ghReposLoading, setGhReposLoading] = useState(false);
+  // 'auth' = not connected / token expired (show Connect); anything else = a real fetch error.
+  const [ghReposError, setGhReposError] = useState<string>('');
+  const [repoSearch, setRepoSearch] = useState('');
+  const [importSending, setImportSending] = useState(false);
+
+  const loadGhRepos = useCallback(async () => {
+    const token = (() => { try { return localStorage.getItem('gh_token'); } catch { return null; } })();
+    if (!token) { setGhRepos(null); setGhReposError('auth'); return; }
+    setGhReposLoading(true);
+    setGhReposError('');
+    try {
+      const res = await fetch('/api/github/repos', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401 || res.status === 403) { setGhRepos(null); setGhReposError('auth'); return; }
+      if (!res.ok) throw new Error(`GitHub returned ${res.status} — try again in a moment.`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error('Unexpected response while listing your repositories.');
+      setGhRepos(
+        data
+          .map((r: { full_name?: unknown; html_url?: unknown; private?: unknown; updated_at?: unknown; description?: unknown }) => ({
+            fullName: typeof r.full_name === 'string' ? r.full_name : '',
+            url: typeof r.html_url === 'string' ? r.html_url : '',
+            isPrivate: r.private === true,
+            updatedAt: typeof r.updated_at === 'string' ? (Date.parse(r.updated_at) || 0) : 0,
+            description: typeof r.description === 'string' ? r.description : '',
+          }))
+          .filter((r) => r.fullName && r.url),
+      );
+    } catch (e) {
+      setGhRepos(null);
+      setGhReposError(e instanceof Error ? e.message : 'Could not load your repositories.');
+    } finally {
+      setGhReposLoading(false);
+    }
+  }, []);
+  // Load the list the moment the modal opens (state 3: already connected → zero extra clicks).
+  useEffect(() => {
+    if (showImportModal) { setRepoSearch(''); void loadGhRepos(); }
+  }, [showImportModal, loadGhRepos]);
+
+  // Full-page OAuth redirect — the SAME proven flow the app-level GitHub connect uses (the
+  // callback returns to this exact URL with #gh_token, which App.tsx stores in localStorage).
+  // A redirect can't be killed by mobile popup blockers, unlike window.open.
+  const connectGitHub = useCallback(async () => {
+    try {
+      const state = window.location.href.split('#')[0];
+      const redirectUri = 'https://navbharatai.com/api/github/callback';
+      const reqUrl = new URL(`${window.location.origin}/api/auth/github/url`);
+      reqUrl.searchParams.set('redirect_uri', redirectUri);
+      reqUrl.searchParams.set('state', state);
+      const response = await fetch(reqUrl.toString());
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data?.url !== 'string' || !data.url) throw new Error('Could not start GitHub sign-in — try again.');
+      const githubUrl = new URL(data.url);
+      if (data.clientId) githubUrl.searchParams.set('client_id', String(data.clientId));
+      githubUrl.searchParams.set('redirect_uri', redirectUri);
+      if (data.scope) githubUrl.searchParams.set('scope', String(data.scope));
+      if (data.state) githubUrl.searchParams.set('state', String(data.state));
+      window.location.href = githubUrl.toString();
+    } catch (e) {
+      setGhReposError(e instanceof Error ? e.message : 'Could not start GitHub sign-in.');
+    }
+  }, []);
+
+  // 1-CLICK IMPORT: picking a repo sends the import message itself — the user just watches the
+  // clone → Files/IDE → preview → AI survey happen (the #886/#890 Landing Pipeline server-side).
+  // Deliberately a PLAIN function (not useCallback): it must close over the CURRENT render's
+  // send() — a memoized version would freeze the first render's userId/email/session bindings.
+  const importRepo = (repoUrl: string) => {
+    if (running || importSending) return;
+    setImportSending(true);
+    setShowImportModal(false);
+    void send({
+      text: 'Import this app from my GitHub repository and give me a short survey of what it is and how it is structured. Do not change any files yet.',
+      importUrl: repoUrl,
+    }).finally(() => setImportSending(false));
+  };
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
   // (state.narration) is reset by start() on every new message, so without
@@ -484,9 +564,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (picked.length > 0) setFiles((prev) => [...prev, ...picked].slice(0, 8));
   };
 
-  const send = async () => {
-    const text = prompt.trim();
-    if ((!text && files.length === 0) || running) return;
+  // `override` — programmatic sends (the GitHub repo picker's 1-click import): supplies its own
+  // text + importUrl and NEVER consumes the user's typed draft or staged attachments.
+  const send = async (override?: { text: string; importUrl: string }) => {
+    const text = (override?.text ?? prompt).trim();
+    const sendFiles = override ? [] : files;
+    if ((!text && sendFiles.length === 0) || running) return;
     // A fresh user message resets the Layer-3 auto-continue budget for the new turn.
     autoContinueRef.current = 0;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
@@ -508,15 +591,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (state.checkpoints.length > 0) {
       setCheckpointHistory((h) => [...h, ...state.checkpoints]);
     }
-    const attachments = files.length > 0 ? await Promise.all(files.map(fileToAttachment)) : undefined;
+    const attachments = sendFiles.length > 0 ? await Promise.all(sendFiles.map(fileToAttachment)) : undefined;
     // A file with no text gets a sensible default prompt (the server requires one).
-    const msgText = text || (files.length > 0 ? `Please read and analyze the attached file(s): ${files.map((f) => f.name).join(', ')}` : '');
-    const displayText = text || `📎 ${files.map((f) => f.name).join(', ')}`;
+    const msgText = text || (sendFiles.length > 0 ? `Please read and analyze the attached file(s): ${sendFiles.map((f) => f.name).join(', ')}` : '');
+    const displayText = text || `📎 ${sendFiles.map((f) => f.name).join(', ')}`;
     setUserMsgs((c) => [...c, { role: 'user', text: displayText, ts: Date.now() }]);
-    setPrompt('');
-    setFiles([]);
-    const pendingImportUrl = importUrl.trim();
-    setImportUrl(''); // consume import URL on first send
+    if (!override) {
+      setPrompt('');
+      setFiles([]);
+    }
+    const pendingImportUrl = (override?.importUrl ?? importUrl).trim();
+    if (!override) setImportUrl(''); // consume the set-by-hand import URL on first send
     // Phase S3 conflict guard: flush any pending IDE edits to v3.0's durable store BEFORE the build
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
@@ -2017,38 +2102,86 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Repository URL</label>
-              <input
-                type="url"
-                value={importUrl}
-                onChange={e => setImportUrl(e.target.value)}
-                placeholder="https://github.com/username/my-app"
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
-              />
-              <p className="text-[10px] text-[#484f58]">
-                Public repos work without a token. For private repos, make sure you've signed in with GitHub in Settings → Connections.
-              </p>
-            </div>
-            {importUrl.trim() && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
-                <Github className="w-3.5 h-3.5 text-green-400 shrink-0" />
-                <span className="text-[11px] text-green-300 truncate">{importUrl.trim()}</span>
+            {/* PRIMARY: the 1-click repo picker (states: connect → loading → list/empty → error) */}
+            {ghReposError === 'auth' ? (
+              <div className="space-y-2 text-center py-2">
+                <p className="text-[11px] text-[#8b949e]">Connect your GitHub once — then every import is a single click on a repo.</p>
+                <button
+                  type="button"
+                  onClick={() => void connectGitHub()}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-all touch-manipulation"
+                >
+                  <Github className="w-4 h-4" /> Connect GitHub
+                </button>
+                <p className="text-[10px] text-[#484f58]">You'll be taken to GitHub to sign in and approve access (private repos included), then brought right back here.</p>
               </div>
-            )}
-            <div className="flex gap-2">
-              <button
-                onClick={() => { setImportUrl(''); setShowImportModal(false); }}
-                className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-300 text-sm font-medium rounded-xl transition-all"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"
-              >
-                {importUrl.trim() ? 'Set Import' : 'Close'}
-              </button>
+            ) : ghReposLoading ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-[#8b949e] text-xs">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading your repositories…
+              </div>
+            ) : ghReposError ? (
+              <div className="space-y-2 text-center py-2">
+                <p className="text-[11px] text-amber-300">{ghReposError}</p>
+                <button type="button" onClick={() => void loadGhRepos()} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-200 text-xs font-semibold rounded-xl touch-manipulation">Retry</button>
+              </div>
+            ) : ghRepos && ghRepos.length === 0 ? (
+              <p className="text-[11px] text-[#8b949e] text-center py-3">No repositories found on your GitHub account — paste a URL below instead.</p>
+            ) : ghRepos ? (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={repoSearch}
+                  onChange={(e) => setRepoSearch(e.target.value)}
+                  placeholder={`Search ${ghRepos.length} repositories…`}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                />
+                <div className="max-h-56 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
+                  {ghRepos
+                    .filter((r) => !repoSearch.trim() || r.fullName.toLowerCase().includes(repoSearch.trim().toLowerCase()))
+                    .slice(0, 60)
+                    .map((r) => (
+                      <button
+                        key={r.fullName}
+                        type="button"
+                        onClick={() => importRepo(r.url)}
+                        disabled={running || importSending}
+                        title={running ? 'A build is running — wait for it to finish before importing' : `Import ${r.fullName} into this workspace`}
+                        className="w-full text-left px-3 py-2.5 hover:bg-white/5 active:bg-white/10 disabled:opacity-40 touch-manipulation"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Github className="w-3.5 h-3.5 text-[#8b949e] shrink-0" />
+                          <span className="text-xs text-white truncate font-medium">{r.fullName}</span>
+                          {r.isPrivate && <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/20">private</span>}
+                          {r.updatedAt > 0 && <span className="shrink-0 ml-auto text-[10px] text-[#484f58]">{relTime(r.updatedAt)}</span>}
+                        </span>
+                        {r.description && <span className="block mt-0.5 pl-5 text-[10px] text-[#8b949e] truncate">{r.description}</span>}
+                      </button>
+                    ))}
+                </div>
+                <p className="text-[10px] text-[#484f58]">Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.</p>
+              </div>
+            ) : null}
+
+            {/* SECONDARY: paste any repo URL (e.g. someone else's public repo) */}
+            <div className="pt-1 border-t border-white/10 space-y-2">
+              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={importUrl}
+                  onChange={e => setImportUrl(e.target.value)}
+                  placeholder="https://github.com/owner/repo"
+                  className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
+                  disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
+                  className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
+                >
+                  Import
+                </button>
+              </div>
             </div>
           </div>
         </div>

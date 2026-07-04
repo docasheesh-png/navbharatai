@@ -7811,3 +7811,18 @@ assets survive the live sandbox but silently vanish on durable restore (a half-s
 second absolute rule forbids). Own designed PR.
 10 new tests (28 total in ProjectImport.test.ts). Gate: tsc 0/0 both, vitest 4545/4545,
 build + boot PASS.
+
+## 2026-07-04 — Google sign-in shows "continue to navbharatai.com" (authDomain → own domain)
+
+Admin: the Google account-chooser read "continue to gen-lang-client-0866594388.firebaseapp.com" (the
+raw project host) instead of navbharatai.com. Root cause: Firebase `authDomain` was the *.firebaseapp.com
+host. Fixed by pointing `authDomain` at `navbharatai.com` (src/config/firebase.ts fallback; VITE_ vars
+are not injected at build, so the fallback is what ships). This ALSO makes the whole auth flow
+same-origin with the app — which was the real reason the custom domain was reverted before
+(authDomain≠app-origin → cross-origin storage partitioning made signInWithRedirect return logged-out);
+same-origin removes it, and sign-in is popup-first regardless. All prerequisites verified before flip:
+/__/auth proxy exists (server.ts), navbharatai.com is a Firebase Authorized Domain (current logins
+succeed), and the Google OAuth Web client already lists https://navbharatai.com/__/auth/handler +
+https://navbharatai.com. server.ts FIREBASE_AUTH_HOST left as the real firebaseapp.com host (proxy
+upstream). Gate: tsc 0, vitest 4488/4488 PASS, boot PASS. Post-deploy: test Google login immediately;
+1-line revert ready if any issue.

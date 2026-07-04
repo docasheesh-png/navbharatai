@@ -148,7 +148,7 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       // maximum-scale=1) locks out low-vision users who need to zoom (WCAG 1.4.4). ──
       if (
         name === 'meta' && /name\s*=\s*['"{]?\s*viewport\b/i.test(tag) &&
-        /user-scalable\s*=\s*(?:no|0)|maximum-scale\s*=\s*1(?:\.0)?\b/i.test(tag)
+        /user-scalable\s*=\s*(?:no|0)|maximum-scale\s*=\s*1(?:\.0+)?(?![.\d])/i.test(tag)
       ) {
         push('zoom-disabled', 'medium');
       }
@@ -175,8 +175,16 @@ export function scanAccessibility(file: string, content: string): AccessibilityI
       // Conservative: only flag when there is NO labelling hint at all — no
       // aria-label / aria-labelledby / title, AND no id (an id may be the target
       // of a <label for>), AND it is not a type that needs no label.
+      // A control WRAPPED by a <label> on this line (e.g. `<label>Email <input/></label>`, a very
+      // common React form pattern) IS labelled by the label's text — flagging it as unlabeled is a
+      // false positive. Detect the enclosing label: an unclosed `<label …>` opens before the control.
+      const beforeTag = line.slice(0, m.index);
+      const insideWrappingLabel =
+        beforeTag.lastIndexOf('<label') !== -1 &&
+        beforeTag.lastIndexOf('<label') > beforeTag.lastIndexOf('</label');
       if (
         LABELLED_CONTROLS.has(name) &&
+        !insideWrappingLabel &&
         !hasAttr(tag, 'aria-label') &&
         !hasAttr(tag, 'aria-labelledby') &&
         !hasAttr(tag, 'title') &&

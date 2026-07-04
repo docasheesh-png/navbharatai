@@ -132,9 +132,10 @@ export function GitViewPanel({
             isPushing={isPushing}
             onConnect={onConnectGitHub}
             onDisconnect={onDisconnectGitHub}
-            onPush={onPushToRepo ?? ((msg: string) => {
-              alert(`[Sandbox Commit] Committing files and starting deployment.\nCommit Message: "${msg || 'Update via navBharatAI'}"`);
-            })}
+            // GitPanel's real push goes through its own executeRealGitHubPush → /api/github/push-enhanced;
+            // `onPush` is not invoked by GitPanel. When no real handler is supplied, pass a no-op (never a
+            // faked "[Sandbox Commit]" alert that pretends to commit).
+            onPush={onPushToRepo ?? (() => { /* no-op — GitPanel pushes via its own real path */ })}
             files={files}
             projectId={currentSessionId}
             projectName={sessions.find(s => s.id === currentSessionId)?.title}

@@ -92,12 +92,13 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   onActivateWorkspace
 }) => {
   const [activeTab, setActiveTab2] = useState<'sync' | 'deploy'>('deploy');
-  const [commitMsg, setCommitMsg] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [isGeneratingCommitMsg, setIsGeneratingCommitMsg] = useState(false);
 
+  // Suggest a commit message from the actually-changed files — a deterministic LOCAL heuristic (not an
+  // AI/model call, so it is not labelled as one). Writes to the SAME config field the input shows
+  // (configs.github.commitMsg via updateConfig) so the suggestion actually appears — previously it set
+  // an unused `commitMsg` state, so the button did nothing visible.
   const generateCommitMessage = () => {
-    setIsGeneratingCommitMsg(true);
     const fileNames = Object.keys(files);
     const exts = [...new Set(fileNames.map(f => f.split('.').pop() || ''))].filter(Boolean);
     const components = fileNames.filter(f => /\.(tsx?|jsx?)$/.test(f)).map(f => f.split('/').pop()?.replace(/\.[^.]+$/, '') || '').filter(Boolean);
@@ -109,8 +110,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     else if (fileNames.some(f => /test|spec/i.test(f))) msg = 'Add tests';
     else if (fileNames.some(f => /readme|docs/i.test(f))) msg = 'Update documentation';
     else if (fileNames.length === 1) msg = `Update ${fileNames[0].split('/').pop()}`;
-    setCommitMsg(msg);
-    setTimeout(() => setIsGeneratingCommitMsg(false), 400);
+    updateConfig('github', { commitMsg: msg });
   };
 
   // Premium Cloud Sync States
@@ -118,16 +118,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   const [syncDropdownOpen, setSyncDropdownOpen] = useState(false);
   const [syncQuery, setSyncQuery] = useState('');
   
-  const [connectedPlatforms, setConnectedPlatforms] = useState<Record<string, boolean>>({
-    vercel: true,
-    netlify: false,
-    cloudflare: false,
-    railway: true,
-    supabase: false,
-    render: false,
-    default: true
-  });
-
   const [fetchedProjects, setFetchedProjects] = useState<any[]>([]);
   const [isFetchingProjects, setIsFetchingProjects] = useState(false);
 
@@ -481,7 +471,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     } else if (selectedPlatform === 'firebase') {
       onFirebaseConnect();
     } else {
-      alert('OAuth authorization handshake initiated for: ' + selectedPlatform.toUpperCase());
+      // No real OAuth exists for these platforms — show the HONEST "not available" state instead of a
+      // faked "handshake initiated" alert (which did nothing).
+      showDeployUnavailable();
     }
   };
 
@@ -990,15 +982,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                           <div className="flex items-center justify-between">
                             <label className="text-[9.5px] font-bold text-[#8b949e]">Commit Message</label>
                             <div className="flex items-center gap-2">
-                              {/* J1: AI-suggested commit message */}
+                              {/* J1: suggest a commit message from the changed files (local heuristic, not AI) */}
                               <button
                                 onClick={generateCommitMessage}
-                                disabled={isGeneratingCommitMsg}
-                                title="AI: Suggest commit message"
-                                aria-label="Suggest commit message with AI"
+                                title="Suggest a commit message from your changed files"
+                                aria-label="Suggest a commit message from your changed files"
                                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black text-indigo-400 hover:text-indigo-300 hover:bg-indigo-900/20 transition-all uppercase tracking-widest"
                               >
-                                <Sparkles className={`w-2.5 h-2.5 ${isGeneratingCommitMsg ? 'animate-pulse' : ''}`} />
+                                <Sparkles className="w-2.5 h-2.5" />
                                 Suggest
                               </button>
                               {/* J15: Character count warning */}
@@ -1452,15 +1443,15 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                       setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠️ Commit message required for sync.`]);
                       return;
                     }
-                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🔄 Syncing: pulling remote changes then pushing local commits...`]);
+                    setDeployLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⬆️ Pushing local commits to the remote…`]);
                     setShowConfirmModal(true);
                   }}
                   disabled={deployStatus === 'validating' || deployStatus === 'building'}
                   className="w-full h-8 bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-40 text-[#8b949e] hover:text-white rounded-xl text-[9px] font-black uppercase tracking-[0.15em] flex items-center justify-center gap-2 transition-all"
-                  title="Sync: pull remote changes then push local commits"
+                  title="Push your local commits to the remote (a remote→local pull is not performed)"
                 >
                   <RefreshCcw className="w-3 h-3" />
-                  Sync with Remote
+                  Push to Remote
                 </button>
               </div>
             )}
@@ -1825,48 +1816,19 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   </div>
                 )
               ) : (
-                /* Native sandbox fallback for other platforms to ensure instant connectivity */
-                connectedPlatforms[selectedSyncPlatform] ? (
-                  <div className="flex items-center justify-between p-2 px-3 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-[#1f2937]/50 flex items-center justify-center border border-emerald-500/20 text-[#8b949e] shrink-0">
-                        <Server className="w-3.5 h-3.5" />
-                      </div>
-                      <div className="leading-none">
-                        <p className="text-[10px] font-black text-white uppercase">{selectedSyncPlatform}</p>
-                        <span className="text-[8px] font-sans text-emerald-400 uppercase tracking-widest font-black inline-flex items-center gap-1 mt-0.5">
-                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                          CONNECTED
-                        </span>
-                      </div>
+                /* Non-GitHub/Firebase cloud sync is NOT available yet — shown HONESTLY. We never fake a
+                   "connected" state here: there is no real OAuth/backend for these platforms. Use GitHub. */
+                <div className="p-3 bg-[#1f2937]/15 border border-white/5 rounded-xl space-y-2">
+                  <div className="flex items-start gap-2">
+                    <Lock className="w-3.5 h-3.5 text-[#8b949e] mt-0.5 shrink-0" />
+                    <div className="leading-tight">
+                      <p className="text-white text-[10px] font-black uppercase tracking-wide">{selectedSyncPlatform.toUpperCase()} sync — coming soon</p>
+                      <p className="text-[#8b949e] text-[8.5px] leading-snug mt-0.5">
+                        Direct {selectedSyncPlatform} cloud sync isn't available yet — we won't fake a connection that doesn't work. Use GitHub (fully supported) to push your project, or export a ZIP.
+                      </p>
                     </div>
-                    <button 
-                      onClick={() => setConnectedPlatforms(p => ({ ...p, [selectedSyncPlatform]: false }))}
-                      className="px-2 py-1 bg-neutral-950 hover:bg-red-500/10 text-[8px] font-black uppercase tracking-widest text-[#8b949e] hover:text-red-400 border border-white/5 hover:border-red-500/25 rounded-lg transition-all"
-                    >
-                      Disconnect
-                    </button>
                   </div>
-                ) : (
-                  <div className="p-3 bg-[#1f2937]/15 border border-white/5 rounded-xl space-y-2">
-                    <div className="flex items-start gap-2">
-                      <Lock className="w-3.5 h-3.5 text-indigo-400 mt-0.5 shrink-0" />
-                      <div className="leading-tight">
-                        <p className="text-white text-[10px] font-black uppercase tracking-wide">Connect {selectedSyncPlatform.toUpperCase()}</p>
-                        <p className="text-[#8b949e] text-[8.5px] leading-snug mt-0.5">
-                          Establish secure OAuth tunnels into {selectedSyncPlatform} credentials.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setConnectedPlatforms(p => ({ ...p, [selectedSyncPlatform]: true }))}
-                      className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Connect {selectedSyncPlatform} Session
-                    </button>
-                  </div>
-                )
+                </div>
               )}
             </div>
 

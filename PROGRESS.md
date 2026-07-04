@@ -8031,3 +8031,31 @@ size+count quota + takedown guard + content scan apply with ZERO extra wiring. A
 agentv3_deploy entry updated (Cloudflare added). Gate: frontend tsc 0, server tsc 0, vitest 4643/4643
 PASS, boot PASS. Admin: set CLOUDFLARE_API_TOKEN (Pages:Edit) + CLOUDFLARE_ACCOUNT_ID as Cloud Run
 secrets to activate.
+
+## 2026-07-04 — HOTFIX (admin-reported): 1-sec internet blip fails a build + stale account-lock traps retries
+
+Two coupled bugs, root-caused via a client-stream investigation. Symptom: a ~1s network drop during a
+v3.0 build showed "failed"; retrying said "A build is already running for this account" with NO working
+Stop/Resume and History showed 404 (the dropped build never persisted).
+
+ROOT CAUSES:
+- Bug 1: on a mid-stream network drop the client's catch probed /status ONCE, immediately — while the
+  network was still down — so the probe also threw and the build was declared FAILED (the 100s stall
+  watchdog can't help: the hard error flips running→false, tearing the watchdog down).
+- Bug 2: the account build-lock (`activeBuilds`) is released by the handler's finally; if a blip leaves
+  the build stuck on an un-abortable await, that finally never runs and the lock is only freed at the
+  long wall-clock deadline — trapping the account for minutes. The client's 409 recovery was gated on
+  workspaceIdRef.current (only set by a live stream event), so after a reload (new sessionId) it
+  dead-ended with no Stop button (panel Stop is gated on serverBuildRunning, which stayed false).
+
+FIXES (three layers so it can't recur):
+1. Client (blip resilience): the reconnect probe now RETRIES with backoff (4 attempts: 0/1.2/2.4/3.6s)
+   — a brief blip is caught on a later attempt → transparent resume() instead of "failed". Only errors
+   when a probe definitively reports the build gone or all attempts fail.
+2. Client (409 recovery): the dead-end 409 branch now sets serverBuildRunning=true so the panel renders
+   the real ⏹ Stop button (which force-clears the lock server-side) + an honest "Press Stop, then send
+   again" message — no more dead end.
+3. Server (lock reclaim): new pure shouldReclaimBuildLock() — a NEW build request auto-reclaims an
+   ABANDONED (no subscriber + past the 30s stall window) or ZOMBIE (no live registry entry) lock,
+   tearing the old build down cleanly, so a hung/dropped build can never trap the account beyond ~30s.
+   +5 unit tests. Gate: frontend tsc 0, server tsc 0, vitest 4648/4648 PASS, boot:check PASS.

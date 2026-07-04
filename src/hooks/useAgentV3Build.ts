@@ -687,10 +687,15 @@ export function useAgentV3Build(): UseAgentV3Build {
             return;
           }
           if (res.status === 409 && resumable) {
-            // A build is running for this account but in a DIFFERENT (or unknown) session —
-            // attaching it here would pour another chat's build into this one. Point the user at
-            // the right place instead of a dead end.
-            msg = 'A build from another chat on your account is still running. Open that chat from the ☰ History menu to watch or stop it, then try again here.';
+            // A build is running for this account but in a DIFFERENT (or unknown) session — attaching
+            // it here would pour another chat's build into this one. But a bare error DEAD-ENDS the user
+            // (root-cause fix): flip serverBuildRunning so the panel renders the real STOP button, which
+            // force-clears the account lock server-side. The message tells them exactly that. (The server
+            // ALSO auto-reclaims an abandoned lock after its stall window, so this is the fast manual path.)
+            setServerBuildRunning(true);
+            setError('A build is still running on your account. Press ⏹ Stop to end it, then send your message again.');
+            setRunning(false);
+            return;
           }
           setError(msg);
           setRunning(false);
@@ -768,18 +773,30 @@ export function useAgentV3Build(): UseAgentV3Build {
           // silence window that never comes (the drop flips `running` to false first).
           // Skipped entirely once stale — the user already navigated away, so a dropped connection
           // for the ABANDONED build must not reconnect into (or show an error on) the new session.
+          // RETRY the reconnect probe with backoff (root-cause fix for "a 1-second blip fails the
+          // build"): the single immediate probe ran WHILE the network was still down, so it too threw
+          // and the build was declared FAILED. A brief blip (iOS "Load failed", a 1–2s mobile drop) is
+          // over by the 2nd/3rd attempt — so we retry a few times before giving up, and only surface
+          // the real error once a probe DEFINITIVELY reports the build is gone or all attempts fail.
           let reconnected = false;
-          try {
-            const params = new URLSearchParams();
-            if (userIdRef.current) params.set('userId', userIdRef.current);
-            if (emailRef.current) params.set('email', emailRef.current);
-            const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
-            const j = await probe.json().catch(() => ({}));
-            if (j?.buildRunning === true && !isStale(gen)) {
-              reconnected = true;
-              await resume({ userId: userIdRef.current, email: emailRef.current });
-            }
-          } catch { /* probe/reconnect failed — fall through to showing the real error */ }
+          for (let attempt = 0; attempt < 4 && !reconnected && !isStale(gen); attempt++) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 1200 * attempt)); // 0, 1.2s, 2.4s, 3.6s
+            try {
+              const params = new URLSearchParams();
+              if (userIdRef.current) params.set('userId', userIdRef.current);
+              if (emailRef.current) params.set('email', emailRef.current);
+              const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
+              const j = await probe.json().catch(() => ({}));
+              if (isStale(gen)) break;
+              if (j?.buildRunning === true) {
+                reconnected = true;
+                await resume({ userId: userIdRef.current, email: emailRef.current });
+              } else if (j && j.buildRunning === false) {
+                break; // server reached + build genuinely ended — stop retrying, show the real result/error
+              }
+              // else: probe reached but shape was unexpected → try again after backoff
+            } catch { /* still offline — back off and retry */ }
+          }
           if (!reconnected && !isStale(gen)) setError(err instanceof Error ? err.message : String(err));
         }
       } finally {

@@ -87,6 +87,9 @@ import { judgeBuild, judgeRepairPrompt } from '../AgentV3/BuildJudge';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
+// Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
+import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { billedAmountUsd } from '../AgentV3/pricing';
@@ -3678,6 +3681,82 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
+      // ── SOFTWARE PROJECT MODE (SPM-2) — flag-gated AGENTV3_PROJECT_MODE=on, default OFF ──────
+      // A 1000-5000-file project can never fit one agentic conversation (context window, step cap,
+      // wall clock). In project mode the mega-ask is decomposed ONCE into modules with explicit
+      // dependencies + frozen export contracts (durable — survives reloads and instance rotations),
+      // and each build turn constructs ONE module in a small, constant-size context: that module's
+      // spec + the contracts of already-DONE modules. The existing Layer-3 client auto-continue
+      // drives turn after turn via the `resumable` result flag below. FULLY CONTAINED: flag off, no
+      // plan, a non-mega ask, a planner failure, or ANY error → the build runs EXACTLY as today.
+      // With a plan active, only a CONTINUATION message advances it — a substantive mid-project
+      // message (an edit request, a question) takes the normal build path so it is never
+      // steamrolled into "build module N". Planner tokens are billed via blueprintUsage (same
+      // markup as every other v3.0 call).
+      let projectPlanRef: ProjectPlan | null = null;
+      let projectModuleRef: ProjectModule | null = null;
+      if (projectModeEnabled() && !planFirst) {
+        try {
+          let pPlan = await loadProjectPlan(workspaceId);
+          const planPreExisted = !!pPlan;
+          if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
+            events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
+            const ppGenerate = async (system: string, user: string): Promise<string> => {
+              const startedAt = Date.now();
+              const call = new ClaudeClient(undefined, { maxRetries: 1 }).runTurn({
+                model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+              });
+              // Hard timeout so the up-front planner can NEVER hang the build (the losing call is ignored).
+              const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('project planner timed out')), 60_000));
+              const t = await Promise.race([call, timeout]);
+              try {
+                buildDiag.recordLlmCall({ model: fastBuildModel(), provider: 'anthropic', promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              } catch { /* diagnostics best-effort */ }
+              blueprintUsage.inputTokens += t.usage.inputTokens;
+              blueprintUsage.outputTokens += t.usage.outputTokens;
+              return t.text;
+            };
+            const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(prompt, ppScaffold)));
+            if (modules.length >= MIN_PROJECT_MODULES) {
+              pPlan = createProjectPlan(prompt, framework, modules, Date.now());
+              await saveProjectPlan(workspaceId, pPlan);
+              events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
+            }
+            // Fewer modules than MIN_PROJECT_MODULES → not really a mega-project; fall through and
+            // build normally (honest fallback — never force a small app through module rounds).
+          }
+          if (pPlan && !planComplete(pPlan) && (!planPreExisted || isContinuationMessage(prompt))) {
+            let nextMod = nextBuildableModule(pPlan);
+            // RETRY a failed module on an EXPLICIT user continuation (auto-continue stops at a
+            // failure by design — `resumable` is only emitted on ok results). Resetting it to
+            // pending clears the failure detail and lets the normal scheduler pick it up again.
+            if (!nextMod && planPreExisted) {
+              const failedMod = pPlan.modules.find((m) => m.status === 'failed');
+              if (failedMod) {
+                pPlan = markModuleStatus(pPlan, failedMod.id, 'pending');
+                nextMod = nextBuildableModule(pPlan);
+                if (nextMod) events.emit({ type: 'narration', agent: 'architect', text: `🔁 Retrying module "${failedMod.name}" (it failed last round).`, ts: Date.now() });
+              }
+            }
+            if (nextMod) {
+              pPlan = markModuleStatus(pPlan, nextMod.id, 'in_progress');
+              await saveProjectPlan(workspaceId, pPlan);
+              state.setTodos(projectPlanTodos(pPlan));
+              projectPlanRef = pPlan;
+              projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
+              buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 ${planProgressLine(pPlan)}`, ts: Date.now() });
+            } else {
+              const reason = planBlockedReason(pPlan);
+              if (reason) events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Project plan is blocked: ${reason}`, ts: Date.now() });
+            }
+          } else if (pPlan && !planComplete(pPlan) && planPreExisted) {
+            events.emit({ type: 'narration', agent: 'architect', text: `ℹ️ Handling this message normally (project plan stays paused at ${planProgressLine(pPlan)}). Say "continue" to resume the next module.`, ts: Date.now() });
+          }
+        } catch { /* project mode is additive — on ANY failure the build proceeds exactly as today */ }
+      }
+
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
       // this is exactly `await runner.run(buildPrompt)` (the start-tier build, once). When
       // on, the build runs cheap-first and climbs the analyser's escalation path ONLY when
@@ -3694,7 +3773,9 @@ export function registerAgentV3Routes(app: Express): void {
       // sub-agents, no per-file round-trips, no Opus, no rebuild loop). On success the build is
       // done. On ANY failure (no usable files / model error) it falls through to the agentic loop
       // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
-      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier)) {
+      // Project mode (SPM-2): a module turn always runs the agentic loop — the fast lane's isolated
+      // per-file generation has no tool loop to honor the module's frozen contracts and file scope.
+      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier) && !projectModuleRef) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -4282,6 +4363,31 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }
 
+      // ── SOFTWARE PROJECT MODE (SPM-2): settle this module's status from the REAL result ──────
+      // done only on a genuinely successful turn; failed (with the honest reason) otherwise — a
+      // failed module blocks its dependents by design (planBlockedReason reports it). A wall-clock
+      // pause never reaches here, so the module stays in_progress and the next turn RESUMES it.
+      // The plan (todos projection) is refreshed BEFORE the PLAN_STATE capture below so the durable
+      // note reflects the settled statuses. Best-effort — never affects the build result.
+      if (projectPlanRef && projectModuleRef) {
+        try {
+          const settled = result.ok
+            ? markModuleStatus(projectPlanRef, projectModuleRef.id, 'done')
+            : markModuleStatus(projectPlanRef, projectModuleRef.id, 'failed', (result.summary || 'The build turn for this module failed.').slice(0, 300));
+          await saveProjectPlan(workspaceId, settled);
+          projectPlanRef = settled;
+          state.setTodos(projectPlanTodos(settled));
+          if (planComplete(settled)) {
+            events.emit({ type: 'narration', agent: 'architect', text: `🏁 All ${settled.modules.length} modules are complete — the project plan is finished.`, ts: Date.now() });
+          } else if (result.ok) {
+            events.emit({ type: 'narration', agent: 'architect', text: `✅ Module "${projectModuleRef.name}" done — ${planProgressLine(settled)}. Continuing with the next module…`, ts: Date.now() });
+          } else {
+            const reason = planBlockedReason(settled);
+            events.emit({ type: 'narration', agent: 'architect', text: `❌ Module "${projectModuleRef.name}" failed — ${reason ?? 'say "continue" after reviewing to retry the remaining modules.'}`, ts: Date.now() });
+          }
+        } catch { /* module settle is best-effort — the plan self-heals on the next turn */ }
+      }
+
       // P-AI.5 — Personalization: learn this user's revealed stack from the SUCCESSFUL build.
       // Inferred from the files that actually shipped (framework + deps + code) and the prompt —
       // never from explicit input. Feeds the next build's injected preference context above.
@@ -4539,7 +4645,14 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
       // P-UX.7 — surface the build's token count to the client (in + out) for a usage badge. 0 → omitted.
       const totalTokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
-      emit({ type: 'result', ...result, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}) });
+      // SOFTWARE PROJECT MODE (SPM-2): a successful MODULE turn with plan modules still buildable
+      // marks the result `resumable`, so the existing Layer-3 client auto-continue drives the next
+      // module without the user typing "continue". Only on ok (a failed module stops the loop for
+      // an explicit user decision) and only when the plan can actually advance (never on blocked).
+      const projectContinue = projectPlanRef && result.ok && !planComplete(projectPlanRef) && nextBuildableModule(projectPlanRef)
+        ? { resumable: true, planRemaining: projectPlanRef.modules.filter((m) => m.status !== 'done').length }
+        : {};
+      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}) });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

@@ -4,6 +4,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  projectModeEnabled,
+  detectMegaProject,
+  isContinuationMessage,
   extractJsonArray,
   parsePlannedModules,
   createProjectPlan,
@@ -37,6 +40,57 @@ const mod = (over: Partial<ProjectModule> = {}): ProjectModule => ({
 });
 
 const plan = (modules: ProjectModule[]): ProjectPlan => createProjectPlan('build a big app', 'vite-react', modules, 1_000);
+
+describe('project-mode gating', () => {
+  it('projectModeEnabled requires the exact flag value', () => {
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'on' } as NodeJS.ProcessEnv)).toBe(true);
+    expect(projectModeEnabled({ AGENTV3_PROJECT_MODE: 'true' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(projectModeEnabled({} as NodeJS.ProcessEnv)).toBe(false);
+  });
+
+  it('detectMegaProject fires on an explicit large scale', () => {
+    expect(detectMegaProject('banao ek software with 1000 files, complete ERP')).toBe(true);
+    expect(detectMegaProject('an app with 200+ screens for logistics')).toBe(true);
+    // Small explicit scale does NOT fire.
+    expect(detectMegaProject('a landing page with 5 pages')).toBe(false);
+  });
+
+  it('detectMegaProject fires on big-software noun + a long feature enumeration', () => {
+    const features = Array.from({ length: 9 }, (_, i) => `- feature ${i}: something real`).join('\n');
+    expect(detectMegaProject(`Build a hospital management system:\n${features}`)).toBe(true);
+    // The same noun WITHOUT the enumeration stays conservative (a small HMS demo is fine as one build).
+    expect(detectMegaProject('Build a hospital management system')).toBe(false);
+  });
+
+  it('detectMegaProject fires on a very long spec even without a category noun', () => {
+    const bullets = Array.from({ length: 15 }, (_, i) => `${i + 1}. requirement ${i}`).join('\n');
+    expect(detectMegaProject(`I need an app that does:\n${bullets}`)).toBe(true);
+  });
+
+  it('detectMegaProject stays OFF for ordinary apps (high precision by design)', () => {
+    expect(detectMegaProject('make me a todo app with dark mode')).toBe(false);
+    expect(detectMegaProject('ek calculator banao')).toBe(false);
+    expect(detectMegaProject('a portfolio site with:\n- about\n- projects\n- contact')).toBe(false);
+    expect(detectMegaProject('')).toBe(false);
+  });
+
+  it('isContinuationMessage matches the client auto-continue prompt and human phrasings', () => {
+    expect(isContinuationMessage('continue')).toBe(true); // the literal Layer-3 auto-continue prompt
+    expect(isContinuationMessage('Continue!')).toBe(true);
+    expect(isContinuationMessage('please continue')).toBe(true);
+    expect(isContinuationMessage('ok, keep going')).toBe(true);
+    expect(isContinuationMessage('next module')).toBe(true);
+    expect(isContinuationMessage('continue karo')).toBe(true);
+    expect(isContinuationMessage('aage badhao')).toBe(true);
+  });
+
+  it('isContinuationMessage rejects substantive instructions (never steamroll a real ask)', () => {
+    expect(isContinuationMessage('change the logo color to blue')).toBe(false);
+    expect(isContinuationMessage('continue but first fix the login bug on the signup page')).toBe(false);
+    expect(isContinuationMessage('why did the last module fail?')).toBe(false);
+    expect(isContinuationMessage('')).toBe(false);
+  });
+});
 
 describe('extractJsonArray', () => {
   it('parses a bare JSON array', () => {

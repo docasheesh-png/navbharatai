@@ -57,7 +57,7 @@ export type AgentV3WireEvent =
   | { type: 'repo'; url: string; fullName: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {

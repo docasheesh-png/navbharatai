@@ -75,6 +75,50 @@ function slugify(s: string, fallback: string): string {
   return slug || fallback;
 }
 
+// ── Project-mode gating (pure, conservative) ──────────────────────────────────────────────────
+
+/** Fewer than this many parsed modules means the ask was not really a mega-project — the build
+ *  then runs the normal path (project mode must never make a small build slower/costlier). */
+export const MIN_PROJECT_MODULES = 3;
+
+/** Master kill-switch: Software Project Mode runs ONLY when AGENTV3_PROJECT_MODE=on. */
+export function projectModeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AGENTV3_PROJECT_MODE === 'on';
+}
+
+/**
+ * Conservative mega-project detection — HIGH precision on purpose. A false positive would route
+ * an ordinary app through module decomposition (slower + an extra planner call); a false negative
+ * just builds exactly as today. Fires only on a clear signal:
+ *   A. an explicit large scale: "N files/pages/screens/modules" with N >= 100, or
+ *   B. a big-software category noun (ERP/CRM/management system/SaaS platform/…) AND >= 8
+ *      enumerated feature lines, or
+ *   C. >= 14 enumerated feature lines (a spec that long is a project, whatever it's called).
+ * PURE.
+ */
+export function detectMegaProject(prompt: string): boolean {
+  const text = (prompt || '').toLowerCase();
+  const scale = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
+  if (scale && Number(scale[1]) >= 100) return true;
+  const bullets = (prompt || '').split('\n').filter((l) => /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/.test(l)).length;
+  const bigNoun = /\b(?:erp|crm|lms|hms|hrms|pos)\b|management system|management software|enterprise|saas platform|multi[- ]tenant|marketplace|social network|super ?app|full[- ](?:fledged|scale)/i.test(text);
+  if (bigNoun && bullets >= 8) return true;
+  return bullets >= 14;
+}
+
+/**
+ * Is this turn's message a "keep going" continuation (vs a NEW substantive instruction)? When a
+ * project plan already exists, only a continuation advances it to the next module — a substantive
+ * message (an edit request, a question) is handled by the normal build path so the user's actual
+ * ask is never steamrolled into "build module N". Matches the client's literal auto-continue
+ * prompt ('continue') plus common English + Hinglish phrasings. PURE.
+ */
+export function isContinuationMessage(prompt: string): boolean {
+  const t = (prompt || '').trim().toLowerCase();
+  if (!t || t.length > 80) return false;
+  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|proceed|carry on|keep going|go on|next(?: module| step)?|finish(?: it)?|complete(?: it)?|aage(?: barh| badh)(?:o|ao|iye)?|jari rakho|chalu rakho|continue karo|next banao|aage chalo)(?:\s+(?:building|the build|the project|karo|karo!|it))?[\s!.।]*$/i.test(t);
+}
+
 // ── Parsing the planner's output ──────────────────────────────────────────────────────────────
 
 /**

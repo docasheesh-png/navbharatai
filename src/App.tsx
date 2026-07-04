@@ -6453,8 +6453,10 @@ ${buildLanguageRule(preferredLanguage)}`;
       />
 
       {/* P-UX.4 — Product Tour overlay (dependency-free; renders its own launcher). Navigates via the
-          app's guarded toggleTab and gracefully skips any target not present on the current view. */}
-      <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} />
+          app's guarded toggleTab and gracefully skips any target not present on the current view.
+          currentView gates the floating launcher to the home view only, so it never overlaps the
+          controls on other surfaces (e.g. the v3.0 chat composer). */}
+      <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} currentView={activeView} />
 
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too). */}
       {effectiveDeviceMode !== 'desktop' && !focusMode && (

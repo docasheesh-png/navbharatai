@@ -8158,3 +8158,14 @@ shipping a speculative boot fix without the Diagnose log would be guessing (rule
 preview + Diagnose remain the honest fallbacks.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4660/4660 PASS, boot:check PASS.
+
+## 2026-07-04 — v3.0 focus-mode follow-up: remove the dead strip under the composer (PR after #936)
+
+Admin (IMG_5708) flagged an empty unused strip under the v3.0 composer in focus mode, above the phone
+browser's address bar. ROOT CAUSE (App.tsx:5544): the mobile view container reserved `pb-14` (56px)
+"space for bottom nav on mobile" unconditionally — but the mobile bottom nav is hidden in focus mode
+(its <nav> at App.tsx:6506 is gated on `!focusMode`). So focus mode padded 56px for a nav that isn't
+rendered → empty dead strip. FIX: gate the `pb-14` on the SAME `!focusMode` condition as the nav, so
+the reservation and the nav stay in lock-step (padding exists iff the nav does). Composer's own
+`pb-[env(safe-area-inset-bottom)]` stays → sits just above the browser bar without hiding behind it.
+Gate: frontend tsc 0, vitest 4650/4650 PASS, build PASS.

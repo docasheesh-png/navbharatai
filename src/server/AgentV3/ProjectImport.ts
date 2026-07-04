@@ -23,6 +23,20 @@ const JUNK_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 // Live secrets are excluded; ".env.example"/".env.sample" templates are safe and useful to keep.
 const SECRET_FILE_RE = /(^|\/)\.env(\.local|\.production|\.development|\.staging)?$|\.(pem|key|p12|pfx|keystore|jks)$/i;
 const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|icns|bmp|tiff?|mp3|mp4|mov|avi|mkv|webm|wav|ogg|flac|zip|gz|tgz|bz2|7z|rar|jar|war|exe|dll|so|dylib|bin|wasm|pdf|docx?|xlsx?|pptx?|ttf|otf|woff2?|eot|psd|ai|sketch|db|sqlite3?)$/i;
+// Small binary ASSETS worth keeping (an imported app's logo/favicon/icons/fonts) so the preview
+// isn't full of broken images. Everything ELSE that matches BINARY_EXT_RE (video/audio/archives/
+// binaries) stays dropped — too large and never needed to boot a preview. ext → MIME for a data URI.
+const ASSET_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  avif: 'image/avif', ico: 'image/x-icon', bmp: 'image/bmp',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject',
+};
+
+/** The asset MIME for a path, or null when it is not a keepable small-asset type. Pure. */
+export function assetMimeFor(path: string): string | null {
+  const m = path.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return m ? (ASSET_MIME[m[1]] ?? null) : null;
+}
 // Text lockfiles pin the EXACT dependency tree the app was built with — losing them makes
 // `npm install` re-resolve versions and can break an imported app in ways the user never had.
 // (bun.lockb is binary and stays excluded.)
@@ -34,9 +48,21 @@ export const IMPORT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
 /** A lockfile larger than the durable cap is still written to the SANDBOX (npm install needs it);
  *  only truly enormous ones are dropped. */
 export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
+/** Per-asset RAW-byte cap — a small logo/favicon/icon/font, not a hero video. */
+export const IMPORT_MAX_ASSET_BYTES = 200 * 1024;
+/** Bounds on the kept-asset set so a media-heavy zip can't blow the budget. */
+export const IMPORT_MAX_ASSETS = 200;
+export const IMPORT_MAX_ASSET_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export interface ExtractedProject {
   files: Record<string, string>;
+  /**
+   * Small binary assets (logo/favicon/icons/fonts, ≤200KB each) kept as `data:<mime>;base64,…`
+   * strings. Deliberately SEPARATE from `files`: assets are written to the sandbox as real bytes
+   * and persisted in their OWN durable store, so they never pollute the text-file map that the
+   * in-browser preview, the deploy collector, and the AI's file reads consume.
+   */
+  assets: Record<string, string>;
   /**
    * Files that exceed the durable-store cap but are still worth having in the LIVE sandbox
    * (today: big text lockfiles, so `npm install` reproduces the app's exact dependency tree).
@@ -121,14 +147,30 @@ export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> 
   }
 
   const files: Record<string, string> = {};
+  const assets: Record<string, string> = {};
   const sandboxOnly: Record<string, string> = {};
   let totalBytes = 0;
+  let assetBytes = 0;
   for (const { path, entry } of entries) {
     if (!path) continue; // re-rooted away above (already counted)
     if (SKIP_DIR_RE.test(path)) { dropped.dir++; continue; }
     if (JUNK_FILE_RE.test(path)) { dropped.junk++; continue; }
     if (SECRET_FILE_RE.test(path)) { dropped.secret++; continue; }
-    if (BINARY_EXT_RE.test(path)) { dropped.binary++; continue; }
+    if (BINARY_EXT_RE.test(path)) {
+      // A small image/font asset is KEPT (as a data URI); every other binary is dropped.
+      const mime = assetMimeFor(path);
+      if (mime && Object.keys(assets).length < IMPORT_MAX_ASSETS) {
+        const b64 = await entry.async('base64');
+        const rawBytes = Math.floor((b64.length * 3) / 4); // base64 → raw byte estimate
+        if (rawBytes <= IMPORT_MAX_ASSET_BYTES && assetBytes + rawBytes <= IMPORT_MAX_ASSET_TOTAL_BYTES) {
+          assets[path] = `data:${mime};base64,${b64}`;
+          assetBytes += rawBytes;
+          continue;
+        }
+      }
+      dropped.binary++;
+      continue;
+    }
     if (Object.keys(files).length >= IMPORT_MAX_FILES) { dropped.overCap++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
@@ -143,7 +185,19 @@ export async function extractZipProject(buf: Buffer): Promise<ExtractedProject> 
     totalBytes += bytes;
     files[path] = content;
   }
-  return { files, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
+  return { files, assets, sandboxOnly, dropped, totalEntries, strippedRoot, appRoot };
+}
+
+/**
+ * Split a `data:<mime>;base64,<payload>` string into its mime + base64 payload, or null when it
+ * is not a base64 data URI. Used to materialize a stored asset back into the sandbox as real
+ * bytes (via the actuator's writeBinaryFile). Pure + tested.
+ */
+export function parseDataUri(dataUri: string): { mime: string; base64: string } | null {
+  if (typeof dataUri !== 'string') return null;
+  const m = dataUri.match(/^data:([^;,]+);base64,(.*)$/s);
+  if (!m) return null;
+  return { mime: m[1], base64: m[2] };
 }
 
 /**
@@ -287,6 +341,8 @@ export function droppedDetailNote(extracted: ExtractedProject): string {
 export function importSummaryLine(extracted: ExtractedProject, framework: string): string {
   const n = Object.keys(extracted.files).length;
   const parts = [`📦 Imported ${n} file${n === 1 ? '' : 's'} from your zip (framework: ${framework})`];
+  const assetCount = Object.keys(extracted.assets).length;
+  if (assetCount > 0) parts.push(`+ ${assetCount} image/font asset${assetCount === 1 ? '' : 's'}`);
   if (extracted.appRoot) parts.push(`— landed the app from its "${extracted.appRoot}/" folder`);
   const lockfiles = Object.keys(extracted.sandboxOnly);
   if (lockfiles.length > 0) parts.push(`— kept ${lockfiles.join(', ')} for exact dependency versions (sandbox only, too large for durable storage)`);

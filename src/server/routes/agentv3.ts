@@ -155,6 +155,7 @@ import {
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
@@ -1566,6 +1567,8 @@ export function registerAgentV3Routes(app: Express): void {
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
         const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         if (Object.keys(saved).length > 0) await writeWorkspaceFiles(actuator, workspaceId, saved);
+        // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
+        await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
       } catch { /* hydration is best-effort — the structure check below still runs */ }
       // STRUCTURE VALIDATION FIRST — before spending 90 s trying to boot a server that CAN'T run.
       // Read package.json and confirm the project is actually runnable (valid JSON + a dev/start/serve
@@ -2223,6 +2226,8 @@ export function registerAgentV3Routes(app: Express): void {
       const saved = await loadWorkspaceFiles(workspaceId);
       if (saved && Object.keys(saved).length > 0) {
         const { written } = await writeWorkspaceFiles(actuator, workspaceId, saved);
+        // Also re-materialize the durable binary assets so a restored app isn't full of broken images.
+        await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
         res.json({ files: written, count: written.length, restored: true, source: 'saved' });
         return;
       }
@@ -2678,7 +2683,7 @@ export function registerAgentV3Routes(app: Express): void {
     let importPreviewBoot: Promise<void> | undefined;
     const landImportedProject = async (
       importedFiles: Record<string, string>,
-      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string> },
+      opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
     ): Promise<boolean> => {
       const validation = validateImportedProject(importedFiles);
       if (!validation.ok) {
@@ -2699,6 +2704,15 @@ export function registerAgentV3Routes(app: Express): void {
         }
       } else {
         written = Object.keys(importedFiles); // already in the sandbox (e.g. a git clone)
+      }
+      // Small binary assets (logo/favicon/icons/fonts): write REAL bytes into the sandbox so the
+      // live preview renders them, and persist them in their OWN durable store so they survive a
+      // reload/recycle (the text-file store can't hold binaries — see WorkspaceAssetStore). Kept
+      // entirely out of `importedFiles`, so they never pollute the text map. Best-effort.
+      const assets = opts.assets ?? {};
+      if (Object.keys(assets).length > 0) {
+        if (opts.writeToSandbox) { try { await materializeAssets(actuator, workspaceId, assets); } catch { /* an asset failing never blocks the import */ } }
+        void saveWorkspaceAssets(workspaceId, assets).catch(() => {});
       }
       // DURABLE PERSIST — the half whose absence caused "zip imported but Files/IDE/Preview all
       // empty": without it the import lives only in the ephemeral sandbox.
@@ -2767,6 +2781,7 @@ export function registerAgentV3Routes(app: Express): void {
             droppedDetailNote(extracted),
           ].filter(Boolean).join(' '),
           sandboxOnly: extracted.sandboxOnly,
+          assets: extracted.assets,
         });
       } catch (err) {
         emit({ type: 'narration', agent: 'architect', text: `⚠️ Could not unpack the zip (${err instanceof Error ? err.message : String(err)}) — nothing was imported. Please re-export the archive and try again.`, ts: Date.now() });
@@ -3189,6 +3204,9 @@ export function registerAgentV3Routes(app: Express): void {
           const plan = planFileGuardian(saved, existing.files);
           if (plan.count > 0) {
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
+            // A recycled sandbox loses binary assets too (they aren't in the text-file store or the
+            // sandbox scan) — re-materialize them from the durable asset store alongside the files.
+            await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
             // The guardian used to restore files SILENTLY — no file_changed event, so the client's
             // "Files (N)" count (and the agent's own file-count answers in plain chat, above) stayed
             // stuck at the pre-restore number even though the workspace genuinely has plan.count more

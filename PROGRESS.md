@@ -7826,3 +7826,30 @@ succeed), and the Google OAuth Web client already lists https://navbharatai.com/
 https://navbharatai.com. server.ts FIREBASE_AUTH_HOST left as the real firebaseapp.com host (proxy
 upstream). Gate: tsc 0, vitest 4488/4488 PASS, boot PASS. Post-deploy: test Google login immediately;
 1-line revert ready if any issue.
+
+## 2026-07-04 — Tier-2b BUILT: small binary assets kept (the 5th & final import addition)
+
+The deferred piece from Tier-2a, now done COMPLETELY (no half-state): an imported app's small
+binary assets (logo/favicon/icons/fonts, ≤200KB each) are kept as REAL bytes so the preview
+isn't full of broken images.
+- Extraction (ProjectImport.ts): a BINARY_EXT_RE entry that is a keepable image/font type
+  (ASSET_MIME map) and ≤200KB (≤200 assets, ≤20MB total) is stored as a `data:<mime>;base64,…`
+  string in a NEW ExtractedProject.assets bucket — deliberately SEPARATE from `files`. Every
+  other binary (video/audio/archive/large image) stays dropped. parseDataUri/assetMimeFor pure+tested.
+- Why a separate bucket + separate store (the design decision, verified in code): the text-file
+  store (WorkspaceFileStore) is REPLACED after every build from a text-only sandbox scan
+  (collectWorkspaceFiles skips binaries via NUL) — an asset put there would be silently dropped on
+  the FIRST build after import. And a data-URI in the text map would leak `data:` blobs into the
+  in-browser preview, the deploy collector, and the AI's file reads. So assets get WorkspaceAssetStore
+  (own Firestore collection workspace_assets_v3, one doc/asset, merge-union, #873 settings-guard).
+- Landing (route): assets written to the sandbox as real bytes (actuator.writeBinaryFile via
+  materializeAssets) AND persisted via saveWorkspaceAssets. Materialized back into the sandbox at
+  EVERY restore point — the restore endpoint, the build-start File Guardian (cold-sandbox signal),
+  and the structure-check reseed — via restoreWorkspaceAssets. So an imported logo survives reload,
+  tab close, and instance rotation, exactly like the source files.
+- Known gap (honest, pre-existing — NOT introduced here): the importUrl GIT-CLONE path
+  (writeToSandbox:false) still doesn't persist its binary assets durably, because its file set comes
+  from collectWorkspaceFiles which skips binaries. Closing that needs a binary read on the shared
+  deploy collector — a separate, larger change; recorded, not half-built.
+14 new tests (ProjectImport asset extraction + WorkspaceAssetStore materialize/restore). AppKnowledgeBase
+zip-import entry updated (sync rule). Gate: tsc 0/0 both, vitest 4554/4554, build + boot PASS.

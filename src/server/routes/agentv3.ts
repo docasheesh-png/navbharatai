@@ -3309,6 +3309,7 @@ export function registerAgentV3Routes(app: Express): void {
       const deploy = withDeploymentPersistence(
         (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
         userId,
+        chosenProviderId, // Phase 0 hosting quota: classify first-party (platform-paid) vs BYO
       );
       // writtenFiles is declared further up (hoisted so the deadline-timeout/crash paths can see it too).
       // Fix 2 — PROGRESSIVE SERVER PERSISTENCE: save every written file to Firestore

@@ -7911,3 +7911,18 @@ Slice 1 (pure modules, zero wiring — cannot break anything):
 
 Not yet wired (Slice 2): enforcement at the withDeploymentPersistence choke point. Gate: frontend
 tsc 0, server tsc 0, vitest 4559/4559 PASS, boot PASS.
+
+## 2026-07-04 — HOSTING Phase 0, Slice 2: enforce the quota at the deploy choke point
+
+Wired Slice 1's HostingQuota into the ONE place every AgentV3 deploy funnels through —
+withDeploymentPersistence (DeploymentStore.ts). Before base() publishes: a 5s-bounded, FAIL-OPEN
+enforceHostingQuota() runs; over-limit throws an honest Error that propagates to the deploy tool's
+error result (verified path: ToolDispatcher deploy case 1767 → general dispatch catch 656 → is_error
+result) so NOTHING is published, no `preview` event, no URL, no fake success. On success, first-party
+publishes increment hostingUsageStore.recordDeploy(userId) and the agentv3_deployments registry doc is
+extended with providerId/firstParty/sizeMb/status:'active' (the takedown/report spine for later slices).
+BYO deploys pass straight through (user's own host/cost). withDeploymentPersistence gained a providerId
+param; agentv3.ts:3309 passes chosenProviderId. record() extended additively (only 2 callers; the
+get-consumer is additive-safe). +5 gate tests (normal passes; oversized first-party blocks before
+publish, base never called; env-lowered cap; BYO never blocked; count-cap fails-open under VITEST).
+Gate: frontend tsc 0, server tsc 0, vitest 4604/4604 PASS, boot PASS.

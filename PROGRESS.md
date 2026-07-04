@@ -7926,3 +7926,19 @@ param; agentv3.ts:3309 passes chosenProviderId. record() extended additively (on
 get-consumer is additive-safe). +5 gate tests (normal passes; oversized first-party blocks before
 publish, base never called; env-lowered cap; BYO never blocked; count-cap fails-open under VITEST).
 Gate: frontend tsc 0, server tsc 0, vitest 4604/4604 PASS, boot PASS.
+
+## 2026-07-04 — HOSTING Phase 0, Slice 3: registry queries + REAL Firebase takedown (Phase 0 complete)
+
+Completes Phase 0 (the abuse/takedown spine on top of the quota core). DeploymentStore gains
+list()/listByUser()/setStatus() (best-effort, in-memory status filter → no composite Firestore index).
+FirebaseHostingDeployer.deleteChannel(workspaceId) is a REAL unpublish via Firebase Hosting
+channels.delete keyed by the SAME makeChannelId as deploy — idempotent (404=already-gone=success),
+honest 403 (missing Firebase Hosting Admin IAM). admin.ts adds verifyAdminToken routes: GET
+/api/admin/deployments (list, ?status=/?userId=), POST .../:workspaceId/takedown (deleteChannel FIRST
+then setStatus('taken_down') + audit ADMIN_APP_TAKEDOWN; honest 502 if the live channel wasn't confirmed
+removed — never a fake "taken down"), POST .../restore. The deploy choke point re-checks status
+(bounded 3s, fail-open) so a taken_down app can never silently re-publish. +4 tests (registry no-throw
+empties; taken-down republish blocked, base never called; active allowed; BYO skips the guard).
+AppKnowledgeBase entry deferred to Phase A slice 5 (with the user-facing Report button). Gate: frontend
+tsc 0, server tsc 0, vitest 4608/4608 PASS, boot PASS. Admin note: takedown needs the Cloud Run SA to
+have the Firebase Hosting Admin role (deploy already uses it → present).

@@ -90,6 +90,54 @@ class DeploymentStore {
       return null;
     }
   }
+
+  /**
+   * List published deployments (admin registry). Best-effort; returns [] when unavailable. Orders by
+   * updatedAt desc and filters `status` in memory so NO composite Firestore index is required.
+   */
+  async list(opts?: { status?: DeploymentStatus; limit?: number }): Promise<DeploymentRecord[]> {
+    const db = this.getDb();
+    if (!db) return [];
+    const limit = Math.max(1, Math.min(500, opts?.limit ?? 100));
+    try {
+      const snap = await db.collection('agentv3_deployments').orderBy('updatedAt', 'desc').limit(limit).get();
+      let recs = snap.docs.map((d) => d.data() as DeploymentRecord);
+      if (opts?.status) recs = recs.filter((r) => (r.status ?? 'active') === opts.status);
+      return recs;
+    } catch {
+      return [];
+    }
+  }
+
+  /** List a single user's deployments (admin registry). Best-effort. */
+  async listByUser(userId: string, limit = 100): Promise<DeploymentRecord[]> {
+    const db = this.getDb();
+    if (!db || !userId) return [];
+    const cap = Math.max(1, Math.min(500, limit));
+    try {
+      const snap = await db.collection('agentv3_deployments').where('userId', '==', userId).limit(cap).get();
+      return snap.docs
+        .map((d) => d.data() as DeploymentRecord)
+        .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Set a deployment's registry status (takedown / hold / restore). Best-effort. Returns success. */
+  async setStatus(workspaceId: string, status: DeploymentStatus): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return false;
+    try {
+      await db.collection('agentv3_deployments').doc(workspaceId).set(
+        { status, updatedAt: Date.now() },
+        { merge: true },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export const deploymentStore = new DeploymentStore();
@@ -116,6 +164,19 @@ export function withDeploymentPersistence(
     ]).catch(() => ({ allowed: true as boolean, message: '' }));
     if (verdict && verdict.allowed === false) {
       throw new Error(('message' in verdict && verdict.message) ? verdict.message : 'Hosting limit reached.');
+    }
+
+    // TAKEDOWN re-publish guard: an app an admin took down for a policy violation must not be
+    // silently re-published. Bounded (3s) + fail-OPEN — a store outage must never block a legit
+    // deploy (blocking a taken-down republish during a rare outage is an acceptable trade vs rule #1).
+    if (isFirstPartyProvider(providerId)) {
+      const existing = await Promise.race([
+        deploymentStore.get(workspaceId),
+        new Promise<DeploymentRecord | null>((r) => setTimeout(() => r(null), 3_000)),
+      ]).catch(() => null);
+      if (existing?.status === 'taken_down') {
+        throw new Error('This app was taken down for a policy violation and cannot be re-published. Contact support if you believe this is a mistake.');
+      }
     }
 
     const url = await base(workspaceId, files);

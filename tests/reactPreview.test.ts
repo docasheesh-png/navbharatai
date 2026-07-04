@@ -165,3 +165,16 @@ describe('renderPreview', () => {
     expect(html).not.toContain('@babel/standalone');
   });
 });
+
+describe('buildReactPreview — CDN resilience (fallback when esm.sh flakes)', () => {
+  it('embeds a fallback ESM CDN + retries a failed import once before surfacing an error', () => {
+    const vfs = reactVfs();
+    const html = buildReactPreview(vfs, 'https://navbharatai.com');
+    // A second ESM CDN is wired in…
+    expect(html).toContain('esm.run');
+    expect(html).toContain('specUrlAlt');
+    // …and the loader actually RETRIES on the alt CDN before recording a load error.
+    expect(html).toMatch(/import\(specUrlAlt\(spec\)\)/);
+    expect(html).toContain('from fallback CDN after esm.sh failed');
+  });
+});

@@ -231,6 +231,11 @@ ${babelTag}
   var ENTRY = bundle.entry;
   var IMAP = ${importmap ? 'JSON.parse(document.querySelector(\'script[type="importmap"]\').textContent).imports' : '{}'};
   var ESM = '${ESM}';
+  // Fallback ESM CDN: if esm.sh flakes/times-out for a package, retry from jsdelivr's ESM (esm.run)
+  // before giving up — one CDN hiccup should not blank the whole preview. (esm.run has no ?external
+  // flag, so a React library loaded via the fallback may bundle its own React; acceptable only when
+  // esm.sh is down anyway, and strictly better than a dead preview.)
+  var ESM_ALT = 'https://esm.run/';
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
@@ -355,6 +360,13 @@ ${babelTag}
     var isReactPkg = root === 'react' || root === 'react-dom';
     return ESM + spec + (isReactPkg ? '' : ${JSON.stringify(EXTERNAL_REACT_Q)});
   }
+  // Fallback URL for the SAME spec on the alternate CDN (pins the version from the importmap when known
+  // so the fallback matches package.json, e.g. react@18.3.1). Used only when specUrl() failed to load.
+  function specUrlAlt(spec) {
+    var root = spec.split('/')[0]; if (spec[0] === '@') root = spec.split('/').slice(0, 2).join('/');
+    if (IMAP[root]) { var b = IMAP[root], qi = b.indexOf('?'); var noQ = qi < 0 ? b : b.slice(0, qi); var verPart = noQ.slice(ESM.length + root.length); return ESM_ALT + root + verPart + spec.slice(root.length); }
+    return ESM_ALT + spec;
+  }
 
   window.addEventListener('error', function (e) { showError((e && e.message) || 'Script error'); });
   window.addEventListener('unhandledrejection', function (e) { showError((e && e.reason && e.reason.message) || e.reason || 'Promise rejected'); });
@@ -373,10 +385,17 @@ ${babelTag}
       await Promise.all(bare.map(async function (spec) {
         try { bareCache[spec] = interop(await import(specUrl(spec))); }
         catch (e) {
-          // Record the EXACT failure so a later "Could not load react" names the real cause
-          // (e.g. "Failed to fetch dynamically imported module: https://esm.sh/react@18.3.1").
-          bareLoadErrors[spec] = (e && e.message) ? e.message : String(e);
-          console.warn('[preview] failed to load', spec, 'from', specUrl(spec), '—', bareLoadErrors[spec]);
+          // esm.sh flaked for this package — retry ONCE from the fallback CDN before giving up, so a
+          // single transient CDN hiccup doesn't blank the whole preview.
+          try {
+            bareCache[spec] = interop(await import(specUrlAlt(spec)));
+            console.warn('[preview] loaded', spec, 'from fallback CDN after esm.sh failed');
+          } catch (e2) {
+            // Record the EXACT failure so a later "Could not load react" names the real cause
+            // (e.g. "Failed to fetch dynamically imported module: https://esm.sh/react@18.3.1").
+            bareLoadErrors[spec] = (e && e.message) ? e.message : String(e);
+            console.warn('[preview] failed to load', spec, 'from', specUrl(spec), 'AND fallback', specUrlAlt(spec), '—', bareLoadErrors[spec]);
+          }
         }
       }));
       requireModule(ENTRY);

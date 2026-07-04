@@ -82,3 +82,41 @@ describe('extractContract', () => {
     expect(map.has('src/y')).toBe(false);
   });
 });
+
+describe('contractDriftReport — destructured exports + ambiguous same-named enums (false-positive fixes)', () => {
+  it('does NOT report drift for a consumer importing a DESTRUCTURED export (Zustand/Context pattern)', () => {
+    const files = {
+      'src/store.ts': 'export const { useStore, StoreProvider } = createStore();',
+      'src/App.tsx': "import { useStore } from './store';\nexport default function App(){ return useStore(); }",
+    };
+    const r = contractDriftReport(files);
+    // The old parser saw store.ts as exporting "(none)" → false drift on the valid useStore import.
+    expect(r === null || !/useStore.*but it exports/.test(r)).toBe(true);
+  });
+
+  it('extractModuleContract captures object AND array destructured export bindings (incl. rename)', () => {
+    const c = extractModuleContract('export const { a, b: c } = x;\nexport const [ d, e ] = y;');
+    for (const name of ['a', 'c', 'd', 'e']) expect(c.exports.has(name)).toBe(true);
+    expect(c.exports.has('b')).toBe(false); // `b: c` binds the LOCAL name `c`, not `b`
+  });
+
+  it('does NOT report enum drift when two files declare a same-named enum with DIFFERENT members', () => {
+    const files = {
+      'src/user.ts': 'export enum Status { ACTIVE, INACTIVE }\nexport const u = Status.ACTIVE;',
+      'src/order.ts': 'export enum Status { OPEN, CLOSED }\nexport const o = Status.OPEN;',
+    };
+    const r = contractDriftReport(files);
+    // order.ts's valid Status.OPEN must NOT be flagged against user.ts's Status members.
+    expect(r === null || !/Status\.OPEN but/.test(r)).toBe(true);
+    expect(r === null || !/Status\.ACTIVE but/.test(r)).toBe(true);
+  });
+
+  it('STILL reports a genuine enum drift when the enum name is unambiguous', () => {
+    const files = {
+      'src/types.ts': 'export enum Color { RED, GREEN }',
+      'src/App.tsx': "import { Color } from './types';\nconst c = Color.BLUE;",
+    };
+    const r = contractDriftReport(files);
+    expect(r).toContain('Color.BLUE');
+  });
+});

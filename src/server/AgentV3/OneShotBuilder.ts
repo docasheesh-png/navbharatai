@@ -41,7 +41,12 @@ export interface OneShotFile { path: string; content: string; }
 export function parseFileBlocks(text: string): OneShotFile[] {
   const files: OneShotFile[] = [];
   if (!text) return files;
-  const re = /<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)\r?\n?<<<ENDFILE>>>/g;
+  // Terminate a file's content at the FIRST of: its own `<<<ENDFILE>>>`, the NEXT `<<<FILE` header,
+  // or end of input. Before this, the lazy content group was only bounded by `<<<ENDFILE>>>`, so a
+  // single missing ENDFILE made file A's content run through the next `<<<FILE b>>>` header until the
+  // following ENDFILE — merging two files into one corrupt file and silently DROPPING file B. The
+  // `<<<FILE` lookahead + `$` terminator recover file B (and a lone trailing file with no ENDFILE).
+  const re = /<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?<<<ENDFILE>>>|(?=\r?\n?<<<FILE\s)|$)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');

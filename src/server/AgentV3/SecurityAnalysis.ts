@@ -352,12 +352,22 @@ const RULES: Rule[] = [
     rule: 'sql-injection',
     severity: 'high',
     // A SQL statement built by interpolating/concatenating a value straight into the
-    // query string — the classic SQL-injection vector. High-precision: the string must
-    // actually start with a SQL verb (SELECT/INSERT/UPDATE/DELETE) AND contain a
-    // template `${…}` interpolation, OR be concatenated with a non-literal (`"…" + x`).
-    // Parameterised queries (`query('… WHERE id = ?', [id])`) have no `${`/`+ var`, so
-    // they are not flagged. `(?!['"])` after `+` excludes safe literal+literal joins.
-    re: /`\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^`]*\$\{|['"]\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*['"]\s*\+\s*(?!['"])\S/i,
+    // query string — the classic SQL-injection vector.
+    //
+    // ROOT-CAUSE FIX (2026-07-04, from a real blocked build): the old rule matched ANY
+    // template string that merely STARTED with an English word that is also a SQL verb —
+    // so a Hospital-app build was blocked as "SQL injection" (readiness score 0/100) on
+    //   aria-label={`Delete ${med.name}`}
+    // — a GOOD accessibility label in a localStorage app with no SQL at all. UI English
+    // ("Delete …?", "Update …", "Select … from the list") is full of SQL verbs.
+    //
+    // The rule now requires a REAL SQL skeleton, not just a verb:
+    //   INSERT INTO <tbl> | DELETE FROM <tbl> … WHERE | UPDATE <tbl> SET …= |
+    //   SELECT * FROM <tbl> | SELECT <cols> FROM <tbl> … WHERE
+    // plus a `${…}` interpolation (template branch) or a non-literal concatenation
+    // (string branch; `(?!['"])` after `+` excludes safe literal+literal joins).
+    // Parameterised queries (`query('… WHERE id = ?', [id])`) are still not flagged.
+    re: /`(?=[^`]*\$\{)[^`]*\b(?:insert\s+into\s+[\w."\[]|delete\s+from\s+[\w."\[][^`]*\bwhere\b|update\s+[\w."\[][\w."\]]*\s+set\s+[^`]*=|select\s+\*\s+from\s+[\w."\[]|select\s+[^`]{1,80}?\bfrom\s+[\w."\[][^`]*\bwhere\b)|['"][^'"]*\b(?:insert\s+into\s+[\w."\[]|delete\s+from\s+[\w."\[][^'"]*\bwhere\b|update\s+[\w."\[][\w."\]]*\s+set\b|select\s+\*\s+from\s+[\w."\[]|select\s+[^'"]{1,80}?\bfrom\s+[\w."\[][^'"]*\bwhere\b)[^'"]*['"]\s*\+\s*(?!['"])\S/i,
     message: 'SQL query built from interpolated/concatenated input — this enables SQL injection; use parameterised queries (placeholders + a values array) instead.',
   },
   {

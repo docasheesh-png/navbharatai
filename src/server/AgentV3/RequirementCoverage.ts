@@ -42,17 +42,25 @@ interface FeatureSpec {
 // (synonyms) so a feature built under a reasonable alternate name still counts.
 const FEATURES: FeatureSpec[] = [
   { label: 'login / authentication', request: /\b(login|log ?in|sign ?in|authentication|auth)\b/i, artifact: /(login|signin|sign-in|auth)/i },
-  { label: 'sign-up / registration', request: /\b(sign ?up|register|registration|create account)\b/i, artifact: /(signup|sign-up|register)/i },
+  // ROOT-CAUSE FIX (2026-07-04, from a real blocked build): artifact was /register/, which does
+  // NOT match "Registration.tsx"/"useRegistrations" ("registr-a-tion" has no "register" substring)
+  // — a Hospital app whose OPD Registration page was fully built was reported "Requested feature
+  // not found: sign-up / registration". /regist/ covers register/registration/registrations.
+  { label: 'sign-up / registration', request: /\b(sign ?up|register|registration|create account)\b/i, artifact: /(signup|sign-up|regist)/i },
   { label: 'dashboard', request: /\bdashboard\b/i, artifact: /dashboard/i },
   { label: 'user profile', request: /\bprofile\b/i, artifact: /profile/i },
   { label: 'settings', request: /\bsettings\b/i, artifact: /settings/i },
-  { label: 'search', request: /\bsearch\b/i, artifact: /search/i },
+  // Search & notifications are frequently built INLINE (a search input inside a list page; a
+  // toast system instead of a "Notification" component). Name-only matching must accept the
+  // common real-world artifact names, or it reports built features as missing (real case:
+  // ToastContext + inline patient search were both flagged "not found").
+  { label: 'search', request: /\bsearch\b/i, artifact: /(search|filter)/i },
   { label: 'shopping cart', request: /\b(cart|basket)\b/i, artifact: /(cart|basket)/i },
   { label: 'checkout', request: /\bcheckout\b/i, artifact: /checkout/i },
   { label: 'payment', request: /\b(payment|payments|billing)\b/i, artifact: /(payment|pay|billing|checkout)/i },
   { label: 'admin panel', request: /\badmin\b/i, artifact: /admin/i },
   { label: 'chat / messaging', request: /\b(chat|messaging|messages)\b/i, artifact: /(chat|message|messaging|conversation)/i },
-  { label: 'notifications', request: /\bnotification/i, artifact: /notification/i },
+  { label: 'notifications', request: /\bnotification/i, artifact: /(notification|toast|snackbar)/i },
   { label: 'contact page', request: /\bcontact\b/i, artifact: /contact/i },
   { label: 'about page', request: /\babout\b/i, artifact: /about/i },
 ];

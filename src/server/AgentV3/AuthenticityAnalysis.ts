@@ -61,7 +61,13 @@ const RULES: Rule[] = [
     kind: 'stub-marker',
     severity: 'high',
     // a left-in stub/placeholder comment or string, not a legitimate identifier.
-    re: /(?:\/\/|\/\*|#|["'`])\s*(this is a )?(placeholder|stub)\b/i,
+    // ROOT-CAUSE FIX (2026-07-04, from a real blocked build): `(?![-:])` excludes
+    // Tailwind's `placeholder:`/`placeholder-*` utility classes inside quoted class
+    // strings (e.g. 'placeholder:text-gray-400', 'placeholder-gray-400') — real UI
+    // styling that the old rule counted as "fake/incomplete code" and hard-blocked
+    // a complete working app's readiness. A genuine `// placeholder` comment or a
+    // "this is a stub" string is still flagged.
+    re: /(?:\/\/|\/\*|#|["'`])\s*(this is a )?(placeholder|stub)\b(?![-:])/i,
   },
   {
     kind: 'placeholder-image',
@@ -75,7 +81,12 @@ const RULES: Rule[] = [
   {
     kind: 'coming-soon',
     severity: 'high',
-    re: /\b(coming\s+soon|not\s+available\s+yet)\b/i,
+    // "coming soon" filler = an unimplemented section shipped as done. Deliberately
+    // NARROW: the constitution itself MANDATES honest "not available" states for
+    // features whose infrastructure is missing — so "not available yet" is legitimate
+    // honest UI text (same bug class as the Tailwind-placeholder false positive:
+    // legitimate UI language mistaken for a fake-code marker) and must not be flagged.
+    re: /\bcoming\s+soon\b/i,
   },
   // ── medium: standard TODO/FIXME/HACK comment markers ─────────────────────
   {

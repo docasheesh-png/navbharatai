@@ -77,6 +77,29 @@ describe('analyzeRequirementCoverage', () => {
     expect(r.missing).toContain('admin panel');
   });
 
+  it('matches real-world artifact names (the Hospital-build false negatives)', () => {
+    // "Registration.tsx" does not contain the substring "register" — the old artifact regex
+    // reported a fully-built OPD Registration page as missing.
+    const reg = analyzeRequirementCoverage(
+      'Hospital OPD with patient registration',
+      graph({ files: ['src/pages/Registration.tsx', 'src/hooks/useRegistrations.ts'] }),
+    );
+    expect(reg.covered).toContain('sign-up / registration');
+    expect(reg.missing).not.toContain('sign-up / registration');
+    // A toast system IS the app's notification surface.
+    const notif = analyzeRequirementCoverage(
+      'an app with notifications',
+      graph({ files: ['src/context/ToastContext.tsx'] }),
+    );
+    expect(notif.covered).toContain('notifications');
+    // A filter surface satisfies a search request (search & filter ship as one CRUD surface).
+    const search = analyzeRequirementCoverage(
+      'a list with search',
+      graph({ components: ['PatientFilters'] }),
+    );
+    expect(search.covered).toContain('search');
+  });
+
   it('caps findings at five', () => {
     const r = analyzeRequirementCoverage(
       'login signup dashboard profile settings search cart admin',

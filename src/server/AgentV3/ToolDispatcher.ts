@@ -519,11 +519,16 @@ export class ToolDispatcher {
       if (detectsTracker(content)) { hasTracker = true; if (!trackerFile) trackerFile = p; }
       if (detectsConsentUI(content)) hasConsentUI = true;
     }
-    // Project-level rule: collecting personal data with no privacy policy is a
-    // hard DPDP/GDPR blocker for a public launch.
+    // Project-level rule: collecting personal data with no privacy policy matters for a
+    // PUBLIC launch (DPDP/GDPR) — but it is ADVISORY, not a readiness blocker.
+    // ROOT-CAUSE FIX (2026-07-04, from a real blocked build): virtually every CRUD app has a
+    // name/phone/email form, so as a `high` this rule hard-blocked a huge class of complete,
+    // working apps (a Hospital-OPD demo the user explicitly asked for was scored 0/100). The
+    // user never asked for a privacy-policy page; refusing READY for omitting an unrequested
+    // page is a wrong verdict. Medium = surfaced honestly in the report, never a blocker.
     if (collectsPii && !hasPrivacyPolicy) {
-      issues.push({ file: '(project)', line: 0, kind: 'missing-privacy-policy', severity: 'high',
-        snippet: 'App collects personal data (forms/inputs) but ships no privacy policy.' });
+      issues.push({ file: '(project)', line: 0, kind: 'missing-privacy-policy', severity: 'medium',
+        snippet: 'App collects personal data (forms/inputs) but ships no privacy policy — add one before a public launch.' });
     }
     // Project-level rule: a tracker without a consent surface drops cookies
     // before consent — a GDPR/ePrivacy violation in the EU.

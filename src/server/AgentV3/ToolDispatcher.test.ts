@@ -1095,6 +1095,18 @@ describe('ToolDispatcher — evaluate integration (compliance + env vars)', () =
     expect(out).toContain('Env var check');
     expect(out).toContain('MISSING_SECRET_TOKEN');
   });
+
+  it('missing privacy policy is ADVISORY, not a readiness blocker (the Hospital-build false block)', async () => {
+    // A complete CRUD app collecting ordinary form PII (patient name/phone) with no privacy
+    // policy page must NOT be hard-blocked — virtually every real app has such a form. The
+    // finding is still surfaced in the compliance report as advice for a public launch.
+    const dd = makeDispatcher('ws-eval-privacy');
+    await write(dd, 'src/pages/Patients.tsx',
+      'export function Patients(){ return <form><input name="phone" type="tel" /><input name="email" type="email" /></form>; }');
+    const out = await evalText(dd);
+    expect(out).toContain('missing-privacy-policy'); // honest advisory still present
+    expect(out).not.toContain('serious privacy/compliance issue'); // …but never a high blocker
+  });
 });
 
 describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () => {

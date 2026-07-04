@@ -22,6 +22,16 @@ describe('assessReadiness', () => {
     expect(r.blockers.join(' ')).toContain('unresolved');
   });
 
+  it('a server-only Node builtin in front-end code is a hard blocker (browser-build-breaker, not READY)', () => {
+    // Regression: `import fs from "fs"` in a React component breaks the Vite browser build, but the
+    // gate never read arch.nodeBuiltinsInFrontend → it reported READY 100/100 (fake success).
+    const r = assessReadiness({ ...cleanArch, nodeBuiltinsInFrontend: ['src/components/FileList.tsx -> fs'] }, []);
+    expect(r.ready).toBe(false);
+    expect(r.score).toBeLessThan(100);
+    expect(r.blockers.join(' ')).toContain('browser build');
+    expect(r.blockers.join(' ')).toContain('fs');
+  });
+
   it('a high-severity security finding blocks readiness', () => {
     const finding: SecurityFinding = { file: 'a.ts', line: 1, severity: 'high', rule: 'hardcoded-secret', message: 'x' };
     const r = assessReadiness(cleanArch, [finding]);

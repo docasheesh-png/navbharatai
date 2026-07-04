@@ -147,6 +147,9 @@ export interface AgentV3ClientState {
   diagnostics?: unknown;
   /** True when the build paused at the wall-clock limit and can be auto-continued (Layer 3). */
   resumable?: boolean;
+  /** SPM-3 (project mode): modules not yet done after this turn — drives the progress-monotone
+   *  auto-continue guard (continue only while this number strictly decreases). */
+  planRemaining?: number;
   /** P-UX.7 — total tokens (in + out) the finished build used, for the usage badge. */
   tokens?: number;
   error?: string;

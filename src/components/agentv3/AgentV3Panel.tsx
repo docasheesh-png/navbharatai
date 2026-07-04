@@ -10,6 +10,7 @@ import {
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
+import { decideAutoContinue } from './planAutoContinue';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
 import { trackEvent } from '../../lib/analytics';
@@ -323,8 +324,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // this was a real path for a just-abandoned build to reappear after "+ New chat".
   const autoResumedRef = useRef(false);
   // Layer 3 — how many times a paused (time-limit) build has been auto-continued this turn.
-  const AUTO_CONTINUE_MAX = 2;
+  // SPM-3: in project mode the decision lives in decideAutoContinue (progress-monotone on
+  // planRemaining); these refs are its inputs. autoContinueRef counts deadline pauses (reset on
+  // every real module progress), planContinuesRef counts plan-driven module rounds, and
+  // lastPlanRemainingRef holds the previous plan result's remaining count for the strict-decrease
+  // loop guard.
   const autoContinueRef = useRef(0);
+  const planContinuesRef = useRef(0);
+  const lastPlanRemainingRef = useRef<number | null>(null);
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
@@ -570,8 +577,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
-    // A fresh user message resets the Layer-3 auto-continue budget for the new turn.
+    // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
+    // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
+    // "continue" after a stall starts a fresh progress-monotone chain.
     autoContinueRef.current = 0;
+    planContinuesRef.current = 0;
+    lastPlanRemainingRef.current = null;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
     // build state — otherwise the prior reply (which lives only in state.narration)
     // disappears from the thread the moment the next message begins.
@@ -610,20 +621,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
 
   // ── Layer 3: bounded auto-continue ──────────────────────────────────────────────
-  // When a build PAUSES at the wall-clock limit (resumable), automatically resume the SAME
-  // project without the user typing "continue" — up to AUTO_CONTINUE_MAX times so a genuinely
-  // stuck build can never loop forever or rack up unbounded cost. After the budget, we hand back
-  // to the user honestly. Reuses the proven resume path (start('continue', …)); no build-loop surgery.
+  // When a build ends `resumable`, automatically resume the SAME project without the user typing
+  // "continue". Two shapes share one pure decision (decideAutoContinue): a wall-clock PAUSE keeps
+  // the classic small pause budget (a genuinely stuck build can never loop or rack up unbounded
+  // cost), while a project-mode MODULE turn (SPM-3, `planRemaining` on the result) continues for
+  // as long as the plan STRICTLY advances — so a 40-module software project runs unattended, but
+  // a stalled plan hands back honestly. Reuses the proven resume path (start('continue', …)).
   useEffect(() => {
     if (!state.done || !state.resumable || running) return;
-    if (autoContinueRef.current >= AUTO_CONTINUE_MAX) {
-      setAgentHistory((h) => [
-        ...h,
-        { role: 'agent' as const, agent: 'architect', text: 'This build is taking longer than the time limit allows even after auto-continuing. Type **"continue"** and I will keep finishing it.', ts: Date.now() },
-      ]);
+    // SPM-3: one pure decision for both loops — the classic bounded deadline-pause continue AND
+    // the project-mode module chain (continues only while planRemaining strictly decreases, with
+    // a fresh pause budget per completed module and an absolute backstop).
+    const decision = decideAutoContinue({
+      planRemaining: state.planRemaining,
+      lastPlanRemaining: lastPlanRemainingRef.current,
+      pauseContinues: autoContinueRef.current,
+      planContinues: planContinuesRef.current,
+    });
+    if (typeof state.planRemaining === 'number') lastPlanRemainingRef.current = state.planRemaining;
+    if (!decision.proceed) {
+      if (decision.stopMessage) {
+        setAgentHistory((h) => [
+          ...h,
+          { role: 'agent' as const, agent: 'architect', text: decision.stopMessage as string, ts: Date.now() },
+        ]);
+      }
       return;
     }
-    autoContinueRef.current += 1;
+    if (decision.isPlanContinue) planContinuesRef.current += 1;
+    if (decision.resetPauseBudget) autoContinueRef.current = 0;
+    else autoContinueRef.current += 1;
     // Preserve the paused turn's replies into history before start() resets the live state.
     if (state.narration.length > 0) {
       setAgentHistory((h) => [

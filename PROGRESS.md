@@ -8082,3 +8082,39 @@ CHANGES (focus-mode-only; normal mode byte-for-byte unchanged):
 Gate: frontend tsc 0, vitest 4650/4650 PASS, build PASS, boot:check PASS. Additive + reversible
 (focusMode absent = today's exact behaviour). No server code touched → no AppKnowledgeBase change
 needed (pure visual polish, no new navigation/feature surface).
+
+## MILESTONE (2026-07-04, session 01KDmsCZ): PARALLEL BUG-HUNT ROUND 3 — 5 fixes across stores/templates/analyzers, all merged
+
+Third read-only hunt round over the ISOLATED (non-hot) surfaces (still avoiding the other session's
+hot core — agentv3.ts/E2BActuator/ToolDispatcher/DevServerRecovery, and the import/SPM stores). All
+follow the 4th rule and passed the full gate before merge:
+
+- **#934** — a11y `hasAttr` used `\b${attr}`, which matches after a hyphen, so `\balt=` matched inside
+  `data-alt=` → an `<img data-alt>` was read as HAVING alt and the missing-alt finding silently
+  skipped (a MISSED real a11y issue). Fixed with `(?<![-\w])`; swept BOTH copies (AccessibilityAnalysis
+  + AppMakerLab/intelligence/A11yLinter).
+- **#935** — HIGH (deploy-breaking): the Django scaffold's Procfile boots `gunicorn myproject.wsgi` but
+  getFiles never emitted `myproject/wsgi.py` → production deploy died with ModuleNotFoundError, served
+  no traffic (sandbox preview hid it via runserver's default WSGI). Added wsgi.py + WSGI_APPLICATION.
+- **#937** — PRIVACY (medium-high) + integrity: durable per-user diagnostics keyed a null user to a
+  shared `'anon'` doc (`userId || 'anon'`) → one anon user could read another's report (generated
+  SOURCE/errors/commands). New pure perUserDiagnosticsDocId returns null for a null user (no shared
+  bucket; anon still served via the unguessable workspace-keyed path). ALSO: UserPreferenceStore
+  .recordBuild did a non-transactional read-modify-write with set(merge:false) → lost update on
+  concurrent builds; wrapped in runTransaction. **Admin flagged in the PR** for awareness of the leak.
+- **#938** — hardcoded-URL scan matched only `https?://`, missing `ws://localhost`/`wss://` local
+  sockets (chat/live features) — flagged by NEITHER this nor SecurityAnalysis, breaks 100% in prod.
+  Broadened to `(?:https?|wss?)`.
+
+DELIBERATELY DEFERRED (real but marginal — recorded so the next session can pick them up, NOT churned):
+- DesignLinter.extractFontFamilies advertises Tailwind `font-[...]` coverage in its doc but only parses
+  CSS `font-family:` → a 3-arbitrary-font Tailwind app isn't flagged (LOW-MED).
+- PortBindingAnalysis misses the split `const PORT = 3000; app.listen(PORT)` hardcode (single-line
+  detection only) (LOW).
+- FirestoreConversationStore.listByUser fallback (when the composite index is absent AND >200 convos)
+  truncates BEFORE ordering → newest chats can be dropped from the "recent" list (LOW-MED, edge).
+- DiagnosticsStore history subcollection grows unbounded (eviction is read-side only) — storage/cost
+  creep, not a correctness bug (LOW).
+Round-3 verified-clean (no fix needed): CheckpointStore, DeploymentStore, ProviderStateStore,
+EmbeddingStore, in-memory ConversationStore, FirestoreConversationStore timeline writes; GitignoreGenerator
+and all non-Django framework providers; DesignLinter's hex/spacing logic.

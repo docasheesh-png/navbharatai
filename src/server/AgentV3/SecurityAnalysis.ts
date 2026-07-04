@@ -21,10 +21,16 @@ interface Rule {
   severity: Severity;
   re: RegExp;
   message: string;
-  /** Optional guard to suppress obvious false positives (e.g. placeholders). */
-  ignore?: (matchText: string, fullLine: string) => boolean;
+  /** Optional guard to suppress obvious false positives (e.g. placeholders). Receives the full match
+   *  array so it can test the captured CREDENTIAL VALUE, not the whole line (see PLACEHOLDER note). */
+  ignore?: (m: RegExpExecArray, fullLine: string) => boolean;
 }
 
+// Placeholder / non-real-credential markers. MUST be tested against the captured credential VALUE
+// (or the token itself), NOT the whole line: two tokens here (`<` and `test`) match far too much of
+// an ordinary line — `<` hits EVERY JSX line (so secret detection was disabled on .tsx, the most
+// common file type here) and `test` matches `latest`/`fastest`/a `// …test…` comment. Scoped to the
+// value, `<` only fires on `<your-key>` and `test` only on a `test…` value — which is the intent.
 const PLACEHOLDER = /(your[_-]?|example|placeholder|xxx+|<|\$\{|process\.env|import\.meta\.env|changeme|dummy|test)/i;
 
 // A security-sensitive context: the value being built is a secret/identity token, not a
@@ -48,7 +54,7 @@ const RULES: Rule[] = [
     // false positive of a validation/UI message (password = "Password must be 8 characters").
     re: /\b(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token|client[_-]?secret)\b\s*[:=]\s*['"`]([^'"`\s]{8,})['"`]/i,
     message: 'Hardcoded credential — load it from an environment variable instead.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
   },
   {
     rule: 'connection-string-credentials',
@@ -57,7 +63,7 @@ const RULES: Rule[] = [
     // The assignment-based hardcoded-secret rule misses this URI form entirely.
     re: /\b(mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|rediss?|amqps?):\/\/[^\s:'"`@/]*:([^\s:'"`@/]{3,})@/i,
     message: 'Credentials embedded in a connection string — move the user/password to environment variables; never commit live DB/queue credentials.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[2] ?? m[0]),
   },
   {
     rule: 'client-exposed-secret',
@@ -78,7 +84,7 @@ const RULES: Rule[] = [
     // (mongodb/postgres/…); this covers plain http(s) API URLs it misses.
     re: /\bhttps?:\/\/[^\s:'"`@/]+:([^\s:'"`@/]{3,})@/i,
     message: 'Credentials embedded in an http(s) URL (https://user:pass@host) — this leaks the credential and is deprecated in browsers; send them in an Authorization header from an environment variable instead.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[1] ?? m[0]),
   },
   {
     rule: 'hardcoded-jwt-secret',
@@ -89,7 +95,7 @@ const RULES: Rule[] = [
     // secret arg is matched whether or not an options object follows.
     re: /\b(?:jwt|jsonwebtoken)\.sign\s*\(.*?,\s*(['"`])[^'"`]{4,}\1\s*[,)]/,
     message: 'Hardcoded JWT signing secret — anyone with the source can forge tokens; load it from an environment variable.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[0]),
   },
   {
     rule: 'jwt-none-algorithm',
@@ -458,7 +464,7 @@ const RULES: Rule[] = [
     // env form (`Bearer ${token}`) and obvious placeholders.
     re: /\bauthorization\b['"`]?\s*[:=]\s*(['"`])\s*(?:bearer|basic)\s+[^'"`]{8,}\1/i,
     message: 'Hardcoded Authorization credential (Bearer/Basic literal) — load the token from an environment variable instead of committing it.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[0]),
   },
   {
     rule: 'hardcoded-provider-token',
@@ -471,7 +477,7 @@ const RULES: Rule[] = [
     // inside .env templates — this covers code.)
     re: /\bgh[posru]_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{30,}|\bAIza[0-9A-Za-z_-]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|\b[rs]k_live_[A-Za-z0-9]{16,}|\bsk-ant-[A-Za-z0-9_-]{20,}/,
     message: 'Hardcoded API credential (GitHub/Google/Slack/Stripe/Anthropic token) in source — remove it, load it from an environment variable, and rotate the key since it was committed.',
-    ignore: (_m, line) => PLACEHOLDER.test(line),
+    ignore: (m) => PLACEHOLDER.test(m[0]),
   },
   {
     rule: 'unsafe-target-blank',
@@ -576,7 +582,7 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
       const m = r.re.exec(line);
-      if (m && !(r.ignore && r.ignore(m[0], line))) {
+      if (m && !(r.ignore && r.ignore(m, line))) {
         findings.push({ file, line: i + 1, severity: r.severity, rule: r.rule, message: r.message });
       }
     }

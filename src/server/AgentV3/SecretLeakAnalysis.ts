@@ -23,13 +23,22 @@ const base = (p: string): string => p.split('/').pop() || p;
 const REAL_ENV = /^\.env(\.|$)/;
 const TEMPLATE = /\.(example|sample|template|dist|defaults?)$/i;
 
-/** True if the .gitignore content has a non-comment line that references .env. */
+/** True if the .gitignore has a non-comment rule that actually covers the BARE `.env` file.
+ *  The old `/\.env\b/` matched INSIDE `.env.local` (the `\b` sits between `v` and `.`), so a
+ *  CRA-style gitignore that only lists `.env.local` (never bare `.env`) was wrongly read as
+ *  covering `.env` → a committed `.env` full of live keys reported "gitignored". A rule covers
+ *  bare `.env` only when it is `.env`, `.env*`, `*.env`, or a leading-globstar any-dir form —
+ *  NOT `.env.local`, `.env` followed by `.<something>`, or `.env/` (a directory). */
 function gitignoreCoversEnv(gitignore: string | null | undefined): boolean {
   if (!gitignore) return false;
   return gitignore
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .some((l) => l && !l.startsWith('#') && /\.env\b|\.env\*|\*\.env/.test(l));
+    .some((l) => {
+      if (!l || l.startsWith('#')) return false;
+      const t = l.replace(/^\//, ''); // a leading anchor slash doesn't change what file it covers
+      return /^(?:\*\*\/)?\.env\*?$/.test(t) || t === '*.env';
+    });
 }
 
 /**

@@ -7886,3 +7886,28 @@ orchestrators, LiveEventBuffer, numeric helpers) and the CORE build pass/fail cl
 Intentionally deferred: ContractMap enum SCOPE-aware resolution (did the conservative skip instead) and
 the low-value ContractMap advisory edge. Isolated-surface hunting is now at diminishing returns; the
 remaining high-value work lives in the other session's hot core (hold per safeguard #2).
+
+## 2026-07-04 — HOSTING Phase 0, Slice 1: HostingQuota policy + usage store (pure, no wiring)
+
+Admin approved building the hosting product (host users' apps) in phases: Phase 0 (quota + abuse
+guard) → A (GitHub Pages free + Cloudflare subdomain) → C (wallet billing) → B (custom domain). A
+map+design workflow (10 agents, adversarial) produced the plan; who-pays reality: NavBharatAI pays for
+every FIRST-PARTY deploy (its own Firebase Hosting today, Cloudflare later) and there was NO size or
+count cap = open cost/abuse hole.
+
+Slice 1 (pure modules, zero wiring — cannot break anything):
+- NEW src/server/lib/HostingUsageStore.ts — clone of UserCostStore (collection hosting_usage, doc
+  {userId}_{YYYY-MM}, deployCount, transactional increment, VITEST-skip, best-effort never-throws).
+  SEPARATE from user_costs so it never clobbers the billing total.
+- NEW src/server/lib/HostingQuota.ts — single source of truth for who-pays/how-much: FIRST_PARTY_
+  PROVIDERS {firebase,cloudflare} + isFirstPartyProvider; hostingDeployCap() (env
+  AGENTV3_USER_MONTHLY_DEPLOY_CAP, 0=DISABLED default → zero behaviour change until admin opts in);
+  maxDeployMb() (env AGENTV3_DEPLOY_MAX_MB, default 50 = safe ON); pure hostingWithinCap/deployBytesMb;
+  async enforceHostingQuota() — BYO providers always allowed (user's own cost); first-party enforces
+  size ceiling then monthly count; FAIL-OPEN on any store error/missing userId/disabled cap; honest
+  hard-stop over-limit message pointing to free BYO hosting.
+- +14 unit tests (classification, env parsing, size boundary at/over cap, fail-open under VITEST,
+  BYO-always-allowed, anon).
+
+Not yet wired (Slice 2): enforcement at the withDeploymentPersistence choke point. Gate: frontend
+tsc 0, server tsc 0, vitest 4559/4559 PASS, boot PASS.

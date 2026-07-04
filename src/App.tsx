@@ -5543,8 +5543,11 @@ ${buildLanguageRule(preferredLanguage)}`;
         }>
         <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
           ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
-          // 8.1 — space for bottom nav on mobile (all views including chat)
-          effectiveDeviceMode !== 'desktop' ? "pb-14" : ""
+          // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
+          // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
+          // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
+          // rendered — leaving an empty dead strip under the v3.0 composer, above the phone browser bar.
+          effectiveDeviceMode !== 'desktop' && !focusMode ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
              <HomeView

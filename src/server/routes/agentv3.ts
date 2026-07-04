@@ -116,7 +116,7 @@ import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
-import { buildGroundedContext, tokenize as rerankTokenize } from '../AgentV3/ContextReranker';
+import { buildGroundedContext, tokenize as rerankTokenize, contentSearchTerms } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -3487,13 +3487,29 @@ export function registerAgentV3Routes(app: Express): void {
           // and inject the most-relevant ones as a cited grounding block, so the agent reads/edits the
           // right files first. Bounded (≤14 candidate reads, selected by path-token overlap) + best-effort.
           try {
+            const codeFile = (p: string) => /\.(t|j)sx?$|\.vue$|\.css$|\.html$/.test(p);
             const qTokens = new Set(rerankTokenize(prompt));
-            const candidates = fileTree
-              .filter((p) => /\.(t|j)sx?$|\.vue$|\.css$|\.html$/.test(p))
+            // (a) By FILENAME: rank the tree by path-token overlap with the request.
+            const pathRanked = fileTree
+              .filter(codeFile)
               .map((p) => ({ p, overlap: rerankTokenize(p).filter((t) => qTokens.has(t)).length }))
               .sort((a, b) => b.overlap - a.overlap)
               .slice(0, 14)
               .map((x) => x.p);
+            // (b) By CONTENT: grep the codebase for the request's salient terms. For a large imported
+            // app the relevant file's NAME often doesn't echo the request (e.g. "credits don't
+            // decrement" lives in storage.ts), so filename ranking alone misses it — content search
+            // finds it. Bounded + best-effort (searchFiles is a capped `grep -rl`, 10s, returns []).
+            let contentHits: string[] = [];
+            try {
+              const terms = contentSearchTerms(prompt);
+              if (terms.length > 0 && typeof actuator.searchFiles === 'function') {
+                contentHits = (await actuator.searchFiles(workspaceId, terms).catch(() => [])).filter(codeFile);
+              }
+            } catch { /* content search is best-effort */ }
+            // Content hits FIRST (the stronger signal for "where does this behaviour live"), then the
+            // filename-ranked set; dedup; cap the total files READ (each is a sandbox round-trip).
+            const candidates = [...new Set([...contentHits, ...pathRanked])].slice(0, 16);
             const filesMap: Record<string, string> = {};
             for (const p of candidates) {
               const c = await actuator.readFile(workspaceId, p).catch(() => '');

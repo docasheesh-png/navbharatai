@@ -9791,3 +9791,21 @@ SAFETY: default OFF → production byte-identical (every key resolves to the acc
 consulted). When ON: different apps concurrent (cap 3), same app mutually exclusive, and the anon
 shared-lock collision is gone (anon still shares, but real users key by their own workspace).
 Gate: frontend tsc 0, server tsc 0, vitest 4924/4924 PASS, build PASS, boot PASS.
+
+## 2026-07-05 — P4.1 CQRS: command/query split for AppMakerLab workspaces  ✅ DONE
+
+Completed the last open P4 item. The AppMakerLab WorkspaceController mixed writes (create/saveFiles/
+delete/updateStatus) and a read (getWorkspaceInfo) in one class. Split into a real CQRS pair:
+- WorkspaceCommandController — the write path only (create, saveFiles [NotFoundError-guarded], delete,
+  updateStatus). No reads.
+- WorkspaceQueryController — the read path only, MUTATES NOTHING (getWorkspaceInfo joins registry
+  metadata + manager file summary; plus new getMetadata + listWorkspaces query capability). Because it
+  never mutates it is free to cache/replicate/fan out independently of writes.
+- WorkspaceController is now a non-breaking CQRS FACADE: preserves the original 5-method API by
+  delegating to the correct side, and exposes .commands / .queries for callers wanting an explicit
+  write-only or read-only handle. Existing callers unchanged.
+Real, tested (not scaffolding): WorkspaceCqrs.test.ts (12 tests) asserts the write path runs via a spy
+manager, the read path performs NO mutating manager calls, NotFoundError on unknown workspace for both
+saveFiles and getWorkspaceInfo, and facade delegation end-to-end.
+
+P4 is now 100%. Gate: frontend tsc 0, server tsc 0, vitest 4927/4927 PASS (12 new), boot:check PASS.

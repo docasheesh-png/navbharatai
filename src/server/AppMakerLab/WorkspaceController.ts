@@ -1,52 +1,48 @@
 import { WorkspaceRegistry } from './WorkspaceRegistry';
-import { WorkspaceMetadata, WorkspaceInfo } from './types/workspace';
+import { WorkspaceInfo } from './types/workspace';
 import { GeneratedFile } from './types/files';
 import { IWorkspaceManager } from './interfaces/IWorkspaceManager';
-import { NotFoundError } from './errors/AppMakerErrors';
+import { WorkspaceCommandController } from './WorkspaceCommandController';
+import { WorkspaceQueryController } from './WorkspaceQueryController';
 
+/**
+ * CQRS facade (P4.1): the command (write) and query (read) paths are now fully separated into
+ * WorkspaceCommandController and WorkspaceQueryController. This class preserves the original
+ * WorkspaceController API — delegating each call to the correct side — so existing callers are
+ * unchanged, while `.commands` / `.queries` expose an explicit write-only or read-only handle for
+ * code that wants to depend on just one side of the split.
+ */
 export class WorkspaceController {
+    readonly commands: WorkspaceCommandController;
+    readonly queries: WorkspaceQueryController;
+
     constructor(
-        private manager: IWorkspaceManager,
-        private registry: WorkspaceRegistry
-    ) {}
-
-    async createWorkspace(workspaceId: string, projectName: string, sourceType: 'generated' | 'cloned'): Promise<void> {
-        await this.manager.createWorkspace(workspaceId);
-        await this.registry.register({
-            workspaceId,
-            projectName,
-            sourceType,
-            status: 'ready',
-            createdAt: new Date(),
-            updatedAt: new Date()
-        });
+        manager: IWorkspaceManager,
+        registry: WorkspaceRegistry
+    ) {
+        this.commands = new WorkspaceCommandController(manager, registry);
+        this.queries = new WorkspaceQueryController(manager, registry);
     }
 
-    async saveFiles(workspaceId: string, files: GeneratedFile[]): Promise<void> {
-        const metadata = await this.registry.get(workspaceId);
-        if (!metadata) throw new NotFoundError("Workspace not found");
-        
-        await this.manager.saveFiles(workspaceId, files);
+    // ── Commands (write path → WorkspaceCommandController) ──────────────────────────
+    createWorkspace(workspaceId: string, projectName: string, sourceType: 'generated' | 'cloned'): Promise<void> {
+        return this.commands.createWorkspace(workspaceId, projectName, sourceType);
     }
 
-    async getWorkspaceInfo(workspaceId: string): Promise<WorkspaceInfo> {
-        const metadata = await this.registry.get(workspaceId);
-        if (!metadata) throw new NotFoundError("Workspace not found");
-        
-        const info = await this.manager.getWorkspaceInfo(workspaceId);
-        return {
-            ...metadata,
-            rootPath: info.rootPath,
-            files: info.files
-        };
+    saveFiles(workspaceId: string, files: GeneratedFile[]): Promise<void> {
+        return this.commands.saveFiles(workspaceId, files);
     }
 
-    async deleteWorkspace(workspaceId: string): Promise<void> {
-        await this.manager.deleteWorkspace(workspaceId);
-        await this.registry.delete(workspaceId);
+    deleteWorkspace(workspaceId: string): Promise<void> {
+        return this.commands.deleteWorkspace(workspaceId);
     }
 
-    async updateStatus(workspaceId: string, status: 'idle' | 'creating' | 'ready' | 'error'): Promise<void> {
-        await this.registry.update(workspaceId, { status });
+    updateStatus(workspaceId: string, status: 'idle' | 'creating' | 'ready' | 'error'): Promise<void> {
+        return this.commands.updateStatus(workspaceId, status);
+    }
+
+    // ── Queries (read path → WorkspaceQueryController) ──────────────────────────────
+    getWorkspaceInfo(workspaceId: string): Promise<WorkspaceInfo> {
+        return this.queries.getWorkspaceInfo(workspaceId);
     }
 }

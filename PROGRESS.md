@@ -9617,3 +9617,21 @@ healthy server was already bound on the port — pure wasted wall-clock on big/s
   4898/4898, boot PASS.
 - NOTE: E5 (parallelize post-build gate+reviewer) deferred to the C3 backend batch — it touches the
   delicate readiness-gate/reviewer ordering and deserves its own careful PR; E6 ships as the clean win.
+
+## 2026-07-05 — C1 (B6): live-poll pauses on hidden + resumes from last seq (no more re-download-from-0)
+
+subscribeLive (the cross-device live mirror) had two real background-cost gaps beyond the earlier
+backoff fix: (1) the visibility guard only stopped a poll from STARTING while hidden — a poll already
+running when the tab was backgrounded kept hitting the network every few seconds; (2) every tab-focus
+re-arm restarted from seq 0, re-downloading + re-applying the WHOLE event history.
+- New pure `livePollPolicy.ts`: `nextLivePollDelayMs({hidden,hadActivity,current})` (hidden → max/
+  near-pause; activity → fast; quiet → ×1.6 backoff) + `resumeSinceSeq(stored)`. Unit-tested.
+- useAgentV3Build: a `liveSeqRef` (per-workspace last seq) so a re-arm RESUMES from it; the tick now
+  SKIPS the fetch entirely while `document.hidden` (real pause, not just backoff) and reschedules at
+  the max cadence — the next visible tick fetches from `sinceSeq`, so nothing is missed.
+- Tests: livePollPolicy.test.ts +6. Gate: frontend tsc 0, vitest 4904/4904, build PASS.
+- HONEST scope note: C1's other ledger items are recorded as lower-priority follow-ups — B5 (history
+  array cap+memoize) and the convo re-sort live in the heavily-churned AgentV3Panel (high conflict
+  risk right now); B10 (checkRunning/checkpoints debounce) is largely mitigated by the existing
+  visibility-gated effects; B9 (unify the two NDJSON readers / authJsonHeaders) is a pure refactor
+  with no user-visible defect. B6 was the genuine resilience win and shipped clean.

@@ -68,6 +68,8 @@ export { parseGitHubRepo, resolveStorageTarget, ownRepoStorageEnabled, WORK_BRAN
 export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetInput } from './GitStorageTarget';
 export { perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser, acquireDecision, MAX_CONCURRENT_BUILDS_DEFAULT } from './BuildConcurrency';
 export type { AcquireResult } from './BuildConcurrency';
+export { emptyQueue, enqueue, claimNext, completeRunning, cancelItem, reorderPending, pendingItems, runningItem, queueSummary, MAX_QUEUE_ITEMS } from './BuildQueue';
+export type { CommandQueue, QueueItem, QueueItemStatus, QueueItemSource, EnqueueResult, ClaimResult } from './BuildQueue';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

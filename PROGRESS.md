@@ -8951,8 +8951,8 @@ B9. Two hand-rolled NDJSON readers + two authJsonHeaders (drift risk) → unify.
 B10. checkRunning/checkpoints effects over-fetch on routine UI changes → debounce. [S]
 
 UI/UX (AgentV3Panel/PreviewSurface):
-U1. Preview never auto-refreshes on file_changed/diff events (stale until manual ↻) — HIGH. [M]
-U2. Mobile: opening preview hides chat + progress entirely (hidden sm:flex) — HIGH. [M]
+U1. ✅ DONE (Batch 4) Preview never auto-refreshes on file_changed/diff events (stale until manual ↻) — HIGH. [M]
+U2. ✅ DONE (Batch 4) Mobile: opening preview hides chat + progress entirely (hidden sm:flex) — HIGH. [M]
 ✅ U3. Error banners dead-end — add Retry + "Fix with AI" buttons (pattern exists in PreviewSurface). [S]
 U4. No live token/cost ticker during build (billing only at done). [M]
 ✅ U5. Preview collapsed by default; never auto-opens when the preview URL arrives. [S]
@@ -9083,3 +9083,29 @@ Ships E4 from the 30-gap audit ledger (AgentRunner.ts).
 Gate: frontend tsc 0, server tsc 0, vitest 4786/4786 PASS, boot:check PASS. Ledger: E4 → ✅.
 Batch 3 (E2 + E4) complete. Next: Batch 4 — U1 (preview auto-refresh on file_changed/diff) +
 U2 (mobile: keep progress strip visible when preview open).
+
+## 2026-07-05 — v3.0 audit Batch 4 (UI HIGH gaps): live preview auto-refresh + mobile progress strip (U1 + U2)
+
+Ships U1 and U2 from the 30-gap audit ledger.
+- ✅ U1: the Preview surface never auto-refreshed — while a build wrote files, the open in-browser
+  preview stayed stale until the user hit ↻ manually. Root cause: PreviewSurface only (re)loads on
+  mount / mode / workspace change. Fix: AgentV3Panel derives a monotonic `filesVersion` (bumps on every
+  file_changed / diff — the reducer hands `state.files` / `state.diffs` a fresh identity per event) and
+  passes it as `reloadSignal`. PreviewSurface DEBOUNCES (900ms) so a 20-file batch triggers ONE reload
+  after writes settle, not one per file; in-browser re-compiles, live re-connects the iframe. An
+  `inFlight` guard stops a reload overlapping an in-flight compile (the slower response could otherwise
+  clobber the newer one). The surface is mounted only on the Preview tab, so a hidden preview never
+  wastes a compile. The reload decision is a pure, unit-tested helper (`previewAutoReload.ts`):
+  skips the first observation (mount already loads) and any unchanged signal.
+- ✅ U2: on a PHONE, opening the workspace hides the chat column (`hidden sm:flex`), so tapping Preview
+  made the live build progress vanish entirely. Fix: a compact progress strip in the workspace header
+  region — MOBILE ONLY (`sm:hidden`; desktop keeps the chat split with the full indicator) — rendering
+  the SAME real `WorkingIndicator` (current action + elapsed + expandable real activity log) while a
+  build runs. The user can now watch the preview AND the build at once on mobile.
+
+Tests: previewAutoReload.test.ts (5 new) locks the trigger semantics (first-skip, reload-on-change,
+no-reload-on-unchanged, per-mount independence). U2 is layout-only (a responsive `sm:hidden` strip
+reusing an existing tested component).
+
+Gate: frontend tsc 0, vitest 4797/4797 PASS, frontend+server build PASS. Ledger: U1 → ✅, U2 → ✅.
+Next: Batch 5 — remaining ledger (B5-B10, U4/U6/U8-U10, E1/E3/E5-E10).

@@ -1418,6 +1418,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   }, [state.previewUrl, isTouchDevice]);
 
+  // U1 (audit Batch 4): a monotonic signal that bumps on every file write / diff, so the open Preview
+  // surface can AUTO-REFRESH as the build progresses (see PreviewSurface's reloadSignal). The reducer
+  // hands `state.files` / `state.diffs` a fresh identity on each file_changed / diff event, so watching
+  // their reference is a faithful "the app just changed" trigger (PreviewSurface debounces the reload).
+  const [filesVersion, setFilesVersion] = useState(0);
+  useEffect(() => { setFilesVersion((v) => v + 1); }, [state.files, state.diffs]);
+
   // "Fix with AI" clicked from the SIDEBAR preview (outside this panel's own UI) — prefill the chat
   // input with the error and bring the chat into view, mirroring this panel's OWN onFixError handler
   // for its in-panel Preview tab (below). Fires on each new pendingFix (nonce change).
@@ -2061,6 +2068,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <X className="w-4 h-4" />
             </button>
           </div>
+          {/* U2 (audit Batch 4): on a PHONE, opening the workspace hides the chat column (hidden sm:flex
+              above), so the live build progress vanished the moment the user tapped Preview. Keep a
+              compact progress strip here — MOBILE ONLY (sm:hidden; desktop keeps the chat split with the
+              full indicator) — so the user can watch the preview AND still see what the build is doing.
+              Same real WorkingIndicator (current action + elapsed + expandable real activity log). */}
+          {(running || state.activity.length > 0) && (
+            <div className="sm:hidden shrink-0 px-3 py-1.5 border-b border-zinc-800 bg-zinc-950">
+              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+            </div>
+          )}
 
           {tab === 'preview' ? (
             <PreviewSurface
@@ -2069,6 +2086,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               userId={userId}
               email={email}
               framework={framework}
+              // U1 — auto-refresh the preview as files are written during the build (debounced inside).
+              reloadSignal={filesVersion}
               // C1 — when the panel is idle (no build running), let the preview auto-boot a dead
               // sandbox ONCE on reopen so a returning user's live preview restores itself instead of
               // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL

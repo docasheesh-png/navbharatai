@@ -9558,3 +9558,28 @@ turn fell to Claude anyway.
   request never trimmed). Gate: server tsc 0, frontend tsc 0, vitest 4885/4885, boot PASS.
 - Together with #995 (binary assets out of the manifest), the 233KB prompt class is now closed: big-app
   turns stay bounded → the cheap floor stops timing out and each turn is faster.
+## 2026-07-05 — P3.1 App.tsx split #3: DELETE dead Pro v2.0 engine (~1,050 lines)
+
+Biggest single reduction so far — and NOT an extraction: investigation (subagent dep-map + manual
+trace) proved `handleSendForPro` (~1,020 lines) + `handleStopPro` were DEAD CODE — the retired Pro v2.0
+engine, unreachable from any live UI path. Proof recorded:
+- `handleStopPro` had ZERO callers; `handleSendForPro` was referenced only by its own self-recursion and
+  by ONE branch inside `handleZipImport` gated on `extraMessage?.trim()`.
+- All three LIVE callers of `handleZipImport` (file-drop / conflict-resolve, lines ~3981/4032/4034) pass
+  NO extraMessage, so that branch never fires. The live Pro surface is the self-contained `ProV3Surface`
+  (code comment: "replaces the retired Pro v2.0 builder"). Pro-state output (proMessages/proBuildProgress)
+  is rendered by no live component.
+Per rule 4 (root-cause) + P5.3 (delete throwaway) the right move was DELETE, not extract (moving dead
+code is pointless; deleting is safer AND removes far more). Admin explicitly approved the deletion.
+
+Removed: `handleSendForPro` + `handleStopPro`; the dead `if(extraMessage)` branch in the LIVE
+`handleZipImport`; and every symbol used ONLY by those functions — 9 refs (proAbortControllerRef,
+proLivePreviewUrlRef, proLiveScreenshotRef, lastBuildPromptRef, proAutoContinueRef, proGuiderSpecRef,
+proGuiderRefineRef, providerRetryTimerRef, providerRetryPromptRef), 2 consts (PRO_MAX_AUTO_CONTINUE,
+PRO_MAX_REFINE), 3 orphaned states (proGuiderPlan, proGuiderReplanning, providerRetryCountdown), and now-
+unused imports (buildApp, buildAppStream, previewSrcFor, classifyBuildIntent, classifyAutoIntent,
+extractCode). Each verified orphaned by whole-file grep BEFORE removal. LIVE handleZipImport + proMessages
+(saved to sessions) untouched.
+
+App.tsx: 6,096 -> 5,045 lines (-1,051). Running total: 6,596 -> 5,045 (~24% down; target ~2,000-2,500).
+Gate: frontend tsc 0, vitest 4879/4879 PASS, vite build PASS.

@@ -61,6 +61,23 @@ export class UserGitHubClient implements PrCapableClient {
     return `https://x-access-token:${this.token}@github.com/${login}/${name}.git`;
   }
 
+  /**
+   * Verify the authenticated user's access to their own repo `<login>/<name>`: does it exist, can the
+   * token PUSH to it, and what is its default branch (the PR base). Used to gate own-repo working-branch
+   * storage — we only ever write to a repo the user genuinely owns and can push to. Never throws: any
+   * API/network failure reports `canPush:false` so the caller safely falls back to the private mirror.
+   */
+  async getRepoAccess(name: string): Promise<{ exists: boolean; canPush: boolean; defaultBranch: string }> {
+    try {
+      const login = await this.getLogin();
+      const got = await this.request<RepoApi>('GET', `/repos/${login}/${name}`);
+      if (!got.ok || !got.body) return { exists: false, canPush: false, defaultBranch: 'main' };
+      return { exists: true, canPush: got.body.permissions?.push === true, defaultBranch: got.body.default_branch ?? 'main' };
+    } catch {
+      return { exists: false, canPush: false, defaultBranch: 'main' };
+    }
+  }
+
   // ── PrCapableClient (owner = the user's login) ──────────────────────────────────
 
   async openPullRequest(repo: string, head: string, base: string, title: string, body: string): Promise<PullRequestInfo> {
@@ -112,6 +129,7 @@ interface RepoApi {
   clone_url?: string;
   html_url?: string;
   default_branch?: string;
+  permissions?: { push?: boolean; admin?: boolean; pull?: boolean };
 }
 
 function toRepoInfo(r: RepoApi, created: boolean): RepoInfo {

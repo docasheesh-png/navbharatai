@@ -9140,3 +9140,33 @@ the three Opus power levels be called? (No user is overcharged — the label ove
 DEFERRED (follow-up B): true per-model billing needs the engine to bucket tokens by model tier
 (AgentRunner) so a mixed normal build (cheap-floor GLM/KIMI + a Sonnet final-fix) bills cheap tokens ×1.2
 and Sonnet tokens ×3 exactly, instead of the whole normal build at ×1.2. Recorded; touches hot AgentRunner.
+
+## 2026-07-05 — Own-repo working-branch storage (admin model, Slice 1 of 2) — no more mirror sprawl
+
+Admin approved a coordinated GitHub flow: when a user imports a repo THEY OWN, edits should go to a
+working branch INSIDE that real repo (main safe) and reach main only via a PR — instead of today's
+separate per-session mirror repo (`app-<uid>-<session>`) that caused sprawl and left the real repo
+disconnected from the edits. (Rejected on honest grounds: storing project files in NavBharatAI's
+Firebase — breaks the per-user cost rule that git-native storage exists to avoid; and moving build
+reports to GitHub — Firestore is the right home for that metadata.)
+
+SLICE 1 (this PR, flag-gated OFF via AGENTV3_OWN_REPO_STORAGE):
+- New pure `GitStorageTarget.ts`: `parseGitHubRepo`, `resolveStorageTarget` (own-repo vs mirror with
+  ALL guardrails — feature enabled + real github repo + signed-in + owner===login + verified write),
+  `WORK_BRANCH='navbharatai/work'`, `ownRepoStorageEnabled()`. Fully unit-tested (own-repo only when
+  every guard holds; every miss → safe mirror).
+- `UserGitHubClient.getRepoAccess(name)` — verifies push access + default branch (safe fallback on any
+  API error). Tested.
+- `GitRepoSync.hydrateFromRepo` gains optional `{ branch, fallbackBranch }` — clones the work branch
+  (accumulated edits), else the base, else the default. Byte-identical to before when no branch given.
+  Tested (order + backward-compat).
+- Route wiring (agentv3.ts): for an owned imported repo → store on `navbharatai/work` in the REAL repo,
+  push there (force is safe — single-writer branch, NEVER main), keep ONE work→base PR open, and NEVER
+  auto-merge. main changes only when the USER merges → structurally nothing can break main.
+- SAFETY: default OFF; only repos the user personally owns + has write to; main never auto-touched.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4718/4718 PASS, build PASS, boot PASS.
+
+SLICE 2 (next): in-app "Ship to main" (merge on CI-green) + "Revert last merge" buttons — revert ships
+in the SAME slice as any auto-merge so an undo always exists wherever a merge does. AppKnowledgeBase
+entry lands with slice 2 (the user-facing buttons).

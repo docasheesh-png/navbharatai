@@ -40,8 +40,12 @@ import {
   githubPrMode,
   mergeViaPullRequest,
   repoNameForProject,
+  resolveStorageTarget,
+  ownRepoStorageEnabled,
+  parseGitHubRepo,
   type RepoInfo,
   type PrCapableClient,
+  type OwnRepoTarget,
   registerSession,
   restoreSession,
   gitStatusForSession,
@@ -3184,6 +3188,11 @@ export function registerAgentV3Routes(app: Express): void {
       // GitHub) or the platform App (org storage). Either implements PrCapableClient.
       let prClient: PrCapableClient | undefined;
       let repoNameRef = '';
+      // Own-repo working-branch storage (admin model 2026-07-05, flag-gated OFF): when the user imports
+      // a repo they OWN, edits are stored on a stable working branch (`navbharatai/work`) INSIDE that
+      // real repo and reach `main` only via a PR the user merges — never a separate mirror, never a
+      // direct push to `main`. Non-null only in that case; the mirror path leaves it null (unchanged).
+      let ownRepoTarget: OwnRepoTarget | null = null;
       try {
         // Emit an immediate status so the NDJSON stream is never silent while the
         // sandbox is being created (E2B VM setup can take several seconds). A long
@@ -3214,23 +3223,58 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const userClient = new UserGitHubClient(userToken);
               const login = await userClient.getLogin();
-              const repo = await userClient.ensureRepo(repoName);
-              repoAuthedUrl = userClient.authedCloneUrl(repoName, login);
-              repoBranch = repo.defaultBranch || 'main';
-              prClient = userClient;
-              repoNameRef = repoName;
-              repoSync = new GitRepoSync(actuator, workspaceId);
-              const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
-              // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
-              if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
-              events.emit({
-                type: 'narration', agent: 'architect',
-                text: h.hydrated
-                  ? `Loaded your project from your GitHub (${login}/${repoName}).`
-                  : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
-                ts: Date.now(),
+              // Decide the storage target: the user's OWN imported repo (working branch) vs the safe
+              // private mirror. The write-access API call only runs for a plausibly-owned imported repo
+              // (feature enabled + the import URL's owner equals the signed-in login), so the common
+              // path is unchanged. resolveStorageTarget makes the final, guard-checked decision.
+              const imported = ownRepoStorageEnabled() ? parseGitHubRepo(importUrl) : null;
+              const ownsImported = !!imported && imported.owner.toLowerCase() === login.toLowerCase();
+              const access = ownsImported
+                ? await userClient.getRepoAccess(imported!.repo)
+                : { exists: false, canPush: false, defaultBranch: 'main' };
+              const target = resolveStorageTarget({
+                importUrl, userLogin: login, hasWriteAccess: access.canPush,
+                baseBranch: access.defaultBranch, mirrorRepoName: repoName, ownRepoEnabled: ownRepoStorageEnabled(),
               });
-            } catch { repoSync = undefined; prClient = undefined; /* fall through to the platform store */ }
+              if (target.mode === 'own-repo') {
+                // OWN-REPO WORKING BRANCH: store edits on `navbharatai/work` INSIDE the user's real repo.
+                // `main` (the base branch) is NEVER pushed here — edits reach it only via a PR the user
+                // merges. Hydrate prefers the work branch (accumulated edits), else the repo default.
+                repoAuthedUrl = userClient.authedCloneUrl(target.repo, target.owner);
+                repoBranch = target.workBranch;
+                prClient = userClient;
+                repoNameRef = target.repo;
+                ownRepoTarget = target;
+                repoSync = new GitRepoSync(actuator, workspaceId);
+                const h = await repoSync.hydrateFromRepo(repoAuthedUrl, { branch: target.workBranch, fallbackBranch: target.baseBranch, overlayAnyContent: true });
+                events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ts: Date.now() });
+                events.emit({
+                  type: 'narration', agent: 'architect',
+                  text: h.hydrated
+                    ? `Working on your own repo ${target.owner}/${target.repo} — edits go to the ‘${target.workBranch}’ branch; your ‘${target.baseBranch}’ stays untouched until you merge the PR.`
+                    : `Connected to your own repo ${target.owner}/${target.repo} — edits will be saved to the ‘${target.workBranch}’ branch; your ‘${target.baseBranch}’ stays safe until you merge the PR.`,
+                  ts: Date.now(),
+                });
+              } else {
+                // MIRROR (today's behaviour): a private per-project repo in the user's account.
+                const repo = await userClient.ensureRepo(repoName);
+                repoAuthedUrl = userClient.authedCloneUrl(repoName, login);
+                repoBranch = repo.defaultBranch || 'main';
+                prClient = userClient;
+                repoNameRef = repoName;
+                repoSync = new GitRepoSync(actuator, workspaceId);
+                const h = await repoSync.hydrateFromRepo(repoAuthedUrl);
+                // Surface the repo so the UI can offer a "View on GitHub" link (full app control).
+                if (repo.htmlUrl) events.emit({ type: 'repo', url: repo.htmlUrl, fullName: repo.fullName || `${login}/${repoName}`, ts: Date.now() });
+                events.emit({
+                  type: 'narration', agent: 'architect',
+                  text: h.hydrated
+                    ? `Loaded your project from your GitHub (${login}/${repoName}).`
+                    : `Connected to your GitHub — this build will be saved to ${login}/${repoName}.`,
+                  ts: Date.now(),
+                });
+              }
+            } catch { repoSync = undefined; prClient = undefined; ownRepoTarget = null; /* fall through to the platform store */ }
           }
           // PLATFORM-ORG STORE (Email/Phone users, or if the user-token path failed): the invisible
           // durable repo in the platform GitHub org via the App installation token.
@@ -4667,10 +4711,28 @@ export function registerAgentV3Routes(app: Express): void {
       if (repoSync && repoAuthedUrl && writtenFiles.size > 0) {
         try {
           const msg = `NavBharatAI build: ${deriveTitle(prompt)}`;
-          // PR MODE (Phase 3, opt-in GITHUB_PR_MODE): push to a build branch, open a PR, and merge
-          // it ONLY when CI is green (Claude-Code-style). Default mode force-pushes straight to the
-          // project's default branch. Both best-effort — never block or fail the build.
-          if (githubPrMode() && prClient && repoNameRef) {
+          // OWN-REPO WORKING BRANCH (admin model 2026-07-05): the user imported a repo they own — push
+          // edits to the `navbharatai/work` branch (force is safe: single-writer branch, NEVER `main`)
+          // and keep ONE work→base PR open. We do NOT auto-merge: `main` changes only when the USER
+          // merges the PR (an in-app "Ship to main" + "Revert" lands in the next slice). So there is
+          // structurally nothing that can break `main` here.
+          if (ownRepoTarget && prClient) {
+            const pushed = await repoSync.pushAll(repoAuthedUrl, ownRepoTarget.workBranch, msg);
+            if (pushed.pushed) {
+              let prNote = `Saved your edits to the ‘${ownRepoTarget.workBranch}’ branch (your ‘${ownRepoTarget.baseBranch}’ is untouched).`;
+              try {
+                const pr = await prClient.openPullRequest(
+                  ownRepoTarget.repo, ownRepoTarget.workBranch, ownRepoTarget.baseBranch,
+                  `NavBharatAI: update ${ownRepoTarget.repo}`,
+                  `Edits by NavBharatAI Pro v3.0 on \`${ownRepoTarget.workBranch}\`. Review and merge into \`${ownRepoTarget.baseBranch}\` when ready.`,
+                );
+                if (pr.number) {
+                  prNote = `Saved your edits to ‘${ownRepoTarget.workBranch}’ and opened PR #${pr.number} → ‘${ownRepoTarget.baseBranch}’. Your ‘${ownRepoTarget.baseBranch}’ is untouched — review and merge when ready: ${pr.htmlUrl}`;
+                }
+              } catch { /* PR is best-effort — the edits are safely on the work branch regardless */ }
+              events.emit({ type: 'narration', agent: 'architect', text: prNote, ts: Date.now() });
+            }
+          } else if (githubPrMode() && prClient && repoNameRef) {
             const buildBranch = `nbi/build-${Date.now()}`;
             const pushed = await repoSync.pushAll(repoAuthedUrl, buildBranch, msg);
             if (pushed.pushed) {

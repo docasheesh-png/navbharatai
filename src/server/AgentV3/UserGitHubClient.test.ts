@@ -65,6 +65,35 @@ describe('UserGitHubClient.ensureRepo', () => {
   });
 });
 
+describe('UserGitHubClient.getRepoAccess (own-repo write-access gate)', () => {
+  it('reports push access + default branch for a repo the user can write', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: fakeFetch({
+        ...userRoute,
+        'GET /repos/alice/mitrify': { status: 200, body: { full_name: 'alice/mitrify', default_branch: 'develop', permissions: { push: true, admin: true, pull: true } } },
+      }),
+    });
+    expect(await client.getRepoAccess('mitrify')).toEqual({ exists: true, canPush: true, defaultBranch: 'develop' });
+  });
+
+  it('reports canPush:false for a repo the user can only read (never write to it)', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: fakeFetch({
+        ...userRoute,
+        'GET /repos/alice/readonly': { status: 200, body: { default_branch: 'main', permissions: { push: false, pull: true } } },
+      }),
+    });
+    expect(await client.getRepoAccess('readonly')).toEqual({ exists: true, canPush: false, defaultBranch: 'main' });
+  });
+
+  it('reports exists:false + canPush:false when the repo 404s or the API errors (safe fallback)', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: fakeFetch({ ...userRoute, 'GET /repos/alice/missing': { status: 404, body: { message: 'Not Found' } } }),
+    });
+    expect(await client.getRepoAccess('missing')).toEqual({ exists: false, canPush: false, defaultBranch: 'main' });
+  });
+});
+
 describe('UserGitHubClient PR flow (PrCapableClient)', () => {
   const base = (extra: Record<string, { status: number; body: unknown }>) => new UserGitHubClient('t', { fetchImpl: fakeFetch({ ...userRoute, ...extra }) });
 

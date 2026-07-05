@@ -124,6 +124,29 @@ describe('GitRepoSync.hydrateFromRepo', () => {
     expect(res.hydrated).toBe(false);
   });
 
+  it('own-repo hydrate tries the WORK branch, then the base branch, then the default clone (in order)', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    const res = await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL, { branch: 'navbharatai/work', fallbackBranch: 'main', overlayAnyContent: true });
+    expect(res.hydrated).toBe(true);
+    const cmd = commands[0];
+    // Branch-specific clones are emitted, work branch BEFORE the base branch, then a plain default clone.
+    const iWork = cmd.indexOf('-b "navbharatai/work"');
+    const iMain = cmd.indexOf('-b "main"');
+    const iPlain = cmd.lastIndexOf('git clone --depth 1 "'); // the no-`-b` fallback
+    expect(iWork).toBeGreaterThan(-1);
+    expect(iMain).toBeGreaterThan(iWork);
+    expect(iPlain).toBeGreaterThan(iMain);
+    // Each attempt cleans the temp dir so a failed `-b <missing>` clone never blocks the next.
+    expect(cmd).toContain('rm -rf /tmp/nbhydrate');
+  });
+
+  it('no branch opts → a single plain clone, no -b flag (original behaviour preserved)', async () => {
+    const { runner, commands } = fakeRunner(() => ({ stdout: 'NB_HYDRATED' }));
+    await new GitRepoSync(runner, 'ws1').hydrateFromRepo(URL);
+    expect(commands[0]).not.toContain('-b "'); // no branch flag when none requested
+    expect(commands[0]).toContain('git clone --depth 1 "');
+  });
+
   it('skips with no url, and never throws when the runner rejects', async () => {
     const noUrl = await new GitRepoSync(fakeRunner(() => ({})).runner, 'ws1').hydrateFromRepo('');
     expect(noUrl).toEqual({ hydrated: false, hadFiles: false, skipped: true });

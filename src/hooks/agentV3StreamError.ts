@@ -38,3 +38,41 @@ export function shouldSurfaceStreamError(ctx: StreamErrorContext): boolean {
   if (ctx.sawResult) return false;
   return true;
 }
+
+// ── Reconnect (/attach) outcome — the ONE decision for what a re-attach RESULT means ────────────
+//
+// ROOT CAUSE it fixes (2026-07-05, admin's "internet off 30s → load fail → retry" report, IMG_5709):
+// on a network drop the client took the 409-resumable path and OPTIMISTICALLY printed
+// "Your build … was still running — I re-attached to it live below" BEFORE /attach had confirmed a
+// live build. /attach then 404'd ("No running build to resume.") because the build had already ended
+// (finished, or was torn down when the connection dropped) — an inherent race: /chat's 409 check and
+// the separate /attach call are not atomic, so the build can end between them. The user saw TWO
+// contradictory messages: "re-attached live" AND "no running build". The fix is honesty timing: the
+// optimistic re-attach notice is emitted ONLY on a confirmed-live attach; a 404 is the authoritative,
+// truthful final state and is presented calmly (never a red error, never paired with the promise).
+//
+// The four outcomes, decided purely from the attach response + whether a terminal result was already
+// seen, so the hook can render exactly one coherent state:
+export type ReconnectOutcome =
+  /** Attach returned a live stream → replay it and (only now) show the "re-attached" notice. */
+  | 'live'
+  /** Build is gone AND its result was already seen → benign tail close; say nothing, just clean up. */
+  | 'gone-silent'
+  /** Build is gone mid-run (the drop ended it) → one honest "your files are safe, send again" line. */
+  | 'gone-notice'
+  /** An unexpected, non-404 failure (e.g. 5xx) → surface it honestly as an error. */
+  | 'error';
+
+/**
+ * Classify a /attach reconnect result. Pure + exported for unit testing.
+ * - ok            → 'live'
+ * - 404 (no build) → 'gone-silent' if the build's result was already seen, else 'gone-notice'
+ * - any other non-ok → 'error'
+ * A 404 is NEVER an error here: it is the truthful "that build isn't running anymore", which the
+ * caller shows without contradicting an earlier (now-suppressed) "re-attached live" promise.
+ */
+export function reconnectOutcome(input: { ok: boolean; status: number; resultAlreadySeen: boolean }): ReconnectOutcome {
+  if (input.ok) return 'live';
+  if (input.status === 404) return input.resultAlreadySeen ? 'gone-silent' : 'gone-notice';
+  return 'error';
+}

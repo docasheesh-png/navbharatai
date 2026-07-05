@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldSurfaceStreamError, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
 
 function ctx(over: Partial<StreamErrorContext> = {}): StreamErrorContext {
   return { isAbort: false, isStale: false, sawResult: false, reconnected: false, ...over };
@@ -46,6 +46,41 @@ describe('shouldSurfaceStreamError', () => {
     expect(shouldSurfaceStreamError(ctx())).toBe(true); // baseline: surfaces
     for (const key of ['isAbort', 'isStale', 'sawResult', 'reconnected'] as const) {
       expect(shouldSurfaceStreamError(ctx({ [key]: true }))).toBe(false);
+    }
+  });
+});
+
+describe('reconnectOutcome', () => {
+  // THE exact bug (admin, 2026-07-05, IMG_5709 — "internet off 30s → load fail → retry"): on a drop
+  // the client OPTIMISTICALLY printed "your build was still running — I re-attached to it live below",
+  // then /attach 404'd ("No running build to resume.") because the build had already ended in the
+  // window between /chat's 409 check and the separate /attach call. Two contradictory messages. The
+  // fix: a 404 is 'gone', never 'live' and never an 'error' — so the caller shows ONE honest state and
+  // the "re-attached live" notice is emitted ONLY for a confirmed-live attach.
+  it("a live attach is 'live' (and only then is the re-attached notice shown)", () => {
+    expect(reconnectOutcome({ ok: true, status: 200, resultAlreadySeen: false })).toBe('live');
+  });
+
+  it("a 404 mid-build is 'gone-notice' — the honest 'send again' path, NOT an error (the reported bug)", () => {
+    expect(reconnectOutcome({ ok: false, status: 404, resultAlreadySeen: false })).toBe('gone-notice');
+  });
+
+  it("a 404 AFTER the result was seen is 'gone-silent' — benign tail close, no message", () => {
+    expect(reconnectOutcome({ ok: false, status: 404, resultAlreadySeen: true })).toBe('gone-silent');
+  });
+
+  it("a non-404 failure (e.g. 500) is a genuine 'error'", () => {
+    expect(reconnectOutcome({ ok: false, status: 500, resultAlreadySeen: false })).toBe('error');
+    expect(reconnectOutcome({ ok: false, status: 503, resultAlreadySeen: true })).toBe('error');
+  });
+
+  // A 404 is NEVER classified as 'error' or 'live' — it is always one of the two honest "gone"
+  // states, so the contradiction ("re-attached live" + "no running build") can never reappear.
+  it('a 404 is never live and never a red error', () => {
+    for (const resultAlreadySeen of [true, false]) {
+      const out = reconnectOutcome({ ok: false, status: 404, resultAlreadySeen });
+      expect(out === 'live' || out === 'error').toBe(false);
+      expect(out.startsWith('gone')).toBe(true);
     }
   });
 });

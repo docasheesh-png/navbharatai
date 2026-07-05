@@ -4,6 +4,13 @@ import { initialAgentV3State } from './agentV3Types';
 import type { AgentV3WireEvent } from './agentV3Types';
 
 describe('agentV3Reducer — folds wire events into surface state', () => {
+  it('records own-repo storage from an own_repo event (drives the Ship/Revert controls)', () => {
+    let s = initialAgentV3State();
+    expect(s.ownRepo).toBeUndefined();
+    s = agentV3Reducer(s, { type: 'own_repo', owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main', ts: 1 });
+    expect(s.ownRepo).toEqual({ owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' });
+  });
+
   it('tracks the live AI-team card from a tool_call then clears active on result', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, {

@@ -9203,3 +9203,25 @@ admin-gated — recording honestly instead of shipping a redundant or unilateral
   rollout flag" and CLAUDE.md requires ADMIN SIGN-OFF for. Not flipping it unilaterally (safeguard #3).
   → OPEN, awaiting admin decision: "turn v3.0 cost-ladder escalation on by default?" (makes every build
   cheap-first → gate → auto-repair/escalate; more reliable, slightly higher worst-case cost per build).
+
+## 2026-07-05 — Own-repo storage Slice 2a: in-app "Ship to main" (merge on green CI)
+
+Builds on Slice 1 (own-repo working-branch storage). Adds the user-facing action to merge the
+`navbharatai/work` branch into the repo's default branch — from inside NavBharatAI.
+
+- New wire event `own_repo` {owner, repo, workBranch, baseBranch} (client + server type unions),
+  emitted when own-repo storage activates; reducer stores `state.ownRepo`. +reducer test.
+- New `POST /api/agentv3/ship`: verifies the user's GitHub write access (their token = the authority,
+  so only their own repo is reachable), then reuses the tested `mergeViaPullRequest` to open-or-reuse
+  the work→default PR and merge ONLY on green/none CI. A red/pending PR is returned OPEN with an honest
+  note — never force-merged. `main` changes ONLY here, on the user's explicit click.
+- Hook `shipToMain()` + `ShipResult` type; AgentV3Panel shows a green "Ship to <main>" button above the
+  composer whenever `state.ownRepo` is set (own-repo mode), rendering the honest result in-thread.
+- AppKnowledgeBase: new `agentv3_ship_to_main` entry (own-repo edit → ship-on-green loop).
+
+SAFETY: still flag-gated (AGENTV3_OWN_REPO_STORAGE) — the button only appears in own-repo mode, which
+only activates when the flag is on. main is merged ONLY on green CI, ONLY on the user's click, ONLY on
+their own repo. Reverting a shipped merge is available on GitHub's native PR "Revert" today; the in-app
+Revert button is Slice 2b (next).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4815/4815 PASS, build PASS, boot PASS.

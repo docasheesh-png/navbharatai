@@ -56,6 +56,9 @@ export interface UseAgentV3Build {
    *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
    *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
   resume: (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string }) => Promise<void>;
+  /** Ship to main (own-repo storage): merge `navbharatai/work` → the repo default via a PR, server-side
+   *  merging ONLY on green CI. Returns an honest result to render in-thread. */
+  shipToMain: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<ShipResult>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -81,6 +84,22 @@ export interface UseAgentV3Build {
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
    *  Pass `workspaceId` so the server (same-instance case) won't mirror a build for a different session. */
   subscribeLive: (opts?: { userId?: string; email?: string; workspaceId?: string }) => (() => void);
+}
+
+/** Result of "Ship to main" (own-repo storage, slice 2) — an honest, renderable outcome. */
+export interface ShipResult {
+  /** The request itself succeeded (reached GitHub) — NOT necessarily that a merge happened. */
+  ok: boolean;
+  /** True only when the PR was actually merged into the base branch. */
+  merged: boolean;
+  prNumber?: number;
+  prUrl?: string;
+  /** The CI verdict read for the PR head: 'success' | 'failure' | 'pending' | 'none'. */
+  ci?: string;
+  /** The base branch the work branch was merged into (the repo default). */
+  base?: string;
+  /** A short, honest, user-facing summary of what happened. */
+  note: string;
 }
 
 /** Real working-tree git status (Phase G2). available:false when the sandbox isn't warm this session. */
@@ -532,6 +551,24 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, [pumpStream]);
 
+  // SHIP TO MAIN (own-repo working-branch storage, slice 2): merge the user's `navbharatai/work`
+  // branch into their repo's default branch via a PR — server-side merges ONLY when CI is green.
+  // Returns an honest result the caller renders in-thread. The user's GitHub token authorizes it.
+  const shipToMain = useCallback(async (opts: { repo: string; userId?: string; email?: string; githubToken?: string }): Promise<ShipResult> => {
+    try {
+      const res = await fetch('/api/agentv3/ship', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ repo: opts.repo, userId: opts.userId, email: opts.email, githubToken: opts.githubToken }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, merged: false, note: typeof j?.error === 'string' ? j.error : `Ship failed (HTTP ${res.status}).` };
+      return { ok: true, merged: j?.merged === true, prNumber: typeof j?.prNumber === 'number' ? j.prNumber : undefined, prUrl: typeof j?.prUrl === 'string' ? j.prUrl : undefined, ci: typeof j?.ci === 'string' ? j.ci : undefined, base: typeof j?.base === 'string' ? j.base : undefined, note: typeof j?.note === 'string' ? j.note : (j?.merged ? 'Merged.' : 'Could not merge.') };
+    } catch (err) {
+      return { ok: false, merged: false, note: err instanceof Error ? err.message : String(err) };
+    }
+  }, []);
+
   const respond = useCallback(async (requestId: string, approved: boolean) => {
     // Clear the gate immediately so the UI is responsive; the build resumes.
     setState((prev) => ({ ...prev, pendingPermission: undefined }));
@@ -917,5 +954,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

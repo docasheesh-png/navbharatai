@@ -8945,7 +8945,7 @@ CLIENT BACKGROUND (useAgentV3Build/panel effects):
 B5. Panel history arrays unbounded in long sessions (agentHistory/checkpointHistory; convo re-sorts every
    render) → cap + memoize. [M]
 B6. subscribeLive re-arms from seq 0 on every visibilitychange; never pauses on hidden. [M]
-B7. No beforeunload guard / composer draft not persisted (typing lost on reload). [S]
+B7. ✅ DONE (Batch 6) No beforeunload guard / composer draft not persisted (typing lost on reload). [S]
 B8. ✅ DONE (Batch 5) No SW-update "reload for new version" prompt (the stale-bundle class the admin hit). [M]
 B9. Two hand-rolled NDJSON readers + two authJsonHeaders (drift risk) → unify. [M]
 B10. checkRunning/checkpoints effects over-fetch on routine UI changes → debounce. [S]
@@ -9225,3 +9225,22 @@ their own repo. Reverting a shipped merge is available on GitHub's native PR "Re
 Revert button is Slice 2b (next).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4815/4815 PASS, build PASS, boot PASS.
+## 2026-07-05 — v3.0 audit Batch 6 (long-session robustness): composer draft persistence (B7)
+
+Ships B7 — and it directly complements B8 (Batch 5).
+- ✅ B7: the chat composer's unsent text was pure in-memory React state, so ANY reload wiped it —
+  "typing lost on reload". This got MORE likely right after B8 (which now reloads promptly to pick up a
+  deploy) and is always possible when a phone backgrounds the tab. Root-cause fix: persist the draft.
+  A new pure, tested `composerDraft.ts` (saveDraft/loadDraft over a storage boundary, 20k cap,
+  never-throws) backs it; AgentV3Panel hydrates `prompt` from the saved draft on mount
+  (`useState(() => loadDraft())`) and re-saves on every keystroke (`useEffect … saveDraft(prompt)`).
+  Sending sets `prompt=''`, which clears the stored draft too — so a sent message never lingers.
+  DELIBERATELY did NOT add an intrusive `beforeunload` "are you sure?" dialog: with the draft persisted
+  AND sticky sessions resuming the build, nothing is actually lost, so a confirm dialog would only
+  annoy — fixing the real root cause (no persistence) is the honest move, not warning over the symptom.
+  Tests: composerDraft.test.ts (6) — save/load round-trip, clear-on-empty, whitespace-as-empty, huge-
+  paste cap, storage-unavailable no-throw.
+  Gate: frontend tsc 0, vitest 4824/4824 PASS, frontend+server build PASS. Ledger: B7 → ✅.
+
+Remaining ledger after Batch 6: B5, B6, B9, B10, U4, U6, U8, U9, U10, E5, E6, E7, E8, E9, E10
+(E1 done, E3 open awaiting admin escalation-default decision).

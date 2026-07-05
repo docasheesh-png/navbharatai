@@ -12,6 +12,7 @@ import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
+import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
@@ -66,7 +67,8 @@ let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
-  const [prompt, setPrompt] = useState('');
+  // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
+  const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" (own-repo storage, slice 2): in-flight + last honest result for the action bar.
   const [shipping, setShipping] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
@@ -1439,6 +1441,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // their reference is a faithful "the app just changed" trigger (PreviewSurface debounces the reload).
   const [filesVersion, setFilesVersion] = useState(0);
   useEffect(() => { setFilesVersion((v) => v + 1); }, [state.files, state.diffs]);
+
+  // B7 — persist the composer draft on every keystroke so a reload (incl. B8's prompt SW-update
+  // reloads, or a phone backgrounding the tab) never loses unsent text. Sending clears `prompt`, which
+  // clears the stored draft too (saveDraft removes it on empty). Best-effort; never blocks typing.
+  useEffect(() => { saveDraft(prompt); }, [prompt]);
 
   // "Fix with AI" clicked from the SIDEBAR preview (outside this panel's own UI) — prefill the chat
   // input with the error and bring the chat into view, mirroring this panel's OWN onFixError handler

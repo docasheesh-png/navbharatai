@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { doc, updateDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { encrypt } from '../lib/secrets';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
@@ -50,8 +50,18 @@ export function registerSecretsRoutes(app: Express): void {
   app.delete('/api/secrets/:userId/:secretId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const { secretId } = req.params;
-      await updateDoc(doc(db, 'user_secrets', secretId), { deleted: true }); // Soft delete
+      const { userId, secretId } = req.params;
+      const ref = doc(db, 'user_secrets', secretId);
+      const snap = await getDoc(ref);
+      // IDOR guard: user_secrets is a FLAT collection, so requireUserMatch (caller === :userId) is
+      // NOT enough — the delete keys off :secretId alone. Confirm the target secret actually belongs
+      // to the authenticated user before soft-deleting, so a caller can't destroy another user's
+      // secret by guessing its document id. Respond 404 (not 403) so we don't leak that the id exists.
+      if (!snap.exists() || (snap.data() as { user_id?: string } | undefined)?.user_id !== userId) {
+        res.status(404).json({ error: 'Secret not found' });
+        return;
+      }
+      await updateDoc(ref, { deleted: true }); // Soft delete
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to delete secret' });

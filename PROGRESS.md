@@ -8435,3 +8435,24 @@ Round-8 remaining recorded findings: the HIGH non-atomic wallet-credit race (liv
 refactor — being surfaced to admin for a careful, transaction-based follow-up), the NaN-cost
 defense-in-depth guard (not live-exploitable; both callers pre-guard `> 0`), and the ₹50-vs-₹100
 ledger-label honesty bug (LOW).
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-8 #3 — billing correctness + honesty hardening (#TBD)
+
+Two low-risk billing fixes from the round-8 deferred list, shipped together:
+
+- **NaN cost guard (UserCostStore.record)** — the guard was `costUsd <= 0`, which lets `NaN`/`Infinity`
+  through (`NaN <= 0` is false). A single NaN would then permanently poison the stored monthly total
+  (`existing + NaN === NaN` forever) and flow into the Billing panel. Extracted the invariant to a pure
+  tested helper `isRecordableCost(costUsd)` (finite AND > 0) enforced at the single entry point. Both
+  current callers already pre-guard `> 0`, so this is defense-in-depth (invariant-at-entry per rule #2),
+  not a live-exploitable bug — and now it cannot regress. Locked with tests (userCostStoreGuard.test.ts).
+- **Ledger honesty label (payments.ts)** — the vishwakarma purchase ledger hardcoded
+  "Lifetime Pass Activated (₹50)" while the real withheld pass price is `VISHWAKARMA_PASS_PRICE_RUPEES = 100`.
+  Now interpolates the constant so the customer-facing description matches the actual amount and can
+  never drift from the price. (Honesty rule — the system must tell the truth about what it charged.)
+
+Round-8 wrap: shipped the dead-webhook fix (#959), domains auth (#960), and this hardening. The one
+remaining recorded finding is the HIGH non-atomic wallet-credit race (payments.ts:119-212) — a
+live-money concurrency refactor (runTransaction / FieldValue.increment) that cannot be end-to-end
+verified against real Firestore in this sandbox, so it is being surfaced to the admin as a decision
+rather than blind-patched (safeguard #3).

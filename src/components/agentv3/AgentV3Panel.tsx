@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
@@ -1842,12 +1843,34 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
                 </div>
                 {!running && (
-                  <button
-                    onClick={() => fixWithAI(`Fix this error and continue building the app:\n\n${error || state.error}`)}
-                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" /> Fix with AI
-                  </button>
+                  isBuildBusyError(error || state.error) ? (
+                    // "A build is already running" is a LOCK, not a code error — "Fix with AI" would just
+                    // re-send and re-hit the lock (the 100-retries loop). The real actions are STOP (free
+                    // the lock) and CONNECT (attach to the build that's actually running). See isBuildBusyError.
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <button
+                        onClick={stop}
+                        title="Stop the build that's holding your account, so you can send again"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-red-600 hover:bg-red-500 rounded px-2.5 py-1"
+                      >
+                        <Square className="w-3.5 h-3.5" /> Stop
+                      </button>
+                      <button
+                        onClick={() => resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() })}
+                        title="Connect to the build that's already running — attach and watch it live"
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                      >
+                        <Play className="w-3.5 h-3.5" /> Connect
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => fixWithAI(`Fix this error and continue building the app:\n\n${error || state.error}`)}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Fix with AI
+                    </button>
+                  )
                 )}
               </div>
             )}

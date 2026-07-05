@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldSurfaceStreamError, reconnectOutcome, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, isBuildBusyError, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
 
 function ctx(over: Partial<StreamErrorContext> = {}): StreamErrorContext {
   return { isAbort: false, isStale: false, sawResult: false, reconnected: false, ...over };
@@ -82,5 +82,27 @@ describe('reconnectOutcome', () => {
       expect(out === 'live' || out === 'error').toBe(false);
       expect(out.startsWith('gone')).toBe(true);
     }
+  });
+});
+
+describe('isBuildBusyError', () => {
+  // THE exact bug (admin, IMG_5718): the account lock error offered "Fix with AI", which re-sent and
+  // re-hit the lock → the 100-retries loop. This detector routes such errors to Stop/Connect instead.
+  it('detects the exact account-lock messages (client 409 + server 409)', () => {
+    expect(isBuildBusyError('A build is still running on your account. Press ⏹ Stop to end it, then send your message again.')).toBe(true);
+    expect(isBuildBusyError('A build is already running for this account. Stop it before starting another.')).toBe(true);
+    expect(isBuildBusyError('a build is ALREADY running')).toBe(true); // case-insensitive
+  });
+
+  it('does NOT match ordinary build/code errors (they still get "Fix with AI")', () => {
+    expect(isBuildBusyError('Build failed: TypeScript error in src/App.tsx')).toBe(false);
+    expect(isBuildBusyError('npm install failed')).toBe(false);
+    expect(isBuildBusyError('The build is running slowly')).toBe(false); // not the lock phrasing
+  });
+
+  it('is false for empty / null / undefined', () => {
+    expect(isBuildBusyError('')).toBe(false);
+    expect(isBuildBusyError(null)).toBe(false);
+    expect(isBuildBusyError(undefined)).toBe(false);
   });
 });

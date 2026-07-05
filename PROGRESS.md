@@ -9507,3 +9507,30 @@ with client fallback; CSS/JS inlining for vanilla; universal viewer otherwise), 
 - App.tsx: 6,353 -> ~6,095 lines (~275 lines of bundler logic relocated).
 
 Gate: frontend tsc 0, vitest 4856/4856 PASS, vite build PASS. No AppKnowledgeBase change (pure refactor).
+
+## 2026-07-05 — Concurrency FIX #1 (admin IMG_5718): "build already running" → Stop | Connect (loop killed)
+
+Admin report: the account-lock error ("A build is still running… Press Stop… then send again") showed a
+"Fix with AI" button. Clicking it SENDS A NEW MESSAGE → re-hits the same held lock → the same 409 → the
+same error. Admin clicked it ~100 times; it can never work — "Fix with AI" cannot free a lock.
+
+ROOT CAUSE: the generic error banner offered one action ("Fix with AI") for ALL errors, but a
+"build already running" error is a LOCK, not a code defect. Its only real resolutions are STOP (free the
+lock) or CONNECT (attach to the build that's actually running) — a retry is the exact wrong move.
+
+FIX:
+- New pure `isBuildBusyError(msg)` (agentV3StreamError.ts) — detects the account-lock error class
+  (/a build is (already|still) running/i). +unit tests (exact client+server messages, non-matches, null).
+- AgentV3Panel error banner: for a build-busy error it now renders "⏹ Stop | ▶ Connect" instead of
+  "Fix with AI". Stop = free the lock (existing /stop) then send again; Connect = resume/attach the
+  running build into this view (existing resumeBuild). Ordinary errors keep "Fix with AI".
+- stop() now also clears `error`, so the banner can't linger and re-tempt the retry loop.
+
+This is FIX #1 of the concurrency plan (admin-approved). Once per-workspace concurrency lands, this error
+mostly disappears; until then Stop/Connect gives the user the ONLY two actions that actually work.
+Gate: frontend tsc 0, vitest 4835/4835 PASS, build PASS.
+
+Concurrency roadmap (admin-approved, for the record): #1 Stop|Connect (this) → #2 anon-key investigate
+→ #3 durable per-app command QUEUE + single serial executor (Chat 1) → #4 Chat 2 = planner that enqueues
+→ #5 Chat 3 = flexible read-only advisor (audit/test/research/explain) that enqueues → #6 queue UI +
+snapshot reads. Model: 1 writer (executor) + N read-only advisors feeding one queue = safe concurrency.

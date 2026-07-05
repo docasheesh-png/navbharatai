@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
 import { escapeHtml } from '../../lib/escapeHtml';
+import { newSdaCaseId } from '../../lib/sdaCaseId';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +261,20 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
   // Gates the Firestore autosave effect until the cross-device fetch (below) has
   // finished — otherwise a stale local case could overwrite a newer one mid-fetch.
   const hydratedRef = useRef(false);
+
+  // Per-CASE session id (clinical-safety isolation). Persisted so a mid-case reload keeps the SAME
+  // case (the server's clinical store survives); rotated in startNewCase() so a new patient never
+  // inherits the previous patient's clinical context under the same doctor's userId.
+  const caseIdRef = useRef<string>('');
+  if (!caseIdRef.current) {
+    let id = '';
+    try { id = localStorage.getItem('sda_case_id') || ''; } catch { /* ignore */ }
+    if (!id) {
+      id = newSdaCaseId();
+      try { localStorage.setItem('sda_case_id', id); } catch { /* ignore */ }
+    }
+    caseIdRef.current = id;
+  }
 
   // Restore messages from localStorage on mount (handles 1-2 hour gaps without reload)
   useEffect(() => {
@@ -520,6 +535,9 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           history,
           teachingMode,
           userId,
+          // Isolate this patient's clinical store (server keys on sessionId; without it every case for
+          // one doctor would share the userId key and contaminate each other).
+          sessionId: caseIdRef.current,
           fileData: fileForMsg?.base64 || null,
           fileType: fileForMsg?.type || null,
           fileName: fileForMsg?.name || null,
@@ -569,7 +587,14 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
     setInput('');
     setAttachedFile(null);
     setSuggestPDF(false);
-    try { localStorage.removeItem('sda_messages'); } catch {}
+    // Rotate the per-case id so the NEW patient starts from an empty server clinical store — the
+    // previous patient's demographics / red-flags / recent turns can never carry over (clinical safety).
+    const freshId = newSdaCaseId();
+    caseIdRef.current = freshId;
+    try {
+      localStorage.removeItem('sda_messages');
+      localStorage.setItem('sda_case_id', freshId);
+    } catch { /* ignore */ }
   };
 
   // ── Render ────────────────────────────────────────────────────────────────

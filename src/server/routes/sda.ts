@@ -6,6 +6,7 @@ import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVi
 import { CREATOR_IDENTITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
+import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
 import { AIRouterManager } from '../AI/AIRouterManager';
 
 /**
@@ -291,32 +292,6 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         return update;
       };
 
-      const detectRedFlags = (text: string): string[] => {
-        const flags: string[] = [];
-        const patterns: [RegExp, string][] = [
-          [/\bshock\b/i, 'Shock'],
-          [/\bsepsis\b/i, 'Sepsis'],
-          [/spo2.{0,10}[0-8]\d%?|oxygen.{0,10}[0-8]\d/i, 'Low SpO2'],
-          [/\brespiratory failure\b/i, 'Respiratory Failure'],
-          [/\bchest pain\b.{0,30}\bsweating\b|\bdiaphoresis\b/i, 'Possible ACS'],
-          [/\bstroke\b|\bfacial droop\b|\barm weakness\b/i, 'Stroke Signs'],
-          [/\bmeningitis\b|\bneck stiffness\b.*fever/i, 'Meningitis Signs'],
-          [/\bgi bleed\b|\bmelena\b|\bhematemesis\b/i, 'GI Bleeding'],
-          [/\bdka\b|\bdiabetic ketoacidosis\b/i, 'DKA'],
-          [/bp.{0,10}[0-7]\d\/|hypotension/i, 'Hypotension'],
-          [/\bpulse.{0,10}1[2-9]\d|tachycardia/i, 'Tachycardia'],
-          [/\btemp.{0,10}1(?:0[4-9]|[1-9]\d)|fever.{0,20}high|hyperpyrexia/i, 'High Fever'],
-          [/\baltered.{0,20}conscious|unconscious|unresponsive/i, 'Altered Consciousness'],
-          [/\beclampsia\b|\bpre-?eclampsia\b.*severe/i, 'Eclampsia'],
-          [/\bhb.{0,10}[0-6]\.?\d?\b|severe.{0,15}anaemia|severe.{0,15}anemia/i, 'Severe Anaemia'],
-          [/\bneck stiffness\b|\bphotophobia\b|\bmeningism\b/i, 'Meningism'],
-        ];
-        for (const [pattern, label] of patterns) {
-          if (pattern.test(text) || pattern.test(message)) flags.push(label);
-        }
-        return flags;
-      };
-
       // Build AI context: pinned clinical snapshot + last 6 raw exchanges. The
       // snapshot encodes ALL collected patient data in ~200 tokens regardless of
       // session length, so SDA never forgets demographics/symptoms from turn 1.
@@ -546,7 +521,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         }
       }
 
-      const redFlags = detectRedFlags(cleanReply);
+      // Check both the model's reply AND the clinician's message (as the old inline detector did),
+      // but per-text so a number in one can't fuse with a delimiter in the other into a fake vital.
+      const redFlags = detectRedFlagsAcross(cleanReply, message);
       const patientUpdate = extractPatientUpdate(cleanReply, message);
       const redFlagDetected = redFlags.length > 0 || /\bRED FLAG\b|\bEMERGENCY\b|\bURGENT\b/i.test(cleanReply);
 

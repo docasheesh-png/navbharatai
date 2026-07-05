@@ -257,6 +257,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     let stopped = false;
     let sinceSeq = 0;
     let idlePolls = 0;
+    // BACKGROUND-COST fix (2026-07-05 audit #2): the poll used a FIXED 3s cadence forever, and only an
+    // EXPLICIT `running === false` ever wound it down — an omitted/undefined `running` kept a hidden,
+    // idle panel polling every 3s indefinitely (battery + network drain, worse now that the v3.0
+    // surface stays mounted as a window). Quiet ticks now back off 3s → 30s (×1.6), any activity snaps
+    // back to 3s, and ANY non-`true` running counts toward wind-down.
+    let delayMs = 3000;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       if (stopped || isStale(myGen)) { stopped = true; return; }
@@ -265,7 +271,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (em) params.set('email', em);
         if (opts?.workspaceId) params.set('workspaceId', opts.workspaceId);
         params.set('sinceSeq', String(sinceSeq));
-        const res = await fetch(`/api/agentv3/live?${params.toString()}`);
+        // Bounded: a dead-zone mobile connection must fail this poll fast and retry, not hang it.
+        const res = await fetch(`/api/agentv3/live?${params.toString()}`, { signal: AbortSignal.timeout(10_000) });
         if (res.ok) {
           const j = await res.json().catch(() => ({} as Record<string, unknown>));
           if (typeof j.seq === 'number') sinceSeq = j.seq;
@@ -273,15 +280,17 @@ export function useAgentV3Build(): UseAgentV3Build {
           if (events.length > 0) {
             if (isStale(myGen)) { stopped = true; return; } // session moved on while this fetch was in flight
             idlePolls = 0;
+            delayMs = 3000; // activity → snap back to the fast cadence
             setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
-          } else if (j.running === false) {
-            idlePolls += 1; // no activity + nothing running → wind down so an idle open panel stops polling
+          } else if (j.running !== true) {
+            idlePolls += 1; // no activity + not provably running → wind down so an idle open panel stops polling
+            delayMs = Math.min(30_000, Math.round(delayMs * 1.6));
           }
         }
-      } catch { /* best-effort — a failed poll just retries */ }
+      } catch { /* best-effort — a failed poll just retries (with backoff) */ }
       if (stopped || isStale(myGen)) { stopped = true; return; }
-      if (idlePolls >= 10) { stopped = true; return; } // ~30 s quiet → stop until re-armed by the panel
-      timer = setTimeout(() => { void tick(); }, 3000);
+      if (idlePolls >= 10) { stopped = true; return; } // quiet streak → stop until re-armed by the panel
+      timer = setTimeout(() => { void tick(); }, delayMs);
     };
     void tick();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
@@ -824,17 +833,22 @@ export function useAgentV3Build(): UseAgentV3Build {
               const params = new URLSearchParams();
               if (userIdRef.current) params.set('userId', userIdRef.current);
               if (emailRef.current) params.set('email', emailRef.current);
-              const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
+              // SESSION-SCOPED + BOUNDED (2026-07-05 audit #3/#4): scope the probe to THIS session's
+              // workspace so recovery can never re-attach a different session's build, and time-box it
+              // so a still-dead connection fails fast into the next backoff attempt instead of hanging.
+              if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
+              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
               const j = await probe.json().catch(() => ({}));
               if (isStale(gen)) break;
-              if (j?.buildRunning === true) {
+              const aliveHere = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
+              if (aliveHere) {
                 reconnected = true;
                 // Pass whether this build already produced its terminal result. After the result the
                 // build IS done and the server is only running the best-effort import-preview boot —
                 // reconnecting catches its tail (e.g. the live preview URL), but a further drop on the
                 // reattached stream must not resurface an error for a finished build.
-                await resume({ userId: userIdRef.current, email: emailRef.current, resultAlreadySeen: sawResult });
-              } else if (j && j.buildRunning === false) {
+                await resume({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current, resultAlreadySeen: sawResult });
+              } else if (j && (workspaceIdRef.current ? j.buildRunningHere === false : j.buildRunning === false)) {
                 break; // server reached + build genuinely ended — stop retrying, show the real result/error
               }
               // else: probe reached but shape was unexpected → try again after backoff
@@ -868,7 +882,10 @@ export function useAgentV3Build(): UseAgentV3Build {
   // "auto-restart when stuck" safety net — no manual reload needed.
   useEffect(() => {
     if (!running) return;
-    const STALL_MS = 100_000;   // ~1.7 min of total stream silence before we act
+    // RESPONSIVENESS fix (2026-07-05 audit #1): 100s stall + a 30s tick meant a dead stream sat as a
+    // frozen spinner for up to ~2min 20s before the auto-reconnect even started. The server pings every
+    // 15s, so >35s of TOTAL silence already proves the stream is dead — detect in ~35-45s instead.
+    const STALL_MS = 35_000;
     const id = setInterval(() => {
       if (Date.now() - lastEventTsRef.current < STALL_MS) return;
       lastEventTsRef.current = Date.now(); // avoid re-firing every tick while we reconcile
@@ -877,12 +894,16 @@ export function useAgentV3Build(): UseAgentV3Build {
           const params = new URLSearchParams();
           if (userIdRef.current) params.set('userId', userIdRef.current);
           if (emailRef.current) params.set('email', emailRef.current);
-          const r = await fetch(`/api/agentv3/status?${params.toString()}`);
+          // SESSION-SCOPED (audit #4): without workspaceId this account-wide probe could re-attach a
+          // DIFFERENT session's build into this panel. Bounded so a dead connection can't hang the net.
+          if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
+          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
-          if (j?.buildRunning === true) {
+          const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
+          if (alive) {
             // The build is alive but OUR stream went quiet — reconnect and keep going.
             abortRef.current?.abort();
-            await resume({ userId: userIdRef.current, email: emailRef.current });
+            await resume({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current });
           } else {
             // The build is no longer running server-side — stop the spinner instead of hanging.
             abortRef.current?.abort();
@@ -892,7 +913,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           }
         } catch { /* probe failed — leave running and try again next tick */ }
       })();
-    }, 30_000);
+    }, 10_000);
     return () => clearInterval(id);
   }, [running, resume]);
 

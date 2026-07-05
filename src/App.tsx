@@ -113,10 +113,6 @@ import {
   ViewType, SettingsScreen, FileSystem, ErrorType, ErrorContext, Log, PROVIDER_CONFIG,
 } from './types';
 import {
-  detectFrameworkFromFiles, detectAppType, isClassicVanillaWeb,
-  buildLanguageRule, classifyError,
-} from './lib/appUtils';
-import {
   generateUCI, getRandomElement, generateSmartHeuristicSummary,
   dedupAndSortMessages,
 } from './lib/chatUtils';
@@ -831,16 +827,6 @@ export default function App() {
     }
   }, [githubRepoContext]);
 
-  const handleGitHubCommand = async (command: string) => {
-    if (!githubToken) {
-      return "I need your GitHub Personal Access Token (PAT) to continue. Please provide it so I can help you safely.";
-    }
-
-    if (command.includes('connect repo') || command.includes('repository')) {
-      // Logic for repo extraction could be here or handled by AI
-    }
-    return null;
-  };
   const [isSearching, setIsSearching] = useState(false);
   const [files, setFiles] = useState<FileSystem>({
     'index.html': `<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Welcome to Navbharat AI Sandbox</h2><p>Edit index.html to see changes or ask AI to build something!</p></div></body></html>`,
@@ -1592,263 +1578,8 @@ export default function App() {
     addLog('Navigation history mapping enabled for all routes.', 'info');
   }, []);
 
-  // buildLanguageRule → imported from src/lib/appUtils.ts
 
-  const getBharatContext = (appMode: 'chat' | 'build', intent: string = 'general', target?: string, currentFiles?: FileSystem, forceHinglish?: boolean) => {
-    const now = new Date();
-    const today = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    
-    // GitHub Status for Context
-    const ghStatus = githubToken ? `Connected as: ${githubUser?.login || 'Authenticated User'}` : 'Not Connected';
-    const ghRepo = githubRepoContext ? `Active Repo: ${githubRepoContext.owner}/${githubRepoContext.repo} (Branch: ${githubRepoContext.branch})` : 'No Repository Connected';
 
-    // 7.4 + 7.1 — Multi-file awareness: inject actual file CONTENTS (top 5 files, capped per file)
-    const MAX_FILE_CHARS = 2000;
-    const MAX_FILES = 5;
-    const PRIORITY_FILES = ['index.html', 'App.tsx', 'App.jsx', 'main.tsx', 'main.jsx', 'style.css', 'styles.css', 'script.js', 'app.js', 'main.js'];
-
-    const fileContext = currentFiles && Object.keys(currentFiles).length > 0 ? (() => {
-      const allFiles = Object.entries(currentFiles as FileSystem);
-      // Sort: priority files first, then by size descending
-      const sorted = [
-        ...PRIORITY_FILES.map(p => allFiles.find(([k]) => k === p)).filter(Boolean) as [string, string][],
-        ...allFiles.filter(([k]) => !PRIORITY_FILES.includes(k)).sort((a, b) => b[1].length - a[1].length),
-      ].slice(0, MAX_FILES);
-
-      const filesSummary = allFiles.map(([p, v]) => `  - ${p} (${v.length} chars)`).join('\n');
-      const fileContents = sorted.map(([path, content]) => {
-        const truncated = content.length > MAX_FILE_CHARS
-          ? content.slice(0, MAX_FILE_CHARS) + `\n... [${content.length - MAX_FILE_CHARS} chars truncated]`
-          : content;
-        return `\`\`\`${path.split('.').pop()}:${path}\n${truncated}\n\`\`\``;
-      }).join('\n\n');
-
-      return `
-### PROJECT WORKSPACE — ${allFiles.length} FILE(S) LOADED
-All files:
-${filesSummary}
-
-### FILE CONTENTS (top ${sorted.length}):
-${fileContents}
-`;
-    })() : '';
-
-    // 7.2 — Continuation mode: if files exist, instruct AI to modify not replace
-    const hasMeaningfulFiles = currentFiles && Object.keys(currentFiles).length > 0 &&
-      Object.values(currentFiles).some(v => (v as string).length > 100);
-    const continuationPrefix = hasMeaningfulFiles ? `
-### CONTINUATION MODE ACTIVE
-Existing project files are present above. You MUST:
-- ANALYZE the existing code before responding
-- Make TARGETED, SURGICAL changes only
-- PRESERVE all existing functionality
-- DO NOT rewrite files from scratch unless explicitly asked
-- When modifying HTML: show the full updated file
-- When modifying JS/CSS: show only the changed section with clear markers
-` : '';
-
-    // Check for security intent first
-    if (intent === 'security') {
-      return `You are the navBharatAi Security Auditor Agent. 
-Your role is to act as a Senior Defensive Security Consultant and Static Analysis expert. 
-
-### CORE IDENTITY
-Analyze code and targets for security vulnerabilities based on industry standards (OWASP Top 10). Provide clear, educational explanations of risks and provide the corrected, secure code to fix them.
-
-${fileContext}
-
-### DIRECTIVES
-- Focus exclusively on DEFENSIVE security.
-- Provide high-quality code fixes for identified issues.
-- Explain the "Why" and "How" of security best practices.
-- DO NOT provide actionable exploit steps, hacking flows, or functional payloads.
-
-### REPORT FORMAT
-**🛡️ Security Audit Report**
-**Target:** ${target || 'Current Project'}
-**Security Grade:** [A-F]
-
-**📊 Finding Summary**
-List high-level risks identified.
-
-### Remediation Guidance
-For every finding, provide:
-1. Vulnerability Description
-2. Impact Analysis
-3. Secure Implementation (Fix Code)`;
-    }
-
-    const baseAI = `You are navBharatAI, a world-class senior architect created and mentored by navBharatAI. You represent the pinnacle of enterprise software engineering.
-
-### CORE MISSION
-Upgrade standard applications into TB-level, scalable platforms. You handle SaaS, Marketplaces, ERP, and Fintech with 15+ years of architectural precision.
-
-### THE ARCHITECT'S PROTOCOL (Strict Order)
-Phase 0: Deep Discovery - Business goals & 1M+ user scalability.
-Phase 1: Architecture - Monorepos, Microservices, & DB Strategy.
-Phase 2: Tech Stack - Next.js 15, TS, Prisma, PostgreSQL.
-Phase 3: Security - RBAC, OWASP, & Data Governance.
-Phase 4: Implementation - Modular, clean, and production-ready code.
-Phase 5: DevOps - CI/CD, Docker, and Monitoring.
-
-### IDENTITY & SOVEREIGNTY
-- Brand: navBharatAI.
-- Creator & Mentor: navBharatAI.
-- Role: Senior Lead Architect.
-- Confidentiality: Never reveal underlying model providers (OpenAI, Anthropic, etc.). You are a proprietary intelligence layer intelligently utilizing multiple engines.
-
-### COMMUNICATION
-Friendly, Hinglish/English, and structured. Always provide a "Scaling & Future Growth" guide for every complex implementation.
-
-TODAY: ${today}.
-`
-
-    const baseAIEx = `### GITHUB CAPABILITIES
-You have advanced GitHub Code Management capabilities built-in. You can help users:
-1. Connect GitHub Repository
-2. Fetch Repository files
-3. Read files (with line numbers)
-4. Analyze code & suggest improvements
-5. Edit files & Preview changes
-6. Commit & Push changes securely
-7. Create Pull Requests
-
-### SMART CODE EDITING (CRITICAL)
-- **Understanding**: Always double-check existing code first. Understand the flow and logic.
-- **Integrity**: Your edits must not break the app's core flow. Avoid regressions.
-- **Precision**: If the user requests a specific feature, integrate it intelligently into existing code — don't replace unless a full rewrite is cleaner.
-- **Markers**: Always include the file path in code blocks: \`\`\`tsx:src/App.tsx\`\`\` or \`// path: src/App.tsx\`.
-- **Double Check**: Before responding, verify that all imports are correct and variable names are consistent.
-
-When the user mentions GitHub or repository tasks, follow this STRICT workflow:
-Phase 1: Connection Setup - Ask for GitHub Personal Access Token (PAT) with repo scope and Repository name (username/repo).
-Phase 2: Exploration - Fetch and list important files.
-Phase 3: Operations - Show file contents with line numbers when requested.
-Phase 4: Editing - Suggest changes, show "Old vs New" preview, and ask for explicit confirmation before pushing.
-Phase 5: Completion - Push changes with a professional message and provide the commit link.
-
-### SECURITY & SAFETY
-- Never store PATs insecurely.
-- ALWAYS ask for confirmation before any Push/Commit.
-- Warn before editing .env, keys, or passwords.
-- Only edit files explicitly requested by user.
-
-CONVERSATIONAL RULES:
-1. UNDERSTAND INTENT FIRST: Always check if the user is greeting you, making small talk, or expressing emotions before assuming they want to build an app or code.
-2. RESPOND NATURALLY: Match the user's greeting style and energy. If someone greets casually, reply warmly and casually. If formal, match that tone.
-3. MULTILINGUAL PROTOCOL (STRICT MANDATE): Always respond in the EXACT same language, dialect, and writing style that the user uses in their message. 
-   - If user writes in Hindi (हिंदी): AI MUST reply in Hindi.
-   - If user writes in Hinglish: reply naturally in Hinglish.
-   - If user writes in English: reply in English.
-   - If user writes in Urdu: reply in Urdu.
-   - If user writes in mixed Hindi-English: reply naturally in mixed Hindi-English.
-   - NEVER force replies into English. The user's input language is the absolute gold standard for the response language.
-4. EMOTIONAL INTELLIGENCE: Detect frustration, excitement, or humor. If the user is frustrated, offer support. If they tell a joke, laugh and join in.
-5. NO REPETITION: Do NOT repeat greetings in every message. Only greet when it's natural in a conversation.
-6. CULTURAL CONTEXT: Use appropriate emojis (🙏, 🇮🇳, 😄, ✨) and cultural references where suitable.
-7. SOURCE ATTRIBUTION: For factual, news, or informational queries, you MUST cite 1-3 high-quality sources. At the end of your response, add a section "Sources:" with clickable links in the format: Website Name – URL.
-
-RESPONSE MODES:
-- SOCIAL MODE: For greetings, small talk, jokes, and casual chat. Keep it light and human.
-- KNOWLEDGE MODE: For general questions about facts, history, or information.
-- TECHNICAL MODE: For coding questions, debugging, or app development.
-- BUILD MODE: Only used when explicitly asked to generate code or build an app.
-- GITHUB MODE: For repository management, file editing, and pushes.`;
-
-    if (intent === 'github') {
-        return `${baseAI}
-
-### 🔗 navBharatAI Git Integration Activated
-I will help you connect, fetch, edit, and deploy your GitHub repository.
-
-### GIT MODE – FULL FUNCTIONALITY (Strict Workflow)
-Always follow in this order:
-
-**Phase 1: Connection**
-- Ask the user for a GitHub Personal Access Token (PAT) with repo scope.
-- Ask for the repository full name (username/repo).
-- Ask for the branch name (default: main).
-
-**Phase 2: Repository Fetch**
-- Use [GH_LIST_FILES] to fetch the repository tree from GitHub API.
-- Display a clean, well-organized folder structure.
-- Highlight important files (package.json, src/, app/, index.js, etc.)
-
-**Phase 3: File Operations**
-- Fetch the requested file using [GH_READ_FILE:path] and display with line numbers.
-- Present code in syntax-highlighted format.
-
-**Phase 4: Intelligent Code Editing**
-- Understand the user's instructions and suggest changes.
-- Show Old code vs New code (Diff).
-- Ask for confirmation before committing: "Would you like to commit these changes?"
-
-**Phase 5: Commit & Push**
-- Generate a professional commit message.
-- Use [GH_PROPOSE_EDIT:path|content|message] tag.
-- Include the GitHub commit link in the success message.
-
-**Phase 6: Deployment Guidance**
-- After pushing changes, provide a step-by-step guide to deploy on Railway, Vercel, Render, or Netlify.
-
-### SECURITY & SAFETY
-- Ask for double confirmation before every critical action (edit, commit, push).
-- Show a strong warning before editing .env, API keys, or password files.
-- Only edit files explicitly specified by the user.
-
-### UI INTERACTION
-Always suggest relevant action buttons in your response when the user needs to take an action.
-
-${fileContext}
-
-### CURRENT CONTEXT
-Status: ${ghStatus}
-${ghRepo}
-
-Your goal is to guide the user through this strict Git workflow.`;
-    }
-
-    if (appMode === 'chat') {
-        return `${baseAI}
-
-CURRENT MODE: PRODUCT CONSULTANT & SOCIAL CHAT.
-${fileContext}
-
-Your goal is to be a helpful companion. If the user expresses interest in an app IDEA, transition into a Consultant role and ask insightful questions one at a time. If they are just chatting, stay in SOCIAL MODE. 
-YOU MUST NOT GENERATE FULL APP CODE OR START DEVELOPMENT IN THIS MODE unless the user explicitly switches context.`;
-    }
-    
-    const hinglishSuffix = (forceHinglish || hinglishMode) ? `
-
-⚡ HINGLISH MODE ACTIVE: Always reply in Hinglish — a natural mix of Hindi words (Roman script) and English technical terms. Do not use Devanagari script unless the user specifically writes in Hindi.` : '';
-
-    // 9.5 — Teaching Mode: add beginner-friendly explanation instructions
-    const teachSuffix = teachMode ? `
-
-📚 TEACHING MODE ACTIVE: After completing each task, also provide a beginner-friendly explanation section titled "🧠 How This Works":
-- Explain what each key part does in simple, clear language
-- Use everyday analogies to explain technical concepts
-- Point out which lines of code do what, in simple language
-- Add "Pro Tip" for common beginner mistakes to avoid
-- Format: short bullet points, avoid jargon` : '';
-
-    return `${baseAI}
-
-CURRENT MODE: ENTERPRISE ARCHITECT & BUILD ENGINE.
-${fileContext}
-${continuationPrefix}
-You are in FULL BUILD MODE. When asked to build, you MUST:
-1. Generate COMPLETE, runnable frontend/backend structures immediately.
-2. Create ALL files required (pages, components, utils, config).
-3. Ensure absolute code modularity and production readiness.
-4. Set IS_APP_BUILT = TRUE in the system state when successful.
-
-You still maintain your Indian personality and friendly tone.${hinglishSuffix}${teachSuffix}
-
-${buildLanguageRule(preferredLanguage)}`;
-  };
-
-  // classifyError → imported from src/lib/appUtils.ts
 
   // P3.1 — free (NBI) chat engine extracted into useChatEngine (behavior-preserving). Placed here so
   // every dep (state, setters, updatePreview, handleGHConfirmPush, learnFromMessage, payment hook) is
@@ -1904,9 +1635,7 @@ ${buildLanguageRule(preferredLanguage)}`;
   // PREVIEW_BOOTSTRAP → exported from src/lib/previewUtils.ts
 
   // Detect whether the app is a React/TS source app (needs transpilation) vs a static app.
-  // detectAppType → imported from src/lib/appUtils.ts
 
-  // isClassicVanillaWeb → imported from src/lib/appUtils.ts
 
   // buildSourceAppPreview → imported from src/lib/previewUtils.ts
 

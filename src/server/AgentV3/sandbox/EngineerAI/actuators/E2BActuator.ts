@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
@@ -636,6 +636,24 @@ export class E2BActuator implements IEngineerActuator {
       } catch { /* no package.json / parse error — keep the raw command (unchanged behaviour) */ }
       const framework: DevFramework = detectDevFramework(resolvedCommand);
       const port = extractDevPort(resolvedCommand);
+      // E6 — FAST PATH: if a healthy dev server is ALREADY bound on this port and package.json hasn't
+      // changed, skip the whole config-patch → pre-kill → launch → 25s port-wait → recovery sequence.
+      // A managed preview re-runs `npm run dev` on every update_preview; a running Vite/Next server
+      // already reflects file edits via HMR, so relaunching just re-pays ~25s+ for nothing. Both checks
+      // are real sandbox probes (a false "up"/"fresh" is impossible), and on ANY doubt we fall through
+      // to the full, proven sequence below — never worse than today. AGENTV3_DEVSERVER_FASTPATH=off bypasses.
+      if (process.env.AGENTV3_DEVSERVER_FASTPATH !== 'off') {
+        const alreadyUp = await sandbox.commands.run(buildPortWaitCommand(port, 2), { timeoutMs: 6000 })
+          .then((r) => r.stdout.includes('PORT_UP')).catch(() => false);
+        if (alreadyUp) {
+          const stale = await sandbox.commands.run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
+            .then((r) => r.stdout.includes('STALE')).catch(() => false);
+          if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
+            const boundPort = port;
+            return { exitCode: 0, stdout: `[health-check] dev server already healthy on port ${boundPort} — reused it (no relaunch; edits apply via HMR).\n${devServerHealthLine(true, boundPort)}`, stderr: '' };
+          }
+        }
+      }
       // Pin the port so the server binds EXACTLY `port` (or fails loudly) instead of
       // silently drifting to 5174 when 5173 is busy — the drift is what made the
       // preview connect to a dead port and the build loop until the time-limit cap.

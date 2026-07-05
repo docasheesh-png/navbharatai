@@ -358,6 +358,21 @@ export function shouldReprobeBoundPort(assumedPort: number, boundPort: number): 
 }
 
 /**
+ * E6 — may we SKIP the full `npm run dev` sequence (config patch → pre-kill → launch → 25s port-wait →
+ * recovery loop) because a healthy dev server is ALREADY bound on the port?
+ *
+ * A managed preview re-runs `npm run dev` on every update_preview; when the server is already up, a
+ * running Vite/Next dev server picks up file edits via HMR, so relaunching just re-pays ~25s+ of
+ * setup for nothing (the Mitrify-class "why is every preview so slow"). Skip ONLY when the port is
+ * verifiably UP (a real probe — a false "up" is impossible) AND deps are NOT stale (a changed
+ * package.json needs a reinstall + restart, which HMR can't do). On any doubt this returns false and
+ * the full, proven sequence runs — today's behaviour, never worse. Pure + unit-testable.
+ */
+export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean): boolean {
+  return portAlreadyUp === true && depsStale !== true;
+}
+
+/**
  * Poll a TCP port until it is listening, returning the MOMENT it comes up instead
  * of sleeping a fixed wall-clock budget. A Vite/Next server that boots in 3 s no
  * longer costs the full fixed wait — across the many dev-server (re)starts in a

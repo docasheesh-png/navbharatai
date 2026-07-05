@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { escapeHtml } from '../../lib/escapeHtml';
 import {
   Plus, FileCode, GripVertical, MoreVertical, Pencil, Copy, Trash2,
   Download, FolderOpen, FileText, Globe, Layout, Eye, X, ChevronRight,
@@ -97,12 +98,17 @@ function makeFilename(page: Page): string {
   return `${page.settings.slug || slugify(page.name)}.html`;
 }
 
+// escNav escapes user-controlled values (page title/name, logo text, filename) before they go into the
+// generated nav markup — which is both written into the app AND injected into a same-origin preview
+// via dangerouslySetInnerHTML, so an unescaped `<img src=x onerror=…>` page title would run in-origin.
+const escNav = escapeHtml;
+
 function generateNav(pages: Page[], config: NavConfig): string {
   const navPages = pages.filter((p) => p.settings.includeInNav);
   const links = navPages
     .map((p) => {
-      const href = makeFilename(p);
-      return `<a href="${href}" style="${linkStyle(config.colorScheme)}">${p.title || p.name}</a>`;
+      const href = escNav(makeFilename(p));
+      return `<a href="${href}" style="${linkStyle(config.colorScheme)}">${escNav(p.title || p.name)}</a>`;
     })
     .join('\n    ');
 
@@ -111,13 +117,13 @@ function generateNav(pages: Page[], config: NavConfig): string {
 
   if (config.style === 'vertical') {
     return `<nav style="width:220px;min-height:100vh;background:${bg};padding:24px 16px;display:flex;flex-direction:column;gap:8px;position:fixed;top:0;left:0">
-  <div style="font-weight:700;font-size:1.1rem;color:${textColor};margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1)">${config.logoText}</div>
+  <div style="font-weight:700;font-size:1.1rem;color:${textColor};margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.1)">${escNav(config.logoText)}</div>
   ${links}
 </nav>`;
   }
 
   return `<nav style="background:${bg};padding:0 32px;display:flex;align-items:center;gap:24px;height:60px;position:sticky;top:0;z-index:100;box-shadow:0 1px 0 rgba(255,255,255,0.1)">
-  <span style="font-weight:700;font-size:1.1rem;color:${textColor};margin-right:auto">${config.logoText}</span>
+  <span style="font-weight:700;font-size:1.1rem;color:${textColor};margin-right:auto">${escNav(config.logoText)}</span>
   ${links}
 </nav>`;
 }

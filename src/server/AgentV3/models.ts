@@ -56,6 +56,29 @@ export function resolveModel(power: boolean | 'off' | 'mini' | 'medium' | 'max')
   return isPowerOn ? opusModel() : sonnetModel();
 }
 
+/**
+ * Whether an Anthropic model supports the extended-reasoning request params — adaptive `thinking`
+ * (`{ type: 'adaptive' }`) AND the `output_config.effort` lever. Only Opus 4.x and Sonnet 4.6+ do.
+ *
+ * ROOT CAUSE this guards (build report 2026-07-05, workspace agentv3-anon-d6a78356): a Haiku build
+ * turn (and the forced-Haiku CLAUDE_HAIKU backstop) sent `thinking: { type: 'adaptive' }` and the
+ * Anthropic API rejected it with a HARD 400 "adaptive thinking is not supported on this model" — which
+ * burned the ENTIRE provider-fallback chain (GLM → GLM → KIMI → KIMI → CLAUDE → CLAUDE_HAIKU) and
+ * produced a BUILD_ERROR; the build only survived because the Sonnet escalation happened to dodge it.
+ *
+ * DEFAULT-DENY on an unknown id is deliberate and safe: a MISSING thinking/effort param never 400s (we
+ * merely lose the reasoning display), whereas an UNSUPPORTED one is a fatal request error. So a model
+ * we don't recognise is treated as "does not support it" — the call succeeds instead of dying.
+ */
+export function modelSupportsAdaptiveThinking(model: string | undefined): boolean {
+  if (!model) return false;
+  const m = model.toLowerCase();
+  if (m.includes('haiku')) return false;      // Haiku (any version) never supports it
+  if (/opus-4/.test(m)) return true;          // Opus 4.x (4-7 / 4-8 / future 4-x)
+  if (/sonnet-4-(?:[6-9]|\d\d)/.test(m)) return true; // Sonnet 4.6 and later
+  return false;                               // unknown id → default-deny (never send an unsupported param)
+}
+
 /** The Anthropic ladder tiers, low → high cost (excludes the Gemini/Vertex base). */
 export type ClaudeLadderTier = 'haiku' | 'sonnet' | 'opus';
 

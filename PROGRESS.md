@@ -9281,3 +9281,65 @@ Changes: AgentV3Panel power buttons relabeled + switched to a vertical list so t
 per-level hint text updated (Opus · low/high/ultracode effort). powerLevel.ts SPECS: medium effort
 'medium' → 'high'. AppKnowledgeBase Power description reconciled to the new names + effort + "real Opus
 × 2" billing. Tests updated (powerLevel). Full gate green (tsc ×2, vitest 4798, build, boot).
+## 2026-07-05 — BUILD-REPORT AUTOPSY (rule 5): Mitrify import (agentv3-anon-d6a78356) — adaptive-thinking 400 root-caused
+
+Admin sent a real v3.0 build-diagnostics report (import + survey of the "Mitrify" repo). Full forensic
+autopsy per the fifth absolute rule. Report: model claude-haiku-4-5, ok:true (survey delivered), 69
+events, 2 errors, 10 warnings, ~11.5 min wall-clock for a READ-ONLY survey.
+
+### Step 1 — Itemized ledger (5 buckets)
+❌ STILL BROKEN / delivered-imperfect:
+- **[FIXED THIS PR] Hard 400 that killed the whole provider chain.** A Haiku build turn sent
+  `thinking: { type: 'adaptive' }`; Anthropic rejected it: `400 invalid_request_error "adaptive
+  thinking is not supported on this model"`. This burned GLM→GLM→KIMI→KIMI→CLAUDE→CLAUDE_HAIKU and
+  raised BUILD_ERROR at minute 9. The build ONLY survived because escalation to claude-sonnet-4-6
+  dodged it. Root cause: ClaudeClient.runTurn attached `thinking` (and, same class, `output_config.
+  effort`) based only on whether the caller passed the flag — NOT on whether the model supports it.
+- **[OPEN] Fake-ish completion summary.** For a read-only survey that changed NOTHING, the final line
+  read "✅ Here's what I built: … 165 files, 44 components, 186 routes." "Here's what I *built*" +
+  "186 routes" for a no-op survey misleads (honesty, rule 5). Recorded as an open root cause: the
+  build-summary template must distinguish "surveyed/analyzed (no changes)" from "built".
+- **[OPEN] Inconsistent file counts in one run:** "Imported 165 files" vs "Editing your existing app
+  (317 files)" vs summary "165 files". Same run, three numbers — the count source isn't single.
+🔀 WORKED AROUND (deferred root causes):
+- The adaptive-thinking 400 → recovered via Sonnet escalation (the workaround; now the underlying bug
+  is fixed so escalation is no longer load-bearing for this failure class).
+- `read_file /home/user/workspace/README.md` (doesn't exist) → agent read other files. Minor.
+- Live preview didn't boot (imported full-stack app needs DATABASE_URL/SESSION_SECRET/Firebase/Cashfree
+  env + a real DB) → fell back to in-browser preview. Infra-gated; honest fallback message shown.
+⏭️ SKIPPED: the `<<<EXISTING_FILES>>>` manifest included binary `attached_assets/*.png|jpeg` names —
+  pure noise (never editable source), never filtered.
+🥵 STRUGGLE: GLM timed out ~6× and KIMI ~2-3× (Request timed out; 61s and 100s latencies) on a prompt
+  that grew 45KB → 93KB → 233KB → 250KB; ~11.5 min for a read-only survey.
+✅ SELF-HEALED: none genuinely — the "recovery" was the escalation workaround above, not a self-heal.
+
+Tally: 0 clean self-heals, 3 workarounds, 1 skip, 3 still-broken/imperfect (1 fixed here), struggled at
+minutes 6–11 in the provider-scramble.
+
+### Step 2 — Missing subsystems
+(A) **Model-capability awareness for request params — FIXED THIS PR.** The #1 structural gap: the
+    engine emitted model-specific params (adaptive thinking, effort) with no capability check, so a
+    cheap/fallback tier turned every such turn into a fatal 400. Now gated by a single source of truth.
+(B) **Prompt-size governance — OPEN.** No budget on the grounding manifest (binary assets included) or
+    the accumulating read_file transcript (233KB), which is why the cheap floor (GLM/KIMI) timed out
+    repeatedly and a read-only survey took ~11.5 min. Follow-up: filter binary/asset paths from
+    `summarizeFileTree`, and compact/cap large read_file results in the transcript for cheap providers.
+
+### Step 3 — Root-cause fix shipped (the ❌ error)
+`modelSupportsAdaptiveThinking(model)` added to models.ts (single source of truth): Opus 4.x and
+Sonnet 4.6+ → true; Haiku and unknown ids → false (DEFAULT-DENY — a missing thinking/effort param never
+400s; an unsupported one is fatal). ClaudeClient.runTurn now gates BOTH `thinking` and
+`output_config.effort` (sibling, rule 3) through it — one choke point covers the main build turn AND
+the CLAUDE / CLAUDE_HAIKU fallback runners (all three are ClaudeClient instances; CLAUDE_HAIKU is a
+forceModelRunner-wrapped ClaudeClient, so params.thinking flowed straight through). Regression tests:
+ClaudeClient.test.ts (Haiku denies thinking+effort = the exact 400; Sonnet/Opus allow; unknown denies)
+and models.test.ts (predicate matrix incl. Sonnet 4.5 vs 4.6 boundary). Honesty (rule 5): the failure
+now can't happen, so the report will stop showing this class of BUILD_ERROR.
+
+Gate: server tsc 0, frontend tsc 0, vitest 4833/4833 PASS, boot:check PASS.
+
+### Step 4 — Open root causes recorded (rule 6, awaiting follow-up autopsy)
+1. Fake-ish "Here's what I built" summary for read-only/survey runs → make the summary honest about
+   analyze-vs-build.  2. Single source for file counts (165 vs 317 vs 165).  3. Prompt-size governance
+   (missing subsystem B): filter binary assets from the manifest + compact large transcript reads for
+   the cheap floor so GLM/KIMI stop timing out.

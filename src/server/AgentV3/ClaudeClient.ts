@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { modelSupportsAdaptiveThinking } from './models';
 
 /**
  * ClaudeClient — the v3.0 engine's wrapper over the Anthropic SDK for native
@@ -293,13 +294,21 @@ export class ClaudeClient implements TurnRunner {
       createParams.tool_choice = { type: 'auto' };
     }
 
-    if (params.thinking) {
+    // Extended-reasoning params (adaptive thinking + output_config.effort) are ONLY valid on Opus 4.x
+    // and Sonnet 4.6+. Sending them to a model that doesn't support them (Haiku, or the forced-Haiku
+    // CLAUDE_HAIKU backstop) is a HARD 400 "adaptive thinking is not supported on this model" that kills
+    // the whole provider-fallback chain — the real BUILD_ERROR from the 2026-07-05 build report. Gate
+    // both by model capability (single source of truth in models.ts) so a cheap/fallback tier degrades
+    // gracefully (no reasoning display) instead of failing the turn outright.
+    const extendedReasoning = modelSupportsAdaptiveThinking(params.model);
+
+    if (params.thinking && extendedReasoning) {
       // Adaptive thinking with a summarized display — the correct shape for
       // claude-opus-4-8 / claude-sonnet-4-6 (do NOT use budget_tokens here).
       createParams.thinking = { type: 'adaptive', display: 'summarized' };
     }
 
-    if (params.effort) {
+    if (params.effort && extendedReasoning) {
       // Opus 4.8 reasoning-effort lever (GA, no beta header). Drives the power tiers
       // (mini=low / medium=medium / max=max). Only set for Opus / Sonnet 4.6 runs.
       createParams.output_config = { effort: params.effort };

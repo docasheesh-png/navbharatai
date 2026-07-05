@@ -45,6 +45,11 @@ import {
   ownRepoStorageEnabled,
   parseGitHubRepo,
   WORK_BRANCH,
+  perWorkspaceLockEnabled,
+  maxConcurrentBuilds,
+  buildLockKey,
+  countActiveBuildsForUser,
+  acquireDecision,
   type RepoInfo,
   type PrCapableClient,
   type OwnRepoTarget,
@@ -643,8 +648,12 @@ export interface RunningBuild {
   subscribers: Set<BuildSubscriber>;
   ended: boolean;
   startedTs: number;
-  /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. */
+  /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the
+   *  ACCOUNT key even under per-workspace locking, so the cross-device mirror is unchanged. */
   key?: string;
+  /** The owning account (userId ?? 'anon') — lets the per-account concurrency cap count this account's
+   *  live builds even when the registry Map is keyed by workspace (per-workspace locking). */
+  userId?: string | null;
   /** Which v3.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
    *  have several DIFFERENT chat sessions; `runningBuilds` is keyed by userId only (one account can
    *  only build one thing at a time), but the auto-resume/attach and live-mirror paths must still
@@ -1241,11 +1250,16 @@ export function registerAgentV3Routes(app: Express): void {
     // must key off `buildRunningHere`, or a build genuinely still running in a DIFFERENT v3.0
     // session bleeds its progress into whatever session the user currently has open.
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
-    const buildKey = userId ?? 'anon';
+    // Under per-workspace locking (FIX #3) the registry is keyed by workspace, so scope the lookups
+    // accordingly: `buildRunningHere` looks up THIS session's key; the account-wide `buildRunning`
+    // counts any of the account's live builds. Flag OFF → both use the account key (today's behaviour).
+    const perWs = perWorkspaceLockEnabled();
+    const hereKey = buildLockKey(userId, workspaceId, perWs);
+    const buildRunning = perWs ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0 : isBuildRunning(userId ?? 'anon');
     res.json({
       enabled: isAgentV3Enabled(userId, email),
-      buildRunning: isBuildRunning(buildKey),
-      buildRunningHere: isBuildRunningForWorkspace(runningBuilds.get(buildKey), workspaceId),
+      buildRunning,
+      buildRunningHere: isBuildRunningForWorkspace(runningBuilds.get(hereKey), workspaceId),
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -1759,8 +1773,9 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ ok: resolveApproval(requestId, approved) });
   });
 
-  // Stop the running build for this account — aborts the agent loop (between turns),
-  // ends every attached stream, and frees the slot so a fresh build can start.
+  // Stop the running build — aborts the agent loop (between turns), ends every attached stream, and
+  // frees the slot so a fresh build can start. Under per-workspace locking (FIX #3) the client passes
+  // `workspaceId` so Stop targets THIS app's build (not the whole account); flag OFF → the account key.
   app.post('/api/agentv3/stop', (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
@@ -1768,7 +1783,8 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;
     }
-    const buildKey = userId ?? 'anon';
+    const stopWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    const buildKey = buildLockKey(userId, stopWorkspaceId, perWorkspaceLockEnabled());
     const rb = runningBuilds.get(buildKey);
     const wasRunning = !!rb && !rb.ended;
     if (rb) {
@@ -1901,17 +1917,20 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;
     }
-    const buildKey = userId ?? 'anon';
+    // `workspaceId` is OPTIONAL for back-compat, but the panel's auto-resume ALWAYS sends the session
+    // it's asking about. Under per-workspace locking (FIX #3) the registry is keyed by workspace, so we
+    // look the build up by THAT key directly; flag OFF → the account key (today). The workspaceId
+    // cross-check below stays as defense-in-depth either way.
+    const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    const buildKey = buildLockKey(userId, requestedWorkspaceId, perWorkspaceLockEnabled());
     const rb = runningBuilds.get(buildKey);
     if (!rb || rb.ended) {
       res.status(404).json({ error: 'No running build to resume.' });
       return;
     }
-    // `workspaceId` is OPTIONAL for back-compat, but the panel's auto-resume ALWAYS sends the
-    // session it's asking about — refuse to attach when the running build belongs to a DIFFERENT
-    // session under the same account, so a build genuinely still running elsewhere never gets
-    // silently replayed into the session the user currently has open.
-    const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    // Refuse to attach when the running build belongs to a DIFFERENT session under the same account, so
+    // a build genuinely still running elsewhere never gets silently replayed into the session currently
+    // open (the account-keyed path relies on this; the workspace-keyed path already can't mismatch).
     if (requestedWorkspaceId && rb.workspaceId && rb.workspaceId !== requestedWorkspaceId) {
       res.status(404).json({ error: 'No running build to resume for this session.' });
       return;
@@ -2513,7 +2532,20 @@ export function registerAgentV3Routes(app: Express): void {
       });
       return;
     }
-    const buildKey = userId ?? 'anon';
+    // BUILD LOCK KEY (FIX #3, flag-gated): per-ACCOUNT today (`userId ?? 'anon'`); per-WORKSPACE when
+    // AGENTV3_PER_WORKSPACE_LOCK is on — so two DIFFERENT apps build at once while the SAME app stays
+    // mutually exclusive. `lockWorkspaceId` is the stable derived id for THIS session (only used as the
+    // key when the flag is on AND it's stable; else buildLockKey falls back to the account key). Flag
+    // OFF → buildKey is byte-identical to the old `userId ?? 'anon'`.
+    const perWorkspaceLock = perWorkspaceLockEnabled();
+    // Only key by workspace when the sessionId is STABLE (matches deriveWorkspaceId's own gate) — else
+    // deriveWorkspaceId returns a Date.now()-based id that would differ every request, so we fall back
+    // to the account key (buildLockKey handles the null). This keeps the lock stable per app+session.
+    const lockSessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null;
+    const lockWorkspaceId = perWorkspaceLock && lockSessionId && SESSION_ID_RE.test(lockSessionId)
+      ? deriveWorkspaceId(userId, lockSessionId)
+      : null;
+    const buildKey = buildLockKey(userId, lockWorkspaceId, perWorkspaceLock);
     if (activeBuilds.has(buildKey)) {
       const existing = runningBuilds.get(buildKey);
       if (shouldReclaimBuildLock(existing, Date.now())) {
@@ -2527,9 +2559,29 @@ export function registerAgentV3Routes(app: Express): void {
         }
         activeBuilds.delete(buildKey);
       } else {
-        res.status(409).json({ error: 'A build is already running for this account. Stop it before starting another.', resumable: isBuildRunning(buildKey) });
+        // Same key still building. Under per-workspace locking this means the SAME app is already
+        // building (attach it, don't start a second); under per-account it's the account-wide lock.
+        res.status(409).json({
+          error: perWorkspaceLock
+            ? 'This app is already building in another chat — connect to it (or stop it) instead of starting a second build.'
+            : 'A build is already running for this account. Stop it before starting another.',
+          resumable: isBuildRunning(buildKey),
+        });
         return;
       }
+    }
+    // PER-ACCOUNT CONCURRENCY CAP (per-workspace only): bound how many builds one account runs at once,
+    // so N different apps can build in parallel but sandbox cost stays bounded. `acquireDecision` is
+    // pure + tested; flag OFF never consults the cap (single-build-per-account is unchanged).
+    const capDecision = acquireDecision({
+      perWorkspace: perWorkspaceLock,
+      lockHeldByLiveBuild: false, // the live-lock case was already handled (reclaim-or-409) above
+      accountActiveCount: countActiveBuildsForUser(runningBuilds.values(), userId),
+      cap: maxConcurrentBuilds(),
+    });
+    if (!capDecision.ok && capDecision.reason === 'account-cap') {
+      res.status(429).json({ error: `You have ${capDecision.active} builds running (max ${capDecision.cap} at once). Let one finish, or stop it, then try again.` });
+      return;
     }
     activeBuilds.add(buildKey);
     // Power level (admin override 2026-06-27): 'off' | 'mini' (5×) | 'medium' (10×) |
@@ -2845,7 +2897,10 @@ export function registerAgentV3Routes(app: Express): void {
     // intentWorkspaceId was already derived above (deriveWorkspaceId(userId, req.body?.sessionId)) for
     // intent classification — reuse it so the running-build registry knows which session owns this
     // build, instead of computing it twice from the same (userId, sessionId) pair.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: buildKey, workspaceId: intentWorkspaceId };
+    // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
+    // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
+    // `userId` lets the per-account cap count this account's live builds across workspaces.
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },

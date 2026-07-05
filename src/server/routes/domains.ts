@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { doc, setDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   cloudflareConfigured,
   createCustomHostname,
@@ -32,8 +32,15 @@ const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/;
 
 export function registerDomainsRoutes(app: Express): void {
   app.post('/api/domains/connect', buildRateLimiter(), async (req: Request, res: Response) => {
+    // SECURITY: provisioning a Cloudflare custom hostname spends NavBharatAI's zone quota and writes an
+    // ownership mapping, so it MUST be authenticated. Derive the owner from the verified Firebase token —
+    // never a spoofable req.body.userId (which also let an anonymous caller provision on our zone).
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) {
+      res.status(401).json({ error: 'Please sign in to connect a custom domain.' });
+      return;
+    }
     const host = normalizeDomain(req.body?.domain);
-    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     if (!DOMAIN_RE.test(host)) {
       res.status(400).json({ error: 'Enter a valid domain like myshop.com (no https://, no slashes).' });
       return;

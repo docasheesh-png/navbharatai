@@ -246,12 +246,22 @@
 
 ## 🟢 PHASE P3 — SCALE & FRONTEND HEALTH
 
-### P3.1 — Split the `App.tsx` God Component  🟡 PARTIAL (9,156 lines)
+### P3.1 — Split the `App.tsx` God Component  🔄 IN PROGRESS (6,096 lines, was 6,596)
 - **Problem:** Violates SRP/SoC — state + chat + files + preview + payment + routing in one file.
-- [ ] Extract into context providers + hooks: `PreviewProvider`, `ChatProvider`, `PaymentProvider`,
-      `FilesProvider`, plus `usePreviewBundler`, `useProBuild` hooks.
-- [ ] Target: `App.tsx` < 1,500 lines, no behavior change.
-- **Files:** `src/App.tsx` → `src/contexts/`, `src/hooks/`.
+- **Approach (admin-approved 2026-07-05):** a SERIES of behavior-preserving extractions into custom
+  hooks (NOT Context providers — a provider forces restructuring the component tree since App both
+  defines `user` and consumes `wallet` in one scope; a hook keeps App's scope intact = far lower risk
+  on a live payments app). Each slice ships gated → PR → CI green → merge, byte-identical relocation.
+- [x] `usePaymentEngine` — wallet/billing/credits/referral (#996). App 6,596 → 6,353.
+- [x] `usePreviewBundler` — preview build + client-side bundler (#999). App 6,353 → 6,096.
+- [ ] Remaining logic slices: files (upload/zip/template), github/deploy, admin, chat handlers, and the
+      pro-build engine `useProBuild` (~1,270 lines, most coupled — last).
+- [ ] **Target REVISED by admin (2026-07-05): `App.tsx` ≈ 2,000–2,500 lines, no behavior change.**
+      Measured basis: App is ~4,700 lines of LOGIC + ~1,135 lines of JSX render. Extracting ALL logic
+      into hooks lands ~2,000–2,500 (≈60% cut, the real SRP win) at low risk. The original "< 1,500"
+      additionally required splitting the JSX render tree into child view components — higher risk /
+      more PRs for marginal benefit; deliberately dropped in favour of the safe target.
+- **Files:** `src/App.tsx` → `src/hooks/` (+ `src/contexts/` where a provider is genuinely warranted).
 
 ### P3.2 — Offline-First Runtime  ✅ DONE (2026-06-28)
 - [x] Service worker now caches an allowlist of safe, read-only GET API endpoints

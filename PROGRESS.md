@@ -8232,3 +8232,30 @@ EnvVarAnalysis, ViteEnvAnalysis, AsyncPatternAnalysis, TestCoverageAnalysis, Env
 SecurityConfigAnalysis, ProjectHygieneAnalysis, ASTAnalyzer; deploy PROVIDERS (Netlify/Vercel/Cloudflare/
 Firebase) all correct. (The Angular dist-dir + no-per-framework-output-map deploy gaps remain deferred
 from round 4.)
+
+## MILESTONE (2026-07-05, session 01KDmsCZ): BUG-HUNT ROUND 6 — NEW AREAS (platform frontend + non-build AI surfaces)
+
+First hunt outside the AgentV3 build backend — the platform's OWN frontend (XSS in how it renders
+AI/user content) and the non-build AI surfaces (Doctor AI / Free / Pro chat). Most productive round:
+- **#948** — HIGH stored XSS. The IDE file-tree hover preview injected an `.svg` file's RAW source via
+  dangerouslySetInnerHTML; `files` is AI/user/import-controlled, so a `logo.svg` containing
+  `<img src=x onerror=…>` stole document.cookie + localStorage (Firebase auth tokens) in the PLATFORM
+  origin the moment the user HOVERED it. Fixed by rendering SVG via an `<img>` data-URI (script-disabled
+  secure-static mode); extracted pure tested svgPreviewSrc(). No new dep (DOMPurify isn't in the tree).
+- **#949** — HIGH clinical safety. Doctor AI's red-flag detector matched a leading digit behind
+  `.{0,10}`, so "BP 120/80" false-flagged Hypotension while real "BP 85/55" was MISSED, "Hb 13" →
+  Severe Anaemia, "SpO2 100%" → Low SpO2 — and these flags are PERSISTED into case memory + re-injected
+  into the model's prompt every turn. Extracted to a pure numeric-parsing lib/clinical/redFlags.ts
+  (SpO2<90, systolic<90 or diastolic<60, Hb<7) with boundary tests.
+- **#950** — MEDIUM same-origin XSS: the SDA clinical-PDF (document.write to about:blank) interpolated
+  the attached-file name / patient fields / red-flags RAW, and MultiPageBuilder's nav preview
+  interpolated page title / logo text / href RAW. Centralized escaping into one shared tested
+  src/lib/escapeHtml.ts used by both.
+
+DEFERRED (recorded for follow-up):
+- FigmaImporter (src/components/ide/FigmaImporter.tsx:642) `document.write(generatedCode)` into a
+  same-origin window.open popup — AI/Figma-derived HTML runs in-origin. Correct fix is a sandboxed
+  iframe (`sandbox="allow-scripts"`, NO allow-same-origin), a larger refactor than an escape.
+Round-6 cleared (safe): react-markdown v10 with no rehype-raw (AI-reply markdown XSS not exploitable);
+PWANotifications highlight escaping; clinical calculators (CURB-65/qSOFA/GCS/Wells/CHA2DS2-VASc);
+AIRouter tier→universe mapping; AppKnowledgeBase (no duplicate ids); free/pro chat prompt assembly.

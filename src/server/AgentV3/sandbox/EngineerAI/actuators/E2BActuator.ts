@@ -8,6 +8,7 @@ import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
+import { isDeadSandboxSignal, isDeadSandboxError } from './sandboxHealth';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -245,6 +246,13 @@ export class E2BActuator implements IEngineerActuator {
   private _browserDaemon = new Map<string, Promise<boolean>>();
   // Phase 12E — last activity timestamp per workspace, drives idle auto-pause.
   private _lastActivity = new Map<string, number>();
+  // Warm-sandbox durability (2026-07-05): a bounded write-through cache of the SOURCE files written to
+  // each sandbox, so when a dead sandbox is evicted and recreated mid-build the fresh one is restored
+  // instead of coming back empty. Source only — node_modules / big / binary writes are skipped (they
+  // re-install), so the cache stays small (<~1 MB for a normal app).
+  private _fileCache = new Map<string, Map<string, string>>();
+  private static readonly FILE_CACHE_MAX_FILES = 500;
+  private static readonly FILE_CACHE_MAX_BYTES = 256 * 1024; // per file
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -344,6 +352,7 @@ export class E2BActuator implements IEngineerActuator {
       if (now - last > IDLE_LIMIT_MS) {
         await this.pauseSandbox(sandbox.sandboxId).catch(() => {});
         this._lastActivity.delete(workspaceId);
+        this._fileCache.delete(workspaceId); // free the recreate-restore cache for an idle workspace (a resume reconnects + restores from E2B; a fresh build re-populates)
       }
     }
   }
@@ -364,6 +373,7 @@ export class E2BActuator implements IEngineerActuator {
     // Every create/connect is bounded by SANDBOX_CREATE_TIMEOUT_MS so a slow E2B can
     // never hang the build silently — on timeout we throw and the caller surfaces it.
     let sandbox: Sandbox;
+    let freshCreate = false;
     if (resumeSandboxId) {
       // Reconnect to the persisted sandbox — auto-resumes it if paused, restoring
       // all files, node_modules, and any running dev server. Fall back to a fresh
@@ -373,13 +383,40 @@ export class E2BActuator implements IEngineerActuator {
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
         sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
+        freshCreate = true;
       }
     } else {
       sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
+      freshCreate = true;
     }
     this.sandboxes.set(workspaceId, sandbox);
     usageTracker.record(workspaceId, 'sandbox');
+    // RECREATE-AFTER-DEATH restore: a fresh sandbox comes back EMPTY. When we hold a cached copy of the
+    // source files this workspace already wrote (the dead sandbox that was just evicted), replay them so
+    // the build continues instead of losing everything. No-op on the very first create (cache empty).
+    if (freshCreate) {
+      const cached = this._fileCache.get(workspaceId);
+      if (cached && cached.size > 0) await this._replayFilesToSandbox(sandbox, cached);
+    }
     return sandbox;
+  }
+
+  /** Record a source-file write in the bounded per-workspace cache (for recreate-after-death restore). */
+  private _cacheFileWrite(workspaceId: string, relPath: string, content: string): void {
+    if (content.length > E2BActuator.FILE_CACHE_MAX_BYTES) return;      // skip huge files (they re-install/re-generate)
+    if (/(^|\/)(node_modules|\.git|dist|build)\//.test(relPath)) return; // never cache dependency/build output
+    let m = this._fileCache.get(workspaceId);
+    if (!m) { m = new Map(); this._fileCache.set(workspaceId, m); }
+    if (!m.has(relPath) && m.size >= E2BActuator.FILE_CACHE_MAX_FILES) return; // bounded — never grows unbounded
+    m.set(relPath, content);
+  }
+
+  /** Best-effort replay of the cached source files onto a freshly-created sandbox. Never throws. */
+  private async _replayFilesToSandbox(sandbox: Sandbox, files: Map<string, string>): Promise<void> {
+    for (const [relPath, content] of files) { // keys are already safeRelPath'd by writeFile
+      try { await withTimeout(sandbox.files.write(`${WORKSPACE_ROOT}/${relPath}`, content), 15_000, 'files.write(replay)'); }
+      catch { /* one file failing to replay never blocks the recreate */ }
+    }
   }
 
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
@@ -472,15 +509,21 @@ export class E2BActuator implements IEngineerActuator {
     try {
       return await withTimeout(op(sandbox), timeoutMs, label);
     } catch (e) {
-      if (e instanceof Error && / timed out after /.test(e.message) && this.sandboxes.get(workspaceId) === sandbox) {
-        this.sandboxes.delete(workspaceId); // dead/stalled sandbox — recreate on the next call
+      // Evict the cached sandbox on a DEAD-sandbox signal — not just a timeout. A reaped sandbox
+      // rejects FAST (the "exit -1 in 0s" from the report), so the old timeout-only check never fired
+      // and the corpse was reused forever. isDeadSandboxError catches the reaped/not-running/network
+      // shapes too, so the next getSandbox recreates (and replays the cached source files).
+      if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
+        this.sandboxes.delete(workspaceId);
       }
       throw e;
     }
   }
 
   async writeFile(workspaceId: string, filePath: string, content: string): Promise<void> {
-    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, content));
+    const rel = safeRelPath(filePath);
+    await this.fileOp(workspaceId, 'files.write', (sb) => sb.files.write(`${WORKSPACE_ROOT}/${rel}`, content));
+    this._cacheFileWrite(workspaceId, rel, content); // warm-durability: remember for recreate-after-death restore
   }
 
   async writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void> {
@@ -717,15 +760,28 @@ export class E2BActuator implements IEngineerActuator {
       return { exitCode: 0, stdout, stderr };
     }
 
-    try {
-      const result = await sandbox.commands.run(command, {
-        cwd: WORKSPACE_ROOT,
-        timeoutMs: COMMAND_TIMEOUT_MS,
-      });
-      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
-    } catch (err: any) {
-      return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+    // REGULAR command with DEAD-SANDBOX recreate-retry (root-cause fix for the "81 commands died on a
+    // reaped sandbox for 21 min" build): on a dead-sandbox signal, evict + recreate ONCE (getSandbox
+    // replays the cached source files onto the fresh sandbox) and retry — so a mid-build sandbox death
+    // is invisible instead of a corpse grind. A normal nonzero program exit is returned as-is and NEVER
+    // triggers a recreate (isDeadSandboxSignal distinguishes a dead sandbox from a failed command).
+    let sb = sandbox;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const t0 = Date.now();
+      try {
+        const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS });
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      } catch (err: any) {
+        const dead = isDeadSandboxSignal({ exitCode: -1, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
+        if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
+          this.sandboxes.delete(workspaceId); // drop the reaped sandbox reference
+          try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
+          catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
+        }
+        return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+      }
     }
+    return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
   }
 
   async browseUrl(workspaceId: string, url: string): Promise<{ html: string }> {

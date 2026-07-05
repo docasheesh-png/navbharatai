@@ -9717,3 +9717,19 @@ sitting between them, stays in App). Mapped by subagent first.
 - Exported safeLS from App (module-private) so the hook shares it; db/authedHeaders already exported.
 - tsc passed first try. App.tsx: 4,401 -> 4,126 lines (-275). Running total: 6,596 -> 4,126 (~37% down).
 Gate: frontend tsc 0, vitest 4915/4915 PASS, vite build PASS.
+
+## 2026-07-05 — P3.1 App.tsx split #6: delete dead getBharatContext + handleGitHubCommand
+
+More dead-code removal found while scanning the biggest remaining blocks. Two functions had ZERO
+callers (only their own definitions):
+- getBharatContext (~253 lines) — a legacy system-prompt/context builder, orphaned when Free chat moved
+  to server-side prompt construction (the extracted useChatEngine builds its prompt in callGeminiFrontend,
+  never calling getBharatContext).
+- handleGitHubCommand (~10 lines) — an unused GitHub command stub.
+Deleting them then orphaned the entire ./lib/appUtils import in App (detectFrameworkFromFiles, detectAppType,
+isClassicVanillaWeb, buildLanguageRule, classifyError — all now live only inside the extracted preview/chat
+hooks), so that import block + its stale "→ imported" comments were removed too. Each verified dead by
+whole-file grep before removal.
+
+App.tsx: 4,139 -> 3,868 lines (-271). Running total: 6,596 -> 3,868 (~41% down; target ~2,000-2,500).
+Gate: frontend tsc 0, vitest PASS, vite build PASS.

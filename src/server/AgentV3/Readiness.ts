@@ -32,6 +32,16 @@ export interface ExtraFinding {
   label: string;
 }
 
+// The readiness SCORE floor. A build can be free of any single categorised HARD blocker yet still be
+// riddled with quality defects that crater the score (real admin evidence, 2026-07-05: 27 orphan
+// components alone drove the score to 0, and — because `ready` only checked `blockers.length` — the
+// engine reported "Build health: READY · 0/100", a self-evident lie the user rightly did not trust).
+// A low score is ITSELF a not-ready signal: readiness now requires BOTH no hard blocker AND a score at
+// or above this floor, so "READY · <low>/100" can never be emitted again. 50 = at least half the
+// 100-point defect budget must remain; a genuinely clean build sits far above it, so this never
+// false-blocks a real, working app.
+export const MIN_READY_SCORE = 50;
+
 // Per-defect penalties (points off 100).
 const PENALTY = {
   unresolvedImport: 25, // breaks the build
@@ -119,6 +129,14 @@ export function assessReadiness(
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
+  // HONESTY GATE: a score below the floor is a not-ready signal on its own, even with no single hard
+  // blocker — otherwise a pile of "warning" defects (orphan components, cycles, …) that craters the
+  // score still reports READY. Record an honest reason so the verdict says WHY, never a silent
+  // "READY · <low>/100".
+  if (score < MIN_READY_SCORE && blockers.length === 0) {
+    const why = warnings.length ? ` — ${warnings.slice(0, 2).join('; ')}${warnings.length > 2 ? ', …' : ''}` : '';
+    blockers.push(`readiness score ${score}/100 is below the ${MIN_READY_SCORE}/100 bar (too many unresolved quality issues${why})`);
+  }
   const ready = blockers.length === 0;
   return { score, ready, blockers, warnings };
 }

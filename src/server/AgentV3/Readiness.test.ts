@@ -74,6 +74,28 @@ describe('assessReadiness', () => {
     expect(r.score).toBeLessThan(100);
     expect(r.warnings.join(' ')).toContain('Hero.tsx');
   });
+
+  // THE reported honesty bug (admin, 2026-07-05): a build with 27 orphan components — all WARNINGS,
+  // no single hard blocker — cratered the score to 0, yet the engine reported "Build health: READY ·
+  // 0/100". A low score is itself a not-ready signal: it must now be NOT READY, with an honest reason.
+  it('a warning pile that craters the score below the floor is NOT READY (no more "READY · 0/100")', () => {
+    const orphans = Array.from({ length: 27 }, (_, i) => `src/components/C${i}.tsx (C${i})`);
+    const r = assessReadiness({ ...cleanArch, orphanComponents: orphans }, []);
+    expect(r.score).toBe(0);            // 27 × 6 penalty, clamped
+    expect(r.ready).toBe(false);        // was true (the bug) — now honestly blocked
+    expect(r.blockers.join(' ')).toMatch(/below the 50\/100 bar/);
+    expect(readinessVerdict(r)).toContain('NOT READY');
+  });
+
+  // Boundary: a build just AT the floor with no hard blocker stays READY (the floor never
+  // false-blocks a genuinely-acceptable build).
+  it('a build at/above the score floor with no hard blocker stays READY', () => {
+    // 8 orphans × 6 = 48 off → score 52 (≥ 50) → still READY.
+    const orphans = Array.from({ length: 8 }, (_, i) => `src/components/C${i}.tsx (C${i})`);
+    const r = assessReadiness({ ...cleanArch, orphanComponents: orphans }, []);
+    expect(r.score).toBeGreaterThanOrEqual(50);
+    expect(r.ready).toBe(true);
+  });
 });
 
 describe('assessReadiness — extra findings', () => {

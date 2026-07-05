@@ -8552,3 +8552,36 @@ reconnect outcome, and the resume()/attach REPLAY buffer): the Reconnect/Resume 
 without a click. The keep-alive fix above makes a drop far rarer in the first place. Not re-touched.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4721/4721 PASS, frontend+server build PASS.
+
+## 2026-07-05 — FIFTH-RULE AUTOPSY: "Build health: READY · 0/100" (Hospital OPD build #2, IMG_5712/5713 + 637KB diagnostics JSON)
+
+Admin sent a v3.0 build report. Full forensic autopsy per the fifth absolute rule.
+
+STEP 1 — ledger (630 issues; 549 auto-resolved, 81 unresolved, 84 errors): 🥵 STRUGGLE (dominant) — the
+E2B SANDBOX DIED mid-build: 81× SANDBOX_CMD_FAILED, every trivial command (ls/pwd/cat package.json/
+node --version/true/echo ok) exit -1 in 0s, agent notes "sandbox timed out / unresponsive". 110 cmds:
+27 exit-0 (early) then 83 failures — alive at first, then E2B killed it and the engine never recreated
+it (222 steps / 21m / ₹23). 🔀 51× PROVIDER_FALLBACK (GLM/KIMI failing→Claude), 41× TOOL_ERROR. ⏭️
+sign-up/registration not built; no tests; no real error boundary. ❌ NO package.json (app can't run);
+App.tsx missing imports (ToastContext/ErrorBoundary/Patients/OPD); 27 orphan components; the verdict LIED.
+
+STEP 2 — missing subsystems: (1) live sandbox-health gate + auto-recreate (exit -1 on `true`/`echo ok`
+⇒ sandbox dead ⇒ recreate ONE fresh, don't fire 81 cmds into a corpse) — the #1 open root cause
+"warm-sandbox durability", now with hard evidence the engine REUSES DEAD sandboxes; (2) honest readiness
+gate (fixed); (3) guaranteed package.json scaffold.
+
+STEP 3 — DNA fix shipped (honesty root cause, verifiable): "READY · 0/100" is impossible now.
+Readiness.assessReadiness set `ready = blockers.length === 0`, IGNORING the score — so 27 orphan
+components (WARNINGS) cratered the score to 0 while no hard blocker existed → "READY 0/100", and the AI
+reviewer's own "❌ 25/100 CRITICAL" verdict never reached the gate. Fix (Readiness.ts): MIN_READY_SCORE
+= 50 — ready requires no hard blocker AND score ≥ floor; below it records an honest blocker saying WHY.
+Propagates to the AgentRunner summary + build-health badge. +2 regression tests; existing readiness
+tests unaffected.
+
+OPEN ROOT CAUSES (rule 6 — recorded, NOT faked):
+- [#1, INFRA-GATED] dead-sandbox detect + auto-recreate — the true root; detector is code-testable but
+  the E2B recreate needs a LIVE sandbox to verify (no E2B in CI), so queued as top follow-up, not faked.
+- package.json invariant (runnable scaffold even if the sandbox is dead during scaffolding).
+- reviewer→readiness wiring (reviewer's CRITICAL findings should feed the gate as hard blockers).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4723/4723 PASS.

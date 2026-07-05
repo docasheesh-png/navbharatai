@@ -62,9 +62,17 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
     if (!domainValid || busy) return;
     setBusy(true); setError(null);
     try {
+      // Attach the Firebase ID token — the server now requires an authenticated owner before
+      // provisioning a Cloudflare hostname and stores the mapping under the VERIFIED uid.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const { auth } = await import('../../lib/firebase');
+        const tok = await auth.currentUser?.getIdToken();
+        if (tok) headers.Authorization = `Bearer ${tok}`;
+      } catch { /* best-effort; server will 401 if unauthenticated */ }
       const res = await fetch('/api/domains/connect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ domain: cleanDomain }),
       });
       const data = await res.json().catch(() => ({}));

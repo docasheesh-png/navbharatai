@@ -8413,3 +8413,25 @@ safeguard #3):
 - **payments.ts:176 ledger honesty** — hardcodes "Lifetime Pass Activated (₹50)" while the real pass
   price withheld is `VISHWAKARMA_PASS_PRICE_RUPEES = 100`. Customer-facing honesty bug; one-line fix
   (interpolate the constant). LOW.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-8 #2 — /api/domains/connect now requires auth (#TBD)
+
+MEDIUM auth bug (recorded in the round-8 deferred list, now fixed). `POST /api/domains/connect` was
+guarded ONLY by `buildRateLimiter()` (rate-limit, not auth) and trusted a spoofable `req.body.userId`.
+When Cloudflare is configured, an anonymous caller could trigger `createCustomHostname()` on
+NavBharatAI's own zone (cost/quota abuse) and write a `custom_domains/{host}` mapping under any uid.
+(The legit frontend didn't even send userId → stored owner was always null.)
+
+Root cause: a resource-provisioning + ownership-writing route with no verified identity. Two-sided fix:
+- Server (domains.ts): require `verifyFirebaseToken(req)` FIRST (401 if absent) and persist the mapping
+  under the VERIFIED uid — the guard runs before any Cloudflare call or DB write.
+- Frontend (ConnectDomainPanel.tsx): attach `Authorization: Bearer <idToken>` (dynamic firebase import).
+
+Locked with a route-level regression test (routesDomainsAuth.test.ts, mocked cloudflare + firestore):
+an unauthenticated request → 401 and provisions NOTHING (createCustomHostname/setDoc never called),
+even when a spoofed body userId is supplied.
+
+Round-8 remaining recorded findings: the HIGH non-atomic wallet-credit race (live-money concurrency
+refactor — being surfaced to admin for a careful, transaction-based follow-up), the NaN-cost
+defense-in-depth guard (not live-exploitable; both callers pre-guard `> 0`), and the ₹50-vs-₹100
+ledger-label honesty bug (LOW).

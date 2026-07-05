@@ -9,6 +9,31 @@ import { verifyPaymentInternal } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 
 /**
+ * Verify a Cashfree webhook signature. CRITICAL: the HMAC MUST be computed over the EXACT raw bytes
+ * Cashfree signed — never over `JSON.stringify(req.body)`, because re-serializing the parsed body
+ * (whitespace, key order, escaping) yields different bytes and a different HMAC, so every legitimate
+ * webhook would be rejected and the server-side payment-fulfillment safety net would silently die
+ * (a paid user who closes the tab before the client poll finishes is charged but never credited).
+ *
+ * Accepts Cashfree's v2 (base64 of `timestamp + rawBody`) and legacy v1 (base64/hex of `rawBody`)
+ * formats. Pure + fully unit-testable. This does NOT weaken security — forging any of these still
+ * requires the shared secret.
+ */
+export function isValidCashfreeSignature(opts: {
+  rawBody: string;
+  timestamp: string;
+  signature: string;
+  secret: string;
+}): boolean {
+  const { rawBody, timestamp, signature, secret } = opts;
+  if (!signature || !secret) return false;
+  const v2 = crypto.createHmac('sha256', secret).update(timestamp + rawBody).digest('base64');
+  const v1Base64 = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
+  const v1Hex = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  return signature === v2 || signature === v1Base64 || signature === v1Hex;
+}
+
+/**
  * Payment routes (Cashfree order creation, verification, webhook, coupon redeem)
  * extracted from the server.ts monolith (Phase 1). Behavior unchanged. The
  * payment rate limiter is injected so its config stays owned by the bootstrap.
@@ -199,7 +224,13 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
   app.post('/api/payment/webhook', async (req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const body = JSON.stringify(req.body);
+      // Verify the HMAC over the EXACT bytes received (captured by the express.json `verify` hook
+      // in server.ts as req.rawBody), NOT a re-serialized JSON.stringify(req.body) — the latter
+      // changes the bytes and makes every legitimate webhook fail signature validation. Fall back
+      // to re-serialization only if the raw bytes are somehow unavailable (no worse than before).
+      const rawBody: string = (req as any).rawBody
+        ? (req as any).rawBody.toString('utf8')
+        : JSON.stringify(req.body);
 
       // Cashfree Webhook Data structure
       const orderId = req.body.data?.order?.order_id;
@@ -238,13 +269,8 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       const signature = (req.headers['x-cf-signature'] || req.headers['cf-signature'] || '') as string;
       const ts = (req.headers['x-cf-signature-timestamp'] || '') as string;
 
-      // Compute multiple plausible formats to be extremely robust against API version variations
-      const signatureDataWithTimestamp = ts + body;
-      const expectedV2 = crypto.createHmac('sha256', secret).update(signatureDataWithTimestamp).digest('base64');
-      const expectedV1Base64 = crypto.createHmac('sha256', secret).update(body).digest('base64');
-      const expectedV1Hex = crypto.createHmac('sha256', secret).update(body).digest('hex');
-
-      const isSignatureValid = (signature === expectedV2) || (signature === expectedV1Base64) || (signature === expectedV1Hex);
+      // Accepts Cashfree's v2 (timestamp+rawBody) and legacy v1 (rawBody) formats — all over raw bytes.
+      const isSignatureValid = isValidCashfreeSignature({ rawBody, timestamp: ts, signature, secret });
 
       if (!isSignatureValid) {
         // Never log the expected HMACs — they are secret-derived and would let a reader forge signatures.

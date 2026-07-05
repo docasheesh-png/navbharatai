@@ -11,6 +11,7 @@
  * back to prompt-only planning (no regression).
  */
 import type { ModelCall } from './aiEdits';
+import { extractFirstJson } from '../lib/extractJson';
 
 export interface RequirementSpec {
   appType: string;
@@ -21,17 +22,9 @@ export interface RequirementSpec {
 
 const EMPTY: RequirementSpec = { appType: '', modules: [], pages: [], entities: [] };
 
-/** Extract the first JSON object from arbitrary model text. */
+/** Extract the first JSON object from arbitrary model text (shared balanced extractor). */
 function extractJsonObject(raw: string): any {
-  if (!raw) return null;
-  let s = raw.trim();
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
-  try { return JSON.parse(s); } catch { /* slice */ }
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
+  return extractFirstJson(raw, 'object');
 }
 
 function strArray(v: any, cap = 40): string[] {

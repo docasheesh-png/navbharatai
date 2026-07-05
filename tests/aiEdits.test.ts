@@ -35,6 +35,13 @@ describe('parseFileEdits', () => {
     expect(parseFileEdits('no json here')).toEqual([]);
     expect(parseFileEdits('')).toEqual([]);
   });
+
+  it('REGRESSION: does not silently drop all edits when trailing prose contains a bracket', () => {
+    // The old naive lastIndexOf(']') grabbed the ']' inside "[thanks]" → JSON.parse threw → [] →
+    // the whole edit turn became a silent no-op. The balanced extractor stops at the array's close.
+    const raw = 'Here are the edits: [{"op":"write","path":"src/App.tsx","content":"x"}]\nLet me know if you need anything else [thanks]';
+    expect(parseFileEdits(raw)).toEqual([{ op: 'write', path: 'src/App.tsx', content: 'x' }]);
+  });
 });
 
 describe('makeAiEditGenerator', () => {

@@ -52,6 +52,64 @@ describe('summarizeFileTree (edit at scale — bound the injected tree)', () => 
     const out = summarizeFileTree(['a/x.ts', 'a/y.ts', 'b/z.ts'], { fullListMax: 2 });
     expect(out).toContain('3 files');
   });
+
+  // Prompt-size governance (autopsy 2026-07-05, follow-up 3): the Mitrify import injected ~150
+  // attached_assets/IMG_*.png|jpeg names into EVERY turn's manifest — pure token noise the model can
+  // never text-edit, and part of why the cheap floor (GLM/KIMI) timed out on the bloated prompt.
+  describe('binary assets are excluded from the manifest (with one honest note)', () => {
+    it('filters image/font/media names out of the small-project flat list', () => {
+      const out = summarizeFileTree([
+        'src/App.tsx',
+        'attached_assets/IMG_4787_1777795591587.png',
+        'attached_assets/photo.jpeg',
+        'public/font.woff2',
+        'public/intro.mp4',
+        'package.json',
+      ]);
+      expect(out).toContain('src/App.tsx');
+      expect(out).toContain('package.json');
+      expect(out).not.toContain('IMG_4787');
+      expect(out).not.toContain('photo.jpeg');
+      expect(out).not.toContain('font.woff2');
+      expect(out).not.toContain('intro.mp4');
+      // One honest note so the agent knows assets exist (never "this project has no images").
+      expect(out).toContain('+4 binary asset files');
+      expect(out).toContain('omitted');
+    });
+
+    it('keeps .svg (editable text the agent legitimately modifies)', () => {
+      const out = summarizeFileTree(['src/logo.svg', 'src/App.tsx']);
+      expect(out).toContain('src/logo.svg');
+      expect(out).not.toContain('binary asset');
+    });
+
+    it('binary files do not push a small project over the summary threshold', () => {
+      // 10 source files + 395 images = 405 total (over fullListMax 400), but only 10 EDITABLE files —
+      // the agent must still get the full flat list of what it can actually edit.
+      const paths = Array.from({ length: 10 }, (_, i) => `src/f${i}.ts`);
+      for (let i = 0; i < 395; i++) paths.push(`attached_assets/img${i}.png`);
+      const out = summarizeFileTree(paths);
+      expect(out).toContain('src/f9.ts');           // full flat list survived
+      expect(out).not.toContain('LARGE project');    // not forced into summary mode by images
+      expect(out).toContain('+395 binary asset files');
+    });
+
+    it('large-project summary also carries the binary-asset note', () => {
+      const paths: string[] = [];
+      for (let d = 0; d < 30; d++) for (let f = 0; f < 40; f++) paths.push(`src/dir${d}/file${f}.tsx`);
+      paths.push('assets/a.png', 'assets/b.png');
+      const out = summarizeFileTree(paths);
+      expect(out).toContain('LARGE project');
+      expect(out).toContain('+2 binary asset files');
+      // Directory counts reflect EDITABLE files only (1200, not 1202).
+      expect(out).toContain('1200 files');
+    });
+
+    it('an assets-only tree degrades to just the note (never an empty misleading blank)', () => {
+      const out = summarizeFileTree(['a.png', 'b.jpg']);
+      expect(out).toContain('+2 binary asset files');
+    });
+  });
 });
 
 describe('editModePrefix', () => {

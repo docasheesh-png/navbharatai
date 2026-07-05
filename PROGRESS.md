@@ -8797,3 +8797,41 @@ build was STILL RUNNING. FIX: new pure historyOpenPolicy.historyOpen404Action �
 only old+idle → 'brand-dead' (unchanged). Panel probes /api/agentv3/status first. +11 tests total.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4762/4762 PASS, frontend+server build PASS.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-11 — unguarded JSON.parse crash-loop in always-mounted state initializers (#TBD)
+
+New hunt area (React frontend state/effects). Shipped the HIGH finding — it directly protects the #1
+absolute rule (the app must never break):
+
+- **HIGH — unguarded `JSON.parse(localStorage.getItem(...))` in top-level `useState` initializers** of
+  ALWAYS-MOUNTED components. `App.tsx` (referralHistory, githubRepoContext, keys, appSecrets) and
+  `useSettings.ts` (enabledModules) parsed stored JSON with no try/catch. If any of those keys holds a
+  corrupt value (truncated write, older-build format, cross-tab/extension tampering, manual edit), the
+  parse throws DURING RENDER → the root ErrorBoundary shows "Reload App" → reload re-runs the same
+  initializer → the same throw → an UNRECOVERABLE app-wide crash loop whose own recovery button can't
+  escape it (the poison value persists). Five sibling reads in the same file were already guarded — proof
+  it was an oversight.
+
+Root-cause fix (centralize the class): new `src/lib/safeLocalJson(key, fallback)` — reads + parses
+localStorage, never throws, returns the fallback on absent/empty/corrupt (self-heals). Routed all five
+always-mounted sites through it. Locked with tests (safeLocalJson.test.ts: valid parse, missing key,
+CORRUPT value → fallback not throw, empty string, localStorage-undefined).
+
+DEFERRED — the SAME class in LAZILY-mounted IDE panels (per-panel crash on open, not app-wide, so lower
+severity): unguarded `JSON.parse(localStorage…)` still in SDAChat, DatabaseSettings, HistoryView,
+LocalizationManager, AIDebugger, AIImageGenerator, CodeVersioning, AppAnalytics, PerformanceAnalyzer,
+TeamCollaboration, FigmaImporter, AppStorePublisher, GitPanel, CustomDomain, CodeMinifier,
+ScreenshotToCode, APITester, defaultContent. The helper now exists — a follow-up sweep routes them all
+through `safeLocalJson` (mechanical, but many files → separate focused PR). (Many other sites are already
+try/catch-guarded and need no change.)
+
+NEXT (clinical safety — highest priority, from the SDA hunt, NOT yet fixed):
+- **HIGH/CRITICAL — SDA cross-patient memory contamination.** `sda.ts:104` keys the clinical store on
+  `sessionId || userId`, but `SDAChat.tsx` never sends a per-case `sessionId` and "New Case" resets only
+  client state — so a doctor's Patient A context (demographics + red flags + last 20 turns) is injected
+  into Patient B's workup under the same userId within the 24h TTL → wrong risk stratification/dosing,
+  and SDA is told "Do NOT re-ask". Fix: client sends a per-case `sessionId` (useRef UUID) and rotates it
+  in `startNewCase()`; server already prefers sessionId. THIS IS THE NEXT PR.
+- **MEDIUM — SDA audit cross-check dropped on an "ok"-prefixed danger note.** `sda.ts:78`
+  `/^ok\b/i.test(text)` discards a real warning like "OK, but the dose is a 10× overdose…". Fix: only
+  treat an EXACT `OK`/`OK.`/`OK!` (trimmed) as clean.

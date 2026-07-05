@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ThemeMode } from '../lib/theme';
 import type { AgentMode } from '../types';
+import { safeLocalJson } from '../lib/safeLocalJson';
 
 const DEFAULT_MODULES: Record<string, boolean> = {
   chat: true, history: true, files: true, preview: true, shell: true,
@@ -26,10 +27,8 @@ export function useSettings() {
     return saved || null;
   });
   const [mode, setMode] = useState<AgentMode>('auto');
-  const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('navbharat_modules');
-    return saved ? { ...DEFAULT_MODULES, ...JSON.parse(saved) } : DEFAULT_MODULES;
-  });
+  const [enabledModules, setEnabledModules] = useState<Record<string, boolean>>(() =>
+    ({ ...DEFAULT_MODULES, ...safeLocalJson<Record<string, boolean>>('navbharat_modules', {}) }));
   const [isThemePickerOpen, setIsThemePickerOpen] = useState(false);
 
   const setTheme = (t: ThemeMode) => {

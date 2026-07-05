@@ -119,6 +119,7 @@ import {
   stripFences, buildSourceAppPreview, buildUniversalPreview, injectHarness,
 } from './lib/previewUtils';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
+import { safeLocalJson } from './lib/safeLocalJson';
 // Re-exported for SDAChat.tsx which imports sanitizeFirestoreData from App
 export { sanitizeFirestoreData };
 
@@ -923,13 +924,10 @@ export default function App() {
   const [dismissedReminderWarning, setDismissedReminderWarning] = useState<boolean>(false);
   const [copiedReferral, setCopiedReferral] = useState<boolean>(false);
   const [buyAmountInput, setBuyAmountInput] = useState<string>('500');
-  const [referralHistory, setReferralHistory] = useState<any[]>(() => {
-    const cached = localStorage.getItem('navbharat_referral_history');
-    return cached ? JSON.parse(cached) : [
-      { email: 'amit_sharma2026@gmail.com', status: 'CLAIMED', creditsEarned: 50.00, timestamp: '2026-05-18T14:20:00Z' },
-      { email: 'priya.rastogi@navbharat.ai', status: 'ACTIVE', creditsEarned: 25.00, timestamp: '2026-05-19T09:12:00Z' },
-    ];
-  });
+  const [referralHistory, setReferralHistory] = useState<any[]>(() => safeLocalJson<any[]>('navbharat_referral_history', [
+    { email: 'amit_sharma2026@gmail.com', status: 'CLAIMED', creditsEarned: 50.00, timestamp: '2026-05-18T14:20:00Z' },
+    { email: 'priya.rastogi@navbharat.ai', status: 'ACTIVE', creditsEarned: 25.00, timestamp: '2026-05-19T09:12:00Z' },
+  ]));
 
   useEffect(() => {
     localStorage.setItem('navbharat_reminder_limit', reminderLimit.toString());
@@ -1113,10 +1111,7 @@ export default function App() {
     }
   }, [activeView, isAdmin]);
 
-  const [githubRepoContext, setGithubRepoContext] = useState<any>(() => {
-    const saved = localStorage.getItem('navbharat_gh_context');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [githubRepoContext, setGithubRepoContext] = useState<any>(() => safeLocalJson<any>('navbharat_gh_context', null));
 
   // theme persistence → handled inside useSettings() hook
 
@@ -1302,18 +1297,14 @@ export default function App() {
   }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showVishwakarmaChooser, showVishwakarmaUnlockModal, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
-      const saved = localStorage.getItem('navbharat_keys');
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
-      return saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
+      return { ...defaults, ...safeLocalJson<Partial<ApiKeys>>('navbharat_keys', {}) };
   });
-  const [appSecrets, setAppSecrets] = useState<AppSecret[]>(() => {
-      const saved = localStorage.getItem('navbharat_app_secrets');
-      return saved ? JSON.parse(saved) : [
-          { id: '1', label: 'Firebase Config', provider: 'firebase', value: '', masked: true },
-          { id: '2', label: 'Stripe Secret', provider: 'stripe', value: '', masked: true },
-          { id: '3', label: 'AWS S3 Key', provider: 'aws', value: '', masked: true },
-      ];
-  });
+  const [appSecrets, setAppSecrets] = useState<AppSecret[]>(() => safeLocalJson<AppSecret[]>('navbharat_app_secrets', [
+      { id: '1', label: 'Firebase Config', provider: 'firebase', value: '', masked: true },
+      { id: '2', label: 'Stripe Secret', provider: 'stripe', value: '', masked: true },
+      { id: '3', label: 'AWS S3 Key', provider: 'aws', value: '', masked: true },
+  ]));
   const [showKeyStates, setShowKeyStates] = useState<Record<string, boolean>>({
       gemini: false, groq: false, deepseek: false, openai: false, openrouter: false, claude: false
   });

@@ -9245,7 +9245,6 @@ Ships B7 — and it directly complements B8 (Batch 5).
 
 Remaining ledger after Batch 6: B5, B6, B9, B10, U4, U6, U8, U9, U10, E5, E6, E7, E8, E9, E10
 (E1 done, E3 open awaiting admin escalation-default decision).
-=======
 
 ## 2026-07-05 — Own-repo storage Slice 2b: in-app "Revert last merge" (undo a shipped break)
 
@@ -9269,3 +9268,16 @@ user's own repo (their token); only single-parent commits auto-revert (else hone
 via AGENTV3_OWN_REPO_STORAGE. The undo now lives exactly where the merge action does.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4826/4826 PASS, build PASS, boot PASS.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): billing follow-up — power-level NAMES + effort map (admin)
+
+Admin finalized the v3.0 Power selector (billing itself unchanged from #985 — every Opus tier = real
+Opus cost × 2). The three Opus levels are now NAMED (were "5× / 10× / 20×", which misread as price):
+- mini  → **"Strong 💪"**        — Opus LOW effort
+- medium→ **"Powerful Force"**    — Opus HIGH effort (was 'medium' effort → now 'high', per admin)
+- max   → **"Full Team"**         — Opus ultracode (max effort)
+
+Changes: AgentV3Panel power buttons relabeled + switched to a vertical list so the longer names fit; the
+per-level hint text updated (Opus · low/high/ultracode effort). powerLevel.ts SPECS: medium effort
+'medium' → 'high'. AppKnowledgeBase Power description reconciled to the new names + effort + "real Opus
+× 2" billing. Tests updated (powerLevel). Full gate green (tsc ×2, vitest 4798, build, boot).

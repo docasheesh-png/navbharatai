@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from 'lucide-react';
 import { auth } from '../../App';
+import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -30,7 +31,7 @@ function Empty({ children }: { children: React.ReactNode }) {
  *    running server. Works even when the sandbox is unavailable, and (via the server's saved-files
  *    fallback) even after the sandbox is gone. In-browser defaults on when there is no live URL yet.
  */
-export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
+export function PreviewSurface({ url, workspaceId, userId, email, framework, autoResume, reloadSignal, onFixError, onFileEdited }: { url?: string; workspaceId?: string; userId?: string; email?: string; framework?: string; autoResume?: boolean; reloadSignal?: number; onFixError?: (errorText: string) => void; onFileEdited?: (path: string, content: string) => void }) {
   // A4 (unified preview): in-browser is the DETERMINISTIC DEFAULT — it always renders the current
   // files instantly with no server, so the preview is never a dead "No live preview yet" empty state
   // that depends on an ephemeral E2B sandbox being up. "Live server" (full-fidelity, real runtime) is
@@ -160,8 +161,13 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     void runDiagnose();
   }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, runDiagnose]);
 
+  // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
+  // while the first is still in flight — the slower response could otherwise clobber the newer one).
+  const inFlight = useRef(false);
   const loadInBrowser = useCallback(async () => {
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoading(true);
     setErr('');
     try {
@@ -181,6 +187,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setHtml('');
     } finally {
       setLoading(false);
+      inFlight.current = false;
     }
   }, [workspaceId, userId, email]);
 
@@ -193,6 +200,26 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     if (mode === 'inbrowser' && !html && !loading && workspaceId) { void loadInBrowser(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workspaceId]);
+
+  // U1 — AUTO-REFRESH the preview as the build writes files. The parent bumps `reloadSignal` on every
+  // file_changed/diff event; we DEBOUNCE so a burst of writes (a 20-file batch) triggers ONE reload
+  // after they settle, not one per file. In-browser re-compiles from the fresh files; live re-connects
+  // the sandbox iframe (belt-and-suspenders on top of Vite HMR). The surface is only mounted on the
+  // Preview tab, so a hidden preview never wastes a compile. `shouldReloadOnSignal` skips the initial
+  // value (the mount load already covers it) and any unchanged re-render.
+  const reloadTracker = useRef(newReloadTracker());
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!shouldReloadOnSignal(reloadTracker.current, reloadSignal)) return;
+    if (!workspaceId) return;
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => {
+      if (mode === 'inbrowser') { void loadInBrowser(); }
+      else if (mode === 'live' && effectiveUrl) { setLiveReloadKey((k) => k + 1); }
+    }, 900);
+    return () => { if (reloadTimer.current) clearTimeout(reloadTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadSignal]);
 
   // Capture in-browser preview failures (postMessage'd up from the sandboxed srcdoc iframe) into the
   // build's diagnostics report, so a build that "succeeded" but doesn't render shows the REAL preview

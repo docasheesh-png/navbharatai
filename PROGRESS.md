@@ -9023,3 +9023,32 @@ Ships E2 from the 30-gap audit ledger (ToolDispatcher.ts `write_files_batch`):
 Gate: frontend tsc 0, server tsc 0, vitest 4782/4782 PASS, boot:check PASS. Ledger: E2 → ✅.
 Next in Batch 3: E4 (per-turn/per-tool timeout budget in AgentRunner) — one hung provider call should
 not block the build until the 30-min watchdog.
+## UPDATE (2026-07-05, session 01KDmsCZ): round-13 — wallet-credit concurrency race FIXED (admin-approved, live money)
+
+The HIGH deferred finding (billing hunter Finding 1), admin-approved for a careful transaction refactor.
+`verifyPaymentInternal` (payments.ts) credited the wallet with a getDoc → compute → full-document setDoc
+OUTSIDE any transaction. The per-order PENDING→SUCCESS claim (H1) guarantees only one caller credits PER
+ORDER, but two DIFFERENT concurrent credits to the SAME wallet — two orders for one user, the Cashfree
+webhook + the client /verify-payment poll, or a concurrent coupon/admin write — each read the same stale
+balance and the full-doc setDoc clobbered the other → a user's paid ₹/tokens silently dropped (lost
+update), or a concurrent write reverted.
+
+Root-cause fix:
+- Extracted the credit math into a PURE, tested `computeCreditedWallet(current, txData, promo, now)` —
+  every field is `(current) + delta`, so applying it to a re-read wallet ACCUMULATES.
+- The credit now runs INSIDE `runTransaction`: it re-reads the wallet + pending promo in-transaction
+  (all reads before writes), computes via the pure fn, and `tx.set`s. Firestore aborts+retries on a
+  concurrent commit, so each credit re-reads the latest balance and adds on top — never overwrites.
+  Promo consumption (`status: 'USED'`) now happens atomically in the SAME transaction (was a separate
+  updateDoc). SECURITY C4 preserved: tokens still derive from the VERIFIED paid amount.
+
+Locked with tests (walletCredit.test.ts): standard / vishwakarma+pass / promo credit math, field
+preservation (full merge, not reset), NaN-safety, and the KEY concurrency property — crediting the
+RESULT of a prior credit accumulates (tokenBalance 10000→20000, balance 100→200, 2 ledger entries), which
+is exactly what the transaction does on a retry.
+
+HONEST NOTE (real Firestore not in CI): the accumulation LOGIC is unit-tested; Firestore's actual
+abort-on-conflict + retry is a documented Firestore guarantee that can't be exercised in CI. The fix is
+strictly safer than the old full-overwrite. Same-class sibling — the COUPON credit (payment.ts
+getDoc→updateDoc) — is the same race and still open; recorded for a follow-up (awaiting admin: fix in a
+separate PR).

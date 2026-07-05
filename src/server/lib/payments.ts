@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { getDb } from './db';
 import { getSecretValue } from './secrets';
 
@@ -19,6 +19,87 @@ export function creditableVishwakarmaTokens(amountPaidRupees: unknown, buyPass: 
   if (!Number.isFinite(paid) || paid <= 0) return 0;
   const tokenRupees = Math.max(0, paid - (buyPass ? VISHWAKARMA_PASS_PRICE_RUPEES : 0));
   return Math.round(tokenRupees * TOKENS_PER_RUPEE);
+}
+
+export interface WalletCreditTx {
+  userId: string;
+  amountPaid: number;
+  balanceAdded: number;
+  isVishwakarmaOrder?: boolean;
+  buyPass?: boolean;
+}
+
+/**
+ * PURE credit computation: given the CURRENT wallet doc, a verified paid order, and an optional pending
+ * promo, return the FULL new wallet doc after crediting. No I/O. The caller runs read→compute→write
+ * INSIDE a Firestore transaction that re-reads `current` in-transaction, so two concurrent credits to
+ * the same wallet (two orders, or webhook + client poll, or a coupon credit) can't lost-update: on a
+ * concurrent commit the transaction retries, re-reads the now-higher balance, and re-applies the delta
+ * on top. Every add is `(current field) + delta`, so accumulation is correct on retry. Tested.
+ */
+export function computeCreditedWallet(
+  current: Record<string, any>,
+  txData: WalletCreditTx,
+  promo: { mode?: string } | null,
+  now: string,
+): { wallet: Record<string, any>; promoApplied: boolean } {
+  const w = current || {};
+  const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const isVishwakarmaOrder = !!txData.isVishwakarmaOrder;
+  const buyPass = !!txData.buyPass;
+  const tokensToCredit = creditableVishwakarmaTokens(txData.amountPaid, buyPass);
+  const amountPaid = n(txData.amountPaid);
+  const balanceAdded = n(txData.balanceAdded);
+
+  const update: Record<string, any> = {};
+  let promoApplied = false;
+  if (promo) {
+    update.unlockedModes = [...(w.unlockedModes || []), promo.mode];
+    update.hasVishwakarmaPass = true;
+    update.vishwakarmaPassActivatedAt = now;
+    update.tokenBalance = n(w.tokenBalance) + 1000; // 1000 promo tokens
+    promoApplied = true;
+  }
+
+  if (isVishwakarmaOrder) {
+    if (buyPass) {
+      update.hasVishwakarmaPass = true;
+      update.vishwakarmaPassActivatedAt = now;
+    }
+    if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCredit;
+    update.totalTokensPurchased = n(w.totalTokensPurchased) + (promoApplied ? 1000 : tokensToCredit);
+    update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
+    update.lastRechargeAt = now;
+    const ledgerEntry = {
+      type: 'purchase',
+      amountCoinsOrTokens: promoApplied ? 1000 : tokensToCredit,
+      moneySpent: amountPaid,
+      timestamp: now,
+      description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ` + Lifetime Pass Activated (₹${VISHWAKARMA_PASS_PRICE_RUPEES})` : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`,
+    };
+    update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
+    update.remaining_balance = n(w.remaining_balance) + amountPaid;
+    update.total_balance = n(w.total_balance) + amountPaid;
+  } else {
+    const tokensToCreditFallback = balanceAdded * 100;
+    if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCreditFallback;
+    update.totalTokensPurchased = n(w.totalTokensPurchased) + (promoApplied ? 10000 : tokensToCreditFallback);
+    update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
+    update.lastRechargeAt = now;
+    const ledgerEntry = {
+      type: 'purchase',
+      amountCoinsOrTokens: promoApplied ? 10000 : tokensToCreditFallback,
+      moneySpent: amountPaid,
+      timestamp: now,
+      description: `Standard wallet recharge: ₹${amountPaid} (${tokensToCreditFallback.toLocaleString()} tokens added)${promoApplied ? ' + Promo 100₹ Tokens' : ''}`,
+    };
+    update.walletLedger = [...(w.walletLedger || []), ledgerEntry];
+    update.remaining_balance = n(w.remaining_balance) + balanceAdded;
+    update.total_balance = n(w.total_balance) + balanceAdded;
+  }
+
+  update.updatedAt = now;
+  return { wallet: { ...w, ...update }, promoApplied };
 }
 
 /**
@@ -117,9 +198,8 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);
-      const walletSnap = await getDoc(walletRef);
-
-      let walletData = walletSnap.exists() ? walletSnap.data() : {
+      const promoRef = doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`);
+      const DEFAULT_WALLET: Record<string, any> = {
         userId: txData.userId,
         hasVishwakarmaPass: false,
         unlockedModes: [],
@@ -133,83 +213,27 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         remaining_balance: 0,
         total_balance: 0,
         total_output_tokens_used: 0,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
 
-      let walletUpdate: any = {};
-      const isVishwakarmaOrder = !!txData.isVishwakarmaOrder;
-      const buyPass = !!txData.buyPass;
-      // SECURITY (C4): derive from the VERIFIED paid amount, NOT the client-supplied txData.tokenAmount.
-      const tokensToCredit = creditableVishwakarmaTokens(txData.amountPaid, buyPass);
-
-      // PROMO HANDLING
-      const promoSnap = await getDoc(doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`));
-      let promoApplied = false;
-      if (promoSnap.exists() && promoSnap.data().status === 'PENDING') {
-        const promoData = promoSnap.data();
-        await updateDoc(doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`), { status: 'USED' });
-        walletUpdate.unlockedModes = [...(walletData.unlockedModes || []), promoData.mode];
-        walletUpdate.hasVishwakarmaPass = true;
-        walletUpdate.vishwakarmaPassActivatedAt = new Date().toISOString();
-        walletUpdate.tokenBalance = (walletData.tokenBalance || 0) + 1000; // 1000 tokens
-        promoApplied = true;
-      }
-
-      if (isVishwakarmaOrder) {
-        if (buyPass) {
-          walletUpdate.hasVishwakarmaPass = true;
-          walletUpdate.vishwakarmaPassActivatedAt = new Date().toISOString();
-        }
-
-        if (!promoApplied) {
-            walletUpdate.tokenBalance = (walletData.tokenBalance || 0) + tokensToCredit;
-        }
-        walletUpdate.totalTokensPurchased = (walletData.totalTokensPurchased || 0) + (promoApplied ? 1000 : tokensToCredit);
-        walletUpdate.totalMoneySpent = (walletData.totalMoneySpent || 0) + txData.amountPaid;
-        walletUpdate.lastRechargeAt = new Date().toISOString();
-
-        const ledgerEntry = {
-          type: 'purchase',
-          amountCoinsOrTokens: promoApplied ? 1000 : tokensToCredit,
-          moneySpent: txData.amountPaid,
-          timestamp: new Date().toISOString(),
-          description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ` + Lifetime Pass Activated (₹${VISHWAKARMA_PASS_PRICE_RUPEES})` : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`
-        };
-        walletUpdate.walletLedger = [
-          ...(walletData.walletLedger || []),
-          ledgerEntry
-        ];
-
-        walletUpdate.remaining_balance = (walletData.remaining_balance || 0) + txData.amountPaid;
-        walletUpdate.total_balance = (walletData.total_balance || 0) + txData.amountPaid;
-      } else {
-        const tokensToCreditFallback = txData.balanceAdded * 100;
-        if (!promoApplied) {
-            walletUpdate.tokenBalance = (walletData.tokenBalance || 0) + tokensToCreditFallback;
-        }
-        walletUpdate.totalTokensPurchased = (walletData.totalTokensPurchased || 0) + (promoApplied ? 10000 : tokensToCreditFallback);
-        walletUpdate.totalMoneySpent = (walletData.totalMoneySpent || 0) + txData.amountPaid;
-        walletUpdate.lastRechargeAt = new Date().toISOString();
-
-        const ledgerEntry = {
-          type: 'purchase',
-          amountCoinsOrTokens: promoApplied ? 10000 : tokensToCreditFallback,
-          moneySpent: txData.amountPaid,
-          timestamp: new Date().toISOString(),
-          description: `Standard wallet recharge: ₹${txData.amountPaid} (${tokensToCreditFallback.toLocaleString()} tokens added)${promoApplied ? ' + Promo 100₹ Tokens' : ''}`
-        };
-        walletUpdate.walletLedger = [
-          ...(walletData.walletLedger || []),
-          ledgerEntry
-        ];
-
-        walletUpdate.remaining_balance = (walletData.remaining_balance || 0) + txData.balanceAdded;
-        walletUpdate.total_balance = (walletData.total_balance || 0) + txData.balanceAdded;
-      }
-
-      walletUpdate.updatedAt = new Date().toISOString();
-      const integratedWallet = { ...walletData, ...walletUpdate };
-      await setDoc(walletRef, integratedWallet);
+      // CONCURRENCY (fix): credit the wallet INSIDE a transaction that re-reads the wallet + pending
+      // promo in-transaction. Two concurrent credits to the SAME wallet (two orders, webhook + client
+      // poll, or a coupon credit) used to lost-update because the old getDoc→compute→full setDoc ran
+      // outside any transaction. Now Firestore aborts+retries this transaction on a concurrent commit,
+      // so every credit re-reads the latest balance and adds its delta on top — never overwrites.
+      // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
+      const integratedWallet = await runTransaction(db, async (tx: any) => {
+        const walletSnap = await tx.get(walletRef);
+        const promoSnap = await tx.get(promoRef); // all reads BEFORE any write (Firestore rule)
+        const walletData = walletSnap.exists() ? walletSnap.data() : { ...DEFAULT_WALLET };
+        const promo = promoSnap.exists() && promoSnap.data().status === 'PENDING'
+          ? { mode: promoSnap.data().mode }
+          : null;
+        const { wallet, promoApplied } = computeCreditedWallet(walletData, txData as WalletCreditTx, promo, new Date().toISOString());
+        if (promoApplied) tx.update(promoRef, { status: 'USED' });
+        tx.set(walletRef, wallet);
+        return wallet;
+      });
 
       return {
         success: true,

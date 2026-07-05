@@ -110,13 +110,158 @@ export function snippetAround(content: string, line: number, radius = 3, maxChar
   return lines.slice(start, end).join('\n').slice(0, maxChars);
 }
 
+// ── Retrieval v2 (Mitrify autopsy: "retrieval quality kamzor hai" → world-class candidate selection) ──
+//
+// THE BUG this replaces: candidates were picked by path-token overlap with the request. A survey /
+// vague request ("give me a survey of what this app is") shares NO tokens with any filename → every
+// file ties at overlap 0 → sort keeps tree order → the FIRST 14 files alphabetically became the
+// "most relevant" candidates (BackButton.tsx, ChangeCredentialsDialog.tsx…). Pure noise, injected
+// into every turn of a 317-file app.
+//
+// v2 selects candidates from three REAL signals, intent-aware:
+//   1. CONTENT hits (grep for the request's salient terms) — the strongest "where does this live".
+//   2. STRUCTURAL ANCHORS — entry points & structural files (package.json, README, main/App, routes,
+//      schema, server index): what a senior engineer opens FIRST in an unknown repo.
+//   3. IMPORT-GRAPH CENTRALITY — files the rest of the codebase imports most (storage.ts, db.ts,
+//      schema.ts): structurally load-bearing even when their name echoes nothing in the request.
+// An OVERVIEW request (survey/structure/explain/analyze…) skips filename matching entirely — anchors
+// + centrality ARE the right answer. A targeted request uses content hits first, then filename
+// overlap (only where overlap > 0 — the tie bug can never pick arbitrary files again), then priors.
+
+/**
+ * Tokenize a FILE PATH for filename↔request matching: besides the normal split, camelCase and
+ * PascalCase are broken apart — `CustomerHomePage.tsx` must match the request token "customer"
+ * (plain tokenize keeps it as one opaque token, so real page names never matched). Pure.
+ */
+export function pathTokenize(p: string): string[] {
+  const spaced = String(p || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  return tokenize(spaced);
+}
+
+/** Overview/survey-style request? (EN + common Hinglish forms.) Pure. */
+export function isOverviewRequest(prompt: string): boolean {
+  return /\b(survey|overview|structure[ds]?|architecture|walk\s?through|explain (this|the) (app|project|codebase|repo)|analy[sz]e|summar(y|ise|ize)|describe (this|the|it)|what (is|does) (this|the|it)|how (is|does) (this|the|it).{0,20}(work|structured|organi[sz]ed)|samjhao|samajhao|kya hai|kaise (kaam|bana))\b/i.test(String(prompt || ''));
+}
+
+/** Priority-ordered structural anchor patterns — what an engineer opens first in an unknown repo. */
+const ANCHOR_PATTERNS: RegExp[] = [
+  /(^|\/)package\.json$/,
+  /(^|\/)readme\.md$/i,
+  /(^|\/)(src|client\/src|app)\/(main|index)\.(t|j)sx?$/,
+  /(^|\/)(src|client\/src)\/app\.(t|j)sx?$/i,
+  /(^|\/)(server|api|backend)\/(index|server|main|app)\.(t|j)s$/,
+  /(^|\/)server\.(t|j)s$/,
+  /(^|\/)(manage\.py|main\.py|app\.py)$/,
+  /(^|\/)routes?\.(t|j)sx?$/,
+  /(^|\/)(router|routes\/index)\.(t|j)sx?$/,
+  /(^|\/)schema\.(t|j)s$/,
+  /(^|\/)(prisma\/schema\.prisma|drizzle\.config\.(t|j)s)$/,
+  /(^|\/)(storage|db|database)\.(t|j)s$/,
+  /(^|\/)(vite|next|nuxt|svelte|astro)\.config\.(t|j)s$/,
+];
+
+/**
+ * The structural anchor files PRESENT in this tree, in priority order (entry → routes → data → config).
+ * Deterministic; each pattern contributes its lexicographically-first match so monorepos stay stable. Pure.
+ */
+export function structuralAnchors(fileTree: readonly string[], max = 8): string[] {
+  const out: string[] = [];
+  for (const re of ANCHOR_PATTERNS) {
+    const matches = fileTree.filter((p) => re.test(p) && !/(^|\/)node_modules\//.test(p)).sort();
+    for (const m of matches.slice(0, 2)) {
+      if (!out.includes(m)) out.push(m);
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Rank files by IMPORT-GRAPH CENTRALITY (in-degree): how many OTHER files import them. Central files
+ * (storage.ts, schema.ts, lib/db.ts) are structurally load-bearing for almost any edit, even when
+ * their name echoes nothing in the request. Import specifiers are resolved to tree files by basename
+ * (`./storage`, `@/lib/db` → the tree file whose path ends with that segment) — a deliberate, cheap
+ * heuristic that needs no resolver config. UI-kit primitives (components/ui/*) are excluded: a
+ * shadcn `button` is imported everywhere yet grounds nothing. Pure.
+ */
+export function centralFiles(fileTree: readonly string[], imports: Record<string, string[]> | undefined, top = 6): string[] {
+  if (!imports) return [];
+  const inDegree = new Map<string, number>();
+  const bySuffix = (seg: string): string[] =>
+    fileTree.filter((p) => !/(^|\/)components\/ui\//.test(p) && new RegExp(`(^|/)${seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.(t|j)sx?$`).test(p));
+  for (const [from, specs] of Object.entries(imports)) {
+    for (const spec of specs || []) {
+      // Only project-internal specifiers (relative / '@/' / '~/') — bare imports are npm packages.
+      if (!/^(\.|@\/|~\/)/.test(spec)) continue;
+      const seg = spec.replace(/\.(t|j)sx?$/, '').split('/').filter(Boolean).pop();
+      if (!seg || seg === '.' || seg === '..') continue;
+      for (const target of bySuffix(seg)) {
+        if (target === from) continue;
+        inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
+      }
+    }
+  }
+  return [...inDegree.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(0, top))
+    .map(([p]) => p);
+}
+
+/** Files worth grounding on: code + the two doc anchors (package.json / README). Pure. */
+export function groundableFile(p: string): boolean {
+  return /\.(t|j)sx?$|\.vue$|\.svelte$|\.css$|\.html$|\.py$/.test(p) || /(^|\/)package\.json$/.test(p) || /(^|\/)readme\.md$/i.test(p);
+}
+
+export interface GroundingSelection {
+  candidates: string[];
+  /** True → an overview/survey request: the caller should preserve anchor order (skip BM25 re-rank). */
+  overview: boolean;
+}
+
+/**
+ * Retrieval v2 entry point: choose WHICH files to read for grounding, intent-aware. See the block
+ * comment above for the three signals. Pure + deterministic.
+ */
+export function selectGroundingCandidates(opts: {
+  fileTree: readonly string[];
+  prompt: string;
+  contentHits?: readonly string[];
+  imports?: Record<string, string[]>;
+  cap?: number;
+}): GroundingSelection {
+  const tree = (opts.fileTree || []).filter(groundableFile);
+  const cap = Math.max(1, opts.cap ?? 16);
+  const overview = isOverviewRequest(opts.prompt);
+  const anchors = structuralAnchors(tree, 8);
+  const central = centralFiles(tree, opts.imports, 6);
+  const hits = (opts.contentHits || []).filter(groundableFile);
+  if (overview) {
+    // Survey/structure: entry points + load-bearing files ARE the answer; filename overlap is noise.
+    return { candidates: [...new Set([...anchors, ...central, ...hits])].slice(0, Math.min(cap, 12)), overview };
+  }
+  // Targeted request: content hits (strongest) → filename overlap (ONLY > 0 — never the tie bug) →
+  // structural priors as backstop so a vague ask still grounds on the right skeleton.
+  const qTokens = new Set(tokenize(opts.prompt));
+  const pathRanked = tree
+    .map((p) => ({ p, overlap: pathTokenize(p).filter((t) => qTokens.has(t)).length }))
+    .filter((x) => x.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap || a.p.localeCompare(b.p))
+    .slice(0, 10)
+    .map((x) => x.p);
+  return { candidates: [...new Set([...hits, ...pathRanked, ...anchors.slice(0, 4), ...central.slice(0, 4)])].slice(0, cap), overview };
+}
+
 /**
  * Build a grounded, CITED context block from the top BM25-ranked workspace files for the query.
  * Returns '' when nothing is relevant. Pure (given the file map). The agent is told these are
  * grounding hints (read the file for the full content), each labelled with its source path:line.
+ * `preserveOrder` (overview mode) keeps the caller's candidate order — anchors first — instead of
+ * BM25, whose scores are meaningless for a survey-style query that matches no content terms.
  */
-export function buildGroundedContext(files: Record<string, string>, query: string, topK = 3): string {
-  const ranked = rankByBM25(files, query, topK);
+export function buildGroundedContext(files: Record<string, string>, query: string, topK = 3, opts?: { preserveOrder?: boolean }): string {
+  const ranked = opts?.preserveOrder
+    ? Object.keys(files).slice(0, Math.max(0, topK)).map((path) => ({ path, score: 1 }))
+    : rankByBM25(files, query, topK);
   if (ranked.length === 0) return '';
   const blocks: string[] = [];
   for (const { path } of ranked) {

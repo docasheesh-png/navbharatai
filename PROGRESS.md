@@ -9679,3 +9679,24 @@ now emit a bounded diff too.
 - Tests: ToolDispatcher.test.ts +4 (bounded-diff create/rewrite/cap/singular) + the write_file test now
   asserts a create emits an additions-only diff. Gate: server tsc 0, frontend tsc 0, vitest 4908/4908,
   boot PASS.
+## 2026-07-05 — P3.1 App.tsx split #4: extract useChatEngine (free NBI chat engine)
+
+Slice #4 — the biggest LIVE extraction. Moved the free (NBI) chat engine into src/hooks/useChatEngine.ts:
+handleSendForTab (core turn handler — intent routing, GitHub PAT/repo capture, attachment encoding,
+streaming reply, build-mode code extraction), handleSend, and the private helpers callGeminiFrontend,
+runFrontendPipeline, readFileRaw, downscaleImage, filesToBase64. Code moved BYTE-IDENTICAL via range
+extraction (not retyped) so it is a pure relocation.
+
+- 46 cross-slice deps injected (state values, setters, addLog/addToast, incrementDailyUsage,
+  handleGHConfirmPush, learnFromMessage, updatePreview, FREE_DAILY_MESSAGES/isFreeLimitReached from the
+  payment hook). App.tsx destructures the SAME handleSendForTab/handleSend the render tree + Enter/retry
+  handlers already called, so every call site is unchanged.
+- Dependency surface mapped by a subagent first (which also confirmed callGeminiFrontend/runFrontendPipeline/
+  filesToBase64 etc. are engine-internal, and handleModelSelect/handleKeySave are NOT engine → left in App).
+- Two fixes required by the move: exported rememberGithubOwner from App; rewrote the inline
+  import('./types') type refs to import('../types') for the new file location.
+- tsc passed on the FIRST try — proves all 46 deps present/typed/ordered, no used-before-declaration, and
+  every external call site resolves to the hook returns.
+
+App.tsx: 5,045 -> 4,387 lines (-658). Running total: 6,596 -> 4,387 (~33% down; target ~2,000-2,500).
+Gate: frontend tsc 0, vitest 4888/4888 PASS, vite build PASS.

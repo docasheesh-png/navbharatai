@@ -1,4 +1,5 @@
 import type { AIRouter } from '../AI/Router/AIRouter';
+import { extractFirstJsonSlice } from '../lib/extractJson';
 
 export interface PlanStep {
   description: string;
@@ -6,11 +7,10 @@ export interface PlanStep {
 }
 
 function extractJson(text: string): string {
-  const s = text.trim().replace(/^```json?\s*/i, '').replace(/\s*```$/i, '');
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start === -1 || end === -1 || end < start) return s;
-  return s.slice(start, end + 1);
+  // Balanced, string-aware extraction (shared) — a naive indexOf/lastIndexOf slice mis-grabbed a
+  // bracket from trailing prose and silently failed the parse. '' on no match → the caller's
+  // JSON.parse throws → its try/catch returns the fallback (unchanged behavior).
+  return extractFirstJsonSlice(text, 'object') ?? '';
 }
 
 /**

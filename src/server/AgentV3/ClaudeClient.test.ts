@@ -108,7 +108,8 @@ describe('ClaudeClient streaming (word-by-word + thinking)', () => {
     const textDeltas: string[] = [];
     const thinkingDeltas: string[] = [];
     const res = await client.runTurn({
-      model: 'm',
+      // A thinking-CAPABLE model (Sonnet 4.6) so adaptive thinking is actually requested.
+      model: 'claude-sonnet-4-6',
       messages: [],
       thinking: true,
       onText: (d) => textDeltas.push(d),
@@ -148,6 +149,50 @@ describe('ClaudeClient streaming (word-by-word + thinking)', () => {
     expect(stream).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(1);
     expect(res.text).toBe('recovered');
+  });
+});
+
+// REGRESSION (build report 2026-07-05): a Haiku build turn sent adaptive `thinking` and the API 400'd
+// with "adaptive thinking is not supported on this model", killing the whole provider-fallback chain.
+// Extended-reasoning params must be gated by model capability so a cheap/fallback tier degrades
+// gracefully (no reasoning display) instead of failing the turn outright.
+describe('ClaudeClient — extended-reasoning params gated by model capability (build-report fix)', () => {
+  function mock() {
+    const create = vi.fn().mockResolvedValue({ content: [], stop_reason: 'end_turn' });
+    return { create, client: new ClaudeClient({ messages: { create } } as MessagesCreateClient) };
+  }
+
+  it('does NOT send adaptive thinking to a HAIKU model (the exact 400 the build report hit)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'claude-haiku-4-5-20251001', messages: [], thinking: true });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].thinking).toBeUndefined(); // gated off → no 400
+  });
+
+  it('does NOT send output_config.effort to a HAIKU model either (same capability class)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'claude-haiku-4-5-20251001', messages: [], effort: 'high' });
+    expect(create.mock.calls[0][0].output_config).toBeUndefined();
+  });
+
+  it('DOES send adaptive thinking + effort to a capable model (Sonnet 4.6)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'claude-sonnet-4-6', messages: [], thinking: true, effort: 'high' });
+    const p = create.mock.calls[0][0];
+    expect(p.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+    expect(p.output_config).toEqual({ effort: 'high' });
+  });
+
+  it('DOES send them to Opus 4.8', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'claude-opus-4-8', messages: [], thinking: true });
+    expect(create.mock.calls[0][0].thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+  });
+
+  it('default-DENIES an unknown model id (never send an unsupported param → no 400)', async () => {
+    const { create, client } = mock();
+    await client.runTurn({ model: 'some-future-model', messages: [], thinking: true });
+    expect(create.mock.calls[0][0].thinking).toBeUndefined();
   });
 });
 

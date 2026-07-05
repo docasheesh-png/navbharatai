@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveModel, sonnetModel, opusModel, haikuModel, fastBuildModel, opusNormalModel, ladderModel } from './models';
+import { resolveModel, sonnetModel, opusModel, haikuModel, fastBuildModel, opusNormalModel, ladderModel, modelSupportsAdaptiveThinking } from './models';
 import { architectSystemPrompt } from './systemPrompt';
 
 describe('model resolution (D5/D6)', () => {
@@ -65,5 +65,24 @@ describe('architect system prompt', () => {
     expect(lower).toContain('no fake success');
     expect(p).toContain('update_todo');
     expect(p).toContain('write_file');
+  });
+});
+
+describe('modelSupportsAdaptiveThinking (build-report 400 guard)', () => {
+  it('DENIES Haiku (the exact model that 400d on adaptive thinking)', () => {
+    expect(modelSupportsAdaptiveThinking('claude-haiku-4-5-20251001')).toBe(false);
+    expect(modelSupportsAdaptiveThinking('claude-haiku-4-5')).toBe(false);
+  });
+  it('ALLOWS Opus 4.x and Sonnet 4.6+', () => {
+    expect(modelSupportsAdaptiveThinking('claude-opus-4-8')).toBe(true);
+    expect(modelSupportsAdaptiveThinking('claude-opus-4-7')).toBe(true);
+    expect(modelSupportsAdaptiveThinking('claude-sonnet-4-6')).toBe(true);
+  });
+  it('DENIES older Sonnet (< 4.6) and unknown / empty ids (default-deny → never a 400)', () => {
+    expect(modelSupportsAdaptiveThinking('claude-sonnet-4-5')).toBe(false);
+    expect(modelSupportsAdaptiveThinking('claude-3-5-sonnet')).toBe(false);
+    expect(modelSupportsAdaptiveThinking('some-future-model')).toBe(false);
+    expect(modelSupportsAdaptiveThinking(undefined)).toBe(false);
+    expect(modelSupportsAdaptiveThinking('')).toBe(false);
   });
 });

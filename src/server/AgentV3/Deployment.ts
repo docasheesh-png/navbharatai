@@ -155,10 +155,20 @@ export class FirebaseHostingDeployer {
   }
 }
 
-/** Convert a workspaceId to a valid Firebase channel ID (max 36 chars, [a-z0-9-_]). */
+/**
+ * Convert a workspaceId to a valid Firebase channel ID (≤36 chars, [a-z0-9-]).
+ *
+ * CRITICAL: the id must be derived from the FULL workspaceId, not a prefix slice. A plain
+ * `.slice(0, 30)` dropped the sessionId — `agentv3-` (8) + a 28-char Firebase uid already fills 30
+ * chars — so `agentv3-<uid>-sessionA` and `agentv3-<uid>-sessionB` produced the SAME channel, and every
+ * project a user deployed silently overwrote their previous live app at one shared URL. A readable
+ * prefix + a hash of the full id keeps each workspace's channel unique AND stable (same workspace →
+ * same channel on redeploy).
+ */
 export function makeChannelId(workspaceId: string): string {
-  const safe = workspaceId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().slice(0, 30);
-  return `v3-${safe}`;
+  const safe = workspaceId.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().slice(0, 17);
+  const hash = crypto.createHash('sha256').update(workspaceId).digest('hex').slice(0, 12);
+  return `v3-${safe}-${hash}`; // ≤ 3 + 17 + 1 + 12 = 33 chars
 }
 
 /** The default deploy function the route injects into the dispatcher. */

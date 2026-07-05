@@ -8753,3 +8753,27 @@ DEFERRED (recorded from the same hunt):
   skip it in pass 2 (only retry providers SKIPPED in pass 1). Clean next PR.
 - **LOW (latent) — `AIRouterManager.slot()` drops the 5th `images` arg** — not currently reachable
   (UniversalAIRouter passes no images; EngineerAI uses raw registerProvider), fix defensively later.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-10 #2 — router pass 2 no longer re-runs an already-failed provider (#TBD)
+
+The LOW-MEDIUM finding recorded in round-10, now fixed. `AIRouter.execute()` runs two passes: pass 1
+skips providers on cooldown; pass 2 tries them anyway ("better than error"). But pass 2's only guard was
+`pass===1 && onCooldown`, so on a total-failure request EVERY provider that failed in pass 1 was
+re-invoked in pass 2 — a deterministic failure (e.g. a 400 on a malformed prompt) cost 2× latency + 2×
+spend, and double-sent the request.
+
+Root cause: pass 2 couldn't tell "skipped in pass 1 (cooldown)" from "already tried and failed in pass 1".
+Fix: track a per-request `attempted` set (a provider is added the moment we commit to calling it, after
+the slot is acquired) and `continue` past it in pass 2. So pass 2 now retries ONLY providers pass 1
+skipped (cooldown / health / capacity), never one it already ran — while the legitimate cross-request
+behavior (a cooled-down provider retried in pass 2 of a LATER request, and recovering) is unchanged.
+
+Locked with a regression test (aiRouterEmptyReply.test.ts: two failing providers → each execute called
+exactly once, not twice). Also updated the pre-existing AIRouter.test.ts case that previously asserted
+the OLD double-call behavior (execute called 2× within one request) — it now encodes the corrected
+contract: ONE call per provider per request, plus the preserved cross-request cooldown→pass2→recovery
+path. (Corrected the test to the RIGHT behavior with reasoning — not changed to mask a regression.)
+
+Round-10 remaining recorded (unchanged): MEDIUM UniversalAIRouter timeout doesn't abort the provider
+call (needs an AbortSignal threaded through the provider interface — cross-cutting, separate PR); LOW
+latent AIRouterManager.slot() drops the images arg.

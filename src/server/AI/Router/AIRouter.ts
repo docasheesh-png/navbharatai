@@ -18,6 +18,20 @@ function isOnCooldown(name: string): boolean {
   return getBreaker(name).isBlocking();
 }
 
+/**
+ * A provider that returns HTTP 200 with empty/whitespace `content` has NOT answered — it happens on
+ * ordinary outcomes (Gemini SAFETY/RECITATION block, Anthropic thinking-only/tool-only reply, a
+ * MAX_TOKENS-with-no-text response), and none of the providers throw on it. Treating it as success
+ * would hand the user a BLANK reply, skip the lower-priority providers that could have answered, and
+ * mark the breaker healthy on a non-answer. So we throw here and let the caller fall through to the
+ * next provider. Centralized so EVERY routing path (sequential + raced + last-resort) enforces the
+ * same invariant and it can't drift out of one of them again.
+ */
+function assertNonEmpty(response: AIProviderResponse, name: string): AIProviderResponse {
+  if (!response.content?.trim()) throw new Error(`${name}: empty`);
+  return response;
+}
+
 function setCooldown(name: string, seconds: number) {
   // A failure → open the breaker (escalates on consecutive failures, capped).
   const until = getBreaker(name).recordFailure(seconds * 1000);
@@ -135,8 +149,7 @@ export class AIRouter {
         if (!this.acquire(p.name)) throw new Error(`${p.name}: no slot`);
         const t = Date.now();
         try {
-          const response = await p.execute(prompt, undefined, undefined, systemPrompt, images);
-          if (!response.content?.trim()) throw new Error(`${p.name}: empty`);
+          const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
           recordProviderLatency(p.name, Date.now() - t, false);
           return { response, name: p.name };
         } catch (err: any) {
@@ -169,8 +182,7 @@ export class AIRouter {
       const t = Date.now();
       try {
         console.log(`[RACE] last-resort: ${p.name}`);
-        const response = await p.execute(prompt, undefined, undefined, systemPrompt, images);
-        if (!response.content?.trim()) throw new Error(`${p.name}: empty`);
+        const response = assertNonEmpty(await p.execute(prompt, undefined, undefined, systemPrompt, images), p.name);
         recordProviderLatency(p.name, Date.now() - t, false);
         return {
           response,
@@ -332,7 +344,10 @@ export class AIRouter {
         try {
           const startTime = Date.now();
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);
-          const response = await provider.execute(prompt, targetSchema, modelOverride, systemPrompt, images);
+          const response = assertNonEmpty(
+            await provider.execute(prompt, targetSchema, modelOverride, systemPrompt, images),
+            provider.name,
+          );
           const latency = Date.now() - startTime;
           console.log(`[ROUTER] ${provider.name} SUCCESS in ${latency}ms`);
           recordProviderLatency(provider.name, latency, false);

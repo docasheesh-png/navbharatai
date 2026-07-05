@@ -8719,3 +8719,37 @@ their existing tests (guider.test.ts, designAdvisor.test.ts) plus the shared ext
 balanced-brace scan (its `lastIndexOf` is only a truncated-output fallback), so it was never part of the
 bug class. The class is now fully centralized on one shared, tested implementation — no naive
 `lastIndexOf` JSON slice remains in the server.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-10 — sequential AI router accepted an EMPTY reply as success (#TBD)
+
+New hunt area (AI routing / provider fallback / breaker). Shipped the HIGH finding:
+
+- **HIGH — `AIRouter.execute()` (sequential FREE/PRO path) treated a 200-with-empty-content reply as
+  success** (`src/server/AI/Router/AIRouter.ts`). Every provider returns `content: ''` on ordinary
+  outcomes without throwing — Gemini SAFETY/RECITATION block, Vertex/Grok empty message, Anthropic
+  thinking-only/tool-only reply, MAX_TOKENS-with-no-text. `execute()` had NO non-empty guard, so it
+  returned the blank as success → the user got a BLANK reply, the lower-priority providers that could
+  have answered were never tried, and `recordProviderLatency(..,false)` marked the breaker HEALTHY on a
+  non-answer. The sibling paths already guarded this (`routeRaced` race + last-resort: `if
+  (!response.content?.trim()) throw`), so the sequential path — used by `route()` for all FREE/PRO chat —
+  was the one isolated gap.
+
+Root-cause fix (centralize the invariant per rule #2/#3): new shared `assertNonEmpty(response, name)`
+helper; `execute()` now wraps `provider.execute(...)` in it (empty → throw → existing catch cools the
+provider down and falls through to the next), and the two `routeRaced` inline guards were replaced with
+the SAME helper so the invariant can't drift out of one path again. Locked with tests
+(aiRouterEmptyReply.test.ts): sequential route() falls through an empty provider to the next; routeRaced
+ignores an empty racer; all-empty → telemetry.success=false (graceful message, not a fake success).
+
+DEFERRED (recorded from the same hunt):
+- **MEDIUM — UniversalAIRouter 90s timeout doesn't abort the provider call** (UniversalAIRouter.ts:18-27).
+  `Promise.race([route, timeout])` leaves the provider call running when the timeout wins; the bulkhead
+  slot leaks and a late 200 still records success/latency (closes the breaker) for a discarded response.
+  Fix needs an `AbortSignal` threaded through `AIProvider.execute` → every provider SDK call (cross-cutting
+  interface change) — separate focused PR.
+- **LOW-MEDIUM — execute() pass 2 re-runs providers that deterministically failed in pass 1**
+  (AIRouter.ts). Pass 2 only guards `pass===1 && onCooldown`, so on a total-failure request every provider
+  is re-invoked (2× latency/spend) even for a non-transient 400. Fix: track a per-request attempted set and
+  skip it in pass 2 (only retry providers SKIPPED in pass 1). Clean next PR.
+- **LOW (latent) — `AIRouterManager.slot()` drops the 5th `images` arg** — not currently reachable
+  (UniversalAIRouter passes no images; EngineerAI uses raw registerProvider), fix defensively later.

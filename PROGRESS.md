@@ -8965,7 +8965,7 @@ U10. Three "history" concepts collide (☰ chats / History tab / Report history)
 BACKEND ENGINE (routes/agentv3, AgentRunner, ToolDispatcher, E2BActuator):
 E1. Readiness gate re-scans the whole project serially at build END (up to ~45s dead wall-clock) →
    incremental per-write analysis + cheap end delta. [L]
-E2. write_files_batch writes files SERIALLY (N × E2B round-trips) → bounded-concurrency like fastWrite. [M]
+E2. ✅ DONE (Batch 3) write_files_batch writes files SERIALLY (N × E2B round-trips) → bounded-concurrency like fastWrite. [M]
 E3. Empty-build fallback = full Sonnet rebuild (escalation repair path dormant by default) → targeted
    repair on existing files / default escalation on. [M]
 E4. No per-turn/per-tool timeout budget (one hung provider call blocks the build until the 30-min
@@ -8998,3 +8998,28 @@ Ships U3, U5, U7 from the 30-gap audit ledger (all in AgentV3Panel.tsx):
 
 UI-only (JSX + handlers); no new pure logic to unit-test. Gate: frontend tsc 0, server tsc 0,
 vitest 4780/4780 PASS, frontend+server build PASS. Ledger updated (U3/U5/U7 → ✅).
+
+## 2026-07-05 — v3.0 audit Batch 3 (backend speed): parallel batch writes (E2)
+
+Ships E2 from the 30-gap audit ledger (ToolDispatcher.ts `write_files_batch`):
+- ✅ E2: `write_files_batch` no longer writes files SERIALLY. The old loop paid 2 remote round-trips
+  PER file (create-vs-modify probe + write) — ~6-12s of dead wall-clock for a 20-file batch, the single
+  biggest "why is v3.0 slow" on a large build. Now writes run in BOUNDED PARALLEL (limit 6, mirroring
+  the route's `fastWrite` → `mapWithConcurrency(files, 6, …)`).
+  - Correctness (root-cause safe): writes to DISTINCT paths are order-independent — the final sandbox
+    state is identical regardless of write order — and each file's create-vs-modify verdict depends only
+    on whether it pre-existed the batch, not on its siblings. `mapWithConcurrency` is order-preserving,
+    so the result summary + FULL-REWRITE warning stay in topo order. JS is single-threaded, so the
+    in-worker hooks (`onFileWrite` / `recordFileChange` / `indexFile` / `addFile`) never interleave
+    mid-statement. `recordFileChange` is keyed by path in a Map, so cross-file completion order can't
+    corrupt final state.
+  - Hunted the sibling race: duplicate paths within one batch now collapse to their LAST entry
+    (last-write-wins — the serial loop's exact final state) BEFORE the parallel writers run, so two
+    workers can never race two writes on the same path (which would leave nondeterministic content).
+  - Regression tests locked it (ToolDispatcher.test.ts): a 25-file batch lands every file with exact
+    content and records 25 distinct changes; a duplicated path deterministically resolves to the last
+    write and is recorded once. Existing create/modify-honesty + FULL-REWRITE-warning tests unchanged.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4782/4782 PASS, boot:check PASS. Ledger: E2 → ✅.
+Next in Batch 3: E4 (per-turn/per-tool timeout budget in AgentRunner) — one hung provider call should
+not block the build until the 30-min watchdog.

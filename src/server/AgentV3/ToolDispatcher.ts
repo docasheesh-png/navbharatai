@@ -777,19 +777,31 @@ export class ToolDispatcher {
         if (!Array.isArray(rawFiles) || rawFiles.length === 0) {
           return 'write_files_batch: files array is empty or missing.';
         }
-        const batchFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
+        const parsedFiles: { path: string; content: string }[] = rawFiles.map((f: unknown) => {
           if (typeof f !== 'object' || f === null) throw new Error('Each file entry must be an object.');
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           // Same Vite-preview-host backstop as write_file, applied per batched file.
           return { path: p, content: ensureViteAllowedHosts(p, reqStr(obj, 'content')) };
         });
-        // Sort by import dependencies: files that import others go after their deps.
-        const sorted = topoSortBatch(batchFiles);
-        const written: string[] = [];
-        const overwritten: string[] = []; // existing files this batch REPLACED wholesale
+        // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
+        // final state the old serial loop produced), so the parallel writers below never race two
+        // writes on the same path (a race would leave nondeterministic content on disk).
+        const dedupedByPath = new Map<string, { path: string; content: string }>();
+        for (const f of parsedFiles) dedupedByPath.set(f.path, f);
+        // Sort by import dependencies: files that import others go after their deps. Purely for a
+        // readable, deterministic result summary — writes are order-independent across distinct paths.
+        const sorted = topoSortBatch([...dedupedByPath.values()]);
         const batchMem = getWorkspaceMemory(this.workspaceId);
-        for (const file of sorted) {
+        // Write every file in bounded parallel (mirrors fastWrite's mapWithConcurrency(files, 6, …)).
+        // A serial loop cost 2 remote round-trips PER file (create-vs-modify probe + write) — ~6-12s
+        // for a 20-file batch, the single biggest "why is it so slow" in a large build. Distinct paths
+        // are order-independent (final sandbox state is identical regardless of write order) and each
+        // file's create-vs-modify verdict depends only on whether it pre-existed the batch, not on its
+        // siblings — so bounded concurrency is safe. mapWithConcurrency is order-preserving, so the
+        // summary arrays below stay in topo order. JS is single-threaded, so the in-worker hooks never
+        // interleave mid-statement.
+        const perFile = await mapWithConcurrency(sorted, 6, async (file) => {
           // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
           // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
           let kind: 'create' | 'modify' = 'create';
@@ -801,9 +813,10 @@ export class ToolDispatcher {
           this.state?.recordFileChange({ path: file.path, kind }, agent);
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          written.push(file.path);
-          if (kind === 'modify') overwritten.push(file.path);
-        }
+          return { path: file.path, kind };
+        });
+        const written: string[] = perFile.map((r) => r.path);
+        const overwritten: string[] = perFile.filter((r) => r.kind === 'modify').map((r) => r.path); // existing files this batch REPLACED wholesale
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch

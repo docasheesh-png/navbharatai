@@ -34,15 +34,18 @@ export { architectSystemPrompt, planSystemPrompt, editModePrefix, dateContextBlo
 export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
 export {
   NORMAL_MULTIPLIER,
+  SONNET_MULTIPLIER,
+  OPUS_MULTIPLIER,
   POWER_MULTIPLIER,
   opusRate,
   sonnetRate,
   opusEquivalentUsd,
   sonnetEquivalentUsd,
+  billedForTier,
   billedAmountUsd,
   billedAmountInr,
 } from './pricing';
-export type { BilledUsage, TokenRate } from './pricing';
+export type { BilledUsage, TokenRate, BillingTier } from './pricing';
 export { defaultToolCatalog, CATALOG_TOOL_NAMES, taskToolDef, secondOpinionToolDef, consensusToolDef, catalogForTools } from './ToolCatalog';
 export { ToolDispatcher } from './ToolDispatcher';
 export type { ActuatorPort, ToolResult, SubAgentSpawn } from './ToolDispatcher';

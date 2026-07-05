@@ -1,32 +1,31 @@
-// AgentV3 pricing — multi-model billing (admin model, 2026-06-24).
+// AgentV3 pricing — multi-model billing (admin model, updated 2026-07-05).
 //
-// NORMAL mode (Power OFF): whichever provider actually answered (Gemini/Vertex/Haiku/
-// Sonnet — the user never knows), the engine bills AS IF SONNET ran — it prices the real
-// token usage at Sonnet's rate and applies the NORMAL markup (× 3.5). Opus is power-only,
-// so normal-mode billing is flat & predictable and never surprises the user.
+// The user NEVER sees which provider actually answered. Billing is by the ACTUAL model TIER that did
+// the work, always priced against Claude rates:
+//   • CHEAP tier (Haiku / GLM / Grok / Gemini / Vertex — anything below Sonnet) → Sonnet-equivalent × 1.2
+//   • SONNET (Sonnet actually ran)                                             → Sonnet-equivalent × 3
+//   • OPUS   (power mode — Opus 4.8 runs 100%)                                 → REAL Opus cost    × 2
 //
-// POWER mode (Power ON): the user is on Opus 4.8; bill the REAL Opus cost × the POWER
-// markup (× 2.5). The effort selector (mini/medium/max) only changes how many real tokens
-// are spent → the bill scales naturally; the multiplier stays 2.5×.
+// The effort selector (mini/medium/max) only changes how many real tokens Opus spends → the bill scales
+// naturally; the multiplier stays 2× at EVERY power level. Margin is structurally positive in every tier
+// (billed ≥ real cost). Rates are env-overridable so ops can track live Anthropic prices without a deploy.
 //
-// The customer-facing amount is shown in INR: billedAmountInr() = billedAmountUsd() × the
-// (real-time) USD→INR rate. Margin is structurally positive in both modes (billed ≥ real
-// cost). Rates are env-overridable so ops can track live Anthropic prices without a deploy.
+// Mode → tier mapping: the engine currently reports a power LEVEL, not per-model token counts, so
+// billedAmountUsd() maps Power OFF → CHEAP tier (normal builds run on the cheap-floor models) and any
+// Power level → OPUS. The SONNET tier (× 3) is applied by billedForTier() where the actual model is
+// known — used once per-model token accounting lands (follow-up).
 
-/** Normal-mode markup: Sonnet-equivalent × 3.5. */
-export const NORMAL_MULTIPLIER = 3.5;
-/**
- * Legacy power-mode markup (real Opus 4.8 cost × 2.5). Retained for the boolean
- * `billedAmountUsd(usage, true)` path so existing callers/tests are unchanged.
- * New code uses the three power-level multipliers below (admin override 2026-06-27).
- */
-export const POWER_MULTIPLIER = 2.5;
+/** CHEAP/normal-tier markup: Sonnet-equivalent cost × 1.2 (Haiku/GLM/Grok/Gemini/Vertex work). */
+export const NORMAL_MULTIPLIER = 1.2;
+/** SONNET-tier markup: Sonnet-equivalent cost × 3 (when Sonnet actually did the work). */
+export const SONNET_MULTIPLIER = 3;
+/** OPUS/power-tier markup: REAL Opus 4.8 cost × 2 — flat at EVERY power level (mini/medium/max). */
+export const OPUS_MULTIPLIER = 2;
+/** @deprecated Back-compat alias — power billing is now a flat OPUS_MULTIPLIER (× 2) at every level. */
+export const POWER_MULTIPLIER = OPUS_MULTIPLIER;
 
-/**
- * Admin-authorized power-level markups (aashishcpmt09, 2026-06-27), applied to the
- * real Opus-equivalent token cost: 5× (mini) / 10× (medium) / 20× (max/ultracode).
- */
-export const POWER_MULTIPLIERS = { mini: 5, medium: 10, max: 20 } as const;
+/** The model tier that actually did the work — the axis billing is charged on. */
+export type BillingTier = 'cheap' | 'sonnet' | 'opus';
 
 /** A power level for billing. 'off' bills at the normal Sonnet rate. */
 export type BillingPowerLevel = 'off' | 'mini' | 'medium' | 'max';
@@ -82,16 +81,26 @@ export function sonnetEquivalentUsd(usage: BilledUsage): number {
 }
 
 /**
- * The USD amount to bill the user.
- * - Power level 'mini'/'medium'/'max' → real Opus 4.8 cost × 5 / 10 / 20
- * - Power level 'off' → Sonnet-equivalent cost × 3.5
- * - Legacy boolean: `true` → real Opus 4.8 cost × 2.5 (the old POWER_MULTIPLIER);
- *   `false` → normal. Kept so existing callers/tests behave exactly as before.
+ * The USD amount to bill for work done by a KNOWN model tier (the admin billing model, 2026-07-05):
+ * - 'cheap'  (Haiku/GLM/Grok/Gemini/Vertex) → Sonnet-equivalent cost × 1.2
+ * - 'sonnet' (Sonnet actually ran)          → Sonnet-equivalent cost × 3
+ * - 'opus'   (power mode, real Opus 4.8)    → real Opus cost × 2
+ */
+export function billedForTier(usage: BilledUsage, tier: BillingTier): number {
+  if (tier === 'opus') return opusEquivalentUsd(usage) * OPUS_MULTIPLIER;
+  return sonnetEquivalentUsd(usage) * (tier === 'sonnet' ? SONNET_MULTIPLIER : NORMAL_MULTIPLIER);
+}
+
+/**
+ * The USD amount to bill the user, keyed by the request's power LEVEL (what the engine currently
+ * reports). Power OFF → CHEAP tier (Sonnet-equivalent × 1.2 — normal builds run on cheap-floor models);
+ * any power level ('mini'/'medium'/'max') or the legacy boolean `true` → OPUS tier (real Opus × 2, flat
+ * at every level — the effort selector only changes how many real tokens are spent). The per-model
+ * SONNET tier (× 3) is reached via billedForTier() once per-model token accounting is wired.
  */
 export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
-  if (power === true) return opusEquivalentUsd(usage) * POWER_MULTIPLIER;
-  if (power === false || power === 'off') return sonnetEquivalentUsd(usage) * NORMAL_MULTIPLIER;
-  return opusEquivalentUsd(usage) * POWER_MULTIPLIERS[power];
+  const tier: BillingTier = (power === false || power === 'off') ? 'cheap' : 'opus';
+  return billedForTier(usage, tier);
 }
 
 /**

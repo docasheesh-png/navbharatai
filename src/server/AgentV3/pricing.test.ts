@@ -1,11 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   NORMAL_MULTIPLIER,
+  SONNET_MULTIPLIER,
+  OPUS_MULTIPLIER,
   POWER_MULTIPLIER,
   opusRate,
   sonnetRate,
   opusEquivalentUsd,
   sonnetEquivalentUsd,
+  billedForTier,
   billedAmountUsd,
   billedAmountInr,
 } from './pricing';
@@ -40,50 +43,57 @@ describe('pricing — rates & equivalents', () => {
   });
 });
 
-describe('pricing — billed amount (the admin model)', () => {
-  it('NORMAL mode bills Sonnet-equivalent × 3.5', () => {
-    expect(NORMAL_MULTIPLIER).toBe(3.5);
-    // Sonnet-equivalent = 18 → × 3.5 = 63.
-    expect(billedAmountUsd(usage, false)).toBeCloseTo(18 * 3.5, 6);
-    expect(billedAmountUsd(usage)).toBeCloseTo(63, 6); // defaults to normal
+describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
+  it('the three tier multipliers', () => {
+    expect(NORMAL_MULTIPLIER).toBe(1.2); // cheap
+    expect(SONNET_MULTIPLIER).toBe(3);
+    expect(OPUS_MULTIPLIER).toBe(2);
+    expect(POWER_MULTIPLIER).toBe(2); // back-compat alias → Opus tier
   });
 
-  it('POWER mode bills real Opus 4.8 cost × 2.5', () => {
-    expect(POWER_MULTIPLIER).toBe(2.5);
-    // Opus real = 90 → × 2.5 = 225.
-    expect(billedAmountUsd(usage, true)).toBeCloseTo(90 * 2.5, 6);
-    expect(billedAmountUsd(usage, true)).toBeCloseTo(225, 6);
+  it('billedForTier: cheap → Sonnet×1.2, sonnet → Sonnet×3, opus → real Opus×2', () => {
+    // Sonnet-equivalent = 18, real Opus = 90.
+    expect(billedForTier(usage, 'cheap')).toBeCloseTo(18 * 1.2, 6);  // 21.6
+    expect(billedForTier(usage, 'sonnet')).toBeCloseTo(18 * 3, 6);   // 54
+    expect(billedForTier(usage, 'opus')).toBeCloseTo(90 * 2, 6);     // 180
   });
 
-  it('power costs more in absolute terms despite a lower multiplier (Opus base)', () => {
+  it('NORMAL mode (power off) bills the CHEAP tier: Sonnet-equivalent × 1.2', () => {
+    expect(billedAmountUsd(usage, false)).toBeCloseTo(18 * 1.2, 6);
+    expect(billedAmountUsd(usage)).toBeCloseTo(21.6, 6); // defaults to normal
+  });
+
+  it('POWER mode bills real Opus 4.8 cost × 2 — FLAT at every power level', () => {
+    expect(billedAmountUsd(usage, true)).toBeCloseTo(90 * 2, 6);   // 180
+    expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(180, 6);
+    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(180, 6);  // level changes tokens, not the ×2
+    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(180, 6);
+    expect(billedAmountUsd(usage, 'off')).toBeCloseTo(21.6, 6);    // off → cheap tier
+  });
+
+  it('power costs more in absolute terms (Opus base) than the cheap normal tier', () => {
     expect(billedAmountUsd(usage, true)).toBeGreaterThan(billedAmountUsd(usage, false));
   });
 
-  it('margin is positive in both modes (billed ≥ real provider cost)', () => {
-    // Normal: even when Sonnet itself runs, billed (63) ≥ real Sonnet cost (18).
-    expect(billedAmountUsd(usage, false)).toBeGreaterThan(sonnetEquivalentUsd(usage));
-    // Power: billed (225) ≥ real Opus cost (90).
-    expect(billedAmountUsd(usage, true)).toBeGreaterThan(opusEquivalentUsd(usage));
+  it('margin is positive in every tier (billed ≥ real provider cost)', () => {
+    // Cheap: billed 21.6 ≥ even real Sonnet cost 18 (and >> a real cheap-model cost).
+    expect(billedForTier(usage, 'cheap')).toBeGreaterThan(sonnetEquivalentUsd(usage));
+    // Sonnet: billed 54 ≥ real Sonnet 18.
+    expect(billedForTier(usage, 'sonnet')).toBeGreaterThan(sonnetEquivalentUsd(usage));
+    // Opus: billed 180 ≥ real Opus 90.
+    expect(billedForTier(usage, 'opus')).toBeGreaterThan(opusEquivalentUsd(usage));
   });
 
-  it('power-level tiers bill real Opus cost × 5 / 10 / 20 (admin override 2026-06-27)', () => {
-    // Opus real = 90 → ×5 = 450, ×10 = 900, ×20 = 1800.
-    expect(billedAmountUsd(usage, 'off')).toBeCloseTo(63, 6); // Sonnet × 3.5
-    expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(450, 6);
-    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(900, 6);
-    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(1800, 6);
-  });
-
-  it('power-level INR billing scales by the USD→INR rate', () => {
-    expect(billedAmountInr(usage, 'max', 85)).toBeCloseTo(1800 * 85, 4);
-    expect(billedAmountInr(usage, 'off', 85)).toBeCloseTo(63 * 85, 4);
+  it('INR billing scales by the USD→INR rate', () => {
+    expect(billedAmountInr(usage, 'max', 85)).toBeCloseTo(180 * 85, 4);
+    expect(billedAmountInr(usage, 'off', 85)).toBeCloseTo(21.6 * 85, 4);
   });
 });
 
 describe('pricing — INR conversion', () => {
   it('billedAmountInr = billedAmountUsd × the USD→INR rate', () => {
-    expect(billedAmountInr(usage, false, 85)).toBeCloseTo(63 * 85, 4); // normal
-    expect(billedAmountInr(usage, true, 85)).toBeCloseTo(225 * 85, 4); // power
+    expect(billedAmountInr(usage, false, 85)).toBeCloseTo(21.6 * 85, 4); // normal (cheap × 1.2)
+    expect(billedAmountInr(usage, true, 85)).toBeCloseTo(180 * 85, 4);   // power (Opus × 2)
   });
 
   it('clamps a negative rate to zero', () => {
@@ -91,9 +101,9 @@ describe('pricing — INR conversion', () => {
   });
 
   it('a realistic small build is cheap in normal mode (calculator-scale)', () => {
-    // ~60k in + 15k out → Sonnet-equiv ≈ 0.405 → × 3.5 × 85 ≈ ₹120.
+    // ~60k in + 15k out → Sonnet-equiv ≈ 0.405 → × 1.2 × 85 ≈ ₹41.
     const inr = billedAmountInr({ inputTokens: 60_000, outputTokens: 15_000 }, false, 85);
-    expect(inr).toBeGreaterThan(80);
-    expect(inr).toBeLessThan(200);
+    expect(inr).toBeGreaterThan(20);
+    expect(inr).toBeLessThan(80);
   });
 });

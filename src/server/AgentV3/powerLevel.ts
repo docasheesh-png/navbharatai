@@ -18,7 +18,7 @@
 // is controlled by effort only, paired with adaptive thinking. PURE module so the
 // mapping is unit-testable without any provider key.
 
-import { NORMAL_MULTIPLIER } from './pricing';
+import { NORMAL_MULTIPLIER, OPUS_MULTIPLIER } from './pricing';
 
 /** The four user-facing power levels. 'off' is normal (Power toggle OFF). */
 export type PowerLevel = 'off' | 'mini' | 'medium' | 'max';
@@ -29,7 +29,7 @@ export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface PowerSpec {
   /** The level itself. */
   level: PowerLevel;
-  /** True for any Opus power level (5×/10×/20×). False for normal mode. */
+  /** True for any Opus power level (real Opus × 2). False for normal mode. */
   powerMode: boolean;
   /**
    * Opus reasoning effort for this level. Undefined in normal mode so Sonnet/Haiku
@@ -45,9 +45,9 @@ export interface PowerSpec {
 
 const SPECS: Record<PowerLevel, PowerSpec> = {
   off: { level: 'off', powerMode: false, effort: undefined, ceilingEffort: 'low', multiplier: NORMAL_MULTIPLIER },
-  mini: { level: 'mini', powerMode: true, effort: 'low', ceilingEffort: 'low', multiplier: 5 },
-  medium: { level: 'medium', powerMode: true, effort: 'medium', ceilingEffort: 'low', multiplier: 10 },
-  max: { level: 'max', powerMode: true, effort: 'max', ceilingEffort: 'low', multiplier: 20 },
+  mini: { level: 'mini', powerMode: true, effort: 'low', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
+  medium: { level: 'medium', powerMode: true, effort: 'medium', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
+  max: { level: 'max', powerMode: true, effort: 'max', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
 };
 
 /**

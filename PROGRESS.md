@@ -8835,3 +8835,29 @@ NEXT (clinical safety — highest priority, from the SDA hunt, NOT yet fixed):
 - **MEDIUM — SDA audit cross-check dropped on an "ok"-prefixed danger note.** `sda.ts:78`
   `/^ok\b/i.test(text)` discards a real warning like "OK, but the dose is a 10× overdose…". Fix: only
   treat an EXACT `OK`/`OK.`/`OK!` (trimmed) as clean.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-11 #2 — SDA clinical-safety: cross-patient contamination + audit "OK"-prefix drop (#TBD)
+
+Two clinical-safety fixes from the SDA hunt (highest priority — Doctor AI patient safety):
+
+- **HIGH/CRITICAL — cross-patient memory contamination.** Doctor AI's server clinical store keys on
+  `sessionId || userId` (sda.ts:104), but `SDAChat.tsx` sent only `userId` and never a per-case
+  `sessionId`, and "New Case" reset only client state. So within the 24h TTL, one doctor's Patient A
+  context (demographics + red-flags + last 20 turns) was injected into Patient B's workup as
+  `[CASE_CONTEXT] … Do NOT re-ask` → wrong risk stratification / drug cautions / age-weight dosing, on the
+  most ordinary multi-patient workflow. Fix (client): a per-CASE `sessionId` — `newSdaCaseId()` (shared
+  `src/lib/sdaCaseId.ts`, crypto.randomUUID + fallback), persisted to `sda_case_id` so a mid-case reload
+  keeps the SAME case, and ROTATED in `startNewCase()` so a new patient starts from an empty server
+  store. Sent in the `/api/sda-chat` body; the server already prefers `sessionId`, so cases isolate
+  immediately (old ids GC at 24h).
+- **MEDIUM — audit safety cross-check dropped on an "OK"-prefixed danger note.** `auditSdaReply` used
+  `/^ok\b/i.test(text)` to detect a clean pass, which ALSO matched a real warning like "OK, but the dose
+  is a 10x overdose…" → the "⚠️ Automated safety cross-check" block was silently suppressed. Fix: new
+  pure `src/server/lib/clinical/auditGate.ts` `isAuditReplyClean()` — clean ONLY on an exact OK/OK./OK!
+  (trimmed) or empty; any warning that merely starts with "OK" is now surfaced.
+
+Locked with tests (sdaClinicalSafety.test.ts): newSdaCaseId never collides across 2000 calls (rotation
+always yields a new server key); isAuditReplyClean drops exact OK, keeps every "OK, but…"/warning.
+
+Remaining recorded (unchanged): lazily-mounted IDE-panel unguarded JSON.parse sweep; router
+AbortSignal-on-timeout (MEDIUM); wallet-credit concurrency (HIGH, live-money, needs your sign-off).

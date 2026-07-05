@@ -7,6 +7,7 @@ import { CREATOR_IDENTITY } from '../lib/prompts';
 import { computeClinicalTool, AVAILABLE_CLINICAL_TOOLS } from '../lib/clinical/calculators';
 import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clinical/knowledgeBase';
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
+import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 
 /**
@@ -75,7 +76,8 @@ Otherwise output up to 3 short bullet points, each naming the issue and the corr
       new Promise((_, rej) => setTimeout(() => rej(new Error('audit timeout')), 12000)),
     ]);
     const text = String(r?.text || r?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-    if (!text || /^ok\b/i.test(text) || /^ok[.!]?$/i.test(text)) return null;
+    // Drop ONLY an exact "OK" pass — NEVER a warning that merely starts with "OK" (e.g. an overdose note).
+    if (isAuditReplyClean(text)) return null;
     return text;
   } catch {
     return null;

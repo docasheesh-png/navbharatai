@@ -8699,3 +8699,23 @@ stops. `count:'all'` (split/join) and the whitespace-tolerant fallback were alre
 Still recorded (LOW): `flexibleReplace` ignores a numeric `count > 1` (only distinguishes all vs first),
 so a count:3 patch that matches only via the whitespace-tolerant fallback replaces 1 — minor
 under-application, not corruption; separate follow-up.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-9 #3 — naive JSON-extractor class CLOSED
+
+Finished the class opened in round-9 (#968). Migrated the three remaining string-returning naive
+extractors — same `indexOf(open)…lastIndexOf(close)` trap (trailing/leading prose with a bracket → bad
+slice → silent parse failure → dropped result) — onto the shared balanced extractor:
+- `EngineerAI/PlannerAgent.extractJson` (plan step parse)
+- `Guider.extractJsonObject` (Pro-build plan + grade parse; exported, has a direct test)
+- `AgentV3/DesignAdvisor.extractJson` (design suggestions/palette parse; exported, has a direct test)
+
+Added `extractFirstJsonSlice(raw, kind)` to `src/server/lib/extractJson.ts` (returns the balanced JSON
+SUBSTRING, preserving each caller's string contract) alongside the existing parsed-value `extractFirstJson`
+(now a thin wrapper over the shared scan). Each site is a one-line delegate returning '' on no match —
+behavior-equivalent (their surrounding `try/catch` already falls back on a parse failure), verified by
+their existing tests (guider.test.ts, designAdvisor.test.ts) plus the shared extractJson.test.ts.
+
+`EngineerAI/EngineerAgentLoop.extractJson` was inspected and EXCLUDED — it already does a string-aware
+balanced-brace scan (its `lastIndexOf` is only a truncated-output fallback), so it was never part of the
+bug class. The class is now fully centralized on one shared, tested implementation — no naive
+`lastIndexOf` JSON slice remains in the server.

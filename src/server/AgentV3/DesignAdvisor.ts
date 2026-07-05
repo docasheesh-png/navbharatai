@@ -8,6 +8,8 @@
 // are unit-tested without any network. The AI calls are thin wrappers that route through the provided
 // router fn and parse — honest fallback ([] / null) when the model returns nothing usable; never throws.
 
+import { extractFirstJsonSlice } from '../lib/extractJson';
+
 export type SuggestionCategory = 'improve' | 'add' | 'fix' | 'style';
 
 export interface DesignSuggestion {
@@ -19,15 +21,13 @@ export interface DesignSuggestion {
 const CATEGORIES: ReadonlySet<string> = new Set<SuggestionCategory>(['improve', 'add', 'fix', 'style']);
 const MAX_SUGGESTIONS = 6;
 
-/** Strip markdown code fences and pull out the first JSON array or object. Pure. Returns '' if none. */
+/**
+ * Strip markdown code fences and pull out the first JSON array or object. Pure. Returns '' if none.
+ * Uses the shared balanced, string-aware extractor — the old indexOf/lastIndexOf slice mis-grabbed a
+ * bracket from trailing prose (a common cause of a silently dropped design pass).
+ */
 export function extractJson(text: string, kind: 'array' | 'object'): string {
-  const s = String(text || '').replace(/```(?:json)?/gi, '').trim();
-  const open = kind === 'array' ? '[' : '{';
-  const close = kind === 'array' ? ']' : '}';
-  const start = s.indexOf(open);
-  const end = s.lastIndexOf(close);
-  if (start === -1 || end === -1 || end <= start) return '';
-  return s.slice(start, end + 1);
+  return extractFirstJsonSlice(text, kind) ?? '';
 }
 
 /** Build the prompt that asks for actionable, context-aware design/improvement suggestions. Pure. */

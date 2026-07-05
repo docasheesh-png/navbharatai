@@ -8305,3 +8305,24 @@ DEFERRED (recorded, honest — root not fully in reach this change):
   vector (the wildcard leak/injection); the same-origin amplifier needs the preview sandbox moved to an
   opaque origin (drop allow-same-origin), which requires runtime verification that the live preview
   feature still works and is a larger change — NOT blind-edited here.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-7 #2 — build cost/history attribution spoofing fixed (#TBD)
+
+MEDIUM auth/IDOR in the Pro build path. `/api/build-stream` took the user identity from the
+client-supplied `req.body.userId` (unverified) and used it for `userCostStore.record()` and
+`userBuildHistoryStore.record()`. Any caller could set `userId` to a VICTIM's uid → inflate that
+victim's monthly cost / burn their quota, and forge build-history entries under their name.
+
+Root cause: cost/history was attributed from a spoofable request-body field instead of a verified
+identity — and the frontend `buildAppStream()` sent NO Authorization header at all, so there was no
+verified identity to attribute to. Two-sided fix:
+- **Server (build.ts)** — derive the attribution uid ONLY from `verifyFirebaseToken(req)` via a new
+  pure tested helper `resolveAttributionUserId()` (verified uid → used; no token → undefined = no
+  attribution to anyone). The `req.body.userId` field is no longer read for attribution.
+- **Frontend (buildService.ts)** — `buildAppStream()` now attaches `Authorization: Bearer <idToken>`
+  (dynamic firebase import so the unit-tested module stays firebase-free at load). Signed-out users
+  build anonymously (unattributed), exactly as before.
+
+Locked with a regression test (routesBuildPro.test.ts): attribution uses a verified uid verbatim and
+returns undefined for null/empty — a spoofed body userId can never reach cost/history recording.
+Behavior for legitimate signed-in users is unchanged (same uid attributed, now unspoofable).

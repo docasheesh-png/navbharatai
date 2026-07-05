@@ -28,6 +28,20 @@ describe('EditEngine.applyEdits', () => {
     expect(vfs.readText('x.ts')).toBe('bar baz baz');
   });
 
+  it('REGRESSION: count>1 does not re-match inside its own replacement when replace contains find', () => {
+    // Old code searched from index 0 each iteration → the 2nd pass matched "count" inside the
+    // just-inserted "itemCount" → "const itemitemCount". Cursor must advance past the insertion.
+    const vfs = vfsFrom({ 'x.ts': 'const count = 0;\nreturn count;' });
+    applyEdits(vfs, [{ op: 'patch', path: 'x.ts', find: 'count', replace: 'itemCount', count: 2 }]);
+    expect(vfs.readText('x.ts')).toBe('const itemCount = 0;\nreturn itemCount;');
+  });
+
+  it('count>1 replaces exactly N occurrences and stops (not all)', () => {
+    const vfs = vfsFrom({ 'x.ts': 'a a a a' });
+    applyEdits(vfs, [{ op: 'patch', path: 'x.ts', find: 'a', replace: 'aa', count: 2 }]);
+    expect(vfs.readText('x.ts')).toBe('aa aa a a');
+  });
+
   it('reports per-op failures without aborting the batch', () => {
     const vfs = vfsFrom({ 'a.ts': 'A' });
     const r = applyEdits(vfs, [

@@ -8680,3 +8680,22 @@ Also from this hunt (recorded, not yet fixed): **MEDIUM — EditEngine `patch` w
 re-scans from index 0**, so when `replace` contains `find` it re-matches inside its own insertion and
 corrupts the file (`const count` → `itemCount` with count:2 → `const itemitemCount`). Fix: advance the
 search cursor past each replacement instead of restarting at 0. Clean next PR.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-9 #2 — EditEngine count>1 self-match corruption fixed (#TBD)
+
+The MEDIUM sibling recorded in the round-9 milestone above, now fixed. `EditEngine.applyOne` patch path
+with a numeric `count > 1` called `updated.indexOf(edit.find)` from index 0 EVERY iteration. When
+`replace` contains `find` as a substring, iteration 2 re-matched `find` INSIDE the just-inserted
+replacement instead of the next real occurrence — e.g. `const count = 0;\nreturn count;` with
+`{find:"count", replace:"itemCount", count:2}` produced `const itemitemCount = 0;\nreturn count;`
+(mangled identifier + the real 2nd occurrence left untouched → file corruption → build breaks).
+
+Root cause: a fixed-start search in a mutate-in-place loop. Fix: track a `fromIdx` cursor and search
+from PAST each inserted replacement (`indexOf(edit.find, fromIdx)`; `fromIdx = idx + replace.length`),
+so a replacement can never be re-matched. Locked with 2 regression tests (editEngine.test.ts): the exact
+self-match case now yields `const itemCount = 0;\nreturn itemCount;`, and count>1 replaces exactly N and
+stops. `count:'all'` (split/join) and the whitespace-tolerant fallback were already correct.
+
+Still recorded (LOW): `flexibleReplace` ignores a numeric `count > 1` (only distinguishes all vs first),
+so a count:3 patch that matches only via the whitespace-tolerant fallback replaces 1 — minor
+under-application, not corruption; separate follow-up.

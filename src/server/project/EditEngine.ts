@@ -91,10 +91,16 @@ function applyOne(vfs: VirtualFileSystem, edit: FileEdit): EditOpResult {
         } else {
           const n = typeof edit.count === 'number' && edit.count > 0 ? edit.count : 1;
           updated = current;
+          // Advance the search cursor PAST each inserted replacement. Searching from 0 every
+          // iteration re-matches `find` inside the text we just wrote when `replace` contains
+          // `find` (e.g. count:2, find:"count", replace:"itemCount" → "const itemitemCount"),
+          // corrupting the file and leaving the real later occurrence untouched.
+          let fromIdx = 0;
           for (let i = 0; i < n; i++) {
-            const idx = updated.indexOf(edit.find);
+            const idx = updated.indexOf(edit.find, fromIdx);
             if (idx < 0) break;
             updated = updated.slice(0, idx) + edit.replace + updated.slice(idx + edit.find.length);
+            fromIdx = idx + edit.replace.length;
           }
         }
         vfs.write(edit.path, updated);

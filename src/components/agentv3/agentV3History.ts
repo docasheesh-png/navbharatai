@@ -20,8 +20,10 @@ export interface PersistedConversation {
   updatedAt?: number;
   /** Eternal sessions: the durable evidence layer (compact server TimelineEvents) — see below. */
   timeline?: unknown[];
-  /** Terminal facts of the last finished build turn (billedInr/tokens/buildHealth). */
-  finalState?: { ok?: boolean; billedUsd?: number; billedInr?: number; tokens?: number; buildHealth?: unknown };
+  /** Terminal facts of the last finished build turn (billedInr/tokens/buildHealth), plus the compact
+   *  build report embedded WITH the chat so the "Build report" always returns on reopen (never a
+   *  separate doc that can 404 after a long build). */
+  finalState?: { ok?: boolean; billedUsd?: number; billedInr?: number; tokens?: number; buildHealth?: unknown; report?: unknown };
   /** The framework this session builds with (restored so follow-up builds stay correct). */
   framework?: string;
   /** Cumulative token usage (older field, still returned by the server). */
@@ -142,11 +144,17 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     const tokens = typeof final.tokens === 'number'
       ? final.tokens
       : (conv.usage ? (conv.usage.inputTokens ?? 0) + (conv.usage.outputTokens ?? 0) : 0);
-    if (billedUsd > 0 || (billedInr ?? 0) > 0 || tokens > 0) {
+    // The compact build report embedded WITH the chat (finalState.report) — rehydrated into the
+    // synthetic `result` so `state.diagnostics` is populated on reopen and the "Build report"
+    // download/copy works offline (no separate fetch that can 404). Fire the result whenever a report
+    // exists, even for a zero-billing turn, so the report never gets dropped for a cheap build.
+    const report = final.report;
+    if (billedUsd > 0 || (billedInr ?? 0) > 0 || tokens > 0 || report) {
       events.push({
         type: 'result', ok, summary, steps: 0, billedUsd,
         ...(billedInr !== undefined ? { billedInr } : {}),
         ...(tokens > 0 ? { tokens } : {}),
+        ...(report ? { diagnostics: report } : {}),
       });
     }
   }

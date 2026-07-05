@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { trimReportForStorage, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId } from './DiagnosticsStore';
+import { trimReportForStorage, compactReportForRecord, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -66,6 +66,61 @@ describe('trimReportForStorage', () => {
     expect(trimmed.problems!.length).toBeLessThanOrEqual(300);
     // keeps the NEWEST (highest-index) errors, same "keep the tail" policy as issues/commands/llmCalls.
     expect(trimmed.problems![trimmed.problems!.length - 1].message).toContain('error 399');
+  });
+});
+
+// The compact report EMBEDDED in the durable conversation record (admin, 2026-07-05: "build report
+// hamesa ke liye wahin save honi chahiye jahan chat text save hota hai"). Keeps the user-facing
+// essentials, DROPS the heavy forensic channels, and stays small enough to ride in the conversation doc.
+describe('compactReportForRecord — the report saved WITH the chat (reopen never 404s)', () => {
+  it('keeps the user-facing essentials (readiness/root-cause/summary/counts/problems)', () => {
+    const r = baseReport({
+      endedAt: 2000, ok: false, summary: 'Built with 1 blocker', rootCause: 'unresolved import ./Missing',
+      counts: { total: 3, errors: 1, warnings: 1, autoResolved: 1, unresolved: 1 },
+      issues: [{ ts: 1, phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '1 unresolved import(s) — the build will fail', autoResolved: false }],
+      problems: [{ ts: 1, phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: '1 unresolved import(s) — the build will fail', autoResolved: false }],
+    });
+    const c = compactReportForRecord(r);
+    expect(c.ok).toBe(false);
+    expect(c.summary).toBe('Built with 1 blocker');
+    expect(c.rootCause).toContain('unresolved import');
+    expect(c.counts).toEqual(r.counts);
+    expect(c.problems.some((p) => p.code === 'READINESS_BLOCKER')).toBe(true);
+    expect(c.schema).toBe('navbharatai.v3.build-diagnostics/1');
+  });
+
+  it('DROPS the heavy forensic channels (commands / llmCalls / errors / generatedFiles) — they stay in the workspace doc', () => {
+    const r = baseReport({
+      commands: [{ ts: 1, command: 'npm i', exitCode: 0, stdout: 'x'.repeat(5000), stderr: '' }],
+      llmCalls: [{ ts: 1, ok: true, promptPreview: 'p'.repeat(5000), responsePreview: 'r'.repeat(5000) }],
+      errors: [{ ts: 1, message: 'e'.repeat(5000), stack: 's'.repeat(5000) }],
+      generatedFiles: [{ ts: 1, path: 'src/App.tsx', content: 'z'.repeat(6000), note: 'compile error' }],
+    });
+    const c = compactReportForRecord(r);
+    expect(c.commands).toBeUndefined();
+    expect(c.llmCalls).toBeUndefined();
+    expect(c.errors).toBeUndefined();
+    expect(c.generatedFiles).toBeUndefined();
+  });
+
+  it('bounds the issues tail and recomputes problems from the trimmed issues (stays small in the conversation doc)', () => {
+    const many = Array.from({ length: 1000 }, (_, i) => ({ ts: i, phase: 'build' as const, severity: (i % 3 === 0 ? 'error' : 'info') as 'error' | 'info', code: 'E', message: `line ${i} ${'y'.repeat(500)}`, autoResolved: i % 3 !== 0 }));
+    const c = compactReportForRecord(baseReport({ issues: many, problems: many.filter((i) => i.severity === 'error') }));
+    expect(c.issues.length).toBeLessThanOrEqual(120);           // bounded tail
+    expect(c.issues[c.issues.length - 1].message).toContain('line 999'); // newest kept
+    expect(c.issues[0].message.length).toBeLessThan(500);       // per-line message capped
+    expect(c.problems.every((p) => p.severity !== 'info')).toBe(true);   // problems = non-info only
+    // Small enough to embed in the conversation record alongside the chat.
+    expect(Buffer.byteLength(JSON.stringify(c), 'utf8')).toBeLessThan(120 * 1024);
+  });
+
+  it('a huge report compacts to a fraction of its trimReportForStorage size (the whole point of embedding)', () => {
+    const bigCmds = Array.from({ length: 300 }, (_, i) => ({ ts: i, command: `cmd ${i}`, exitCode: 0, stdout: 'y'.repeat(4000), stderr: 'z'.repeat(4000) }));
+    const bigLlm = Array.from({ length: 300 }, (_, i) => ({ ts: i, ok: true, promptPreview: 'p'.repeat(2000), responsePreview: 'r'.repeat(2000) }));
+    const big = baseReport({ endedAt: 2000, commands: bigCmds, llmCalls: bigLlm });
+    const compactBytes = Buffer.byteLength(JSON.stringify(compactReportForRecord(big)), 'utf8');
+    const storageBytes = Buffer.byteLength(JSON.stringify(trimReportForStorage(big)), 'utf8');
+    expect(compactBytes).toBeLessThan(storageBytes); // the embedded copy is materially lighter
   });
 });
 

@@ -8884,3 +8884,19 @@ site unreachable from this sandbox (network policy) — the admin's check is the
 header; if it stays old after a deploy, hard-refresh / clear the PWA cache.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4773/4773 PASS, frontend+server build PASS.
+## UPDATE (2026-07-05, session 01KDmsCZ): round-11 #3 — crash-resilience class CLOSED (CustomDomain unguarded parse)
+
+Followed up the round-11 "lazily-mounted IDE panel" deferral by actually auditing each site — and the
+deferral was OVER-INCLUSIVE: the broad grep matched many sites that are ALREADY try/catch-guarded
+(FigmaImporter, CodeMinifier, AIDebugger, ScreenshotToCode, APITester, defaultContent, HistoryView,
+DatabaseSettings, AIImageGenerator, CodeVersioning, TeamCollaboration, AppStorePublisher, GitPanel,
+LocalizationManager, AppAnalytics, PerformanceAnalyzer — all guarded). The codebase is disciplined here;
+the only genuinely-unguarded render-path sites were the 5 always-mounted App.tsx/useSettings ones already
+fixed in #974.
+
+The ONE remaining genuinely-unguarded component was **CustomDomain.tsx**: a mount `useEffect` (line ~223)
+did `JSON.parse(localStorage.getItem('navbharatai_custom_domains'))` with NO try/catch → a corrupt value
+crashes that panel on open. Fixed all three of its localStorage-JSON reads (mount effect, saveDomain,
+checkDns) to route through the tested `safeLocalJson` helper. No raw `JSON.parse` of localStorage remains
+in that component. Behavior-preserving on valid data (locked by safeLocalJson.test.ts). The unguarded
+localStorage-JSON crash class is now CLOSED across the app (no known unguarded render-path site remains).

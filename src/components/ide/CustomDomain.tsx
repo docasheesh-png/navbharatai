@@ -12,6 +12,7 @@ import {
   Clock,
   Wifi,
 } from 'lucide-react';
+import { safeLocalJson } from '../../lib/safeLocalJson';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -216,16 +217,14 @@ export const CustomDomain: React.FC = () => {
 
   const [copiedCommand, setCopiedCommand] = useState(false);
 
-  // Load saved domains
+  // Load saved domains. safeLocalJson never throws — a corrupt value would otherwise crash this
+  // panel on mount (this effect runs on open) with no way to recover but manually clearing storage.
   useEffect(() => {
-    const saved = localStorage.getItem('navbharatai_custom_domains');
-    if (saved) {
-      const domains: SavedDomain[] = JSON.parse(saved);
-      if (domains.length > 0) {
-        const last = domains[domains.length - 1];
-        setDomain(last.domain);
-        setPlatform(last.platform);
-      }
+    const domains = safeLocalJson<SavedDomain[]>('navbharatai_custom_domains', []);
+    if (domains.length > 0) {
+      const last = domains[domains.length - 1];
+      setDomain(last.domain);
+      setPlatform(last.platform);
     }
   }, []);
 
@@ -251,8 +250,7 @@ export const CustomDomain: React.FC = () => {
   }, [autoRetry, step, domain]);
 
   const saveDomain = useCallback((d: string, p: Platform) => {
-    const saved = localStorage.getItem('navbharatai_custom_domains');
-    const domains: SavedDomain[] = saved ? JSON.parse(saved) : [];
+    const domains = safeLocalJson<SavedDomain[]>('navbharatai_custom_domains', []);
     const existing = domains.findIndex((x) => x.domain === d);
     const entry: SavedDomain = { domain: d, platform: p, configuredAt: new Date().toISOString(), status: 'pending' };
     if (existing >= 0) domains[existing] = entry;
@@ -279,12 +277,9 @@ export const CustomDomain: React.FC = () => {
         setDnsResult(json.Answer.map((a: { data: string }) => a.data).join(', '));
         setChecklist((c) => ({ ...c, dnsPropagated: true }));
         // Mark domain as active in localStorage
-        const saved = localStorage.getItem('navbharatai_custom_domains');
-        if (saved) {
-          const domains: SavedDomain[] = JSON.parse(saved);
-          const idx = domains.findIndex((x) => x.domain === d);
-          if (idx >= 0) { domains[idx].status = 'active'; localStorage.setItem('navbharatai_custom_domains', JSON.stringify(domains)); }
-        }
+        const domains = safeLocalJson<SavedDomain[]>('navbharatai_custom_domains', []);
+        const idx = domains.findIndex((x) => x.domain === d);
+        if (idx >= 0) { domains[idx].status = 'active'; localStorage.setItem('navbharatai_custom_domains', JSON.stringify(domains)); }
       } else if (json.Status === 3) {
         setPropagationStatus('not_found');
       } else {

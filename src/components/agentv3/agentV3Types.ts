@@ -55,6 +55,9 @@ export type AgentV3WireEvent =
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
+  // Own-repo working-branch storage is active: edits are on `workBranch` inside the user's REAL repo,
+  // to be merged into `baseBranch` via a PR. Drives the in-app "Ship to main" / "Revert" controls.
+  | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number };
@@ -123,6 +126,9 @@ export interface AgentV3ClientState {
   /** The project's GitHub repo (the user's own, or platform-org), once git-native storage runs. */
   repoUrl?: string;
   repoFullName?: string;
+  /** Present when own-repo working-branch storage is active: edits live on `workBranch` in the user's
+   *  REAL repo and reach `baseBranch` via a PR. Drives the "Ship to main" / "Revert last merge" UI. */
+  ownRepo?: { owner: string; repo: string; workBranch: string; baseBranch: string };
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */

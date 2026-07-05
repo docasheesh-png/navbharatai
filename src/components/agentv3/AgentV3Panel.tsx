@@ -65,8 +65,23 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   const [prompt, setPrompt] = useState('');
+  // "Ship to main" (own-repo storage, slice 2): in-flight + last honest result for the action bar.
+  const [shipping, setShipping] = useState(false);
+  const [shipNote, setShipNote] = useState<string | null>(null);
+  const doShipToMain = useCallback(async () => {
+    if (!state.ownRepo || shipping) return;
+    setShipping(true);
+    setShipNote(null);
+    try {
+      const githubToken = (() => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } })();
+      const r = await shipToMain({ repo: state.ownRepo.repo, userId, email, githubToken });
+      setShipNote(r.note);
+    } finally {
+      setShipping(false);
+    }
+  }, [state.ownRepo, shipping, shipToMain, userId, email]);
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
   const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
@@ -1871,6 +1886,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               and pb-[env(safe-area-inset-bottom)] always stays so the composer never hides behind
               the phone browser's bottom search/address bar. Normal mode is unchanged. */}
           <div className={`shrink-0 sticky bottom-0 pb-[env(safe-area-inset-bottom)] ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}>
+            {/* OWN-REPO SHIP BAR (slice 2): when edits are stored on the user's own repo working branch,
+                offer a one-click "Ship to main" — it merges navbharatai/work → the repo default via a PR,
+                server-side merging ONLY on green CI (your main is never touched until you click this). */}
+            {state.ownRepo && !running && (
+              <div className="px-3 pt-2 flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={doShipToMain}
+                  disabled={shipping}
+                  title={`Merge ‘${state.ownRepo.workBranch}’ into ‘${state.ownRepo.baseBranch}’ (only if CI is green)`}
+                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
+                >
+                  <Rocket className="w-3.5 h-3.5" />
+                  {shipping ? 'Shipping…' : `Ship to ${state.ownRepo.baseBranch}`}
+                </button>
+                <span className="text-[10px] text-zinc-500 truncate">
+                  {shipNote ?? `Edits saved on ‘${state.ownRepo.workBranch}’ in ${state.ownRepo.owner}/${state.ownRepo.repo} — your ‘${state.ownRepo.baseBranch}’ is untouched until you ship.`}
+                </span>
+              </div>
+            )}
             {/* Live plan progress (only when there's no pending plan-approval gate, which shows its
                 own copy) — lets the user watch the AI work through its real todo list as it builds. */}
             {state.todos.length > 0 && !state.pendingPermission && (

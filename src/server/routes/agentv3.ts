@@ -43,6 +43,7 @@ import {
   resolveStorageTarget,
   ownRepoStorageEnabled,
   parseGitHubRepo,
+  WORK_BRANCH,
   type RepoInfo,
   type PrCapableClient,
   type OwnRepoTarget,
@@ -1762,6 +1763,59 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({ stopped: wasRunning });
   });
 
+  // SHIP TO MAIN (own-repo working-branch storage, slice 2): merge the user's `navbharatai/work`
+  // branch into their repo's default branch via a PR — but ONLY when CI is green (or the repo has no
+  // checks). Honest: a red/pending PR is left OPEN with a clear note, never force-merged. The user's
+  // OWN GitHub token is the authority (only their own repos are writable), so this can never touch
+  // another account's repo. `main` changes ONLY here, on the user's explicit click.
+  app.post('/api/agentv3/ship', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    if (!ownRepoStorageEnabled()) {
+      res.status(400).json({ error: 'Shipping to your own repo is not enabled yet.' });
+      return;
+    }
+    const repo = typeof req.body?.repo === 'string' ? req.body.repo.trim() : '';
+    const token = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+    if (!repo || !token) {
+      res.status(400).json({ error: 'Sign in with GitHub and open a build on your own repo to ship it.' });
+      return;
+    }
+    try {
+      const client = new UserGitHubClient(token);
+      // The token's own login is the repo owner (UserGitHubClient uses login-as-owner), and we verify
+      // write access — so a caller can only ever ship a repo they personally own and can push to.
+      const access = await client.getRepoAccess(repo);
+      if (!access.exists || !access.canPush) {
+        res.status(403).json({ error: 'You do not have write access to that repository (or it no longer exists).' });
+        return;
+      }
+      // Open-or-reuse the work→default PR, read its CI, and merge ONLY when green/none (Claude-Code
+      // style). A red/pending PR is returned OPEN with an honest note — never force-merged.
+      const flow = await mergeViaPullRequest(client, repo, {
+        head: WORK_BRANCH,
+        base: access.defaultBranch,
+        title: `NavBharatAI: ship ${repo}`,
+        body: `Merging \`${WORK_BRANCH}\` into \`${access.defaultBranch}\` — reviewed & shipped from NavBharatAI Pro v3.0.`,
+      });
+      res.json({
+        merged: flow.merged,
+        opened: flow.opened,
+        prNumber: flow.prNumber,
+        prUrl: flow.prUrl,
+        ci: flow.ci,
+        base: access.defaultBranch,
+        note: flow.note || (flow.merged ? `Merged into ${access.defaultBranch}.` : 'Nothing to merge yet — make an edit first.'),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Resume: re-attach to a running build whose original connection was lost. Replays the
   // buffered events so the UI catches up, then streams live ones — same NDJSON contract.
   app.post('/api/agentv3/attach', (req: Request, res: Response) => {
@@ -3248,6 +3302,9 @@ export function registerAgentV3Routes(app: Express): void {
                 repoSync = new GitRepoSync(actuator, workspaceId);
                 const h = await repoSync.hydrateFromRepo(repoAuthedUrl, { branch: target.workBranch, fallbackBranch: target.baseBranch, overlayAnyContent: true });
                 events.emit({ type: 'repo', url: `https://github.com/${target.owner}/${target.repo}`, fullName: `${target.owner}/${target.repo}`, ts: Date.now() });
+                // Tell the client own-repo mode is active so it can offer the "Ship to main" / "Revert"
+                // controls scoped to this exact repo + branches (see /api/agentv3/ship, /revert).
+                events.emit({ type: 'own_repo', owner: target.owner, repo: target.repo, workBranch: target.workBranch, baseBranch: target.baseBranch, ts: Date.now() });
                 events.emit({
                   type: 'narration', agent: 'architect',
                   text: h.hydrated

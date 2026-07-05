@@ -144,6 +144,8 @@ export type AgentEvent =
   | { type: 'checkpoint'; checkpoint: GitCheckpoint; ts: number }
   | { type: 'preview'; url: string; ts: number }
   | { type: 'repo'; url: string; fullName: string; ts: number }
+  // Own-repo working-branch storage is active — drives the client's "Ship to main" / "Revert" controls.
+  | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
   | { type: 'security_warning'; filePath: string; safe: boolean; findings: Array<{ severity: string; rule: string; description: string; line: number }>; report: string; ts: number };

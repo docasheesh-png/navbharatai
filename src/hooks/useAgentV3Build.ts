@@ -200,6 +200,9 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     setRunning(false);
     setServerBuildRunning(false);
+    // Clear any "a build is already running" error — Stop is exactly its resolution, so the banner must
+    // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
+    setError(null);
     // Truly stop the SERVER build (not just this local stream), so it cannot keep
     // running and block the next build.
     fetch('/api/agentv3/stop', {

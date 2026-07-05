@@ -76,3 +76,16 @@ export function reconnectOutcome(input: { ok: boolean; status: number; resultAlr
   if (input.status === 404) return input.resultAlreadySeen ? 'gone-silent' : 'gone-notice';
   return 'error';
 }
+
+// ── "A build is already running" error class ────────────────────────────────────────────────────
+//
+// ROOT CAUSE it fixes (2026-07-05, admin's IMG_5718 "100 baar fix kiya, theek nahi hua"): when the
+// account's build lock is held by another/stuck build, the /chat POST 409s with a "a build is
+// (already|still) running" message. The generic error banner offered "Fix with AI", which SENDS A NEW
+// MESSAGE — re-hitting the very same lock → the same 409 → an infinite loop. "Fix with AI" cannot fix
+// a lock; only STOP frees it (or CONNECT/resume attaches to the running build). So for THIS error class
+// the UI must offer Stop / Connect, never "Fix with AI". Pure + exported for unit testing.
+export function isBuildBusyError(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /\ba build is (?:already|still) running\b/i.test(message);
+}

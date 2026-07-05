@@ -53,7 +53,7 @@
 | P0 | Core-Law Violations | Breaks your own permanent rules | ✅ Complete | 100% |
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
-| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
+| P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | ~90% (P3.1 App.tsx split IN PROGRESS: 6,596 → ~3,414 lines, ~48% down via 6 hooks + dead-code removal; P3.2-P3.4 done) |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | ✅ Complete | 100% (P4.1 CQRS done 2026-07-05; P4.2 + P4.3 + P4.4 done) |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | ✅ Complete | 100% (P5.1 assessed/kept, P5.3 done, P5.2 assessed 2026-07-05 — isolation already achieved, risky migration declined) |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |

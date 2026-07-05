@@ -9844,3 +9844,15 @@ multi-package monorepo, if ever wanted, needs admin sign-off on the pipeline cha
 Shipped instead a zero-risk guardrail: added remote-keyboard to the exclude of tsconfig.json +
 tsconfig.server.json so a future glob widening can never pull the Android/PC-server tree into the web
 typecheck. P5 is now 100%. Gate: frontend tsc 0, server tsc 0, vitest PASS.
+
+## 2026-07-05 — P3.1 App.tsx split #9: extract useGitHubConnect (OAuth connect/fetch)
+
+Slice #9. Moved the GitHub OAuth slice into src/hooks/useGitHubConnect.ts: connectGitHub (start the OAuth
+handshake + redirect), disconnectGitHub (clear the local connection), fetchGitHubUser (load authed user
+then repos), fetchUserRepos. Two byte-identical blocks. 9 deps injected + clearGithubConnection exported
+from App. Hook placed with the other hook calls so the message-listener/callback effects below resolve
+the returned handlers; App destructures the same identifiers so all JSX/effect call sites are unchanged.
+tsc passed first try. handleGHConfirmPush (chat-coupled) intentionally left in App.
+
+App.tsx: 3,521 -> 3,414 lines (-107). Running total: 6,596 -> 3,414 (~48% down). Also refreshed the
+stale P3 tracker row. Gate: frontend tsc 0, vitest 4955/4955 PASS, vite build PASS.

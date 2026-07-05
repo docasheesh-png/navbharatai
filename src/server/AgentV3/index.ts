@@ -66,6 +66,8 @@ export type { PrCapableClient, PrFlowResult, PrFlowOptions, RevertPlan } from '.
 export { UserGitHubClient } from './UserGitHubClient';
 export { parseGitHubRepo, resolveStorageTarget, ownRepoStorageEnabled, WORK_BRANCH } from './GitStorageTarget';
 export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetInput } from './GitStorageTarget';
+export { perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser, acquireDecision, MAX_CONCURRENT_BUILDS_DEFAULT } from './BuildConcurrency';
+export type { AcquireResult } from './BuildConcurrency';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

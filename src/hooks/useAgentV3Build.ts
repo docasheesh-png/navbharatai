@@ -208,11 +208,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
     setError(null);
     // Truly stop the SERVER build (not just this local stream), so it cannot keep
-    // running and block the next build.
+    // running and block the next build. Send `workspaceId` so that under per-workspace locking (FIX #3)
+    // Stop targets THIS app's build, not the whole account (the server ignores it when the flag is off).
     fetch('/api/agentv3/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current }),
+      body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current }),
     }).catch(() => { /* best-effort */ });
   }, []);
 

@@ -9763,3 +9763,31 @@ Two changes bundled (one merge cycle):
 
 App.tsx: 3,695 -> 3,521 lines (-174). Running total: 6,596 -> 3,521 (~47% down; target ~2,000-2,500).
 Gate: frontend tsc 0, vitest PASS, vite build PASS.
+## 2026-07-05 — Concurrency FIX #3: per-workspace build lock + per-account cap (flag-gated OFF)
+
+The foundation of the admin's concurrency plan. TODAY the build lock/registry key is per-ACCOUNT
+(`userId ?? 'anon'`) → one build at a time per account (blocks 2 apps at once / roadmap-in-one-chat +
+edit-elsewhere; and every anon user shared the single 'anon' lock). FIX #3 keys by WORKSPACE when
+enabled → different apps build concurrently, the SAME app stays mutually exclusive (no file clobbering),
+with a per-account cap to bound sandbox cost.
+
+- New pure `BuildConcurrency.ts` (fully tested, 13 cases): `perWorkspaceLockEnabled()`
+  (AGENTV3_PER_WORKSPACE_LOCK, default OFF), `maxConcurrentBuilds()` (AGENTV3_MAX_CONCURRENT_BUILDS,
+  default 3), `buildLockKey(userId, workspaceId, perWorkspace)` (account key when off — byte-identical —
+  else the workspaceId, falling back to the account key when no stable id), `countActiveBuildsForUser`,
+  `acquireDecision` (same-workspace-busy vs account-cap vs ok; flag-off NEVER consults the cap).
+- Route wiring (agentv3.ts), all via buildLockKey so flag-OFF == today's keys exactly:
+  • /chat acquire: key by workspace (stable sessionId only) + a per-account cap check (429 with the
+    honest count when at the cap); 409 copy is app-scoped under per-workspace.
+  • RunningBuild gains `userId` (for the cap count); `key` stays the ACCOUNT key for the cross-device
+    LiveChannel (readers already filter by workspaceId), registry Map keyed by the lock key.
+  • /stop now targets THIS app's build (client sends workspaceId); /attach looks the build up by the
+    requested workspace directly; /status scopes buildRunning/here per-workspace.
+- Client: hook stop() sends workspaceId (server ignores it when the flag is off).
+- KNOWN flag-ON follow-up (documented, safe): /live's same-instance fast path still keys by account —
+  it degrades to the cross-instance channel, never a build break. Full /live rekey is a later slice.
+
+SAFETY: default OFF → production byte-identical (every key resolves to the account key, cap not
+consulted). When ON: different apps concurrent (cap 3), same app mutually exclusive, and the anon
+shared-lock collision is gone (anon still shares, but real users key by their own workspace).
+Gate: frontend tsc 0, server tsc 0, vitest 4924/4924 PASS, build PASS, boot PASS.

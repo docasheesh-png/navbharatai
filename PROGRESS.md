@@ -8521,3 +8521,34 @@ best-effort write didn't land (very likely on an 18-min/killed/"Load failed" bui
 These are the highest-value targets to make big complex apps struggle as little as small ones.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4716/4716 PASS, boot:check PASS.
+
+## 2026-07-05 — v3.0 connection resilience: a tab switch no longer kills the live build (admin's 3 asks)
+
+Admin (IMG_5711 build report + follow-up): (1) "Load failed" should never happen — even on a tab
+change the build should keep running in the background; (2) NavBharatAI's tab bar can have v3.0 AND
+Free open at once (4+ tabs) — that must not fail the connection; (3) if a drop DOES happen, a
+"reconnect" must resume from where it left off, never restart from 0.
+
+ROOT CAUSE (unified for asks 1 & 2): the v3.0 surface rendered ONLY on `activeView === 'nbi_pro_chat'`
+(App.tsx). NavBharatAI has a tab bar (openTabs) where several surfaces can be open, but only the ACTIVE
+one is mounted — so the instant v3.0 stopped being the active tab (switch tabs, or click Free while a
+build runs), ProV3Surface UNMOUNTED and tore down the live NDJSON stream mid-build → the "Load failed"
+on a tab switch, and the "both open → connection fails" report. (The server build survives via
+runningBuilds and auto-resume re-attaches on return, but that teardown→re-attach churn is what surfaced
+as failure.)
+
+FIX (PR pending): keep ProV3Surface MOUNTED while a build is running, regardless of the active tab, so
+the stream keeps flowing invisibly in the background across tab switches and multi-tab usage.
+- NEW pure `src/components/agentv3/v3SurfaceMount.ts` — `shouldRenderV3Surface(activeView, running)`
+  (render when active OR a build is running) + `v3SurfaceDisplayClass(activeView)` (`contents` when
+  active = a layout NO-OP identical to before; `hidden`/display:none when kept alive in the background).
+- App.tsx: the v3.0 render block now uses these + a keep-alive wrapper div. Guarded by `v3Preview.running`
+  (already reported via onPreviewState) → zero idle overhead: once the build ends it unmounts as before.
+- +6 unit tests (tests/v3SurfaceMount.test.ts).
+
+Ask 3 was ALREADY handled by prior merged work (#940 suppress cosmetic error after result, #957 honest
+reconnect outcome, and the resume()/attach REPLAY buffer): the Reconnect/Resume path calls resume()
+(re-attach + replay from where it dropped), never start() from 0, and an auto-resume effect fires it
+without a click. The keep-alive fix above makes a drop far rarer in the first place. Not re-touched.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4721/4721 PASS, frontend+server build PASS.

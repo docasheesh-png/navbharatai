@@ -601,3 +601,130 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     expect(done?.readiness?.blockers?.length).toBeGreaterThan(0);
   });
 });
+
+// ── E4 (audit Batch 3): per-turn / per-tool hard timeouts ──────────────────────────────────────
+// A hung provider call must NOT block the build until the 30-min watchdog (which is only checked
+// BETWEEN turns and so never even runs while a single turn hangs). Same for a stuck tool.
+describe('AgentRunner — E4 hard timeouts (no hung call blocks the build)', () => {
+  const NEVER: Promise<never> = new Promise(() => { /* never settles */ });
+  const mkTurn = (p: Partial<import('./ClaudeClient').TurnResult>): import('./ClaudeClient').TurnResult => ({
+    text: '', toolUses: [], stopReason: 'end_turn',
+    usage: { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+    rawContent: [], ...p,
+  });
+
+  /** A TurnRunner that plays a scripted list of per-turn thunks (each gets the live params). */
+  class ProgrammableRunner implements import('./ClaudeClient').TurnRunner {
+    calls: import('./ClaudeClient').RunTurnParams[] = [];
+    private i = 0;
+    constructor(private turns: Array<(p: import('./ClaudeClient').RunTurnParams) => Promise<import('./ClaudeClient').TurnResult>>) {}
+    async runTurn(p: import('./ClaudeClient').RunTurnParams): Promise<import('./ClaudeClient').TurnResult> {
+      this.calls.push(p);
+      const fn = this.turns[this.i++] ?? (() => Promise.resolve(mkTurn({ text: 'done' })));
+      return fn(p);
+    }
+  }
+
+  function e4Runner(
+    turns: Array<(p: import('./ClaudeClient').RunTurnParams) => Promise<import('./ClaudeClient').TurnResult>>,
+    opts: Partial<AgentRunnerOptions> & { actuator?: ActuatorPort } = {},
+  ) {
+    const actuator = opts.actuator ?? new FakeActuator();
+    const stream = new AgentEventStream();
+    const events: AgentEvent[] = [];
+    stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const dispatcher = new ToolDispatcher(actuator, 'ws-1', state, stream);
+    const runner = new AgentRunner({
+      client: new ProgrammableRunner(turns),
+      dispatcher, state, events: stream,
+      model: 'test', system: 'sys', tools: defaultToolCatalog(),
+      ...opts,
+    });
+    return { runner, actuator, events };
+  }
+
+  it('a hung MODEL turn with nothing built stops honestly (ok:false), it does not block forever', async () => {
+    const { runner } = e4Runner([() => NEVER], { turnTimeoutMs: 40 });
+    const result = await runner.run('build something');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toMatch(/stalled|didn't respond|did not respond/i);
+    expect(result.steps).toBe(1);
+  });
+
+  it('a hung MODEL turn AFTER files were written stops as ok:true (work saved, resumable)', async () => {
+    const wrote = mkTurn({
+      stopReason: 'tool_use',
+      toolUses: [{ id: 'w1', name: 'write_file', input: { path: 'index.html', content: '<h1>hi</h1>' } }],
+      rawContent: [{ type: 'tool_use', id: 'w1', name: 'write_file', input: { path: 'index.html', content: '<h1>hi</h1>' } }],
+      usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    const { runner, actuator } = e4Runner([() => Promise.resolve(wrote), () => NEVER], { turnTimeoutMs: 40, expectsArtifacts: true });
+    const result = await runner.run('build a page');
+    expect(actuator.files.get('index.html')).toBe('<h1>hi</h1>'); // the real work survived
+    expect(result.ok).toBe(true);
+    expect(result.summary).toMatch(/saved/i);
+  });
+
+  it('a hung TOOL yields an is_error result to the model (build survives), then ends honestly', async () => {
+    // A sandbox command that never returns → dispatch hangs → per-tool cap must fire.
+    class HangingActuator extends FakeActuator {
+      async runCommand() { return NEVER as unknown as { exitCode: number; stdout: string; stderr: string }; }
+    }
+    const bashTurn = mkTurn({
+      stopReason: 'tool_use',
+      toolUses: [{ id: 'b1', name: 'bash', input: { command: 'echo hi' } }],
+      rawContent: [{ type: 'tool_use', id: 'b1', name: 'bash', input: { command: 'echo hi' } }],
+      usage: { inputTokens: 5, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    let toolResultSeen: string | undefined;
+    const turn2 = (p: import('./ClaudeClient').RunTurnParams) => {
+      // The tool_result fed back on turn 2 must be the honest timeout is_error, not a hang.
+      const last = (p.messages as Array<{ role: string; content: unknown }>).at(-1);
+      const blocks = Array.isArray(last?.content) ? last!.content as Array<Record<string, unknown>> : [];
+      const tr = blocks.find((b) => b.type === 'tool_result');
+      toolResultSeen = typeof tr?.content === 'string' ? tr.content : JSON.stringify(tr?.content);
+      return Promise.resolve(mkTurn({ text: 'ok, I will try a smaller step' }));
+    };
+    const { runner } = e4Runner([() => Promise.resolve(bashTurn), turn2], { toolTimeoutMs: 40, actuator: new HangingActuator() });
+    const result = await runner.run('run a command');
+    expect(toolResultSeen).toMatch(/did not finish|skipped/i);
+    expect(result.steps).toBe(2); // it did NOT hang on the tool — it reached turn 2 and finished
+  });
+
+  it('the `task` sub-agent tool is EXEMPT from the per-tool cap (its own watchdog bounds it)', async () => {
+    // spawnSubAgent resolves AFTER the tiny tool cap would have fired — proving `task` is not capped.
+    const CAP = 20;
+    const spawn = async () => {
+      await new Promise((r) => setTimeout(r, CAP * 4)); // 4× the cap — a short cap would have killed it
+      return { ok: true, summary: 'sub-agent finished the work' };
+    };
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const dispatcher = new ToolDispatcher(new FakeActuator(), 'ws-1', state, stream, spawn);
+    const taskTurn = mkTurn({
+      stopReason: 'tool_use',
+      toolUses: [{ id: 'k1', name: 'task', input: { role: 'frontend', instruction: 'build the UI' } }],
+      rawContent: [{ type: 'tool_use', id: 'k1', name: 'task', input: { role: 'frontend', instruction: 'build the UI' } }],
+      usage: { inputTokens: 5, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    let taskResultSeen: string | undefined;
+    const turn2 = (p: import('./ClaudeClient').RunTurnParams) => {
+      const last = (p.messages as Array<{ role: string; content: unknown }>).at(-1);
+      const blocks = Array.isArray(last?.content) ? last!.content as Array<Record<string, unknown>> : [];
+      const tr = blocks.find((b) => b.type === 'tool_result');
+      taskResultSeen = typeof tr?.content === 'string' ? tr.content : JSON.stringify(tr?.content);
+      return Promise.resolve(mkTurn({ text: 'great, continuing' }));
+    };
+    const runner = new AgentRunner({
+      client: new ProgrammableRunner([() => Promise.resolve(taskTurn), turn2]),
+      dispatcher, state, events: stream, model: 'test', system: 'sys', tools: defaultToolCatalog(),
+      toolTimeoutMs: CAP,
+    });
+    const result = await runner.run('delegate to a sub-agent');
+    // The sub-agent's real result flowed through — NOT a "did not finish" timeout error.
+    expect(taskResultSeen).toMatch(/sub-agent finished/i);
+    expect(taskResultSeen).not.toMatch(/did not finish/i);
+    expect(result.steps).toBe(2);
+  });
+});

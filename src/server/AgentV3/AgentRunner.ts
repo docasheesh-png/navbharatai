@@ -6,6 +6,7 @@ import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { compactMessagesForPersist } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
+import { withTimeout } from './asyncUtils';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -52,6 +53,22 @@ export interface AgentRunnerOptions {
    * 20-30 minutes (e.g. when a broken preview can't be verified). 0/undefined = no time cap.
    */
   maxBuildMs?: number;
+  /**
+   * E4 — per-model-turn hard timeout (ms). The wall-clock watchdog above is only checked BETWEEN
+   * turns, so a single provider call that hangs (connection open, no bytes, no error) would block the
+   * whole build indefinitely — the watchdog never even gets to run. This caps every `runTurn` so a
+   * stalled provider stops the build honestly (respecting whatever was already built) instead of
+   * hanging. Default 8 min — comfortably above any legitimate single turn. 0/undefined disables it.
+   */
+  turnTimeoutMs?: number;
+  /**
+   * E4 — per-tool hard timeout (ms). A single stuck tool call (a hung sandbox command, a stalled
+   * provider-backed review) can otherwise block a turn forever. On timeout the tool returns an honest
+   * is_error result to the model (never a throw) so the build survives and can route around it. The
+   * `task` sub-agent tool is EXEMPT — it is self-bounded by its own runner's watchdog/budget, and a
+   * cap here would wrongly kill a legitimate long sub-agent build. Default 10 min. 0/undefined disables it.
+   */
+  toolTimeoutMs?: number;
   /** Which agent this loop represents (for event attribution). Default 'architect'. */
   agentRole?: AgentRole;
   /**
@@ -204,6 +221,10 @@ export class AgentRunner {
     const expectsArtifacts = this.opts.expectsArtifacts === true;
     const readinessGate = this.opts.readinessGate === true;
     const maxBuildMs = this.opts.maxBuildMs;
+    // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
+    // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
+    const turnTimeoutMs = this.opts.turnTimeoutMs ?? 8 * 60_000;
+    const toolTimeoutMs = this.opts.toolTimeoutMs ?? 10 * 60_000;
     const buildStartMs = Date.now();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
@@ -343,7 +364,10 @@ export class AgentRunner {
         const llmStartedAt = Date.now();
         let turn: TurnResult;
         try {
-          turn = await client.runTurn({
+          // E4 — cap the model call so a hung provider (socket open, no bytes, no error) can't block
+          // the whole build. The wall-clock watchdog only runs BETWEEN turns, so without this a single
+          // stalled turn would never return control to it.
+          const turnCall = client.runTurn({
             model,
             system,
             messages,
@@ -356,6 +380,9 @@ export class AgentRunner {
             onThinking: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'thinking', delta, ts: Date.now() }),
           });
+          turn = turnTimeoutMs > 0
+            ? await withTimeout(turnCall, turnTimeoutMs, `model turn ${steps}`)
+            : await turnCall;
         } catch (err) {
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {
@@ -366,6 +393,20 @@ export class AgentRunner {
               ok: false, error: err instanceof Error ? err.message : String(err),
             });
           } catch { /* diagnostics capture is best-effort */ }
+          // E4 — a per-turn TIMEOUT is a stalled provider, not a code error: stop honestly (respecting
+          // whatever was already built, exactly like the wall-clock watchdog) instead of blocking or
+          // reporting a hard crash. Any other error keeps the existing propagate → outer-catch path.
+          const isTurnTimeout = err instanceof Error && /timed out after/.test(err.message);
+          if (isTurnTimeout) {
+            const minutes = Math.max(1, Math.round(turnTimeoutMs / 60000));
+            const builtSomething = totalToolUses > 0;
+            const summary = builtSomething
+              ? `A model response stalled and was stopped after about ${minutes} min. Your files so far are saved — send another message and I'll continue from here.`
+              : `The model didn't respond in time (stalled after about ${minutes} min). Nothing was lost — please try again.`;
+            await persist(builtSomething ? 'complete' : 'error');
+            events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
+            return { ok: builtSomething, summary, steps, usage, billedUsd: billed() };
+          }
           throw err;
         }
         // #4 — capture the successful model turn (finish reason 'max_tokens' = truncated output).
@@ -472,15 +513,36 @@ export class AgentRunner {
             : r.content,
           is_error: r.is_error,
         });
+        // E4 — dispatch every tool under a hard timeout so one stuck call can't block the turn forever.
+        // The `task` sub-agent tool is EXEMPT: it runs a whole nested build bounded by its OWN runner
+        // watchdog/budget, so a cap here would wrongly kill a legitimate long sub-agent. On timeout the
+        // tool yields an honest is_error result (never a throw) so the model can retry or route around it.
+        const dispatchWithBudget = async (tu: ToolUse) => {
+          if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
+          try {
+            return await withTimeout(dispatcher.dispatch(tu, agentRole), toolTimeoutMs, `tool ${tu.name}`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const timedOut = /timed out after/.test(msg);
+            const minutes = Math.max(1, Math.round(toolTimeoutMs / 60000));
+            return {
+              tool_use_id: tu.id,
+              content: timedOut
+                ? `Tool "${tu.name}" did not finish within about ${minutes} min and was skipped so the build could keep moving. Try a smaller step or a different approach.`
+                : `Tool "${tu.name}" failed: ${msg}`,
+              is_error: true,
+            };
+          }
+        };
         const serialIdx: number[] = [];
         const parallelIdx: number[] = [];
         turn.toolUses.forEach((tu, i) => (isParallelSafeToolUse(tu) ? parallelIdx : serialIdx).push(i));
         for (const i of serialIdx) {
-          resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
+          resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
         }
         if (parallelIdx.length > 0) {
           await mapWithConcurrency(parallelIdx, toolConcurrency, async (i) => {
-            resultBlocks[i] = toBlock(await dispatcher.dispatch(turn.toolUses[i], agentRole));
+            resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
           });
         }
         messages.push({ role: 'user', content: resultBlocks });

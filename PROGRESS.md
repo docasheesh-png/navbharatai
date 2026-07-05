@@ -8968,7 +8968,7 @@ E1. Readiness gate re-scans the whole project serially at build END (up to ~45s 
 E2. ✅ DONE (Batch 3) write_files_batch writes files SERIALLY (N × E2B round-trips) → bounded-concurrency like fastWrite. [M]
 E3. Empty-build fallback = full Sonnet rebuild (escalation repair path dormant by default) → targeted
    repair on existing files / default escalation on. [M]
-E4. No per-turn/per-tool timeout budget (one hung provider call blocks the build until the 30-min
+E4. ✅ DONE (Batch 3) No per-turn/per-tool timeout budget (one hung provider call blocks the build until the 30-min
    watchdog) → withTimeout per turn + per-tool budget. [M]
 E5. Post-build verification (gate → heal loop → reviewer) fully serial inside the deadline → parallelize
    gate+reviewer, hard-budget the heal pass. [M]
@@ -9052,3 +9052,34 @@ abort-on-conflict + retry is a documented Firestore guarantee that can't be exer
 strictly safer than the old full-overwrite. Same-class sibling — the COUPON credit (payment.ts
 getDoc→updateDoc) — is the same race and still open; recorded for a follow-up (awaiting admin: fix in a
 separate PR).
+
+## 2026-07-05 — v3.0 audit Batch 3 (backend reliability): per-turn + per-tool hard timeouts (E4)
+
+Ships E4 from the 30-gap audit ledger (AgentRunner.ts).
+- ✅ E4: a hung provider call could block the whole build INDEFINITELY. Root cause: the wall-clock
+  watchdog is only checked BETWEEN turns, so a single `client.runTurn` that stalls (socket open, no
+  bytes, no error) never returns control to the watchdog — the "one hung provider call blocks the
+  build until the 30-min watchdog" report, except it was actually worse than 30 min (the watchdog
+  never even ran). Same exposure for a stuck tool call (a hung sandbox command, a stalled
+  provider-backed review).
+  - Per-MODEL-turn cap: `client.runTurn` is now wrapped in `withTimeout` (default 8 min, configurable
+    via `turnTimeoutMs`, 0 disables). On timeout the build stops HONESTLY respecting whatever was
+    already built — exactly like the wall-clock watchdog: files written on prior turns → ok:true
+    "saved, send another message to continue"; nothing built yet → ok:false "didn't respond, try
+    again". A NON-timeout provider error keeps the existing propagate → outer-catch path unchanged.
+  - Per-TOOL cap: every tool dispatch is wrapped in `withTimeout` (default 10 min, `toolTimeoutMs`).
+    On timeout the tool returns an honest is_error result to the model (NEVER a throw) so the build
+    survives and can route around the stuck step. The `task` sub-agent tool is EXEMPT — it runs a
+    whole nested build bounded by its OWN runner watchdog/budget, so a cap here would wrongly kill a
+    legitimate long sub-agent. (Sibling check: `task` is the only self-bounded long-runner in the
+    dispatch path; bash/review/preview tools are all short and correctly capped.)
+  - Defaults are active for every build with no route change needed (generous ceilings no legitimate
+    turn/tool reaches); callers can tune via the two new options.
+  - Regression tests (AgentRunner.test.ts, 4 new): a hung model turn with nothing built → ok:false and
+    RETURNS (no hang); a hung model turn after a file was written → ok:true with the file preserved; a
+    hung tool → honest is_error fed back and the loop reaches the next turn; the `task` tool is NOT
+    capped (its sub-agent result flows through even when it finishes 4× past the tiny test cap).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4786/4786 PASS, boot:check PASS. Ledger: E4 → ✅.
+Batch 3 (E2 + E4) complete. Next: Batch 4 — U1 (preview auto-refresh on file_changed/diff) +
+U2 (mobile: keep progress strip visible when preview open).

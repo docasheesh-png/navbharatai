@@ -60,4 +60,24 @@ describe('AIRouter — empty reply is not success', () => {
     // No provider answered → not reported as a provider success.
     expect(telemetry.success).toBe(false);
   });
+
+  it('does NOT re-invoke a provider in pass 2 that already failed in pass 1', async () => {
+    // Both providers throw. Old behaviour: 2 passes × 2 providers = 4 calls (2 each). Correct: each
+    // provider that was actually attempted-and-failed is tried exactly ONCE this request.
+    const geminiSpy = vi.fn();
+    const vertexSpy = vi.fn();
+    const failing = (name: AIProvider['name'], priority: number, spy: () => void): AIProvider => ({
+      name, priority,
+      healthCheck: async () => true,
+      execute: async () => { spy(); throw new Error(`${name} down`); },
+    });
+    const router = new AIRouter('test-nodouble');
+    router.registerProvider(failing('GEMINI', 1, geminiSpy));
+    router.registerProvider(failing('VERTEX', 2, vertexSpy));
+
+    const { telemetry } = await router.route('hi');
+    expect(telemetry.success).toBe(false);     // all failed → graceful message
+    expect(geminiSpy).toHaveBeenCalledTimes(1); // NOT re-run in pass 2
+    expect(vertexSpy).toHaveBeenCalledTimes(1);
+  });
 });

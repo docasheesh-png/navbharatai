@@ -65,25 +65,26 @@ describe('AIRouter', () => {
       expect(telemetry.provider).toBe('GROK');
     });
 
-    it('skips a provider on cooldown in pass 1 and retries it in pass 2', async () => {
+    it('calls a failed provider only ONCE per request, but retries it (pass 2) on a later request', async () => {
       const router = new AIRouterClass();
       const execute = vi.fn()
-        .mockRejectedValueOnce(new Error('boom'))
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValueOnce({ content: 'recovered', latencyMs: 1, provider: 'GEMINI', model: 'test' });
       const provider = makeProvider('GEMINI', 1, { execute });
       router.registerProvider(provider);
 
-      // First call: pass 1 fails, sets cooldown; pass 2 (ignores cooldown) fails again.
+      // Request 1: pass 1 calls it → fails → cooldown. Pass 2 must NOT re-invoke the SAME provider it
+      // just tried and failed this request (that only doubles latency + spend on a deterministic
+      // failure), so exactly ONE execute call this request.
       const first = await router.route('hello');
       expect(first.telemetry.success).toBe(false);
-      expect(execute).toHaveBeenCalledTimes(2);
+      expect(execute).toHaveBeenCalledTimes(1);
 
-      // Second call: pass 1 must skip (still on cooldown) — no extra execute call —
-      // then pass 2 retries regardless of cooldown and succeeds.
+      // Request 2: the provider is still on cooldown → pass 1 skips it (no call) → pass 2 retries
+      // regardless of cooldown (it was NOT attempted this request) and it recovers. One more call.
       const second = await router.route('hello');
       expect(second.response.content).toBe('recovered');
-      expect(execute).toHaveBeenCalledTimes(3);
+      expect(execute).toHaveBeenCalledTimes(2);
     });
 
     it.each([

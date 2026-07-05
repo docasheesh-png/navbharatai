@@ -17,15 +17,74 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 
+/**
+ * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
+ * admin SDK can never mis-detect the project it verifies ID tokens against (a wrong/auto-detected
+ * project makes `verifyIdToken` reject every genuinely-valid token → the user silently becomes 'anon').
+ * Falls back to `{}` (today's auto-detect) when no project env is set, so this is purely additive.
+ */
+export function adminAppOptions(env: NodeJS.ProcessEnv = process.env): { projectId?: string } {
+  const projectId = (env.FIREBASE_PROJECT_ID || env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT || '').trim();
+  return projectId ? { projectId } : {};
+}
+
 async function getAdminAuth(): Promise<import('firebase-admin/auth').Auth | null> {
   if (process.env.VITEST) return null;
   try {
     const admin = await import('firebase-admin');
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
+    if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
     return admin.auth();
   } catch {
     return null;
   }
+}
+
+/**
+ * Why a token verification produced (or failed to produce) an identity — so an 'anon' fallback on the
+ * build path is never SILENT. `no-bearer` = the request carried no Bearer token; `admin-unavailable` =
+ * the firebase-admin SDK could not initialize (missing creds / cold-start); `verify-error` =
+ * `verifyIdToken` threw (expired/invalid token, OR — the systematic case — the server cannot reach
+ * Google's signing certs, which rejects EVERY real token). `ok` = a real verified identity.
+ */
+export type IdentityReason = 'ok' | 'no-bearer' | 'admin-unavailable' | 'verify-error';
+export interface IdentityWithReason {
+  identity: { uid: string; email: string | null } | null;
+  reason: IdentityReason;
+  /** The thrown error's message when reason === 'verify-error' (for honest server-side diagnostics). */
+  detail?: string;
+}
+
+/** Minimal shape of the admin auth we depend on — injectable so this is unit-testable without GCP. */
+export interface VerifierAuth { verifyIdToken(token: string): Promise<{ uid: string; email?: string | null }>; }
+
+/**
+ * Testable CORE of identity verification with an honest failure reason. Deps (the Authorization header
+ * + an auth-provider factory) are injected so a fake can exercise every branch. On a transient throw it
+ * RETRIES ONCE (a cold-start cert-fetch race is the common false negative), then reports `verify-error`.
+ */
+export async function verifyIdentityWithReason(
+  authHeader: string | undefined,
+  getAuth: () => Promise<VerifierAuth | null>,
+): Promise<IdentityWithReason> {
+  if (!authHeader?.startsWith('Bearer ')) return { identity: null, reason: 'no-bearer' };
+  const token = authHeader.slice(7);
+  const auth = await getAuth();
+  if (!auth) return { identity: null, reason: 'admin-unavailable' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const decoded = await auth.verifyIdToken(token);
+      return { identity: { uid: decoded.uid, email: typeof decoded.email === 'string' ? decoded.email : null }, reason: 'ok' };
+    } catch (err) {
+      if (attempt === 1) return { identity: null, reason: 'verify-error', detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { identity: null, reason: 'verify-error' };
+}
+
+/** Request-level identity + honest reason (build path uses this to log an 'anon' fallback's true cause). */
+export async function verifyFirebaseIdentityDiag(req: Request): Promise<IdentityWithReason> {
+  if (process.env.VITEST) return { identity: null, reason: 'no-bearer' };
+  return verifyIdentityWithReason(req.headers.authorization, getAdminAuth as unknown as () => Promise<VerifierAuth | null>);
 }
 
 export async function verifyFirebaseToken(req: Request): Promise<string | null> {
@@ -155,7 +214,7 @@ async function getAdminFirestore(): Promise<import('firebase-admin/firestore').F
   if (process.env.VITEST) return null;
   try {
     const admin = await import('firebase-admin');
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
+    if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
     return admin.firestore();
   } catch {
     return null;

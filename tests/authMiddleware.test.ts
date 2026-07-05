@@ -4,7 +4,7 @@
  * no-auth fast-paths and basic input validation.
  */
 import { describe, it, expect } from 'vitest';
-import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, rateLimiter } from '../src/server/lib/authMiddleware';
+import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
 import type { Request, Response, NextFunction } from 'express';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -43,6 +43,58 @@ describe('verifyFirebaseToken', () => {
     const uid = await verifyFirebaseToken(req);
     // Firebase admin is null in VITEST → returns null regardless of token
     expect(uid).toBeNull();
+  });
+});
+
+// ── verifyIdentityWithReason (honest "why is this build anon?" — admin investigation) ────────────
+
+describe('verifyIdentityWithReason', () => {
+  const okAuth: VerifierAuth = { async verifyIdToken() { return { uid: 'u1', email: 'a@b.com' }; } };
+
+  it("verifies a real token → identity + reason 'ok'", async () => {
+    const r = await verifyIdentityWithReason('Bearer good', async () => okAuth);
+    expect(r).toEqual({ identity: { uid: 'u1', email: 'a@b.com' }, reason: 'ok' });
+  });
+
+  it("no Bearer token → reason 'no-bearer' (never guesses an identity)", async () => {
+    expect((await verifyIdentityWithReason(undefined, async () => okAuth)).reason).toBe('no-bearer');
+    expect((await verifyIdentityWithReason('Basic x', async () => okAuth)).reason).toBe('no-bearer');
+  });
+
+  it("admin SDK unavailable → reason 'admin-unavailable'", async () => {
+    const r = await verifyIdentityWithReason('Bearer good', async () => null);
+    expect(r).toEqual({ identity: null, reason: 'admin-unavailable' });
+  });
+
+  it("verifyIdToken keeps throwing → reason 'verify-error' with the detail (the systematic cert/network case)", async () => {
+    let calls = 0;
+    const throwing: VerifierAuth = { async verifyIdToken() { calls++; throw new Error('Failed to fetch public keys'); } };
+    const r = await verifyIdentityWithReason('Bearer good', async () => throwing);
+    expect(r.reason).toBe('verify-error');
+    expect(r.identity).toBeNull();
+    expect(r.detail).toMatch(/public keys/i);
+    expect(calls).toBe(2); // retried once (cold-start race), then reported
+  });
+
+  it('retries ONCE and succeeds on the second attempt (a transient cold-start hiccup)', async () => {
+    let calls = 0;
+    const flaky: VerifierAuth = { async verifyIdToken() { calls++; if (calls === 1) throw new Error('transient'); return { uid: 'u2', email: null }; } };
+    const r = await verifyIdentityWithReason('Bearer good', async () => flaky);
+    expect(r).toEqual({ identity: { uid: 'u2', email: null }, reason: 'ok' });
+    expect(calls).toBe(2);
+  });
+});
+
+describe('adminAppOptions (explicit projectId hardening)', () => {
+  it('passes an explicit projectId when a project env is set (deterministic verification)', () => {
+    expect(adminAppOptions({ FIREBASE_PROJECT_ID: 'proj-a' } as NodeJS.ProcessEnv)).toEqual({ projectId: 'proj-a' });
+    expect(adminAppOptions({ GOOGLE_CLOUD_PROJECT: 'proj-b' } as NodeJS.ProcessEnv)).toEqual({ projectId: 'proj-b' });
+    expect(adminAppOptions({ GCLOUD_PROJECT: 'proj-c' } as NodeJS.ProcessEnv)).toEqual({ projectId: 'proj-c' });
+  });
+
+  it('falls back to {} (today\'s auto-detect) when no project env is set — purely additive', () => {
+    expect(adminAppOptions({} as NodeJS.ProcessEnv)).toEqual({});
+    expect(adminAppOptions({ FIREBASE_PROJECT_ID: '  ' } as NodeJS.ProcessEnv)).toEqual({});
   });
 });
 

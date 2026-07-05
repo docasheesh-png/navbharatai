@@ -9733,3 +9733,18 @@ whole-file grep before removal.
 
 App.tsx: 4,139 -> 3,868 lines (-271). Running total: 6,596 -> 3,868 (~41% down; target ~2,000-2,500).
 Gate: frontend tsc 0, vitest PASS, vite build PASS.
+
+## 2026-07-05 — P3.1 App.tsx split #7: dead-code sweep — delete 9 orphaned functions
+
+A whole-file sweep for component-scope functions with a single reference (definition only) found NINE
+dead functions — all orphaned when their UI moved into child components (AppModals/ViewPanels/etc.) or
+when the dead Pro v2.0 engine was removed (which had been their only caller):
+  handleRetry, handleFixNow, handleModelSelect, createFile, deployApp, handleDeployApp, handleUndoBuild,
+  saveVersionSnapshot, renderUciControls.
+Each is a component-scope const (cannot be referenced outside App.tsx), so whole-file grep is authoritative;
+each verified at exactly one reference (its own definition) before removal. Deleting never-called functions
+cannot change runtime behavior. (renderUciControls was preserved during the earlier session extraction out
+of caution; the sweep proved it is never called, so it is removed now.)
+
+App.tsx: 3,868 -> 3,695 lines (-173). Running total: 6,596 -> 3,695 (~44% down; target ~2,000-2,500).
+Gate: frontend tsc 0, vitest PASS, vite build PASS.

@@ -9700,3 +9700,20 @@ extraction (not retyped) so it is a pure relocation.
 
 App.tsx: 5,045 -> 4,387 lines (-658). Running total: 6,596 -> 4,387 (~33% down; target ~2,000-2,500).
 Gate: frontend tsc 0, vitest 4888/4888 PASS, vite build PASS.
+
+## 2026-07-05 — P3.1 App.tsx split #5: extract useSessionManager (session restore/mgmt)
+
+Slice #5. Moved the session-restore / session-management cluster into src/hooks/useSessionManager.ts:
+handleRestoreUci (restore a chat by UCI/id — local cache then Firestore, incl. the v3.0-session resume
+branch), handleRestoreByUci (restore from the typed UCI input), deleteSession (delete locally + in
+Firestore), startNewChat. Two non-adjacent byte-identical blocks (renderUciControls, a JSX render helper
+sitting between them, stays in App). Mapped by subagent first.
+
+- Deps injected (17 setters + sessions/user/currentSessionId/resumeUciInputState/mode + toggleTab/
+  addToast/addLog). v3ResumeInFlightRef stays App-owned + injected (shared with the toggleTab new-chat-
+  bump effect — the resume-vs-fresh-open bridge). App returns handleRestoreUci/handleRestoreByUci/
+  deleteSession (the HistoryView/ProChat/Continue-modal consumers) unchanged; startNewChat is hook-
+  internal (deleteSession calls it) so not returned to App.
+- Exported safeLS from App (module-private) so the hook shares it; db/authedHeaders already exported.
+- tsc passed first try. App.tsx: 4,401 -> 4,126 lines (-275). Running total: 6,596 -> 4,126 (~37% down).
+Gate: frontend tsc 0, vitest 4915/4915 PASS, vite build PASS.

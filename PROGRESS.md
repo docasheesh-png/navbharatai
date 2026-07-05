@@ -8612,3 +8612,38 @@ GLM/KIMI failure and escalates to Sonnet — a reviewer/repairer outage never br
 Claude-first builds are untouched.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4733/4733 PASS, boot:check PASS.
+
+## 2026-07-05 — WARM-SANDBOX DURABILITY: dead sandbox is detected + recreated instead of grinding on a corpse (admin "seriously fix")
+
+Root cause (from the "READY · 0/100" autopsy): the E2B sandbox was reaped mid-build (timed out / reclaimed
+between the long multi-session build). `getSandbox()` handed back the CACHED dead reference with no
+liveness check, and the ONLY eviction path (fileOp) fired only on a *timeout* — but a dead sandbox fails
+FAST (every ls/pwd/cat/true/echo ok returned exit -1 in 0s, not a timeout). So the corpse was never
+evicted and 81 commands died against it over 21 min.
+
+FIX:
+- NEW pure `sandboxHealth.ts` — `isDeadSandboxSignal({exitCode,durationMs,stdout,stderr,errorMessage})`
+  + `isDeadSandboxError(msg)`: classify a DEAD sandbox (reaped / not-running / network-gone / 5xx, OR
+  "exit<0 instant with no output" — the exact reported shape) vs. a normal command that ran and failed.
+  +8 unit tests (incl. the exact reported failure shape + the "don't nuke on a real command error" cases).
+- `E2BActuator`:
+  • `runCommand` regular path: on a dead-sandbox signal, EVICT + recreate ONCE + retry — a mid-build
+    death becomes invisible instead of an 81-command corpse grind. A normal nonzero exit never recreates.
+  • `fileOp`: eviction broadened from timeout-only to ANY dead-sandbox signal (the fast-fail case).
+  • Bounded SOURCE-file write-through cache (`_fileCache`, ≤500 files × ≤256 KB, node_modules/dist
+    excluded) populated by `writeFile`; `getSandbox` REPLAYS it onto a freshly-created sandbox so the
+    recreate restores the build's source instead of coming back empty. Cleared on idle-pause.
+
+Answers to the admin's questions (recorded): (1) "prevent death" isn't achievable — every ephemeral cloud
+sandbox (E2B/Docker/Modal/Daytona) has a lifetime/reclaim; the real fix is RESILIENCE (detect→recreate→
+restore), which is what this ships. (2) It does NOT die from heavy use — activity refreshes the timeout;
+it died from timeout/reclaim across the long build. (3) Switching providers won't make it immortal; this
+resilience works for any provider.
+
+HONEST verification note (rule 6): the PURE classifier + the eviction/cache LOGIC are fully CI-verified
+(tsc + 8 unit tests + full suite). The actual E2B reap → recreate → source-replay round-trip can only be
+proven against a LIVE E2B sandbox (there is no E2B in CI), so that end-to-end behaviour is exercised by
+the existing Sandbox.create path but not asserted here — it is the one part that needs a live-sandbox
+smoke test to fully close, and is called out rather than claimed as verified.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4741/4741 PASS, boot:check PASS.

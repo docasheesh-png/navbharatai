@@ -8930,3 +8930,56 @@ DEFERRED (recorded — same class, LATENT, not the confirmed deterministic bug):
 - LOW: WorkspaceFileStore.fileDocId base64url.slice(0,1500) can collide for >1125-byte paths (pathological).
 - LOW/MED: Vercel/Firebase return a success URL before confirming READY (PostDeployLiveness exists — verify
   it's wired into both return paths).
+
+## 2026-07-05 — v3.0 FULL AUDIT (admin mandate: "smooth aur powerful banao") — 30-gap ledger + Batch 1 shipped (PR #979)
+
+Three parallel deep audits (UI/UX, client background, backend engine) against world-class app-builder
+standards (Lovable/v0/Bolt/Cursor). THE ROADMAP (fix one by one, highest leverage first; ✅ = done):
+
+CLIENT BACKGROUND (useAgentV3Build/panel effects):
+✅ B1. Stall watchdog ~2min-slow (100s+30s tick) → now 35s stall + 10s tick (~4× faster auto-reconnect).
+✅ B2. subscribeLive fixed 3s poll forever → exponential backoff 3s→30s, winds down on any non-running.
+✅ B3. No fetch timeouts (hung mobile request stalls recovery itself) → AbortSignal.timeout on probes/poll.
+✅ B4. Watchdog/drop-recovery probes account-wide (could re-attach the WRONG session's build) → scoped to
+   workspaceIdRef (buildRunningHere) end-to-end, resume too.
+B5. Panel history arrays unbounded in long sessions (agentHistory/checkpointHistory; convo re-sorts every
+   render) → cap + memoize. [M]
+B6. subscribeLive re-arms from seq 0 on every visibilitychange; never pauses on hidden. [M]
+B7. No beforeunload guard / composer draft not persisted (typing lost on reload). [S]
+B8. No SW-update "reload for new version" prompt (the stale-bundle class the admin hit). [M]
+B9. Two hand-rolled NDJSON readers + two authJsonHeaders (drift risk) → unify. [M]
+B10. checkRunning/checkpoints effects over-fetch on routine UI changes → debounce. [S]
+
+UI/UX (AgentV3Panel/PreviewSurface):
+U1. Preview never auto-refreshes on file_changed/diff events (stale until manual ↻) — HIGH. [M]
+U2. Mobile: opening preview hides chat + progress entirely (hidden sm:flex) — HIGH. [M]
+U3. Error banners dead-end — add Retry + "Fix with AI" buttons (pattern exists in PreviewSurface). [S]
+U4. No live token/cost ticker during build (billing only at done). [M]
+U5. Preview collapsed by default; never auto-opens when the preview URL arrives. [S]
+U6. No overall build stage/progress arc (only current action + elapsed). [M]
+U7. Composer: no ⏎/⇧⏎ hint, no Cmd+Enter / Esc-stop shortcuts. [S]
+U8. Toolbar clutter: 4 report buttons bury Preview/Deploy CTAs → collapse into one Diagnostics menu. [S]
+U9. Diff tab is a flat colored dump → per-file collapse + add/del badges. [M]
+U10. Three "history" concepts collide (☰ chats / History tab / Report history) + bare spinners. [M]
+
+BACKEND ENGINE (routes/agentv3, AgentRunner, ToolDispatcher, E2BActuator):
+E1. Readiness gate re-scans the whole project serially at build END (up to ~45s dead wall-clock) →
+   incremental per-write analysis + cheap end delta. [L]
+E2. write_files_batch writes files SERIALLY (N × E2B round-trips) → bounded-concurrency like fastWrite. [M]
+E3. Empty-build fallback = full Sonnet rebuild (escalation repair path dormant by default) → targeted
+   repair on existing files / default escalation on. [M]
+E4. No per-turn/per-tool timeout budget (one hung provider call blocks the build until the 30-min
+   watchdog) → withTimeout per turn + per-tool budget. [M]
+E5. Post-build verification (gate → heal loop → reviewer) fully serial inside the deadline → parallelize
+   gate+reviewer, hard-budget the heal pass. [M]
+E6. Dev-server boot loop re-pays full setup every `npm run dev` (staleness check+prekill+wait+recovery)
+   → cache "healthy on bound port" per workspace. [M]
+E7. No file-content streaming to the UI while writing (create emits no diff event). [M]
+E8. Cold start: first model turn blocked behind Sandbox.create (up to 45s) + git hydrate → pre-warm pool
+   / parallelize planning with sandbox create. [L]
+E9. No build queue/fairness (second build 409s; no global Sandbox.create cap). [M]
+E10. Synchronous per-write review+impact on the hot path → defer off the tool_result path. [S]
+
+BATCH 1 SHIPPED (PR #979): B1-B4 — the "frozen spinner" and background-cost class. Gate: frontend
+tsc 0, server tsc 0, vitest 4778/4778 PASS, build PASS. Next batches: U3+U5+U7 (UI quick wins), then
+E2+E4 (backend speed/reliability), then the rest per this ledger.

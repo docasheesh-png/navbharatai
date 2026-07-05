@@ -9408,3 +9408,27 @@ anyway — minutes of silent waste, then the strong model did the work regardles
   which model ran (per-model token accounting is the already-recorded follow-up B from the #985
   policy). Large-project Sonnet runs bill ×1.2 until follow-up B lands — margin is still positive,
   and the admin explicitly chose reliability here.
+## 2026-07-05 — P3.1 App.tsx split #1: extract usePaymentEngine (behavior-preserving)
+
+Roadmap P3.1 (deferred God-component split) resumed as a SERIES of behavior-preserving extractions —
+never one high-risk mega-PR on a live payments app. Slice #1 = the wallet/billing/credits/referral
+concern, the structurally SAFEST first slice (per structural analysis it has the fewest outbound deps:
+nothing payment-owned flows into the build/preview/chat pipeline, so lifting it out cannot change build
+behavior).
+
+- New `src/hooks/usePaymentEngine.ts` — owns all payment state (wallet, dailyUsage/free-limit, referral,
+  Vishwakarma, billing logs/transactions, coupons, reminder/budget limits) + the Cashfree URL-callback
+  effect + every `/api/payment/*` + `/api/wallet/*` action (fetchWallet, createBillingOrder,
+  createVishwakarmaOrder, verifyBillingPayment, redeemPromoCoupon, redeemVishwakarmaPromo). Code moved
+  BYTE-IDENTICAL — pure relocation, zero logic change.
+- `App.tsx` calls `usePaymentEngine({ user, addLog })` and destructures the SAME identifiers the 6k-line
+  render tree already referenced, so all JSX is unchanged. Chose a HOOK (not a Context provider) on
+  purpose: a provider would force restructuring the component tree (App both defines `user` and consumes
+  `wallet` in one scope) → higher risk. The hook keeps everything in App's scope; the two coupling points
+  the analysis flagged (`closeTab` + Esc-handler read payment modal flags) keep working via destructure.
+- `authedHeaders` exported from App.tsx so the hook shares the exact same auth-header builder.
+- App.tsx: 6,596 → 6,353 lines (−243 net; ~390 lines of logic relocated). Target is <1,500 across the
+  remaining slices (usePreviewBundler → FilesProvider → PreviewProvider → useProBuild → ChatProvider).
+
+Gate: frontend tsc 0, vitest 4832/4832 PASS, vite build PASS. No AppKnowledgeBase change (pure refactor,
+no new user-facing surface).

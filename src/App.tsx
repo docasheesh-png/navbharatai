@@ -17,6 +17,7 @@ import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProV3Surface } from './components/agentv3/ProV3Surface';
+import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
@@ -5653,10 +5654,17 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
-          {activeView === 'nbi_pro_chat' && (
+          {shouldRenderV3Surface(activeView, v3Preview.running === true) && (
             /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
                real v3.0 builder when it's enabled for this account, else an honest "rolling out"
-               message (never a broken builder). The old ProChatPanel (v2.0) is retired. */
+               message (never a broken builder). The old ProChatPanel (v2.0) is retired.
+
+               KEEP-ALIVE across tab switches: while a v3.0 build is RUNNING, the surface stays mounted
+               even when another NavBharatAI tab is active — so switching tabs (or having Free + v3.0
+               both open in the tab bar) never tears down the live event stream. `contents` when active
+               is a layout no-op (identical to before); `hidden` (display:none) keeps the stream flowing
+               invisibly in the background. It unmounts normally once the build ends. See v3SurfaceMount. */
+          <div className={v3SurfaceDisplayClass(activeView)} aria-hidden={activeView !== 'nbi_pro_chat'}>
             <ProV3Surface
               userId={user?.uid}
               email={user?.email}
@@ -5715,6 +5723,7 @@ ${buildLanguageRule(preferredLanguage)}`;
                 },
               }}
             />
+          </div>
           )}
 
           {/* ── Senior Doctor Assistant ── */}

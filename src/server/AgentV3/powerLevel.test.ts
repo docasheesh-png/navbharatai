@@ -31,29 +31,30 @@ describe('powerSpec', () => {
     expect(s.ceilingEffort).toBe('low'); // Opus "lowest version" escalation ceiling
   });
 
-  it('5× (mini): Opus low effort, ×5', () => {
+  it('mini: Opus low effort, flat ×2 (2026-07-05 policy)', () => {
     const s = powerSpec('mini');
     expect(s.powerMode).toBe(true);
     expect(s.effort).toBe('low');
-    expect(s.multiplier).toBe(5);
+    expect(s.multiplier).toBe(2);
   });
 
-  it('10× (medium): Opus medium effort, ×10', () => {
+  it('medium: Opus medium effort, flat ×2', () => {
     const s = powerSpec('medium');
     expect(s.powerMode).toBe(true);
     expect(s.effort).toBe('medium');
-    expect(s.multiplier).toBe(10);
+    expect(s.multiplier).toBe(2);
   });
 
-  it('20× (max / ultracode): Opus max effort, ×20', () => {
+  it('max / ultracode: Opus max effort, flat ×2', () => {
     const s = powerSpec('max');
     expect(s.powerMode).toBe(true);
     expect(s.effort).toBe('max');
-    expect(s.multiplier).toBe(20);
+    expect(s.multiplier).toBe(2);
   });
 
-  it('billing multipliers increase strictly with power', () => {
-    expect(powerSpec('mini').multiplier).toBeLessThan(powerSpec('medium').multiplier);
-    expect(powerSpec('medium').multiplier).toBeLessThan(powerSpec('max').multiplier);
+  it('every power level bills the same flat ×2 (the level changes real tokens, not the multiplier)', () => {
+    expect(powerSpec('mini').multiplier).toBe(2);
+    expect(powerSpec('medium').multiplier).toBe(2);
+    expect(powerSpec('max').multiplier).toBe(2);
   });
 });

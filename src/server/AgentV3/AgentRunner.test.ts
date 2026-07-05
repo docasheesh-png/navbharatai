@@ -168,13 +168,14 @@ describe('AgentRunner (native tool-use loop)', () => {
     const looping = {
       content: [{ type: 'tool_use', id: 'tu', name: 'write_file', input: { path: 'a.ts', content: 'x' } }],
       stop_reason: 'tool_use',
-      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 }, // ~ $90 Opus-equiv × 2.5 = $225/turn
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 }, // normal billing: ~$18 Sonnet-equiv × 1.2 = $21.6/turn
     };
-    const { runner } = buildRunner([looping, looping, looping], { maxBudgetUsd: 100 });
+    // Cap chosen below the 3-turn total ($64.8) so the loop must stop on the budget, not run out of turns.
+    const { runner } = buildRunner([looping, looping, looping], { maxBudgetUsd: 40 });
     const result = await runner.run('expensive build');
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('Budget reached');
-    expect(result.billedUsd).toBeGreaterThanOrEqual(100);
+    expect(result.billedUsd).toBeGreaterThanOrEqual(40);
   });
 });
 

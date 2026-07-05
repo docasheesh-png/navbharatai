@@ -281,8 +281,8 @@ describe('isRetryableError', () => {
   });
 });
 
-// Pricing is covered comprehensively in pricing.test.ts (new admin model:
-// Normal = Sonnet-equivalent × 3.5, Power = real Opus × 2.5, + INR conversion).
+// Pricing is covered comprehensively in pricing.test.ts (admin model 2026-07-05:
+// cheap → Sonnet-equivalent × 1.2, Sonnet → × 3, Opus/power → real Opus × 2, + INR conversion).
 
 import { sanitizeApiKey } from './ClaudeClient';
 

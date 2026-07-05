@@ -9109,3 +9109,34 @@ reusing an existing tested component).
 
 Gate: frontend tsc 0, vitest 4797/4797 PASS, frontend+server build PASS. Ledger: U1 → ✅, U2 → ✅.
 Next: Batch 5 — remaining ledger (B5-B10, U4/U6/U8-U10, E1/E3/E5-E10).
+## UPDATE (2026-07-05, session 01KDmsCZ): billing policy change (admin-approved, aashishcpmt09) — per-tier markups
+
+Admin redefined v3.0 build billing (the old flat "assume-Sonnet × 3.5 normal / Opus 5–20× power" was
+replaced). New policy — the user NEVER sees which provider ran; billed by the ACTUAL model tier, always
+against Claude rates:
+- **CHEAP** (Haiku/GLM/Grok/Gemini/Vertex — anything below Sonnet) → **Sonnet-equivalent × 1.2**
+- **SONNET** (Sonnet actually ran) → **Sonnet-equivalent × 3**
+- **OPUS** (power mode, Opus 4.8 100%) → **REAL Opus cost × 2** — FLAT at every power level (mini/medium/max);
+  the level only changes how many real tokens Opus spends, so the bill scales naturally.
+
+Implemented in `pricing.ts`: NORMAL_MULTIPLIER 3.5→1.2, new SONNET_MULTIPLIER=3, new OPUS_MULTIPLIER=2
+(replaces POWER_MULTIPLIER 2.5 + POWER_MULTIPLIERS 5/10/20; POWER_MULTIPLIER kept as a ×2 alias). New pure
+`billedForTier(usage, 'cheap'|'sonnet'|'opus')`. `billedAmountUsd(usage, power)` maps Power OFF → cheap
+(×1.2), any power level → opus (×2) — because the engine currently reports a power LEVEL, not per-model
+token counts (Option A, admin-chosen). The per-model SONNET tier (×3) is wired via billedForTier() once
+per-model token accounting lands (follow-up B). powerLevel.ts SPECS multipliers → 2 at every level.
+Tests updated (pricing/powerLevel/AgentRunner budget-cap) + AppKnowledgeBase billing text corrected.
+
+Margin stays structurally positive in every tier (billed ≥ real cost): cheap billed 1.2× Sonnet-equiv
+while the real provider is far cheaper; Sonnet 3×; Opus 2× real. Normal-mode revenue drops vs the old
+3.5× (admin's explicit intent — "3.5x bekar"); power revenue drops vs old 5–20× (admin: "power kam log
+use karenge, flat 2×").
+
+OPEN (needs admin decision — FLAGGED): the AgentV3Panel power buttons still render labels **"5× / 10× / 20×"**
+(AgentV3Panel.tsx:1933-1935) which now MISLEAD (all bill flat 2×). Not changed here — it's a hot file
+(other session active) AND the new label wording is a product/branding call. Awaiting admin: what should
+the three Opus power levels be called? (No user is overcharged — the label oversells; billing is correctly 2×.)
+
+DEFERRED (follow-up B): true per-model billing needs the engine to bucket tokens by model tier
+(AgentRunner) so a mixed normal build (cheap-floor GLM/KIMI + a Sonnet final-fix) bills cheap tokens ×1.2
+and Sonnet tokens ×3 exactly, instead of the whole normal build at ×1.2. Recorded; touches hot AgentRunner.

@@ -108,6 +108,39 @@ describe('ToolDispatcher', () => {
     expect(res.content).not.toContain('FULL-REWRITE WARNING');
   });
 
+  // E2 (audit Batch 3): the batch writes files in bounded PARALLEL. Every distinct file must still
+  // land with its exact content, be recorded as a change, and appear in the summary — no file lost
+  // or overwritten by a racing worker — regardless of write completion order.
+  it('write_files_batch writes every file of a large batch (parallel, none lost)', async () => {
+    const files = Array.from({ length: 25 }, (_, i) => ({ path: `src/f${i}.ts`, content: `content-${i}` }));
+    const res = await d.dispatch(call('write_files_batch', { files }), 'frontend');
+    expect(res.is_error).toBe(false);
+    for (let i = 0; i < 25; i++) {
+      expect(act.files.get(`src/f${i}.ts`)).toBe(`content-${i}`);
+    }
+    // Every file recorded as a change (Map keyed by path → 25 distinct entries).
+    expect(state.snapshot().files).toHaveLength(25);
+    expect(res.content).toContain('Wrote 25 file(s)');
+  });
+
+  // A concurrent writer must never race two writes to the SAME path. Duplicate paths in one batch
+  // collapse to their LAST entry (last write wins — the serial loop's final state), deterministically.
+  it('write_files_batch dedupes a duplicated path to the last write (no race)', async () => {
+    const res = await d.dispatch(
+      call('write_files_batch', { files: [
+        { path: 'dup.ts', content: 'first' },
+        { path: 'other.ts', content: 'x' },
+        { path: 'dup.ts', content: 'LAST' },
+      ] }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(act.files.get('dup.ts')).toBe('LAST'); // deterministic last-wins, not a coin-flip race
+    // dup.ts recorded once (not twice) → 2 distinct files total.
+    expect(state.snapshot().files).toHaveLength(2);
+    expect(res.content).toContain('Wrote 2 file(s)');
+  });
+
   it('generate_openapi writes an OpenAPI 3.0.3 contract from the given routes', async () => {
     const res = await d.dispatch(
       call('generate_openapi', { routes: [{ method: 'GET', path: '/users/:id', summary: 'Get a user' }], title: 'My API' }),

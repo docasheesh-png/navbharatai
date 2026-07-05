@@ -97,8 +97,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReverting(false);
     }
   }, [state.ownRepo, reverting, revertLastMerge, userId, email]);
-  // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
-  // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
+  // Power level (admin tiers 2026-07-05): Off = normal (cheap tier, Sonnet-equivalent × 1.2);
+  // mini "Strong" = Opus low effort; medium "Powerful Force" = Opus high effort; max "Full Team" =
+  // Opus ultracode (max effort). All Opus tiers bill the real Opus cost × 2.
   const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
   // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
   const onlyOpus = powerLevel !== 'off';
@@ -1996,22 +1997,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      {/* Power level: Off (Sonnet) / 5× (Opus min) / 10× (Opus medium) / 20× (Opus max, ultracode). */}
+                      {/* Power level (Opus effort tiers): Off (normal) / Strong (low) / Powerful Force (high) / Full Team (ultracode). All Opus tiers bill real Opus cost × 2. */}
                       <div className="px-3 py-2">
                         <div className="text-sm text-zinc-200 mb-1.5">Power</div>
-                        <div className="flex gap-1">
+                        <div className="flex flex-col gap-1">
                           {([
                             { key: 'off', label: 'Off' },
-                            { key: 'mini', label: '5×' },
-                            { key: 'medium', label: '10×' },
-                            { key: 'max', label: '20×' },
+                            { key: 'mini', label: 'Strong 💪' },
+                            { key: 'medium', label: 'Powerful Force' },
+                            { key: 'max', label: 'Full Team' },
                           ] as const).map((opt) => (
                             <button
                               key={opt.key}
                               type="button"
                               disabled={running}
                               onClick={() => setPowerLevel(opt.key)}
-                              className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
+                              className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
                                 powerLevel === opt.key
                                   ? 'bg-indigo-600 text-white'
                                   : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
@@ -2025,10 +2026,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                           {powerLevel === 'off'
                             ? 'Normal — fast & lowest cost'
                             : powerLevel === 'mini'
-                            ? 'Opus minimum power'
+                            ? 'Opus · low effort'
                             : powerLevel === 'medium'
-                            ? 'Opus medium power'
-                            : 'Opus max — ultracode'}
+                            ? 'Opus · high effort'
+                            : 'Opus · ultracode (max effort)'}
                         </div>
                       </div>
                       <div className="border-t border-zinc-800 my-1" />

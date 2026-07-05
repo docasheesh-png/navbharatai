@@ -38,10 +38,10 @@ describe('powerSpec', () => {
     expect(s.multiplier).toBe(2);
   });
 
-  it('medium: Opus medium effort, flat ×2', () => {
+  it('medium (10× "Powerful Force"): Opus HIGH effort, flat ×2', () => {
     const s = powerSpec('medium');
     expect(s.powerMode).toBe(true);
-    expect(s.effort).toBe('medium');
+    expect(s.effort).toBe('high');
     expect(s.multiplier).toBe(2);
   });
 

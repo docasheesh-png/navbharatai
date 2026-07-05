@@ -45,8 +45,9 @@ export interface PowerSpec {
 
 const SPECS: Record<PowerLevel, PowerSpec> = {
   off: { level: 'off', powerMode: false, effort: undefined, ceilingEffort: 'low', multiplier: NORMAL_MULTIPLIER },
+  // Admin label→effort map (2026-07-05): 5× = low, 10× = high, 20× = ultracode (max). All bill real Opus × 2.
   mini: { level: 'mini', powerMode: true, effort: 'low', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
-  medium: { level: 'medium', powerMode: true, effort: 'medium', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
+  medium: { level: 'medium', powerMode: true, effort: 'high', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
   max: { level: 'max', powerMode: true, effort: 'max', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
 };
 

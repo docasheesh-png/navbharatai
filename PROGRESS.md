@@ -8557,47 +8557,31 @@ Gate: frontend tsc 0, server tsc 0, vitest 4721/4721 PASS, frontend+server build
 
 Admin sent a v3.0 build report. Full forensic autopsy per the fifth absolute rule.
 
-STEP 1 — itemized ledger (630 issues total; 549 auto-resolved, 81 unresolved, 84 errors):
-- 🥵 STRUGGLE (dominant): **the SANDBOX DIED mid-build.** 81× SANDBOX_CMD_FAILED — every trivial command
-  (`ls`, `pwd`, `cat package.json`, `node --version`, `true`, `echo ok`) returned exit -1 in 0s, with
-  agent notes "the sandbox has timed out and needs to restart" / "unresponsive (timed out between
-  sessions)". Commands: 110 total, 27 exit-0 (early), then 83 failures — the sandbox was alive at first
-  then E2B killed it and the engine never recreated it, grinding for 222 steps / 21m 31s / ₹23.
-- 🔀 WORKED AROUND: 51× PROVIDER_FALLBACK (GLM/KIMI cheap-floor providers failing → fell back to Claude);
-  41× TOOL_ERROR. Deferred root causes: unreliable cheap-floor providers + no dead-sandbox recovery.
-- ⏭️ SKIPPED: "Requested feature not found: sign-up / registration"; no tests; no real error boundary.
-- ❌ STILL BROKEN: **no package.json** in the delivered 45 files → app cannot install/run (headline
-  screenshot); App.tsx has multiple missing imports (ToastContext/ErrorBoundary/Patients/OPD don't
-  exist — reviewer CRITICAL); 27 components created but never used; **the verdict LIED**.
-- ✅ SELF-HEALED: 549 auto-resolved (but inflated — many were retries against a dead sandbox).
+STEP 1 — ledger (630 issues; 549 auto-resolved, 81 unresolved, 84 errors): 🥵 STRUGGLE (dominant) — the
+E2B SANDBOX DIED mid-build: 81× SANDBOX_CMD_FAILED, every trivial command (ls/pwd/cat package.json/
+node --version/true/echo ok) exit -1 in 0s, agent notes "sandbox timed out / unresponsive". 110 cmds:
+27 exit-0 (early) then 83 failures — alive at first, then E2B killed it and the engine never recreated
+it (222 steps / 21m / ₹23). 🔀 51× PROVIDER_FALLBACK (GLM/KIMI failing→Claude), 41× TOOL_ERROR. ⏭️
+sign-up/registration not built; no tests; no real error boundary. ❌ NO package.json (app can't run);
+App.tsx missing imports (ToastContext/ErrorBoundary/Patients/OPD); 27 orphan components; the verdict LIED.
 
-STEP 2 — missing subsystems: (1) **live sandbox-health gate + auto-recreate** — exit -1 on `true`/`echo
-ok` means the sandbox is DEAD; the engine must detect that and recreate ONE fresh sandbox, not fire 81
-commands into a corpse (this is the #1 open root cause "warm-sandbox durability", now with hard
-evidence it REUSES DEAD sandboxes). (2) **honest readiness gate** (fixed below). (3) **guaranteed
-package.json** — a vite-react build must never finish without one, even if scaffolding failed.
+STEP 2 — missing subsystems: (1) live sandbox-health gate + auto-recreate (exit -1 on `true`/`echo ok`
+⇒ sandbox dead ⇒ recreate ONE fresh, don't fire 81 cmds into a corpse) — the #1 open root cause
+"warm-sandbox durability", now with hard evidence the engine REUSES DEAD sandboxes; (2) honest readiness
+gate (fixed); (3) guaranteed package.json scaffold.
 
-STEP 3 — DNA fix shipped THIS turn (the honesty root cause, fully code-completable + verifiable):
-**"READY · 0/100" is impossible now.** Root cause: `Readiness.assessReadiness` set `ready =
-blockers.length === 0`, IGNORING the score — so 27 orphan components (all WARNINGS) cratered the score
-to 0 while no categorised hard blocker existed → the engine reported READY at 0/100, and the AI
-reviewer's own "❌ Build Review (25/100) CRITICAL" verdict never reached the gate. Fix (Readiness.ts):
-added `MIN_READY_SCORE = 50` — readiness now requires BOTH no hard blocker AND score ≥ floor; below the
-floor it records an honest blocker ("readiness score N/100 is below the 50/100 bar …") so the verdict
-says WHY. Propagates automatically to AgentRunner's summary + the build-health badge. +2 regression
-tests (the 27-orphan → NOT READY case + the at-floor stays-READY boundary). Existing readiness tests
-unaffected (cycle+low = 90, 1 orphan = 94, both ≥ floor).
+STEP 3 — DNA fix shipped (honesty root cause, verifiable): "READY · 0/100" is impossible now.
+Readiness.assessReadiness set `ready = blockers.length === 0`, IGNORING the score — so 27 orphan
+components (WARNINGS) cratered the score to 0 while no hard blocker existed → "READY 0/100", and the AI
+reviewer's own "❌ 25/100 CRITICAL" verdict never reached the gate. Fix (Readiness.ts): MIN_READY_SCORE
+= 50 — ready requires no hard blocker AND score ≥ floor; below it records an honest blocker saying WHY.
+Propagates to the AgentRunner summary + build-health badge. +2 regression tests; existing readiness
+tests unaffected.
 
-OPEN ROOT CAUSES (rule 6 — recorded honestly, NOT silently patched; need work beyond this turn):
-- **[#1, INFRA-GATED] Dead-sandbox detection + auto-recreate.** The true root of this build's failure.
-  A pure "consecutive trivial commands all exit -1 in ~0s ⇒ sandbox dead ⇒ recreate once" detector is
-  code-testable, but the actual E2B recreate can only be VERIFIED against a live sandbox (no E2B in CI)
-  — shipping it "verified" here is impossible, so it is queued as the top follow-up, not faked.
-- **package.json invariant**: guarantee a runnable scaffold (package.json) lands in the durable store
-  even when the sandbox is dead during scaffolding. Needs generator/actuator wiring.
-- **Reviewer→readiness wiring**: the AI reviewer's CRITICAL/blocking findings (it found the App.tsx
-  missing imports the static ArchitectureAnalysis missed) should feed the readiness gate as a hard
-  blocker, so the two verdicts can never disagree. The score-floor fix catches THIS build regardless,
-  but the wiring is the deeper fix.
+OPEN ROOT CAUSES (rule 6 — recorded, NOT faked):
+- [#1, INFRA-GATED] dead-sandbox detect + auto-recreate — the true root; detector is code-testable but
+  the E2B recreate needs a LIVE sandbox to verify (no E2B in CI), so queued as top follow-up, not faked.
+- package.json invariant (runnable scaffold even if the sandbox is dead during scaffolding).
+- reviewer→readiness wiring (reviewer's CRITICAL findings should feed the gate as hard blockers).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4723/4723 PASS.

@@ -8372,3 +8372,44 @@ FIX (honesty timing, root cause not symptom):
   presented calmly per reconnectOutcome (no red banner, clean sendable state), so the contradiction can
   never recur. +5 regression tests encoding the exact IMG_5709 case + boundaries.
 Gate: frontend tsc 0, server tsc 0, vitest 4671/4671 PASS, build PASS.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-8 — Cashfree webhook signature verified over raw bytes (#TBD)
+
+New hunt area (billing / payments / cost math). Two read-only hunters swept it; shipped the
+highest-confidence, lowest-risk live money bug:
+
+- **payment.ts `/api/payment/webhook`** — the HMAC was computed over `JSON.stringify(req.body)`, i.e.
+  the parsed-then-RE-serialized body, whose bytes differ from what Cashfree actually signed (whitespace,
+  key order, escaping). So `isSignatureValid` was effectively ALWAYS false → every legitimate webhook
+  got `401` → the server-to-server payment-fulfillment safety net was silently dead. A user who paid
+  but closed the tab / dropped network before the client `/verify-payment` poll finished was CHARGED
+  but NEVER CREDITED. Root cause: signing over re-serialized JSON instead of the exact received bytes.
+  Fix: verify over `req.rawBody` (already captured by the express.json `verify` hook in server.ts),
+  via a new pure tested helper `isValidCashfreeSignature()` (v2 = base64(ts+rawBody); legacy v1 =
+  base64/hex(rawBody)); falls back to re-serialization only if rawBody is unavailable. Does NOT weaken
+  security — forging any format still needs the shared secret. Locked with a regression test
+  (cashfreeWebhookSignature.test.ts) that PROVES re-serialized bytes differ and would fail validation.
+
+DEFERRED (recorded — HIGH, money path, needs careful/admin-aware treatment; NOT blind-fixed per
+safeguard #3):
+- **Non-atomic wallet credit (payments.ts:119-212)** — the wallet mutation is a read-modify-write with
+  a FULL-document `setDoc` OUTSIDE any transaction. The per-order PENDING→SUCCESS claim (H1) ensures
+  only one caller credits PER ORDER, but two DIFFERENT concurrent orders for the same user (or a
+  concurrent coupon credit at payment.ts / admin token adjustment at admin.ts) can lost-update or be
+  clobbered by the full overwrite → a user's paid credit silently dropped, or a concurrent write
+  reverted. Correct fix: move the wallet read+credit into a `runTransaction` (re-read inside the tx)
+  or use `FieldValue.increment()` on the numeric fields + `arrayUnion` for the ledger. Same class also
+  affects the coupon credit (payment.ts getDoc→updateDoc). This is a live-money concurrency refactor;
+  it should ship with strong transaction tests and careful review rather than a quick patch.
+- **NaN cost guard (UserCostStore.record, line 50)** — `costUsd <= 0` lets `NaN`/`Infinity` through
+  (`NaN <= 0` is false), which would permanently poison the stored monthly total. Currently BOTH
+  callers pre-guard with `> 0` (agentv3.ts:4663, build.ts:558), so it is not live-exploitable today —
+  recorded as a defense-in-depth hardening (enforce `Number.isFinite(costUsd) && costUsd > 0` at the
+  store, the single entry point), not a live bug.
+- **domains.ts `/api/domains/connect`** — unauthenticated (only buildRateLimiter), trusts a body
+  `userId`; when Cloudflare is configured, an anonymous caller can trigger `createCustomHostname` on
+  NavBharatAI's zone + write a `custom_domains` doc with an attacker-chosen userId. Fix: require
+  `verifyFirebaseToken` and persist the verified uid. MEDIUM; gated on Cloudflare being configured.
+- **payments.ts:176 ledger honesty** — hardcodes "Lifetime Pass Activated (₹50)" while the real pass
+  price withheld is `VISHWAKARMA_PASS_PRICE_RUPEES = 100`. Customer-facing honesty bug; one-line fix
+  (interpolate the constant). LOW.

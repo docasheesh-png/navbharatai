@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 import {
   Link,
   Key,
@@ -639,7 +640,21 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                   <button
                     onClick={() => {
                       const w = window.open('', '_blank');
-                      if (w) { w.document.write(generatedCode); w.document.close(); }
+                      if (!w) return;
+                      // SECURITY: the generated HTML is AI/Figma-derived and untrusted. Writing it
+                      // straight into the (same-origin) popup let its scripts read the platform's
+                      // cookies/localStorage (auth tokens). Instead, run it inside a SANDBOXED iframe
+                      // with NO allow-same-origin → opaque origin, so it can render/execute but can't
+                      // reach platform storage. Only this static shell touches the same-origin popup;
+                      // `srcdoc` is set as a PROPERTY (no HTML-attribute escaping needed).
+                      w.document.title = 'Preview';
+                      w.document.body.style.margin = '0';
+                      const frame = w.document.createElement('iframe');
+                      frame.setAttribute('sandbox', UNTRUSTED_PREVIEW_SANDBOX);
+                      frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0';
+                      frame.srcdoc = generatedCode;
+                      w.document.body.appendChild(frame);
+                      w.document.close();
                     }}
                     className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors"
                   >

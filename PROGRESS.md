@@ -8900,3 +8900,33 @@ crashes that panel on open. Fixed all three of its localStorage-JSON reads (moun
 checkDns) to route through the tested `safeLocalJson` helper. No raw `JSON.parse` of localStorage remains
 in that component. Behavior-preserving on valid data (locked by safeLocalJson.test.ts). The unguarded
 localStorage-JSON crash class is now CLOSED across the app (no known unguarded render-path site remains).
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-12 — Firebase deploy channel id dropped the session → cross-project overwrite (#TBD)
+
+New hunt area (deploy / workspace-file / git / preview). Shipped the HIGH finding:
+
+- **HIGH — every project a user deploys overwrote their previous live app at one shared URL.**
+  `Deployment.makeChannelId` derived the Firebase Hosting channel from `workspaceId.replace(...).slice(0, 30)`.
+  `workspaceId = agentv3-{uid}-{sessionId}`, and `"agentv3-"` (8) + a 28-char Firebase uid already fills
+  30 chars — so the sessionId was DROPPED and `agentv3-<uid>-sessionA` / `…-sessionB` produced the SAME
+  channel id. The channel is meant to be per-workspace (URL `…--v3-<workspaceId>.web.app`) but was
+  effectively per-user: deploy App A → live at URL X; later deploy App B → same channel → App B published
+  over App A at the same version/URL, silently destroying the first, while the returned "success" URL
+  looks distinct (violates no-fake-success). Deterministic for any 28-char uid.
+  Root-cause fix: derive from the FULL workspaceId — a readable prefix + a sha256 hash suffix
+  (`v3-${safe.slice(0,17)}-${hash12}`, ≤33 chars, [a-z0-9-]) so each workspace's channel is unique AND
+  stable (same workspace → same channel on redeploy; takedown at Deployment.ts:105 uses the same
+  derivation so it stays consistent). Locked with tests (Deployment.test.ts): two workspaces sharing a
+  28-char-uid prefix but different sessionId → DIFFERENT channels; same workspace → same channel.
+
+DEFERRED (recorded — same class, LATENT, not the confirmed deterministic bug):
+- Vercel `vercelProjectName` / Cloudflare `cloudflareProjectName` / Netlify `netlifySiteName` all use the
+  same prefix-truncation (`slice(0,52)`); 52 chars usually reaches into the sessionId so they "usually
+  survive", but a long uid+session can still collide. Same fix (hash suffix over the full workspaceId);
+  each has an exact-output test that must move from asserting the literal string to asserting the
+  invariant (prefix-sharing ids differ + charset/length) — a focused follow-up in these 3 providers.
+- LATENT: EngineerAI/DeploymentService.makeChannelId has the identical slice(0,30) bug, but
+  registerEngineerRoutes is commented out (server.ts:491) → dead code, not a live bug.
+- LOW: WorkspaceFileStore.fileDocId base64url.slice(0,1500) can collide for >1125-byte paths (pathological).
+- LOW/MED: Vercel/Firebase return a success URL before confirming READY (PostDeployLiveness exists — verify
+  it's wired into both return paths).

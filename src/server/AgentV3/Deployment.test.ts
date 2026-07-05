@@ -35,6 +35,19 @@ describe('deploy tool', () => {
     expect(makeChannelId('x'.repeat(80)).length).toBeLessThanOrEqual(33);
   });
 
+  it('REGRESSION: two workspaces sharing a long prefix (differ only in sessionId) get DIFFERENT channels', () => {
+    // A 28-char Firebase uid + "agentv3-" already fills the old 30-char prefix slice, so the sessionId
+    // was dropped and every project a user deployed overwrote the previous one at one shared channel.
+    const uid = 'a'.repeat(28);
+    const a = makeChannelId(`agentv3-${uid}-sessionAAAAAAAA`);
+    const b = makeChannelId(`agentv3-${uid}-sessionBBBBBBBB`);
+    expect(a).not.toBe(b);
+  });
+
+  it('makeChannelId is STABLE — the same workspace always maps to the same channel (redeploy in place)', () => {
+    expect(makeChannelId('agentv3-uid-sess1')).toBe(makeChannelId('agentv3-uid-sess1'));
+  });
+
   // The deploy case does a post-deploy liveness GET (P-PIPE.116). Stub fetch so tests are deterministic
   // and never touch the network; unstubbed after each case.
   afterEach(() => vi.unstubAllGlobals());

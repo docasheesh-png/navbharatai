@@ -8946,7 +8946,7 @@ B5. Panel history arrays unbounded in long sessions (agentHistory/checkpointHist
    render) → cap + memoize. [M]
 B6. subscribeLive re-arms from seq 0 on every visibilitychange; never pauses on hidden. [M]
 B7. No beforeunload guard / composer draft not persisted (typing lost on reload). [S]
-B8. No SW-update "reload for new version" prompt (the stale-bundle class the admin hit). [M]
+B8. ✅ DONE (Batch 5) No SW-update "reload for new version" prompt (the stale-bundle class the admin hit). [M]
 B9. Two hand-rolled NDJSON readers + two authJsonHeaders (drift risk) → unify. [M]
 B10. checkRunning/checkpoints effects over-fetch on routine UI changes → debounce. [S]
 
@@ -9170,3 +9170,36 @@ Gate: frontend tsc 0, server tsc 0, vitest 4718/4718 PASS, build PASS, boot PASS
 SLICE 2 (next): in-app "Ship to main" (merge on CI-green) + "Revert last merge" buttons — revert ships
 in the SAME slice as any auto-merge so an undo always exists wherever a merge does. AppKnowledgeBase
 entry lands with slice 2 (the user-facing buttons).
+## 2026-07-05 — v3.0 audit Batch 5 (stale-bundle root cause): periodic SW update check (B8)
+
+Ships B8 — and it is the ROOT CAUSE of the admin's real "#973 still dead / my changes don't show up".
+- ✅ B8: the service worker was checked for a new version exactly ONCE, at page load (`reg.update()`
+  in main.tsx). A tab left OPEN across a deploy therefore kept serving the STALE bundle indefinitely —
+  and the sticky-session feature we shipped this same day (chat survives reload/phone-off) makes tabs
+  stay open for a long time, so this stale-bundle case became the COMMON path, not the rare one. That
+  is precisely what the admin hit on the #973 retest (build stamp proved the test ran on a pre-#973
+  bundle). Fix: after registering, re-check for a new SW PERIODICALLY (every 60s) AND whenever the tab
+  regains focus (phone back on / tab refocus), throttled by a pure `shouldCheckForUpdate(last, now)`
+  helper so a burst of focus events can't hammer `reg.update()`. A found update → the SW's existing
+  skipWaiting/activate → controllerchange → the existing reload-once — so a deploy is now picked up
+  within ~a minute automatically, instead of "never until a manual hard-refresh".
+  Tests: swUpdateCheck.test.ts (4) — throttle window, custom interval, refocus-burst suppression.
+  Gate: frontend tsc 0, vitest 4801/4801 PASS, frontend+server build PASS. Ledger: B8 → ✅.
+
+### Honest ledger corrections (redundant-work + no-sycophancy check, safeguard #6 / rule 3)
+Auditing before building the next backend items, TWO ledger entries turned out to be already-fixed or
+admin-gated — recording honestly instead of shipping a redundant or unilateral change:
+- **E1 (readiness gate serial full re-scan → ~45s):** ALREADY substantially fixed by the prior P0-C
+  audit work. `readEvalSnapshot()` and `seedGraphFromWorkspace()` in ToolDispatcher.ts already read the
+  source tree in BOUNDED PARALLEL (12-way, 5s/file cap) and the graph is seeded incrementally as files
+  are written (only unknown files re-read at the end). The 45s is a worst-case TIMEOUT, not the typical
+  cost. An "incremental per-write + end-delta" rewrite would trade correctness (the gate judging the
+  ACTUAL current sandbox state) for marginal speed over already-parallel reads — not worth the risk to
+  rule 1. Marking E1 as effectively addressed; no redundant change shipped.
+- **E3 (empty-build fallback = full rebuild → targeted repair / default escalation on):** the targeted
+  REPAIR path already exists (escalation hands judge findings as an edit-existing-files repair task,
+  never a rebuild — agentv3.ts ~4110). The remaining half of E3 is flipping `AGENTV3_ESCALATION` on by
+  DEFAULT, which is a cost + model-routing behaviour change the design doc explicitly puts "behind the
+  rollout flag" and CLAUDE.md requires ADMIN SIGN-OFF for. Not flipping it unilaterally (safeguard #3).
+  → OPEN, awaiting admin decision: "turn v3.0 cost-ladder escalation on by default?" (makes every build
+  cheap-first → gate → auto-repair/escalate; more reliable, slightly higher worst-case cost per build).

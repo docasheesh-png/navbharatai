@@ -84,7 +84,8 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
-import { judgeBuild, judgeRepairPrompt } from '../AgentV3/BuildJudge';
+import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
+import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
@@ -854,6 +855,37 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
     add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));
   }
   return runners;
+}
+
+/**
+ * The REVIEWER for a cheap-floor (GLM/KIMI) build — admin plan 2026-07-05: review with GROK, not
+ * Sonnet. Grok is cheaper than Sonnet AND an independent model family (less correlated blind spots),
+ * and it keeps Claude out of the review step entirely — Claude is then spent ONLY on the final repair.
+ *
+ * Returns the `JudgeRunTurn` + model id `judgeBuild()` needs. GROK is used when a Grok/xAI key is
+ * present and `AGENTV3_REVIEWER` is not 'sonnet'; otherwise it SAFELY falls back to the Sonnet judge
+ * (today's behaviour) — so an unconfigured env, or a Grok outage, never changes or breaks a build.
+ * Grok speaks the OpenAI-compatible API (same client the GLM/KIMI floor uses), so no new infra.
+ */
+function selectReviewJudge(): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' } {
+  const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+  const kind = selectReviewer({ reviewer: process.env.AGENTV3_REVIEWER, grokKey });
+  if (kind === 'grok') {
+    try {
+      const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
+      const runTurn: JudgeRunTurn = async ({ model, system, messages, maxTokens }) => {
+        const r = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: 'user' as const, content: m.content }))],
+          max_tokens: maxTokens,
+        });
+        return { text: r.choices?.[0]?.message?.content ?? '' };
+      };
+      return { runTurn, modelId: process.env.GROK_JUDGE_MODEL || 'grok-3', kind: 'grok' };
+    } catch { /* client not constructable → fall through to Sonnet */ }
+  }
+  const runTurn: JudgeRunTurn = (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text }));
+  return { runTurn, modelId: sonnetModel(), kind: 'sonnet' };
 }
 
 /**
@@ -4104,14 +4136,33 @@ export function registerAgentV3Routes(app: Express): void {
             // cheap floor actually delivered it (no point judging a Claude-built app).
             const deliveredCheap = /^(GLM|KIMI)$/i.test(dominantProvider(providerTurns) || '');
             if (!judgeOn || lastAttempt !== 1 || !deliveredCheap) return base;
-            const files = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
-            const verdict = await judgeBuild(prompt, files, (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text })), sonnetModel());
-            try {
-              buildDiag.record({ phase: 'build', severity: verdict.pass ? 'info' : 'warning', code: 'SONNET_JUDGE', message: verdict.pass ? `Sonnet judge: PASS (score ${verdict.score})` : `Sonnet judge: FAIL (score ${verdict.score}) — ${verdict.findings.slice(0, 3).join('; ')}`, autoResolved: true });
-            } catch { /* diagnostics best-effort */ }
-            if (verdict.pass) return base; // cheap build is genuinely good → keep it (no Sonnet spend)
-            judgeFindings = verdict.findings; // hand these to Sonnet as a repair list on the next attempt
-            return { pass: false, score: verdict.score, reason: `Sonnet review found issues: ${verdict.findings.slice(0, 2).join('; ')}` };
+            // ADMIN PLAN (2026-07-05): review the cheap build with GROK (cheaper than Sonnet + an
+            // independent family), and give GLM/KIMI EXACTLY ONE self-repair bounce — re-reviewed by
+            // Grok — BEFORE we ever spend Sonnet. Claude is touched only for the FINAL repair below.
+            const judge = selectReviewJudge();
+            const reviewerName = judge.kind === 'grok' ? 'Grok' : 'Sonnet';
+            const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
+            const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
+              try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }
+            };
+            events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} is reviewing the cheap build…`, ts: Date.now() });
+            let verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
+            recordVerdict(verdict, `${reviewerName} review`);
+            // BOUNCE loop: `nextReviewAction` bounds it — after `cap` cheap repairs it can ONLY go to
+            // Sonnet, never bounce to the weak model again (that was the 51-fallback grind).
+            const cap = cheapBounceCap(process.env.AGENTV3_CHEAP_BOUNCES);
+            let bounces = 0;
+            while (nextReviewAction(verdict.pass, bounces, cap) === 'cheap_repair') {
+              bounces++;
+              events.emit({ type: 'narration', agent: 'architect', text: '🔧 Review found issues — GLM/KIMI fixing them once…', ts: Date.now() });
+              try { await runner.run(judgeRepairPrompt(prompt, verdict.findings)); } catch { break; /* GLM/KIMI down → stop bouncing, escalate to Sonnet */ }
+              events.emit({ type: 'narration', agent: 'architect', text: `🔎 ${reviewerName} re-reviewing the fix…`, ts: Date.now() });
+              verdict = await judgeBuild(prompt, collectFiles(), judge.runTurn, judge.modelId);
+              recordVerdict(verdict, `${reviewerName} re-review`);
+            }
+            if (verdict.pass) return base; // the cheap build (or its one self-fix) is genuinely good → no Sonnet spend
+            judgeFindings = verdict.findings; // still failing after the bounce → hand to Sonnet as the repair list
+            return { pass: false, score: verdict.score, reason: `Review found issues: ${verdict.findings.slice(0, 2).join('; ')}` };
           },
           onAttempt: (tier, attempt) => console.log(`[AGENTV3] escalation attempt ${attempt} on tier ${tier}`),
           onEscalate: (from, to, reason) => console.log(`[AGENTV3] escalate ${from} → ${to}: ${reason}`),

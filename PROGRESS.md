@@ -8585,3 +8585,30 @@ OPEN ROOT CAUSES (rule 6 — recorded, NOT faked):
 - reviewer→readiness wiring (reviewer's CRITICAL findings should feed the gate as hard blockers).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4723/4723 PASS.
+
+## 2026-07-05 — v3.0 cheap-floor review pipeline: Grok reviews, GLM/KIMI gets 1 bounce, Sonnet only for the final fix (admin plan)
+
+Admin's approved pipeline: GLM/KIMI builds → GROK reviews → pass? keep it → fail? GLM/KIMI self-repairs
+ONCE → Grok re-reviews → pass? keep it → still fail? SONNET repairs. Two wins: (1) the weak cheap model
+gets EXACTLY ONE self-fix bounce before we spend the strong model — no more of the 51-PROVIDER_FALLBACK
+grind seen in the last autopsy; (2) the REVIEWER moves from Sonnet → Grok (cheaper + an independent
+model family), so Claude is touched ONLY for the final repair — minimising the Anthropic bill.
+
+CHANGES:
+- NEW pure `src/server/AgentV3/CheapFloorReview.ts` — `nextReviewAction(pass, bouncesUsed, cap)` bounds
+  the loop (after the cap it can ONLY go to Sonnet, never bounce to the weak model again),
+  `selectReviewer({reviewer, grokKey})` (Grok when a Grok/xAI key is present + AGENTV3_REVIEWER≠sonnet,
+  else SAFE fallback to today's Sonnet judge), `cheapBounceCap` (AGENTV3_CHEAP_BOUNCES, clamped [0,3]).
+  +10 unit tests.
+- `routes/agentv3.ts` — new `selectReviewJudge()` builds the Grok `JudgeRunTurn` over the OpenAI-compatible
+  xAI API (`GROK_API_KEY`/`XAI_API_KEY`, model `GROK_JUDGE_MODEL` default grok-3) — no new infra — and
+  falls back to the Sonnet judge when Grok isn't configured. The cheap-floor escalation gate now reviews
+  with Grok and runs the bounded GLM/KIMI self-repair loop before handing the findings to Sonnet.
+
+SAFETY: entirely inside the existing cheap-floor escalation path (shouldEscalateBuild + escalationEnabled
++ deliveredCheap + AGENTV3_SONNET_JUDGE). No Grok key OR AGENTV3_REVIEWER=sonnet → byte-for-byte today's
+Sonnet-judge behaviour. Grok outage → judgeBuild is best-effort (resolves PASS), and the bounce catches a
+GLM/KIMI failure and escalates to Sonnet — a reviewer/repairer outage never breaks a build. Normal
+Claude-first builds are untouched.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4733/4733 PASS, boot:check PASS.

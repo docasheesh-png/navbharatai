@@ -4646,7 +4646,11 @@ export function registerAgentV3Routes(app: Express): void {
           // Pass the REAL preview state: a live preview URL was published this build iff lastPreviewUrl
           // is set. Without this the recap always said "see it live" even when the preview never came up
           // (the dishonest message a real build report showed — no-fake-success rule).
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl });
+          // HONESTY (autopsy 2026-07-05): also pass how many files THIS run actually changed —
+          // writtenFiles counts only dispatcher writes (AI edits), NOT imported files, so a read-only
+          // import+survey gets "I analyzed your project — no files were changed" instead of the false
+          // "Here's what I built". An edit run says "I changed N file(s)"; a fresh build keeps "built".
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }

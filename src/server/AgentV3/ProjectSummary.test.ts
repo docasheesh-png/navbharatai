@@ -117,4 +117,49 @@ describe('summarizeProject', () => {
     // Default (no opts) stays backward-compatible = preview-live message.
     expect(summarizeProject(g, 'x')).toContain('see it live');
   });
+
+  // HONESTY (build-report autopsy 2026-07-05): a read-only import+survey run ended with
+  // "✅ Here's what I built: … 165 files, 186 routes" — claiming authorship of an app the AI never
+  // touched. The header must reflect what ACTUALLY happened this run.
+  describe('honest header: analyzed vs edited vs built', () => {
+    const mitrify = graph({
+      files: ['client/src/App.tsx', 'server/routes.ts', 'shared/schema.ts'],
+      components: ['App', 'AdminDashboardPage'],
+      routes: ['/', '/admin/dashboard'],
+      dependencies: ['react', 'vite', 'express'],
+    });
+
+    it('a run that changed NOTHING says "analyzed — no files were changed", never "built"', () => {
+      const out = summarizeProject(mitrify, 'survey my app', { changedFiles: 0, editMode: true });
+      expect(out).toContain('I analyzed your project');
+      expect(out).toContain('no files were changed');
+      expect(out).not.toContain("Here's what I built");
+      // Counts describe the EXISTING project, framed as such.
+      expect(out).toContain('Project: 3 files');
+    });
+
+    it('an EDIT run says how many files it changed, never "built"', () => {
+      const out = summarizeProject(mitrify, 'fix the login bug', { changedFiles: 2, editMode: true });
+      expect(out).toContain('I changed 2 files in your project');
+      expect(out).not.toContain("Here's what I built");
+      expect(out).toContain('Project: 3 files');
+    });
+
+    it('uses the singular for a single changed file', () => {
+      const out = summarizeProject(mitrify, 'tweak', { changedFiles: 1, editMode: true });
+      expect(out).toContain('I changed 1 file in your project');
+    });
+
+    it('a FRESH build keeps "Here\'s what I built" even when the graph holds extra scaffold files', () => {
+      // changedFiles < graph size here (scaffold files the AI did not write) — editMode:false must
+      // still classify it as a BUILD, proving classification comes from editMode, not a size compare.
+      const out = summarizeProject(mitrify, 'build me an app', { changedFiles: 2, editMode: false });
+      expect(out).toContain("Here's what I built");
+      expect(out).not.toContain('I changed');
+    });
+
+    it('backward-compatible: callers that do not track changes keep today\'s wording', () => {
+      expect(summarizeProject(mitrify, 'x')).toContain("Here's what I built");
+    });
+  });
 });

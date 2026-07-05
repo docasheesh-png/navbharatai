@@ -70,16 +70,33 @@ function runHint(stack: string, previewLive: boolean): string {
  * graph. PURE — no I/O, fully deterministic. Returns '' for an essentially empty
  * graph (no files) so the caller never shows an empty summary.
  */
-export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean }): string {
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
   // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
   // preview URL was actually published this build) so the recap never claims "see it live" falsely.
   const previewLive = opts?.previewLive !== false;
+  // HONESTY (build-report autopsy 2026-07-05): how many files did THIS run actually create/modify,
+  // and was it operating on an EXISTING app (edit/import) or building fresh? A read-only run
+  // (import + survey, a question, an analysis) previously ended with "✅ Here's what I built: …
+  // 165 files, 186 routes" — claiming authorship of an app it never touched. The header must say
+  // what ACTUALLY happened: analyzed (0 changes) / edited (changed files in an existing app) /
+  // built (fresh build, or the caller didn't track changes — today's wording, backward-compatible).
+  // NOTE: editMode (not a changed-vs-total size comparison) distinguishes edit from fresh build —
+  // a fresh build's graph also contains scaffold files the AI didn't write, so sizes can't be trusted.
+  const changed = opts?.changedFiles;
 
   const stack = detectStack(graph);
   const lines: string[] = [];
-  lines.push("✅ Here's what I built:");
+  const analysisOnly = changed === 0;
+  const editRun = typeof changed === 'number' && changed > 0 && opts?.editMode === true;
+  if (analysisOnly) {
+    lines.push('🔍 I analyzed your project — no files were changed. Overview:');
+  } else if (editRun) {
+    lines.push(`✅ Done — I changed ${changed} file${changed === 1 ? '' : 's'} in your project. Overview:`);
+  } else {
+    lines.push("✅ Here's what I built:");
+  }
   lines.push(`Stack: ${stack}`);
 
   const counts: string[] = [`${graph.files.length} file${graph.files.length === 1 ? '' : 's'}`];
@@ -89,7 +106,8 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   if (graph.routes.length) {
     counts.push(`${graph.routes.length} route${graph.routes.length === 1 ? '' : 's'}`);
   }
-  lines.push(counts.join(', ') + '.');
+  // For analysis/edit runs the counts describe the EXISTING project, not this run's output.
+  lines.push((analysisOnly || editRun ? 'Project: ' : '') + counts.join(', ') + '.');
 
   if (graph.components.length) {
     const names = graph.components.slice(0, MAX_COMPONENTS).join(', ');
@@ -113,6 +131,6 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
 }
 
 /** Thin wrapper — single clear entry point alias for the route/other callers. */
-export function projectSummaryNote(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean }): string {
+export function projectSummaryNote(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean }): string {
   return summarizeProject(graph, request, opts);
 }

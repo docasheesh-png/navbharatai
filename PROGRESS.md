@@ -8647,3 +8647,36 @@ the existing Sandbox.create path but not asserted here — it is the one part th
 smoke test to fully close, and is called out rather than claimed as verified.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4741/4741 PASS, boot:check PASS.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-9 — silent edit-drop bug (naive JSON extractor) + centralized the class
+
+New hunt area (server data-integrity/plumbing). Shipped the highest-confidence finding:
+
+- **HIGH — `aiEdits.extractJson` silently dropped ALL edits on trailing prose** (`src/server/project/aiEdits.ts`).
+  It sliced the model reply with `s.search(/[[{]/)` … `s.lastIndexOf(close)`. `lastIndexOf` grabs the LAST
+  bracket ANYWHERE in the reply, so any trailing/leading prose containing a bracket — a markdown link
+  `[docs](url)`, a checkbox `[ ]`, "thanks [x]", `${...}` — dragged prose into the slice, `JSON.parse`
+  threw, `extractJson` returned null, `parseFileEdits` returned `[]`, and the BuildPipeline applied
+  NOTHING → the whole edit turn became a silent no-op ("the edit did nothing"). Root cause: a naive
+  bracket slice instead of a balanced, string-aware scan.
+
+Root-cause fix (centralize the class per rule #2/#3): new shared `src/server/lib/extractJson.ts`
+`extractFirstJson(raw, kind?)` — strips a ```json fence, tries a direct parse, then does a
+string/escape-aware BALANCED scan, trying each opener left-to-right so a stray bracket in leading prose
+is skipped and trailing prose is ignored. `kind` ('array'|'object'|'any') keeps a caller from picking a
+stray value of the wrong shape. Migrated the two PARSED-VALUE call sites to it: `aiEdits` (edit-parse AND
+file-plan parse) and `RequirementSpec.extractJsonObject` (same class bug; object kind). Locked with tests
+(extractJson.test.ts — 9 incl. the exact trailing-prose case; aiEdits.test.ts regression at the
+parseFileEdits level). The CORRECT sibling `ProjectPlan.extractJsonArray` was the reference (already
+balanced) — not touched (other session's hot area).
+
+DEFERRED — sibling STRING-returning naive extractors (same `indexOf/lastIndexOf` class, non-hot, but they
+return a string slice the caller parses, so migrating changes their contract → separate focused pass):
+`EngineerAI/PlannerAgent.extractJson`, `Guider.extractJsonObject`, `AgentV3/DesignAdvisor.extractJson`,
+`EngineerAI/EngineerAgentLoop.extractJson` (its comment claims it's more robust — verify first). Should
+adopt a string-returning variant of the shared util. Recorded so the class is finished, not half-done.
+
+Also from this hunt (recorded, not yet fixed): **MEDIUM — EditEngine `patch` with numeric `count > 1`
+re-scans from index 0**, so when `replace` contains `find` it re-matches inside its own insertion and
+corrupts the file (`const count` → `itemCount` with count:2 → `const itemitemCount`). Fix: advance the
+search cursor past each replacement instead of restarting at 0. Clean next PR.

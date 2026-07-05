@@ -14,24 +14,7 @@ import type { VirtualFileSystem } from './ProjectModel';
 import type { ProjectIssue } from './ProjectVerifier';
 import { selectArchitecture, manifestContract } from './ArchitectureManifest';
 import { featureChecklist } from './FeatureCoverage';
-
-/** Extract the first JSON value (array or object) from arbitrary model text. */
-function extractJson(raw: string): unknown {
-  if (!raw) return null;
-  let s = raw.trim();
-  // strip code fences
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
-  // try direct parse, else slice from first [ or { to its matching last bracket
-  try { return JSON.parse(s); } catch { /* fall through */ }
-  const start = s.search(/[[{]/);
-  if (start < 0) return null;
-  const open = s[start];
-  const close = open === '[' ? ']' : '}';
-  const end = s.lastIndexOf(close);
-  if (end <= start) return null;
-  try { return JSON.parse(s.slice(start, end + 1)); } catch { return null; }
-}
+import { extractFirstJson } from '../lib/extractJson';
 
 const VALID_OPS = new Set(['write', 'delete', 'rename', 'patch']);
 
@@ -56,7 +39,7 @@ function toFileEdit(o: any): FileEdit | null {
 
 /** Parse an LLM reply into a validated, deduped FileEdit[] (malformed ops dropped). */
 export function parseFileEdits(raw: string): FileEdit[] {
-  const json: any = extractJson(raw);
+  const json: any = extractFirstJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.edits) ? json.edits : [];
   const edits: FileEdit[] = [];
   for (const item of arr) {
@@ -262,7 +245,7 @@ async function planFiles(callModel: ModelCall, prompt: string): Promise<PlannedF
   const checklist = featureChecklist(prompt);
   const sys = `You are a senior software architect planning a real, runnable multi-file web app.\n\n${contract}\n\n${ENGINEERING_RULES}\n\n${DESIGN_RULES}\n\n${PLAN_FORMAT}`;
   const raw = await callModel(sys, `App request:\n${prompt}\n\n${checklist ? checklist + '\n\n' : ''}Plan the full file tree now. Conform strictly to the ARCHITECTURE above — one framework only. Ensure EVERY module, page, entity, and checklist feature maps to concrete files.`);
-  const json: any = extractJson(raw);
+  const json: any = extractFirstJson(raw);
   const arr: any[] = Array.isArray(json) ? json : Array.isArray(json?.files) ? json.files : [];
   const seen = new Set<string>();
   const files: PlannedFile[] = [];

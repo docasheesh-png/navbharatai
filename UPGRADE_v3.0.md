@@ -54,7 +54,7 @@
 | P1 | Break-Proof Foundation | "App break nahi honi chahiye" guarantee | ✅ Complete | 100% |
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
-| P4 | Advanced Enterprise Patterns | True enterprise depth | 🔄 In Progress | 75% (P4.2 + P4.3 + P4.4 done; only P4.1 CQRS — large — remains) |
+| P4 | Advanced Enterprise Patterns | True enterprise depth | ✅ Complete | 100% (P4.1 CQRS done 2026-07-05; P4.2 + P4.3 + P4.4 done) |
 | P5 | Hygiene & Hardening | Remove rot, close small holes | 🔄 In Progress | 67% (P5.1 assessed/kept, P5.3 done; P5.2 monorepo deferred — large infra) |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
@@ -316,9 +316,20 @@
 ## 🔵 PHASE P4 — ADVANCED ENTERPRISE PATTERNS
 > Depth that makes it genuinely "enterprise", not just functional.
 
-### P4.1 — CQRS  ❌ MISSING
-- [ ] Separate command (write) and query (read) paths for workspace/build operations.
-- **Files:** `src/server/AppMakerLab/`.
+### P4.1 — CQRS  ✅ DONE (2026-07-05)
+- [x] Separated the command (write) and query (read) paths for workspace operations:
+      `WorkspaceCommandController` (create / saveFiles / delete / updateStatus) and
+      `WorkspaceQueryController` (getWorkspaceInfo / getMetadata / listWorkspaces — the query side
+      mutates nothing, so it is free to cache/replicate/fan out independently of writes).
+- [x] `WorkspaceController` refactored into a non-breaking CQRS **facade** that delegates each call to
+      the correct side and exposes `.commands` / `.queries` for callers wanting an explicit
+      write-only or read-only handle → existing callers unchanged.
+- [x] New read capability added on the query side (`listWorkspaces`, `getMetadata`).
+- **Files:** `src/server/AppMakerLab/WorkspaceCommandController.ts`, `WorkspaceQueryController.ts`,
+      `WorkspaceController.ts` (facade), `WorkspaceCqrs.test.ts` (12 tests).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 4927/4927 ✅
+      (12 new: write-path spy assertions, read-path no-mutation guard, NotFoundError cases, facade
+      delegation) · `npm run boot:check` PASS.
 
 ### P4.2 — Event Sourcing + Replay  ✅ DONE (2026-06-28)
 - [x] Made `EventHistoryStore` replayable. New `WorkspaceProjection.ts`: a PURE `replayWorkspaceState(events, id)`

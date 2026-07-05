@@ -8259,3 +8259,14 @@ DEFERRED (recorded for follow-up):
 Round-6 cleared (safe): react-markdown v10 with no rehype-raw (AI-reply markdown XSS not exploitable);
 PWANotifications highlight escaping; clinical calculators (CURB-65/qSOFA/GCS/Wells/CHA2DS2-VASc);
 AIRouter tier→universe mapping; AppKnowledgeBase (no duplicate ids); free/pro chat prompt assembly.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-6 deferred FigmaImporter sink — NOW FIXED (#952)
+
+The FigmaImporter same-origin XSS deferred in the round-6 milestone above is done:
+- **#952** — "Open in Preview" no longer `document.write`s the AI/Figma-generated HTML into a
+  same-origin `about:blank` popup (where its scripts could read platform auth tokens). It now renders
+  inside a SANDBOXED `<iframe srcdoc>` with NO `allow-same-origin` (opaque origin), so the preview
+  runs but can't reach platform storage/DOM. Sandbox tokens live in shared src/lib/previewSandbox.ts
+  with a test locking the invariant (never allow-same-origin). All FOUR round-6 XSS sinks are now
+  closed (#948 file-tree SVG, #950 SDA-PDF + nav, #952 FigmaImporter), each with a tested pure helper
+  (svgPreviewSrc / escapeHtml / previewSandbox) so they can't silently regress.

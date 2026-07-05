@@ -9748,3 +9748,18 @@ of caution; the sweep proved it is never called, so it is removed now.)
 
 App.tsx: 3,868 -> 3,695 lines (-173). Running total: 6,596 -> 3,695 (~44% down; target ~2,000-2,500).
 Gate: frontend tsc 0, vitest PASS, vite build PASS.
+
+## 2026-07-05 — P3.1 App.tsx split #8: dead-state sweep + extract useZipImport
+
+Two changes bundled (one merge cycle):
+1. Dead-state sweep — 13 useState vars whose value AND setter appeared only at their declaration
+   (orphaned by the #1012 function deletions): showWorkspace, copiedUci, sharedUci, isBuilding,
+   deployPlatform, deployToken, deployProjectName, deployOwner, deployRepo, isDeploying, deployPanelError,
+   appSecrets, showGHAid. Each verified at a single reference before removal.
+2. Extract useZipImport — handleZipImport (~165 lines: stream .zip → SSE extraction → real-time Code
+   Studio load → persist/mirror to v3.0 → classify + honest summary) moved BYTE-IDENTICAL into
+   src/hooks/useZipImport.ts. 11 deps injected; App destructures the same handleZipImport so the file-drop
+   and conflict-resolve callers are unchanged. tsc passed first try.
+
+App.tsx: 3,695 -> 3,521 lines (-174). Running total: 6,596 -> 3,521 (~47% down; target ~2,000-2,500).
+Gate: frontend tsc 0, vitest PASS, vite build PASS.

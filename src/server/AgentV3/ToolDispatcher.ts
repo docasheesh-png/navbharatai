@@ -734,6 +734,14 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
+        // E7 — stream the written content to the UI Diff tab as a live diff event (create → additions
+        // only; wholesale rewrite → removed+added), bounded so a large file can't produce a huge event.
+        // Previously only edit_file emitted a diff, so the Diff tab stayed empty through a fresh build.
+        this.events?.emit({
+          type: 'diff', agent,
+          diff: { path, patch: boundedWholeFileDiff(kind === 'modify' ? existingContent : '', content) },
+          ts: Date.now(),
+        });
         const mem = getWorkspaceMemory(this.workspaceId);
         mem.indexFile(path, content);
         // Level 3: update embedding index for semantic search (best-effort, async, non-blocking).
@@ -805,12 +813,20 @@ export class ToolDispatcher {
           // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
           // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
           let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
+          let priorContent = '';
+          try { priorContent = await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
           await this.actuator.writeFile(this.workspaceId, file.path, file.content);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
           this.onFileWrite?.(file.path, file.content);
           this.state?.recordFileChange({ path: file.path, kind }, agent);
+          // E7 — stream each batched write to the Diff tab too (reusing the probe content we already
+          // read for the create-vs-modify verdict, so no extra round-trip). Bounded per file.
+          this.events?.emit({
+            type: 'diff', agent,
+            diff: { path: file.path, patch: boundedWholeFileDiff(kind === 'modify' ? priorContent : '', file.content) },
+            ts: Date.now(),
+          });
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
           return { path: file.path, kind };
@@ -1994,6 +2010,27 @@ function miniDiff(oldStr: string, newStr: string): string {
   const minus = oldStr.split('\n').map((l) => `- ${l}`).join('\n');
   const plus = newStr.split('\n').map((l) => `+ ${l}`).join('\n');
   return `${minus}\n${plus}`;
+}
+
+/**
+ * E7 — a BOUNDED whole-file diff for the live `diff` event emitted on write_file / write_files_batch,
+ * so a CREATE (or a wholesale rewrite) streams its content to the UI Diff tab as it happens — instead
+ * of the Diff tab staying empty through an all-creates fresh build. A create (empty old) shows
+ * additions only; a rewrite shows removed then added. Each side is capped at `maxLines` with a
+ * "… (N more lines)" note so a large file never produces an unbounded event payload. Pure + tested.
+ */
+export function boundedWholeFileDiff(oldStr: string, newStr: string, maxLines = 160): string {
+  const clip = (text: string, prefix: '+' | '-'): string[] => {
+    const arr = text.split('\n');
+    if (arr.length <= maxLines) return arr.map((l) => `${prefix} ${l}`);
+    const shown = arr.slice(0, maxLines).map((l) => `${prefix} ${l}`);
+    shown.push(`… (${arr.length - maxLines} more line${arr.length - maxLines === 1 ? '' : 's'})`);
+    return shown;
+  };
+  const parts: string[] = [];
+  if (oldStr.length > 0) parts.push(...clip(oldStr, '-'));
+  parts.push(...clip(newStr, '+'));
+  return parts.join('\n');
 }
 
 /**

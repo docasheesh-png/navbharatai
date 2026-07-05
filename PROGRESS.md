@@ -9663,3 +9663,19 @@ NEXT: read the AGENTV3_ANON_FALLBACK logs from a real admin build → the `reaso
 it's a transient cold-start (now retried) or a systematic cert/network/config issue (then fix the infra:
 set FIREBASE_PROJECT_ID + confirm Cloud Run egress to googleapis.com + the runtime SA can verify tokens).
 Gate: frontend tsc 0, server tsc 0, vitest 4889/4889 PASS, build PASS, boot PASS.
+## 2026-07-05 — C3/E7: live file-content streaming to the Diff tab (create now emits a diff event)
+
+Only edit_file emitted a `diff` event, so the Diff tab stayed EMPTY through an all-creates fresh build —
+the user couldn't watch files stream in. write_file (create + wholesale rewrite) and write_files_batch
+now emit a bounded diff too.
+- New pure `boundedWholeFileDiff(old, new, maxLines=160)`: create (empty old) → additions only;
+  rewrite → removed+added; each side capped with a "… (N more lines)" note so a large file can never
+  produce an unbounded event payload.
+- write_file emits it after recordFileChange (create → old ''; modify → the pre-overwrite content it
+  already read). write_files_batch reuses the create-vs-modify PROBE content it already reads (no extra
+  round-trip) and emits per file.
+- Synergy: state.diffs now updates on creates → U1's preview auto-refresh also fires as files are
+  created, and the events go to the UI stream (not the model transcript), so A1's compaction is unaffected.
+- Tests: ToolDispatcher.test.ts +4 (bounded-diff create/rewrite/cap/singular) + the write_file test now
+  asserts a create emits an additions-only diff. Gate: server tsc 0, frontend tsc 0, vitest 4908/4908,
+  boot PASS.

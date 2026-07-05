@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ToolDispatcher, applyEdit, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, boundedWholeFileDiff, type ActuatorPort } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -74,6 +74,12 @@ describe('ToolDispatcher', () => {
     expect(events.find((e) => e.type === 'tool_call')).toBeTruthy();
     expect(events.find((e) => e.type === 'tool_result' && e.ok)).toBeTruthy();
     expect(events.find((e) => e.type === 'file_changed')).toBeTruthy();
+    // E7 — a CREATE now streams a diff event (additions only) so the Diff tab isn't empty during a
+    // fresh build. Previously only edit_file emitted a diff.
+    const diffEv = events.find((e) => e.type === 'diff') as { diff: { path: string; patch: string } } | undefined;
+    expect(diffEv?.diff.path).toBe('src/App.tsx');
+    expect(diffEv?.diff.patch).toContain('+ hello');
+    expect(diffEv?.diff.patch).not.toContain('- '); // create → additions only
     // Creating a NEW file gives a plain confirmation — no edit_file nudge.
     expect(res.content).toContain('Created src/App.tsx');
     expect(res.content).not.toContain('edit_file');
@@ -1240,5 +1246,28 @@ describe('ToolDispatcher — secret redaction on the user-visible event surface 
     const callEvt = events.find((e) => e.type === 'tool_call') as { input?: { command?: string } } | undefined;
     expect(callEvt?.input?.command ?? '').not.toContain(secret);
     expect(callEvt?.input?.command ?? '').toContain('[REDACTED:');
+  });
+});
+
+describe('boundedWholeFileDiff (E7 — live diff for write_file, bounded)', () => {
+  it('a create (empty old) shows additions only', () => {
+    const d = boundedWholeFileDiff('', 'line1\nline2');
+    expect(d).toBe('+ line1\n+ line2');
+    expect(d).not.toContain('- ');
+  });
+  it('a wholesale rewrite shows removed then added', () => {
+    const d = boundedWholeFileDiff('old1\nold2', 'new1');
+    expect(d).toBe('- old1\n- old2\n+ new1');
+  });
+  it('caps each side at maxLines with a "N more lines" note (no unbounded payload)', () => {
+    const big = Array.from({ length: 500 }, (_, i) => `l${i}`).join('\n');
+    const d = boundedWholeFileDiff('', big, 160);
+    const plusLines = d.split('\n').filter((l) => l.startsWith('+ '));
+    expect(plusLines).toHaveLength(160);
+    expect(d).toContain('340 more lines');
+  });
+  it('singular "1 more line" at the exact boundary', () => {
+    const big = Array.from({ length: 161 }, (_, i) => `l${i}`).join('\n');
+    expect(boundedWholeFileDiff('', big, 160)).toContain('(1 more line)');
   });
 });

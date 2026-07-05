@@ -4,6 +4,7 @@ import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { shouldSurfaceStreamError, reconnectOutcome } from './agentV3StreamError';
+import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../App';
 
 /**
@@ -169,6 +170,9 @@ export function useAgentV3Build(): UseAgentV3Build {
   // it; every async apply path re-checks it before calling setState and stops cold if it no longer
   // matches — so a stale resume/mirror can never silently repopulate a session the user has since left.
   const generationRef = useRef(0);
+  // B6 — last live-poll seq seen per workspace, so a tab-focus re-arm of subscribeLive resumes from it
+  // instead of re-downloading the whole event history from seq 0.
+  const liveSeqRef = useRef<Record<string, number>>({});
   // Why the LAST loadConversation() returned null — so "opening an old chat shows 0 messages" stops
   // being an opaque dead end. Every failure branch records a precise reason (HTTP 404 vs 403 vs empty
   // vs network) that the panel surfaces in the error toast + console, turning a 5th guess into a fact.
@@ -291,17 +295,30 @@ export function useAgentV3Build(): UseAgentV3Build {
     if (!uid) return () => {};
     const myGen = generationRef.current;
     let stopped = false;
-    let sinceSeq = 0;
+    // B6 — RESUME from the last seq seen for THIS workspace, so a tab-focus re-arm fetches only what's
+    // new instead of re-downloading the whole event history from seq 0.
+    const seqKey = opts?.workspaceId ?? '_';
+    let sinceSeq = resumeSinceSeq(liveSeqRef.current[seqKey]);
     let idlePolls = 0;
     // BACKGROUND-COST fix (2026-07-05 audit #2): the poll used a FIXED 3s cadence forever, and only an
     // EXPLICIT `running === false` ever wound it down — an omitted/undefined `running` kept a hidden,
     // idle panel polling every 3s indefinitely (battery + network drain, worse now that the v3.0
     // surface stays mounted as a window). Quiet ticks now back off 3s → 30s (×1.6), any activity snaps
     // back to 3s, and ANY non-`true` running counts toward wind-down.
-    let delayMs = 3000;
+    let delayMs = LIVE_POLL_FAST_MS;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       if (stopped || isStale(myGen)) { stopped = true; return; }
+      // B6 — PAUSE while the tab is hidden: don't hit the network at all, just reschedule at the max
+      // cadence. The initial-visibility guard only stopped a poll from STARTING while hidden; a poll
+      // already running when the tab was backgrounded kept fetching every few seconds. When the tab is
+      // shown again the next tick fetches from `sinceSeq`, so nothing is missed.
+      const hidden = typeof document !== 'undefined' && document.hidden === true;
+      if (hidden) {
+        timer = setTimeout(() => { void tick(); }, nextLivePollDelayMs({ hidden: true, hadActivity: false, current: delayMs }));
+        return;
+      }
+      let hadActivity = false;
       try {
         const params = new URLSearchParams({ userId: uid });
         if (em) params.set('email', em);
@@ -311,21 +328,21 @@ export function useAgentV3Build(): UseAgentV3Build {
         const res = await fetch(`/api/agentv3/live?${params.toString()}`, { signal: AbortSignal.timeout(10_000) });
         if (res.ok) {
           const j = await res.json().catch(() => ({} as Record<string, unknown>));
-          if (typeof j.seq === 'number') sinceSeq = j.seq;
+          if (typeof j.seq === 'number') { sinceSeq = j.seq; liveSeqRef.current[seqKey] = sinceSeq; }
           const events = Array.isArray(j.events) ? (j.events as AgentV3WireEvent[]) : [];
           if (events.length > 0) {
             if (isStale(myGen)) { stopped = true; return; } // session moved on while this fetch was in flight
             idlePolls = 0;
-            delayMs = 3000; // activity → snap back to the fast cadence
+            hadActivity = true;
             setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
           } else if (j.running !== true) {
             idlePolls += 1; // no activity + not provably running → wind down so an idle open panel stops polling
-            delayMs = Math.min(30_000, Math.round(delayMs * 1.6));
           }
         }
       } catch { /* best-effort — a failed poll just retries (with backoff) */ }
       if (stopped || isStale(myGen)) { stopped = true; return; }
       if (idlePolls >= 10) { stopped = true; return; } // quiet streak → stop until re-armed by the panel
+      delayMs = nextLivePollDelayMs({ hidden: false, hadActivity, current: delayMs });
       timer = setTimeout(() => { void tick(); }, delayMs);
     };
     void tick();

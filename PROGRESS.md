@@ -9225,6 +9225,7 @@ their own repo. Reverting a shipped merge is available on GitHub's native PR "Re
 Revert button is Slice 2b (next).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4815/4815 PASS, build PASS, boot PASS.
+
 ## 2026-07-05 — v3.0 audit Batch 6 (long-session robustness): composer draft persistence (B7)
 
 Ships B7 — and it directly complements B8 (Batch 5).
@@ -9244,3 +9245,27 @@ Ships B7 — and it directly complements B8 (Batch 5).
 
 Remaining ledger after Batch 6: B5, B6, B9, B10, U4, U6, U8, U9, U10, E5, E6, E7, E8, E9, E10
 (E1 done, E3 open awaiting admin escalation-default decision).
+=======
+
+## 2026-07-05 — Own-repo storage Slice 2b: in-app "Revert last merge" (undo a shipped break)
+
+Completes the admin's own-repo flow (edit → work branch → Ship → Revert). Adds the in-app undo so a
+shipped change that breaks the app can be rolled back WITHOUT leaving NavBharatAI.
+
+- New pure `planRevert(head)` (GitHubPrFlow.ts): a SINGLE-parent head (the shape a squash "Ship to
+  main" produces) is auto-revertible → restore to its parent; a true (2-parent) merge or a root commit
+  is refused honestly and the user is pointed at GitHub's Revert. Fully unit-tested.
+- UserGitHubClient git-data methods: getBranchHeadCommit, getCommitTreeSha, createCommit, updateBranchRef
+  (force:false — NEVER rewrites history). Tested (incl. asserting the ref update is non-forced).
+- New `POST /api/agentv3/revert`: verify write access → read base head → planRevert → snapshot base back
+  to the parent's tree as a NEW commit on top of head (non-destructive, itself revertible) → fast-forward
+  the ref. Honest refusal when not auto-revertible or the branch moved.
+- Hook `revertLastMerge()` + `RevertResult`; AgentV3Panel "Revert last" button beside "Ship" (with a
+  confirm), honest result rendered in-thread.
+- AppKnowledgeBase agentv3_ship_to_main updated: the in-app Revert now exists.
+
+SAFETY: never a force-push (revert is a new commit, history preserved + itself undoable); only the
+user's own repo (their token); only single-parent commits auto-revert (else honest refusal); flag-gated
+via AGENTV3_OWN_REPO_STORAGE. The undo now lives exactly where the merge action does.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4826/4826 PASS, build PASS, boot PASS.

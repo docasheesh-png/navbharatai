@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mergeViaPullRequest, githubPrMode, type PrCapableClient } from './GitHubPrFlow';
+import { mergeViaPullRequest, githubPrMode, planRevert, type PrCapableClient } from './GitHubPrFlow';
 import type { CiVerdict, PullRequestInfo } from './GitHubAppClient';
 
 function fakeClient(over: Partial<PrCapableClient> & { ci?: CiVerdict; pr?: Partial<PullRequestInfo>; merged?: boolean } = {}): PrCapableClient & { mergeCalls: number } {
@@ -63,6 +63,33 @@ describe('mergeViaPullRequest', () => {
     const res = await mergeViaPullRequest(throwing, 'app-x', { head: 'h', base: 'main', title: 't' });
     expect(res.opened).toBe(false);
     expect(res.merged).toBe(false);
+  });
+});
+
+describe('planRevert', () => {
+  it('auto-reverts a single-parent head (the squash "Ship to main" shape) to its parent', () => {
+    const plan = planRevert({ sha: 'm1', parents: [{ sha: 'p0' }] });
+    expect(plan).toEqual({ canRevert: true, parentSha: 'p0' });
+  });
+
+  it('refuses a true (multi-parent) merge commit honestly — points at GitHub Revert', () => {
+    const plan = planRevert({ sha: 'm2', parents: [{ sha: 'a' }, { sha: 'b' }] });
+    expect(plan.canRevert).toBe(false);
+    expect(plan.parentSha).toBeUndefined();
+    expect(plan.reason).toMatch(/multi-parent/i);
+  });
+
+  it('refuses a root commit (no parents) honestly', () => {
+    const plan = planRevert({ sha: 'root', parents: [] });
+    expect(plan.canRevert).toBe(false);
+    expect(plan.reason).toMatch(/first commit/i);
+  });
+
+  it('refuses safely when the head is unreadable (null / malformed)', () => {
+    expect(planRevert(null).canRevert).toBe(false);
+    expect(planRevert(undefined).canRevert).toBe(false);
+    // @ts-expect-error — exercising a malformed shape at runtime
+    expect(planRevert({ sha: 'x' }).canRevert).toBe(false);
   });
 });
 

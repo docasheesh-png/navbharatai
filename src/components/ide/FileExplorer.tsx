@@ -6,6 +6,7 @@ import {
   CheckSquare, Square, X, AlertTriangle
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { svgPreviewSrc } from '../../lib/svgPreview';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface FileExplorerProps {
@@ -268,7 +269,11 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
             <div className="absolute left-full top-0 ml-2 z-50 p-2 bg-[#161b22] border border-white/10 rounded-xl shadow-2xl pointer-events-none" style={{ minWidth: '120px', maxWidth: '200px' }}>
               {(files[item.path] || '').startsWith('data:image') || item.name.endsWith('.svg') ? (
                 item.name.endsWith('.svg')
-                  ? <div className="w-full" dangerouslySetInnerHTML={{ __html: files[item.path] || '' }} />
+                  // SECURITY: never inject raw SVG source as HTML — a generated/imported `logo.svg`
+                  // containing `<img src=x onerror=…>` would run in the PLATFORM origin on hover and
+                  // steal auth tokens (stored XSS). svgPreviewSrc renders it through an <img> data-URI
+                  // (script-disabled "secure static" mode) so no script/onerror in the SVG can execute.
+                  ? <img src={svgPreviewSrc(files[item.path] || '')} alt={item.name} className="w-full rounded" />
                   : <img src={files[item.path]} alt={item.name} className="w-full rounded" />
               ) : (
                 <div className="flex items-center gap-2 p-1">

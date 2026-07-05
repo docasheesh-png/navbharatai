@@ -119,6 +119,20 @@ describe('Build routes — /api/build', () => {
   });
 });
 
+describe('Build routes — cost/history attribution identity (security)', () => {
+  it('attributes ONLY to a verified uid, never a client-supplied body userId', async () => {
+    const { resolveAttributionUserId } = await import('../src/server/routes/build');
+    // A verified Firebase uid is used verbatim.
+    expect(resolveAttributionUserId('uid_verified')).toBe('uid_verified');
+    // No verified identity → no attribution, REGARDLESS of what a body.userId claimed.
+    // (The route derives this arg from verifyFirebaseToken(req), not req.body.userId, so a
+    //  spoofed body userId can never reach cost/history recording.)
+    expect(resolveAttributionUserId(null)).toBeUndefined();
+    expect(resolveAttributionUserId(undefined)).toBeUndefined();
+    expect(resolveAttributionUserId('')).toBeUndefined();
+  });
+});
+
 // ── Pro routes ────────────────────────────────────────────────────────────────
 
 describe('Pro routes — /api/pro/code-review', () => {

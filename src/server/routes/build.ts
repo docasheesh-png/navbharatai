@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, requireUserMatch } from '../lib/authMiddleware';
+import { buildRateLimiter, requireUserMatch, verifyFirebaseToken } from '../lib/authMiddleware';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
@@ -8,6 +8,17 @@ import { shouldConfirm } from '../Guider/GuiderGate';
 import type { GuiderSpec } from '../Guider/GuiderTypes';
 import { eventBus } from '../lib/eventBus';
 import { EventType } from '../AppMakerLab/eventbus/EventTypes';
+
+/**
+ * SECURITY (cost/history attribution): a build's cost and history are attributed ONLY to the
+ * cryptographically-verified Firebase uid — NEVER a client-supplied `userId` body field, which any
+ * caller could set to a victim's uid to inflate that victim's monthly cost/quota or forge build
+ * history under their name. No verified identity → no attribution (an anonymous build is simply not
+ * recorded against anyone, exactly as before for signed-out users).
+ */
+export function resolveAttributionUserId(verifiedUid: string | null | undefined): string | undefined {
+  return verifiedUid || undefined;
+}
 
 /** Compact textual view of the built files for the grader (tree + budgeted snippets). */
 function buildGradeContext(files: Record<string, string>): string {
@@ -361,7 +372,9 @@ export function registerBuildRoutes(app: Express): void {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') { send({ type: 'error', message: 'prompt (string) is required' }); cleanup(); return res.end(); }
-      const reqUserId: string | undefined = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : undefined;
+      // SECURITY: attribute cost/history to the VERIFIED Firebase identity only — never the
+      // client-supplied req.body.userId (spoofable → griefing a victim's cost/quota/history).
+      const reqUserId: string | undefined = resolveAttributionUserId(await verifyFirebaseToken(req));
 
       // Foundations (G1) — best-effort lifecycle events (never block the build).
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';

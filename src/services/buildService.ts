@@ -232,9 +232,19 @@ export async function buildAppStream(
   onEvent: (ev: BuildStreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<BuildStreamEvent> {
+  // Attach the Firebase ID token so the server can attribute build cost/history to the
+  // VERIFIED identity (it no longer trusts a userId body field). Dynamic import keeps this
+  // module free of firebase at load time (unit tests import it without initializing auth).
+  // Best-effort: a signed-out user simply builds anonymously (unattributed), as before.
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { auth } = await import('../lib/firebase');
+    const tok = await auth.currentUser?.getIdToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  } catch { /* best-effort — anonymous build still proceeds */ }
   const res = await fetch('/api/build-stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(req),
     signal,
   });

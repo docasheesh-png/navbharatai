@@ -9534,3 +9534,27 @@ Concurrency roadmap (admin-approved, for the record): #1 Stop|Connect (this) →
 → #3 durable per-app command QUEUE + single serial executor (Chat 1) → #4 Chat 2 = planner that enqueues
 → #5 Chat 3 = flexible read-only advisor (audit/test/research/explain) that enqueues → #6 queue UI +
 snapshot reads. Model: 1 writer (executor) + N read-only advisors feeding one queue = safe concurrency.
+
+## 2026-07-05 — A1 (autopsy #3 slice 2): model-side transcript compaction — the 233KB→timeout root cause
+
+The remaining half of the Mitrify prompt-bloat: `compactMessagesForPersist` bounded the transcript for
+STORAGE only; the LIVE `messages` sent to the model each turn were UNBOUNDED — every read_file/bash
+result stayed verbatim, so reading a few large files (2500-line routes.ts) grew the per-turn prompt to
+200KB+. The cheap floor (GLM/KIMI) then timed out on the payload (report: GLM 6×, KIMI 2×) and every
+turn fell to Claude anyway.
+- New pure `compactTranscriptForModel(messages, {keepRecentMessages, maxOldToolResultChars})` in
+  SessionTimeline.ts: last N messages (default 6 ≈ 3 turns) sent VERBATIM (in-flight work untouched);
+  OLDER large tool_result payloads head+tail trimmed (default 2000 chars) with an honest
+  "call read_file again if you need the full content" note; old base64 screenshots → short note.
+  NEVER drops a block (tool_use↔tool_result id pairing always preserved → API never rejects an orphan);
+  never mutates `messages` (persistence + audit keep full fidelity — only the network payload shrinks);
+  deterministic (a message truncates identically each turn → stable cache prefix); natural no-op on a
+  small build.
+- Wired in AgentRunner.run() right before client.runTurn — sends `modelMessages` (compacted copy), keeps
+  the full `messages` for everything else. Env: AGENTV3_MODEL_COMPACT=off bypasses; KEEP_RECENT / MAX_CHARS
+  tune the window.
+- Tests: SessionTimeline.test.ts +6 (old-large trimmed + recent verbatim by reference; no orphaned tool
+  ids; no-op + no-mutation on small builds; short results untouched; old screenshot → note; original user
+  request never trimmed). Gate: server tsc 0, frontend tsc 0, vitest 4885/4885, boot PASS.
+- Together with #995 (binary assets out of the manifest), the 233KB prompt class is now closed: big-app
+  turns stay bounded → the cheap floor stops timing out and each turn is faster.

@@ -4,7 +4,7 @@ import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from '
 import type { ToolDispatcher } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
-import { compactMessagesForPersist } from './SessionTimeline';
+import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
 import { withTimeout } from './asyncUtils';
 
@@ -225,6 +225,11 @@ export class AgentRunner {
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
     const turnTimeoutMs = this.opts.turnTimeoutMs ?? 8 * 60_000;
     const toolTimeoutMs = this.opts.toolTimeoutMs ?? 10 * 60_000;
+    // A1 — model-side transcript compaction knobs (env-tunable). keepRecent messages go verbatim;
+    // older large tool_results are head+tail trimmed to maxOldToolResultChars. Generous defaults so
+    // in-flight work is never touched and only genuinely-stale large file dumps shrink.
+    const modelKeepRecent = Math.max(2, parseInt(process.env.AGENTV3_MODEL_COMPACT_KEEP_RECENT || '', 10) || 6);
+    const modelMaxOldToolResultChars = Math.max(500, parseInt(process.env.AGENTV3_MODEL_COMPACT_MAX_CHARS || '', 10) || 2_000);
     const buildStartMs = Date.now();
     // Total tool calls across the whole run — a build that never called a tool built nothing.
     let totalToolUses = 0;
@@ -367,10 +372,19 @@ export class AgentRunner {
           // E4 — cap the model call so a hung provider (socket open, no bytes, no error) can't block
           // the whole build. The wall-clock watchdog only runs BETWEEN turns, so without this a single
           // stalled turn would never return control to it.
+          // A1 — bound the transcript SENT to the model (recent turns verbatim, older large
+          // tool_results head+tail trimmed). The full `messages` array is untouched (persistence +
+          // the next turn's own compaction both read from it), so this only shrinks the network
+          // payload — the fix for the 233KB prompt that timed out the cheap floor. No-op on a small
+          // build. Disabled by setting transcriptKeepRecent to 0 turns is not offered; instead
+          // AGENTV3_MODEL_COMPACT=off bypasses entirely for a clean A/B if ever needed.
+          const modelMessages = process.env.AGENTV3_MODEL_COMPACT === 'off'
+            ? messages
+            : compactTranscriptForModel(messages, { keepRecentMessages: modelKeepRecent, maxOldToolResultChars: modelMaxOldToolResultChars });
           const turnCall = client.runTurn({
             model,
             system,
-            messages,
+            messages: modelMessages,
             tools,
             maxTokens: maxTokensPerTurn,
             thinking,

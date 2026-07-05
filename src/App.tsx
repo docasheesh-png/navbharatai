@@ -18,6 +18,7 @@ import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProV3Surface } from './components/agentv3/ProV3Surface';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
+import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
@@ -1590,6 +1591,11 @@ export default function App() {
       // When closing pro chat, also remove the preview tab
       if (view === 'nbi_pro_chat') {
         nextTabs = nextTabs.filter(t => t !== 'preview');
+        // ✕ CLOSE = one of the only ways the v3.0 chat ends (admin rule 2026-07-05): clear the sticky
+        // session so the NEXT open starts a fresh chat. Everything short of this ✕ (tab switches,
+        // reload, phone off) restores the same chat. A still-running build keeps running server-side
+        // and lands in ☰ History with all its build files (durable WorkspaceFileStore).
+        clearStickySession(user?.uid);
         // If active view is preview or pro-chat, redirect away
         if (activeView === 'preview' || activeView === 'nbi_pro_chat') {
           const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';

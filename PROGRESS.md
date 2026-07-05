@@ -8835,3 +8835,31 @@ NEXT (clinical safety — highest priority, from the SDA hunt, NOT yet fixed):
 - **MEDIUM — SDA audit cross-check dropped on an "ok"-prefixed danger note.** `sda.ts:78`
   `/^ok\b/i.test(text)` discards a real warning like "OK, but the dose is a 10× overdose…". Fix: only
   treat an EXACT `OK`/`OK.`/`OK!` (trimmed) as clean.
+
+## 2026-07-05 — v3.0 STICKY SESSION (admin rule): chat survives reload/phone-off; ends ONLY via +New chat / history-open / tab ✕
+
+ADMIN RULE CHANGE (explicit, 2026-07-05): the 2026-07-01 "opening v3.0 always starts a brand-new chat"
+rule is RETIRED by the admin ("us time ek chat fas gayi thi... ab sab theek hai, is rule ki need nahi
+hai"). New standing rule: the v3.0 chat changes/closes ONLY via (1) ☰ +New chat, (2) ☰ opening another
+chat, (3) the header tab ✕. Everything else — in-app tab switches, reload, phone switched off, browser
+killed — restores the SAME chat where the user left it, and typing anything continues the engine.
+
+CHANGES:
+- NEW pure `v3SessionContinuity.ts` — single source of truth for the sticky-session key
+  (v3SessionStorageKey / readStickySession / clearStickySession), shared by the panel and App's
+  closeTab so they can never drift. +5 tests.
+- AgentV3Panel: session init now RESTORES the sticky id (was: always mint fresh — the retired rule);
+  the fresh-open-nonce → startNewSession effect is replaced by a SILENT sticky-restore
+  (openConversation(id, {silent:true})): restores the saved thread, re-attaches a still-running build
+  (resume-live), and a brand-new session with nothing saved quietly stays a blank chat — no error, no
+  "Transcript lost" branding, ever, from the auto path.
+- App.tsx closeTab('nbi_pro_chat'): clears the sticky session — ✕ is the deliberate "chat band" action;
+  a running build keeps running server-side and lands in ☰ History with all its build files.
+
+DEPLOY-VERIFICATION NOTE (admin's "#973 still dead" report): IMG_5715's v3.0 header shows build stamp
+b:07-05 07:51 — BEFORE #973's merge (08:56 UTC), so that test provably ran on a pre-#973 bundle. The
+live site is unreachable from this sandbox (network policy), so bundle freshness could not be verified
+remotely; the admin can check the b: stamp in the v3.0 header (must be ≥ 07-05 09:00 for #973, newer
+for this PR). If the stamp stays old after a deploy: hard-refresh / clear the PWA cache.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4773/4773 PASS, frontend+server build PASS.

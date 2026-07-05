@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -525,6 +525,40 @@ describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, 
     expect(selectBuildModel(calc.startTier, false)).toBe(haikuModel());
     const complex = analyzeRequest({ prompt: 'build a multi-tenant SaaS with auth, postgres database, billing and an admin dashboard' });
     expect(selectBuildModel(complex.startTier, false)).toBe(sonnetModel());
+  });
+
+  // Admin decision 2026-07-05 ("badi apps direct Sonnet"): a LARGE existing project overrides the
+  // prompt-based tier — the analyser saw "survey my app" as simple/haiku while the CONTEXT was a
+  // 317-file import; the cheap floor then timed out 8× and fell to Claude anyway (Mitrify autopsy).
+  it('a LARGE existing project builds on Sonnet even when the prompt tier says haiku', () => {
+    expect(selectBuildModel('haiku', false, true)).toBe(sonnetModel());
+    expect(selectBuildModel('gemini', false, true)).toBe(sonnetModel());
+    expect(selectBuildModel(undefined, false, true)).toBe(sonnetModel());
+  });
+  it('power mode still beats the large-project override (Opus)', () => {
+    expect(selectBuildModel('haiku', true, true)).toBe(opusModel());
+  });
+  it('largeProject=false keeps every existing route unchanged (backward compat)', () => {
+    expect(selectBuildModel('haiku', false, false)).toBe(haikuModel());
+    expect(selectBuildModel('sonnet', false, false)).toBe(sonnetModel());
+  });
+});
+
+describe('isLargeExistingProject — the "badi app" threshold', () => {
+  afterEach(() => { delete process.env.AGENTV3_LARGE_PROJECT_FILES; });
+  it('Mitrify-scale (317 files) is large; a fresh v3.0 app (40 files) is not', () => {
+    expect(isLargeExistingProject(317)).toBe(true);
+    expect(isLargeExistingProject(40)).toBe(false);
+  });
+  it('boundary: default threshold 100 (99 no, 100 yes); 0 files (fresh build / list failed) never large', () => {
+    expect(isLargeExistingProject(99)).toBe(false);
+    expect(isLargeExistingProject(100)).toBe(true);
+    expect(isLargeExistingProject(0)).toBe(false);
+  });
+  it('AGENTV3_LARGE_PROJECT_FILES tunes the threshold', () => {
+    process.env.AGENTV3_LARGE_PROJECT_FILES = '50';
+    expect(isLargeExistingProject(60)).toBe(true);
+    expect(isLargeExistingProject(49)).toBe(false);
   });
 });
 

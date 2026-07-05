@@ -756,10 +756,25 @@ export function tierToGeminiBuildModel(tier: StartTier): string {
  * D5/D6) regardless of which model runs — margin only widens on the cheaper tiers.
  * Pure + exported for unit testing.
  */
-export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean): string {
+export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean, largeProject = false): string {
   if (powerOn) return opusModel();
+  // LARGE existing project → Sonnet DIRECTLY (admin decision 2026-07-05: "badi apps direct Sonnet").
+  // The analyser tiers by the PROMPT's complexity — but on a big imported app even a simple ask
+  // ("survey my app") carries a huge context, which Haiku + the cheap floor handled by timing out
+  // 8× and then falling to Claude anyway (Mitrify autopsy). Route the turn where it will end up.
+  if (largeProject) return sonnetModel();
   if (tier === 'sonnet' || tier === 'opus') return sonnetModel();
   return haikuModel();
+}
+
+/**
+ * Is this an existing project big enough that the cheap floor + Haiku reliably struggle (huge
+ * per-turn context)? Threshold env-tunable via AGENTV3_LARGE_PROJECT_FILES (default 100 files —
+ * Mitrify-scale imports are ~300+, fresh v3.0 builds are ~15-60). Pure + exported for testing.
+ */
+export function isLargeExistingProject(fileCount: number): boolean {
+  const threshold = Math.max(1, parseInt(process.env.AGENTV3_LARGE_PROJECT_FILES || '', 10) || 100);
+  return fileCount >= threshold;
 }
 
 /** The dev-server port a framework's `npm run dev` listens on — used by the OneShot lane to
@@ -3207,9 +3222,28 @@ export function registerAgentV3Routes(app: Express): void {
           `[AGENTV3] cost-ladder: ${analysis.reasoning} → build model ${tierToGeminiBuildModel(analysis.startTier)}`,
         );
       }
-      // Admin routing policy: small app → Haiku, complex app → Sonnet, power → Opus
-      // (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
-      const model = selectBuildModel(analysis?.startTier, onlyOpus);
+      // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
+      // project ONCE up-front (edit/import mode only — a fresh build has nothing to list). The
+      // listing is REUSED further down for the edit-mode prompt, so this adds no extra sandbox
+      // roundtrip. On a Mitrify-scale app the analyser tiers by the PROMPT ("survey" → haiku) while
+      // the CONTEXT is huge — the cheap floor then timed out 8× and fell to Claude anyway. Detecting
+      // "large existing project" here routes the whole build to Sonnet directly and keeps the cheap
+      // floor out of its chain: faster, and no silent multi-timeout money burn.
+      let editFileTree: string[] | null = null;
+      if (isEditMode) {
+        try { editFileTree = await actuator.listFiles(workspaceId); } catch { editFileTree = null; }
+      }
+      const largeProject = isLargeExistingProject(editFileTree?.length ?? 0);
+      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project → Sonnet,
+      // power → Opus (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
+      const model = selectBuildModel(analysis?.startTier, onlyOpus, largeProject);
+      if (largeProject && !onlyOpus) {
+        // Honest + visible: the user sees WHY this build routes to the strong model.
+        events.emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: `🏗️ Large project (${editFileTree?.length ?? 0} files) — running directly on the strong model for reliability.`,
+        });
+      }
       // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
       // without building" nudge, readiness blocker, sandbox issue) into a downloadable report,
       // so the admin can hand it to Claude and the rough edges get fixed in code.
@@ -3236,8 +3270,10 @@ export function registerAgentV3Routes(app: Express): void {
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
         // straight to the strong model) AND only for allowlisted users (canary; empty list = all).
+        // NEVER for a large existing project (admin 2026-07-05): the floor timed out 8× on a 233KB
+        // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
         // Escalation builds below never pass this, so they stay Claude.
-        allowCheapFloor: cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
+        allowCheapFloor: !largeProject && cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
         onProviderUsed: captureProvider,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
@@ -3724,10 +3760,14 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* blueprint is advisory + best-effort — on any error/timeout the build proceeds unchanged */ }
       }
       if (isEditMode) {
-        let fileTree: string[] = [];
-        try {
-          fileTree = await actuator.listFiles(workspaceId);
-        } catch { /* listing is best-effort — fall through to the normal build prompt */ }
+        // Reuse the up-front large-project listing (no second sandbox roundtrip); re-list only if
+        // that early attempt failed (listing is best-effort — fall through to the normal build prompt).
+        let fileTree: string[] = editFileTree ?? [];
+        if (fileTree.length === 0) {
+          try {
+            fileTree = await actuator.listFiles(workspaceId);
+          } catch { /* listing is best-effort — fall through to the normal build prompt */ }
+        }
         // Engage surgical-edit mode ONLY when there are real files to patch. On an
         // empty or failed workspace there is nothing to edit, so the normal build
         // prompt (which freely creates files) is the correct, non-misleading default.

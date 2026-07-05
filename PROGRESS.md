@@ -9385,3 +9385,26 @@ Prompt-size governance, first slice (the Mitrify autopsy's "missing subsystem B"
 - REMAINING for follow-up 3 (recorded, not silently dropped): transcript compaction / read_file
   result capping for the cheap floor — the other half of the 233KB growth (bigger change, own PR).
   Follow-up 2 (single source for file counts) also still open.
+
+## 2026-07-05 — P1 (admin-approved): large existing projects build DIRECTLY on Sonnet, cheap floor bypassed
+
+Admin decision ("badi apps, direct sonnet par edit karwao — badi apps only"), grounded in the Mitrify
+autopsy: the analyser tiers by the PROMPT ("survey my app" → haiku) while the CONTEXT was a 317-file
+import → the cheap floor (GLM/KIMI) timed out 8× on the bloated prompt and every turn fell to Claude
+anyway — minutes of silent waste, then the strong model did the work regardless.
+- New pure `isLargeExistingProject(fileCount)` — default threshold 100 files, env-tunable via
+  AGENTV3_LARGE_PROJECT_FILES. Mitrify-scale (300+) → large; fresh v3.0 apps (15-60) → not.
+- `selectBuildModel(tier, powerOn, largeProject)` — largeProject → Sonnet directly (power still wins
+  → Opus; largeProject=false → byte-identical routing to before).
+- Cheap floor: `allowCheapFloor` now ANDs `!largeProject` — GLM/KIMI never lead a big-app turn.
+- The edit-mode file listing is HOISTED before model selection and REUSED for the edit prefix — no
+  extra sandbox roundtrip (still exactly one listFiles per edit build).
+- Honest narration when it fires: "🏗️ Large project (N files) — running directly on the strong model
+  for reliability."
+- Tests: agentv3.test.ts +6 (large overrides haiku/gemini/undefined; power beats large; backward
+  compat; threshold boundary 99/100/0; env tune). Gate: server tsc 0, frontend tsc 0, vitest
+  4856/4856 PASS, boot:check PASS.
+- NOTE (billing, recorded): normal-mode billing currently maps to the cheap ×1.2 tier regardless of
+  which model ran (per-model token accounting is the already-recorded follow-up B from the #985
+  policy). Large-project Sonnet runs bill ×1.2 until follow-up B lands — margin is still positive,
+  and the admin explicitly chose reliability here.

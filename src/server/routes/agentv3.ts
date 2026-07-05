@@ -72,6 +72,7 @@ import {
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote } from '../AgentV3/ProjectImport';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
+import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -3777,10 +3778,14 @@ export function registerAgentV3Routes(app: Express): void {
         // empty or failed workspace there is nothing to edit, so the normal build
         // prompt (which freely creates files) is the correct, non-misleading default.
         if (fileTree.length > 0) {
+          // Count EDITABLE SOURCE files (autopsy #2): listFiles includes ~150 binary assets the agent
+          // can't touch, so the old raw `fileTree.length` (e.g. 317) contradicted the import banner's
+          // "165 files" for the SAME project. One shared count (fileClassification.ts) keeps them honest.
+          const sourceCount = countEditableSourceFiles(fileTree);
           events.emit({
             type: 'narration',
             agent: 'architect',
-            text: `✏️ Editing your existing app (${fileTree.length} file${fileTree.length === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
+            text: `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
             ts: Date.now(),
           });
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;

@@ -9583,3 +9583,19 @@ extractCode). Each verified orphaned by whole-file grep BEFORE removal. LIVE han
 
 App.tsx: 6,096 -> 5,045 lines (-1,051). Running total: 6,596 -> 5,045 (~24% down; target ~2,000-2,500).
 Gate: frontend tsc 0, vitest 4879/4879 PASS, vite build PASS.
+
+## 2026-07-05 — A2 (autopsy #2): one honest project file-count (kills the 165-vs-317 contradiction)
+
+The Mitrify run reported "📦 Imported 165 files" then "✏️ Editing your existing app (317 files)" for the
+SAME project — two numbers that read as a bug. Root cause: the import banner counts durably-saved TEXT
+files (assets excluded), while the edit banner used raw `listFiles().length` which INCLUDES the ~150
+`attached_assets/*.png|jpeg` the agent can never edit. And the binary predicate was defined only inside
+systemPrompt.ts, so nothing else could count consistently.
+- New shared `fileClassification.ts` (single source of truth): `isBinaryAsset` / `isEditableSourceFile`
+  / `countEditableSourceFiles`. systemPrompt.ts's manifest filter now imports `isBinaryAsset` (the
+  duplicated BINARY_ASSET_RE removed — rule 2/3, one definition).
+- Edit banner now says "N **source** files" via `countEditableSourceFiles(fileTree)` — binaries
+  excluded, so it lands at ~165 (matching the import banner) instead of a contradictory 317.
+- Tests: fileClassification.test.ts +7 incl. the exact Mitrify-shaped tree (165 source + 150 assets +
+  2 docs = 317 total → count 167). systemPrompt's 31 tests unchanged (refactor is behaviour-preserving).
+- Gate: server tsc 0, frontend tsc 0, vitest 4894/4894, boot PASS.

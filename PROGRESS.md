@@ -8753,3 +8753,28 @@ DEFERRED (recorded from the same hunt):
   skip it in pass 2 (only retry providers SKIPPED in pass 1). Clean next PR.
 - **LOW (latent) — `AIRouterManager.slot()` drops the 5th `images` arg** — not currently reachable
   (UniversalAIRouter passes no images; EngineerAI uses raw registerProvider), fix defensively later.
+
+## 2026-07-05 — v3.0 WINDOW SEMANTICS (round 2, IMG_5715): tab-switch can never blank the chat again + "Transcript lost" misbranding fixed
+
+Admin retest after #963: build running → opened Free chat mid-build → returned to v3.0 → BLANK page/new
+chat; opening the old chat from History showed "HTTP 404: Conversation not found" and permanently
+branded a chat from THE SAME HOUR as "Transcript lost (old bug)".
+
+ROOT CAUSE 1 (blank page): #963's keep-alive was RUNNING-gated — an unmount race. With another tab
+active, the moment the build finished (or a stream blip flipped running→false) the surface UNMOUNTED in
+the background and the whole chat state evaporated; returning bumped v3OpenNonce → startNewSession() →
+blank. FIX: window semantics — ProV3Surface stays mounted while the v3.0 tab is OPEN in the tab bar
+(openTabs), like a real window in NavBharatAI's window system; 10+ tabs open, v3.0 keeps living. It
+unmounts only on explicit tab close (and never mid-build — running still keeps it alive).
+v3SurfaceMount.shouldRenderV3Surface(activeView, running, v3TabOpen); App.tsx passes
+openTabs.includes('nbi_pro_chat'). Tests updated (window-semantics cases).
+
+ROOT CAUSE 2 (Transcript lost): openConversation treated a single transcript 404 as PROOF of the
+pre-rebuild destroyed-transcript class and durably wrote deadTranscript:true — even for a chat whose
+build was STILL RUNNING (persist in flight). FIX: new pure historyOpenPolicy.historyOpen404Action —
+build running → 'resume-live' (adopt session + re-attach the live stream, which is what the user
+wanted); row younger than 24h → 'not-saved-yet' (honest transient message, NO branding); only old+idle
+→ 'brand-dead' (the genuine pre-rebuild class; unchanged behaviour). Panel probes
+/api/agentv3/status?workspaceId before deciding. +5 policy tests.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4762/4762 PASS, frontend+server build PASS.

@@ -5654,16 +5654,18 @@ ${buildLanguageRule(preferredLanguage)}`;
             />
           )}
 
-          {shouldRenderV3Surface(activeView, v3Preview.running === true) && (
+          {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
             /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
                real v3.0 builder when it's enabled for this account, else an honest "rolling out"
                message (never a broken builder). The old ProChatPanel (v2.0) is retired.
 
-               KEEP-ALIVE across tab switches: while a v3.0 build is RUNNING, the surface stays mounted
-               even when another NavBharatAI tab is active — so switching tabs (or having Free + v3.0
-               both open in the tab bar) never tears down the live event stream. `contents` when active
-               is a layout no-op (identical to before); `hidden` (display:none) keeps the stream flowing
-               invisibly in the background. It unmounts normally once the build ends. See v3SurfaceMount. */
+               WINDOW SEMANTICS (admin, 2026-07-05 IMG_5715): the surface stays MOUNTED while the v3.0
+               tab is OPEN in the tab bar — its chat + live build stream survive switching among any
+               number of other tabs (10+ windows), exactly like a real window. The earlier running-only
+               keep-alive had an unmount race: the build finishing (or a stream blip) while another tab
+               was active unmounted the surface in the background and the chat evaporated → "blank page,
+               new chat". Unmounts only on explicit tab close (and never mid-build). `contents` when
+               active is a layout no-op; `hidden` keeps it alive invisibly. See v3SurfaceMount. */
           <div className={v3SurfaceDisplayClass(activeView)} aria-hidden={activeView !== 'nbi_pro_chat'}>
             <ProV3Surface
               userId={user?.uid}

@@ -1,23 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass, V3_VIEW } from '../src/components/agentv3/v3SurfaceMount';
 
-describe('shouldRenderV3Surface', () => {
-  it('renders when v3.0 is the active tab (build running or not)', () => {
-    expect(shouldRenderV3Surface(V3_VIEW, false)).toBe(true);
-    expect(shouldRenderV3Surface(V3_VIEW, true)).toBe(true);
+describe('shouldRenderV3Surface (window semantics)', () => {
+  it('renders when v3.0 is the active tab', () => {
+    expect(shouldRenderV3Surface(V3_VIEW, false, false)).toBe(true);
+    expect(shouldRenderV3Surface(V3_VIEW, true, true)).toBe(true);
   });
 
-  // THE fix (admin, 2026-07-05): switching to another tab used to UNMOUNT v3.0 and kill the live
-  // build stream → "Load failed". While a build is RUNNING, keep it mounted under any active tab.
-  it('keeps v3.0 mounted under ANOTHER active tab while a build is running (the fix)', () => {
-    expect(shouldRenderV3Surface('nbi_chat', true)).toBe(true);   // Free chat active, v3 build running
-    expect(shouldRenderV3Surface('studio', true)).toBe(true);
-    expect(shouldRenderV3Surface('home', true)).toBe(true);
+  // THE round-2 fix (IMG_5715): the v3.0 tab is OPEN in the tab bar → the surface stays mounted under
+  // ANY other active tab, build running or not. The old running-only keep-alive unmounted the surface
+  // the moment the build finished in the background → "blank page, new chat" on return.
+  it('stays mounted while the v3.0 tab is OPEN, under any other tab, even with NO build running', () => {
+    expect(shouldRenderV3Surface('nbi_chat', false, true)).toBe(true);  // Free chat active, idle v3 tab open
+    expect(shouldRenderV3Surface('studio', false, true)).toBe(true);
+    expect(shouldRenderV3Surface('home', false, true)).toBe(true);
   });
 
-  it('unmounts v3.0 under another tab once no build is running (zero idle overhead)', () => {
+  it('a running build keeps it mounted even if the tab was closed (accidental close cannot kill a build)', () => {
+    expect(shouldRenderV3Surface('nbi_chat', true, false)).toBe(true);
+  });
+
+  it('unmounts only when: not active, tab closed, and nothing running', () => {
+    expect(shouldRenderV3Surface('nbi_chat', false, false)).toBe(false);
+    expect(shouldRenderV3Surface('home', false, false)).toBe(false);
+  });
+
+  it('back-compat: the tab-open param defaults to false (old call shape still safe)', () => {
+    expect(shouldRenderV3Surface('nbi_chat', true)).toBe(true);
     expect(shouldRenderV3Surface('nbi_chat', false)).toBe(false);
-    expect(shouldRenderV3Surface('home', false)).toBe(false);
   });
 });
 

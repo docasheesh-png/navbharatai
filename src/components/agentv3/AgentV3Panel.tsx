@@ -10,6 +10,7 @@ import {
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
+import { historyOpen404Action } from './historyOpenPolicy';
 import { decideAutoContinue } from './planAutoContinue';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
@@ -919,6 +920,47 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         // diagnosable in one click (404 = no transcript stored; 403 = ownership/token; empty = 0 turns).
         const why = conversationLoadDiag();
         if (why) console.error('[v3-open] could not restore:', why, 'id=', id);
+        // A 404 alone is NOT proof of a destroyed transcript (IMG_5715: a chat built THE SAME HOUR was
+        // permanently branded "Transcript lost" while its build was still running/saving). Probe whether
+        // its build is STILL RUNNING and gate on the row's age BEFORE deciding (historyOpenPolicy):
+        // running → re-attach live; young → honest "not saved yet" (no branding); old+idle → the
+        // genuine pre-rebuild destroyed-transcript class (brand, as before).
+        const row = historyItems.find((it) => it.id === id || it.id === `v3_${sessionId}`);
+        let buildRunning = false;
+        try {
+          const params = new URLSearchParams();
+          if (userId) params.set('userId', userId);
+          if (email) params.set('email', email);
+          if (row?.workspaceId) params.set('workspaceId', row.workspaceId);
+          const probe = await fetch(`/api/agentv3/status?${params.toString()}`);
+          const j = await probe.json().catch(() => ({} as Record<string, unknown>));
+          buildRunning = row?.workspaceId ? (j as { buildRunningHere?: unknown })?.buildRunningHere === true : (j as { buildRunning?: unknown })?.buildRunning === true;
+        } catch { /* probe unreachable — the age gate below still protects young chats from branding */ }
+        const rowTs = row?.updatedAt ?? row?.createdAt;
+        const action = historyOpen404Action({ ageMs: rowTs ? Date.now() - rowTs : Number.POSITIVE_INFINITY, buildRunning });
+        if (action === 'resume-live') {
+          // The user reopened an IN-FLIGHT chat — re-attach its live build instead of declaring it lost.
+          sessionIdRef.current = sessionId;
+          persistSessionId(sessionId);
+          autoRestoredSessionRef.current = sessionId;
+          rehydratedWsRef.current = '';
+          await resumeBuild({ userId, email, workspaceId: row?.workspaceId, notice: 'This build is still running — re-attached to it live below.' });
+          return;
+        }
+        if (action === 'not-saved-yet') {
+          if (saved) {
+            // Adopt the session so "send a message to continue" genuinely continues THIS project.
+            sessionIdRef.current = sessionId;
+            persistSessionId(sessionId);
+            autoRestoredSessionRef.current = sessionId;
+            rehydratedWsRef.current = '';
+          }
+          setOpenChatError(
+            "This chat's transcript hasn't reached the server yet — the build may have just finished or is still saving. Nothing is lost: try opening it again in a moment, or send a message to continue this project."
+            + (why ? `\n\nDiagnostic (send this to support): ${why}` : ''),
+          );
+          return;
+        }
         setOpenChatError(
           (saved
             ? 'This is an OLD chat from before the history fix — its messages were destroyed by the earlier bug and cannot be recovered. It is now marked "Transcript lost" in the list. Your project files and memory are safe; every chat from today onward is saved permanently. Send a message to continue this project.'

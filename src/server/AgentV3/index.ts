@@ -61,8 +61,8 @@ export { GitHubAppClient, githubConfigFromEnv, githubStorageEnabled, githubStora
 export type { GitHubConfig, RepoInfo, CiVerdict, PullRequestInfo } from './GitHubAppClient';
 export { GitRepoSync, sanitizeRepoUrl } from './GitRepoSync';
 export type { HydrateResult, PushResult } from './GitRepoSync';
-export { mergeViaPullRequest, githubPrMode } from './GitHubPrFlow';
-export type { PrCapableClient, PrFlowResult, PrFlowOptions } from './GitHubPrFlow';
+export { mergeViaPullRequest, githubPrMode, planRevert } from './GitHubPrFlow';
+export type { PrCapableClient, PrFlowResult, PrFlowOptions, RevertPlan } from './GitHubPrFlow';
 export { UserGitHubClient } from './UserGitHubClient';
 export { parseGitHubRepo, resolveStorageTarget, ownRepoStorageEnabled, WORK_BRANCH } from './GitStorageTarget';
 export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetInput } from './GitStorageTarget';

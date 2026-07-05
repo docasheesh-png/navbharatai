@@ -94,6 +94,42 @@ describe('UserGitHubClient.getRepoAccess (own-repo write-access gate)', () => {
   });
 });
 
+describe('UserGitHubClient git-data (Revert last merge)', () => {
+  it('reads a branch head commit: sha, message, tree, parents', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: fakeFetch({
+        ...userRoute,
+        'GET /repos/alice/app/git/ref/heads/main': { status: 200, body: { object: { sha: 'm1' } } },
+        'GET /repos/alice/app/git/commits/m1': { status: 200, body: { sha: 'm1', message: 'Ship (#4)', tree: { sha: 't1' }, parents: [{ sha: 'p0' }] } },
+      }),
+    });
+    expect(await client.getBranchHeadCommit('app', 'main')).toEqual({ sha: 'm1', message: 'Ship (#4)', treeSha: 't1', parents: [{ sha: 'p0' }] });
+  });
+
+  it('returns null when the ref or commit is unreadable', async () => {
+    const client = new UserGitHubClient('t', {
+      fetchImpl: fakeFetch({ ...userRoute, 'GET /repos/alice/app/git/ref/heads/main': { status: 404, body: {} } }),
+    });
+    expect(await client.getBranchHeadCommit('app', 'main')).toBeNull();
+  });
+
+  it('creates a commit and fast-forwards the branch ref (force:false)', async () => {
+    const fetchImpl = vi.fn(fakeFetch({
+      ...userRoute,
+      'GET /repos/alice/app/git/commits/p0': { status: 200, body: { tree: { sha: 'pt0' } } },
+      'POST /repos/alice/app/git/commits': { status: 201, body: { sha: 'rev1' } },
+      'PATCH /repos/alice/app/git/refs/heads/main': { status: 200, body: { object: { sha: 'rev1' } } },
+    }));
+    const client = new UserGitHubClient('t', { fetchImpl });
+    expect(await client.getCommitTreeSha('app', 'p0')).toBe('pt0');
+    expect(await client.createCommit('app', 'Revert "Ship"', 'pt0', ['m1'])).toBe('rev1');
+    expect(await client.updateBranchRef('app', 'main', 'rev1')).toBe(true);
+    // The ref update must never force-rewrite history.
+    const patchCall = fetchImpl.mock.calls.find((c) => (c[1] as { method?: string })?.method === 'PATCH');
+    expect(JSON.parse((patchCall![1] as { body: string }).body)).toMatchObject({ sha: 'rev1', force: false });
+  });
+});
+
 describe('UserGitHubClient PR flow (PrCapableClient)', () => {
   const base = (extra: Record<string, { status: number; body: unknown }>) => new UserGitHubClient('t', { fetchImpl: fakeFetch({ ...userRoute, ...extra }) });
 

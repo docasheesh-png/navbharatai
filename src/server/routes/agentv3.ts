@@ -39,6 +39,7 @@ import {
   githubStorageActive,
   githubPrMode,
   mergeViaPullRequest,
+  planRevert,
   repoNameForProject,
   resolveStorageTarget,
   ownRepoStorageEnabled,
@@ -1811,6 +1812,65 @@ export function registerAgentV3Routes(app: Express): void {
         base: access.defaultBranch,
         note: flow.note || (flow.merged ? `Merged into ${access.defaultBranch}.` : 'Nothing to merge yet — make an edit first.'),
       });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // REVERT LAST MERGE (own-repo storage, slice 2b): undo the most recent change to the user's default
+  // branch by snapshotting it back to the previous state as a NEW commit (never a force-push — history
+  // is preserved and the revert is itself revertible). Only a single-parent head (the shape a squash
+  // "Ship to main" produces) is auto-revertible; a true merge / root commit is refused honestly and the
+  // user is pointed at GitHub's own Revert. The user's own token is the authority (own repos only).
+  app.post('/api/agentv3/revert', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    if (!ownRepoStorageEnabled()) {
+      res.status(400).json({ error: 'Own-repo revert is not enabled yet.' });
+      return;
+    }
+    const repo = typeof req.body?.repo === 'string' ? req.body.repo.trim() : '';
+    const token = typeof req.body?.githubToken === 'string' ? req.body.githubToken : '';
+    if (!repo || !token) {
+      res.status(400).json({ error: 'Sign in with GitHub and open a build on your own repo to revert it.' });
+      return;
+    }
+    try {
+      const client = new UserGitHubClient(token);
+      const access = await client.getRepoAccess(repo);
+      if (!access.exists || !access.canPush) {
+        res.status(403).json({ error: 'You do not have write access to that repository (or it no longer exists).' });
+        return;
+      }
+      const base = access.defaultBranch;
+      const head = await client.getBranchHeadCommit(repo, base);
+      const plan = planRevert(head);
+      if (!plan.canRevert || !plan.parentSha || !head) {
+        res.json({ reverted: false, note: plan.reason ?? 'This change can’t be auto-reverted — use GitHub’s Revert button.' });
+        return;
+      }
+      // Snapshot base back to the parent's tree as a NEW commit on top of the current head (no force).
+      const parentTree = await client.getCommitTreeSha(repo, plan.parentSha);
+      if (!parentTree) {
+        res.json({ reverted: false, note: 'Could not read the previous state to revert to.' });
+        return;
+      }
+      const firstLine = (head.message.split('\n')[0] || 'last change').slice(0, 120);
+      const revertSha = await client.createCommit(repo, `Revert "${firstLine}"\n\nReverted from NavBharatAI Pro v3.0.`, parentTree, [head.sha]);
+      if (!revertSha) {
+        res.json({ reverted: false, note: 'Could not create the revert commit.' });
+        return;
+      }
+      const updated = await client.updateBranchRef(repo, base, revertSha);
+      if (!updated) {
+        res.json({ reverted: false, note: 'Could not update the branch — someone may have pushed to it. Revert from GitHub instead.' });
+        return;
+      }
+      res.json({ reverted: true, sha: revertSha, base, note: `Reverted the last change on ‘${base}’ — restored to the previous state (a new revert commit, undoable).` });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

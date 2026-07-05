@@ -66,24 +66,37 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
-  // "Ship to main" (own-repo storage, slice 2): in-flight + last honest result for the action bar.
+  // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
+  const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  const ghToken = () => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } };
   const doShipToMain = useCallback(async () => {
     if (!state.ownRepo || shipping) return;
     setShipping(true);
     setShipNote(null);
     try {
-      const githubToken = (() => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } })();
-      const r = await shipToMain({ repo: state.ownRepo.repo, userId, email, githubToken });
+      const r = await shipToMain({ repo: state.ownRepo.repo, userId, email, githubToken: ghToken() });
       setShipNote(r.note);
     } finally {
       setShipping(false);
     }
   }, [state.ownRepo, shipping, shipToMain, userId, email]);
+  const doRevertLastMerge = useCallback(async () => {
+    if (!state.ownRepo || reverting) return;
+    if (!window.confirm(`Revert the last change on ‘${state.ownRepo.baseBranch}’? This restores it to the previous state as a new commit (undoable).`)) return;
+    setReverting(true);
+    setShipNote(null);
+    try {
+      const r = await revertLastMerge({ repo: state.ownRepo.repo, userId, email, githubToken: ghToken() });
+      setShipNote(r.note);
+    } finally {
+      setReverting(false);
+    }
+  }, [state.ownRepo, reverting, revertLastMerge, userId, email]);
   // Power level (admin tiers 2026-06-27): Off = normal (Sonnet, billed ×3.5);
   // 5× = Opus minimum power; 10× = Opus medium; 20× = Opus max / ultracode.
   const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
@@ -1901,12 +1914,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <button
                   type="button"
                   onClick={doShipToMain}
-                  disabled={shipping}
+                  disabled={shipping || reverting}
                   title={`Merge ‘${state.ownRepo.workBranch}’ into ‘${state.ownRepo.baseBranch}’ (only if CI is green)`}
                   className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors"
                 >
                   <Rocket className="w-3.5 h-3.5" />
                   {shipping ? 'Shipping…' : `Ship to ${state.ownRepo.baseBranch}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={doRevertLastMerge}
+                  disabled={shipping || reverting}
+                  title={`Undo the last change on ‘${state.ownRepo.baseBranch}’ (restores the previous state as a new commit)`}
+                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-50 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  {reverting ? 'Reverting…' : 'Revert last'}
                 </button>
                 <span className="text-[10px] text-zinc-500 truncate">
                   {shipNote ?? `Edits saved on ‘${state.ownRepo.workBranch}’ in ${state.ownRepo.owner}/${state.ownRepo.repo} — your ‘${state.ownRepo.baseBranch}’ is untouched until you ship.`}

@@ -112,6 +112,45 @@ export class UserGitHubClient implements PrCapableClient {
     return merged.ok && merged.body?.merged === true;
   }
 
+  // ── Git data API (used by "Revert last merge") ─────────────────────────────────
+
+  /** The head commit of a branch: its sha, message, tree sha, and parent shas. Null if unreadable. */
+  async getBranchHeadCommit(repo: string, branch: string): Promise<{ sha: string; message: string; treeSha: string; parents: Array<{ sha: string }> } | null> {
+    const login = await this.getLogin();
+    const ref = await this.request<{ object?: { sha?: string } }>('GET', `/repos/${login}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
+    const headSha = ref.body?.object?.sha;
+    if (!ref.ok || !headSha) return null;
+    const commit = await this.request<{ sha?: string; message?: string; tree?: { sha?: string }; parents?: Array<{ sha?: string }> }>('GET', `/repos/${login}/${repo}/git/commits/${headSha}`);
+    if (!commit.ok || !commit.body?.tree?.sha) return null;
+    return {
+      sha: headSha,
+      message: commit.body.message ?? '',
+      treeSha: commit.body.tree.sha,
+      parents: (commit.body.parents ?? []).filter((p): p is { sha: string } => typeof p?.sha === 'string'),
+    };
+  }
+
+  /** The tree sha of an arbitrary commit (used to snapshot the base back to a parent's tree). */
+  async getCommitTreeSha(repo: string, sha: string): Promise<string | null> {
+    const login = await this.getLogin();
+    const commit = await this.request<{ tree?: { sha?: string } }>('GET', `/repos/${login}/${repo}/git/commits/${sha}`);
+    return commit.ok && commit.body?.tree?.sha ? commit.body.tree.sha : null;
+  }
+
+  /** Create a commit with the given tree + parents. Returns its sha, or null on failure. */
+  async createCommit(repo: string, message: string, treeSha: string, parentShas: string[]): Promise<string | null> {
+    const login = await this.getLogin();
+    const created = await this.request<{ sha?: string }>('POST', `/repos/${login}/${repo}/git/commits`, { message, tree: treeSha, parents: parentShas });
+    return created.ok && created.body?.sha ? created.body.sha : null;
+  }
+
+  /** Fast-forward a branch ref to `sha` (force:false — never rewrites history). Returns success. */
+  async updateBranchRef(repo: string, branch: string, sha: string): Promise<boolean> {
+    const login = await this.getLogin();
+    const patched = await this.request<{ object?: { sha?: string } }>('PATCH', `/repos/${login}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { sha, force: false });
+    return patched.ok && patched.body?.object?.sha === sha;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<{ ok: boolean; status: number; body: T | null }> {
     const res = await this.fetchImpl(`${GITHUB_API}${path}`, {
       method,

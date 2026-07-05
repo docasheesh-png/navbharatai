@@ -48,6 +48,28 @@ export function githubPrMode(): boolean {
 
 const SKIPPED: PrFlowResult = { opened: false, prNumber: 0, prUrl: '', ci: 'none', merged: false, note: '' };
 
+export interface RevertPlan {
+  canRevert: boolean;
+  /** The parent commit whose tree the base branch is restored to (present iff canRevert). */
+  parentSha?: string;
+  /** An honest reason when the revert is refused. */
+  reason?: string;
+}
+
+/**
+ * Plan an "undo the last merge" for a branch: restore its content to the state BEFORE its most recent
+ * commit by snapshotting back to that commit's single parent (a new, non-destructive commit on top of
+ * history — itself revertible). Only a SINGLE-PARENT head is auto-revertible, which is exactly the
+ * shape NavBharatAI's squash "Ship to main" produces. A true merge commit (2 parents) or a root commit
+ * (0 parents) is refused honestly — the user is pointed at GitHub's own Revert. Pure + unit-testable.
+ */
+export function planRevert(head: { sha: string; parents: Array<{ sha: string }> } | null | undefined): RevertPlan {
+  if (!head || !Array.isArray(head.parents)) return { canRevert: false, reason: 'Could not read the latest commit on your branch.' };
+  if (head.parents.length === 1) return { canRevert: true, parentSha: head.parents[0].sha };
+  if (head.parents.length === 0) return { canRevert: false, reason: 'The latest commit is the repository’s first commit — there is nothing before it to revert to.' };
+  return { canRevert: false, reason: 'The latest commit is a multi-parent merge — revert it from GitHub’s “Revert” button on the merged pull request instead.' };
+}
+
 /**
  * Open a PR for the build branch and merge it when CI is green (or absent). Best-effort: any error
  * resolves to a skipped result rather than throwing, so it can never break a build.

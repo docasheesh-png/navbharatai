@@ -59,6 +59,8 @@ export interface UseAgentV3Build {
   /** Ship to main (own-repo storage): merge `navbharatai/work` → the repo default via a PR, server-side
    *  merging ONLY on green CI. Returns an honest result to render in-thread. */
   shipToMain: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<ShipResult>;
+  /** Revert the last merge on the repo default branch (own-repo storage). Returns an honest result. */
+  revertLastMerge: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<RevertResult>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -99,6 +101,18 @@ export interface ShipResult {
   /** The base branch the work branch was merged into (the repo default). */
   base?: string;
   /** A short, honest, user-facing summary of what happened. */
+  note: string;
+}
+
+/** Result of "Revert last merge" (own-repo storage, slice 2b) — an honest, renderable outcome. */
+export interface RevertResult {
+  /** The request reached GitHub. */
+  ok: boolean;
+  /** True only when the last change was actually reverted. */
+  reverted: boolean;
+  /** The new revert commit's sha (present when reverted). */
+  sha?: string;
+  /** A short, honest, user-facing summary. */
   note: string;
 }
 
@@ -569,6 +583,24 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // REVERT LAST MERGE (own-repo storage, slice 2b): undo the most recent change to the user's default
+  // branch (server snapshots it back to the previous state as a new, non-destructive commit). Returns
+  // an honest result. Only single-parent (squash-ship) commits are auto-revertible server-side.
+  const revertLastMerge = useCallback(async (opts: { repo: string; userId?: string; email?: string; githubToken?: string }): Promise<RevertResult> => {
+    try {
+      const res = await fetch('/api/agentv3/revert', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ repo: opts.repo, userId: opts.userId, email: opts.email, githubToken: opts.githubToken }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, reverted: false, note: typeof j?.error === 'string' ? j.error : `Revert failed (HTTP ${res.status}).` };
+      return { ok: true, reverted: j?.reverted === true, sha: typeof j?.sha === 'string' ? j.sha : undefined, note: typeof j?.note === 'string' ? j.note : (j?.reverted ? 'Reverted.' : 'Nothing to revert.') };
+    } catch (err) {
+      return { ok: false, reverted: false, note: err instanceof Error ? err.message : String(err) };
+    }
+  }, []);
+
   const respond = useCallback(async (requestId: string, approved: boolean) => {
     // Clear the gate immediately so the UI is responsive; the build resumes.
     setState((prev) => ({ ...prev, pendingPermission: undefined }));
@@ -954,5 +986,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

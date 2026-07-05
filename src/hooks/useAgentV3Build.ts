@@ -3,7 +3,7 @@ import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
-import { shouldSurfaceStreamError } from './agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome } from './agentV3StreamError';
 import { auth } from '../App';
 
 /**
@@ -447,19 +447,16 @@ export function useAgentV3Build(): UseAgentV3Build {
   // `workspaceId`, when given, must be the CALLER's current session — the server refuses to attach
   // if the running build belongs to a different session under the same account (see /attach route).
   // Omit it only for a truly account-wide manual "Resume" (no session context to check against).
-  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; resultAlreadySeen?: boolean }) => {
+  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; goneNotice?: string; resultAlreadySeen?: boolean }) => {
     if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
     setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
-    // An honest caller-supplied note shown at the top of the reattached stream (e.g. "your typed
-    // message was not sent — this build was already running"). Folded as a narration line so it
-    // survives the state reset above and reads in-thread, not as a scary error banner.
-    if (opts?.notice) {
-      const noticeEvent: AgentV3WireEvent = { type: 'narration', agent: 'architect', text: opts.notice, ts: Date.now() };
-      setState((prev) => agentV3Reducer(prev, noticeEvent));
-    }
+    // NOTE (root-cause fix 2026-07-05, IMG_5709): the optimistic "re-attached live" `notice` is NOT
+    // emitted here anymore. It is a PROMISE that a live build exists — printing it before /attach
+    // confirms one is exactly what produced the contradiction "re-attached live" + "No running build
+    // to resume." So it is emitted below ONLY on a confirmed-live attach (reconnectOutcome === 'live').
     setError(null);
     setServerBuildRunning(false);
     setRunning(true);
@@ -481,9 +478,32 @@ export function useAgentV3Build(): UseAgentV3Build {
       if (isStale(gen)) return; // a reset() happened while /attach was in flight
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
-        setError(typeof j?.error === 'string' ? j.error : `Resume failed (HTTP ${res.status}).`);
+        // One coherent decision (pure + tested) for what this reconnect result MEANS, so the user
+        // never sees a "re-attached live" promise paired with a "no running build" error.
+        const outcome = reconnectOutcome({ ok: false, status: res.status, resultAlreadySeen: sink.sawResult });
+        if (outcome === 'gone-notice') {
+          // The build ended mid-run (the drop tore it down). Honest, calm, in-thread — NOT a red error.
+          // The user's files are durable; they simply resend to continue. No contradiction.
+          const text = opts?.goneNotice
+            ?? 'That build isn’t running anymore — it either finished or the connection dropped during it. Your files are safe. Send your message again to continue.';
+          setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text, ts: Date.now() }));
+          setError(null);
+        } else if (outcome === 'gone-silent') {
+          // The build had already produced its result; a 404 on the tail-reconnect is expected and
+          // benign — say nothing, just clean up (no message, no error).
+          setError(null);
+        } else {
+          // A genuine, unexpected failure (non-404) — surface it honestly.
+          setError(typeof j?.error === 'string' ? j.error : `Resume failed (HTTP ${res.status}).`);
+        }
+        setServerBuildRunning(false);
         setRunning(false);
         return;
+      }
+      // Live build CONFIRMED (the attach opened a real stream). ONLY NOW show the optimistic
+      // "re-attached live" notice, so the promise can never precede its own confirmation.
+      if (opts?.notice) {
+        setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: opts.notice as string, ts: Date.now() }));
       }
       await pumpStream(res, gen, sink);
     } catch (err) {

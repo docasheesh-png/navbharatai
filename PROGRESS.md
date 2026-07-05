@@ -8349,3 +8349,26 @@ Round-7 security sweep (auth/session/postMessage/IDOR) now covers: OAuth token p
 (#955), build cost/history attribution spoofing (#956), and this cross-user secret-delete IDOR.
 Deferred (recorded above): the same-origin preview-iframe amplifier (PreviewPanel allow-same-origin)
 — opaque-sandbox fix needs live preview verification.
+
+## 2026-07-05 — HOTFIX (admin IMG_5709): "internet off 30s → load fail → retry" showed TWO contradictory messages
+
+Admin report: with internet off ~30s during a v3.0 build, the reconnect showed BOTH "Your build from
+before the reload was still running — I re-attached to it live below" AND a red "No running build to
+resume." — a direct contradiction.
+
+ROOT CAUSE (DNA level): on a 409-resumable reconnect the client (useAgentV3Build.ts resume()) emitted
+the optimistic "re-attached live" notice IMMEDIATELY, BEFORE /attach had confirmed a live build. The
+/chat 409 check (isBuildRunning) and the SEPARATE /attach call are not atomic, so the build can end in
+the window between them (it finished, or was torn down when the connection dropped). /attach then 404'd
+("No running build to resume.") — but the false "re-attached live" promise was already on screen. The
+promise preceded its own confirmation → contradiction.
+
+FIX (honesty timing, root cause not symptom):
+- New pure `reconnectOutcome({ ok, status, resultAlreadySeen })` (agentV3StreamError.ts) — the ONE
+  decision for what a /attach result means: ok → 'live'; 404 → 'gone-silent' (result already seen →
+  benign tail close, say nothing) or 'gone-notice' (mid-build → one honest "your files are safe, send
+  again" line); any other non-ok → 'error'. A 404 is NEVER 'live' and NEVER a red 'error'.
+- resume() now emits the optimistic "re-attached live" notice ONLY on a confirmed-live attach; a 404 is
+  presented calmly per reconnectOutcome (no red banner, clean sendable state), so the contradiction can
+  never recur. +5 regression tests encoding the exact IMG_5709 case + boundaries.
+Gate: frontend tsc 0, server tsc 0, vitest 4671/4671 PASS, build PASS.

@@ -8,6 +8,7 @@
 
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY } from '../lib/prompts';
+import { isBinaryAsset } from './fileClassification';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -96,14 +97,12 @@ export function planSystemPrompt(): string {
  * matter how big the project is, which is what makes editing a Mitrify-scale app viable. PURE.
  */
 /**
- * Binary / non-editable asset files (images, fonts, media, archives, design binaries). The model can
- * NEVER edit these as text, so listing every one in the manifest is pure token noise — the Mitrify
- * import (autopsy 2026-07-05) injected ~150 `attached_assets/IMG_*.png|jpeg` names into EVERY turn,
- * bloating the prompt the cheap floor (GLM/KIMI) then timed out on. `.svg` is deliberately KEPT — it
- * is editable text the agent legitimately modifies.
+ * Binary / non-editable asset files are excluded from the manifest (the model can NEVER edit them as
+ * text, so listing every one is pure token noise — the Mitrify import injected ~150
+ * `attached_assets/IMG_*.png|jpeg` names into EVERY turn, bloating the prompt the cheap floor then
+ * timed out on). The binary check lives in fileClassification.ts (one source of truth, shared with the
+ * file counts so they can never drift). `.svg` is deliberately KEPT — it is editable text.
  */
-const BINARY_ASSET_RE = /\.(png|jpe?g|gif|webp|avif|bmp|tiff?|ico|icns|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|webm|mov|avi|mkv|flac|aac|zip|tar|gz|tgz|rar|7z|pdf|psd|ai|sketch|fig|exe|dll|so|dylib|wasm|bin|jar|class|pyc|db|sqlite)$/i;
-
 export function summarizeFileTree(
   paths: string[],
   opts?: { fullListMax?: number; maxDirLines?: number },
@@ -114,7 +113,7 @@ export function summarizeFileTree(
   // Prompt-size governance (autopsy follow-up 3): binary assets are excluded from the listing — the
   // agent can't text-edit them, and their names alone bloated real prompts. One honest note keeps the
   // agent aware they exist (so it never claims "there are no images in this project").
-  const files = all.filter((p) => !BINARY_ASSET_RE.test(p));
+  const files = all.filter((p) => !isBinaryAsset(p));
   const binaryCount = all.length - files.length;
   const binaryNote = binaryCount > 0
     ? `\n(+${binaryCount} binary asset file${binaryCount === 1 ? '' : 's'} — images/fonts/media — omitted from this list; they exist in the project but are not text-editable.)`

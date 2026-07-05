@@ -8777,3 +8777,23 @@ path. (Corrected the test to the RIGHT behavior with reasoning — not changed t
 Round-10 remaining recorded (unchanged): MEDIUM UniversalAIRouter timeout doesn't abort the provider
 call (needs an AbortSignal threaded through the provider interface — cross-cutting, separate PR); LOW
 latent AIRouterManager.slot() drops the images arg.
+
+## 2026-07-05 — v3.0 WINDOW SEMANTICS (round 2, IMG_5715): tab-switch can never blank the chat again + "Transcript lost" misbranding fixed (PR #973)
+
+Admin retest after #963: build running → opened Free chat mid-build → returned to v3.0 → BLANK page/new
+chat; History-open of the same-hour chat 404'd and permanently branded it "Transcript lost (old bug)".
+
+ROOT CAUSE 1 (blank page): #963's keep-alive was RUNNING-gated — an unmount race. With another tab
+active, the moment the build finished (or a stream blip flipped running→false) the surface UNMOUNTED in
+the background and the chat state evaporated; returning bumped v3OpenNonce → startNewSession() → blank.
+FIX: window semantics — ProV3Surface stays mounted while the v3.0 tab is OPEN in the tab bar (openTabs);
+10+ tabs open, v3.0 keeps living. Unmounts only on explicit tab close (never mid-build).
+shouldRenderV3Surface(activeView, running, v3TabOpen); App.tsx passes openTabs.includes('nbi_pro_chat').
+
+ROOT CAUSE 2 (Transcript lost): openConversation treated a single transcript 404 as PROOF of the
+pre-rebuild destroyed-transcript class and durably wrote deadTranscript:true — even for a chat whose
+build was STILL RUNNING. FIX: new pure historyOpenPolicy.historyOpen404Action — running → 'resume-live'
+(adopt session + re-attach); younger than 24h → 'not-saved-yet' (honest transient message, NO branding);
+only old+idle → 'brand-dead' (unchanged). Panel probes /api/agentv3/status first. +11 tests total.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4762/4762 PASS, frontend+server build PASS.

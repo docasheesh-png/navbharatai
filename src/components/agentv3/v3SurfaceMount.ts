@@ -1,29 +1,33 @@
-// Keep the NavBharatAI Pro v3.0 surface (ProV3Surface) MOUNTED while a build is running — even when
-// the user switches to another NavBharatAI tab.
+// Keep the NavBharatAI Pro v3.0 surface (ProV3Surface) MOUNTED like a real WINDOW in NavBharatAI's
+// tab/window system — its state (chat, live build stream) survives switching among any number of
+// other tabs, and it only unmounts when the user explicitly CLOSES the v3.0 tab.
 //
-// ROOT CAUSE it fixes (2026-07-05, admin report): the v3.0 surface was rendered ONLY on
-// `activeView === 'nbi_pro_chat'`. NavBharatAI has a tab bar (openTabs) where several surfaces —
-// e.g. v3.0 AND Free chat — can be open at once, but only the ACTIVE one is mounted. So the instant
-// v3.0 stopped being the active tab (switch tabs, or click Free while a v3.0 build runs), its panel
-// UNMOUNTED, tearing down the live NDJSON event stream mid-build → the "Load failed" the admin saw on
-// a tab switch, and the "connection fails when both are open" report. The server build keeps running
-// (runningBuilds) and auto-resume re-attaches on return, but that teardown→re-attach churn is exactly
-// what surfaces as a failure.
+// HISTORY OF THE ROOT CAUSE (two rounds):
+// • Round 1 (2026-07-05, #963): the surface rendered ONLY on `activeView === 'nbi_pro_chat'` — ANY
+//   tab switch unmounted it and tore down the live NDJSON stream mid-build ("Load failed"). Fixed by
+//   keeping it mounted WHILE A BUILD RAN.
+// • Round 2 (2026-07-05, IMG_5715 — admin retest): running-gated keep-alive has an UNMOUNT RACE. The
+//   user switches to Free chat mid-build; the build finishes (or a stream blip flips running→false)
+//   while v3.0 is hidden → `running` false + not active → the surface UNMOUNTS in the background and
+//   the whole chat state evaporates. Returning to v3.0 then remounts EMPTY, the fresh-open nonce
+//   fires startNewSession() → the "blank page, new chat" the admin hit. The chat looked destroyed.
 //
-// The fix: while a build is RUNNING, keep the surface mounted regardless of the active tab, so the
-// stream keeps flowing invisibly in the background across tab switches and multi-tab usage. When
-// active it renders normally; when another tab is active it is display:none (mounted, hidden). Once
-// the build ends (running→false) it unmounts as before — zero idle overhead.
+// THE FIX (window semantics, admin-mandated: "10 windows open, v3.0 chalta rahe"): mount-persist the
+// surface while the v3.0 tab is OPEN in the tab bar (openTabs) — like any real window, switching away
+// hides it (display:none, stream + state alive) and switching back shows the SAME live surface. It
+// unmounts only when the user explicitly closes the v3.0 tab — and even then a running build keeps it
+// alive so an accidental close can't kill a build in flight.
 
 /** The ViewType under which the main v3.0 surface renders. */
 export const V3_VIEW = 'nbi_pro_chat';
 
 /**
- * Should ProV3Surface be rendered at all? True when it is the active tab OR a build is still running
- * (keep-alive so a tab switch never kills the live stream). Pure + unit-testable.
+ * Should ProV3Surface be rendered at all? True when v3.0 is the active tab, OR its tab is open in the
+ * tab bar (window semantics — state persists across tab switches), OR a build is running (safety: an
+ * explicit tab-close mid-build must not kill the live stream). Pure + unit-testable.
  */
-export function shouldRenderV3Surface(activeView: string, v3BuildRunning: boolean): boolean {
-  return activeView === V3_VIEW || v3BuildRunning === true;
+export function shouldRenderV3Surface(activeView: string, v3BuildRunning: boolean, v3TabOpen = false): boolean {
+  return activeView === V3_VIEW || v3TabOpen === true || v3BuildRunning === true;
 }
 
 /**

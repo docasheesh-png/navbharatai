@@ -9343,3 +9343,26 @@ Gate: server tsc 0, frontend tsc 0, vitest 4833/4833 PASS, boot:check PASS.
    analyze-vs-build.  2. Single source for file counts (165 vs 317 vs 165).  3. Prompt-size governance
    (missing subsystem B): filter binary assets from the manifest + compact large transcript reads for
    the cheap floor so GLM/KIMI stop timing out.
+
+## 2026-07-05 — Autopsy follow-up 1/3: honest build summary (analyzed vs edited vs built)
+
+Open root cause #1 from the Mitrify-import autopsy, admin-ordered ("fix the honesty summary next").
+- ❌→✅ The recap for a READ-ONLY import+survey run said "✅ Here's what I built: … 165 files, 186
+  routes" — claiming authorship of an app the AI never touched (fake-completion wording; violates the
+  no-fake-success rule even though the data was real). Root cause: summarizeProject had exactly ONE
+  header for every successful run; the route never told it whether this run actually changed anything.
+- Fix (root-cause, pure + tested): summarizeProject now takes `changedFiles` (how many files THIS run
+  created/modified) + `editMode` (existing app vs fresh build):
+  · changed=0 → "🔍 I analyzed your project — no files were changed. Overview:" (counts framed
+    "Project: …", describing the EXISTING app, not this run's output)
+  · changed>0 && editMode → "✅ Done — I changed N file(s) in your project. Overview:"
+  · fresh build / untracked caller → today's "✅ Here's what I built:" (backward-compatible).
+  Classification comes from `editMode` (route's real `isEditMode`), NOT a changed-vs-total size compare
+  — a fresh build's graph holds scaffold files the AI didn't write, so sizes can't be trusted (test
+  encodes this exact trap). Call site passes `writtenFiles.size` — dispatcher writes only, imports
+  EXCLUDED by construction (import writes via writeWorkspaceFiles, never the onFileWrite hook), so an
+  import+survey correctly reads as 0 changes.
+- Tests: ProjectSummary.test.ts +5 (analyzed / edited / singular / fresh-build-with-scaffold trap /
+  backward-compat). Gate: server tsc 0, frontend tsc 0, vitest 4845/4845 PASS, boot:check PASS.
+- Remaining autopsy follow-ups (open): #2 single source for file counts (165 vs 317), #3 prompt-size
+  governance (binary assets in manifest + transcript compaction for the cheap floor).

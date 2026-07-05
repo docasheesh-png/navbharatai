@@ -10,6 +10,7 @@ import { cn } from '../../lib/utils';
 import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
+import { escapeHtml } from '../../lib/escapeHtml';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,11 @@ const QUICK_TOOLS = [
 
 // ── PDF Generator ──────────────────────────────────────────────────────────
 
+// esc() covers the case-PDF interpolations (filename / patient fields / red-flags) that mdToHtml —
+// which only escapes message TEXT — does not. The PDF is written into a same-origin popup, so an
+// unescaped `<img onerror=…>` in any of them would execute there and could read platform auth tokens.
+const esc = escapeHtml;
+
 const mdToHtml = (text: string) =>
   text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -157,7 +163,7 @@ const buildCasePDF = (
       const bg = isDoc ? '#f0f7ff' : '#f0fdf4';
       const border = isDoc ? '#93c5fd' : '#6ee7b7';
       const fileTag = m.attachedFile
-        ? `<div style="font-size:11px;color:#6b7280;margin-bottom:6px;padding:4px 8px;background:#f9fafb;border-radius:4px;border:1px solid #e5e7eb">📎 ${m.attachedFile.name}</div>`
+        ? `<div style="font-size:11px;color:#6b7280;margin-bottom:6px;padding:4px 8px;background:#f9fafb;border-radius:4px;border:1px solid #e5e7eb">📎 ${esc(m.attachedFile.name)}</div>`
         : '';
       return `
         <div style="margin-bottom:14px;padding:12px 14px;background:${bg};border-left:3px solid ${border};border-radius:6px;page-break-inside:avoid">
@@ -171,12 +177,12 @@ const buildCasePDF = (
     <div style="margin-bottom:20px">
       <h2 style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#065f46;border-bottom:2px solid #065f46;padding-bottom:4px;margin-bottom:10px">Patient Summary</h2>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        ${patient.age ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600;width:120px">Age</td><td style="padding:4px 8px">${patient.age}</td></tr>` : ''}
-        ${patient.sex ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Sex</td><td style="padding:4px 8px">${patient.sex}</td></tr>` : ''}
-        ${patient.weight ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Weight</td><td style="padding:4px 8px">${patient.weight}</td></tr>` : ''}
-        ${patient.chiefComplaint ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Chief Complaint</td><td style="padding:4px 8px;color:#065f46;font-weight:600">${patient.chiefComplaint}</td></tr>` : ''}
+        ${patient.age ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600;width:120px">Age</td><td style="padding:4px 8px">${esc(patient.age)}</td></tr>` : ''}
+        ${patient.sex ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Sex</td><td style="padding:4px 8px">${esc(patient.sex)}</td></tr>` : ''}
+        ${patient.weight ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Weight</td><td style="padding:4px 8px">${esc(patient.weight)}</td></tr>` : ''}
+        ${patient.chiefComplaint ? `<tr><td style="padding:4px 8px;color:#6b7280;font-weight:600">Chief Complaint</td><td style="padding:4px 8px;color:#065f46;font-weight:600">${esc(patient.chiefComplaint)}</td></tr>` : ''}
       </table>
-      ${redFlags.length > 0 ? `<div style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:11px"><strong style="color:#dc2626">⚠ Red Flags Identified:</strong> ${redFlags.join(' · ')}</div>` : ''}
+      ${redFlags.length > 0 ? `<div style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;font-size:11px"><strong style="color:#dc2626">⚠ Red Flags Identified:</strong> ${redFlags.map(esc).join(' · ')}</div>` : ''}
     </div>` : '';
 
   return `<!DOCTYPE html>

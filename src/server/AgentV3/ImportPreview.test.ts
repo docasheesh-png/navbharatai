@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote } from './ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalSecretVars, externalServiceNote, conjurableSecrets } from './ImportPreview';
 
 describe('detectNeedsDatabase', () => {
   it('detects a SQL/ORM driver in package.json', () => {
@@ -55,5 +55,38 @@ describe('externalSecretVars + externalServiceNote (honest partial preview)', ()
     expect(note).toContain('CASHFREE_APP_ID');
     expect(note).toContain("can't be provisioned");
     expect(externalServiceNote(['DATABASE_URL', 'PORT'])).toBe('');
+  });
+});
+
+// P3 (admin 2026-07-05, "koi aur rasta"): the app's OWN local secrets are CONJURED with real random
+// values — an empty SESSION_SECRET is itself a boot-killer (express-session throws "secret option
+// required" on '', the exact reason the Mitrify live preview died). Third-party keys stay empty.
+describe('conjurableSecrets (real values for self-issued secrets, never third-party keys)', () => {
+  it('generates values for SESSION_SECRET/JWT_SECRET-class vars (the Mitrify boot-killer)', () => {
+    const out = conjurableSecrets(['SESSION_SECRET', 'JWT_SECRET', 'COOKIE_SECRET', 'SECRET_KEY_BASE']);
+    expect(Object.keys(out).sort()).toEqual(['COOKIE_SECRET', 'JWT_SECRET', 'SECRET_KEY_BASE', 'SESSION_SECRET']);
+    for (const v of Object.values(out)) {
+      expect(v.length).toBeGreaterThanOrEqual(32); // crypto-strong, never ''
+    }
+  });
+  it('NEVER conjures third-party-shaped keys (fake external creds cause confusing real failures)', () => {
+    const out = conjurableSecrets(['CASHFREE_SECRET_KEY', 'GOOGLE_API_KEY', 'FIREBASE_API_KEY', 'STRIPE_SECRET_KEY', 'OPENAI_API_KEY', 'DATABASE_URL']);
+    expect(out).toEqual({});
+  });
+  it('is injectable for determinism and each secret is independently generated', () => {
+    let i = 0;
+    const out = conjurableSecrets(['SESSION_SECRET', 'JWT_SECRET'], () => `fixed-${++i}`);
+    expect(out).toEqual({ SESSION_SECRET: 'fixed-1', JWT_SECRET: 'fixed-2' });
+  });
+  it('conjured secrets flow through buildDevEnvContent as real values (not placeholders)', () => {
+    const provided = { DATABASE_URL: 'postgres://local/dev', ...conjurableSecrets(['SESSION_SECRET'], () => 'RANDOM_HEX') };
+    const env = buildDevEnvContent(['DATABASE_URL', 'SESSION_SECRET', 'CASHFREE_APP_ID'], provided);
+    expect(env).toContain('SESSION_SECRET=RANDOM_HEX');
+    expect(env).toContain('DATABASE_URL=postgres://local/dev');
+    expect(env).toContain('CASHFREE_APP_ID=\n'); // external key stays an honest empty placeholder
+  });
+  it('externalSecretVars no longer lists the conjured secrets as "still needed" (honesty)', () => {
+    const ext = externalSecretVars(['SESSION_SECRET', 'NEXTAUTH_SECRET', 'CASHFREE_SECRET_KEY']);
+    expect(ext).toEqual(['CASHFREE_SECRET_KEY']);
   });
 });

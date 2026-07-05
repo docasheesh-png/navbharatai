@@ -71,7 +71,7 @@ import {
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote } from '../AgentV3/ProjectImport';
-import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote } from '../AgentV3/ImportPreview';
+import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActuator';
@@ -2964,8 +2964,13 @@ export function registerAgentV3Routes(app: Express): void {
                 Object.assign(provided, prov.envVars ?? {}); // DATABASE_URL
               } catch { /* DB provision is best-effort — the boot still tries without it */ }
             }
+            // P3 (admin 2026-07-05): CONJURE the app's own local secrets — SESSION_SECRET/JWT_SECRET
+            // etc. get REAL random values, because an empty placeholder is itself a boot-killer
+            // (express-session throws "secret option required" on '' — the exact reason the Mitrify
+            // preview died). Third-party keys are NEVER faked; they stay empty + honestly listed.
+            Object.assign(provided, conjurableSecrets(declaredEnvVars));
             // Write a dev .env so `process.env.X` is defined (the #1 boot-crash cause) — the
-            // provisioned DATABASE_URL plus empty placeholders for everything the app documents.
+            // provisioned DATABASE_URL + generated local secrets, plus empty placeholders for the rest.
             if (declaredEnvVars.length > 0 || Object.keys(provided).length > 0) {
               try { await actuator.writeFile(workspaceId, '.env', buildDevEnvContent(declaredEnvVars, provided)); } catch { /* env write best-effort */ }
               const extNote = externalServiceNote(declaredEnvVars);

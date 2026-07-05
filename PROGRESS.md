@@ -9465,3 +9465,27 @@ Tests: ContextReranker.test.ts +18 (exact Mitrify survey prompt → package.json
 BackButton; zero-overlap tie regression; content-hits-first; centrality ranking + ui-kit exclusion +
 bare-import exclusion; anchors priority/determinism; overview intent EN+Hinglish; preserveOrder beats
 BM25-noise; camelCase matching). Gate: server tsc 0, frontend tsc 0, vitest 4874/4874, boot PASS.
+
+## 2026-07-05 — P3 slice 1 (admin: "env keys ka koi aur rasta dekho"): conjure the app's OWN local secrets
+
+The Mitrify preview-boot post-mortem found the REAL boot-killer was not Cashfree/Firebase at all:
+- ❌→✅ `buildDevEnvContent` gave SESSION_SECRET (and every non-DB var) an EMPTY placeholder — and
+  express-session THROWS "secret option required" on '' — so the dev server died before it could
+  listen. The missing third-party keys never even got a chance to matter.
+- Fix (root-cause): new pure `conjurableSecrets(varNames, rand?)` — SELF-ISSUED secrets
+  (SESSION_SECRET / JWT_* / COOKIE_SECRET / AUTH_SECRET / NEXTAUTH_SECRET / CSRF / TOKEN_SECRET /
+  ENCRYPTION_KEY / SECRET_KEY(_BASE) / APP_SECRET / SIGNING_KEY) get REAL crypto-random values
+  (48 hex chars; injectable rand for deterministic tests). These are the app's own signing secrets,
+  not anyone's credentials — fully valid for a sandbox dev boot.
+- DELIBERATE boundary (honesty): third-party-shaped keys (CASHFREE_*, FIREBASE_*, GOOGLE_*,
+  STRIPE_*, *_API_KEY, DATABASE_URL) are NEVER conjured — a fake external key makes the app fire
+  real requests with garbage credentials and fail in confusing ways; an empty value keeps those
+  features cleanly inactive, and `externalServiceNote` still names them plainly (now WITHOUT listing
+  the conjured secrets as "still needed" — they aren't).
+- Route: `provided` = local-Postgres DATABASE_URL (existing) + conjured secrets → dev .env. A
+  session+DB app (exactly Mitrify's shape) now has a real chance to boot its live preview.
+- Tests: ImportPreview.test.ts +5 (conjured classes incl. SECRET_KEY_BASE; third-party keys NEVER
+  conjured; injectable determinism; flow-through buildDevEnvContent with external keys still empty;
+  externalSecretVars honesty). Gate: server tsc 0, frontend tsc 0, vitest 4879/4879, boot PASS.
+- NEXT for P3 (recorded): Firebase Emulator Suite in the sandbox (auth/firestore without real keys)
+  — the big unlock for Firebase-backed imports; larger slice, own PR.

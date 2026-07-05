@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   emptyQueue, enqueue, claimNext, completeRunning, cancelItem, reorderPending,
-  pendingItems, runningItem, queueSummary, MAX_QUEUE_ITEMS, type CommandQueue,
+  pendingItems, runningItem, queueSummary, serializeQueue, parseStoredQueue,
+  MAX_QUEUE_ITEMS, type CommandQueue,
 } from './BuildQueue';
 
 function withItems(ids: Array<{ id: string; source?: 'user' | 'planner' | 'advisor' }>): CommandQueue {
@@ -109,6 +110,41 @@ describe('reorderPending — reorder the roadmap', () => {
     const q = withItems([{ id: 'a' }, { id: 'b' }]);
     expect(pendingItems(reorderPending(q, 'a', 99)).map((i) => i.id)).toEqual(['b', 'a']);
     expect(reorderPending(q, 'a', 0)).toEqual(q);
+  });
+});
+
+describe('serializeQueue / parseStoredQueue (durable, strict)', () => {
+  it('round-trips a queue', () => {
+    let q = withItems([{ id: 'a' }, { id: 'b' }]);
+    q = completeRunning(claimNext(q).queue, true);
+    expect(parseStoredQueue('ws1', serializeQueue(q))).toEqual(q);
+  });
+
+  it('unparseable / non-array input → an EMPTY queue (executor never runs on garbage)', () => {
+    expect(parseStoredQueue('ws1', 'not json')).toEqual(emptyQueue('ws1'));
+    expect(parseStoredQueue('ws1', { items: 'nope' })).toEqual(emptyQueue('ws1'));
+    expect(parseStoredQueue('ws1', null)).toEqual(emptyQueue('ws1'));
+  });
+
+  it('drops malformed items (missing/invalid fields) but keeps the valid ones', () => {
+    const raw = { items: [
+      { id: 'ok', prompt: 'p', source: 'user', status: 'pending', createdTs: 1 },
+      { id: 'no-status', prompt: 'p', source: 'user', createdTs: 2 },
+      { id: 'bad-source', prompt: 'p', source: 'hacker', status: 'pending', createdTs: 3 },
+      { prompt: 'no-id', source: 'user', status: 'pending', createdTs: 4 },
+    ] };
+    expect(parseStoredQueue('ws1', raw).items.map((i) => i.id)).toEqual(['ok']);
+  });
+
+  it("heals a stale 'running' item (a dead instance) to 'failed' so the serial slot is never stuck", () => {
+    const raw = { items: [
+      { id: 'x', prompt: 'p', source: 'user', status: 'running', createdTs: 1 },
+      { id: 'y', prompt: 'p', source: 'user', status: 'pending', createdTs: 2 },
+    ] };
+    const q = parseStoredQueue('ws1', raw);
+    expect(q.items.find((i) => i.id === 'x')?.status).toBe('failed');
+    expect(runningItem(q)).toBeUndefined();       // slot free
+    expect(claimNext(q).claimed?.id).toBe('y');   // next can run
   });
 });
 

@@ -9856,3 +9856,21 @@ tsc passed first try. handleGHConfirmPush (chat-coupled) intentionally left in A
 
 App.tsx: 3,521 -> 3,414 lines (-107). Running total: 6,596 -> 3,414 (~48% down). Also refreshed the
 stale P3 tracker row. Gate: frontend tsc 0, vitest 4955/4955 PASS, vite build PASS.
+## 2026-07-05 — Concurrency FIX #4.2: durable command-queue store + enqueue/list/cancel API
+
+Builds on #4.1 (the pure BuildQueue state machine). Adds durability + the API so commands can actually
+be queued and managed per app.
+
+- BuildQueue.ts: pure `serializeQueue` / `parseStoredQueue` (STRICT — corrupt storage → empty queue,
+  malformed items dropped, a stale 'running' item from a dead instance HEALED to 'failed' so the serial
+  slot is never stuck). +4 tests.
+- New `BuildQueueStore.ts` (Firestore, mirrors ProjectPlanStore conventions): `loadQueue`,
+  `mutateQueue` (TRANSACTIONAL read→op→write so concurrent enqueues from the planner+advisor chats can't
+  lose an update; in-process fallback when no db / VITEST), `deleteQueue`. +5 store tests.
+- API (all workspace-owner-gated via assertWorkspaceOwner): POST /queue/enqueue (source user|planner|
+  advisor, generates a uuid + ts), GET /queue (items + honest summary), POST /queue/cancel (pending only).
+
+SAFETY: entirely additive — new collection `build_queues_v3`, new endpoints, no existing path touched.
+The queue does not auto-execute yet (that's #4.3, the serial executor) — until then it's a durable,
+manageable command list.
+Gate: frontend tsc 0, server tsc 0, vitest 4963/4963 PASS, build PASS, boot PASS.

@@ -11,6 +11,7 @@ import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { historyOpen404Action } from './historyOpenPolicy';
+import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
 import { decideAutoContinue } from './planAutoContinue';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
@@ -242,7 +243,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const sessionStorageKey = `agentv3_session_${userId || 'anon'}`;
+  const sessionStorageKey = v3SessionStorageKey(userId); // shared with App's ✕-close (single source of truth)
   // Persist the session id so a RELOAD continues the same project. localStorage can throw in some
   // Incognito/Private modes — fall back to sessionStorage so continuity holds within the tab session
   // instead of minting a fresh (empty) workspace on every reload.
@@ -252,11 +253,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   const sessionIdRef = useRef<string>('');
   if (!sessionIdRef.current) {
-    // ADMIN RULE (2026-07-01): opening NavBharatAI Pro v3.0 ALWAYS starts a brand-new chat. We do NOT
-    // restore the last session id from storage anymore — a reload or reopen must NEVER reload the old
-    // (or a stuck) chat into the box. Every past chat is still saved and reachable from the ☰ History
-    // menu to reopen on demand; it just never auto-loads.
-    sessionIdRef.current = newSessionId();
+    // ADMIN RULE (2026-07-05 — REPLACES the retired 2026-07-01 always-fresh rule): the v3.0 chat is
+    // STICKY. A reload, a tab switch, the phone being switched off — none of them change the chat;
+    // reopening v3.0 restores the SAME session where the user left it. The chat changes only via
+    // ☰ "+New chat", ☰ opening another chat, or the header tab ✕ (which CLEARS the sticky id — see
+    // App.closeTab → clearStickySession). The 07-01 rule existed for a once-stuck chat that could not
+    // be cleared; that bug class is fixed and the admin retired the rule ("is rule ki need nahi hai").
+    sessionIdRef.current = readStickySession(userId) || newSessionId();
     persistSessionId(sessionIdRef.current);
   }
   // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
@@ -396,19 +399,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // opens v3.0 from the menu/sidebar → start a brand-new chat. A hard reload restores the v3.0 view
   // WITHOUT bumping the nonce (stays 0) → this effect takes the RESTORE branch instead, bringing the
   // same project's messages/files/preview back. Each distinct nonce is handled at most once.
-  const freshOpenHandledRef = useRef<number>(0);
   useEffect(() => {
     if (running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
-    // ADMIN RULE (2026-07-01): opening v3.0 ALWAYS starts a brand-new chat — the previous chat is
-    // NEVER auto-loaded into the box, on a plain open OR a reload. The old "restore most-recent
-    // conversation" path is removed entirely, so a stuck/old chat can never reappear here. A deliberate
-    // re-open (freshOpenNonce, bumped by toggleTab) still forces a clean session over any leftover
-    // state. Past chats stay in the ☰ History menu (openConversation) / the History page to reopen on
-    // demand — they simply never load themselves.
-    if (freshOpenNonce && freshOpenHandledRef.current !== freshOpenNonce) {
-      freshOpenHandledRef.current = freshOpenNonce;
-      startNewSession();
-    }
+    // STICKY-SESSION RESTORE (admin rule 2026-07-05 — replaces the retired 2026-07-01 always-fresh
+    // rule): opening v3.0 with an empty panel restores the STICKY session's saved chat — text back
+    // where the user left it after a reload / phone-off / browser kill — and, if that session's build
+    // is still running server-side, re-attaches it live (openConversation's resume-live path). Silent:
+    // a brand-new sticky session with nothing saved yet simply stays a blank new chat (no error, no
+    // "Transcript lost" branding). Runs at most once per session id; skipped while a History reopen
+    // (v3Resume) is pending so it can never race a deliberate open.
+    const sid = sessionIdRef.current;
+    if (!sid || autoRestoredSessionRef.current === sid) return;
+    if (resume && resume.nonce && resume.nonce !== lastAppliedResumeNonce) return; // History reopen wins
+    autoRestoredSessionRef.current = sid;
+    void openConversation(`v3_${sid}`, { silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, running, state.narration.length, userMsgs.length, freshOpenNonce]);
 
@@ -827,7 +831,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Allowed even while a build is actively streaming HERE — loadConversation() detaches from it (the
   // underlying server build, if any, keeps running in the background and stays resumable from History)
   // instead of silently no-op'ing until the current build finishes.
-  const openConversation = async (id: string) => {
+  const openConversation = async (id: string, opts?: { silent?: boolean }) => {
+    // `silent` = the sticky-session AUTO-restore on open (not a user click): every "could not open"
+    // outcome stays quiet (the panel simply remains a blank new chat) and NOTHING is ever branded —
+    // but a genuinely-restored thread paints, and a still-running build still re-attaches live.
+    const silent = opts?.silent === true;
     setOpenChatError(null);
     if (tapDebug) setLastTap((prev) => `${prev} | openConversation(${id.slice(0, 24)}…) FIRED`.slice(-180));
     // SWITCH GUARD: while a session switch is in flight, the chat_sessions save effect must NOT
@@ -901,7 +909,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           // The record exists but its thread is empty — opening it must not LOOK like a dead click.
           const why = conversationLoadDiag();
           if (why) console.error('[v3-open] empty transcript:', why);
-          setOpenChatError(
+          if (!silent) setOpenChatError(
             'This chat opened, but its saved transcript is empty (an earlier session-switch bug could erase saved messages — now fixed). Your project files and memory are safe: send a message to continue this project.'
             + (why ? `\n\nDiagnostic (send this to support): ${why}` : ''),
           );
@@ -947,6 +955,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           await resumeBuild({ userId, email, workspaceId: row?.workspaceId, notice: 'This build is still running — re-attached to it live below.' });
           return;
         }
+        if (silent) return; // sticky auto-restore of a chat with nothing saved yet (resume-live already returned above) → quietly stay a blank new chat, never brand
         if (action === 'not-saved-yet') {
           if (saved) {
             // Adopt the session so "send a message to continue" genuinely continues THIS project.

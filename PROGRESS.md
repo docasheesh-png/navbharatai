@@ -8861,3 +8861,26 @@ always yields a new server key); isAuditReplyClean drops exact OK, keeps every "
 
 Remaining recorded (unchanged): lazily-mounted IDE-panel unguarded JSON.parse sweep; router
 AbortSignal-on-timeout (MEDIUM); wallet-credit concurrency (HIGH, live-money, needs your sign-off).
+
+## 2026-07-05 — v3.0 STICKY SESSION (admin rule, PR #976): chat survives reload/phone-off; ends ONLY via +New chat / history-open / tab ✕
+
+ADMIN RULE CHANGE (explicit): the 2026-07-01 "always start a brand-new chat on open" rule is RETIRED by
+the admin (it existed for a once-stuck chat; "ab sab theek hai, is rule ki need nahi hai"). New standing
+rule: the v3.0 chat changes/closes ONLY via (1) ☰ +New chat, (2) ☰ opening another chat, (3) the header
+tab ✕. Everything else — in-app tab switches, reload, phone off, browser killed — restores the SAME chat
+where the user left it, and typing anything continues the engine.
+
+CHANGES: NEW pure v3SessionContinuity.ts (sticky-session key single source of truth:
+v3SessionStorageKey/readStickySession/clearStickySession; +5 tests). AgentV3Panel session init RESTORES
+the sticky id (was: always mint fresh); the fresh-open-nonce→startNewSession effect replaced by a SILENT
+sticky-restore (openConversation(id,{silent:true})) — repaints the saved thread, re-attaches a
+still-running build (resume-live), and a brand-new session quietly stays blank (no error, and the auto
+path can NEVER brand "Transcript lost"). App.closeTab('nbi_pro_chat') clears the sticky session; a
+running build keeps running server-side and lands in ☰ History with all its build files.
+
+DEPLOY-VERIFICATION NOTE (admin's "#973 still dead" report): IMG_5715's header shows build stamp
+b:07-05 07:51 — BEFORE #973's merge (08:56 UTC), so that test provably ran on a pre-#973 bundle. Live
+site unreachable from this sandbox (network policy) — the admin's check is the b: stamp in the v3.0
+header; if it stays old after a deploy, hard-refresh / clear the PWA cache.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4773/4773 PASS, frontend+server build PASS.

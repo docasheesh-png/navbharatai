@@ -5,7 +5,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock,
+  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
 } from 'lucide-react';
 import type { ConversationMeta } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -1055,6 +1055,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setTab(t);
     setShowWorkspace(true);
   };
+  // U3 (audit): error/failure banners must offer a next step, not dead-end. Prefill the composer with a
+  // repair instruction, bring the chat into view, and focus — the user reviews and hits send (no
+  // surprise auto-spend). Mirrors the existing sidebar "Fix with AI" prefill.
+  const fixWithAI = (text: string) => {
+    setPrompt(text);
+    setShowWorkspace(false);
+    setTimeout(() => composerRef.current?.focus(), 0);
+  };
   const anyToggleOn = planFirst || thinking || onlyOpus;
 
   // Portability / no-lock-in (Phase 4): export the WHOLE project as a real .zip the user owns and
@@ -1396,6 +1404,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     onPreviewState?.({ previewUrl: state.previewUrl, workspaceId: state.workspaceId, framework, running });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.previewUrl, state.workspaceId, framework, running]);
+
+  // U5 (audit 2026-07-05): the payoff moment — the user's app becoming viewable — was hidden behind a
+  // tap. Auto-open the Preview surface the FIRST time a build produces a live preview URL. Desktop only
+  // (split view): on a phone opening the workspace hides the chat (that's gap U2), so mobile keeps the
+  // chat + streaming progress and the user taps Preview when ready. Once (a ref) so closing it sticks.
+  const autoOpenedPreviewRef = useRef(false);
+  useEffect(() => {
+    if (state.previewUrl && !autoOpenedPreviewRef.current && !isTouchDevice) {
+      autoOpenedPreviewRef.current = true;
+      setTab('preview');
+      setShowWorkspace(true);
+    }
+  }, [state.previewUrl, isTouchDevice]);
 
   // "Fix with AI" clicked from the SIDEBAR preview (outside this panel's own UI) — prefill the chat
   // input with the error and bring the chat into view, mirroring this panel's OWN onFixError handler
@@ -1773,13 +1794,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
             )}
             {(error || state.error) && (
-              <div className="flex items-start gap-2 px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
-                <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
+              <div className="px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{error || state.error}</span>
+                </div>
+                {!running && (
+                  <button
+                    onClick={() => fixWithAI(`Fix this error and continue building the app:\n\n${error || state.error}`)}
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Fix with AI
+                  </button>
+                )}
               </div>
             )}
             {state.done && state.ok === false && !state.error && state.summary && (
-              <div className="flex items-start gap-2 px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
-                <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
+              <div className="px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>
+                </div>
+                {!running && (
+                  <button
+                    onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Fix with AI
+                  </button>
+                )}
               </div>
             )}
             {state.pendingPermission && (
@@ -1972,6 +2013,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     if (imgs.length > 0) { e.preventDefault(); setFiles((prev) => [...prev, ...imgs].slice(0, 8)); }
                   }}
                   onKeyDown={(e) => {
+                    // U7 (audit): Esc stops a running build from the composer.
+                    if (e.key === 'Escape' && running) { e.preventDefault(); stop(); return; }
+                    // U7: Cmd/Ctrl+Enter ALWAYS sends — even on touch or in the expanded editor — so a
+                    // finished multiline message ships without reaching for the button.
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); send(); return; }
                     // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
                     // (send only via the button). In the expanded editor Enter always inserts a newline
                     // so a long message can be edited freely. Shift+Enter is always a newline.

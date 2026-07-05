@@ -8953,11 +8953,11 @@ B10. checkRunning/checkpoints effects over-fetch on routine UI changes → debou
 UI/UX (AgentV3Panel/PreviewSurface):
 U1. Preview never auto-refreshes on file_changed/diff events (stale until manual ↻) — HIGH. [M]
 U2. Mobile: opening preview hides chat + progress entirely (hidden sm:flex) — HIGH. [M]
-U3. Error banners dead-end — add Retry + "Fix with AI" buttons (pattern exists in PreviewSurface). [S]
+✅ U3. Error banners dead-end — add Retry + "Fix with AI" buttons (pattern exists in PreviewSurface). [S]
 U4. No live token/cost ticker during build (billing only at done). [M]
-U5. Preview collapsed by default; never auto-opens when the preview URL arrives. [S]
+✅ U5. Preview collapsed by default; never auto-opens when the preview URL arrives. [S]
 U6. No overall build stage/progress arc (only current action + elapsed). [M]
-U7. Composer: no ⏎/⇧⏎ hint, no Cmd+Enter / Esc-stop shortcuts. [S]
+✅ U7. Composer: no ⏎/⇧⏎ hint, no Cmd+Enter / Esc-stop shortcuts. [S]
 U8. Toolbar clutter: 4 report buttons bury Preview/Deploy CTAs → collapse into one Diagnostics menu. [S]
 U9. Diff tab is a flat colored dump → per-file collapse + add/del badges. [M]
 U10. Three "history" concepts collide (☰ chats / History tab / Report history) + bare spinners. [M]
@@ -8983,3 +8983,18 @@ E10. Synchronous per-write review+impact on the hot path → defer off the tool_
 BATCH 1 SHIPPED (PR #979): B1-B4 — the "frozen spinner" and background-cost class. Gate: frontend
 tsc 0, server tsc 0, vitest 4778/4778 PASS, build PASS. Next batches: U3+U5+U7 (UI quick wins), then
 E2+E4 (backend speed/reliability), then the rest per this ledger.
+
+## 2026-07-05 — v3.0 audit Batch 2 (UI quick wins): no dead-end errors + auto-open preview + composer shortcuts
+
+Ships U3, U5, U7 from the 30-gap audit ledger (all in AgentV3Panel.tsx):
+- ✅ U3: the red error banner AND the amber failure-summary banner now show a "✨ Fix with AI" button
+  (when not running) — prefills the composer with a targeted repair instruction, brings the chat into
+  view, and focuses it (no surprise auto-spend). New `fixWithAI()` helper mirrors the sidebar prefill.
+- ✅ U5: the Preview surface AUTO-OPENS the first time a build emits a live preview URL (once, via a
+  ref, desktop-only split view — mobile keeps chat+progress visible per gap U2). The payoff moment
+  (seeing the app) is no longer hidden behind a tap.
+- ✅ U7: composer shortcuts — Cmd/Ctrl+Enter ALWAYS sends (even on touch / expanded editor), Esc stops
+  a running build. Plain-Enter-sends-on-laptop behaviour unchanged.
+
+UI-only (JSX + handlers); no new pure logic to unit-test. Gate: frontend tsc 0, server tsc 0,
+vitest 4780/4780 PASS, frontend+server build PASS. Ledger updated (U3/U5/U7 → ✅).

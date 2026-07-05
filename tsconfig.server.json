@@ -20,6 +20,7 @@
     "src/server/AgentV3/**/*.ts"
   ],
   "exclude": [
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "remote-keyboard"
   ]
 }

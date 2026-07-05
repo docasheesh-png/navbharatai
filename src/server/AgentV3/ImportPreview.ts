@@ -18,6 +18,8 @@
 // The side effects (provision Postgres, write the .env, boot the dev server) live in the route; this
 // module is pure so the classification + env generation are fully unit-testable.
 
+import { randomBytes } from 'node:crypto';
+
 /** SQL/ORM drivers whose presence means the app needs a database to boot. */
 const DB_DEPS = [
   'pg', 'postgres', 'drizzle-orm', '@prisma/client', 'prisma', 'mongoose', 'mysql', 'mysql2',
@@ -67,14 +69,42 @@ export function buildDevEnvContent(varNames: string[], provided: Record<string, 
   return Object.entries(env).map(([k, v]) => `${k}=${String(v)}`).join('\n') + '\n';
 }
 
+/**
+ * LOCAL secret-shaped env vars we can legitimately CONJURE (P3, admin 2026-07-05 "koi aur rasta"):
+ * these are secrets the app mints for ITSELF (session signing, JWT signing, cookie/CSRF secrets) —
+ * not credentials issued by a third party to the user. An EMPTY placeholder here is exactly what
+ * killed the Mitrify boot: express-session THROWS "secret option required" on '' — so the dev server
+ * died before it could listen, and the live preview "did not come up". A generated random value is
+ * fully valid for a sandbox dev boot.
+ *
+ * Deliberately narrow: names must be EXACT matches of self-issued secret conventions. Anything
+ * third-party-shaped (API keys, client ids, DSNs, tokens for external services) is NEVER conjured —
+ * a fake external key would make the app fire real requests with garbage credentials and fail in
+ * confusing ways; an empty value keeps those features cleanly inactive (honest partial preview).
+ */
+const LOCAL_SECRET_VAR = /^(SESSION_SECRET|JWT_SECRET|JWT_REFRESH_SECRET|ACCESS_TOKEN_SECRET|REFRESH_TOKEN_SECRET|COOKIE_SECRET|AUTH_SECRET|NEXTAUTH_SECRET|CSRF_SECRET|TOKEN_SECRET|ENCRYPTION_KEY|SECRET_KEY|SECRET_KEY_BASE|APP_SECRET|SIGNING_KEY)$/i;
+
+/**
+ * Generate REAL random values for every conjurable local secret the app documents. `rand` is
+ * injectable for deterministic tests; the default is crypto-strong 48-hex-char values. PURE given rand.
+ */
+export function conjurableSecrets(
+  varNames: string[],
+  rand: () => string = () => randomBytes(24).toString('hex'),
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const n of varNames) if (LOCAL_SECRET_VAR.test(n)) out[n] = rand();
+  return out;
+}
+
 /** The dev infra we auto-provide for a preview boot — everything else the app documents is
  *  something the USER must supply for full functionality. */
-const AUTO_PROVIDED_ENV = /^(DATABASE_URL|NODE_ENV|PORT|JWT_SECRET|SESSION_SECRET)$/i;
+const AUTO_PROVIDED_ENV = /^(DATABASE_URL|NODE_ENV|PORT)$/i;
 
 /** Documented env vars we can NOT provision (external services / user config) — the honest
- *  "still needs a real value" set, i.e. everything except the infra we auto-provide. PURE. */
+ *  "still needs a real value" set, i.e. everything except the infra + local secrets we auto-provide. PURE. */
 export function externalSecretVars(varNames: string[]): string[] {
-  return varNames.filter((n) => !AUTO_PROVIDED_ENV.test(n));
+  return varNames.filter((n) => !AUTO_PROVIDED_ENV.test(n) && !LOCAL_SECRET_VAR.test(n));
 }
 
 /**

@@ -5,6 +5,7 @@ import './index.css';
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
+import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate } from './swUpdateCheck';
 import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
@@ -86,6 +87,19 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
       // Proactively check for a new SW on each load.
       reg.update().catch(() => {});
+      // B8 (audit Batch 5): a tab left OPEN across a deploy kept serving the STALE bundle because the
+      // SW was only checked once (here, at load) — the exact "my changes don't show up / #973 still
+      // dead" the admin hit, made the COMMON case by sticky sessions that keep the tab open for a long
+      // time. Re-check for a new SW periodically AND whenever the tab regains focus (phone back on /
+      // tab refocus), throttled so rapid switches don't hammer it. A found update → the SW's
+      // skipWaiting/activate → controllerchange → the reload above fires automatically, so a deploy is
+      // picked up within ~a minute instead of "never until a manual hard-refresh".
+      let lastCheckMs = Date.now();
+      const checkForUpdate = () => { lastCheckMs = Date.now(); reg.update().catch(() => {}); };
+      setInterval(checkForUpdate, SW_UPDATE_MIN_INTERVAL_MS);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && shouldCheckForUpdate(lastCheckMs, Date.now())) checkForUpdate();
+      });
     }).catch(() => {});
   });
 }

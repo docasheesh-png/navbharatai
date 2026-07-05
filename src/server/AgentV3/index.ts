@@ -64,6 +64,8 @@ export type { HydrateResult, PushResult } from './GitRepoSync';
 export { mergeViaPullRequest, githubPrMode } from './GitHubPrFlow';
 export type { PrCapableClient, PrFlowResult, PrFlowOptions } from './GitHubPrFlow';
 export { UserGitHubClient } from './UserGitHubClient';
+export { parseGitHubRepo, resolveStorageTarget, ownRepoStorageEnabled, WORK_BRANCH } from './GitStorageTarget';
+export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetInput } from './GitStorageTarget';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';
 export { agentLifecycle } from './AgentLifecycle';

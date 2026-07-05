@@ -173,7 +173,7 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           amountCoinsOrTokens: promoApplied ? 1000 : tokensToCredit,
           moneySpent: txData.amountPaid,
           timestamp: new Date().toISOString(),
-          description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ' + Lifetime Pass Activated (₹50)' : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`
+          description: `Bought ${tokensToCredit.toLocaleString()} tokens${buyPass ? ` + Lifetime Pass Activated (₹${VISHWAKARMA_PASS_PRICE_RUPEES})` : ''}${promoApplied ? ' + Promo 1000 Tokens' : ''}`
         };
         walletUpdate.walletLedger = [
           ...(walletData.walletLedger || []),

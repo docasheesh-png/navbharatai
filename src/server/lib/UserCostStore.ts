@@ -24,6 +24,15 @@ export interface MonthlyUsageDoc {
   updatedAt: number;
 }
 
+/**
+ * A cost is recordable only if it is a FINITE, POSITIVE number. This rejects `NaN` and `Infinity` —
+ * a plain `costUsd <= 0` check does NOT (`NaN <= 0` is `false`), and a single NaN would then
+ * permanently poison the stored monthly total (`existing + NaN === NaN` forever). Pure + tested.
+ */
+export function isRecordableCost(costUsd: number): boolean {
+  return Number.isFinite(costUsd) && costUsd > 0;
+}
+
 class UserCostStore {
   private db: admin.firestore.Firestore | null = null;
 
@@ -47,7 +56,9 @@ class UserCostStore {
   /** Add a build's estimated cost to the user's monthly running total. */
   async record(userId: string, costUsd: number): Promise<void> {
     const db = this.getDb();
-    if (!db || !userId || costUsd <= 0) return;
+    // Reject non-finite/non-positive costs at the single entry point (see isRecordableCost) so a
+    // NaN can never permanently poison the stored monthly total.
+    if (!db || !userId || !isRecordableCost(costUsd)) return;
     const month = this.monthKey();
     const docId = `${userId}_${month}`;
     try {

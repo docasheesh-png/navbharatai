@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createTimelineRecorder,
   compactMessagesForPersist,
+  compactTranscriptForModel,
   sessionRecallContextLine,
   type TimelineEvent,
 } from './SessionTimeline';
@@ -180,5 +181,89 @@ describe('sessionRecallContextLine', () => {
     expect(line).toContain('request number 16 ');
     expect(line).toContain('request number 19 ');
     expect(line.length).toBeLessThanOrEqual(1_201);
+  });
+});
+
+// A1 — model-side transcript compaction (the "233KB prompt → cheap-floor timeout" root cause).
+describe('compactTranscriptForModel', () => {
+  const bigRead = 'X'.repeat(80_000); // a 2500-line routes.ts-sized read_file result
+  // Build a realistic alternating transcript: user prompt, then N (assistant tool_use / user tool_result) turns.
+  function transcript(turns: number, resultText: string): unknown[] {
+    const msgs: unknown[] = [{ role: 'user', content: 'survey my app' }];
+    for (let i = 0; i < turns; i++) {
+      msgs.push({ role: 'assistant', content: [{ type: 'tool_use', id: `t${i}`, name: 'read_file', input: { path: `f${i}.ts` } }] });
+      msgs.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: resultText, is_error: false }] });
+    }
+    return msgs;
+  }
+
+  it('truncates OLD large tool_result payloads but keeps the recent window verbatim', () => {
+    const msgs = transcript(6, bigRead); // 13 messages
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4, maxOldToolResultChars: 2000 }) as any[];
+    // The whole payload dropped a lot (the recent window legitimately keeps its ~2 big reads verbatim).
+    expect(JSON.stringify(out).length).toBeLessThan(JSON.stringify(msgs).length / 2);
+    // The LAST 4 messages are the SAME object references (verbatim, untouched).
+    for (let i = out.length - 4; i < out.length; i++) expect(out[i]).toBe(msgs[i]);
+    // An OLD tool_result was trimmed and carries the honest re-read note.
+    const oldResult = out[2] as { content: Array<{ content: string }> };
+    // ~maxChars of real content + the short gap note — a tiny fraction of the original 80 000.
+    expect(oldResult.content[0].content.length).toBeLessThan(2300);
+    expect(oldResult.content[0].content).toContain('call read_file');
+  });
+
+  it('NEVER drops a block — every tool_use keeps its matching tool_result (no orphaned ids)', () => {
+    const msgs = transcript(6, bigRead);
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4 }) as any[];
+    const useIds = new Set<string>();
+    const resultIds = new Set<string>();
+    for (const m of out) {
+      if (Array.isArray((m as any).content)) for (const b of (m as any).content) {
+        if (b.type === 'tool_use') useIds.add(b.id);
+        if (b.type === 'tool_result') resultIds.add(b.tool_use_id);
+      }
+    }
+    expect([...useIds].sort()).toEqual([...resultIds].sort()); // perfect pairing preserved
+  });
+
+  it('is a NO-OP for a small build (nothing old is large) and never mutates the input', () => {
+    const msgs = transcript(2, 'ok, small result');
+    const snapshot = JSON.stringify(msgs);
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 6 });
+    expect(out).toBe(msgs); // cutoff 0 → same array returned
+    expect(JSON.stringify(msgs)).toBe(snapshot); // input untouched
+  });
+
+  it('does not truncate a SHORT old tool_result (only oversized ones shrink)', () => {
+    const msgs = transcript(6, 'a short result under the cap');
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4, maxOldToolResultChars: 2000 }) as any[];
+    const oldResult = out[2] as { content: Array<{ content: string }> };
+    expect(oldResult.content[0].content).toBe('a short result under the cap');
+  });
+
+  it('drops an OLD screenshot image block to a short note (base64 is the biggest payload)', () => {
+    const msgs: unknown[] = [
+      { role: 'user', content: 'test' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'browser', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1', content: [
+        { type: 'text', text: 'page loaded' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(200_000) } },
+      ] }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'looks good' }] },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+      { role: 'user', content: 'ok' },
+    ];
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 3 }) as any[];
+    // message 2 = { content: [ tool_result ] }; the image lives inside the tool_result's own content.
+    const toolResult = (out[2] as { content: Array<{ content: Array<{ type: string; text?: string }> }> }).content[0];
+    const img = toolResult.content.find((c) => c.text?.includes('screenshot'));
+    expect(img?.type).toBe('text'); // image → text note
+    expect(JSON.stringify(out).length).toBeLessThan(1000); // 200KB base64 gone
+  });
+
+  it('never truncates the original user request (message 0, plain string)', () => {
+    const msgs = transcript(8, bigRead);
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4 }) as any[];
+    expect(out[0]).toEqual({ role: 'user', content: 'survey my app' });
   });
 });

@@ -283,6 +283,85 @@ export function compactMessagesForPersist(messages: unknown[], opts: CompactOpti
   });
 }
 
+// ── Model-side transcript compaction (A1 — the "233KB prompt → cheap-floor timeout" root cause) ──
+//
+// compactMessagesForPersist above bounds the transcript for STORAGE only. The LIVE `messages` array
+// sent to the model each turn was never bounded — every read_file / bash result stayed verbatim, so a
+// build that reads a few large files (a 2500-line routes.ts) grew the per-turn prompt to 200KB+. The
+// cheap floor (GLM/KIMI over OpenAI-compatible) then TIMED OUT on the payload (real report: GLM 6×,
+// KIMI 2×), and every turn fell to Claude anyway — slow + costly, the Mitrify autopsy's struggle half.
+//
+// This compacts a COPY for the model only (never mutates `messages`, so persistence + audit keep full
+// fidelity): the last `keepRecentMessages` messages are sent VERBATIM (in-flight work untouched), and
+// OLDER, large tool_result payloads are head+tail truncated with an honest "re-read the file" note —
+// the model has already ACTED on those results; if it needs the full content again it calls read_file.
+// tool_use↔tool_result id pairing is always preserved (blocks are never dropped, only their content
+// strings shrink), so the Anthropic API never rejects an orphaned result. Pure + deterministic:
+// a message truncated at one turn truncates IDENTICALLY at the next (stable cache prefix), and it is a
+// natural no-op on a small build (nothing old is large).
+
+export interface ModelCompactOptions {
+  /** How many of the most-recent messages to send verbatim (default 6 ≈ the last ~3 turns). */
+  keepRecentMessages?: number;
+  /** Truncate an OLD tool_result's string content beyond this many chars (default 2000). */
+  maxOldToolResultChars?: number;
+}
+
+const MODEL_OMITTED_IMAGE = '[screenshot from an earlier turn omitted to keep context small — it was already analyzed; take a new screenshot if you need to see the page again]';
+
+/** Keep the head (70%) and tail (30%) of an oversized old result, with an honest gap note. */
+function headTailTruncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const headLen = Math.floor(max * 0.7);
+  const tailLen = max - headLen;
+  const dropped = s.length - headLen - tailLen;
+  return (
+    s.slice(0, headLen) +
+    `\n… [${dropped} chars from an earlier tool result trimmed to keep the prompt small — call read_file / the tool again if you need the full content] …\n` +
+    s.slice(s.length - tailLen)
+  );
+}
+
+/** Compact ONE block of an OLD message for the model: shrink big tool_result payloads + drop images. */
+function compactOldBlockForModel(block: unknown, maxToolResultChars: number): unknown {
+  if (!block || typeof block !== 'object') return block;
+  const b = block as Record<string, unknown>;
+  if (b.type === 'image') return { type: 'text', text: MODEL_OMITTED_IMAGE };
+  if (b.type === 'tool_result') {
+    const content = b.content;
+    if (typeof content === 'string') {
+      const trimmed = headTailTruncate(content, maxToolResultChars);
+      return trimmed === content ? b : { ...b, content: trimmed };
+    }
+    if (Array.isArray(content)) {
+      let changed = false;
+      const nc = content.map((c) => { const r = compactOldBlockForModel(c, maxToolResultChars); if (r !== c) changed = true; return r; });
+      return changed ? { ...b, content: nc } : b;
+    }
+  }
+  return b;
+}
+
+/**
+ * Bound the transcript SENT TO THE MODEL (not stored): recent messages verbatim, older large
+ * tool_results head+tail truncated. Never mutates the input. Pure + deterministic.
+ */
+export function compactTranscriptForModel(messages: unknown[], opts: ModelCompactOptions = {}): unknown[] {
+  const keepRecent = Math.max(0, opts.keepRecentMessages ?? 6);
+  const maxChars = Math.max(200, opts.maxOldToolResultChars ?? 2_000);
+  const cutoff = Math.max(0, messages.length - keepRecent); // messages BEFORE cutoff are "old"
+  if (cutoff === 0) return messages; // everything is recent → nothing to do
+  return messages.map((m, i) => {
+    if (i >= cutoff) return m; // recent → verbatim (shared reference, no copy)
+    if (!m || typeof m !== 'object') return m;
+    const msg = m as { role?: unknown; content?: unknown };
+    if (!Array.isArray(msg.content)) return m; // plain-string turns (the user's request) are small — keep
+    let changed = false;
+    const content = msg.content.map((b) => { const r = compactOldBlockForModel(b, maxChars); if (r !== b) changed = true; return r; });
+    return changed ? { ...msg, content } : m;
+  });
+}
+
 // ── AI-side recall (the "same memory" half of the order) ───────────────────────────────────────
 
 export interface RecallEpisode {

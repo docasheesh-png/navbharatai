@@ -9809,3 +9809,22 @@ manager, the read path performs NO mutating manager calls, NotFoundError on unkn
 saveFiles and getWorkspaceInfo, and facade delegation end-to-end.
 
 P4 is now 100%. Gate: frontend tsc 0, server tsc 0, vitest 4927/4927 PASS (12 new), boot:check PASS.
+## 2026-07-05 — Concurrency FIX #4 slice 1: durable command QUEUE state machine (the 3-role model's core)
+
+The heart of the admin's 3-role model: ONE serial EXECUTOR per app (Chat 1 "Main build") drains a queue
+of commands one at a time — so the same app's files are never written by two builds at once (safety by
+construction). The read-only advisor chats (Chat 2 planner, Chat 3 auditor/…) never write; they ENQUEUE
+commands for the executor. A user can queue 10+ approved roadmap steps and they run in order, hands-free.
+
+Slice 1 = the PURE state machine `BuildQueue.ts` (fully unit-tested, 15 cases): emptyQueue, enqueue
+(rejects blank/duplicate-id/over-cap MAX_QUEUE_ITEMS=25), claimNext (oldest pending → running; REFUSES a
+second while one runs = the serial "one writer per app" invariant), completeRunning (done/failed + honest
+note), cancelItem (pending only — a running item must be Stopped via the build), reorderPending (reorder
+the roadmap among pending, non-pending keep their slots), queueSummary. All pure/immutable (never mutate
+the caller's state → durable-store reads stay intact) + exported from the AgentV3 index.
+
+NEXT slices (planned): #4.2 durable Firestore queue store + enqueue/list/cancel/reorder API; #4.3 the
+serial executor (auto-run the next item when the app goes idle, reusing the existing auto-continue idle
+pattern); #5 Chat 2 planner + Chat 3 advisor that enqueue (tool-gated NO-write); #6 the queue UI
+(reorder/cancel/pause) + advisors read a stable snapshot.
+Gate: frontend tsc 0, server tsc 0, vitest 4943/4943 PASS, build PASS.

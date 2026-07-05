@@ -124,7 +124,7 @@ import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
-import { buildGroundedContext, tokenize as rerankTokenize, contentSearchTerms } from '../AgentV3/ContextReranker';
+import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
 import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
@@ -3779,46 +3779,13 @@ export function registerAgentV3Routes(app: Express): void {
             ts: Date.now(),
           });
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
-          // P-AI.2 — RAG grounding (dependency-free, BM25): rank the existing files against THIS request
-          // and inject the most-relevant ones as a cited grounding block, so the agent reads/edits the
-          // right files first. Bounded (≤14 candidate reads, selected by path-token overlap) + best-effort.
-          try {
-            const codeFile = (p: string) => /\.(t|j)sx?$|\.vue$|\.css$|\.html$/.test(p);
-            const qTokens = new Set(rerankTokenize(prompt));
-            // (a) By FILENAME: rank the tree by path-token overlap with the request.
-            const pathRanked = fileTree
-              .filter(codeFile)
-              .map((p) => ({ p, overlap: rerankTokenize(p).filter((t) => qTokens.has(t)).length }))
-              .sort((a, b) => b.overlap - a.overlap)
-              .slice(0, 14)
-              .map((x) => x.p);
-            // (b) By CONTENT: grep the codebase for the request's salient terms. For a large imported
-            // app the relevant file's NAME often doesn't echo the request (e.g. "credits don't
-            // decrement" lives in storage.ts), so filename ranking alone misses it — content search
-            // finds it. Bounded + best-effort (searchFiles is a capped `grep -rl`, 10s, returns []).
-            let contentHits: string[] = [];
-            try {
-              const terms = contentSearchTerms(prompt);
-              if (terms.length > 0 && typeof actuator.searchFiles === 'function') {
-                contentHits = (await actuator.searchFiles(workspaceId, terms).catch(() => [])).filter(codeFile);
-              }
-            } catch { /* content search is best-effort */ }
-            // Content hits FIRST (the stronger signal for "where does this behaviour live"), then the
-            // filename-ranked set; dedup; cap the total files READ (each is a sandbox round-trip).
-            const candidates = [...new Set([...contentHits, ...pathRanked])].slice(0, 16);
-            const filesMap: Record<string, string> = {};
-            for (const p of candidates) {
-              const c = await actuator.readFile(workspaceId, p).catch(() => '');
-              if (c) filesMap[p] = c;
-            }
-            const grounded = buildGroundedContext(filesMap, prompt, 3);
-            if (grounded) architectSystem = `${grounded}\n\n---\n\n${architectSystem}`;
-          } catch { /* grounding is best-effort — never blocks the build */ }
           // Warm the project graph from the PERSISTED sandbox files when memory is
           // cold (process restarted but the sandbox survived). This makes the agent's
           // recall / evaluate tools see the existing codebase immediately on a resumed
           // edit session, instead of only after it manually re-reads files. Best-effort,
           // capped, and a no-op when memory is already warm — never blocks the build.
+          // Runs BEFORE grounding (retrieval v2) so the freshly-warmed IMPORT GRAPH feeds
+          // centrality ranking on the very first turn after an import — not one turn late.
           try {
             // Level 9: restore persisted memory snapshot before warming from files —
             // episodes and file-list hints survive server restarts this way.
@@ -3826,6 +3793,32 @@ export function registerAgentV3Routes(app: Express): void {
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
             await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
           } catch { /* warming is best-effort — never blocks a build */ }
+          // P-AI.2 retrieval v2 (Mitrify autopsy) — intent-aware grounding: content hits (grep) +
+          // structural anchors (package.json/README/entry/routes/schema) + import-graph centrality.
+          // Replaces path-token-overlap-only selection, whose zero-overlap tie handed a survey
+          // request the first 14 files alphabetically (BackButton.tsx…). Bounded + best-effort.
+          try {
+            let contentHits: string[] = [];
+            try {
+              const terms = contentSearchTerms(prompt);
+              if (terms.length > 0 && typeof actuator.searchFiles === 'function') {
+                contentHits = await actuator.searchFiles(workspaceId, terms).catch(() => []);
+              }
+            } catch { /* content search is best-effort */ }
+            const sel = selectGroundingCandidates({
+              fileTree, prompt, contentHits,
+              imports: getWorkspaceMemory(workspaceId).graph().imports,
+            });
+            const filesMap: Record<string, string> = {};
+            for (const p of sel.candidates) {
+              const c = await actuator.readFile(workspaceId, p).catch(() => '');
+              if (c) filesMap[p] = c;
+            }
+            // Overview/survey → anchors-first order (BM25 is meaningless for a query that matches no
+            // content terms) and a wider block (5) so entry+routes+schema all land. Targeted → BM25 top 3.
+            const grounded = buildGroundedContext(filesMap, prompt, sel.overview ? 5 : 3, { preserveOrder: sel.overview });
+            if (grounded) architectSystem = `${grounded}\n\n---\n\n${architectSystem}`;
+          } catch { /* grounding is best-effort — never blocks the build */ }
         }
       }
 

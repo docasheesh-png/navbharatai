@@ -9432,3 +9432,36 @@ behavior).
 
 Gate: frontend tsc 0, vitest 4832/4832 PASS, vite build PASS. No AppKnowledgeBase change (pure refactor,
 no new user-facing surface).
+
+## 2026-07-05 — P2 (admin: "retrieval world-class banao"): intent-aware grounding v2 — anchors + import-graph centrality + camelCase paths
+
+Root cause of the Mitrify grounding failure (BackButton.tsx picked for a survey), found + killed:
+- Candidates were selected by path-token overlap with the request. A survey/vague ask shares NO
+  tokens with any filename → EVERY file ties at overlap 0 → sort keeps tree order → the first 14
+  files ALPHABETICALLY became "the most relevant" (AIChat, BackButton, ChangeCredentialsDialog…).
+- Sibling gap: `tokenize` kept PascalCase names as one opaque token — `CustomerHomePage.tsx` could
+  NEVER match the request word "customer", so real page names never ranked even on targeted asks.
+
+Retrieval v2 (ContextReranker.ts — pure, dependency-free, deterministic):
+- `isOverviewRequest(prompt)` — survey/overview/architecture/explain/analyze + Hinglish (kya hai,
+  samjhao, kaise kaam). Overview → filename matching is SKIPPED entirely (it is noise there).
+- `structuralAnchors(tree)` — what a senior engineer opens first: package.json, README, entry
+  (main/index), App, server index, routes, schema/prisma/drizzle, storage/db, framework config —
+  priority-ordered, node_modules excluded, deterministic.
+- `centralFiles(tree, graph.imports)` — import-graph in-degree (project-internal specifiers only,
+  resolved by basename; components/ui/* excluded — a shadcn button is imported everywhere and
+  grounds nothing). storage.ts/schema.ts surface even when their name echoes nothing in the ask.
+- `selectGroundingCandidates` — overview → anchors + central (+content hits); targeted → content
+  hits FIRST, then filename overlap ONLY where overlap>0 (the tie bug is structurally impossible
+  now), then anchor/centrality backstops. Binary/non-groundable paths never candidates.
+- `pathTokenize` — camelCase/PascalCase-aware path matching (CustomerHomePage ↔ "customer").
+- `buildGroundedContext(..., { preserveOrder })` — overview keeps anchor order and widens to top-5
+  (BM25 re-rank is meaningless for a query that matches no content terms — a test proves BM25 would
+  have picked the WRONG file there).
+- Route: memory-warm MOVED BEFORE grounding so the freshly-imported project's import graph feeds
+  centrality on the VERY FIRST turn (it previously warmed after grounding — one turn late).
+
+Tests: ContextReranker.test.ts +18 (exact Mitrify survey prompt → package.json/routes/schema, never
+BackButton; zero-overlap tie regression; content-hits-first; centrality ranking + ui-kit exclusion +
+bare-import exclusion; anchors priority/determinism; overview intent EN+Hinglish; preserveOrder beats
+BM25-noise; camelCase matching). Gate: server tsc 0, frontend tsc 0, vitest 4874/4874, boot PASS.

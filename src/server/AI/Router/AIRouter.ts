@@ -318,11 +318,18 @@ export class AIRouter {
   private async execute(prompt: string, schema?: any, systemPrompt?: string, images?: string[], modelOverride?: string): Promise<{ response: AIProviderResponse; telemetry: ProviderTelemetry }> {
     const targetSchema = schema?.type === 'OBJECT' ? schema : undefined;
     const errors: string[] = [];
+    // Providers actually invoked this request. Pass 2 exists to retry providers that pass 1 SKIPPED
+    // (cooldown), NOT to re-run one that already ran and failed — re-invoking a provider that just
+    // failed deterministically (e.g. a 400 on a malformed prompt) only doubles latency and spend.
+    const attempted = new Set<string>();
 
     // Pass 1: skip providers on cooldown — try fast path first
-    // Pass 2: if all on cooldown, try them anyway (better than error)
+    // Pass 2: if all on cooldown, try them anyway (better than error) — but never a provider we
+    //         already attempted (and failed) in pass 1.
     for (const pass of [1, 2]) {
       for (const provider of this.providers) {
+        if (pass === 2 && attempted.has(provider.name)) continue;
+
         const onCooldown = isOnCooldown(provider.name);
         if (pass === 1 && onCooldown) {
           console.log(`[CIRCUIT] Skipping ${provider.name} (cooldown active)`);
@@ -341,6 +348,7 @@ export class AIRouter {
           continue;
         }
         if (!this.acquire(provider.name)) continue;
+        attempted.add(provider.name); // committed to actually calling this provider now
         try {
           const startTime = Date.now();
           console.log(`[ROUTER] Trying ${provider.name} (pass ${pass}, in-flight ${concurrent + 1})...`);

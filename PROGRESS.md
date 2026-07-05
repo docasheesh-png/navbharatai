@@ -9599,3 +9599,21 @@ systemPrompt.ts, so nothing else could count consistently.
 - Tests: fileClassification.test.ts +7 incl. the exact Mitrify-shaped tree (165 source + 150 assets +
   2 docs = 317 total → count 167). systemPrompt's 31 tests unchanged (refactor is behaviour-preserving).
 - Gate: server tsc 0, frontend tsc 0, vitest 4894/4894, boot PASS.
+
+## 2026-07-05 — A3 / E6: reuse an already-healthy dev server instead of re-paying ~25s every `npm run dev`
+
+The managed preview re-runs `npm run dev` on every update_preview; the WHOLE sequence (vite-config
+patch → deps-stale check → pre-kill port → launch → 25s port-wait → recovery loop) re-ran even when a
+healthy server was already bound on the port — pure wasted wall-clock on big/slow apps.
+- New pure `shouldSkipDevServerLaunch(portAlreadyUp, depsStale)` (devServerHost.ts): skip ONLY when the
+  port is verifiably UP AND deps are NOT stale. A running Vite/Next server already reflects file edits
+  via HMR, so a relaunch is redundant; a changed package.json (stale) still needs reinstall+restart, so
+  it correctly does NOT skip.
+- E2BActuator: FAST PATH at the top of the npm-run-dev branch — a 2s port probe + deps-stale probe;
+  when both good, return "already healthy on port N — reused it" immediately (skips ~25s+). Both are
+  REAL sandbox probes (false up/fresh impossible); on ANY doubt it falls through to the full, proven
+  sequence — never worse than today. AGENTV3_DEVSERVER_FASTPATH=off bypasses.
+- Tests: devServerHost.test.ts +4 (the skip truth table). Gate: server tsc 0, frontend tsc 0, vitest
+  4898/4898, boot PASS.
+- NOTE: E5 (parallelize post-build gate+reviewer) deferred to the C3 backend batch — it touches the
+  delicate readiness-gate/reviewer ordering and deserves its own careful PR; E6 ships as the clean win.

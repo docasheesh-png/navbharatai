@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -366,5 +366,20 @@ describe('buildPortWaitCommand', () => {
 
   it('floors a fractional budget to whole iterations', () => {
     expect(buildPortWaitCommand(3000, 25.9)).toContain('seq 1 25');
+  });
+});
+
+describe('shouldSkipDevServerLaunch (E6 — reuse an already-healthy dev server)', () => {
+  it('skips ONLY when the port is already UP and deps are NOT stale', () => {
+    expect(shouldSkipDevServerLaunch(true, false)).toBe(true);
+  });
+  it('does NOT skip when the port is down (must launch)', () => {
+    expect(shouldSkipDevServerLaunch(false, false)).toBe(false);
+  });
+  it('does NOT skip when deps changed (a new package.json needs reinstall + restart, HMR cannot)', () => {
+    expect(shouldSkipDevServerLaunch(true, true)).toBe(false);
+  });
+  it('does NOT skip when both are bad', () => {
+    expect(shouldSkipDevServerLaunch(false, true)).toBe(false);
   });
 });

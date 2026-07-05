@@ -9489,3 +9489,21 @@ The Mitrify preview-boot post-mortem found the REAL boot-killer was not Cashfree
   externalSecretVars honesty). Gate: server tsc 0, frontend tsc 0, vitest 4879/4879, boot PASS.
 - NEXT for P3 (recorded): Firebase Emulator Suite in the sandbox (auth/firestore without real keys)
   — the big unlock for Firebase-backed imports; larger slice, own PR.
+## 2026-07-05 — P3.1 App.tsx split #2: extract usePreviewBundler (behavior-preserving)
+
+Slice #2 of the P3.1 God-component split. Extracts the preview-build / client-side bundling concern into
+`src/hooks/usePreviewBundler.ts` — the preview build-state (isPreviewBuilding / stage / error / detected
+framework), the Problems-panel data, the preview history, and the four functions that turn the virtual
+file set into a rendered preview: handleTriggerPreviewBuild, updatePreview (server esbuild for React/Vue
+with client fallback; CSS/JS inlining for vanilla; universal viewer otherwise), handleFileChange
+(debounced edit->rebuild) and runCode. Code moved BYTE-IDENTICAL (verified runCode line-for-line).
+
+- Hook takes its cross-slice deps injected (files, setFiles, setGeneratedCode, activeFile, activeAgent,
+  toggleTab, incrementDailyUsage, addLog, addToast) and returns the SAME identifiers the render tree
+  referenced, so all JSX + the ~10 external updatePreview() call sites (chat/pro-build completion,
+  version restore, workspace sync) are unchanged.
+- Hook call placed right before closeTab so every dep is defined above it and closeTab can still reset
+  preview state. tsc (0 errors) proves no used-before-declaration ordering break and no missing symbol.
+- App.tsx: 6,353 -> ~6,095 lines (~275 lines of bundler logic relocated).
+
+Gate: frontend tsc 0, vitest 4856/4856 PASS, vite build PASS. No AppKnowledgeBase change (pure refactor).

@@ -1594,40 +1594,7 @@ export default function App() {
     addLog, addToast, incrementDailyUsage, handleGHConfirmPush, learnFromMessage, updatePreview,
   });
 
-  const handleRetry = () => {
-    setErrorContext(null);
-    handleSend();
-  };
 
-  const handleFixNow = () => {
-    if (!errorContext) return;
-    addLog(`Initiating smart fix for ${errorContext.type}...`, 'info');
-    
-    switch(errorContext.type) {
-      case 'AUTH':
-        const provider = errorContext.provider || selectedModel;
-        if (provider !== 'auto') {
-          setPendingProvider(provider);
-        } else {
-          setActiveView('settings');
-        }
-        addLog('System Config opened. Please update your AI credentials.', 'warn');
-        break;
-      case 'QUOTA':
-        addLog('Routing to provider billing console...', 'info');
-        if (selectedModel === 'openai') window.open('https://platform.openai.com/settings/billing', '_blank');
-        else if (selectedModel === 'claude') window.open('https://console.anthropic.com/settings/billing', '_blank');
-        else if (selectedModel === 'groq') window.open('https://console.groq.com/settings/billing', '_blank');
-        else window.open('https://aistudio.google.com/app/billing', '_blank');
-        break;
-      case 'NETWORK':
-        addLog('Re-establishing connection...', 'info');
-        handleSend();
-        break;
-      default:
-        handleSend();
-    }
-  };
 
 
   // PREVIEW_HARNESS → exported from src/lib/previewUtils.ts
@@ -1723,22 +1690,6 @@ export default function App() {
     return () => workspaceSyncerRef.current?.dispose();
   }, [syncFilesToV3]);
 
-  const handleModelSelect = (id: string) => {
-    if (id === 'auto') {
-      setSelectedModel(id);
-      addLog('Switching to Navbharat Hybrid Engine...', 'info');
-      return;
-    }
-
-    const key = (keys as any)[id];
-    if (!key || key.trim() === '') {
-      setPendingProvider(id);
-      addLog(`Activation blocked: ${id.toUpperCase()} requires an API key.`, 'warn');
-    } else {
-      setSelectedModel(id);
-      addLog(`Switching to ${id.toUpperCase()} (User Key Active)...`, 'success');
-    }
-  };
 
   const handleKeySave = (provider: string, value: string) => {
     setKeys(prev => ({ ...prev, [provider]: value }));
@@ -1750,26 +1701,7 @@ export default function App() {
     }
   };
 
-  const createFile = () => {
-    const name = prompt('File name:');
-    if (name) {
-      setFiles(prev => ({ ...prev, [name]: '// New file\n' }));
-      setActiveFile(name);
-    }
-  };
 
-  const deployApp = () => {
-    setIsBuilding(true);
-    addLog('Initiating secure deployment tunnel...', 'info');
-    setTimeout(() => {
-      const url = `https://nb-deploy-${Math.random().toString(36).substring(7)}.navbharat.ai`;
-      setDeployUrl(url);
-      setIsDeployed(true);
-      setIsBuilding(false);
-      addLog(`Deployment successful: ${url}`, 'success');
-      toggleTab('deploy');
-    }, 2000);
-  };
 
 
   // Intent classifier — prevents build engine from firing on greetings/questions
@@ -1942,36 +1874,6 @@ export default function App() {
   };
 
 
-  const handleDeployApp = useCallback(async () => {
-    const deployFiles = files && Object.keys(files).length > 0 ? files : null;
-    const validationError = validateDeployInput({
-      platform: deployPlatform, token: deployToken, projectName: deployProjectName,
-      owner: deployOwner, repo: deployRepo, hasFiles: !!deployFiles,
-    });
-    if (validationError) { setDeployPanelError(validationError); return; }
-    setIsDeploying(true);
-    setDeployPanelError('');
-    try {
-      const body = buildDeployBody(deployPlatform, deployToken, deployFiles as Record<string, string>, {
-        projectName: deployProjectName, owner: deployOwner, repo: deployRepo,
-      });
-      const resp = await fetch('/api/pro/deploy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await resp.json().catch(() => ({})) as any;
-      if (!resp.ok) throw new Error(data?.error || `Deploy failed (${resp.status})`);
-      setShowDeployPanel(false);
-      setDeployUrl(data.url);
-      setIsDeployed(true);
-      toggleTab('deploy');
-    } catch (e: any) {
-      setDeployPanelError(e.message || 'Deploy failed. Please check your token and try again.');
-    } finally {
-      setIsDeploying(false);
-    }
-  }, [files, deployPlatform, deployToken, deployProjectName, deployOwner, deployRepo]);
 
   const downloadAppZip = useCallback(async (deployFiles: Record<string, string>, appName: string) => {
     try {
@@ -2091,25 +1993,7 @@ export default function App() {
     addToast(`${file.name} ${choice === 'replace' ? 'replaced' : 'added as ' + file.name.replace(/(\.[^.]+)$/, '_new$1')} ✓`, 'success');
   }, [fileUploadConflict, files, addToast, handleZipImport]);
 
-  const handleUndoBuild = useCallback(() => {
-    if (buildVersionStack.length === 0) return;
-    const [lastVersion, ...rest] = buildVersionStack;
-    setBuildVersionStack(rest);
-    setFiles(lastVersion.files as any);
-    updatePreview(lastVersion.files as any);
-    addToast('Restored previous version ↩', 'success');
-  }, [buildVersionStack, updatePreview, addToast]);
 
-  const saveVersionSnapshot = useCallback((buildRequest: string, builtFiles: Record<string, string>) => {
-    const snapshot = buildVersionSnapshot(buildRequest, builtFiles);
-    if (!snapshot) return;
-    try {
-      const saved = localStorage.getItem('navbharat_versions');
-      const existing: VersionSnapshot[] = saved ? JSON.parse(saved) : [];
-      const updated = appendVersionSnapshot(snapshot, existing);
-      safeLS('navbharat_versions', JSON.stringify(updated));
-    } catch {}
-  }, []);
 
   // Task 2.7 — memoized: static array, rebuilt only once
   const menuItems = useMemo(() => [
@@ -2211,63 +2095,6 @@ export default function App() {
     toggleTab, addToast, addLog,
   });
 
-  const renderUciControls = (themeColor: 'indigo' | 'amber') => {
-    const activeSession = sessions.find(s => s.id === currentSessionId);
-    const currentUci = activeSession?.uci || '';
-    if (!currentUci) return null;
-    
-    const isIndigo = themeColor === 'indigo';
-    const borderClass = isIndigo ? 'border-indigo-500/20' : 'border-amber-500/20';
-    const bgClass = isIndigo ? 'bg-indigo-900/10' : 'bg-amber-900/10';
-    const textClass = isIndigo ? 'text-indigo-400' : 'text-amber-400';
-    const hoverBgClass = isIndigo ? 'hover:bg-indigo-500/10' : 'hover:bg-amber-500/10';
-    const btnBgClass = isIndigo ? 'bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300' : 'bg-amber-600/15 hover:bg-amber-600/25 text-amber-300';
-    
-    return (
-      <div className="flex items-center gap-1.5 normal-case font-medium ml-auto select-none shrink-0" id="uci-sub-header-widget">
-        <div className={`flex items-center gap-1 bg-black/40 border ${borderClass} rounded-lg px-2 py-0.5 text-[8px] font-mono ${textClass}`}>
-          <span className="select-all tracking-tight opacity-90">{currentUci}</span>
-          <button 
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(currentUci);
-              setCopiedUci(true);
-              setTimeout(() => setCopiedUci(false), 2000);
-            }}
-            className={`p-0.5 rounded ${hoverBgClass} text-white/70 hover:text-white transition-all active:scale-90`}
-            title="Copy Universal Chat ID"
-          >
-            {copiedUci ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
-          </button>
-        </div>
-
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            const shareUrl = `${window.location.origin}${window.location.pathname}?uci=${encodeURIComponent(currentUci)}`;
-            navigator.clipboard.writeText(shareUrl);
-            setSharedUci(true);
-            setTimeout(() => setSharedUci(false), 2000);
-          }}
-          className={`px-1.5 py-0.5 bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-400 border border-emerald-500/20 rounded-lg text-[8px] font-bold uppercase tracking-wider transition-all active:scale-95`}
-          title="Share Workspace Link"
-        >
-          {sharedUci ? 'Copied Link' : 'Share'}
-        </button>
-
-        <button 
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowContinueModal(true);
-          }}
-          className={`px-1.5 py-0.5 ${btnBgClass} border ${borderClass} rounded-lg text-[8px] font-bold uppercase tracking-wider transition-all active:scale-95`}
-          title="Restore session by UCI"
-        >
-          Continue
-        </button>
-      </div>
-    );
-  };
 
 
   useEffect(() => {

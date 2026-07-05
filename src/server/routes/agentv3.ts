@@ -68,6 +68,8 @@ import {
   classifyIntent,
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
+import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
+import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, queueSummary, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
   InMemoryConversationStore,
   deriveTitle,
@@ -1794,6 +1796,44 @@ export function registerAgentV3Routes(app: Express): void {
     }
     activeBuilds.delete(buildKey);                              // unblock a fresh start immediately
     res.json({ stopped: wasRunning });
+  });
+
+  // ── Command QUEUE (FIX #4.2): durable per-app queue the serial executor drains one at a time ──
+  // Every endpoint is workspace-owner-gated (a user can only touch THEIR app's queue) and best-effort.
+
+  /** Enqueue a command for THIS app. `source`: 'user' (typed) | 'planner' | 'advisor' (a non-writing
+   *  chat handing work to the executor). Returns the updated queue + summary. */
+  app.post('/api/agentv3/queue/enqueue', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    if (!prompt) { res.status(400).json({ error: 'A non-empty prompt is required.' }); return; }
+    if (prompt.length > MAX_PROMPT_LEN) { res.status(400).json({ error: `Prompt is too long (max ${MAX_PROMPT_LEN} chars).` }); return; }
+    const source: QueueItemSource = req.body?.source === 'planner' || req.body?.source === 'advisor' ? req.body.source : 'user';
+    let added = true; let reason: string | undefined;
+    const queue = await mutateQueue(workspaceId, (q) => {
+      const r = enqueueCommand(q, { id: randomUUID(), prompt, source, createdTs: Date.now() });
+      added = r.added; reason = r.reason; return r.queue;
+    });
+    res.json({ added, reason: added ? undefined : reason, summary: queueSummary(queue), items: queue.items });
+  });
+
+  /** Read THIS app's queue (items + summary) — for the queue UI and the executor's idle check. */
+  app.get('/api/agentv3/queue', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.query?.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    const queue = await loadQueue(workspaceId);
+    res.json({ summary: queueSummary(queue), items: queue.items });
+  });
+
+  /** Cancel a PENDING command (a running one must be Stopped via the build). */
+  app.post('/api/agentv3/queue/cancel', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
+    const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
+    res.json({ summary: queueSummary(queue), items: queue.items });
   });
 
   // SHIP TO MAIN (own-repo working-branch storage, slice 2): merge the user's `navbharatai/work`

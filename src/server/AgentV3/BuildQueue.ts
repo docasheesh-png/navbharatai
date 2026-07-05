@@ -128,3 +128,38 @@ export function queueSummary(q: CommandQueue): { pending: number; running: numbe
   for (const i of q.items) s[i.status]++;
   return s;
 }
+
+// ── Durable serialization (strict — corrupt storage parses to an EMPTY queue, never a half-queue) ──
+
+const STATUSES: QueueItemStatus[] = ['pending', 'running', 'done', 'failed', 'cancelled'];
+const SOURCES: QueueItemSource[] = ['user', 'planner', 'advisor'];
+
+export function serializeQueue(q: CommandQueue): string {
+  return JSON.stringify({ workspaceId: q.workspaceId, items: q.items, version: 1 });
+}
+
+/**
+ * Parse a stored queue for `workspaceId`. STRICT: any malformed item is dropped, and unparseable input
+ * yields an empty queue — so the executor never runs on garbage. A stale 'running' item (an instance
+ * died mid-build) is healed to 'failed' on load, so the serial slot is never permanently stuck.
+ */
+export function parseStoredQueue(workspaceId: string, raw: unknown): CommandQueue {
+  let obj: unknown = raw;
+  if (typeof raw === 'string') { try { obj = JSON.parse(raw); } catch { return emptyQueue(workspaceId); } }
+  const items = (obj as { items?: unknown })?.items;
+  if (!Array.isArray(items)) return emptyQueue(workspaceId);
+  let sawRunning = false;
+  const parsed: QueueItem[] = [];
+  for (const it of items) {
+    const o = it as Partial<QueueItem>;
+    if (typeof o?.id !== 'string' || typeof o?.prompt !== 'string' || typeof o?.createdTs !== 'number') continue;
+    if (!STATUSES.includes(o.status as QueueItemStatus)) continue;
+    if (!SOURCES.includes(o.source as QueueItemSource)) continue;
+    let status = o.status as QueueItemStatus;
+    // A 'running' item from a prior (dead) instance can't still be executing here — heal it so the
+    // single serial slot is free (the caller can re-enqueue). Only ONE running is ever valid anyway.
+    if (status === 'running') { if (sawRunning) continue; sawRunning = true; status = 'failed'; }
+    parsed.push({ id: o.id, prompt: o.prompt, source: o.source as QueueItemSource, status, createdTs: o.createdTs, ...(typeof o.note === 'string' ? { note: o.note } : {}) });
+  }
+  return { workspaceId, items: parsed };
+}

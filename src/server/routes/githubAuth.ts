@@ -37,6 +37,21 @@ function htmlEscape(s: string): string {
 }
 
 /**
+ * The EXACT origin the OAuth popup may `postMessage` the GitHub token back to — never '*'.
+ * A wildcard target lets any page that opened the popup (`window.opener`) read the token.
+ * `returnUrl` is either allow-listed (`safeReturnUrl`) or the hardcoded platform fallback, so its
+ * origin is always the legitimate NavBharatAI origin the opener is expected to be on. Any malformed
+ * value falls back to the canonical production origin (never a wildcard).
+ */
+export function oauthTargetOrigin(returnUrl: string | null | undefined): string {
+  try {
+    return new URL(returnUrl || 'https://navbharatai.com').origin;
+  } catch {
+    return 'https://navbharatai.com';
+  }
+}
+
+/**
  * GitHub OAuth routes (authorize URL, redirect, token-exchange callback, user
  * profile) extracted from the server.ts monolith (Phase 1). Self-contained —
  * uses only env (GITHUB_CLIENT_ID/SECRET) and axios. Behavior unchanged.
@@ -147,6 +162,9 @@ export function registerGithubAuthRoutes(app: Express): void {
             <script>
               const token = ${jsLiteral(access_token)};
               const returnUrl = ${jsLiteral(returnUrl || "https://navbharatai.com/")};
+              // Post the (repo+workflow scope) token ONLY to this exact trusted origin, never '*'
+              // (a wildcard target would let any page that opened this popup read the token).
+              const targetOrigin = ${jsLiteral(oauthTargetOrigin(returnUrl))};
 
               function handleReturnToApp() {
                 try {
@@ -158,7 +176,7 @@ export function registerGithubAuthRoutes(app: Express): void {
 
                 try {
                   if (window.opener) {
-                    window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, '*');
+                    window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, targetOrigin);
                   }
                 } catch(e) {
                   console.error('PostMessage handshake failure:', e);
@@ -178,7 +196,7 @@ export function registerGithubAuthRoutes(app: Express): void {
                 localStorage.setItem('gh_token_signal', token);
 
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, '*');
+                  window.opener.postMessage({ type: 'GITHUB_AUTH_SUCCESS', token: token }, targetOrigin);
                   setTimeout(() => {
                     window.close();
                   }, 1200);

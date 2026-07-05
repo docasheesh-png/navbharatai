@@ -8270,3 +8270,38 @@ The FigmaImporter same-origin XSS deferred in the round-6 milestone above is don
   with a test locking the invariant (never allow-same-origin). All FOUR round-6 XSS sinks are now
   closed (#948 file-tree SVG, #950 SDA-PDF + nav, #952 FigmaImporter), each with a tested pure helper
   (svgPreviewSrc / escapeHtml / previewSandbox) so they can't silently regress.
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-7 — OAuth token postMessage hardening (#TBD)
+
+New hunt area (auth / session / postMessage token flow). Two independent read-only hunters both
+flagged the same complete token-injection/exfiltration loop as fix-immediately:
+
+- **githubAuth.ts (SENDER)** — the OAuth success popup broadcast the GitHub (repo+workflow scope)
+  token with `window.opener.postMessage({...token}, '*')` — a WILDCARD target. Any page that opened
+  this callback popup (becoming `window.opener`) could read a victim's token. Fixed: the token is now
+  posted only to a concrete trusted origin, derived server-side via a pure tested helper
+  `oauthTargetOrigin(returnUrl)` (never returns `'*'`; falls back to the canonical production origin
+  for missing/malformed input). `returnUrl` is already allow-list-filtered upstream by `safeReturnUrl`,
+  so the target is always the legitimate NavBharatAI origin the opener is expected to be on. The
+  localStorage-signal + redirect-fragment channels remain as secondary delivery paths, so no legit
+  flow depends solely on postMessage. (The error-branch post carries no token — only an error string —
+  so its wildcard leaks no secret and was left unchanged.)
+- **App.tsx (RECEIVER)** — the `message` handler injected `GITHUB_AUTH_SUCCESS` / `FIREBASE_AUTH_SUCCESS`
+  tokens into state + localStorage with NO `e.origin` check, so any cross-origin page could inject a
+  forged token. Added `if (e.origin !== window.location.origin) return;` to BOTH token branches (the
+  OAuth callback popup is served same-origin). SANDBOX_ERROR was intentionally left unguarded — it
+  legitimately originates from the same-origin preview iframe and carries no secret. (Note:
+  FIREBASE_AUTH_SUCCESS currently has no legit sender — firebaseAuth.ts is an honest "not available"
+  stub that only posts FIREBASE_AUTH_CANCELLED — so its guard is pure hardening against forged tokens.)
+
+Locked with regression tests (githubAuth.test.ts): the target origin is NEVER `'*'`, derives the exact
+origin from an allow-listed return URL, and falls back to production for malformed input.
+
+DEFERRED (recorded, honest — root not fully in reach this change):
+- **Same-origin preview-iframe amplifier** — PreviewPanel.tsx renders the user/AI preview with
+  `sandbox="allow-scripts allow-same-origin"`. Because that iframe shares the platform origin, a
+  hostile preview could still postMessage a forged `GITHUB_AUTH_SUCCESS` that PASSES the new
+  `e.origin === window.location.origin` receiver check. The origin guard above closes the CROSS-origin
+  vector (the wildcard leak/injection); the same-origin amplifier needs the preview sandbox moved to an
+  opaque origin (drop allow-same-origin), which requires runtime verification that the live preview
+  feature still works and is a larger change — NOT blind-edited here.

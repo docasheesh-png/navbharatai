@@ -5043,6 +5043,10 @@ ${buildLanguageRule(preferredLanguage)}`;
       if (e.data.type === 'SANDBOX_ERROR') {
         addLog(`Sandbox error: ${e.data.message}`, 'error');
       } else if (e.data.type === 'GITHUB_AUTH_SUCCESS') {
+        // Only trust an auth token that came from our own origin (the OAuth callback popup is
+        // served same-origin). A cross-origin sender here means a hostile page trying to inject
+        // its own GitHub token into this session — reject it.
+        if (e.origin !== window.location.origin) return;
         const token = e.data.token;
         setGithubToken(token);
         localStorage.setItem('gh_token', token);
@@ -5052,6 +5056,8 @@ ${buildLanguageRule(preferredLanguage)}`;
       } else if (e.data.type === 'GITHUB_AUTH_ERROR') {
         addLog(`GitHub connection failed: ${e.data.error}`, 'error');
       } else if (e.data.type === 'FIREBASE_AUTH_SUCCESS') {
+        // Same-origin guard: reject a cross-origin page injecting a forged Firebase token.
+        if (e.origin !== window.location.origin) return;
         const token = e.data.token;
         const userObj = e.data.user;
         setFirebaseToken(token);

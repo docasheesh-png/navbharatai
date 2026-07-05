@@ -8456,3 +8456,68 @@ remaining recorded finding is the HIGH non-atomic wallet-credit race (payments.t
 live-money concurrency refactor (runTransaction / FieldValue.increment) that cannot be end-to-end
 verified against real Firestore in this sandbox, so it is being surfaced to the admin as a decision
 rather than blind-patched (safeguard #3).
+
+## 2026-07-05 — FIFTH-RULE AUTOPSY #1 (admin build report: Hospital OPD System) + fix: build report now saved WITH the chat, permanently
+
+First forensic autopsy under the fifth absolute rule. Admin ran "Create a complete Hospital OPD
+Management System" on v3.0; the run spanned 4+ "please continue" sessions, 123 steps, 18m 41s, ended
+"✓ Done" then "Load failed", readiness NOT READY 75/100 ("1 unresolved import — the build will fail").
+Admin's emphatic bug: **"build report save kyu nahi huyi … hamesa ke liye wahin save honi chahiye"**
+(the build report itself did not persist — it must always be saved where the chat text is saved).
+
+### Step 1 — Itemized ledger (honest tally)
+- ✅ Self-healed (~8): Dashboard unused imports/state; Patients unused debounce/React/CardFooter;
+  CardBody onClick→wrapper (3 tries); OPDQueue missing OPDVisit import; OPD-number drift centralized.
+- 🔀 Worked around (~4): "Escalating to a stronger model" ×3 (couldn't converge on base model); pages
+  built as throwaway "placeholders" then refilled; sub-agents re-exploring the project every turn.
+- ⏭️ Skipped (~4): "pre-existing errors in other files" (App.tsx/DashboardStats/ToastContainer/
+  useToast/Skeleton) noticed and repeatedly ignored as "out of scope" — the exact source of the final
+  blocker; "App.tsx imports useToast incorrectly" seen, not fixed.
+- ❌ Still broken (~4): "1 unresolved import → NOT READY 75/100" (headline); summary claims
+  "✅ Production build: Successful" while the gate says it will fail (HONESTY CONTRADICTION); "Load
+  failed" after Done; **the build report did not persist** (admin's bug).
+- 🥵 Struggle (~8): "project looked lost from the sandbox, restored N files from history" EVERY session
+  (15→26→35→35 — dominant signal); 123 steps/18m/4 sessions for one app; re-exploration from zero each
+  turn; model escalations; tsconfig-confusion in the verify loop.
+
+### Step 2 — Missing subsystems (systemic diagnosis)
+1. Durable WARM-SANDBOX resume across turns (state lost every turn → full restore each time; FileGuardian
+   fires at ≥50% files missing — FileGuardian.ts:52 — meaning the sandbox came up cold turn after turn).
+2. A project-level IMPORT/WIRING RECONCILER + a readiness gate that BLOCKS and AUTO-FIXES unresolved
+   imports (each sub-agent only tsc-checks its OWN file; nothing owns cross-file App.tsx routing/imports).
+3. Cross-turn BUILD MEMORY so "continue" resumes at the next step instead of re-discovering the project.
+4. Conversation-linked durable REPORT PERSISTENCE (admin's ask) — FIXED this turn (below).
+5. REPORT-HONESTY reconciliation — the final summary must be OVERRIDDEN by the readiness verdict (never
+   print "build Successful" when the gate says NOT READY).
+
+### Step 3 — DNA-level fix SHIPPED this turn: the build report is saved WITH the chat, permanently
+Root cause of "report save nahi huyi": the FULL report lived ONLY in a separate best-effort
+`workspace_diagnostics_v3/{workspaceId}` doc; the conversation record stored only a compact
+`finalState.buildHealth`. On reopen the client's synthetic `result` event OMITTED `diagnostics`
+(agentV3History.ts) so the download had to RE-FETCH by workspaceId — which 404s when that separate
+best-effort write didn't land (very likely on an 18-min/killed/"Load failed" build). Fix:
+- NEW pure `compactReportForRecord()` (DiagnosticsStore.ts) — a bounded report (readiness/root-cause/
+  summary/counts/problems + capped issues tail + preview errors + reviewer findings) that DROPS the
+  heavy forensic channels (commands/llmCalls/errors/generatedFiles — those stay in the workspace doc).
+- `persistSessionTimeline` (agentv3.ts) now EMBEDS that compact report into the conversation record's
+  `finalState.report` — saved atomically with the chat, on the same durable write that already reliably
+  restores the chat text.
+- Client `conversationToEvents` rehydrates `finalState.report` into the synthetic `result` event's
+  `diagnostics` (fires even for a zero-billing turn) → on reopen `state.diagnostics` is populated and
+  the Build-report download/copy works offline, no separate fetch, no 404. Verdict card already
+  rehydrates from `finalState.buildHealth`.
+- +11 tests (compactReportForRecord bounds/drops/recomputes; reopen rehydrates state.diagnostics).
+- AppKnowledgeBase agentv3_build_report updated (report now saved with the chat).
+
+### Step 4 / rule 6 — OPEN ROOT CAUSES (recorded honestly, NOT yet fixed — for the next autopsy passes)
+- OPEN: warm-sandbox resume unreliable → "project looked lost/restored from history" every turn (biggest
+  struggle). Needs a durable per-workspace warm sandbox that survives between continue-turns.
+- OPEN: no whole-project import/wiring reconciler → an app can ship with an unresolved import (NOT READY
+  75/100) after piecemeal per-file generation. Needs a post-generation local-import + route resolver that
+  auto-fixes, and a gate that never passes a build with an unresolved import.
+- OPEN: no cross-turn build memory → every "continue" re-explores from zero (wasted steps/time).
+- OPEN: report-honesty — the sub-agent's "✅ Production build: Successful" summary can contradict the
+  readiness verdict; the final summary must be reconciled with / overridden by the gate.
+These are the highest-value targets to make big complex apps struggle as little as small ones.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4716/4716 PASS, boot:check PASS.

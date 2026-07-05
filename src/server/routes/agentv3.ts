@@ -161,7 +161,7 @@ import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
@@ -2865,10 +2865,21 @@ export function registerAgentV3Routes(app: Express): void {
           const finalState = sessionTimeline.final();
           if (freshEvents.length === 0 && !finalState && rec.framework === framework) return;
           timelinePersistCursor = all.length;
+          // DURABLE BUILD REPORT (admin, 2026-07-05: "build report hamesa ke liye wahin save honi
+          // chahiye jahan chat text save hota hai"): embed a COMPACT settled report INTO the conversation
+          // record's finalState, so the "Build report" is saved atomically with the chat and always
+          // returns on reopen — never dependent on the separate best-effort workspace_diagnostics doc
+          // (which can 404 after a long/killed build like an 18-min run). Only when the build has settled
+          // (finalState present) and a report exists; the heavy forensic channels stay in the workspace
+          // doc. Best-effort read — a missing report never blocks the timeline write.
+          const settledReport = finalState ? lastDiagnostics.get(userId ?? 'anon') : undefined;
+          const finalStateToSave = finalState && settledReport
+            ? { ...finalState, report: compactReportForRecord(settledReport) }
+            : finalState;
           await store.update(convId, {
             updatedAt: Date.now(),
             ...(freshEvents.length > 0 ? { timelineAppend: freshEvents } : {}),
-            ...(finalState ? { finalState } : {}),
+            ...(finalStateToSave ? { finalState: finalStateToSave } : {}),
             framework,
           });
         })(), 8_000, 'persistSessionTimeline');

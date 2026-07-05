@@ -63,6 +63,53 @@ export function trimReportForStorage(report: BuildDiagnosticsReport): BuildDiagn
   };
 }
 
+/** How many issue-timeline lines to keep in the report EMBEDDED in the durable conversation record.
+ *  Tighter than storage: the embedded copy rides inside the conversation doc (saved in the SAME place
+ *  as the chat), so it must stay small — the heavy forensic channels remain in the separate
+ *  workspace_diagnostics_v3 doc for the deep "AI Diagnosis Bundle" download. */
+const EMBED_MAX_ISSUES = 120;
+
+/**
+ * A COMPACT build report for embedding INSIDE the durable conversation record, so the "Build report"
+ * is saved in the same place as the chat and ALWAYS returns on reopen — never a separate best-effort
+ * doc that can 404 after a long / killed build (admin report, 2026-07-05: "build report save nahi
+ * huyi … hamesa ke liye wahin save honi chahiye").
+ *
+ * Keeps the user-facing essentials — readiness/root-cause/summary/counts/problems + a bounded issues
+ * tail + a few preview errors + the reviewer's findings — and DROPS the heavy forensic channels
+ * (sandbox command logs, LLM I/O, full error stacks, generated-file bodies), which stay in the
+ * workspace-keyed forensic report. Pure + exported + unit-tested.
+ */
+export function compactReportForRecord(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const issues = (report.issues ?? []).slice(-EMBED_MAX_ISSUES).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
+  return {
+    schema: report.schema,
+    sessionId: report.sessionId,
+    workspaceId: report.workspaceId,
+    framework: report.framework,
+    model: report.model,
+    prompt: cap(report.prompt, 2000),
+    startedAt: report.startedAt,
+    endedAt: report.endedAt,
+    ok: report.ok,
+    summary: cap(report.summary, 4000),
+    rootCause: cap(report.rootCause, 2000),
+    counts: report.counts,
+    issues,
+    // RECOMPUTE from the trimmed issues so `problems` can never reference an entry that fell out.
+    problems: capProblems(issues.filter((i) => i.severity !== 'info')),
+    previewErrors: lastN(report.previewErrors, 10),
+    providerDelivery: report.providerDelivery,
+    review: cap(report.review, 4000),
+    // Heavy forensic channels deliberately omitted — they stay in workspace_diagnostics_v3 (retrievable
+    // by workspaceId) for the deep bundle; the record only needs the always-available essential report.
+    commands: undefined,
+    llmCalls: undefined,
+    errors: undefined,
+    generatedFiles: undefined,
+  };
+}
+
 /** Persist a workspace's final diagnostics report. Best-effort — never throws. */
 export async function saveDiagnostics(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
   const db = getDb();

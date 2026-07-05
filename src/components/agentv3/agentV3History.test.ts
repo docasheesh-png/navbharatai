@@ -133,6 +133,24 @@ describe('conversationToEvents', () => {
     expect(conversationToEvents(c).some((e) => e.type === 'result')).toBe(false);
   });
 
+  it('rehydrates the build report from finalState.report into state.diagnostics on reopen (the "report saved WITH the chat" fix)', () => {
+    // The compact report the server now embeds in the conversation record. On reopen the download/copy
+    // must work offline (no separate fetch that can 404 after a long build).
+    const report = { schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1, counts: { total: 1, errors: 1, warnings: 0, autoResolved: 0, unresolved: 1 }, issues: [], problems: [], rootCause: 'unresolved import ./Missing' };
+    const c = conv({ status: 'complete', finalState: { ok: false, report } });
+    let state = initialAgentV3State();
+    for (const e of conversationToEvents(c)) state = agentV3Reducer(state, e);
+    expect(state.diagnostics).toEqual(report);
+  });
+
+  it('fires the synthetic result (so the report rehydrates) even for a ZERO-billing turn that has a report', () => {
+    const report = { schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1, counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [] };
+    const c = conv({ status: 'complete', billedUsd: 0, finalState: { report } });
+    const result = conversationToEvents(c).find((e) => e.type === 'result') as { diagnostics?: unknown } | undefined;
+    expect(result).toBeTruthy();
+    expect(result?.diagnostics).toEqual(report);
+  });
+
   it('restores real wall-clock timestamps when the server stamped them', () => {
     const c = conv({
       messages: [

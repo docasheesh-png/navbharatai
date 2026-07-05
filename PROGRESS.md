@@ -8326,3 +8326,26 @@ verified identity to attribute to. Two-sided fix:
 Locked with a regression test (routesBuildPro.test.ts): attribution uses a verified uid verbatim and
 returns undefined for null/empty — a spoofed body userId can never reach cost/history recording.
 Behavior for legitimate signed-in users is unchanged (same uid attributed, now unspoofable).
+
+## UPDATE (2026-07-05, session 01KDmsCZ): round-7 #3 — cross-user secret-delete IDOR fixed (#TBD)
+
+`DELETE /api/secrets/:userId/:secretId` soft-deleted `user_secrets/{secretId}` after only
+`requireUserMatch('userId')`. But `user_secrets` is a FLAT collection (each doc carries a `user_id`
+field), and the delete keyed off `:secretId` ALONE — it never checked that the target document
+belonged to the authenticated user. So any signed-in user could soft-delete ANOTHER user's stored
+secret (their Supabase/API keys, etc.) by calling `DELETE /api/secrets/<their-own-uid>/<victim_secretId>`
+— the `:userId` in the path was decorative for the delete. Denial-of-service / griefing on a victim's
+integrations.
+
+Root cause: an owner-scoped mutation trusted a globally-addressable document id without confirming
+ownership at the point of write. Fix: `getDoc` the target first and refuse (404 — no existence leak,
+no write) unless `data.user_id === :userId` (the verified caller), then soft-delete. Sibling hunt:
+the GET (`where('user_id','==',userId)`) and POST (`user_id: userId`) were already user-scoped; the
+admin rotate-all iterates every doc by design; `sync.ts` deletes by a userId-derived doc id — none
+share the flaw. Locked with a route-level regression test (routesSecretsIdor.test.ts, mocked
+Firestore): a foreign secret → 404 + zero writes, a missing id → 404, the owner → 200 + soft-delete.
+
+Round-7 security sweep (auth/session/postMessage/IDOR) now covers: OAuth token postMessage hardening
+(#955), build cost/history attribution spoofing (#956), and this cross-user secret-delete IDOR.
+Deferred (recorded above): the same-origin preview-iframe amplifier (PreviewPanel allow-same-origin)
+— opaque-sandbox fix needs live preview verification.

@@ -9828,3 +9828,19 @@ serial executor (auto-run the next item when the app goes idle, reusing the exis
 pattern); #5 Chat 2 planner + Chat 3 advisor that enqueue (tool-gated NO-write); #6 the queue UI
 (reorder/cancel/pause) + advisors read a stable snapshot.
 Gate: frontend tsc 0, server tsc 0, vitest 4943/4943 PASS, build PASS.
+
+## 2026-07-05 — P5.2 monorepo: ASSESSED — isolation already achieved, risky migration declined
+
+Investigated the P5.2 goal (isolate remote-keyboard/ from the web build). Finding: it is ALREADY isolated.
+remote-keyboard/ (android/ + pc_server/) has NO package.json, so npm ci never installs it; it is not in any
+tsconfig include, the vite/esbuild web build, or the vitest globs; and nothing in src/ imports it. Directory
+separation already fully isolates it from the web build/test/Cloud Run deploy.
+
+Honest decision (rule 3, no sycophancy): a full pnpm/Turborepo migration would reshape the LIVE Cloud Run
+deploy pipeline (package manager, lockfile, Dockerfile, cloudbuild.yaml, CI) for a benefit that already
+exists — high blast radius, ~zero payoff. Intentionally NOT done (mirrors P5.1 assessed/kept). A true
+multi-package monorepo, if ever wanted, needs admin sign-off on the pipeline change (safeguard #3 / rule #1).
+
+Shipped instead a zero-risk guardrail: added remote-keyboard to the exclude of tsconfig.json +
+tsconfig.server.json so a future glob widening can never pull the Android/PC-server tree into the web
+typecheck. P5 is now 100%. Gate: frontend tsc 0, server tsc 0, vitest PASS.

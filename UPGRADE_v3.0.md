@@ -55,7 +55,7 @@
 | P2 | Resilience & Observability | See + survive failures | ✅ Complete | 100% |
 | P3 | Scale & Frontend Health | Grow without rewrites | 🔄 In Progress | 75% (P3.1 App.tsx split deferred) |
 | P4 | Advanced Enterprise Patterns | True enterprise depth | ✅ Complete | 100% (P4.1 CQRS done 2026-07-05; P4.2 + P4.3 + P4.4 done) |
-| P5 | Hygiene & Hardening | Remove rot, close small holes | 🔄 In Progress | 67% (P5.1 assessed/kept, P5.3 done; P5.2 monorepo deferred — large infra) |
+| P5 | Hygiene & Hardening | Remove rot, close small holes | ✅ Complete | 100% (P5.1 assessed/kept, P5.3 done, P5.2 assessed 2026-07-05 — isolation already achieved, risky migration declined) |
 | **P6** | **IaC & Provisioning** | Reproducible, version-controlled infra | ⏳ Pending | 0% |
 | **P7** | **Async Infra (Queue/Cache)** | Scale beyond Firestore-polling | ⏳ Pending | 0% |
 | **P8** | **Observability Infra** | Tracing + alerting + SLO | ⏳ Pending | 0% |
@@ -395,11 +395,21 @@
   FIRST wire the build to inject the vars + verify on a real deploy (an infra step, deferred per safeguard #3).
 - **Files:** `src/config/firebase.ts` (documenting comment).
 
-### P5.2 — Monorepo tooling  🟡 DEFERRED (large infra)
-- [ ] Adopt pnpm workspaces / Turborepo so `remote-keyboard/` (Android) and web build are isolated.
-- **Deferred:** a root build-system migration (pnpm/Turborepo) is a large, high-blast-radius infra change that
-  reshapes the whole build/deploy pipeline — not safe for a single autonomous cycle (safeguard #3 / rule #1).
-- **Files:** root config.
+### P5.2 — Monorepo tooling  ✅ ASSESSED — isolation already achieved; migration intentionally declined (2026-07-05)
+- **Investigation:** the stated goal — isolate `remote-keyboard/` from the web build — is **already true**.
+  `remote-keyboard/` (contains `android/` + `pc_server/`, an Android app + PC server) **has no `package.json`**,
+  so `npm ci` never installs it; it is **not** in any `tsconfig` `include`, the `vite`/`esbuild` web build, or the
+  `vitest` globs (`tests/**`, `src/**`); and nothing under `src/` imports it. It is already fully isolated from
+  the web build / test / Cloud Run deploy by plain directory separation.
+- **Honest decision (rule 3, no-sycophancy):** a full pnpm/Turborepo migration would reshape the LIVE Cloud Run
+  deploy pipeline (package manager, lockfile, `Dockerfile`, `cloudbuild.yaml`, CI) — high blast radius — for a
+  benefit that **already exists**. That is risk with ~zero payoff, so the migration is **intentionally NOT done**
+  (mirrors P5.1's "assessed & kept"). If a true multi-package monorepo is ever wanted, it needs explicit admin
+  sign-off on the deploy-pipeline change (safeguard #3 / rule #1).
+- [x] Zero-risk guardrail shipped instead: `remote-keyboard` added explicitly to the `exclude` of both
+      `tsconfig.json` and `tsconfig.server.json`, so a future glob widening (e.g. `**/*.ts`) can never accidentally
+      pull the Android/PC-server tree into the web typecheck. Makes the existing isolation explicit + permanent.
+- **Files:** `tsconfig.json`, `tsconfig.server.json`.
 
 ### P5.3 — Delete throwaway scripts & junk files  ✅ DONE (2026-06-28)
 - [x] Root junk `.txt` files (`open.txt`, `close.txt`, `div_open.txt`, `another-file.txt`, …) — already gone (no root

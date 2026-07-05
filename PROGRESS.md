@@ -9366,3 +9366,22 @@ Open root cause #1 from the Mitrify-import autopsy, admin-ordered ("fix the hone
   backward-compat). Gate: server tsc 0, frontend tsc 0, vitest 4845/4845 PASS, boot:check PASS.
 - Remaining autopsy follow-ups (open): #2 single source for file counts (165 vs 317), #3 prompt-size
   governance (binary assets in manifest + transcript compaction for the cheap floor).
+
+## 2026-07-05 — Autopsy follow-up 3 (slice 1): binary assets excluded from the edit-mode manifest
+
+Prompt-size governance, first slice (the Mitrify autopsy's "missing subsystem B").
+- ⏭️→✅ The `<<<EXISTING_FILES>>>` manifest injected EVERY imported path into EVERY turn — including
+  ~150 `attached_assets/IMG_*.png|jpeg` names the model can never text-edit. Pure token noise that
+  helped bloat real prompts (45KB→233KB) until the cheap floor (GLM/KIMI) timed out ~8×.
+- Fix (pure, summarizeFileTree): a BINARY_ASSET_RE (images/fonts/media/archives/design binaries —
+  `.svg` deliberately KEPT, it's editable text) filters the listing BEFORE the small-vs-large
+  threshold, so (a) small-project flat lists carry only editable files, (b) binaries can't force a
+  small app into summary mode, (c) directory counts reflect editable files. One honest note line
+  ("+N binary asset files … omitted; they exist but are not text-editable") keeps the agent aware —
+  it must never conclude "this project has no images".
+- Tests: systemPrompt.test.ts +5 (filtering, .svg kept, threshold not distorted by images,
+  large-project note, assets-only tree degrades to the note). Existing 26 unchanged.
+- Gate: server tsc 0, frontend tsc 0, vitest 4850/4850 PASS, boot:check PASS.
+- REMAINING for follow-up 3 (recorded, not silently dropped): transcript compaction / read_file
+  result capping for the cheap floor — the other half of the 233KB growth (bigger change, own PR).
+  Follow-up 2 (single source for file counts) also still open.

@@ -95,16 +95,33 @@ export function planSystemPrompt(): string {
  * Claude Code) navigates a big repo. Per-turn context then stays small and roughly constant no
  * matter how big the project is, which is what makes editing a Mitrify-scale app viable. PURE.
  */
+/**
+ * Binary / non-editable asset files (images, fonts, media, archives, design binaries). The model can
+ * NEVER edit these as text, so listing every one in the manifest is pure token noise — the Mitrify
+ * import (autopsy 2026-07-05) injected ~150 `attached_assets/IMG_*.png|jpeg` names into EVERY turn,
+ * bloating the prompt the cheap floor (GLM/KIMI) then timed out on. `.svg` is deliberately KEPT — it
+ * is editable text the agent legitimately modifies.
+ */
+const BINARY_ASSET_RE = /\.(png|jpe?g|gif|webp|avif|bmp|tiff?|ico|icns|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|webm|mov|avi|mkv|flac|aac|zip|tar|gz|tgz|rar|7z|pdf|psd|ai|sketch|fig|exe|dll|so|dylib|wasm|bin|jar|class|pyc|db|sqlite)$/i;
+
 export function summarizeFileTree(
   paths: string[],
   opts?: { fullListMax?: number; maxDirLines?: number },
 ): string {
   const fullListMax = opts?.fullListMax ?? 400;
   const maxDirLines = opts?.maxDirLines ?? 240;
-  const files = [...new Set((paths || []).filter((p) => typeof p === 'string' && p.trim()))];
-  if (files.length === 0) return '';
+  const all = [...new Set((paths || []).filter((p) => typeof p === 'string' && p.trim()))];
+  // Prompt-size governance (autopsy follow-up 3): binary assets are excluded from the listing — the
+  // agent can't text-edit them, and their names alone bloated real prompts. One honest note keeps the
+  // agent aware they exist (so it never claims "there are no images in this project").
+  const files = all.filter((p) => !BINARY_ASSET_RE.test(p));
+  const binaryCount = all.length - files.length;
+  const binaryNote = binaryCount > 0
+    ? `\n(+${binaryCount} binary asset file${binaryCount === 1 ? '' : 's'} — images/fonts/media — omitted from this list; they exist in the project but are not text-editable.)`
+    : '';
+  if (files.length === 0) return binaryNote.trim();
   // Small project → the full flat list (today's behaviour, byte-for-byte for small apps).
-  if (files.length <= fullListMax) return files.join('\n');
+  if (files.length <= fullListMax) return files.join('\n') + binaryNote;
 
   // Large project → a bounded directory summary + the (usually few, usually important) root files.
   const rootFiles = files.filter((p) => !p.includes('/')).sort();
@@ -129,7 +146,7 @@ export function summarizeFileTree(
   if (dirs.length > shownDirs.length) {
     lines.push(`  …and ${dirs.length - shownDirs.length} more director${dirs.length - shownDirs.length === 1 ? 'y' : 'ies'} (use search_files/glob to reach them).`);
   }
-  return lines.join('\n');
+  return lines.join('\n') + binaryNote;
 }
 
 export function editModePrefix(fileTree: string[] = []): string {

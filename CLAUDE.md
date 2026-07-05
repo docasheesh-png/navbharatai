@@ -95,6 +95,71 @@ around code that deterministically fails; changing a test to match broken behavi
 works now" without knowing WHY it broke. Time pressure never justifies a surface patch —
 a surface patch is future breakage on the one absolute rule.
 
+## The fifth absolute rule: Every build report is a forensic autopsy — mine it to zero, then harden v3.0 at the DNA level (admin-mandated, 2026-07-05)
+
+**Whenever the admin sends a build report, diagnostics report, or any real run output from
+NavBharatAI Pro v3.0 (AgentV3) — that report is the single highest-signal evidence we will
+ever get about where the engine actually struggles on a real app. It is NOT a status glance
+to skim and reply "looks good". It is a mandatory, exhaustive forensic autopsy whose end
+state is a hardened, measurably-more-error-proof v3.0.** The admin's standing goal is an
+**error-free / error-proof v3.0**: the same mistake never recurs, even large and complex apps
+struggle minimally, and whatever v3.0 does, it does perfectly. Every autopsy moves the engine
+toward that bar; an autopsy that ends without root-cause fixes (or honestly-recorded open root
+causes) is incomplete.
+
+This rule is the OPERATING ENGINE for the fourth absolute rule (root-cause only): the fourth
+rule says *how* to fix; this fifth rule says *every real report is the trigger and the source
+of what to fix*. Both are non-negotiable and reinforce the one absolute rule (never break the
+app). Run all four mandatory steps, in order, every time:
+
+**Step 1 — Read the WHOLE report and build an itemized ledger (every flaw, however small).**
+Read the report end to end — never a truncated tail. Enumerate EVERY issue, imperfection,
+warning, retry, and rough edge, no matter how tiny, and classify each into exactly one bucket,
+with a running count and a concrete one-line description per item:
+- ✅ **Self-healed** — v3.0 detected and genuinely fixed it itself. (Count + list. A self-heal
+  is NOT "free": in Step 3 you still ask why the bug could occur at all and prevent it upstream
+  so the engine never has to heal it.)
+- 🔀 **Worked around / alternative used** — v3.0 substituted or routed around the real problem
+  instead of fixing it (fell back to a different model/tool/path, stubbed, degraded). (Count +
+  list. Every workaround is a DEFERRED root cause — flag it as debt, never as a win.)
+- ⏭️ **Skipped / ignored** — v3.0 saw it (or should have) and took no action. (Count + list.)
+- ❌ **Still broken / shipped imperfect** — the flaw survived into the delivered app or result.
+  (Count + list. These are the most urgent.)
+- 🥵 **Struggle points** — where v3.0 looped, retried, burned many steps, backtracked, or nearly
+  failed even if it eventually succeeded. (Count + list, with EXACTLY where in the run.)
+Report these five buckets back to the admin as a clear tally ("v3.0 ne X self-heal kiye, Y
+workaround, Z skip, W abhi bache, and struggled at …") — honest numbers, no inflation.
+
+**Step 2 — Diagnose the MISSING subsystem (level up the platform, not just this one app).**
+Step back from the individual items and ask the systemic question the admin explicitly wants
+answered: *reading the whole report, what SYSTEM / ENGINE / SETTING is missing from our AI that
+would have prevented this entire class of struggle?* Name it concretely — e.g. a missing
+dependency auto-sync, a missing real port/health detector, a missing DB-migration runner, a
+missing pre-flight env/secret check, a missing self-review pass, a missing capability tier.
+This is how v3.0 gets structurally better instead of patching one app at a time.
+
+**Step 3 — DNA-level root-cause fix for EVERY ledger item (all five buckets, not just ❌).**
+Apply the fourth absolute rule's six-step method to eliminate the CLASS behind each item:
+- A 🔀 workaround → build the real fix so the workaround is never needed again (or, if it truly
+  can't be built now, record it as an open root cause per rule 6 — never leave it silent).
+- A ⏭️ skip → becomes a caught-and-handled case with an honest outcome.
+- A ❌ still-broken → root-caused and killed, with a regression test encoding the exact failure.
+- A 🥵 struggle → becomes a smooth path (fewer steps, no loop, faster convergence).
+- A ✅ self-heal → trace why the bug class exists and prevent it upstream so v3.0 never has to
+  heal it in the first place.
+Then finish the fourth-rule discipline every time: hunt the siblings across the whole repo
+(rule-3), lock each fix with regression tests (rule-4), and fix the system's honesty so the
+report tells the truth about that state forever after (rule-5). Ship through the normal cycle
+(branch → verification gate → PR → CI green → merge); update `AppKnowledgeBase.ts` for any new
+user-facing capability and append the autopsy + fixes to `PROGRESS.md`.
+
+**Step 4 — The bar is error-free v3.0.** The same mistake must never come back, big complex
+apps must struggle as little as small ones, and every capability v3.0 exposes must work
+perfectly. If some root cause is genuinely infra-blocked right now, say so plainly and record
+it in `PROGRESS.md` as an open root cause (rule 6) — never ship a cosmetic patch as if it were
+the fix. Time and credit pressure never shrink this autopsy; a skipped autopsy is a guaranteed
+repeat failure on the one absolute rule.
+
 ## The 7 safeguards (mandatory, every session)
 
 1. **Fresh-state check before trusting any doc.** At the start of every

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -2426,7 +2426,20 @@ export function registerAgentV3Routes(app: Express): void {
     // under VITEST (route handler isn't exercised by tests; the pure resolveBuildIdentity is tested
     // directly), and a genuine anonymous caller (no token + no claim) still resolves to userId=null.
     const claimedUid = typeof req.body?.userId === 'string' && req.body.userId ? req.body.userId : null;
-    const verified = process.env.VITEST ? (claimedUid ? { uid: claimedUid, email: null } : null) : await verifyFirebaseIdentity(req);
+    let verified: { uid: string; email: string | null } | null;
+    if (process.env.VITEST) {
+      verified = claimedUid ? { uid: claimedUid, email: null } : null;
+    } else {
+      const diag = await verifyFirebaseIdentityDiag(req);
+      verified = diag.identity;
+      // HONESTY (admin's "anon" investigation, 2026-07-05): a logged-in user whose token failed to
+      // verify silently became 'anon' (→ app-anon repos + the 5/hr anon rate limit + a SHARED account
+      // lock across all anon users). When a uid WAS claimed but verification produced no identity, log
+      // the exact reason so this is diagnosable instead of invisible — no behaviour change, just truth.
+      if (!verified && claimedUid) {
+        audit('AGENTV3_ANON_FALLBACK', { claimedUid, reason: diag.reason, detail: diag.detail ?? null }, 'warn');
+      }
+    }
     const identity = resolveBuildIdentity(verified?.uid ?? null, claimedUid);
     if (!identity.ok) {
       res.status(401).json({ error: identity.error, code: identity.code });

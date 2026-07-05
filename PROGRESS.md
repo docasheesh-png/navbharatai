@@ -9635,3 +9635,31 @@ re-arm restarted from seq 0, re-downloading + re-applying the WHOLE event histor
   risk right now); B10 (checkRunning/checkpoints debounce) is largely mitigated by the existing
   visibility-gated effects; B9 (unify the two NDJSON readers / authJsonHeaders) is a pure refactor
   with no user-visible defect. B6 was the genuine resilience win and shipped clean.
+
+## 2026-07-05 — Concurrency FIX #2 (admin "anon" investigation): make the 'anon' fallback VISIBLE + harden verify
+
+Admin confirmed they log in with REAL Firebase (aashishcpmt09@gmail.com / doc.asheesh@…), NOT the
+synthetic admin — yet builds land in `app-anon-…` (+ the 5/hr anon rate limit + a SHARED account lock
+across all anon users). Root: `resolveBuildIdentity` (correctly, for security) refuses to trust a
+claimed uid without a verified token, so ANY `verifyIdToken` failure → userId=null → 'anon'. WHY the
+token fails for a real user was INVISIBLE (verify swallowed the error). Honest verdict (rule 6): the
+true root may be infra (cold-start cert race, or the server can't reach Google's signing certs), which
+can't be confirmed from code — so the fix makes it diagnosable + hardens the deterministic parts.
+
+FIX (safe, additive — no behaviour change to identity resolution):
+- `verifyIdentityWithReason(authHeader, getAuth)` (authMiddleware.ts) — testable core returning an honest
+  reason: 'ok' | 'no-bearer' | 'admin-unavailable' | 'verify-error' (+detail). RETRIES verifyIdToken ONCE
+  (cold-start cert-fetch race is the common false negative). + `verifyFirebaseIdentityDiag(req)` wrapper.
+- `adminAppOptions()` — firebase-admin now inits with an EXPLICIT projectId when FIREBASE_PROJECT_ID /
+  GOOGLE_CLOUD_PROJECT / GCLOUD_PROJECT is set (never mis-detects the verification project); `{}`
+  (today's auto-detect) when unset → purely additive. Applied to BOTH getAdminAuth + getAdminFirestore.
+- /chat route: when a uid was CLAIMED but verification produced no identity, `audit('AGENTV3_ANON_FALLBACK',
+  {claimedUid, reason, detail})` — so the silent anon becomes a diagnosable event. Identity resolution is
+  UNCHANGED (still anon on failure, for security); only the observability + init-determinism improve.
+- Tests: verifyIdentityWithReason (ok / no-bearer / admin-unavailable / verify-error+retry / retry-then-
+  succeed) + adminAppOptions (explicit projectId vs additive {}).
+
+NEXT: read the AGENTV3_ANON_FALLBACK logs from a real admin build → the `reason`/`detail` reveals whether
+it's a transient cold-start (now retried) or a systematic cert/network/config issue (then fix the infra:
+set FIREBASE_PROJECT_ID + confirm Cloud Run egress to googleapis.com + the runtime SA can verify tokens).
+Gate: frontend tsc 0, server tsc 0, vitest 4889/4889 PASS, build PASS, boot PASS.

@@ -29,6 +29,7 @@ import { registerJsxCheckRoutes } from './src/server/routes/jsxCheck';
 import { registerWorkspaceHealthRoutes } from './src/server/routes/healthCheck';
 import { registerUndefinedHookCheckRoutes } from './src/server/routes/undefinedHookCheck';
 import { registerDepConstraintCheckRoutes } from './src/server/routes/depConstraintCheck';
+import { registerReleaseGateRoutes } from './src/server/routes/releaseGate';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -547,6 +548,7 @@ setInterval(() => {
   registerWorkspaceHealthRoutes(app); // AgentV3 — one-call build-health aggregate (POST /api/workspace/health-check)
   registerUndefinedHookCheckRoutes(app); // AgentV3 — undefined-hook-call check (POST /api/workspace/hook-resolution-check)
   registerDepConstraintCheckRoutes(app); // P-AI.14 — dependency version-constraint check (POST /api/workspace/dependency-check)
+  registerReleaseGateRoutes(app); // P-DEPLOY.5 — public release freeze/approval gate status (GET /api/release/gate)
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

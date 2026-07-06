@@ -10591,3 +10591,20 @@ use `@/`) had a blank in-browser preview.
 - This is Fix 1 of 5 from the Mitrify/navBharatAI report autopsies (goal: Replit/Lovable/Bolt-exported
   apps run easily). Next: Fix 2 (monorepo framework/port), Fix 3 (cold-sandbox hydration), Fix 4 (P1 on
   import turn), Fix 5 (auto-provision DB for Drizzle/pg imports).
+
+## 2026-07-06 — P-DEPLOY.5: release freeze/approval gate  ✅ DONE
+
+Optional safety layer on auto-deploy. New src/server/lib/ReleaseGate.ts (pure, unit-tested):
+evaluateReleaseGate(config, now, sha) → {allowed, reason} — an active freeze (with optional auto-expiry) blocks
+everything; when approval is required the candidate SHA must match the approved one (prefix-tolerant); OPT-IN,
+defaults fully OPEN so it never blocks a normal deploy. normalizeGateConfig sanitizes untrusted input.
+ReleaseGateStore.ts (Firestore, VITEST-skip) — one config doc, fails OPEN on any storage error. Admin control:
+GET/POST /api/admin/release-gate (verifyAdminToken). Pipeline enforcement: public GET /api/release/gate?sha=… +
+a step in .github/workflows/deploy.yml that curls it via the opt-in RELEASE_GATE_URL secret and blocks the deploy
+when closed (skips cleanly when unset). Honest scope (rule 6): the GH Actions path is fully enforced; the PRIMARY
+Cloud Build trigger needs one admin-added curl step in cloudbuild.yaml (recorded, not changed blind, since a bad
+step could break all deploys). AppKnowledgeBase admin-release-gate entry.
+
+Live smoke: /api/release/gate defaults allowed:true (open). Tests: ReleaseGate.test.ts (8).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5220/5220 PASS (8 new), build PASS, boot:check PASS.

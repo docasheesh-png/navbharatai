@@ -2788,11 +2788,24 @@
 - [ ] Wire real store connectors (Play Developer API / App Store Connect API) for signed upload + track promotion.
 - **Files:** `src/components/ide/APKBuilder.tsx`, `src/components/ide/AppStorePublisher.tsx`, new backend route.
 
-### P-DEPLOY.5 — Release Approval / Freeze Gate  ❌ MISSING  [LOW]
-- Deploy is fully automatic on merge (by design). There is no optional **manual approval gate** or **freeze window**
-  for high-risk releases (e.g. during incidents). This is a safety add-on, not a replacement for auto-deploy.
-- [ ] Add an opt-in approval gate + a freeze flag (Firestore config) the deploy pipeline checks before promoting.
-- **Files:** `.github/workflows/deploy.yml`, `cloudbuild.yaml`, `src/server/routes/admin.ts`.
+### P-DEPLOY.5 — Release Approval / Freeze Gate  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- Optional safety layer on top of auto-deploy — a FREEZE window and/or MANUAL APPROVAL of a specific commit.
+- [x] **`ReleaseGate.ts`** (pure, unit-tested) — `evaluateReleaseGate(config, now, sha)` → `{ allowed, reason }`:
+  an active freeze (with optional auto-expiry) blocks everything; when approval is required the candidate SHA
+  must match the approved one (prefix-tolerant). OPT-IN — defaults fully OPEN, so with no config it never blocks
+  a normal deploy. `normalizeGateConfig` sanitizes untrusted input.
+- [x] **`ReleaseGateStore.ts`** (Firestore, VITEST-skip) — one config doc; **fails OPEN** on any storage error.
+- [x] **Admin control:** `GET`/`POST /api/admin/release-gate` (verifyAdminToken) to read/set the freeze + approval.
+- [x] **Pipeline enforcement:** public `GET /api/release/gate?sha=…` the deploy step checks; a new step in
+  `.github/workflows/deploy.yml` curls it (via the opt-in `RELEASE_GATE_URL` secret) and **blocks the deploy when
+  the gate is closed** (skips cleanly when the secret is unset — no fake enforcement).
+- **Honest scope (rule 6):** the GitHub Actions deploy path is fully enforced. The PRIMARY deployer is the Cloud
+  Build trigger, which does not run that workflow — to enforce there too, the admin adds one curl step to
+  `cloudbuild.yaml` before the `gcloud run deploy` step (same `GET /api/release/gate?sha=$COMMIT_SHA` check). That
+  edit is admin-owned (a bad `cloudbuild.yaml` step could break all deploys), so it is recorded here rather than
+  changed blind. AppKnowledgeBase entry added.
+- **Files:** new `src/server/lib/ReleaseGate.ts` (+`.test.ts`, 8), `ReleaseGateStore.ts`, `routes/releaseGate.ts`,
+  `routes/admin.ts`, `server.ts`, `.github/workflows/deploy.yml`, `AppKnowledgeBase.ts`.
 
 ### P-DEPLOY.6 — Expanded Deploy Targets + Wire MultiCloudDeploy UI  ✅ DONE (2026-06-30) · 🔌 UI-WIRED  [LOW]
 - `ide/MultiCloudDeploy.tsx` lists Railway/Render/Fly.io/Cloudflare but only Firebase/Vercel/Netlify have real

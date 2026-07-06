@@ -14,6 +14,8 @@ import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
 import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
+import { releaseGateStore } from '../lib/ReleaseGateStore';
+import { normalizeGateConfig } from '../lib/ReleaseGate';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
@@ -355,6 +357,17 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/incident-analysis', verifyAdminToken, (req: Request, res: Response) => {
     const events = Array.isArray(req.body?.events) ? req.body.events : [];
     res.json({ ...analyzeIncident(events), generatedAt: Date.now() });
+  });
+
+  // P-DEPLOY.5 — read/update the release freeze/approval gate (admin-gated).
+  app.get('/api/admin/release-gate', verifyAdminToken, async (_req: Request, res: Response) => {
+    res.json({ config: await releaseGateStore.get(), generatedAt: Date.now() });
+  });
+  app.post('/api/admin/release-gate', verifyAdminToken, async (req: Request, res: Response) => {
+    const config = normalizeGateConfig({ ...(req.body ?? {}), updatedAtMs: Date.now(), updatedBy: 'admin' });
+    const ok = await releaseGateStore.set(config);
+    if (!ok) return res.status(503).json({ error: 'Could not persist the release gate (storage unavailable).' });
+    res.json({ ok: true, config });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

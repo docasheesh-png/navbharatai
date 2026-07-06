@@ -1730,6 +1730,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['deploy risk', 'aiops', 'release risk', 'incident analysis', 'rca', 'root cause', 'rollback', 'deployment risk', 'risk score', 'pre-deploy check', 'incident'],
   },
   {
+    id: 'admin-release-gate',
+    name: 'Release Freeze / Approval Gate',
+    path: 'Admin — GET/POST /api/admin/release-gate; the pipeline checks GET /api/release/gate',
+    description: `An optional safety layer on top of auto-deploy. An admin can (1) FREEZE releases during an incident (block all promotions, with an optional auto-expiry time and a reason) and/or (2) require MANUAL APPROVAL of a specific commit SHA before it may ship. The deploy pipeline checks the public GET /api/release/gate?sha=<commit> before promoting and refuses to deploy when the gate is closed. It is OPT-IN and defaults fully OPEN, so with nothing configured a normal merge deploys exactly as before, and a storage error fails OPEN (never accidentally halts deploys). Set it via POST /api/admin/release-gate (frozen, freezeReason, freezeUntilMs, approvalRequired, approvedSha).`,
+    howToUse: 'As admin, POST to /api/admin/release-gate with { "frozen": true, "freezeReason": "prod incident" } to freeze deploys, or { "approvalRequired": true, "approvedSha": "<commit>" } to require approval. Set the RELEASE_GATE_URL GitHub secret to your app’s /api/release/gate URL to enforce it in the deploy workflow. Clear the freeze by POSTing { "frozen": false }.',
+    relatedFeatures: ['admin-deploy-aiops', 'admin-metrics'],
+    keywords: ['release gate', 'freeze', 'deploy freeze', 'release approval', 'block deploy', 'freeze window', 'change freeze', 'approval gate', 'hold release', 'incident freeze', 'stop deploy'],
+  },
+  {
     id: 'admin-mfa',
     name: 'Admin Two-Factor Authentication (2FA / TOTP)',
     path: 'Admin Dashboard → Security tab → Two-Factor Authentication (admin only)',

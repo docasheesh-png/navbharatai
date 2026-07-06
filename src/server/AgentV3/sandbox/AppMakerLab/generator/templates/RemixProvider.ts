@@ -56,7 +56,15 @@ export default defineConfig({
 });
 `;
 
-const ROOT_TSX = `import { Links, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react';
+const ROOT_TSX = `import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  isRouteErrorResponse,
+  useRouteError,
+} from '@remix-run/react';
 
 export default function App() {
   return (
@@ -70,6 +78,34 @@ export default function App() {
       <body style={{ fontFamily: 'sans-serif', padding: 0, margin: 0 }}>
         <Outlet />
         <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+// Remix's canonical error boundary — catches thrown errors / route error responses (incl. 404s)
+// anywhere in the tree and renders a real page instead of a blank white screen.
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const title = isRouteErrorResponse(error)
+    ? \`\${error.status} \${error.statusText}\`
+    : 'Something went wrong';
+  const message = isRouteErrorResponse(error)
+    ? error.data
+    : error instanceof Error
+      ? error.message
+      : 'Unknown error';
+  return (
+    <html lang="en">
+      <head>
+        <title>Oops!</title>
+        <Meta />
+        <Links />
+      </head>
+      <body style={{ fontFamily: 'sans-serif', padding: '2rem' }}>
+        <h1>{title}</h1>
+        <p>{message}</p>
         <Scripts />
       </body>
     </html>

@@ -62,6 +62,43 @@ const PAGE_SVELTE = `<script lang="ts">
 </style>
 `;
 
+// SvelteKit root layout — wraps every route. Svelte 5 runes: children come in via $props().
+const LAYOUT_SVELTE = `<script lang="ts">
+  let { children } = $props();
+</script>
+
+{@render children()}
+`;
+
+// SvelteKit's canonical error boundary — rendered for any load error / 404 with the status + message.
+const ERROR_SVELTE = `<script lang="ts">
+  import { page } from '$app/stores';
+</script>
+
+<main>
+  <h1>{$page.status}</h1>
+  <p>{$page.error?.message ?? 'Something went wrong'}</p>
+  <a href="/">Go back home</a>
+</main>
+
+<style>
+  main { padding: 2rem; font-family: sans-serif; }
+</style>
+`;
+
+// App namespace type declarations SvelteKit expects — keeps \`svelte-check\`/tsc clean out of the box.
+const APP_DTS = `declare global {
+  namespace App {
+    // interface Error {}
+    // interface Locals {}
+    // interface PageData {}
+    // interface Platform {}
+  }
+}
+
+export {};
+`;
+
 export class SvelteKitProvider implements ITemplateProvider {
   getFiles(_features: string[]): Record<string, string> {
     return {
@@ -69,7 +106,10 @@ export class SvelteKitProvider implements ITemplateProvider {
       'svelte.config.js': SVELTE_CONFIG,
       'vite.config.ts': VITE_CONFIG,
       'src/app.html': APP_HTML,
+      'src/app.d.ts': APP_DTS,
+      'src/routes/+layout.svelte': LAYOUT_SVELTE,
       'src/routes/+page.svelte': PAGE_SVELTE,
+      'src/routes/+error.svelte': ERROR_SVELTE,
     };
   }
 }

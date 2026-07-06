@@ -10961,3 +10961,20 @@ preview sandbox, so it can't be verified end-to-end → would violate "real feat
 RN preview path (AB-1 infra gate).
 
 Gate: tsc fe+server 0, vitest 5298/5298 (5 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-06 — LIVE framework scaffolds: error boundaries (P-CGE.12 sibling hardening, rule 3)
+
+After enriching the Next.js scaffold, hunted the siblings (rule 3): the same "no error boundary → an
+unhandled route error renders a blank white screen" gap existed in the other LIVE framework providers.
+Added the canonical error boundary to each live sandbox provider:
+- Nuxt → `error.vue` (statusCode/statusMessage + `clearError` redirect).
+- SvelteKit → `src/routes/+error.svelte` ($page.status/error), `+layout.svelte` (Svelte 5 runes), `app.d.ts`.
+- Remix → `ErrorBoundary` export in `app/root.tsx` (`useRouteError` + `isRouteErrorResponse`).
+
+Direction chosen by 60-second auto-answer (the direction AskUserQuestion failed with a permission-stream
+error): the safest, real, collision-free path — enrich only clearly-deficient LIVE providers (evidence:
+none had any error boundary), no speculative "more is better", no hot files. Tests guard each on the live copy.
+
+Gate: tsc fe+server 0, vitest 5301/5301 (3 new), build PASS, boot:check PASS.

@@ -10016,3 +10016,19 @@ The user-facing layer completing the 3-role model (engine shipped in #3-#5):
 - AppKnowledgeBase: new `agentv3_roles_queue` entry (mandatory user-facing KB rule).
 
 Gate (both changes): frontend tsc 0, server tsc 0, vitest 5004/5004 PASS, build PASS, boot PASS.
+
+## 2026-07-05 — P-PME.6: mid-build scope-change control (no more racing builds)  ✅ DONE
+
+Hardened the flagship build flow. Before, a NEW build request for a workspace while a build was already
+running RACED the first (two builders writing the same files → corrupt workspace state), with no handler.
+- New pure ScopeChangeController.ts: per-namespace serialization. submit(namespace, prompt) is ATOMIC
+  (decide + mark-active in one sync call → two near-simultaneous requests can never both proceed): first
+  PROCEEDS, any request arriving mid-build is DEFERRED — queued (cap 10) with an honest "build in progress,
+  your change will be applied after" message. complete(namespace) releases the lock + returns queued
+  prompts FIFO. Fully unit-tested (8).
+- Wired into AppMakerOrchestrator: execute() consults submit() and on DEFER returns the honest message
+  WITHOUT starting a racing second build; runBuildJob() finally calls complete() (success OR failure) and
+  re-execute()s each queued change (first proceeds, rest re-queue) → a mid-build change is applied right
+  after, never silently dropped. Idempotent reuse short-circuits before the lock; a create failure releases it.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5021/5021 PASS (8 new), build PASS, boot:check PASS.

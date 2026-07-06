@@ -241,7 +241,31 @@ export function stripDevServerBackgrounding(command: string): string {
  * `true` so a clean tree exits 0. PURE string builder — unit-testable without E2B.
  */
 export function buildDepsStaleCheckCommand(): string {
-  return '[ ! -d node_modules ] || [ package.json -nt node_modules ] && echo STALE || true';
+  // STALE (→ reinstall) when node_modules is absent, older than package.json, OR present-but-INCOMPLETE.
+  // The last case is the real fix for a preview that "came up" but crashed on every transform with
+  // "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/dist/unpacker/agents'" (build report
+  // 2026-07-06): the E2B base image ships a PRE-BAKED node_modules, so the mtime check reads "fresh" and
+  // the install is skipped — yet that pruned tree can be missing a declared package, or (for the babel
+  // React plugin) its browserslist→caniuse-lite DATA chain, which vite only needs at transform time. A
+  // pure resolve probe over the app's own package.json catches an incomplete tree that mtime can't. Any
+  // probe failure just triggers a reinstall (safe); a healthy tree passes instantly (no latency added).
+  const integrity =
+    `node -e "try{var p=require('./package.json');var d=Object.assign({},p.dependencies,p.devDependencies);` +
+    `Object.keys(d).forEach(function(k){require.resolve(k+'/package.json')});` +
+    `if(d['@vitejs/plugin-react']){require.resolve('caniuse-lite/dist/unpacker/agents')}}catch(e){process.exit(1)}"`;
+  return `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then echo STALE; elif ! ${integrity} 2>/dev/null; then echo STALE; fi; true`;
+}
+
+/**
+ * The dependency-install command a BUILD runs before starting its dev server. A build that just
+ * (re)wrote package.json MUST install its FULL dependency tree — trusting a pre-baked/partial
+ * node_modules ("deps present", skip install) is exactly what left a transitive babel/browserslist
+ * dependency (caniuse-lite/dist/unpacker/agents) missing and crashed the live preview at transform
+ * time. `npm install` is idempotent + fast when the tree is already satisfied, so always reconciling
+ * is correct and cheap; never skip on "node_modules exists". PURE (unit-testable string builder).
+ */
+export function buildBuildInstallCommand(): string {
+  return 'npm install --no-audit --no-fund';
 }
 
 /**

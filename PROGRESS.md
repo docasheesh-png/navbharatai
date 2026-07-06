@@ -10709,3 +10709,43 @@ email) needs a per-user in-app notification store that doesn't exist yet — rec
 stubbed (NotificationManager is webhook build-notifications, not a user @mention inbox).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5251/5251 PASS (11 new), boot:check PASS.
+
+## 2026-07-06 — Fix 6: preview "came up" but crashed every transform ("Cannot find module 'caniuse-lite/…'")
+
+Admin re-tested the Fix-3 login-page prompt. **Fix 3 confirmed working** — the report now honestly says
+"✅ Preview verified … renders correctly" + "Use the Preview tab to see it live" (no more false "didn't
+start"). But the test surfaced a NEW real bug: the **Live-server** preview showed a Vite error overlay:
+`[plugin:vite:react-babel] Cannot find module 'caniuse-lite/dist/unpacker/agents'` (browserslist chain),
+and the **In-browser** preview showed "No React entry module found".
+
+**Root cause (Live server — fixed).** The dev server's PORT was up (so no restart-recovery fires), but
+`@vitejs/plugin-react` (babel) → `@babel/helper-compilation-targets` → `browserslist` needs
+`caniuse-lite/dist/unpacker/agents` at TRANSFORM time. That transitive file was missing from
+node_modules. Why it was missing AND never reinstalled: the install guard trusted a directory + mtime —
+`if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install; else echo "deps
+present"; fi`. The E2B base image ships a **pre-baked node_modules**, so the mtime check read "fresh"
+and the install was SKIPPED — leaving a pruned tree missing caniuse-lite. A tree that "exists" is not a
+tree that's "complete".
+
+**Fixes (both pure + unit-tested in devServerHost.test.ts):**
+- `buildBuildInstallCommand()` — the fast-lane preview now ALWAYS runs a real `npm install` (idempotent +
+  fast when satisfied) instead of the "deps present" skip. A build that just (re)wrote package.json MUST
+  install its FULL tree. This also covers the earlier "Cannot find module 'tailwindcss'" the skip caused.
+- `buildDepsStaleCheckCommand()` (used by EVERY managed dev-server start — the agentic path too, rule-3
+  sibling hunt) now adds a resolve PROBE: STALE (→ reinstall) when any declared dep doesn't resolve, or
+  (for the babel React plugin) when `caniuse-lite/dist/unpacker/agents` doesn't resolve — catching an
+  incomplete pre-baked/pruned tree that mtime alone reads as fresh. Verified in a real shell against the
+  exact bug scenario (plugin-react present + caniuse-lite pruned → STALE); a healthy tree passes instantly
+  (zero added latency), a probe failure only ever triggers a safe reinstall.
+- Gate: frontend tsc 0, server tsc 0, vitest 5251/5251, boot PASS.
+
+**Open root causes (rule 6 — honestly recorded, need a real-sandbox / client repro to pin):**
+1. **In-browser "No React entry module found".** `findEntry` (ReactPreview.ts) is already robust (index.html
+   script-src → basename match → defaults incl. `src/main.tsx` → last-resort any main/index). It returns
+   null only when the VFS reaching the in-browser preview has NO entry file at all — i.e. the client/durable
+   file set was INCOMPLETE at render time. Pinning which set arrives short needs the actual VFS contents at
+   preview time (client-side). Not shipping an unverified change.
+2. **preview-verify false "renders correctly" while babel had crashed.** `analyzePreviewHtml` already
+   detects `[plugin:vite`/`vite-error-overlay`, so the miss is a TIMING/shadow-DOM race — browseUrl snapshots
+   the DOM before Vite injects the (shadow-root) overlay. Fixing that lives in the actuator's browse timing;
+   the caniuse-lite fix above removes the crash that made this misreport visible in the first place.

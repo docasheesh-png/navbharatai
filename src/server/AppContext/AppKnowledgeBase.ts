@@ -1783,8 +1783,17 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     path: 'Analytics view → Build Performance card',
     description: `Real build-pipeline health computed from your recent build jobs (not faked): success rate %, failure rate %, average build duration, p95 (slowest-5%) duration, and the top failure types (the most common build-error signatures). Helps you see if builds are getting slower or failing more often, and what's breaking most. Backed by GET /api/analytics/builds, which aggregates the last 100 jobs from the build-job store; shows honest zeros until builds have run.`,
     howToUse: 'Open the Analytics view. The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
-    relatedFeatures: ['pro_chat', 'admin-metrics'],
+    relatedFeatures: ['pro_chat', 'admin-metrics', 'build-reliability-metrics'],
     keywords: ['build performance', 'build analytics', 'success rate', 'failure rate', 'build duration', 'p95', 'slow build', 'build health', 'failure types', 'pipeline', 'build stats'],
+  },
+  {
+    id: 'build-reliability-metrics',
+    name: 'Build Reliability (MTTD / MTTR)',
+    path: 'Analytics view → Build Reliability card',
+    description: `Real failure-recovery reliability computed from your recent build jobs (not faked): MTTD (Mean Time To Detect — how long a build runs before its failure surfaces), MTTR (Mean Time To Repair — time from a build failing to the next successful build of the SAME app), the recovery rate (% of failures that were later fixed), and the count of still-unresolved failures. A failure with no later success is honestly counted as unresolved and never given an invented repair time. Backed by GET /api/analytics/reliability, which correlates the last 100 jobs by workspace; shows honest zeros until failures have occurred.`,
+    howToUse: 'Open the Analytics view. The "Build Reliability" card appears once at least one build has failed, showing MTTD, MTTR, recovery rate, and unresolved-failure count. Use Refresh to recompute.',
+    relatedFeatures: ['build-performance-analytics', 'pro_chat', 'admin-metrics'],
+    keywords: ['reliability', 'mttd', 'mttr', 'mean time to detect', 'mean time to repair', 'recovery rate', 'unresolved failures', 'failure recovery', 'build reliability', 'time to fix', 'incident metrics'],
   },
   {
     id: 'auto-test-generation',

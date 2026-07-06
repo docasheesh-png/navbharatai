@@ -338,6 +338,27 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
     return () => { cancelled = true; };
   }, [refreshKey]);
 
+  // P-TQA.13 — real MTTD/MTTR reliability from the server (GET /api/analytics/reliability).
+  interface Reliability {
+    mttdMs: number; mttdSampleSize: number;
+    mttrMs: number; mttrSampleSize: number;
+    recoveredFailures: number; unresolvedFailures: number;
+    recoveryRate: number; totalFailures: number;
+  }
+  const [reliability, setReliability] = useState<Reliability | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/analytics/reliability?limit=100');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setReliability(data);
+      } catch { /* non-fatal — card simply doesn't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
   // ── Read localStorage ──
   const readLocalData = useCallback(() => {
     // Sessions from dedicated key
@@ -637,6 +658,39 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Build Reliability (P-TQA.13 — real MTTD/MTTR from failure→recovery history) ── */}
+      {reliability && reliability.totalFailures > 0 && (
+        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={16} className="text-sky-400" />
+            <h2 className="font-semibold text-white text-sm">Build Reliability</h2>
+            <span className="text-xs text-gray-500 ml-auto">{reliability.totalFailures} failure{reliability.totalFailures === 1 ? '' : 's'} analysed</span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <div className="text-2xl font-bold text-amber-400">
+                {reliability.mttdSampleSize > 0 ? `${(reliability.mttdMs / 60000).toFixed(1)}m` : '—'}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">MTTD (detect)</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-sky-400">
+                {reliability.mttrSampleSize > 0 ? `${(reliability.mttrMs / 60000).toFixed(1)}m` : '—'}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">MTTR (repair)</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-emerald-400">{Math.round(reliability.recoveryRate * 100)}%</div>
+              <div className="text-xs text-gray-500 mt-0.5">Recovery rate</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-red-400">{reliability.unresolvedFailures}</div>
+              <div className="text-xs text-gray-500 mt-0.5">Unresolved</div>
+            </div>
+          </div>
         </div>
       )}
 

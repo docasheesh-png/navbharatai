@@ -10172,3 +10172,25 @@ Wired in server.ts. Honest scope: curated stable surface, not an exhaustive dump
 reused the proven generator instead of adding zod-to-openapi. Tests: apiContract.test.ts (5).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5044/5044 PASS (5 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — P-TQA.13: MTTD/MTTR build-reliability metrics  ✅ DONE
+
+Added failure-recovery reliability tracking derived from REAL build-job history (no new persistence, no
+build-lifecycle hook → zero collision with the live AgentV3 engine the other session is actively fixing).
+New src/server/QualityEvaluationEngine/QAMetricsCollector.ts (pure, unit-tested): computeReliabilityMetrics(jobs)
+computes MTTD = mean(failedAt − startedAt) over FAILED builds (how long a build runs before failure surfaces)
+and MTTR = per-app (workspaceId-correlated) time from a failure to the next successful build of that app. A
+failure with no later same-app success is honestly counted as unresolved — never given an invented repair
+time; also reports recoveryRate + unresolvedFailures. Exposed via GET /api/analytics/reliability on the
+existing live buildAnalytics route (honest zeros until failures occur). AppAnalytics.tsx gains a "Build
+Reliability" KPI card (MTTD/MTTR/recovery rate/unresolved) that renders only once a failure has occurred.
+AppKnowledgeBase updated (build-reliability-metrics entry). Honest scope: classic MTTD's deploy→detect framing
+needs deploy timestamps we don't record for user builds; shipped MTTD is the faithful build-job equivalent,
+documented in the collector. Tests: QAMetricsCollector.test.ts (7 — fail→pass MTTR, cross-app isolation,
+unresolved-no-invented-time, no-workspaceId, consecutive-failures pairing, honest-zeros).
+
+Chose this over P-PME.12 (traceability): P-PME.12 as specced wires into AppMakerOrchestrator, which is only
+referenced by its own test (legacy scaffold, NOT the live path) — building there would attach to a dead path
+(violates real-features-only). P-TQA.13 plugs into the live analytics surface instead.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5063/5063 PASS (7 new), build PASS, boot:check PASS.

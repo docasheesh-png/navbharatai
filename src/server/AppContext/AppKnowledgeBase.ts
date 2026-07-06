@@ -1787,6 +1787,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['react hooks', 'rules of hooks', 'hook error', 'invalid hook call', 'conditional hook', 'hook order', 'white screen', 'react crash', 'usestate error', 'useeffect error', 'rendered more hooks', 'hooks lint', 'hook in loop', 'hook in condition'],
   },
   {
+    id: 'import-export-consistency',
+    name: 'Import / Export Consistency Check',
+    path: 'Settings → Insights & Webhooks → Import / Export Consistency',
+    description: `Scans the generated code for imports of names a local module does NOT actually export — e.g. "import { Foo } from './bar'" when bar never exports Foo, or a default import from a module that has no default export. These are a top cause of HARD build failures ("'Foo' is not exported by './bar'") and runtime "undefined is not a function" crashes. Exact symbol-level analysis (real AST via ts-morph): it resolves the target file, reads its true exports (including names re-exported through barrel/index files), and flags only genuine mismatches. Conservative — skips external packages, missing files (that's the Code Confidence check's job), and wildcard "export *" modules — so it doesn't cry wolf. Backed by POST /api/workspace/import-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "Import / Export Consistency" → Check Imports. A green result means every import matches; otherwise each broken import shows the name, the module it came from, and the file:line to fix.',
+    relatedFeatures: ['code-confidence-check', 'react-hooks-safety', 'agentv3_builder'],
+    keywords: ['import error', 'export error', 'not exported', 'is not exported', 'named import', 'default import', 'broken import', 'undefined import', 'module has no exported member', 'barrel file', 'index re-export', 'build fails import'],
+  },
+  {
     id: 'insights-integrations-panel',
     name: 'Insights & Integrations',
     path: 'Settings → Insights & Webhooks',

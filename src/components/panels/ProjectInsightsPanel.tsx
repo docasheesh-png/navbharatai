@@ -134,6 +134,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setHooksRulesBusy(false); }
   };
 
+  // ── Import/Export consistency check ──
+  const [importChk, setImportChk] = useState<any>(null);
+  const [importChkBusy, setImportChkBusy] = useState(false);
+  const runImportChk = async () => {
+    setImportChkBusy(true); setImportChk(null);
+    try {
+      const r = await fetch('/api/workspace/import-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setImportChk(await r.json());
+    } catch { /* ignore */ }
+    finally { setImportChkBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
 
@@ -213,6 +225,27 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             </div>
             <div className="space-y-1 max-h-40 overflow-auto">{hooksRules.violations.slice(0, 30).map((v: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">{v.kind}: <span className="text-white">{v.hook}()</span> <span className="text-[#8b949e]">({v.file}:{v.line})</span></div>
+            ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Import/Export consistency */}
+      <Card icon={<Brain className="w-4 h-4 text-teal-400" />} title="Import / Export Consistency"
+        action={<Button size="sm" onClick={runImportChk} disabled={importChkBusy} className="uppercase tracking-widest bg-teal-600 hover:bg-teal-700">{importChkBusy ? 'Checking…' : 'Check Imports'}</Button>}>
+        {!importChk ? (
+          <p className="text-[11px] text-[#8b949e]">Scan the generated code for imports of names a local module doesn't actually export (e.g. <span className="font-mono">import &#123; Foo &#125; from './bar'</span> when bar has no <span className="font-mono">Foo</span>). These fail the build with "'Foo' is not exported" — exact symbol-level check.</p>
+        ) : importChk.ok ? (
+          <div className="text-[11px] text-emerald-400 font-bold">✓ All imports match their target exports across {importChk.filesScanned} file(s).</div>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="text-red-400 font-bold">{importChk.mismatches.length} broken import(s) — these will fail the build.</div>
+            <div className="text-[#8b949e]">
+              Missing named export: <span className="text-white font-bold">{importChk.counts['named-import-not-exported']}</span> ·
+              Missing default export: <span className="text-white font-bold">{importChk.counts['default-import-missing']}</span>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-auto">{importChk.mismatches.slice(0, 30).map((m: any, i: number) => (
+              <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300"><span className="text-white">{m.imported}</span> ✗ {m.from} <span className="text-[#8b949e]">({m.file}:{m.line})</span></div>
             ))}</div>
           </div>
         )}

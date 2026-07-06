@@ -10366,3 +10366,26 @@ HooksRulesAnalysis.test.ts (14 — all 4 violation kinds, custom hooks, no-false
 line numbers, multi-file, unparseable-file robustness, non-React-file skip).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5128/5128 PASS (14 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — AgentV3 build-quality: import/export consistency analyzer  ✅ DONE (powerful-builder)
+
+Second build-hardening evaluator toward the "powerful app builder" aim. Catches a top cause of HARD build
+failures that the existing suite misses: a named/default import of a symbol the target LOCAL module doesn't
+actually export ("'Foo' is not exported by './bar'"). Distinct from HallucinationDetector, which only checks
+that the imported FILE exists — this checks the export NAMES match.
+
+New src/server/AgentV3/ImportExportAnalysis.ts (pure, ts-morph AST-accurate, lazily loaded, deterministic):
+analyzeImportExports(files) resolves each relative import to its actual file (extension + index inference),
+reads the target's true exports (including names re-exported through barrel/index files, via
+getExportedDeclarations), and flags named-import-not-exported + default-import-missing. Conservative: skips
+external packages, unresolved files (HallucinationDetector's job), and wildcard `export *` modules (a name
+could legitimately come through) → near-zero false positives, verified by clean-code + barrel-file tests.
+Same proven COLD-wiring pattern (no hot-file collision): route POST /api/workspace/import-check + one additive
+server.ts line + an "Import / Export Consistency" card in ProjectInsightsPanel.tsx. AppKnowledgeBase
+import-export-consistency entry added.
+
+Live prod smoke: broken named import → ok:false with exact name/module/line; matching imports → ok:true.
+Tests: ImportExportAnalysis.test.ts (15 — named/default mismatches, renamed imports, type imports, barrel
+re-exports, wildcard silence, external/missing silence, malformed-import robustness, correct line/file).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5148/5148 PASS (15 new), build PASS, boot:check PASS, live smoke PASS.

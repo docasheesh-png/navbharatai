@@ -3,9 +3,9 @@ import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Download, Github, Circle, GitBranch,
+  SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown,
-  FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
+  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -150,8 +150,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
+    // Admin 2026-07-06: the message box sits beside a 2-row left control column (Build on top,
+    // settings+attach below), so give it a matching minimum height — a bigger, balanced input box.
+    const minHeight = 82;
     const maxHeight = 24 * 5 + 16; // ~5 lines (line-height 24) + vertical padding (py-2)
-    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
   }, [prompt, composerExpanded]);
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
@@ -1200,50 +1203,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   const anyToggleOn = planFirst || thinking || onlyOpus;
 
-  // Portability / no-lock-in (Phase 4): export the WHOLE project as a real .zip the user owns and
-  // can open in any editor or host anywhere. Pulls the live file contents from the sandbox (the
-  // file explorer only carries paths) and zips them in-browser — no server round-trip beyond the
-  // existing read endpoint. Honest about failures; never silent.
-  const [exporting, setExporting] = useState(false);
-  const downloadProjectZip = async () => {
-    if (exporting) return;
-    const wsId = state.workspaceId;
-    if (!wsId) { alert('Open or build a project first — there is nothing to export yet.'); return; }
-    setExporting(true);
-    try {
-      const res = await fetch('/api/agentv3/workspace-files', {
-        method: 'POST',
-        headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId: wsId, userId, email }),
-      });
-      if (!res.ok) throw new Error(`server returned ${res.status}`);
-      const data = await res.json() as { files?: Record<string, string> };
-      const files = data.files ?? {};
-      const paths = Object.keys(files);
-      if (paths.length === 0) { alert('No files found to export yet — build something first.'); return; }
-      const JSZip = (await import('jszip')).default;
-      const zip = new JSZip();
-      // Skip heavy generated dirs so the archive is the SOURCE the user actually owns.
-      const EXCLUDED = /^(node_modules\/|\.git\/|dist\/|build\/|\.next\/|__pycache__\/)/;
-      for (const p of paths) {
-        if (EXCLUDED.test(p)) continue;
-        zip.file(p, files[p] ?? '');
-      }
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `navbharatai-project-${Date.now()}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch (e) {
-      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}. Please try again.`);
-    } finally {
-      setExporting(false);
-    }
-  };
 
   // Download the LAST build's diagnostics report (every issue v3.0 hit — provider fallbacks,
   // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
@@ -1297,9 +1256,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (downloadingDiag) return;
     setDownloadingDiag(true);
     try {
-      const diagnostics = await getLatestDiagnostics(selectedHistoryBuildId);
-      if (!diagnostics) { alert('No build report yet — build an app first, then download the report.'); return; }
-      const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' });
+      let payload: unknown;
+      if (selectedHistoryBuildId) {
+        // A specific past build picked from the History dropdown → just that build's report.
+        payload = await getLatestDiagnostics(selectedHistoryBuildId);
+        if (!payload) { alert('No diagnostics found for that build.'); return; }
+      } else if (state.workspaceId) {
+        // Admin 2026-07-06 ("starting se lekar last tak"): default = the WHOLE session JSON — every
+        // build 0 → last, stitched together — not just the latest message's build. The server keeps
+        // each build in a durable per-workspace history behind the "latest" doc; scope=session
+        // aggregates it. (This is the same full record the removed Text report used to carry.)
+        const params = new URLSearchParams({ workspaceId: state.workspaceId, scope: 'session' });
+        if (userId) params.set('userId', userId);
+        if (email) params.set('email', email);
+        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+        if (!res.ok) { alert('No build report yet — build an app first, then download the report.'); return; }
+        payload = await res.json();
+      } else {
+        payload = await getLatestDiagnostics(null);
+        if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1315,71 +1292,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
   };
 
-  // Download the FULL human/Claude-readable text render (root cause first, problems-only, plus the
-  // complete AI Diagnosis Bundle — sandbox commands, LLM I/O, preview errors, reviewer's full findings)
-  // instead of raw JSON. Server-rendered (renderDiagnosticsText) so the client never re-implements the
-  // same formatting.
-  const [downloadingDiagText, setDownloadingDiagText] = useState(false);
-  const downloadDiagnosticsText = async () => {
-    if (downloadingDiagText || !state.workspaceId) return;
-    setDownloadingDiagText(true);
-    try {
-      const params = new URLSearchParams({ workspaceId: state.workspaceId, format: 'text' });
-      if (userId) params.set('userId', userId);
-      if (email) params.set('email', email);
-      // Default download = the WHOLE session (every build 0 → last, stitched together) so the report is
-      // the complete "kaccha chittha", not just the last message's build. A specific build picked from
-      // the history list still downloads only that one.
-      if (selectedHistoryBuildId) params.set('buildId', selectedHistoryBuildId);
-      else params.set('scope', 'session');
-      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-      if (!res.ok) { alert('No build report yet — build an app first, then download the report.'); return; }
-      const text = await res.text();
-      const blob = new Blob([text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `navbharatai-v3-build-diagnostics-${Date.now()}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch (e) {
-      alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
-    } finally {
-      setDownloadingDiagText(false);
-    }
-  };
-
-  // One-tap COPY of the build report to the clipboard — so it can be pasted straight into a support
-  // chat without the download → find-file → upload dance. Uses the same client copy / durable
-  // server fallback as the download. Leads with a short, READABLE summary (root cause + the real
-  // problems only, no tool-call/heartbeat noise) before the full JSON, so pasting it into chat is
-  // useful at a glance — not just a wall of raw data.
-  const [copyingDiag, setCopyingDiag] = useState(false);
-  const copyDiagnostics = async () => {
-    if (copyingDiag || !state.workspaceId) { if (!state.workspaceId) alert('No build report yet — build an app first.'); return; }
-    setCopyingDiag(true);
-    try {
-      // Copy the SAME full readable report the Text download produces — the whole session (0 → last)
-      // by default, or one specific build when picked from history. Complete + human/Claude-readable,
-      // so it can be pasted straight into a chat to hand off the entire "kaccha chittha".
-      const params = new URLSearchParams({ workspaceId: state.workspaceId, format: 'text' });
-      if (userId) params.set('userId', userId);
-      if (email) params.set('email', email);
-      if (selectedHistoryBuildId) params.set('buildId', selectedHistoryBuildId);
-      else params.set('scope', 'session');
-      const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-      if (!res.ok) { alert('No build report yet — build an app first.'); return; }
-      const text = await res.text();
-      await navigator.clipboard.writeText(text);
-      alert('Full build report copied — paste it into the chat to share it.');
-    } catch (e) {
-      alert(`Could not copy the report: ${e instanceof Error ? e.message : String(e)}.`);
-    } finally {
-      setCopyingDiag(false);
-    }
-  };
+  // Admin 2026-07-06: the Text-report download and Copy-report buttons were removed from the header.
+  // The JSON "Build report" download (downloadDiagnostics) remains the single report export; the
+  // server still keeps the full "0 → last" session history behind it and the History dropdown.
 
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
@@ -1783,15 +1698,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'terminal'} onClick={() => openTab('terminal')} icon={<Terminal className="w-3.5 h-3.5" />}>Terminal</TabPill>
           <TabPill active={showWorkspace && tab === 'history'} onClick={() => openTab('history')} icon={<History className="w-3.5 h-3.5" />}>History ({allCheckpoints.length})</TabPill>
-          <button
-            onClick={downloadProjectZip}
-            disabled={exporting || !state.workspaceId}
-            title="Download your whole project as a .zip you own — open it in any editor or host it anywhere (no lock-in)"
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-            {exporting ? 'Exporting…' : 'Export .zip'}
-          </button>
+          {/* Admin 2026-07-06: the moving header carried Export .zip / Text report / Copy report too —
+              removed to declutter. The single JSON "Build report" download stays (the canonical report
+              to send to support), alongside the per-build History dropdown below. */}
           <button
             onClick={downloadDiagnostics}
             disabled={downloadingDiag}
@@ -1800,24 +1709,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           >
             {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             {downloadingDiag ? 'Preparing…' : 'Build report'}
-          </button>
-          <button
-            onClick={downloadDiagnosticsText}
-            disabled={downloadingDiagText || !state.workspaceId}
-            title="Download the SAME report as a readable text document — root cause first, only real problems, plus the full sandbox/LLM/reviewer detail. Easier to read than the JSON."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {downloadingDiagText ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileCode className="w-3.5 h-3.5" />}
-            {downloadingDiagText ? 'Preparing…' : 'Text report'}
-          </button>
-          <button
-            onClick={copyDiagnostics}
-            disabled={copyingDiag}
-            title="Copy the last build's diagnostics report to your clipboard — paste it straight into a support chat (no download/upload needed)."
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {copyingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
-            {copyingDiag ? 'Copying…' : 'Copy report'}
           </button>
           <div className="relative">
             <button
@@ -1927,7 +1818,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             mobile (the workspace takes over so it's usable on a phone). */}
         <div className={`${showWorkspace ? 'hidden sm:flex sm:w-1/2 sm:border-r border-zinc-800' : 'flex flex-1'} flex-col min-h-0`}>
           {/* Conversation */}
-          <div ref={scrollRef} className="flex-1 overflow-auto p-3 space-y-3 min-h-0">
+          {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
+          <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
             {convo.length === 0 && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />
@@ -2194,11 +2086,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               className="hidden"
               onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
             />
-            <div className="flex items-end gap-1.5 px-2 py-1">
-              {/* Compact Build/Plan/Advise mode dropdown (moved here from its own full-width row). Always
-                  selectable — even mid-build — so the user can switch to the read-only Plan/Advise lanes
-                  and analyze the code while a build runs (multitasking, admin request 2026-07-06). */}
-              <div className="relative shrink-0">
+            <div className="flex items-stretch gap-1.5 px-2 py-1">
+              {/* LEFT COLUMN (admin 2026-07-06): Build selector on TOP, settings + attach in a row
+                  BELOW it — moved off the input row into the empty left space so the message box gets
+                  the freed width. */}
+              <div className="flex flex-col gap-1 shrink-0">
+              {/* Compact Build/Plan/Advise mode dropdown. Always selectable — even mid-build — so the
+                  user can switch to the read-only Plan/Advise lanes and analyze while a build runs. */}
+              <div className="relative">
                 {modeMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
@@ -2221,12 +2116,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
                   title="Mode — Build / Plan / Advise (switchable anytime, even during a build)"
-                  className={`h-[42px] px-2 flex items-center gap-1 rounded border text-[10px] font-semibold uppercase tracking-wide ${modeMenuOpen || chatMode !== 'build' ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                  className={`h-[38px] w-full px-2 flex items-center justify-center gap-1 rounded border text-[10px] font-semibold uppercase tracking-wide ${modeMenuOpen || chatMode !== 'build' ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
                 >
                   {chatMode === 'build' ? 'Build' : chatMode === 'planner' ? 'Plan' : 'Advise'}
                   <ChevronDown className="w-3 h-3" />
                 </button>
               </div>
+              {/* settings + attach in a row directly BELOW the Build selector */}
+              <div className="flex gap-1">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (
@@ -2309,6 +2206,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <Paperclip className="w-4 h-4" />
                 {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
               </button>
+              </div>{/* /settings + attach row */}
+              </div>{/* /left column */}
               <div className="relative flex-1" data-tour="chat">
                 <textarea
                   ref={composerRef}

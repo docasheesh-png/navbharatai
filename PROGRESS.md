@@ -10473,3 +10473,25 @@ hook-resolution failing. Tests: UndefinedHookAnalysis.test.ts (11) + ToolDispatc
 hook → NOT READY) + WorkspaceHealth shape updated to 5 checks.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5180/5180 PASS (12 new), build PASS, boot:check PASS, live smoke PASS.
+## 2026-07-06 — v3.0 composer/header UX pass (admin IMG_5726/5727/5729) + JSON report = full session
+
+Admin UI batch on the Pro v3.0 surface:
+- **Header decluttered:** removed **Export .zip**, **Text report**, **Copy report** buttons from the
+  moving toolbar (+ their now-dead handlers/state and the unused Download/Copy icon imports). The single
+  JSON **"Build report"** download stays (the canonical report to send to support) alongside the per-build
+  History dropdown — so report access is NOT lost (verified the contradiction with the admin first).
+- **JSON report now carries the WHOLE session** ("starting se lekar last tak"): the default download
+  fetches `scope=session` (every build 0 → last, from the durable per-workspace history) instead of only
+  the latest build. A specific build picked from History still downloads just that one.
+- **Composer relayout:** the Build/Plan/Advise selector moved to a LEFT COLUMN on top, with
+  settings + attach in a row beneath it, freeing width so the message box is bigger (auto-grow min
+  height 82px to match the 2-row control column). Matches the admin's sketch.
+- **Tighter chat padding** (p-3 → px-2 py-2, gaps 3 → 2.5) so more conversation is visible.
+
+Build-report DURABILITY (empty report / "No build report yet" after a real build) was already root-caused
+and fixed earlier today — PR #1042 (incremental durable save; survives instance rotation) + the anon fix
+(FIREBASE_PROJECT_ID on Cloud Run, which the admin has now set). Those landed AFTER the screenshots, so a
+fresh post-deploy build is the verification; no blind re-code (rule 7).
+
+Gate: frontend tsc 0, vitest 5119/5119 PASS, build PASS. (Client-only + report-download; no server files
+touched.) No AppKnowledgeBase change (UI layout + existing report export, no new capability).

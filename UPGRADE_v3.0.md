@@ -2513,10 +2513,20 @@
 - **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 4992/4992 ✅ (9 new:
       cascade + user-isolation + empty-uid refusal + TTL bound + registry sanity) · build ✅ · boot:check PASS.
 
-### P-DATA.5 — OpenAPI / Contract Spec for the REST API  ❌ MISSING  [LOW]
-- 32 routes have no machine-readable contract. No OpenAPI/Swagger → no generated client types, no contract tests, no docs.
-- [ ] Generate an `openapi.json` from zod schemas (P-DATA.1) via `zod-to-openapi`; serve at `/api/docs`.
-- **Files:** new `src/server/lib/openapi.ts`, `server.ts`.
+### P-DATA.5 — OpenAPI / Contract Spec for the REST API  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- The platform's own routes had no machine-readable contract. No OpenAPI/Swagger → no generated client types,
+  no contract tests, no docs for external clients.
+- [x] **`apiContract.ts`** — reuses the existing, tested `generateOpenApi` engine (P-CGE.5, the same one that
+  writes contracts for *generated* apps) but feeds it `NAVBHARAT_API_ROUTES` — a hand-curated list of the STABLE,
+  documented public endpoints (health, profile GET/PUT/DELETE, profile/history, export ×2, wallet, payment ×3,
+  github ×2, appmaker job status). `buildApiSpec()` produces a valid OpenAPI 3.0.3 document.
+- [x] **Served live:** `GET /api/openapi.json` (the machine-readable contract) + `GET /api/docs` (a self-contained,
+  CSP-safe HTML viewer — no external CDN — that fetches and renders the spec's endpoint table). Wired in `server.ts`.
+- [x] **Tests:** `apiContract.test.ts` (5) — asserts OpenAPI 3.0.3 shape, one path per unique URL, the
+  right-to-be-forgotten `DELETE /api/profile` confirm body + 401, and Express `:param` → `{param}` conversion.
+- **Honest scope:** curated stable surface, not an exhaustive dump of every internal/experimental route (there are
+  hundreds). Adding a documented route is one entry. Reused the proven generator instead of pulling in `zod-to-openapi`.
+- **Files:** `src/server/lib/apiContract.ts`, `src/server/lib/apiContract.test.ts`, `server.ts`.
 
 ### P-DATA.6 — Hardened File Upload Pipeline  ✅ DONE (2026-06-30) · 🔌 WIRED  [LOW]
 - Attachments were parsed for text with only a per-document CHARACTER cap — a huge base64 blob or a

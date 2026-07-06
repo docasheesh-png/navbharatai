@@ -10160,3 +10160,15 @@ change (internal messaging honesty + infra recommendation, no new user-facing su
 Ledger status: RC-1 ✅ merged, RC-2 ✅ merged, RC-3 ✅ root fix exists (enable AGENTV3_SANDBOX_RESUME —
 admin infra call), RC-4 ✅ this PR. RC-5 (anon identity) remains — partly infra (FIREBASE_PROJECT_ID on
 Cloud Run) + the already-merged Stop/Resume deploy.
+## 2026-07-06 — P-DATA.5: OpenAPI 3.0.3 contract for the platform REST API  ✅ DONE
+
+The platform's own routes had no machine-readable contract. New src/server/lib/apiContract.ts REUSES the
+existing tested generateOpenApi engine (P-CGE.5 — the same one that writes contracts for generated apps)
+and feeds it NAVBHARAT_API_ROUTES, a hand-curated list of the STABLE public endpoints (health, profile
+GET/PUT/DELETE, profile/history, export ×2, wallet, payment ×3, github ×2, appmaker job status).
+buildApiSpec() emits a valid OpenAPI 3.0.3 doc. Served live: GET /api/openapi.json (machine-readable) +
+GET /api/docs (self-contained, CSP-safe HTML viewer — no external CDN — that renders the endpoint table).
+Wired in server.ts. Honest scope: curated stable surface, not an exhaustive dump of every internal route;
+reused the proven generator instead of adding zod-to-openapi. Tests: apiContract.test.ts (5).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5044/5044 PASS (5 new), build PASS, boot:check PASS.

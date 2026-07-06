@@ -58,6 +58,7 @@ import { registerAdminRoutes } from './src/server/routes/admin';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
+import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
@@ -542,6 +543,7 @@ setInterval(() => {
   // User profile (My Profile page: display name, photo, build history, budget).
   registerProfileRoutes(app);
   registerExportRoutes(app); // P-DATA.7 — user data export (build history + usage as CSV/JSON/Excel)
+  registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
 
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);

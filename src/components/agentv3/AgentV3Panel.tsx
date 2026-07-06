@@ -121,6 +121,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [showWorkspace, setShowWorkspace] = useState(false);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Compact Build/Plan/Advise mode dropdown (moved off its own full-width row into the input row to
+  // save space; stays selectable even while a build runs so the user can multitask — switch to the
+  // read-only Plan/Advise lanes to analyze the code while a build is in flight).
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
@@ -2063,27 +2067,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               and pb-[env(safe-area-inset-bottom)] always stays so the composer never hides behind
               the phone browser's bottom search/address bar. Normal mode is unchanged. */}
           <div className={`shrink-0 sticky bottom-0 pb-[env(safe-area-inset-bottom)] ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}>
-            {/* FIX #6 — composer mode (3-role model): Build = the normal builder; Plan/Advise = the
-                read-only role lanes that analyze THIS project and propose queue steps. The queue chip
-                shows this app's pending/running commands (tap to expand, cancel pending ones). */}
-            <div className="px-3 pt-1.5 flex items-center gap-1.5 flex-wrap">
-              {([['build', 'Build'], ['planner', 'Plan'], ['advisor', 'Advise']] as const).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setChatMode(mode)}
-                  disabled={running}
-                  title={mode === 'build' ? 'Builder — messages build/edit the app' : mode === 'planner' ? 'Planner — read-only: decompose goals into queueable steps' : 'Advisor — read-only: audit / test / research / explain'}
-                  className={`px-2 h-6 rounded-full text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50 ${chatMode === mode ? 'bg-indigo-600 text-white' : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                >
-                  {label}
-                </button>
-              ))}
-              {(() => {
-                const pending = queueItems.filter((i) => i.status === 'pending').length;
-                const runningQ = queueItems.some((i) => i.status === 'running');
-                if (pending === 0 && !runningQ) return null;
-                return (
+            {/* FIX #6 — the 3-role model (Build = builder; Plan/Advise = read-only lanes) now lives in a
+                COMPACT dropdown down in the input row (near the settings/attach icons) so it doesn't eat
+                a whole row, and stays active during a build for multitasking. Only the command-queue chip
+                remains here, and only when there's something queued (no empty row otherwise). */}
+            {(() => {
+              const pending = queueItems.filter((i) => i.status === 'pending').length;
+              const runningQ = queueItems.some((i) => i.status === 'running');
+              if (pending === 0 && !runningQ) return null;
+              return (
+                <div className="px-3 pt-1.5 flex items-center">
                   <button
                     type="button"
                     onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
@@ -2093,9 +2086,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <Clock className="w-3 h-3" />
                     Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
                   </button>
-                );
-              })()}
-            </div>
+                </div>
+              );
+            })()}
             {queueOpen && queueItems.length > 0 && (
               <div className="mx-3 mt-1.5 p-2 bg-zinc-900/80 border border-zinc-800 rounded space-y-1 max-h-40 overflow-y-auto">
                 {queueItems.map((item) => (
@@ -2201,7 +2194,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               className="hidden"
               onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
             />
-            <div className="flex items-end gap-2 px-2 py-1.5">
+            <div className="flex items-end gap-1.5 px-2 py-1">
+              {/* Compact Build/Plan/Advise mode dropdown (moved here from its own full-width row). Always
+                  selectable — even mid-build — so the user can switch to the read-only Plan/Advise lanes
+                  and analyze the code while a build runs (multitasking, admin request 2026-07-06). */}
+              <div className="relative shrink-0">
+                {modeMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-32 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1 space-y-0.5">
+                      {([['build', 'Build'], ['planner', 'Plan'], ['advisor', 'Advise']] as const).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => { setChatMode(mode); setModeMenuOpen(false); }}
+                          title={mode === 'build' ? 'Builder — messages build/edit the app' : mode === 'planner' ? 'Planner — read-only: decompose goals into queueable steps' : 'Advisor — read-only: audit / test / research / explain'}
+                          className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors ${chatMode === mode ? 'bg-indigo-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setModeMenuOpen((v) => !v)}
+                  title="Mode — Build / Plan / Advise (switchable anytime, even during a build)"
+                  className={`h-[42px] px-2 flex items-center gap-1 rounded border text-[10px] font-semibold uppercase tracking-wide ${modeMenuOpen || chatMode !== 'build' ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                >
+                  {chatMode === 'build' ? 'Build' : chatMode === 'planner' ? 'Plan' : 'Advise'}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </div>
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (

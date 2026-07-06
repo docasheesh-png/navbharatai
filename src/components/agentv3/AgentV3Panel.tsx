@@ -80,6 +80,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // 'build' = the normal builder (Chat 1). 'planner'/'advisor' = the read-only role lanes (FIX #5)
   // that analyze the project and PROPOSE steps; the user approves them into the queue below.
   const [chatMode, setChatMode] = useState<'build' | 'planner' | 'advisor'>('build');
+  // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
+  // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
+  // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
+  // build's `running`); role replies append to the shared thread (agentHistory). Admin fix 2026-07-06.
+  const [roleBusy, setRoleBusy] = useState(false);
+  const roleAbortRef = useRef<AbortController | null>(null);
+  const [roleProposedSteps, setRoleProposedSteps] = useState<{ role: 'planner' | 'advisor'; steps: string[] } | null>(null);
   const [queueItems, setQueueItems] = useState<QueueItemView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
   // Proposed steps already added this turn (disable their buttons — enqueue is idempotent-by-user).
@@ -342,6 +349,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // `convo` after `running` has cleared on the terminal result).
     .filter((m) => running || !/^⏱️\s*Still building…/.test(m.text || ''))
     .sort((a, b) => a.ts - b.ts);
+
+  // Proposed steps to approve into the queue — from a Plan/Advise role turn (roleProposedSteps, the
+  // decoupled lane) OR, for backward-compat, a build-stream turn (state.proposedSteps). The role one
+  // wins when present. Shown even while a build runs (Plan/Advise are concurrent, read-only).
+  const activeProposedSteps = roleProposedSteps ?? state.proposedSteps ?? null;
 
   // Claude-style chat timeline (admin redesign): prose bubbles interleaved with COLLAPSED action
   // rows — everything the engine did between two prose lines ("Created 33 files", "Ran `npm
@@ -693,6 +705,65 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     });
   };
 
+  // PLAN / ADVISE send (read-only lanes) — a DEDICATED request, decoupled from the build stream.
+  // Works EVEN WHILE a build is running (it never touches the build lock server-side or the build's
+  // `running`/abort state here), and streams its reply into the SHARED thread (agentHistory) so the
+  // one session stays coherent. This is what fixes "can't send during a build" + "send → error".
+  const sendRole = async (role: 'planner' | 'advisor', override?: string) => {
+    const text = (override ?? prompt).trim();
+    if (!text || roleBusy) return;
+    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    if (override === undefined) { setPrompt(''); setComposerExpanded(false); }
+    setRoleProposedSteps(null);
+    setRoleBusy(true);
+    const controller = new AbortController();
+    roleAbortRef.current = controller;
+    let prose = '';
+    try {
+      const res = await fetch('/api/agentv3/chat', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ prompt: text, userId, email, sessionId: sessionIdRef.current, chatRole: role }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        let m = `request failed (${res.status})`;
+        try { const j = await res.json(); if (j && typeof j.error === 'string') m = j.error; } catch { /* non-JSON */ }
+        throw new Error(m);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let ev: { type?: string; text?: string; steps?: unknown; message?: string };
+          try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.type === 'narration' && typeof ev.text === 'string') prose = ev.text;
+          else if (ev.type === 'proposed_steps' && Array.isArray(ev.steps)) {
+            const steps = (ev.steps as unknown[]).filter((s): s is string => typeof s === 'string' && !!s.trim());
+            if (steps.length > 0) setRoleProposedSteps({ role, steps });
+          } else if (ev.type === 'error') throw new Error(ev.message || `${role} turn failed`);
+        }
+      }
+      const reply = prose.trim() || `The ${role} had nothing to add.`;
+      setAgentHistory((h) => [...h, { role: 'agent', agent: 'architect', text: reply, ts: Date.now() }]);
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setAgentHistory((h) => [...h, { role: 'agent', agent: 'architect', text: `⚠️ The ${role} could not reply: ${msg}. Please try again.`, ts: Date.now() }]);
+      }
+    } finally {
+      setRoleBusy(false);
+      roleAbortRef.current = null;
+    }
+  };
+
   // ── Layer 3: bounded auto-continue ──────────────────────────────────────────────
   // When a build ends `resumable`, automatically resume the SAME project without the user typing
   // "continue". Two shapes share one pure decision (decideAutoContinue): a wall-clock PAUSE keeps
@@ -808,10 +879,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [queueEnqueue, refreshQueue, running, state.pendingPermission, claimAndRunNext]);
 
   // A new role turn's proposals replace the previous ones — reset the added-marks + show the queue.
+  // Fires for the decoupled Plan/Advise lane (roleProposedSteps) and the legacy build-stream path.
   useEffect(() => {
-    if (state.proposedSteps) { setAddedSteps(new Set()); void refreshQueue(); }
+    if (roleProposedSteps || state.proposedSteps) { setAddedSteps(new Set()); void refreshQueue(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.proposedSteps]);
+  }, [roleProposedSteps, state.proposedSteps]);
 
   // Load this app's queue once on mount (and when the session changes), so a queue left from a
   // previous visit is visible (and resumable) immediately — the paused-queue-resumes-on-reopen story.
@@ -1836,26 +1908,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             )}
             {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
                 app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}
-            {state.proposedSteps && state.proposedSteps.steps.length > 0 && !running && (
+            {activeProposedSteps && activeProposedSteps.steps.length > 0 && (
               <div className="px-3 py-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
-                    {state.proposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {state.proposedSteps.steps.length} step{state.proposedSteps.steps.length > 1 ? 's' : ''}
+                    {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
                   </span>
                   <button
                     type="button"
-                    onClick={() => addStepsToQueue(state.proposedSteps!.steps.filter((s) => !addedSteps.has(s)), state.proposedSteps!.role)}
-                    disabled={state.proposedSteps.steps.every((s) => addedSteps.has(s))}
+                    onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
+                    disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
                     className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
                   >
-                    {state.proposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
+                    {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
                   </button>
                 </div>
-                {state.proposedSteps.steps.map((s, i) => (
+                {activeProposedSteps.steps.map((s, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
                     <button
                       type="button"
-                      onClick={() => addStepsToQueue([s], state.proposedSteps!.role)}
+                      onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
                       disabled={addedSteps.has(s)}
                       title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
                       className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
@@ -2215,7 +2287,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   ref={composerRef}
                   className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-20 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
                   rows={1}
-                  placeholder="Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)"
+                  placeholder={
+                    chatMode === 'planner'
+                      ? '🧠 Plan mode (read-only) — describe a goal; I plan it with you, then you queue it for the build…'
+                      : chatMode === 'advisor'
+                      ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
+                      : 'Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)'
+                  }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   onPaste={(e) => {
@@ -2230,13 +2308,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     if (e.key === 'Escape' && running) { e.preventDefault(); stop(); return; }
                     // U7: Cmd/Ctrl+Enter ALWAYS sends — even on touch or in the expanded editor — so a
                     // finished multiline message ships without reaching for the button.
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); send(); return; }
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); if (chatMode === 'build') send(); else sendRole(chatMode); return; }
                     // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
                     // (send only via the button). In the expanded editor Enter always inserts a newline
                     // so a long message can be edited freely. Shift+Enter is always a newline.
                     if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && !composerExpanded) {
                       e.preventDefault();
-                      send();
+                      if (chatMode === 'build') send(); else sendRole(chatMode);
                     }
                   }}
                 />
@@ -2249,7 +2327,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 >
                   {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
-                {running ? (
+                {chatMode !== 'build' ? (
+                  // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
+                  // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
+                  // own turn is streaming.
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                    {roleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                ) : running ? (
                   <button onClick={stop} title="Stop" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
                     <Square className="w-4 h-4" />
                   </button>

@@ -10809,3 +10809,29 @@ fetch/server hiccup (honest "server said N, try again"), so a transient failure 
   server tsc 0, vitest 5269/5269, boot PASS.
 - Both fixes are complementary: RC-1 makes the fetch SUCCEED (report found via per-user fallback), RC-2
   makes the found report actually SAVE on iPhone.
+
+## 2026-07-06 — 3-role chat FIX Phase 1: Plan/Advise are sendable anytime + actually reply (admin bug report)
+
+Admin: selecting Plan/Advise "does nothing" — root causes (both CLIENT-side; the server role lane at
+routes/agentv3.ts:2660 was already correct, concurrent, before the build lock):
+1. **No Send during a build** — the composer showed only Stop while `running`, and `send()` early-returned
+   on `|| running`. Plan/Advise are READ-ONLY (never take the build lock) so they must be sendable anytime.
+2. **Send → error, no reply** — Plan/Advise rode the build's `start()`/`running`/abort path, which resets
+   and owns the single build stream, so a role turn collided with / was blocked by the build.
+
+Fix (decouple the read-only lanes from the build): new component-local `sendRole(role)` in AgentV3Panel —
+its OWN in-flight flag (`roleBusy`) + AbortController, POSTs `/chat` with `chatRole`, streams the reply
+into the SHARED thread (`agentHistory`), and NEVER touches the build's `running`/abort/state. So Plan/
+Advise now:
+- send EVEN WHILE a build runs (the composer shows a Send button, not Stop, in Plan/Advise mode),
+- return a real streamed reply (proposed steps surface via `roleProposedSteps` → the same approve-to-queue
+  card, now shown during builds too),
+- can never clobber a live build.
+Mode-aware placeholder makes switching visibly change the composer ("🧠 Plan mode (read-only)…" /
+"🔍 Advise mode (read-only)…").
+
+This is Phase 1 of the admin's 3-sides model (one session, one shared history, Build default, switch
+anytime). Next phases: clearer 3-side UI + build-aware responses + Advise capability cards
+(Scan bugs / Compare / Speed test / Security scan / …).
+
+Gate: frontend tsc 0, vitest 5234/5234 PASS, build PASS. Client-only; server role lane unchanged.

@@ -10556,3 +10556,16 @@ analyzeBuildOptimizations) and surfaced as a "Build Optimizer" card in AppAnalyt
 build-optimizer entry added.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5202/5202 PASS (8 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — P-DEPLOY.3: AIOps deploy-risk advisor + incident/RCA analyzer  ✅ DONE
+
+New src/server/AppMakerLab/deployment/DeployRiskAdvisor.ts (pure, unit-tested): assessDeployRisk(signals) →
+0–100 risk score + low/medium/high band + reasons + advice from real change signals (files/lines changed,
+high-criticality files touched, tests included, CI status); a red CI forces high, tests lower risk, a big
+untested change raises it. analyzeIncident(events) correlates deploy+error events → an error burst within N min
+after a deploy makes that deploy the prime suspect and names the previous revision as the rollback target
+(honest first-deploy/no-deploy handling). Exposed as admin AIOps endpoints POST /api/admin/deploy-risk and
+POST /api/admin/incident-analysis (verifyAdminToken, callable from CI). Deterministic reasoning — reproducible,
+no model call. AppKnowledgeBase admin-deploy-aiops entry. Capacity planner/env optimizer out of scope (low ROI).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5212/5212 PASS (10 new), build (implicit) PASS, boot:check PASS.

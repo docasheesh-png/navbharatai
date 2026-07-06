@@ -13,6 +13,7 @@ import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
 import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
+import { assessDeployRisk, analyzeIncident } from '../AppMakerLab/deployment/DeployRiskAdvisor';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
@@ -334,6 +335,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const question = typeof req.body?.question === 'string' ? req.body.question : '';
     if (!question.trim()) return res.status(400).json({ error: 'A "question" string is required.' });
     res.json({ ...answerMetricQuery(getMetrics().snapshot(), question), generatedAt: Date.now() });
+  });
+
+  // P-DEPLOY.3 — AIOps: deterministic pre-deploy risk score from real change signals.
+  app.post('/api/admin/deploy-risk', verifyAdminToken, (req: Request, res: Response) => {
+    const b = req.body ?? {};
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+    res.json({
+      ...assessDeployRisk({
+        filesChanged: num(b.filesChanged), linesAdded: num(b.linesAdded), linesRemoved: num(b.linesRemoved),
+        criticalFilesTouched: num(b.criticalFilesTouched), testFilesChanged: num(b.testFilesChanged),
+        ciGreen: typeof b.ciGreen === 'boolean' ? b.ciGreen : undefined,
+      }),
+      generatedAt: Date.now(),
+    });
+  });
+
+  // P-DEPLOY.3 — AIOps: incident/RCA analysis correlating deploy + error events.
+  app.post('/api/admin/incident-analysis', verifyAdminToken, (req: Request, res: Response) => {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    res.json({ ...analyzeIncident(events), generatedAt: Date.now() });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

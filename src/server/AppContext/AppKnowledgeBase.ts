@@ -1721,6 +1721,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['ai insights', 'insights', 'nl query', 'natural language', 'ask metrics', 'ops report', 'telemetry query', 'cost question', 'admin insights', 'recommendations', 'aiops'],
   },
   {
+    id: 'admin-deploy-aiops',
+    name: 'AI Deployment Ops (Deploy Risk + Incident Analysis)',
+    path: 'Admin/CI only — POST /api/admin/deploy-risk and POST /api/admin/incident-analysis',
+    description: `Admin/CI-only AIOps endpoints (deterministic, no model call): (1) DEPLOY RISK — given a change's real signals (files changed, lines added/removed, high-criticality files touched, tests included, CI status) returns a 0–100 risk score, a low/medium/high band, the reasons, and concrete advice (a red CI forces high; tests lower risk; a big untested change raises it). (2) INCIDENT / RCA — given deploy + error events, correlates an error burst that starts right after a deploy to that deploy as the prime suspect and names the previous revision as the rollback target. Reproducible reasoning an operator or a CI step can trust.`,
+    howToUse: 'From CI or an admin tool, POST to /api/admin/deploy-risk with the change signals to get a risk score before promoting, or POST deploy+error events to /api/admin/incident-analysis to get a likely cause and rollback target. Both require an admin token.',
+    relatedFeatures: ['admin-metrics', 'admin-ai-insights'],
+    keywords: ['deploy risk', 'aiops', 'release risk', 'incident analysis', 'rca', 'root cause', 'rollback', 'deployment risk', 'risk score', 'pre-deploy check', 'incident'],
+  },
+  {
     id: 'admin-mfa',
     name: 'Admin Two-Factor Authentication (2FA / TOTP)',
     path: 'Admin Dashboard → Security tab → Two-Factor Authentication (admin only)',

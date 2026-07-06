@@ -158,12 +158,49 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setJsxChkBusy(false); }
   };
 
+  // ── One-call Build Health (runs all robustness checks) ──
+  const [health, setHealth] = useState<any>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const runHealth = async () => {
+    setHealthBusy(true); setHealth(null);
+    try {
+      const r = await fetch('/api/workspace/health-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setHealth(await r.json());
+    } catch { /* ignore */ }
+    finally { setHealthBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
 
   return (
     <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
       <h2 className="text-lg font-black text-white tracking-tight">Insights & Integrations</h2>
+
+      {/* Build Health — one-click aggregate of every robustness check */}
+      <Card icon={<Brain className="w-4 h-4 text-violet-400" />} title="Build Health — Will this app work?"
+        action={<Button size="sm" onClick={runHealth} disabled={healthBusy} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700">{healthBusy ? 'Running…' : 'Run All Checks'}</Button>}>
+        {!health ? (
+          <p className="text-[11px] text-[#8b949e]">Run every build-robustness check at once — code confidence, React Rules of Hooks, import/export consistency, and JSX component resolution — for a single verdict on whether the generated app will build and run.</p>
+        ) : (
+          <div className="space-y-2">
+            <div className={`text-sm font-black ${health.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {health.ok ? `✓ All checks passed across ${health.filesScanned} file(s) — good to ship.` : `✗ ${health.totalIssues} issue(s) found — fix before shipping.`}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {health.checks.map((c: any) => (
+                <div key={c.id} className="flex items-start gap-2 bg-black/30 rounded-xl px-3 py-2">
+                  <span className={c.ok ? 'text-emerald-400' : 'text-red-400'}>{c.ok ? '✓' : '✗'}</span>
+                  <div>
+                    <div className="text-[11px] font-bold text-white">{c.name}{c.issues > 0 ? ` (${c.issues})` : ''}</div>
+                    <div className="text-[10px] text-[#8b949e]">{c.summary}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* Build SLO */}
       <Card icon={<Activity className="w-4 h-4 text-emerald-400" />} title="Build SLO Compliance"

@@ -1805,6 +1805,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['is not defined', 'referenceerror', 'undefined component', 'component not imported', 'jsx error', 'missing import', 'white screen', 'react not defined', 'unknown component', 'element not defined'],
   },
   {
+    id: 'build-health-check',
+    name: 'Build Health — Will this app work?',
+    path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',
+    description: `One click that runs EVERY build-robustness check on the generated app and returns a single honest verdict on whether it will build and run: (1) Code Confidence (hallucinated deps / unresolved imports / stubs), (2) React Rules of Hooks (conditional/looped/after-return/callback hooks), (3) Import/Export Consistency (importing names a module doesn't export), and (4) JSX Component Resolution (components used but never imported/defined). Each sub-check shows pass/fail, an issue count, and a one-line summary; the top line says "all passed — good to ship" or "N issues — fix before shipping". Every number is real static analysis of your actual files. Backed by POST /api/workspace/health-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → the "Build Health" card at the top → Run All Checks. Green means the app should build and run; otherwise expand the individual checks (Code Confidence, React Hooks, Import/Export, JSX Resolution) to see exact file:line fixes.',
+    relatedFeatures: ['code-confidence-check', 'react-hooks-safety', 'import-export-consistency', 'jsx-component-resolution', 'agentv3_builder'],
+    keywords: ['build health', 'will it work', 'run all checks', 'app health', 'pre-flight', 'preflight', 'sanity check', 'build check', 'code health', 'ship check', 'is my app broken', 'app kaam karega'],
+  },
+  {
     id: 'insights-integrations-panel',
     name: 'Insights & Integrations',
     path: 'Settings → Insights & Webhooks',

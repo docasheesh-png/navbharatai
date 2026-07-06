@@ -41,6 +41,22 @@ const INDEX_VUE = `<template>
 </template>
 `;
 
+// Nuxt's canonical top-level error page — rendered for any unhandled error / 404 instead of the
+// default Nuxt error screen. Receives the `error` prop; `clearError` returns to a working route.
+const ERROR_VUE = `<template>
+  <div style="padding: 2rem; font-family: sans-serif;">
+    <h1>{{ error.statusCode }}</h1>
+    <p>{{ error.statusMessage || 'Something went wrong' }}</p>
+    <button @click="handleError">Go back home</button>
+  </div>
+</template>
+
+<script setup lang="ts">
+defineProps<{ error: { statusCode: number; statusMessage?: string } }>();
+const handleError = () => clearError({ redirect: '/' });
+</script>
+`;
+
 export class NuxtProvider implements ITemplateProvider {
   getFiles(_features: string[]): Record<string, string> {
     return {
@@ -48,6 +64,7 @@ export class NuxtProvider implements ITemplateProvider {
       'nuxt.config.ts': NUXT_CONFIG,
       'app.vue': APP_VUE,
       'pages/index.vue': INDEX_VUE,
+      'error.vue': ERROR_VUE,
     };
   }
 }

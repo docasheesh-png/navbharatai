@@ -1889,6 +1889,11 @@
   Node-only E2B preview sandbox (no device/simulator), so a generated RN app could not be previewed or
   verified end-to-end — it would violate "real features only". This is the AB-1 multi-runtime infra gate;
   RN generation waits until a real RN preview path exists (recorded as an open item, rule 6).
+- [x] **Sibling frameworks hardened (rule 3 — hunt the siblings, 2026-07-06):** the same "no error boundary →
+  unhandled route error = blank screen" gap existed in the other LIVE scaffolds. Added the canonical error
+  boundary to each: **Nuxt** `error.vue` (with `clearError`), **SvelteKit** `+error.svelte` + `+layout.svelte`
+  + `app.d.ts`, **Remix** `ErrorBoundary` export in `root.tsx` (`useRouteError`/`isRouteErrorResponse`). Tests
+  guard each on the live sandbox copy. (`vitest run` 5301/5301, +3.)
 - **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5298/5298 ✅ (5 new) · `build` ✅ · `boot:check` PASS.
 - **Files:** `src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider.ts` (live),
   `src/server/AppMakerLab/generator/templates/NextjsProvider.ts` (legacy, synced), `tests/templateProviders.test.ts`.

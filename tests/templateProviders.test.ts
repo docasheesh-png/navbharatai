@@ -7,6 +7,9 @@ import { VueProvider } from '../src/server/AppMakerLab/generator/templates/VuePr
 import { PythonFastapiProvider } from '../src/server/AppMakerLab/generator/templates/PythonFastapiProvider';
 import { TemplateRegistry } from '../src/server/AppMakerLab/generator/templates/TemplateRegistry';
 import { NextjsProvider as LiveNextjsProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider';
+import { NuxtProvider as LiveNuxtProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NuxtProvider';
+import { SvelteKitProvider as LiveSvelteKitProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/SvelteKitProvider';
+import { RemixProvider as LiveRemixProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/RemixProvider';
 
 describe('StaticProvider', () => {
   const provider = new StaticProvider();
@@ -177,5 +180,28 @@ describe('NextjsProvider (LIVE v3.0 sandbox copy)', () => {
   it('keeps the E2B-preview host binding in its dev script', () => {
     const pkg = JSON.parse(provider.getFiles([])['package.json']);
     expect(pkg.scripts.dev).toContain('--hostname 0.0.0.0');
+  });
+});
+
+// LIVE v3.0 framework scaffolds must ship a real error boundary (parallel to the Next.js error.tsx) so an
+// unhandled route error renders a page instead of a blank screen. Guards the enriched sandbox copies.
+describe('LIVE framework scaffolds — error boundaries', () => {
+  it('Nuxt ships error.vue with clearError', () => {
+    const files = new LiveNuxtProvider().getFiles([]);
+    expect(files['error.vue']).toBeDefined();
+    expect(files['error.vue']).toContain('clearError');
+  });
+
+  it('SvelteKit ships +error.svelte, +layout.svelte and app.d.ts', () => {
+    const files = new LiveSvelteKitProvider().getFiles([]);
+    expect(files['src/routes/+error.svelte']).toContain('$page');
+    expect(files['src/routes/+layout.svelte']).toBeDefined();
+    expect(files['src/app.d.ts']).toBeDefined();
+  });
+
+  it('Remix root.tsx exports an ErrorBoundary using useRouteError', () => {
+    const files = new LiveRemixProvider().getFiles([]);
+    expect(files['app/root.tsx']).toContain('export function ErrorBoundary');
+    expect(files['app/root.tsx']).toContain('useRouteError');
   });
 });

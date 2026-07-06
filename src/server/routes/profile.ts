@@ -11,7 +11,8 @@
 import type { Express, Request, Response } from 'express';
 import { doc, getDoc } from 'firebase/firestore';
 import { getDb } from '../lib/db';
-import { verifyFirebaseToken } from '../lib/authMiddleware';
+import { verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
 import { userCostStore } from '../lib/UserCostStore';
@@ -116,6 +117,29 @@ export function registerProfileRoutes(app: Express): void {
     ]);
 
     return res.json({ records, summary });
+  });
+
+  // ── DELETE /api/profile — right-to-be-forgotten (P-DATA.4) ──────────────────────
+  // Erase ALL of this user's data across every verified user-scoped collection. Identity is taken from
+  // the VERIFIED Firebase token (never a body param), so a user can only ever delete their OWN data.
+  // An explicit `{ "confirm": "DELETE" }` body is required so it can never fire by accident.
+  app.delete('/api/profile', async (req: Request, res: Response) => {
+    const identity = await verifyFirebaseIdentity(req);
+    if (!identity) return res.status(401).json({ error: 'Unauthorized' });
+    if ((req.body?.confirm) !== 'DELETE') {
+      return res.status(400).json({
+        error: 'Confirmation required',
+        hint: 'Send { "confirm": "DELETE" } to permanently erase all your data. This cannot be undone.',
+      });
+    }
+    const db = getRetentionDb();
+    if (!db) return res.status(503).json({ error: 'Data store unavailable — please try again shortly.' });
+    try {
+      const report = await deleteUserData(db, identity.uid);
+      return res.json({ ok: true, message: 'Your account data has been permanently erased.', ...report });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || 'Deletion failed' });
+    }
   });
 }
 

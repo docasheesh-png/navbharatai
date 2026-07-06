@@ -9960,3 +9960,21 @@ decision: one flexible slot) are READ-ONLY lanes in /chat, selected by a new `ch
 Gate: frontend tsc 0, server tsc 0, vitest 4997/4997 PASS, build PASS, boot PASS. NEXT: #6 the queue +
 roles UI (Chats switcher, approve-steps-to-queue, queue reorder/cancel) — the user-facing surface, with
 the AppKnowledgeBase entry landing there.
+## 2026-07-05 — P-DATA.4: DPDP/GDPR data retention + right-to-be-forgotten deletion  ✅ DONE
+
+Compliance capability on the platform own user data. New DataRetentionManager.ts (injected-Firestore,
+unit-testable):
+- deleteUserData(uid): right-to-be-forgotten cascade over a VERIFIED registry of 7 user-scoped collections
+  (users/user_profiles/user_sessions/user_token_wallets by doc-id==uid; user_costs/user_build_history/
+  chat_sessions by a userId field). EXACT-MATCH ONLY — never a broad/prefix query that could over-delete;
+  refuses empty uid; best-effort per collection. Each key strategy verified against its real read/write path
+  BEFORE being registered (a wrong strategy = miss data or delete the WRONG user's data — nothing on a guess).
+- purgeExpired(now): TTL retention with pure retentionCutoffMs/isExpired + a `< cutoff` bound (only ever
+  removes OLD data). One verified policy shipped (build_jobs.updatedAt 90d); more are pure config.
+- DELETE /api/profile: identity from the VERIFIED Firebase token (never a body param → a user can only
+  delete their OWN data) + required { confirm: "DELETE" }; honest per-collection deletion report.
+- Scheduled purge wired in server.ts, OPT-IN via DATA_RETENTION_PURGE_ENABLED (no auto-deletion in prod
+  without admin sign-off); boot + daily. Honest caveats recorded: Cloud Run scale-to-0 → guaranteed cron
+  needs Cloud Scheduler; a Settings delete-account button is a thin UI follow-up (capability live via API).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4992/4992 PASS (9 new), build PASS, boot:check PASS.

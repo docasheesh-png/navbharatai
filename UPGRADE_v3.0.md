@@ -2476,12 +2476,31 @@
   passes the workspaceId through. Tests: `embeddingStore.test.ts` (5) + existing EmbeddingSearch suite green.
 - **Files:** `src/server/AgentV3/EmbeddingSearch.ts`, new `src/server/AgentV3/EmbeddingStore.ts`, new `tests/embeddingStore.test.ts`.
 
-### P-DATA.4 — Data Retention + Deletion (DPDP/GDPR right-to-be-forgotten)  ❌ MISSING  [MED — compliance]
-- The platform stores user profiles, conversations, build history, cost records, secrets — but has **no retention
-  policy and no user-data-deletion workflow**. `ComplianceAnalysis` only scans *generated apps*, not NavBharatAI itself.
-- [ ] Add a `DataRetentionManager`: configurable TTL per collection (e.g. logs 90d, conversations 1y) + scheduled purge.
-- [ ] Add an account-deletion endpoint that cascades across all user-scoped Firestore collections (right-to-be-forgotten).
-- **Files:** new `src/server/lib/DataRetentionManager.ts`, `src/server/routes/profile.ts`, `server.ts`.
+### P-DATA.4 — Data Retention + Deletion (DPDP/GDPR right-to-be-forgotten)  ✅ DONE (2026-07-05) · 🔌 WIRED  [MED — compliance]
+- The platform stored user profiles, conversations, build history, cost records — but had **no retention
+  policy and no user-data-deletion workflow**.
+- [x] **`DataRetentionManager.ts`** — an injected-Firestore (unit-testable) module with:
+  - **`deleteUserData(uid)` right-to-be-forgotten cascade** over a **VERIFIED** registry of 7 user-scoped
+    collections (`users`/`user_profiles`/`user_sessions`/`user_token_wallets` keyed by doc-id == uid;
+    `user_costs`/`user_build_history`/`chat_sessions` keyed by a `userId` field). **Exact-match only** — it
+    never runs a broad/prefix query that could over-delete, refuses an empty uid, and is best-effort per
+    collection (one flaky collection can't leave the rest of the user's data behind). Every collection's
+    key strategy was verified against its real read/write path before being added — none on a guess.
+  - **`purgeExpired(now)` TTL retention** with pure `retentionCutoffMs`/`isExpired` and a `< cutoff` bound
+    (can only ever remove OLD data). Ships one verified policy (`build_jobs.updatedAt`, 90d); more are pure
+    config as each timestamp field is verified.
+- [x] **`DELETE /api/profile`** — identity from the VERIFIED Firebase token (never a body param, so a user
+      can only delete their OWN data) + a required `{ "confirm": "DELETE" }` body; returns an honest per-
+      collection deletion report.
+- [x] **Scheduled purge wired** in `server.ts` — **opt-in** via `DATA_RETENTION_PURGE_ENABLED=true` (no
+      automated deletion in prod without admin sign-off); runs at boot + daily. Honest caveat: Cloud Run
+      min-instances=0 means the interval only ticks while an instance is alive — a guaranteed cron needs
+      Cloud Scheduler (follow-up). A Settings "Delete my account" button is a thin UI follow-up (the
+      capability is live via the API today).
+- **Files:** `src/server/lib/DataRetentionManager.ts` (new) + `DataRetentionManager.test.ts` (9 tests),
+      `src/server/routes/profile.ts` (DELETE route), `server.ts` (opt-in scheduled purge).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 4992/4992 ✅ (9 new:
+      cascade + user-isolation + empty-uid refusal + TTL bound + registry sanity) · build ✅ · boot:check PASS.
 
 ### P-DATA.5 — OpenAPI / Contract Spec for the REST API  ❌ MISSING  [LOW]
 - 32 routes have no machine-readable contract. No OpenAPI/Swagger → no generated client types, no contract tests, no docs.

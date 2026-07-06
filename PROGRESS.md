@@ -10032,3 +10032,17 @@ running RACED the first (two builders writing the same files → corrupt workspa
   after, never silently dropped. Idempotent reuse short-circuits before the lock; a create failure releases it.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5021/5021 PASS (8 new), build PASS, boot:check PASS.
+
+## 2026-07-05 — P-ORCH.1: scheduled/recurring jobs engine  ✅ ENGINE DONE
+
+Replaced ad-hoc setInterval timers with a single tested scheduler. New ScheduledJobs.ts: Schedule =
+everyMs | dailyAtUtc; pure computeNextRun(schedule, fromMs) (deterministic, unit-tested). Scheduler
+(register/due/tick/start/stop/list): one tick loop fires each due job, reschedules it, ISOLATES failures
+(a throwing handler is recorded, never stops the others); tick timer unref'd so it can't block exit.
+Wired at boot (server.ts): scheduler.start() + the P-DATA.4 retention purge registered THROUGH it (daily
+@ 03:00 UTC, opt-in via DATA_RETENTION_PURGE_ENABLED), replacing its hand-rolled setInterval. Future
+backups/digests/user-automations register the same way. Honest scope: a guaranteed cron surviving Cloud
+Run scale-to-0 needs Cloud Scheduler/Cloud Tasks (infra follow-up); the in-process engine runs while an
+instance is alive.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5032/5032 PASS (11 new), build PASS, boot:check PASS.

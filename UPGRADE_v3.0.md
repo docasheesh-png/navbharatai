@@ -2996,13 +2996,23 @@
 - **⬜ N/A-by-design:** message brokers (Kafka/RabbitMQ/NATS), distributed-lock/lease/leader-election/consensus-coordinator/cluster-coordinator (single-instance managed-serverless), worker-pool/distributed-worker, multi-cloud/cross-cloud/hybrid/edge orchestration, ERP/CRM/enterprise-integration-hub, BPM/DPA/process-mining, mobile/desktop automation platforms.
 - **Already tracked:** multi-agent/tool registry+dispatch/planner/executor/reviewer/function-calling → **P-AI** (DONE) + **P-AI.16**; reasoning/state-machine/rule/constraint engine → **P-AI.14**; ensemble/critic → **P-AI.15**; priority job scheduling / latency-prediction → **P-AI.17**; HITL/approval → **P-AI.8**; circuit-breaker → **P1.3**; idempotency/dedup → **P1.4**; bulkhead/concurrency/quota → **P2.3**; task/job queue/DLQ → **P7/P-BRE.6**; event-sourcing/replay → **P4.2**; notifications/Slack/email → **P-BRE.7/P-PME.9**; metrics/tracing/workflow-analytics → **P2/P8**; anomaly/failure/cost prediction + bottleneck/critical-path → **P-MON.2**; workflow dashboards → **P-MON.6/P-DESIGN.4**; rollback → **P9**; auto-scaling → **P3.3**.
 
-### P-ORCH.1 — Cron / Scheduled / Recurring Jobs Engine  ❌ MISSING  [MED]
-- There is no time-based scheduler: only `setInterval` timers and request-triggered jobs. No cron, recurring, delayed,
-  or calendar-scheduled jobs. This blocks several other phases that need scheduled work — **P-DATA.4** retention-purge,
-  **P9** scheduled Firestore backup, and recurring user automations.
-- [ ] Add a Cloud Scheduler (or Cloud Tasks `scheduleTime`) integration + a small job-registry for recurring/delayed jobs.
-- [ ] Expose it internally so retention-purge, backups, and digest reports can register schedules.
-- **Files:** new `src/server/lib/ScheduledJobs.ts`, `cloudbuild.yaml` (scheduler), `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+### P-ORCH.1 — Cron / Scheduled / Recurring Jobs Engine  ✅ ENGINE DONE (2026-07-05) · 🔌 WIRED  [MED]
+- Before: only ad-hoc `setInterval` timers scattered around — no scheduler, no recurring/daily job registry.
+- [x] **`ScheduledJobs.ts`** — a single, tested in-process scheduler. `Schedule` = a fixed interval
+      (`everyMs`) or a daily UTC time (`dailyAtUtc`); pure `computeNextRun(schedule, fromMs)` (deterministic,
+      unit-tested). `Scheduler.register/due/tick/start/stop/list`: one tick loop fires each due job,
+      reschedules it, and **isolates failures** (a throwing handler is recorded, never stops the others);
+      the tick timer is `unref`'d so it can't block exit. Shared singleton `scheduler`.
+- [x] **Wired at boot** (`server.ts`): `scheduler.start()` + the **P-DATA.4 retention purge registered
+      through it** (daily @ 03:00 UTC, opt-in via `DATA_RETENTION_PURGE_ENABLED`) — replacing its
+      hand-rolled `setInterval`. Backups/digests/user automations can now register the same way.
+- [ ] **Still infra-blocked (honest):** a guaranteed cron that survives Cloud Run scale-to-0 needs Cloud
+      Scheduler / Cloud Tasks `scheduleTime` — the in-process engine runs while an instance is alive; the
+      external trigger is the follow-up once infra exists.
+- **Files:** `src/server/lib/ScheduledJobs.ts` (new) + `ScheduledJobs.test.ts` (11 tests), `server.ts` (wiring).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 5032/5032 ✅ (11 new:
+      everyMs/dailyAtUtc next-run incl. boundary, due filtering, tick run+reschedule, error isolation,
+      disabled-skip, async-await, unregister) · build ✅ · boot:check PASS.
 
 ### P-ORCH.2 — User-Defined Automation / Workflow Builder  ❌ MISSING  [MED — product surface]
 - The orchestration engine is hardcoded to the code-gen pipeline; **end users cannot define their own

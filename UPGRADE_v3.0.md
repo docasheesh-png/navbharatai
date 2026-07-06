@@ -930,14 +930,24 @@
 - [ ] Mutation score target: > 60% for `QualityEvaluationEngine/` core files.
 - **Files:** new `stryker.config.json`, `package.json`.
 
-### P-TQA.13 — MTTD / MTTR Tracking  ❌ MISSING  [LOW]
-- No tracking of Mean Time to Detect (how long from bug introduction to test failure detection) or
-  Mean Time to Repair (how long from failure detection to passing build).
-- [ ] Add `QAMetricsCollector.ts`: on build failure, record `failedAt` timestamp in Firestore. On next
-  passing build, record `resolvedAt`. Compute `mttr = resolvedAt - failedAt`.
-- [ ] Compute MTTD: compare `deployedAt` (when the bad commit deployed) to `failedAt` (when tests caught it).
-- [ ] Show MTTD/MTTR as KPI cards in `AppAnalytics.tsx`.
-- **Files:** new `src/server/QualityEvaluationEngine/QAMetricsCollector.ts`, `src/components/ide/AppAnalytics.tsx`.
+### P-TQA.13 — MTTD / MTTR Tracking  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- No tracking of Mean Time to Detect or Mean Time to Repair for build failures.
+- [x] **`QAMetricsCollector.ts`** (pure, unit-tested) — `computeReliabilityMetrics(jobs)` derives reliability
+  from the SAME real job history the rest of analytics reads (`BuildJobManager.listRecent()`), so it needs no
+  new persistence and no new build-lifecycle hook (zero collision with the live AgentV3 engine):
+  - **MTTD** = mean(failedAt − startedAt) over FAILED builds — how long a build runs before its failure surfaces.
+  - **MTTR** = per-app (correlated by `workspaceId`) time from a failure to the NEXT successful build of that app.
+  - A failure with no later same-app success is honestly counted as **unresolved** — never given an invented
+    repair time. Also reports `recoveryRate` and `unresolvedFailures`.
+- [x] **`GET /api/analytics/reliability?limit=100`** — added to the existing live `buildAnalytics` route, feeding
+  `BuildJobManager.listRecent()`; honest zeros until failures have occurred.
+- [x] **KPI cards in `AppAnalytics.tsx`** — a "Build Reliability" card (MTTD, MTTR, recovery rate, unresolved)
+  that fetches the real endpoint and only renders once a failure has occurred (no fabricated data).
+- **Honest scope:** the classic MTTD "bad-commit-deployed → tests-caught-it" framing needs deploy timestamps we
+  don't record for user builds; the shipped MTTD is the faithful build-job equivalent (build-start → failure),
+  documented as such in the collector. MTTR is exact from real fail→recovery pairs.
+- **Files:** `src/server/QualityEvaluationEngine/QAMetricsCollector.ts` (+ `.test.ts`, 7 tests),
+  `src/server/routes/buildAnalytics.ts`, `src/components/ide/AppAnalytics.tsx`, `AppKnowledgeBase.ts`.
 
 ---
 

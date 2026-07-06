@@ -10873,3 +10873,13 @@ silently-huge payload, never a silently-incomplete one). Applied to both the JSO
   not eliminated for real complex apps. (b) WHY the dev server that was up mid-build was dead at the
   end of the 29-min run (wall-clock kill path vs sandbox process lifetime) needs a live-sandbox repro;
   the routing fix removes the 29-min class for simple prompts that exposed it.
+
+## 2026-07-06 — Fix 9b: build-report DELIVERY GUARANTEE (client fallback chain)
+
+Admin (after another session's attempt didn't fix it): "bas build report milni chahiye" — the report
+must arrive, period. The size root cause is Fix 9's server-side `capSessionReports`; this adds the
+client guarantee: the session stitch is the PREFERRED payload, never the only path. If its fetch fails
+for ANY reason (network drop, oversized response, server hiccup), `downloadDiagnostics` now falls back
+to the single LATEST report via the existing `getLatestDiagnostics` ladder (server latest → per-user
+durable → client-local copy). "No build report yet" is only shown when every rung returned nothing.
+A slightly smaller report always beats no report. Gate: frontend tsc 0, vitest 5280/5280.

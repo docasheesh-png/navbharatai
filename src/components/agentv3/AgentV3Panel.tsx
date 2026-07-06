@@ -1338,20 +1338,24 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         // Admin 2026-07-06 ("starting se lekar last tak"): default = the WHOLE session JSON — every
         // build 0 → last, stitched together — not just the latest message's build. The server keeps
         // each build in a durable per-workspace history behind the "latest" doc; scope=session
-        // aggregates it. (This is the same full record the removed Text report used to carry.)
-        const params = new URLSearchParams({ workspaceId: state.workspaceId, scope: 'session' });
-        if (userId) params.set('userId', userId);
-        if (email) params.set('email', email);
-        const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-        if (!res.ok) {
-          // Honest cause (not a blanket "no report"): 404 = genuinely none yet; anything else is a
-          // fetch/server hiccup the user should retry, not a claim that their build produced no report.
-          alert(res.status === 404
-            ? 'No build report yet — build an app first, then download the report.'
-            : `Couldn't fetch the build report (server said ${res.status}). Please try again in a moment.`);
-          return;
+        // aggregates it (byte-budgeted server-side so mobile Safari can actually load it).
+        //
+        // DELIVERY GUARANTEE (admin 2026-07-06, "bas build report milni chahiye"): the session stitch
+        // is the PREFERRED payload, never the only path. If its fetch fails for ANY reason (network
+        // drop, an oversized response, a server hiccup), fall back to the single LATEST report
+        // (getLatestDiagnostics: server latest → per-user durable copy → the client's local copy) so
+        // the user still gets a report — a slightly smaller report always beats no report.
+        try {
+          const params = new URLSearchParams({ workspaceId: state.workspaceId, scope: 'session' });
+          if (userId) params.set('userId', userId);
+          if (email) params.set('email', email);
+          const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+          if (res.ok) payload = await res.json();
+        } catch { /* session stitch failed — the latest-report fallback below still delivers */ }
+        if (!payload) {
+          payload = await getLatestDiagnostics(null);
+          if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
         }
-        payload = await res.json();
       } else {
         payload = await getLatestDiagnostics(null);
         if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }

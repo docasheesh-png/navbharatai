@@ -178,3 +178,61 @@ describe('buildReactPreview — CDN resilience (fallback when esm.sh flakes)', (
     expect(html).toContain('from fallback CDN after esm.sh failed');
   });
 });
+
+// Fix 1 (2026-07-06): the exact Mitrify failure — `@/components/ui/toaster` (a shadcn path alias)
+// was sent to esm.sh ("Could not load @/… from the CDN"). It must resolve to the LOCAL file instead.
+import { buildAliasMap } from '../src/server/runtime/ReactPreview';
+
+describe('buildAliasMap (path aliases for imported shadcn/Vite/Next/Lovable/Bolt apps)', () => {
+  it('reads "@/*" -> "./client/src/*" from tsconfig (the Replit-export monorepo shape)', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@/*': ['./client/src/*'] } } }),
+    });
+    expect(buildAliasMap(vfs, 'client/src/main.tsx')).toEqual({ '@': '/client/src' });
+  });
+
+  it('reads a root-src alias "@/*" -> "./src/*" (Lovable/Bolt shape) and tolerates tsconfig comments', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'tsconfig.json': '{\n  // paths\n  "compilerOptions": { "paths": { "@/*": ["./src/*"] } }\n}',
+    });
+    expect(buildAliasMap(vfs, 'src/main.tsx')).toEqual({ '@': '/src' });
+  });
+
+  it('falls back to vite.config resolve.alias when tsconfig has none', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'vite.config.ts': "export default { resolve: { alias: { '@': path.resolve(__dirname, './client/src') } } }",
+    });
+    expect(buildAliasMap(vfs, 'client/src/main.tsx')).toEqual({ '@': '/client/src' });
+  });
+
+  it('heuristic: infers @ from the entry src root when the app USES @/ but no config declares it', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'client/src/main.tsx': "import App from '@/App'",
+      'client/src/App.tsx': 'export default ()=>null',
+    });
+    expect(buildAliasMap(vfs, 'client/src/main.tsx')).toEqual({ '@': '/client/src' });
+  });
+
+  it('does NOT invent an alias when the app never imports @/ (no false positives)', () => {
+    const vfs = VirtualFileSystem.fromRecord({ 'src/main.tsx': "import App from './App'" });
+    expect(buildAliasMap(vfs, 'src/main.tsx')).toEqual({});
+  });
+});
+
+describe('buildReactPreview — @/ alias resolves locally, not via the CDN (Fix 1 regression)', () => {
+  it('embeds the ALIASES map and applyAlias so @/… is rewritten to the local src path', () => {
+    const vfs = VirtualFileSystem.fromRecord({
+      'index.html': '<div id="root"></div><script type="module" src="/client/src/main.tsx"></script>',
+      'package.json': JSON.stringify({ dependencies: { react: '^18.0.0' } }),
+      'tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@/*': ['./client/src/*'] } } }),
+      'client/src/main.tsx': "import { Toaster } from '@/components/ui/toaster'; export default Toaster;",
+      'client/src/components/ui/toaster.tsx': 'export function Toaster(){ return null; }',
+    });
+    const html = buildReactPreview(vfs);
+    // The alias map is injected…
+    expect(html).toContain('"@":"/client/src"');
+    expect(html).toContain('function applyAlias');
+    // …and the toaster source is bundled as a LOCAL module (so it never hits esm.sh).
+    expect(html).toContain('client/src/components/ui/toaster.tsx');
+  });
+});

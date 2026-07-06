@@ -10569,3 +10569,25 @@ POST /api/admin/incident-analysis (verifyAdminToken, callable from CI). Determin
 no model call. AppKnowledgeBase admin-deploy-aiops entry. Capacity planner/env optimizer out of scope (low ROI).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5212/5212 PASS (10 new), build (implicit) PASS, boot:check PASS.
+## 2026-07-06 — Fix 1: in-browser preview resolves `@/` path aliases locally (Replit/Lovable/Bolt imports)
+
+Root cause of the Mitrify in-browser error "Could not load @/components/ui/toaster … from the CDN
+(esm.sh/@/components/ui/toaster)": ReactPreview's client resolver treated ANY import not starting with
+`./` or `../` as a bare npm package → sent to esm.sh. But `@/…` is a Vite/tsconfig PATH ALIAS mapping to
+the project's src root, not a package — so every imported shadcn/Vite/Next/Lovable/Bolt app (they ALL
+use `@/`) had a blank in-browser preview.
+- New pure `buildAliasMap(vfs, entry)`: reads aliases in priority order — tsconfig/jsconfig
+  `compilerOptions.paths` (JSON, comment-tolerant), then `vite.config.*` `resolve.alias` (best-effort
+  regex, spans helper-call args like `path.resolve(__dirname, './client/src')`), then a heuristic
+  (`@` → the entry's src root) ONLY when `@/` is actually imported and no config declares it. No false
+  positives when the app never uses `@/`.
+- Injected as `ALIASES` into the preview HTML; the client resolver's `applyAlias` rewrites `@/x` →
+  `/client/src/x` (root-absolute LOCAL path) at the top of `localRequire` AND in `collectBare` (so an
+  aliased import is never prefetched from the CDN). Then the existing local resolver bundles the real file.
+- Tests: reactPreview.test.ts +6 — tsconfig `@/*`→client/src (Replit monorepo), root `./src/*`
+  (Lovable/Bolt) + comment tolerance, vite.config fallback, entry-src heuristic, no-false-positive, and
+  the full Mitrify regression (@/components/ui/toaster bundles locally, ALIASES embedded).
+- Gate: server tsc 0, frontend tsc 0, vitest 5200/5200, boot PASS.
+- This is Fix 1 of 5 from the Mitrify/navBharatAI report autopsies (goal: Replit/Lovable/Bolt-exported
+  apps run easily). Next: Fix 2 (monorepo framework/port), Fix 3 (cold-sandbox hydration), Fix 4 (P1 on
+  import turn), Fix 5 (auto-provision DB for Drizzle/pg imports).

@@ -1774,8 +1774,17 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     path: 'Settings → Insights & Webhooks → Code Confidence',
     description: `Scans the generated app's code for AI "hallucination" signals and gives a 0–100 confidence score: HALLUCINATED DEPENDENCIES (a package imported but not in package.json — the #1 reason a generated app won't install/run), UNRESOLVED LOCAL IMPORTS (importing a file that doesn't exist), and PLACEHOLDER/STUB code (TODO/FIXME, "not implemented" throws, lorem ipsum). Low confidence is flagged with a warning so you review before shipping, instead of silently trusting the AI. Real static analysis of your actual files — no guessing.`,
     howToUse: 'Open Settings → Insights & Webhooks → "Code Confidence" → Check Code. Review the confidence score and the listed signals (each shows the file + the exact issue).',
-    relatedFeatures: ['insights-integrations-panel', 'app-sbom'],
+    relatedFeatures: ['insights-integrations-panel', 'app-sbom', 'react-hooks-safety'],
     keywords: ['hallucination', 'confidence', 'ai accuracy', 'code quality', 'missing dependency', 'undeclared package', 'unresolved import', 'placeholder', 'stub', 'not implemented', 'trust', 'verify ai'],
+  },
+  {
+    id: 'react-hooks-safety',
+    name: 'React Hooks Safety (Rules of Hooks)',
+    path: 'Settings → Insights & Webhooks → React Hooks Safety',
+    description: `Scans the generated React code for Rules-of-Hooks violations — the #1 cause of a hard runtime crash / white screen in a React app. Catches four high-confidence patterns with real AST analysis (not regex): a hook called CONDITIONALLY (inside if/else/ternary/&&), a hook called AFTER AN EARLY RETURN (which makes it conditional), a hook called INSIDE A LOOP, and a hook called FROM A NESTED CALLBACK (event handler or .map callback, where hooks are illegal). Each violation lists the exact file, line, and hook. Because these bugs throw "React has detected a change in the order of Hooks" and blank the screen, catching them here prevents a broken preview from ever shipping. Backed by POST /api/workspace/hooks-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "React Hooks Safety" → Check Hooks. A green result means no violations; otherwise each violation shows the kind, the hook, and the file:line to fix.',
+    relatedFeatures: ['code-confidence-check', 'insights-integrations-panel', 'agentv3_builder'],
+    keywords: ['react hooks', 'rules of hooks', 'hook error', 'invalid hook call', 'conditional hook', 'hook order', 'white screen', 'react crash', 'usestate error', 'useeffect error', 'rendered more hooks', 'hooks lint', 'hook in loop', 'hook in condition'],
   },
   {
     id: 'insights-integrations-panel',

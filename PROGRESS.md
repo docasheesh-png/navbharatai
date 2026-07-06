@@ -10343,3 +10343,26 @@ from a re-run, a follow-up autopsy of the parallel-specialist stall itself. RC-5
 
 Gate: frontend tsc 0, server tsc 0, vitest 5056/5056 PASS, build PASS, boot PASS. No AppKnowledgeBase
 change (internal durability fix, no new user-facing surface).
+## 2026-07-06 — AgentV3 build-quality: React Rules-of-Hooks analyzer  ✅ DONE (powerful-builder)
+
+Admin redirect: "aim = powerful app builder." Added a NEW build-robustness evaluator that hardens what the
+builder ships — catching a hard-crash bug class the existing scanX/readiness suite misses. Chosen for maximum
+value-to-risk after mapping AgentV3: it reuses the proven COLD-wiring precedent (HallucinationDetector →
+routes/hallucination.ts → server.ts) so it touches NONE of the other session's hot core-loop files
+(AgentRunner/ToolDispatcher/systemPrompt/agentv3.ts/Readiness).
+
+New src/server/AgentV3/HooksRulesAnalysis.ts (pure, ts-morph AST-accurate, lazily loaded, deterministic):
+analyzeHooksRules(files) flags four HIGH-CONFIDENCE React Rules-of-Hooks violations — conditional-hook
+(if/else/ternary/&&/switch/try), hook-after-return (early return makes later hooks conditional), hook-in-loop
+(for/while/do), hook-in-callback (hook from a nested event handler / .map callback). These throw "React has
+detected a change in the order of Hooks" and white-screen the app at runtime. Conservative by design (real AST
+scope + control-flow, only flags clear violations) → near-zero false positives, verified by clean-code tests.
+Wired via cold route POST /api/workspace/hooks-check (rate-limited + validated, mirrors hallucination-check) +
+one additive server.ts line, and surfaced as a "React Hooks Safety" card in ProjectInsightsPanel.tsx (parallel
+to the Code Confidence card). AppKnowledgeBase react-hooks-safety entry added.
+
+Live prod smoke: conditional hook → ok:false with exact file/line/kind; clean hooks → ok:true. Tests:
+HooksRulesAnalysis.test.ts (14 — all 4 violation kinds, custom hooks, no-false-positive clean cases, correct
+line numbers, multi-file, unparseable-file robustness, non-React-file skip).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5128/5128 PASS (14 new), build PASS, boot:check PASS, live smoke PASS.

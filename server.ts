@@ -23,6 +23,7 @@ import { registerChangelogRoutes } from './src/server/routes/changelog';
 import { registerTechDebtRoutes } from './src/server/routes/techDebt';
 import { registerVersionRoutes } from './src/server/routes/version';
 import { registerHallucinationRoutes } from './src/server/routes/hallucination';
+import { registerHooksCheckRoutes } from './src/server/routes/hooksCheck';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -535,6 +536,7 @@ setInterval(() => {
   registerTechDebtRoutes(app);
   registerVersionRoutes(app);
   registerHallucinationRoutes(app);
+  registerHooksCheckRoutes(app); // AgentV3 — React Rules-of-Hooks check (POST /api/workspace/hooks-check)
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

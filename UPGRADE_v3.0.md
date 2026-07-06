@@ -2531,10 +2531,17 @@
   out of scope for this code-only pass (the size/type gate is the real security win and is now enforced everywhere).
 - **Files:** new `src/server/lib/uploadValidation.ts`, `src/server/lib/attachmentText.ts`, new `tests/uploadValidation.test.ts`.
 
-### P-DATA.7 — Data Export / Report Generation  ❌ MISSING  [LOW]
-- Users can import (ZIP/Excel/CSV/JSON) but cannot export their data (build history, cost/usage, project metadata) as CSV/Excel/PDF.
-- [ ] Add export endpoints (CSV/Excel via `xlsx`, PDF via a renderer) for build history, usage/cost, and project metadata.
-- **Files:** new `src/server/routes/export.ts`.
+### P-DATA.7 — Data Export / Report Generation  ✅ DONE (2026-07-05) · 🔌 WIRED  [LOW]
+- Users could import but not EXPORT their own data.
+- [x] **`src/server/routes/export.ts`** — `GET /api/export/build-history` and `GET /api/export/usage`, each
+      with `?format=csv|json|xlsx`. Identity always from the verified Firebase token (own data only).
+      Pure, unit-tested `toCsv` (RFC-4180 escaping, union-of-keys header) + `toXlsxBuffer` (via the already-
+      present `xlsx`). Download headers (Content-Type + Content-Disposition) set per format.
+- [ ] **PDF deferred (honest):** needs a renderer dep (pdfkit) not in the project — per "real features only"
+      it is NOT stubbed; CSV/JSON/Excel ship now (zero new deps).
+- **Files:** `src/server/routes/export.ts` (new) + `export.test.ts` (7 tests), `server.ts` (registration).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 5039/5039 ✅ (7 new) ·
+      build ✅ · boot:check PASS.
 
 ---
 

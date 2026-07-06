@@ -10046,3 +10046,12 @@ Run scale-to-0 needs Cloud Scheduler/Cloud Tasks (infra follow-up); the in-proce
 instance is alive.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5032/5032 PASS (11 new), build PASS, boot:check PASS.
+
+## 2026-07-05 — P-DATA.7: user data export (CSV/JSON/Excel)  ✅ DONE
+
+Users could import but not EXPORT their data. New src/server/routes/export.ts: GET /api/export/build-history
+and GET /api/export/usage, each ?format=csv|json|xlsx. Identity always from the verified Firebase token
+(own data only). Pure, unit-tested toCsv (RFC-4180 escaping, union-of-keys header) + toXlsxBuffer (via the
+already-present xlsx dep). Download headers per format. PDF deferred honestly (needs pdfkit, not stubbed).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5039/5039 PASS (7 new), build PASS, boot:check PASS.

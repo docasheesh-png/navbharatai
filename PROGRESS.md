@@ -9896,3 +9896,22 @@ SAFETY: inert when the queue is empty (nothing enqueues it in the main flow yet 
 are #5), serial (one build at a time per app), pauses on error, additive. The full loop (enqueue →
 auto-run in order → complete) is now real end-to-end.
 Gate: frontend tsc 0, server tsc 0, vitest 4970/4970 PASS, build PASS, boot PASS.
+## 2026-07-05 — P-BRE.6 recovery core: build jobs no longer lost SILENTLY on restart
+
+Started the next roadmap track after App.tsx (P3.1 high-value pass banked) + P4/P5 complete. P-BRE.6 full
+vision (BullMQ/Redis or Cloud Tasks queue that RE-EXECUTES an interrupted build) is infra-blocked, but its
+most important symptom — in-flight build jobs lost SILENTLY when Cloud Run scales to 0 / crashes mid-build
+(stuck forever in e.g. BUILDING, user never told) — is fixable with ZERO infra and shipped now:
+- New pure jobRecovery.ts: isStaleInFlight (a non-terminal job whose updatedAt heartbeat — already bumped
+  on every updateStatus — is older than a 10-min threshold is an orphan; terminals + bad timestamps never
+  flagged), staleRecoveryLog. Type-only import of BuildJob + string-literal statuses to avoid a runtime
+  import cycle with BuildJobManager.
+- BuildJobManager.recoverStaleJobs(): scans the store, marks each orphan FAILED with an honest reason,
+  which fires the existing P-BRE.7 notification so the user is told. Best-effort, never throws.
+- Wired on server boot (server.ts listen callback, fire-and-forget) → a restart honestly reconciles the
+  previous instance orphaned builds instead of leaving them stuck.
+Honest scope: true auto-RESUME still needs a queue backend (Redis/Cloud Tasks) → recorded as infra-blocked,
+not stubbed. Recovery makes the loss honest + non-silent today.
+
+Gate: frontend tsc 0, server tsc 0, vitest 4972/4972 PASS (9 new in jobRecovery.test.ts), build PASS,
+boot:check PASS (boot exercised the recovery pass).

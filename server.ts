@@ -574,6 +574,13 @@ setInterval(() => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       // P2.4 — the server is initialized and listening → readiness probe goes green.
       markServerReady();
+      // P-BRE.6 — recover build jobs orphaned by a previous instance's restart/crash: any job left
+      // in a non-terminal status with a stale heartbeat is honestly marked FAILED (never silently
+      // stuck). Fire-and-forget + self-guarded so it can never delay or crash startup.
+      import('./src/server/AppMakerLab/jobs/BuildJobManager')
+        .then(({ BuildJobManager }) => BuildJobManager.recoverStaleJobs())
+        .then((ids) => { if (ids.length) console.log(`[P-BRE.6] recovered ${ids.length} orphaned build job(s):`, ids.join(', ')); })
+        .catch(() => { /* best-effort — recovery must never affect boot */ });
     });
 
     // WebSocket / HMR reverse proxy for live previews. The HTTP side is handled

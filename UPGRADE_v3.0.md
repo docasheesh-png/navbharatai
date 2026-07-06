@@ -1053,14 +1053,26 @@
   fewer moving parts, uses infra that already exists (Artifact Registry), zero new failure surface on the deploy.
 - **Files:** `cloudbuild.yaml` (Dockerfile already cache-friendly from P-BRE.13).
 
-### P-BRE.6 — Durable Background Job Queue (Build Jobs Survive Restarts)  ❌ MISSING  [MED]
-- `BuildJobManager.ts` stores jobs in Firestore but the actual build *execution* is in-memory Promise chains.
-  If Cloud Run scales to 0 mid-build (min-instances=0) or crashes, in-flight jobs are lost silently.
-- [ ] Add a job queue layer (BullMQ with Redis, or a Cloud Tasks trigger) so each build job is enqueued as a durable task.
-- [ ] Worker picks up job from queue, executes build, marks complete in Firestore — survives server restarts.
-- [ ] `BuildJobManager.ts` becomes the queue producer; a dedicated `BuildWorker.ts` is the consumer.
-- **Files:** `src/server/AppMakerLab/jobs/BuildJobManager.ts`, new `src/server/AppMakerLab/jobs/BuildWorker.ts`,
-  new `src/server/AppMakerLab/jobs/BuildQueue.ts`.
+### P-BRE.6 — Durable Background Job Queue (Build Jobs Survive Restarts)  🟡 RECOVERY-CORE DONE (2026-07-05) · 🔌 WIRED  [MED]
+- `BuildJobManager.ts` persists jobs, but the build *execution* is an in-memory Promise chain. If Cloud
+  Run scales to 0 mid-build or crashes, an in-flight job was lost **silently** — stuck forever in e.g.
+  `BUILDING`, with the user never told.
+- [x] **No-silent-loss recovery (the important half, shipped, ZERO infra):** `jobRecovery.ts` — pure,
+      tested staleness rule (`isStaleInFlight`: a non-terminal job whose `updatedAt` heartbeat — already
+      bumped on every `updateStatus` — has gone stale past a 10-min threshold is an orphan; terminal jobs
+      and unreadable timestamps are never flagged). `BuildJobManager.recoverStaleJobs()` scans the store,
+      marks each orphan `FAILED` with an honest reason, which fires the existing P-BRE.7 build
+      notification so the user is told. Best-effort (never throws). **Wired on server boot** (server.ts
+      listen callback, fire-and-forget) so a restart honestly reconciles the previous instance's
+      orphaned builds instead of leaving them stuck.
+- [ ] **Still infra-blocked (honest):** full queue-based RE-EXECUTION of an interrupted build (BullMQ+Redis
+      or Cloud Tasks + a dedicated `BuildWorker.ts`) needs external infra this project does not have, so
+      it is NOT stubbed. Recovery makes the loss *honest and non-silent* today; true auto-resume is the
+      follow-up once a queue backend exists (needs admin infra sign-off).
+- **Files:** `src/server/AppMakerLab/jobs/jobRecovery.ts` (new), `jobRecovery.test.ts` (new, 9 tests),
+      `BuildJobManager.ts` (recoverStaleJobs), `server.ts` (boot wiring).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 4972/4972 ✅ (9 new)
+      · `npm run build` ✅ · `npm run boot:check` PASS (boot ran the recovery pass).
 
 ### P-BRE.7 — Build & Deploy Notifications  ✅ DONE (2026-06-29, webhook channel)
 - Background/agent-triggered builds were silent — no signal on completion/failure.

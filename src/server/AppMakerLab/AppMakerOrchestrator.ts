@@ -22,6 +22,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { BuildJobManager, JobStatus } from './jobs/BuildJobManager';
 import { log, withLogContext } from '../logger';
+import { scopeChangeController } from './intelligence/ScopeChangeController';
 
 export class AppMakerOrchestrator {
     static async execute(prompt: string, namespace: string = 'default', idempotencyKey?: string): Promise<AppMakerExecutionResult> {
@@ -29,19 +30,31 @@ export class AppMakerOrchestrator {
         // P1.4 — when an idempotency key is supplied, a retried/duplicate request reuses the
         // same job instead of double-running. createJob returns the existing job id in that case.
         const existing = idempotencyKey ? await BuildJobManager.findExisting(idempotencyKey) : null;
-        const jobId = await BuildJobManager.createJob(prompt, idempotencyKey);
-
-        // Only spawn the background worker for a genuinely NEW job — never re-run a build
-        // that the idempotency key already started.
-        if (!existing || existing.id !== jobId) {
-            this.runBuildJob(jobId, prompt, namespace);
+        // Idempotent reuse: return the same in-flight/succeeded job, never a second build (or scope lock).
+        if (existing) {
+            return { success: true, files: [], message: `Build job ${existing.id} reused (idempotent).` };
         }
 
-        return {
-            success: true,
-            files: [],
-            message: `Build job ${jobId} ${existing && existing.id === jobId ? 'reused (idempotent)' : 'started'}.`
-        };
+        // P-PME.6 — scope-change control: serialize builds per namespace. If a build is already running
+        // for this workspace, DEFER this change (queued + applied after) instead of starting a second
+        // build that would race the first and corrupt workspace state. submit() is atomic (decide +
+        // mark-active) so two near-simultaneous requests can't both proceed.
+        const decision = scopeChangeController.submit(namespace, prompt);
+        if (decision.action === 'defer') {
+            return { success: true, files: [], message: decision.message ?? 'Build in progress — your change was queued.' };
+        }
+
+        let jobId: string;
+        try {
+            jobId = await BuildJobManager.createJob(prompt, idempotencyKey);
+        } catch (err) {
+            // Never leave the namespace locked if we failed before the build even started.
+            scopeChangeController.complete(namespace);
+            throw err;
+        }
+        this.runBuildJob(jobId, prompt, namespace);
+
+        return { success: true, files: [], message: `Build job ${jobId} started.` };
     }
 
     static async runBuildJob(jobId: string, prompt: string, namespace: string) {
@@ -121,6 +134,13 @@ export class AppMakerOrchestrator {
         } catch (error: any) {
             log.error('build failed', { error: String(error?.message ?? error) });
             await BuildJobManager.updateStatus(jobId, JobStatus.FAILED, 0, `Error: ${error.message}`);
+        } finally {
+            // P-PME.6 — this build for `namespace` is finished (success OR failure): release the scope
+            // lock and apply any changes the user queued mid-build. Each re-enters execute() — the first
+            // proceeds, the rest re-queue behind it — so a mid-build change is never silently dropped.
+            for (const queuedPrompt of scopeChangeController.complete(namespace)) {
+                this.execute(queuedPrompt, namespace);
+            }
         }
       });
     }

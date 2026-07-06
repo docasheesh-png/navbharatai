@@ -1481,15 +1481,26 @@
 - **Files:** new `src/server/lib/BuildRetrospectiveEngine.ts` + `.test.ts`, `src/server/routes/agentv3.ts`,
   `src/server/routes/retrospective.ts`.
 
-### P-PME.6 — Scope Change Control (mid-build requirement change)  ❌ MISSING  [MED]
-- If a user sends a new prompt while a build is in progress (changing scope mid-flight), the system
-  has no handler. The new request races with the running build and can corrupt workspace state.
-- [ ] Add `ScopeChangeController.ts` — detect when a new AI request arrives while `BuildJobManager`
-  reports status === 'building'. Options: (a) queue the new request for after build, (b) abort current
-  build + restart with merged requirements, (c) reject with "Build in progress — please wait".
-- [ ] Show a user-facing "Build in progress — your change will be applied after this completes" message.
-- **Files:** new `src/server/AppMakerLab/intelligence/ScopeChangeController.ts`,
-  `src/server/AppMakerLab/jobs/BuildJobManager.ts`, `server.ts`.
+### P-PME.6 — Scope Change Control (mid-build requirement change)  ✅ DONE (2026-07-05) · 🔌 WIRED  [MED]
+- Before: a NEW build request for a workspace while a build was already running RACED the first — two
+  builders writing the same files → corrupt workspace state, with no handler.
+- [x] **`ScopeChangeController.ts`** — a pure, unit-tested per-namespace coordinator implementing option
+      (a) "queue for after build" (safest — one builder per workspace, and the user's change is never
+      dropped). `submit(namespace, prompt)` is **atomic** (decide + mark-active in one synchronous call)
+      so two near-simultaneous requests can't both proceed: the first PROCEEDS, any request arriving while
+      that build is in flight is DEFERRED — queued (capped at 10) with an honest "🛠️ a build is in
+      progress — your change has been queued and will be applied automatically once it finishes" message.
+      `complete(namespace)` releases the lock + returns the queued prompts FIFO.
+- [x] **Wired into `AppMakerOrchestrator`:** `execute()` consults `submit()` and, on DEFER, returns the
+      honest message WITHOUT starting a racing second build; `runBuildJob()`'s `finally` calls
+      `complete()` (on success OR failure) and re-`execute()`s each queued change (the first proceeds, the
+      rest re-queue behind it) — so a mid-build change is applied right after, never silently dropped.
+      Idempotent reuse short-circuits before the scope lock; a create failure releases the lock.
+- **Files:** `src/server/AppMakerLab/intelligence/ScopeChangeController.ts` (new) + `.test.ts` (8 tests),
+      `src/server/AppMakerLab/AppMakerOrchestrator.ts` (wiring).
+- **Verification:** `tsc --noEmit` ✅ · `tsc -p tsconfig.server.json` ✅ · `vitest run` 5021/5021 ✅ (8 new:
+      proceed/defer, namespace independence, FIFO drain, re-proceed, queue cap, pluralized message) ·
+      build ✅ · boot:check PASS.
 
 ### P-PME.7 — Changelog Manager  ✅ DONE (2026-06-29)
 - No structured changelog of what changed between builds.

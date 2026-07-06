@@ -260,6 +260,24 @@ export interface ImportValidation {
   hasPackageJson: boolean;
 }
 
+/**
+ * Does the `dev` (or start/serve) script LAUNCH A NODE SERVER (tsx/ts-node/node/nodemon on a
+ * server entry) rather than a Vite/framework dev server? This is the tell of a Replit/Lovable-style
+ * FULL-STACK export where the Express/Fastify server ALSO serves the frontend — so the preview must
+ * boot on the server's port (Express default 3000), NOT the Vite 5173 that a pure-frontend guess used
+ * (the exact "did not come up on port 5173" Mitrify failure). Pure.
+ */
+export function devScriptRunsNodeServer(pkgRaw: string | undefined): boolean {
+  if (!pkgRaw) return false;
+  let scripts: Record<string, unknown> = {};
+  try { scripts = (JSON.parse(pkgRaw) as { scripts?: Record<string, unknown> }).scripts ?? {}; } catch { return false; }
+  const cmd = ['dev', 'start', 'serve'].map((s) => (typeof scripts[s] === 'string' ? (scripts[s] as string) : '')).join(' ; ').toLowerCase();
+  if (!cmd.trim()) return false;
+  // A real node-server launcher on a server entry (server.ts, server/index.ts, src/server, app.ts…).
+  return /\b(tsx|ts-node|nodemon|node)\b[^;]*\b(server|app|index|main|backend|api)\b/.test(cmd)
+    || /\bnodemon\b/.test(cmd);
+}
+
 /** Map an imported project's package.json to the framework ids v3.0 already understands. Pure. */
 export function detectImportedFramework(files: Record<string, string>): string {
   const pkgRaw = files['package.json'];
@@ -274,14 +292,20 @@ export function detectImportedFramework(files: Record<string, string>): string {
     return 'vite-react';
   }
   const has = (name: string) => Object.prototype.hasOwnProperty.call(deps, name);
+  // Meta-frameworks own their run/port regardless of a server dep, so match them first.
   if (has('next')) return 'nextjs';
   if (has('@remix-run/react') || has('@remix-run/node')) return 'remix';
   if (has('nuxt')) return 'nuxt';
   if (has('@sveltejs/kit')) return 'sveltekit';
+  if (has('astro')) return 'astro';
+  // FULL-STACK (Replit/Lovable export): a frontend framework + a Node server whose OWN dev script boots
+  // it (Express/Fastify serving the client). The Node server is the run target → node-express (port
+  // 3000), not the frontend's Vite port. This is what makes a monorepo client/+server/ app's live
+  // preview actually come up instead of waiting forever on 5173.
+  if ((has('express') || has('fastify') || has('koa')) && devScriptRunsNodeServer(pkgRaw)) return 'node-express';
   if (has('svelte')) return 'svelte';
   if (has('vue')) return 'vue';
   if (has('@angular/core')) return 'angular';
-  if (has('astro')) return 'astro';
   if (has('react')) return 'vite-react';
   if (has('express') || has('fastify')) return 'node-express';
   return 'vanilla';

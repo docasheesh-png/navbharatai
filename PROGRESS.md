@@ -10883,3 +10883,35 @@ for ANY reason (network drop, oversized response, server hiccup), `downloadDiagn
 to the single LATEST report via the existing `getLatestDiagnostics` ladder (server latest → per-user
 durable → client-local copy). "No build report yet" is only shown when every rung returned nothing.
 A slightly smaller report always beats no report. Gate: frontend tsc 0, vitest 5280/5280.
+
+## 2026-07-06 — Fix 10: COMPLETE-APP LANE — sonnet-tier new builds take the deterministic manifest lane first (admin: "v3.0 complete app bana nahi pa raha")
+
+**The evidence (today's real runs):** the manifest-driven Simple-Builder lane WON every time it ran
+(login page 27 steps/1m23s ✓, 33 steps/2m52s ✓ — complete, compiling, preview-verified). The free-form
+multi-agent agentic path LOST every time it ran on a new build (98 steps/10min ✗, 148 steps/29min ✗ —
+sub-agents re-explored the project from scratch, created files beyond scope, deleted and rebuilt them,
+one asked "Would you like me to run additional checks?" into the void, and both died at the wall clock
+with no complete app). Model strength was never the difference — the lane already runs on SONNET
+(fastBuildModel); the only thing keeping complex prompts out was the classifyForOneShot gate
+(gemini/haiku only).
+
+**The DNA-level fix (fix the class, keep the safety net):**
+- New pure `classifyForSimpleLane(tier)` = gemini | haiku | **sonnet** → the deterministic lane
+  (complete file manifest up front (≤40 files) → frozen shared contract → every file generated in its
+  own focused Sonnet pass → tsc verify + CSS-consistency → bounded repair → preview). Opus/power mode
+  keeps the full agentic experience the user explicitly chose.
+- The agentic loop is UNCHANGED and remains: (a) the automatic fallback when the lane fails (the lane's
+  documented "never worse than today" contract), (b) the engine for ALL edits, imports, and
+  project-module turns.
+- OneShot secondary stays trivial-only (classifyForOneShot): a complex app can't fit one 8k call — a
+  failed sonnet lane falls straight to the agentic loop.
+- Blueprint pre-step now skips lane-eligible builds (its manifest+contract would be wasted).
+- COMPLETENESS BACKSTOP: sonnet-tier lane builds now DO run the post-build reviewer (tsc proves it
+  compiles; only the reviewer checks it is feature-complete vs the request) with C9 auto-fix of
+  [CRITICAL] findings — bounded 90s+120s, can't stall the finish.
+- Tests: OneShotBuilder +2 (lane includes sonnet, opus/undefined stay agentic). Gate: frontend tsc 0,
+  server tsc 0, vitest 5282/5282, boot PASS.
+- **Honest scope note (rule 6):** this reroutes NEW complex builds onto the proven deterministic path;
+  the multi-agent loop's own churn (redundant re-exploration, out-of-scope file creation) is still real
+  for the cases that keep it (edits/imports/opus/fallback) — that orchestration-quality overhaul is the
+  next big project, now with much smaller blast radius.

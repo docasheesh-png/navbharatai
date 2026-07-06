@@ -3,6 +3,7 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { listMembers } from '../lib/TeamStore';
 import { teamLibraryStore, buildLibraryItem, normalizeKind, type LibraryKind } from '../lib/TeamLibraryStore';
+import { resolveMentions } from '../lib/MentionRouter';
 
 /**
  * P-COLLAB.4 — team-scoped shared library (prompts / templates / components).
@@ -24,6 +25,18 @@ async function activeMemberUid(req: Request, teamId: string): Promise<string | n
 }
 
 export function registerTeamLibraryRoutes(app: Express): void {
+  // P-COLLAB.5 (resolution core) — resolve @mentions in a text to the team's ACTIVE members.
+  app.post('/api/team/:teamId/mentions/resolve', async (req: Request, res: Response) => {
+    const teamId = String(req.params.teamId || '');
+    const uid = await activeMemberUid(req, teamId);
+    if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
+    const text = typeof req.body?.text === 'string' ? req.body.text : '';
+    const members = await listMembers(teamId).catch(() => []);
+    // The owner is an implicit active member (teamId === owner uid) — include them so @owner resolves.
+    const resolvable = [...members.map((m) => ({ uid: m.uid, email: m.email, status: m.status }))];
+    res.json(resolveMentions(text, resolvable));
+  });
+
   app.get('/api/team/:teamId/library', async (req: Request, res: Response) => {
     const teamId = String(req.params.teamId || '');
     const uid = await activeMemberUid(req, teamId);

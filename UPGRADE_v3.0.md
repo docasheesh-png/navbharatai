@@ -2932,11 +2932,18 @@
 - **Files:** new `src/server/lib/TeamLibraryStore.ts` (+`.test.ts`, 6), `routes/teamLibrary.ts`, `server.ts`,
   new `src/components/ide/TeamLibraryPanel.tsx`, `TeamCollaboration.tsx`, `AppKnowledgeBase.ts`.
 
-### P-COLLAB.5 — Team @Mention + Notification Routing  ❌ MISSING  [LOW]
-- No `@mention` of teammates in the workspace and no routing of an event (mention, role-change, share) to the right
-  member. (Inline-code comments are P-DEV.11; this is workspace-level mention + routing.)
-- [ ] Add an `@mention` picker in chat/comments; route mentions to in-app + email (reusing P-BRE.7 notification delivery).
-- **Files:** `src/components/ide/LiveCollaboration.tsx`, new `src/server/lib/MentionRouter.ts`.
+### P-COLLAB.5 — Team @Mention + Notification Routing  🟡 RESOLUTION-CORE DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- [x] **`MentionRouter.ts`** (pure, unit-tested) — `parseMentions(text)` finds distinct `@handle` tokens (ignoring
+  in-prose email addresses), and `resolveMentions(text, members)` resolves each to an ACTIVE team member by email
+  local-part or full email (case-insensitive), deduped by uid, with an `unresolved` list. Exposed at
+  `POST /api/team/:teamId/mentions/resolve` (active-member-gated) — any collaboration surface can call it to know
+  exactly who was mentioned. AppKnowledgeBase entry added.
+- **Honest scope (rule 6):** resolution is complete. Actually DELIVERING the notification (in-app inbox + email)
+  needs a **per-user in-app notification store that does not exist yet** — recorded here as the open remaining
+  piece rather than stubbed. The existing `NotificationManager` is webhook-based build notifications, not a user
+  @mention inbox, so wiring delivery is a separate feature.
+- [ ] Add the in-app notification store + email delivery, and an `@mention` picker UI in chat/comments.
+- **Files:** new `src/server/lib/MentionRouter.ts` (+`.test.ts`, 11), `src/server/routes/teamLibrary.ts`, `AppKnowledgeBase.ts`.
 
 ### P-COLLAB.6 — SSO / Identity Federation (SAML / OIDC)  ❌ MISSING  [LOW — enterprise]
 - Auth is Firebase OAuth (Google) + phone OTP only; there is no SAML/OIDC SSO or directory federation for enterprise

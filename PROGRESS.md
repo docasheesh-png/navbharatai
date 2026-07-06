@@ -10698,3 +10698,14 @@ source of truth): empty → "couldn't find your saved files to restore… try ag
   without a live E2B sandbox. RC-1 makes the engine ROBUST to it (the authoritative launcher verdict now
   wins), but the underlying sandbox-process behavior needs a real-sandbox repro to pin definitively.
 - Fix 3 of 5. Remaining: Fix 5 (auto-provision DB for Drizzle/pg imports).
+## 2026-07-06 — P-COLLAB.5 (resolution core): @mention router  🟡 RESOLUTION-CORE DONE
+
+New src/server/lib/MentionRouter.ts (pure, unit-tested): parseMentions(text) finds distinct @handle tokens
+(ignoring in-prose email addresses), resolveMentions(text, members) resolves each to an ACTIVE team member by
+email local-part or full email (case-insensitive), deduped by uid, with an unresolved list. Exposed at
+POST /api/team/:teamId/mentions/resolve (active-member-gated, in routes/teamLibrary.ts). AppKnowledgeBase
+team-mentions entry. Honest scope (rule 6): resolution is complete; DELIVERING a notification (in-app inbox +
+email) needs a per-user in-app notification store that doesn't exist yet — recorded as the open piece, not
+stubbed (NotificationManager is webhook build-notifications, not a user @mention inbox).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5251/5251 PASS (11 new), boot:check PASS.

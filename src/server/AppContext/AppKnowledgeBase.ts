@@ -1730,6 +1730,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['deploy risk', 'aiops', 'release risk', 'incident analysis', 'rca', 'root cause', 'rollback', 'deployment risk', 'risk score', 'pre-deploy check', 'incident'],
   },
   {
+    id: 'team-mentions',
+    name: 'Team @Mentions (resolution)',
+    path: 'API — POST /api/team/:teamId/mentions/resolve',
+    description: `Resolves @mentions in a piece of text to the ACTIVE members of a team. Given text like "please review @alice and @bob", it returns exactly which team members were mentioned (matched by their email local-part or full email, deduped) plus any handles that matched nobody. Any collaboration surface (comments, chat, the team library) can use it to know precisely who was tagged. Active-member-gated. Note: this is the resolution layer — delivering an actual notification to a mentioned user (in-app inbox + email) is a separate, not-yet-built piece.`,
+    howToUse: 'A collaboration surface POSTs { "text": "…@handle…" } to /api/team/:teamId/mentions/resolve (as an active team member) and receives the list of mentioned members to act on.',
+    relatedFeatures: ['team-library', 'team-collaboration'],
+    keywords: ['mention', 'at mention', '@mention', 'tag teammate', 'notify member', 'mention resolution', 'team tagging', 'ping teammate'],
+  },
+  {
     id: 'team-library',
     name: 'Team Library (shared prompts / templates / components)',
     path: 'Team Collaboration panel → Team Library',

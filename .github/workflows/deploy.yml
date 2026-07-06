@@ -32,6 +32,25 @@ jobs:
             echo "::notice::GCP_SA_KEY / GCP_PROJECT_ID not set — skipping deploy. Add them to enable auto-deploy."
           fi
 
+      # P-DEPLOY.5 — Release freeze/approval gate. Honors the opt-in gate served at
+      # ${RELEASE_GATE_URL} (e.g. https://<app>/api/release/gate). If the secret is unset the check is
+      # skipped (no enforcement); if set and the gate returns allowed:false, the deploy is BLOCKED.
+      - name: Check release gate
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          URL="${{ secrets.RELEASE_GATE_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::notice::RELEASE_GATE_URL not set — release gate check skipped."
+            exit 0
+          fi
+          RESP="$(curl -fsS "${URL}?sha=${{ github.sha }}" || echo '{"allowed":true,"reason":"gate unreachable — failing open"}')"
+          echo "Release gate: $RESP"
+          ALLOWED="$(printf '%s' "$RESP" | grep -o '"allowed":[a-z]*' | head -1 | cut -d: -f2)"
+          if [ "$ALLOWED" = "false" ]; then
+            echo "::error::Release gate is CLOSED — deploy blocked. $RESP"
+            exit 1
+          fi
+
       - name: Checkout
         if: steps.guard.outputs.ready == 'true'
         uses: actions/checkout@v4

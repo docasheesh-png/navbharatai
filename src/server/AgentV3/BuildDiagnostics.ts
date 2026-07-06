@@ -775,6 +775,33 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
  * `reports` must already be ordered oldest → newest by the caller (the route sorts the history by
  * startedAt). A single-build session degrades to essentially the per-build report with a session header.
  */
+/**
+ * Bound the whole-session report payload to a byte budget so the download can actually LOAD.
+ *
+ * ROOT CAUSE (admin, 2026-07-06 — "build report bhi fail! Load failed"): scope=session stitched up to
+ * 20 FULL reports (each up to ~2 MB: 2000 timeline issues + 300 LLM calls × 4 KB previews + 300
+ * command logs) into ONE JSON response — tens of MB, which mobile Safari's fetch dies on ("Load
+ * failed") and which can exceed the response-size limit. The fix is honest truncation, newest-first:
+ * keep the most recent builds whole (they're what the autopsy needs), drop the OLDEST ones once the
+ * budget is spent, and tell the caller exactly how many were omitted — never a silently huge payload,
+ * never a silently incomplete one. Always keeps at least the newest build even if it alone exceeds
+ * the budget. `reports` are ordered oldest → newest (the route's order); the kept slice preserves it.
+ * PURE + unit-tested.
+ */
+export function capSessionReports<T>(reports: readonly T[], maxBytes = 6_000_000): { kept: T[]; omitted: number } {
+  if (!reports || reports.length === 0) return { kept: [], omitted: 0 };
+  const kept: T[] = [];
+  let bytes = 0;
+  for (let i = reports.length - 1; i >= 0; i--) {
+    let size = 0;
+    try { size = JSON.stringify(reports[i])?.length ?? 0; } catch { size = maxBytes; /* unserializable → treat as huge */ }
+    if (kept.length > 0 && bytes + size > maxBytes) break; // newest is always kept, even if huge
+    kept.unshift(reports[i]);
+    bytes += size;
+  }
+  return { kept, omitted: reports.length - kept.length };
+}
+
 export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsReport[]): string {
   if (!reports || reports.length === 0) {
     return 'NavBharatAI Pro v3.0 — Full Session Build Report\n' + '='.repeat(52) + '\nNo builds recorded in this session yet.\n';

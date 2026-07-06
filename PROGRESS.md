@@ -10835,3 +10835,41 @@ anytime). Next phases: clearer 3-side UI + build-aware responses + Advise capabi
 (Scan bugs / Compare / Speed test / Security scan / …).
 
 Gate: frontend tsc 0, vitest 5234/5234 PASS, build PASS. Client-only; server role lane unchanged.
+## 2026-07-06 — Fix 9: the 29-min "SaaS landing page" (one word mis-routed a one-page site to the deep multi-agent pipeline) + "Load failed" report download
+
+Admin re-ran the landing-page prompt: **148 steps / 29m 16s**, died at the wall clock with a dead dev
+server ("Closed Port Error" on 5173) and the report download failing with Safari's "Load failed".
+
+**RC-1 — the word "SaaS" (routing, the primary root cause).** "Make a modern **SaaS** landing page…"
+matched `COMPLEX_APP_SIGNAL` via the category word `saas`, and `detectTaskType` checks complex-app
+BEFORE simple-app ("landing page") → task `complex_app`, base 58 → **sonnet tier** → fast lane skipped
+(`classifyForOneShot` false) → deep pipeline (blueprint narration confirms `buildDepth='deep'`) + the
+multi-sub-agent loop → 148 steps/29 min → wall-clock death. The earlier identical failure (98 steps/
+10 min) was the same route. The class bug: **a category word names the page's THEME, not its SCOPE** —
+"SaaS landing page" is one marketing page about a SaaS, not a SaaS platform. Fix in the SINGLE source
+of truth (`appComplexitySignals.isComplexAppPrompt`): when the deliverable is page-scoped (new
+`PAGE_DELIVERABLE_SIGNAL`: landing page / portfolio site / single page / splash / coming-soon), strip
+pure THEME words (saas/crm/erp/e-commerce/marketplace/social/…) and stay "complex" only if a real
+build-scope signal remains (auth, database, backend, payment, checkout, …). `RequestAnalyser` now calls
+`isComplexAppPrompt` instead of the raw regex, so the TIER verdict and the DEPTH/ETA verdict can never
+drift (the original centralization guarantee, now both page-aware). Result: the exact prompt →
+`simple_app`, tier gemini → the ~2-min fast lane (like the 27-step/1m23s login page). "SaaS landing
+page with login system and stripe checkout" stays complex — scope words are never discounted.
+
+**RC-2 — "Load failed" on the Build report.** `scope=session` stitched up to 20 FULL reports (each up
+to ~2 MB: 2000 timeline issues + 300 LLM calls × 4 KB previews + 300 command logs) into one unbounded
+JSON response — tens of MB, which mobile Safari's fetch dies on. Fix: pure `capSessionReports(reports,
+6MB)` — newest builds kept whole (they're what the autopsy needs), OLDEST dropped once the budget is
+spent, always ≥ the newest build, and the response now carries an honest `omittedBuilds` count (never a
+silently-huge payload, never a silently-incomplete one). Applied to both the JSON and text formats.
+
+- Tests: appComplexitySignals +4 (incl. the EXACT mis-routed prompt), RequestAnalyser +3 (prompt →
+  simple_app/fast-lane tier; scope-ful page stays sonnet; real SaaS platform unchanged),
+  BuildDiagnostics +4 (capSessionReports: under-budget keeps all / drops oldest / never empty / empty-in
+  empty-out). Gate: frontend tsc 0, server tsc 0, vitest 5280/5280, boot PASS.
+- **Open root causes (rule 6, honestly recorded):** (a) on genuinely complex agentic builds, sub-agents
+  still churn (created files beyond scope, deleted, rebuilt — visible in this report's transcript);
+  that's an orchestration-quality project, sharply reduced for simple prompts by this routing fix but
+  not eliminated for real complex apps. (b) WHY the dev server that was up mid-build was dead at the
+  end of the 29-min run (wall-clock kill path vs sandbox process lifetime) needs a live-sandbox repro;
+  the routing fix removes the 29-min class for simple prompts that exposed it.

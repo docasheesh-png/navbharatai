@@ -15,6 +15,7 @@ import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
+import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
 import { trackEvent } from '../../lib/analytics';
@@ -67,7 +68,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -712,6 +713,49 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
+
+  // ── FIX #4.3: client-driven QUEUE executor ──────────────────────────────────────────────────────
+  // After a build SETTLES (and it is NOT a resumable SPM continue — handled above), this: (1) records
+  // the outcome of the queued command that was running, then (2) claims + auto-submits the next queued
+  // command. Runs one step at a time (the serial invariant), pauses on error, and is inert when the
+  // queue is empty (the server short-circuits /queue/next without a write). shouldRunNextQueued is the
+  // pure, tested gate; the two refs prevent double-complete and re-entrant double-submit.
+  const activeQueuedItemRef = useRef<string | null>(null);
+  const queueClaimInFlightRef = useRef(false);
+  useEffect(() => {
+    const hasError = !!(error || state.error);
+    // (1) A queued command's build just settled → record its outcome (a failure pauses the queue below).
+    if (state.done && !running && activeQueuedItemRef.current) {
+      const ok = !hasError && state.ok !== false;
+      activeQueuedItemRef.current = null;
+      void queueComplete(expectedWorkspaceId(), ok, ok ? undefined : (error || state.error || 'build did not complete'));
+    }
+    // (2) Idle after a non-resumable settle → claim + run the next queued command.
+    if (!shouldRunNextQueued({
+      running,
+      buildSettled: state.done && !running && !state.resumable,
+      pendingGate: !!state.pendingPermission,
+      hasError,
+      claimInFlight: queueClaimInFlightRef.current,
+    })) return;
+    queueClaimInFlightRef.current = true;
+    void (async () => {
+      try {
+        const item = await queueNext(expectedWorkspaceId());
+        if (!item) return;
+        activeQueuedItemRef.current = item.id;
+        setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
+        if (state.narration.length > 0) {
+          setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
+        }
+        try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
+        start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
+      } finally {
+        queueClaimInFlightRef.current = false;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.done, state.resumable, running, state.pendingPermission, error, state.error]);
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat. Allowed even
   // while a build is actively streaming HERE — reset() detaches from that stream (the underlying

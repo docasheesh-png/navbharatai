@@ -9874,3 +9874,25 @@ SAFETY: entirely additive — new collection `build_queues_v3`, new endpoints, n
 The queue does not auto-execute yet (that's #4.3, the serial executor) — until then it's a durable,
 manageable command list.
 Gate: frontend tsc 0, server tsc 0, vitest 4963/4963 PASS, build PASS, boot PASS.
+
+## 2026-07-05 — Concurrency FIX #4.3: client-driven serial queue EXECUTOR (queue now auto-runs)
+
+Completes the queue's execution (admin chose the client-driven model A). While a v3.0 chat is open,
+whenever a build SETTLES and the app is idle, the client claims the next queued command and auto-submits
+it — a user's queued roadmap (and later the planner/advisor chats' enqueued work) runs one step at a
+time, hands-free. Closing the tab PAUSES the queue; it resumes on reopen (nothing lost).
+
+- New pure `queueExecutor.ts` `shouldRunNextQueued` (7 tests): runs the next ONLY when idle after a
+  settled build, no gate open, no error (a failure PAUSES the queue — honest, user decides), and no
+  claim already in flight.
+- Server: POST /queue/next (atomically CLAIM the next pending → 'running'; cheap short-circuit — a
+  cached read returns claimed:null WITHOUT a transaction/write when the queue is empty or one is already
+  running, so non-queue builds cost ~nothing) + POST /queue/complete (mark the running item done/failed).
+- Hook: queueNext / queueComplete. Panel: a guarded executor effect (two refs prevent double-complete +
+  re-entrant double-submit) that completes the finished queued item, then claims + submits the next —
+  mutually exclusive with the SPM resumable auto-continue (this fires only on a NON-resumable settle).
+
+SAFETY: inert when the queue is empty (nothing enqueues it in the main flow yet — the planner/advisor
+are #5), serial (one build at a time per app), pauses on error, additive. The full loop (enqueue →
+auto-run in order → complete) is now real end-to-end.
+Gate: frontend tsc 0, server tsc 0, vitest 4970/4970 PASS, build PASS, boot PASS.

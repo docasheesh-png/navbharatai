@@ -10641,3 +10641,16 @@ large-project file count is 0 at decision time — P1 (large→Sonnet, #997) cou
 - Tests: agentv3.test.ts +3 (large→strong; the Mitrify fix: import→strong even at 0 files; small
   non-import stays on the ladder). Gate: server tsc 0, vitest 5234/5234, boot PASS.
 - Fix 4 of 5. Remaining: Fix 3 (cold-sandbox hydration), Fix 5 (auto-provision DB for Drizzle/pg imports).
+## 2026-07-06 — P-COLLAB.4: team-scoped shared library  ✅ DONE
+
+Added a team-scoped curated library (the global SyncedTemplates/ComponentLibrary stay as-is). New
+src/server/lib/TeamLibraryStore.ts (Firestore teams/{teamId}/library/{itemId}, VITEST-skip; pure
+buildLibraryItem/normalizeKind unit-tested) — prompts/templates/components, title+content, 200 KB cap,
+newest-first. Member-gated routes GET/POST/DELETE /api/team/:teamId/library (routes/teamLibrary.ts) — fail-closed:
+only the team owner (teamId===uid) or an ACTIVE member (via TeamStore.listMembers) may read/contribute; deletes
+are path-scoped so cross-team deletes are impossible. Self-contained TeamLibraryPanel.tsx (save with
+kind/title/content, copy-to-clipboard, delete) mounted in TeamCollaboration. AppKnowledgeBase team-library entry.
+
+Live smoke: /api/team/:id/library without auth → 403 (fail-closed). Tests: TeamLibraryStore.test.ts (6).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5232/5232 PASS (6 new), build PASS, boot:check PASS.

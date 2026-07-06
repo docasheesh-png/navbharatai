@@ -10608,3 +10608,21 @@ step could break all deploys). AppKnowledgeBase admin-release-gate entry.
 Live smoke: /api/release/gate defaults allowed:true (open). Tests: ReleaseGate.test.ts (8).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5220/5220 PASS (8 new), build PASS, boot:check PASS.
+## 2026-07-06 — Fix 2: full-stack (react+node-server) imports detected correctly (port, not Vite 5173)
+
+Root cause of Mitrify's "dev server did not come up on port 5173": detectImportedFramework checked
+`has('react')` BEFORE any server signal, so a Replit/Lovable FULL-STACK export (React frontend + an
+Express/Fastify server whose OWN `dev` script boots it and serves the client) was mis-labelled
+`vite-react` → the preview boot waited on Vite's 5173 while the app's Node server listened elsewhere
+(Express default 3000).
+- New pure `devScriptRunsNodeServer(pkgRaw)`: true when dev/start/serve launches tsx/ts-node/node/
+  nodemon on a server entry (server.ts, server/index.ts, app.ts…). The "is this a full-stack export"
+  tell.
+- detectImportedFramework: meta-frameworks (Next/Remix/Nuxt/SvelteKit/Astro) still match first (they
+  own their run/port); THEN `(express|fastify|koa) && devScriptRunsNodeServer` → `node-express`
+  (port 3000). A react+express app whose dev script is `vite` STAYS vite-react (a server dep alone
+  never flips it). react-alone → vite-react, express-alone → node-express: unchanged.
+- Tests: ProjectImport.test.ts +5 (the Mitrify react+express+tsx shape → node-express; vite-script
+  stays vite-react; Next wins; devScriptRunsNodeServer truth table incl. env-prefixed/nodemon/broken).
+- Gate: server tsc 0, vitest 5223/5223, boot PASS.
+- Fix 2 of 5. Next: Fix 3 (cold-sandbox hydration), Fix 4 (P1 on import turn), Fix 5 (auto-provision DB).

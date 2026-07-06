@@ -12,8 +12,7 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES,
-} from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -142,6 +141,43 @@ describe('detectImportedFramework', () => {
     expect(detectImportedFramework({ 'index.html': '<html></html>' })).toBe('vanilla');
     expect(detectImportedFramework({ 'src/x.ts': 'x' })).toBe('vite-react');
     expect(detectImportedFramework({ 'package.json': '{broken' })).toBe('vite-react');
+  });
+
+  // Fix 2 (2026-07-06): a Replit/Lovable FULL-STACK export (react frontend + Express server whose OWN
+  // dev script boots it) is NOT a pure Vite app — its live preview runs on the Node server's port
+  // (3000), not Vite's 5173. Mis-detecting it as vite-react caused "did not come up on port 5173".
+  it('a react+express app whose dev script runs a node server → node-express (the Mitrify shape)', () => {
+    const fullstack = JSON.stringify({
+      dependencies: { react: '18', express: '4', 'drizzle-orm': '0.3' },
+      scripts: { dev: 'NODE_ENV=development tsx server/index.ts' },
+    });
+    expect(detectImportedFramework({ 'package.json': fullstack })).toBe('node-express');
+  });
+  it('react + express but a VITE dev script stays vite-react (server dep alone must not flip it)', () => {
+    const viteApp = JSON.stringify({ dependencies: { react: '18', express: '4' }, scripts: { dev: 'vite' } });
+    expect(detectImportedFramework({ 'package.json': viteApp })).toBe('vite-react');
+  });
+  it('a meta-framework (Next) wins even with a node server dep + script', () => {
+    const next = JSON.stringify({ dependencies: { next: '14', react: '18', express: '4' }, scripts: { dev: 'tsx server.ts' } });
+    expect(detectImportedFramework({ 'package.json': next })).toBe('nextjs');
+  });
+});
+
+describe('devScriptRunsNodeServer (full-stack tell)', () => {
+  const s = (dev: string) => JSON.stringify({ scripts: { dev } });
+  it('detects tsx/ts-node/node/nodemon launching a server entry', () => {
+    expect(devScriptRunsNodeServer(s('tsx server/index.ts'))).toBe(true);
+    expect(devScriptRunsNodeServer(s('NODE_ENV=development tsx server.ts'))).toBe(true);
+    expect(devScriptRunsNodeServer(s('node dist/server.js'))).toBe(true);
+    expect(devScriptRunsNodeServer(s('ts-node src/app.ts'))).toBe(true);
+    expect(devScriptRunsNodeServer(s('nodemon'))).toBe(true);
+  });
+  it('is false for a Vite/framework dev script or missing input', () => {
+    expect(devScriptRunsNodeServer(s('vite'))).toBe(false);
+    expect(devScriptRunsNodeServer(s('next dev'))).toBe(false);
+    expect(devScriptRunsNodeServer(s('vite --host'))).toBe(false);
+    expect(devScriptRunsNodeServer(undefined)).toBe(false);
+    expect(devScriptRunsNodeServer('{broken')).toBe(false);
   });
 });
 

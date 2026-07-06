@@ -414,7 +414,8 @@ setInterval(() => {
           req.path.startsWith('/api/') ||
           req.path.startsWith('/preview-app/') ||
           req.path.startsWith('/preview/') ||
-          req.path === '/guide' || req.path === '/guide/' // U-9 — auto-generated docs site
+          req.path === '/guide' || req.path === '/guide/' || // U-9 — auto-generated docs site
+          req.path === '/status' || req.path === '/status/' // U-15 — public status page
         ) {
           return next();
         }
@@ -430,13 +431,10 @@ setInterval(() => {
   // Auth routes (OTP gateway) — extracted to src/server/routes/auth.ts (Phase 1).
   registerAuthRoutes(app);
 
-  // Health check endpoint
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime(), port: PORT });
-  });
-
-  // P2.4 — DR: liveness (/api/live), readiness (/api/ready), and the admin Firestore
-  // backup trigger (/api/admin/backup/firestore).
+  // Health/liveness/readiness + the public status page + admin Firestore backup trigger all live in
+  // registerHealthRoutes. U-15 made GET /api/health a DEEP report (status + real uptime/memory/version
+  // + per-dependency checks); it still returns status:'ok' when healthy, so existing probes keep working.
+  // The old inline shallow /api/health ({status,uptime,port}) was removed so it can't shadow the deep one.
   registerHealthRoutes(app);
 
   // P3.3 — keep-warm: GET /api/warm pre-warms the heavy PRO/SDA singletons. Hit by an

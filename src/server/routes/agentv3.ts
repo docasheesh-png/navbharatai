@@ -74,6 +74,7 @@ import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
 import { summarizeFileTree } from '../AgentV3/systemPrompt';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
+import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
   InMemoryConversationStore,
@@ -3518,12 +3519,29 @@ export function registerAgentV3Routes(app: Express): void {
       // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
       // without building" nudge, readiness blocker, sandbox issue) into a downloadable report,
       // so the admin can hand it to Claude and the rough edges get fixed in code.
+      // AUTOPSY 2026-07-06 ("na hi build report me kuch aya"): the report used to live ONLY in the
+      // in-memory `lastDiagnostics` map during a build and was persisted DURABLY solely at the terminal
+      // paths (finalize / completion / crash-catch). A Cloud Run instance rotation or hard-kill mid-build
+      // dies BEFORE any of those and does NOT run a JS catch → the durable report was never written →
+      // the admin saw an EMPTY build report (and the comment below claimed durability the code never
+      // delivered). Fix: persist the report DURABLY inside onUpdate too, THROTTLED to at most once per
+      // DIAG_FLUSH_MS so Firestore writes stay bounded. First update flushes immediately (report is
+      // durable from the very first recorded issue); the terminal save still writes the complete report.
+      const DIAG_FLUSH_MS = 10_000;
+      let _lastDiagFlushAt = 0;
       const buildDiag = new BuildDiagnostics({
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
         workspaceId, prompt, model, framework,
-        // REAL-TIME: persist the report after every recorded issue, so "Build report" is never
-        // empty mid-build and survives a crash/hang (the user can download it any time).
-        onUpdate: (r) => { lastDiagnostics.set(buildKey, r); },
+        // REAL-TIME: persist the report after every recorded issue, so "Build report" is never empty
+        // mid-build and genuinely survives a crash/hang/rotation (the user can download it any time).
+        onUpdate: (r) => {
+          lastDiagnostics.set(buildKey, r);
+          const now = Date.now();
+          if (flushDecision(_lastDiagFlushAt, now, DIAG_FLUSH_MS) === 'flush-now') {
+            _lastDiagFlushAt = now;
+            saveDiagnostics(workspaceId, r).catch(() => {}); // durable — survives an instance rotation mid-build
+          }
+        },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
@@ -3880,6 +3898,14 @@ export function registerAgentV3Routes(app: Express): void {
       // save at build-end (below) is still the authoritative snapshot; this is the
       // mid-build safety net. GitHub push still happens only after 100% completion.
       let _progressPersistTimer: ReturnType<typeof setTimeout> | null = null;
+      // AUTOPSY 2026-07-06 ("yeh app nahi bani"): the sandbox + Cloud Run instance are EPHEMERAL — a
+      // rotation/hard-kill mid-build loses everything not yet durably saved. The old code used a
+      // RESETTING 3 s debounce, so a CONTINUOUS write burst (parallel specialist agents each writing
+      // files) kept sliding the timer and it NEVER flushed until a 3 s gap — a rotation during the burst
+      // lost the whole app. Guarantee a durable flush at least every FILE_FLUSH_MAX_MS regardless of the
+      // write rate, while still coalescing quiet bursts. Bounds worst-case loss to a few seconds of work.
+      const FILE_FLUSH_MAX_MS = 6_000;
+      let _lastFileFlushAt = Date.now();
       // PLAN SYNC: drive the plan list's spinner + green ticks from REAL build activity, since the
       // model (Haiku especially) does not reliably call update_todo to advance statuses. Each file
       // written advances the progress; the build's final success marks every item done (below).
@@ -3918,12 +3944,20 @@ export function registerAgentV3Routes(app: Express): void {
             state.setTodos(computePlanProgress(cur, planSteps, false));
           }
         } catch { /* plan progress is best-effort — never affects the build */ }
-        if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
-        _progressPersistTimer = setTimeout(() => {
+        const flushFilesDurably = () => {
+          _lastFileFlushAt = Date.now();
+          if (_progressPersistTimer) { clearTimeout(_progressPersistTimer); _progressPersistTimer = null; }
           if (writtenFiles.size > 0) {
             saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
           }
-        }, 3_000);
+        };
+        if (flushDecision(_lastFileFlushAt, Date.now(), FILE_FLUSH_MAX_MS) === 'flush-now') {
+          // Overdue — a burst has been sliding the debounce; flush NOW so a rotation can't wipe it.
+          flushFilesDurably();
+        } else {
+          if (_progressPersistTimer) clearTimeout(_progressPersistTimer);
+          _progressPersistTimer = setTimeout(flushFilesDurably, 3_000);
+        }
       };
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.

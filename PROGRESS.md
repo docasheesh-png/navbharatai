@@ -10297,3 +10297,49 @@ Firebase+Firestore, unavailable in local smoke — the pure core + guards are un
 reachable with correct auth behavior.)
 
 Gate: frontend tsc 0, server tsc 0, vitest 5114/5114 PASS (9 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — BUILD-REPORT AUTOPSY (rule 5): "yeh app nahi bani, na hi build report me kuch aya"
+
+Admin ran a fresh build (AI Website Builder) that failed: the app was not delivered AND the build report
+was EMPTY. Run signature: repeated "I'll continue building…" restarts, "🛡️ restored 11 file(s) from
+history", parallel specialist agents, then "The build stopped responding — your files are saved" (twice).
+Forensic autopsy per the fifth absolute rule.
+
+### Diagnosis — ONE class, two sibling instances (ephemeral compute loses deferred-persist state)
+"The build stopped responding" (useAgentV3Build.ts:1099) fires when the stream is silent >35s AND the
+server reports the build gone — i.e. the Cloud Run instance/sandbox ROTATED mid-build (matches "restored
+from history"). A rotation / hard-kill does NOT run a JS catch, so anything persisted only at terminal
+paths was lost:
+- ❌ EMPTY REPORT — root cause: the diagnostics report lived only in the in-memory `lastDiagnostics` map
+  during a build; the durable `saveDiagnostics` ran ONLY at finalize / completion / crash-catch. A
+  mid-build rotation died before all three → the durable report was never written → empty. (The code
+  comment even CLAIMED it "survives a crash/hang" — a durability the code never delivered; honesty gap.)
+- ❌ APP NOT BUILT (files lost) — SIBLING root cause (rule 3): file writes persisted on a RESETTING 3 s
+  debounce (onFileWrite). Under a CONTINUOUS write burst (parallel specialists) the timer kept sliding
+  and NEVER flushed until a 3 s gap — a rotation during the burst lost the whole app.
+
+Both are the same class: durable persistence deferred → the ephemeral instance rotates → in-flight state
+is lost. Fixed the CLASS, not the instance.
+
+### Root fix (rule 2/3/4)
+- New pure `flushDecision(lastFlushAt, now, maxWaitMs)` (DurableFlush.ts) — 'flush-now' when overdue
+  (≥ maxWait since the last durable flush, or the never-flushed sentinel) else 'debounce'. Guarantees a
+  durable flush at least every maxWait REGARDLESS of event rate (a burst can never starve it). Shared by
+  BOTH persist sites so the bug can't return on either.
+- Files: the 3 s debounce now also force-flushes every FILE_FLUSH_MAX_MS (6 s) → worst-case loss bounded
+  to a few seconds even under a solid write burst.
+- Diagnostics: `onUpdate` now persists DURABLY too, throttled to once per DIAG_FLUSH_MS (10 s), first
+  update immediate → the report is durable from the first recorded issue and survives a rotation.
+- Tests: DurableFlush.test.ts (never-flushed sentinel; recent→debounce; overdue→flush; the continuous-
+  burst-still-flushes regression; disabled-throttle).
+
+### Honest scope (rule 6)
+This makes the report NEVER empty and bounds file loss on rotation — so the app survives better AND the
+NEXT failing run is actually diagnosable (the empty report was blinding the autopsy). The DEEPER cause of
+the repeated stall/rotation on a big fresh parallel build is still open: recommend enabling
+`AGENTV3_SANDBOX_RESUME=on` (warm sandbox across turns — already built) and, with a now-non-empty report
+from a re-run, a follow-up autopsy of the parallel-specialist stall itself. RC-5 (anon) also still needs
+`FIREBASE_PROJECT_ID` on Cloud Run.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5056/5056 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (internal durability fix, no new user-facing surface).

@@ -9915,3 +9915,22 @@ not stubbed. Recovery makes the loss honest + non-silent today.
 
 Gate: frontend tsc 0, server tsc 0, vitest 4972/4972 PASS (9 new in jobRecovery.test.ts), build PASS,
 boot:check PASS (boot exercised the recovery pass).
+
+## 2026-07-06 — HOTFIX (admin): Google login "not smooth" — cancel no longer force-redirects the page
+
+Admin report: Google login is not smooth. ROOT CAUSE (AuthComponent.tsx socialSignIn): the popup catch
+treated `auth/popup-closed-by-user` (the USER cancelled) and `auth/cancelled-popup-request` (a
+double-tap superseded the first popup) the SAME as `auth/popup-blocked` — and responded with
+signInWithRedirect, a FULL-PAGE navigation to Google. So closing the popup ("cancel") forced the user
+straight back into the Google login anyway, and a double-tap set off a popup + a page navigation at
+once. Cancel must mean CANCEL.
+
+FIX: new pure `socialSignInPolicy.ts` `popupFailureAction(code)` (4 tests) — 'redirect' ONLY for
+auth/popup-blocked; 'cancel' for popup-closed-by-user / cancelled-popup-request (stop QUIETLY: spinner
+off, no error banner, never a forced navigation); 'error' otherwise (surfaced honestly). socialSignIn
+now returns 'ok' | 'cancelled' | 'redirecting'; both the Google and GitHub handlers re-enable the
+buttons on a cancel. The genuine popup-blocked → redirect fallback is unchanged, as is the redirect
+finalization at the app root (getRedirectResult).
+
+Gate: frontend tsc 0, vitest 4974/4974 PASS, build PASS. (#5 planner/advisor deferred per admin —
+login first.)

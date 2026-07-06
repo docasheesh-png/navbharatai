@@ -21,6 +21,7 @@ import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
+import { popupFailureAction } from './socialSignInPolicy';
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -334,21 +335,30 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // ── Social sign-in (Google + GitHub) — popup-first, redirect fallback ─────────
   // Popup is the primary path: it sidesteps the cross-origin storage partitioning
   // that makes signInWithRedirect return logged-out on a different serving domain,
-  // and the COOP header (server.ts) now lets the popup deliver its result. If the
-  // browser blocks the popup, we fall back to a full-page redirect (finalized at the
-  // app root via getRedirectResult). Errors are always surfaced — never silent.
-  const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void) => {
+  // and the COOP header (server.ts) now lets the popup deliver its result.
+  //
+  // What a popup FAILURE means is decided by the pure, tested popupFailureAction:
+  //  • 'redirect' — the browser genuinely BLOCKED the popup → full-page redirect fallback
+  //    (finalized at the app root via getRedirectResult).
+  //  • 'cancel'   — the USER closed the popup, or a double-tap superseded it → stop QUIETLY
+  //    (spinner off, no error, and NEVER a forced page navigation — cancel means cancel).
+  //  • 'error'    — a real failure → surfaced honestly.
+  // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
+  // "login is not smooth" jolt the admin reported.)
+  const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
     try {
       const result = await signInWithPopup(auth, provider);
       onCredential?.(result);
       onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state
+      return 'ok';
     } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user') {
-        // Popup unavailable — fall back to full-page redirect (navigates away).
+      const action = popupFailureAction(err?.code);
+      if (action === 'redirect') {
+        // Popup genuinely unavailable — fall back to full-page redirect (navigates away).
         await signInWithRedirect(auth, provider);
-        return;
+        return 'redirecting';
       }
+      if (action === 'cancel') return 'cancelled';
       throw err;
     }
   };
@@ -359,7 +369,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      await socialSignIn(provider);
+      const outcome = await socialSignIn(provider);
+      // The user's own cancel: just re-enable the buttons — no error banner, no navigation.
+      if (outcome === 'cancelled') setLoading(false);
     } catch (err: any) {
       console.error('[GOOGLE SIGN-IN]', err);
       setError(describeSocialError(err));
@@ -380,7 +392,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     provider.addScope('user:email');
     provider.setCustomParameters({ allow_signup: 'true' });
     try {
-      await socialSignIn(provider, captureGithubToken);
+      const outcome = await socialSignIn(provider, captureGithubToken);
+      // The user's own cancel: re-enable the buttons quietly — no error, no forced redirect.
+      if (outcome === 'cancelled') setLoading(false);
     } catch (err: any) {
       // The user's GitHub email already belongs to an account created with another method
       // (Google or Email/Password). Instead of dead-ending, LINK GitHub onto that account so the

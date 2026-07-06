@@ -39,17 +39,23 @@ const nextConfig = {};
 module.exports = nextConfig;
 `;
 
-const LAYOUT = `import type { Metadata } from 'next';
+const GLOBALS = `* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; }
+`;
+
+const LAYOUT = `import './globals.css';
+import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'My App',
-  description: 'Built with Engineer AI',
+  description: 'Built with NavBharatAI',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, fontFamily: 'sans-serif' }}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }
@@ -65,14 +71,68 @@ const PAGE = `export default function Home() {
 }
 `;
 
+// App Router loading UI — shown while a route segment's data is being fetched (Suspense boundary).
+const LOADING = `export default function Loading() {
+  return (
+    <main style={{ padding: '2rem' }}>
+      <p>Loading…</p>
+    </main>
+  );
+}
+`;
+
+// App Router error boundary — MUST be a Client Component and receives \`reset\` to retry the segment.
+const ERROR = `'use client';
+
+import { useEffect } from 'react';
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <main style={{ padding: '2rem' }}>
+      <h2>Something went wrong</h2>
+      <button onClick={() => reset()}>Try again</button>
+    </main>
+  );
+}
+`;
+
+// App Router 404 handler — rendered for unmatched routes and \`notFound()\` calls.
+const NOT_FOUND = `import Link from 'next/link';
+
+export default function NotFound() {
+  return (
+    <main style={{ padding: '2rem' }}>
+      <h2>404 — Page not found</h2>
+      <p>Could not find the requested page.</p>
+      <Link href="/">Return home</Link>
+    </main>
+  );
+}
+`;
+
 export class NextjsProvider implements ITemplateProvider {
   getFiles(_features: string[]): Record<string, string> {
     return {
       'package.json': PKG,
       'tsconfig.json': TSCONFIG,
       'next.config.js': NEXT_CONFIG,
+      'app/globals.css': GLOBALS,
       'app/layout.tsx': LAYOUT,
       'app/page.tsx': PAGE,
+      // App Router special files — a production-shaped scaffold, not just page+layout:
+      'app/loading.tsx': LOADING,
+      'app/error.tsx': ERROR,
+      'app/not-found.tsx': NOT_FOUND,
     };
   }
 }

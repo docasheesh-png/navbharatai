@@ -1872,17 +1872,26 @@
   `tests/observabilityGenerator.test.ts`; wired in `types.ts`, `ToolCatalog.ts`, `AgentRegistry.ts`,
   `ToolDispatcher.ts`, `systemPrompt.ts`, `ToolDispatcher.test.ts`, `AppKnowledgeBase.ts`.
 
-### P-CGE.12 — Additional Framework Generators (Next.js / React Native production-level)  🟡 PARTIAL → full  [LOW]
-- `PatternLibrary.ts` lists Next.js and React Native as supported. The actual generation engines
-  (FrontendGenerationEngine) produce generic React/Vite only, not Next.js pages/App Router or
-  React Native Expo components.
-- [ ] Add `NextJSGenerationEngine.ts` — generates `app/` directory structure (App Router), `page.tsx`,
-  `layout.tsx`, `loading.tsx`, `error.tsx` per route.
-- [ ] Add `ReactNativeGenerationEngine.ts` — generates Expo `app/(tabs)/` structure, React Native
-  components (View/Text/TouchableOpacity, not div/span/button).
-- **Files:** new `src/server/AppMakerLab/generator/NextJSGenerationEngine.ts`,
-  new `src/server/AppMakerLab/generator/ReactNativeGenerationEngine.ts`,
-  `src/server/AppMakerLab/generator/EngineRegistry.ts`.
+### P-CGE.12 — Additional Framework Generators (Next.js / React Native production-level)  🟢 NEXT.JS DONE (2026-07-06) · RN deferred (preview-gated)  [LOW]
+- **Roadmap correction (safeguard #6):** the spec pointed at `AppMakerLab/generator/FrontendGenerationEngine`
+  + `EngineRegistry` — but that whole pipeline (`AppMakerOrchestrator`) is **dead/legacy code, invoked by NO
+  route** in the live v3.0 flow. Building a `NextJSGenerationEngine` there would be a fake feature (never
+  runs). The LIVE v3.0 generation is the AgentV3 agent writing files via tools, scaffolded from the
+  **sandbox `TemplateRegistry`** (`E2BActuator`/`ToolDispatcher`), which **already had a wired
+  `NextjsProvider`** — so Next.js was already generatable; it was just a minimal page+layout stub.
+- [x] **Next.js — enriched the LIVE provider to a production-shaped App Router scaffold** (`NextjsProvider.ts`,
+  the sandbox copy + the legacy copy kept in sync): added `app/loading.tsx` (Suspense boundary),
+  `app/error.tsx` (a correct `'use client'` error boundary with `reset`), `app/not-found.tsx` (404),
+  and `app/globals.css` (imported by `layout.tsx`) — exactly the `page/layout/loading/error` set the spec
+  asked for. Tests assert the full scaffold on BOTH copies incl. the live copy's `--hostname 0.0.0.0`
+  E2B-preview binding, so they can't drift back to the stub.
+- [ ] **React Native — deliberately deferred (honest, preview-gated):** an Expo/RN app cannot render in the
+  Node-only E2B preview sandbox (no device/simulator), so a generated RN app could not be previewed or
+  verified end-to-end — it would violate "real features only". This is the AB-1 multi-runtime infra gate;
+  RN generation waits until a real RN preview path exists (recorded as an open item, rule 6).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5298/5298 ✅ (5 new) · `build` ✅ · `boot:check` PASS.
+- **Files:** `src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider.ts` (live),
+  `src/server/AppMakerLab/generator/templates/NextjsProvider.ts` (legacy, synced), `tests/templateProviders.test.ts`.
 
 ### P-CGE.13 — Seed / Mock / Fixture Data Generators  ✅ DONE (2026-06-29) · 🔌 WIRED
 - No realistic test data was generated — developers couldn't exercise a generated app without

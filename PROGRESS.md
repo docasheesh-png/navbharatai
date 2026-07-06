@@ -10412,3 +10412,24 @@ This completes a three-analyzer build-hardening set (hooks + import/export + JSX
 distinct hard-failure class the readiness suite previously missed, all wired collision-free from the core loop.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5160/5160 PASS (12 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — AgentV3 build-quality: one-call Build-Health aggregator  ✅ DONE (powerful-builder)
+
+Capstone for the three-analyzer build-hardening set. New src/server/AgentV3/WorkspaceHealth.ts (pure,
+composes the existing pure analyzers): analyzeWorkspaceHealth(files) runs all four robustness checks —
+code confidence (HallucinationDetector), React Rules of Hooks, import/export consistency, JSX component
+resolution — the three AST passes in parallel (Promise.all), and returns a single honest verdict {ok,
+totalIssues, filesScanned, checks:[{id,name,ok,issues,summary}]}. ok is true only when EVERY check passes;
+nothing is summarized away. Wired via cold route POST /api/workspace/health-check + one server.ts line + a
+prominent "Build Health — Will this app work?" card at the TOP of ProjectInsightsPanel (one "Run All Checks"
+button → pass/fail per check + a ship/no-ship top line). AppKnowledgeBase build-health-check entry added.
+
+Live prod smoke: broken app (hook + bad import + undefined JSX) → ok:false, totalIssues:4 with each sub-check
+correctly failing; clean app → ok:true, 0 issues, all four passing. Tests: WorkspaceHealth.test.ts (4 —
+clean-all-pass, aggregate-failures, stable 4-check shape, honest summaries).
+
+Builder-hardening story now complete: 3 new analyzers + 1 aggregator, all wired collision-free from the
+core loop, giving the user (and, when the team wires it into the gate, the builder itself) a one-click
+"will this generated app build and run?" verdict.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5164/5164 PASS (4 new), build PASS, boot:check PASS, live smoke PASS.

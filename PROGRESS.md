@@ -10495,3 +10495,29 @@ fresh post-deploy build is the verification; no blind re-code (rule 7).
 
 Gate: frontend tsc 0, vitest 5119/5119 PASS, build PASS. (Client-only + report-download; no server files
 touched.) No AppKnowledgeBase change (UI layout + existing report export, no new capability).
+
+## 2026-07-06 — Preview host fix: Vite "Blocked request … is not allowed" on imported / non-labelled apps
+
+Admin hit a real preview error: `Blocked request. This host ("3000-…e2b.app") is not allowed. … add to
+server.allowedHosts in vite.config.js`. Root-caused, not patched over the symptom.
+
+ROOT CAUSE: the deterministic preview-host gate in E2BActuator (which reads the on-disk vite config and
+injects `allowedHosts: true` via ViteConfigGuard before `npm run dev`) was GATED on
+`framework === 'vite' || /\bvite\b/.test(command)`. An IMPORTED app — or ANY app whose dev script is
+just `npm run dev` (port 3000, no "vite" in the command, framework not labelled 'vite') — matched
+NEITHER signal, so its config was skipped and Vite 5.4+ blocked the E2B proxy host. (Fresh NavBharatAI
+scaffolds already set allowedHosts, and the write-time backstop fires when the AGENT writes a config —
+but an imported config is written by the import path, so only this dev-start net can catch it, and its
+trigger was too narrow.)
+
+FIX (rule 2 — detection-independent trigger): the gate now runs whenever a vite config FILE EXISTS on
+disk, not by framework label or command substring. The per-file `exists()` probe in the loop is the real
+gate, so it's a cheap no-op for a genuinely non-Vite app (no vite config) and always patches a real Vite
+app regardless of how it was launched. `ensureViteAllowedHosts` already injects into an existing
+`server: { … }` block (verified it preserves the app's own `port: 3000`).
+
+Sibling hunt: the legacy (non-AgentV3) EngineerAI E2BActuator has no such patch (different, older path);
+v3.0's sandbox actuator is the live one and is fixed. Regression test: ViteConfigGuard.test.ts +1 — the
+admin's EXACT case (port-3000 server block in vite.config.js → allowedHosts injected, port preserved).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5181/5181 PASS, build PASS, boot PASS.

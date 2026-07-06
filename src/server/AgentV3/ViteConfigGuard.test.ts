@@ -29,6 +29,15 @@ describe('ensureViteAllowedHosts — the "Blocked request … is not allowed" ba
     expect(out).toMatch(/server:\s*\{\s*allowedHosts: true, host: true, port: 5173 \}/);
   });
 
+  it('patches the admin\'s exact reported case: a port-3000 server block in vite.config.js', () => {
+    // "Blocked request. This host ("3000-…e2b.app") is not allowed … add to server.allowedHosts."
+    const src = `import { defineConfig } from 'vite';\nexport default defineConfig({\n  server: { host: '0.0.0.0', port: 3000 },\n  plugins: [],\n});\n`;
+    const out = ensureViteAllowedHosts('vite.config.js', src);
+    expect(out).toContain('allowedHosts: true');
+    expect(out).toMatch(/server:\s*\{\s*allowedHosts: true, host: '0\.0\.0\.0', port: 3000 \}/);
+    expect(out).toContain('port: 3000'); // the app's own port is preserved
+  });
+
   it('is a NO-OP when allowedHosts is already present (server or preview)', () => {
     const withServer = `export default defineConfig({ server: { allowedHosts: true } })`;
     const withPreview = `export default defineConfig({ preview: { allowedHosts: true } })`;

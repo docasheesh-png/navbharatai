@@ -101,7 +101,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
+import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
@@ -4076,7 +4076,9 @@ export function registerAgentV3Routes(app: Express): void {
       // is empty and the build runs EXACTLY as today; its tokens are billed via blueprintUsage below.
       if (
         !isEditMode && intent === 'new_build' && buildDepth === 'deep'
-        && !classifyForOneShot(analysis?.startTier) && process.env.AGENTV3_BLUEPRINT === 'on'
+        // Simple-lane-eligible builds (now incl. sonnet tier) plan their own manifest+contract inside
+        // the lane — spending a blueprint model call here would be wasted on them.
+        && !classifyForSimpleLane(analysis?.startTier) && process.env.AGENTV3_BLUEPRINT === 'on'
       ) {
         try {
           const bpGenerate = async (system: string, user: string): Promise<string> => {
@@ -4498,7 +4500,12 @@ export function registerAgentV3Routes(app: Express): void {
       // below — the safety net — so behavior is NEVER worse than today. AGENTV3_ONESHOT=off disables.
       // Project mode (SPM-2): a module turn always runs the agentic loop — the fast lane's isolated
       // per-file generation has no tool loop to honor the module's frozen contracts and file scope.
-      if (oneShotEnabled() && intent === 'new_build' && classifyForOneShot(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // COMPLETE-APP LANE (admin 2026-07-06): sonnet-tier NEW builds now take this deterministic
+      // manifest-driven lane FIRST too (classifyForSimpleLane) — the free-form multi-agent loop churned
+      // on real builds (98 steps/10min, 148 steps/29min, both died incomplete) while this lane plans the
+      // COMPLETE file list up front, builds every file on Sonnet, and tsc-verifies. The agentic loop
+      // remains the automatic fallback below when this lane fails — never worse than before.
+      if (oneShotEnabled() && intent === 'new_build' && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -4628,8 +4635,10 @@ export function registerAgentV3Routes(app: Express): void {
         if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
         if (sb.ok) {
           fastResult(sb.summary, sb.filesWritten);
-        } else {
-          // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest skips.
+        } else if (classifyForOneShot(analysis?.startTier)) {
+          // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
+          //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
+          //    one 8k-token call — it falls straight through to the agentic loop instead.
           const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) fastResult(os.summary, os.filesWritten);
@@ -5056,7 +5065,11 @@ export function registerAgentV3Routes(app: Express): void {
       // they already passed the fast lane's own `npx tsc --noEmit` type-check + CSS-consistency verify +
       // repair, so the extra multi-call review adds latency to the most common build with little value.
       // The reviewer still runs on the agentic path (complex builds). Force it on with AGENTV3_REVIEW_FASTLANE=on.
-      const reviewerAllowed = !fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on';
+      // COMPLETENESS BACKSTOP (admin 2026-07-06, "complete app"): a SONNET-tier (complex) prompt that
+      // the deterministic lane built DOES get the reviewer — tsc proves it compiles, only the reviewer
+      // checks it's feature-complete against the request, and its [CRITICAL] findings are auto-fixed
+      // in the same build (C9). Bounded (90s review + 120s repair caps), so it can't stall the finish.
+      const reviewerAllowed = !fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on' || analysis?.startTier === 'sonnet';
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);

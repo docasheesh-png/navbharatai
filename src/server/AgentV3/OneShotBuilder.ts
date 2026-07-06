@@ -22,6 +22,26 @@ export function classifyForOneShot(startTier: StartTier | undefined): boolean {
   return startTier === 'gemini' || startTier === 'haiku';
 }
 
+/**
+ * Whether a NEW build should try the deterministic SIMPLE-BUILDER lane first (manifest → shared
+ * contract → every file generated in its own focused pass → tsc verify → bounded repair).
+ *
+ * ROOT CAUSE this fixes (admin, 2026-07-06: "v3.0 complete app bana nahi pa raha"): sonnet-tier NEW
+ * builds went straight to the free-form multi-agent loop, and two real reports show that path churning
+ * on even a landing page — sub-agents re-exploring the project from scratch, creating files beyond
+ * scope, deleting and rebuilding them — 98 steps/10 min and 148 steps/29 min, both dead at the wall
+ * clock with no complete app. The Simple-Builder lane already runs on SONNET (fastBuildModel — model
+ * strength was never the gate), plans the COMPLETE file list up front (manifest, up to 40 files),
+ * freezes a shared contract, builds every file, and verifies with tsc + bounded repair — today's
+ * reports show it winning every time it ran (27 steps/1m23s, 33 steps/2m52s). So sonnet-tier new
+ * builds now take this deterministic complete-app lane FIRST; the agentic loop remains the automatic
+ * FALLBACK when the lane genuinely fails, and still owns edits, imports, and project-module turns.
+ * Opus/power mode keeps the full agentic experience the user explicitly paid for. Pure + tested.
+ */
+export function classifyForSimpleLane(startTier: StartTier | undefined): boolean {
+  return startTier === 'gemini' || startTier === 'haiku' || startTier === 'sonnet';
+}
+
 /** Whether the OneShot lane is enabled. On by default (the agentic loop is the safety net);
  *  AGENTV3_ONESHOT=off instantly disables it (rollback to pure-loop behavior). */
 export function oneShotEnabled(): boolean {

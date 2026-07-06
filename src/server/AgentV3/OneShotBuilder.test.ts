@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  classifyForOneShot, oneShotEnabled, parseFileBlocks, runOneShot, type OneShotFile,
+  classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks, runOneShot, type OneShotFile,
 } from './OneShotBuilder';
 
 describe('classifyForOneShot — simple → one-shot, complex → loop', () => {
@@ -12,6 +12,21 @@ describe('classifyForOneShot — simple → one-shot, complex → loop', () => {
     expect(classifyForOneShot('sonnet')).toBe(false);
     expect(classifyForOneShot('opus')).toBe(false);
     expect(classifyForOneShot(undefined)).toBe(false);
+  });
+});
+
+describe('classifyForSimpleLane — NEW builds take the deterministic complete-app lane (incl. sonnet tier)', () => {
+  it('routes gemini/haiku AND sonnet new builds through the manifest-driven Simple Builder first', () => {
+    // The 2026-07-06 class bug: sonnet-tier new builds went straight to the free-form multi-agent
+    // loop, which churned (98 steps/10min, 148 steps/29min — both died with no complete app), while
+    // this Sonnet-powered lane won every real run. The agentic loop remains the automatic fallback.
+    expect(classifyForSimpleLane('gemini')).toBe(true);
+    expect(classifyForSimpleLane('haiku')).toBe(true);
+    expect(classifyForSimpleLane('sonnet')).toBe(true);
+  });
+  it('opus/power mode keeps the full agentic experience; unknown tier stays on the loop', () => {
+    expect(classifyForSimpleLane('opus')).toBe(false);
+    expect(classifyForSimpleLane(undefined)).toBe(false);
   });
 });
 

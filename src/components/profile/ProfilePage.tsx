@@ -14,6 +14,7 @@ import {
   Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle,
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { ApiKeysCard } from './ApiKeysCard';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -596,6 +597,9 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
             <ChevronRight className="w-4 h-4 text-[#484f58] ml-auto group-hover:text-indigo-400 transition-colors" />
           </button>
         </div>
+
+        {/* ── API Keys (U-7) ───────────────────────────────────────────────── */}
+        <ApiKeysCard getToken={idToken} />
 
         {/* ── Logout ───────────────────────────────────────────────────────── */}
         <div className="border-t border-white/5 pt-4">

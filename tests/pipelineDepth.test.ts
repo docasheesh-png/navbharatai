@@ -25,6 +25,13 @@ describe('resolvePipelineDepth', () => {
     expect(resolvePipelineDepth(1, true)).toBe('deep');
     expect(resolvePipelineDepth(40, true)).toBe('deep');
   });
+  it('RC-2: a large existing project earns deep even on a tiny edit prompt (magnitude ≤ 4)', () => {
+    // The admin case: "retry"/"fix X" on a ~1650-file import → short prompt, but it must get deep time.
+    expect(resolvePipelineDepth(1, false, true)).toBe('deep');
+    expect(resolvePipelineDepth(0, false, true)).toBe('deep');
+    // A small edit on a small project is unchanged (not large → prompt-magnitude decides).
+    expect(resolvePipelineDepth(1, false, false)).toBe('fast');
+  });
   it('a non-finite magnitude falls back to standard (middle)', () => {
     expect(resolvePipelineDepth(NaN)).toBe('standard');
     expect(resolvePipelineDepth(Infinity)).toBe('standard');

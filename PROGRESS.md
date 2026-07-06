@@ -10095,3 +10095,32 @@ honesty; RC-5 anon identity (needs FIREBASE_PROJECT_ID on Cloud Run + the just-m
 
 Gate: frontend tsc 0, server tsc 0, vitest 5019/5019 PASS, build PASS, boot PASS. No AppKnowledgeBase
 change (internal routing/visibility fix, no new user-facing surface).
+
+## 2026-07-06 — Large-project autopsy RC-2: wall-clock budget is now project-size aware, not prompt-size only
+
+Second ledger item from the NavBharatAI-import autopsy (fixed one-by-one per admin). RC-2: the build's
+wall-clock cap was derived ONLY from prompt complexity (`resolvePipelineDepth(moduleCount+featureCount)`),
+so an EDIT of a huge existing project — whose prompt is short ("retry", "fix the navbar") — got the SAME
+base 30-min cap as a 15-file app and paused at the limit ("This build hit the time limit and was paused
+automatically"). Model routing was already size-aware (RC: `isLargeExistingProject` → strong model); the
+TIME budget was not. That asymmetry is the RC-2 bug.
+
+Root fix: `resolvePipelineDepth(magnitude, powerMode, largeExistingProject)` — a large existing project
+now forces `deep`, exactly like power mode and a complex fresh build, so `scaleBuildSeconds` grants it the
+×1.5 headroom (up to the 3600s ceiling). The size signal comes from the DURABLE WorkspaceFileStore
+(`listWorkspaceFilePaths`, metadata-only, sandbox-independent), computed once up-front BEFORE the deadline
+timer is armed and BEFORE the sandbox is ensured — and the same durable paths are reused for the RC-1
+edit-file-tree reconcile (one durable read, no duplication).
+
+- Backward-compatible: the third param defaults false → every existing caller/test unchanged; a small
+  edit on a small project still tiers by prompt magnitude (large=false → prompt decides).
+- Tests: pipelineDepth.test.ts +1 group (large project → deep on magnitude ≤ 4; small edit unchanged).
+- Siblings: the deadline, the runner `maxBuildMs`, and the four post-build headroom gates all thread the
+  SAME `effectiveBuildSeconds`, so a large edit's deep budget is consistent end-to-end (no stale cap).
+
+Honest scope: RC-2 gives a big edit the time a big edit needs. Still OPEN, queued next: RC-3 per-build
+cold-start tax (restore + npm install inside the work window — the deep headroom now absorbs it, but
+amortizing it is the real fix); RC-4 auto-continue honesty; RC-5 anon identity.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5046/5046 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (internal build-budget policy, no new user-facing surface).

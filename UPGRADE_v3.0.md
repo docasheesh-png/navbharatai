@@ -1609,13 +1609,23 @@
 - **Files:** `src/server/AppMakerLab/intelligence/BuildSLATracker.ts` (new), `tests/buildSLATracker.test.ts` (new),
       `src/server/routes/buildAnalytics.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
 
-### P-PME.12 — Requirement Traceability (requirement → file → test)  🟡 PARTIAL → full  [LOW]
+### P-PME.12 — Requirement Traceability (requirement → file → test)  ✅ DONE (2026-07-06)
 - `RequirementIntelligenceEngine.ts` parses requirements. `FilePlanningEngine.ts` maps them to files.
   But there is no traceability link: requirement #3 → generated `authService.ts` → test `auth.test.ts`.
-- [ ] Add `RequirementTraceabilityMatrix.ts` — build a mapping: requirement → files generated → tests.
-- [ ] Persist per build in Firestore; expose as a JSON download in the IDE.
+- [x] Added `RequirementTraceabilityMatrix.ts` (pure, unit-tested) — `buildTraceabilityMatrix(input)` links
+      requirement → files (via each file's `requirementIds`) → covering tests (explicit `covers`, else the
+      `auth.test.ts ↔ auth.ts` convention via `testCoversFile`), and computes a coverage summary: total /
+      implemented / fully-tested requirements, coverage %, **unimplemented (silently-dropped) requirements**,
+      **untested files**, and **orphan tests**. Defensive against malformed input; dedupes; empty-safe.
+- [x] Persisted per workspace in Firestore (`TraceabilityStore`, VITEST-skip/best-effort) + exposed as a
+      JSON download: `POST /api/workspace/traceability` (compute + save) and `GET /api/workspace/traceability`
+      (download latest). Rate-limited + request-validated. Caller supplies the signals (same pattern as
+      P-PME.13) — no deep orchestrator wiring, so no hot-file collision.
+- [x] AppKnowledgeBase entry `requirement-traceability` (aiSurface engineer_ai).
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5293/5293 ✅ (11 new) · `build` ✅ · `boot:check` PASS.
 - **Files:** new `src/server/AppMakerLab/intelligence/RequirementTraceabilityMatrix.ts`,
-  `src/server/AppMakerLab/AppMakerOrchestrator.ts`.
+  new `src/server/AppMakerLab/intelligence/TraceabilityStore.ts`, new `src/server/routes/traceability.ts`,
+  new `tests/requirementTraceabilityMatrix.test.ts`, `server.ts`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-PME.13 — Semantic Version Manager  ✅ DONE (2026-06-29)
 - Snapshots had names but no semantic version — users couldn't tell a breaking change from a fix.

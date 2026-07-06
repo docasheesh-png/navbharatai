@@ -1859,6 +1859,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['dependency conflict', 'version conflict', 'react-dom mismatch', 'npm install fails', 'peer dependency', 'incompatible versions', 'types mismatch', 'package version', 'dependency resolution', 'conflicting dependencies'],
   },
   {
+    id: 'requirement-traceability',
+    name: 'Requirement Traceability Matrix',
+    path: 'Backend API: POST/GET /api/workspace/traceability',
+    description: `Links every requirement of your app to the files that implement it and the tests that cover it — the "requirement #3 → authService.ts → auth.test.ts" chain. Answers three questions honestly: which requirements were actually implemented (and which were silently dropped), which generated source files have no test, and which tests cover nothing (orphans). Returns a matrix per requirement (its files, each file's covering tests, and whether it is fully tested) plus a coverage summary (total / implemented / fully-tested requirements, coverage %, untested files, orphan tests). Test↔file linking uses an explicit "covers" list when provided, otherwise the auth.test.ts ↔ auth.ts filename convention. Pure, deterministic computation from the signals the build already has; the latest matrix is persisted per workspace so the IDE can re-download it. Backed by POST /api/workspace/traceability (compute + save) and GET /api/workspace/traceability?workspaceId=... (download the latest).`,
+    howToUse: 'Backend API: POST /api/workspace/traceability { workspaceId?, requirements:[{id,text?}], files:[{path,requirementIds?}], tests?:[{path,covers?}] } → the matrix + coverage summary. GET /api/workspace/traceability?workspaceId=... → the latest saved matrix as downloadable JSON.',
+    relatedFeatures: ['build-health-check', 'semantic-version', 'agentv3_builder'],
+    keywords: ['traceability', 'requirement traceability', 'requirement to test', 'coverage matrix', 'which requirement', 'untested file', 'requirement coverage', 'dropped requirement', 'requirement to file', 'test coverage map'],
+    aiSurface: 'engineer_ai',
+  },
+  {
     id: 'build-health-check',
     name: 'Build Health — Will this app work?',
     path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',

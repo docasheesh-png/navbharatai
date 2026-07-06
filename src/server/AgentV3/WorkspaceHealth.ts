@@ -14,9 +14,10 @@ import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
+import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 
 export interface HealthCheckResult {
-  id: 'code-confidence' | 'react-hooks' | 'import-export' | 'jsx-resolution' | 'hook-resolution';
+  id: 'code-confidence' | 'react-hooks' | 'import-export' | 'jsx-resolution' | 'hook-resolution' | 'dependency-constraints';
   name: string;
   ok: boolean;
   /** Number of issues this check found (0 when ok). */
@@ -34,8 +35,9 @@ export interface WorkspaceHealthReport {
 
 /** Run every workspace build-health check and combine the results. Pure (delegates to pure analyzers). */
 export async function analyzeWorkspaceHealth(files: Record<string, string>): Promise<WorkspaceHealthReport> {
-  // Code confidence is synchronous; the three AST analyzers are async. Run the async ones in parallel.
+  // Code confidence + dependency constraints are synchronous; the AST analyzers are async.
   const conf = detectHallucinations(files);
+  const constraints = analyzeDependencyConstraints(files);
   const [hooks, imports, jsx, undefHooks] = await Promise.all([
     analyzeHooksRules(files),
     analyzeImportExports(files),
@@ -81,6 +83,13 @@ export async function analyzeWorkspaceHealth(files: Record<string, string>): Pro
       ok: undefHooks.ok,
       issues: undefHooks.undefinedHooks.length,
       summary: undefHooks.ok ? 'Every hook call resolves.' : `${undefHooks.undefinedHooks.length} hook(s) called but never imported/defined.`,
+    },
+    {
+      id: 'dependency-constraints',
+      name: 'Dependency Constraints',
+      ok: constraints.ok,
+      issues: constraints.conflicts.length,
+      summary: constraints.ok ? 'No dependency version conflicts.' : `${constraints.conflicts.length} version conflict(s) (e.g. react/react-dom or @types mismatch).`,
     },
   ];
 

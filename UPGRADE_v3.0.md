@@ -2123,14 +2123,19 @@
 > surfaced 4 additional gap-groups (P-AI.14–17) not previously listed. (Build-ETA/deadline prediction is
 > already tracked in **P-PME.4**, and DB query/migration generation in **P-CGE.6** — not duplicated here.)
 
-### P-AI.14 — Explicit Reasoning Engines  ❌ MISSING  [LOW — mostly academic for a code-gen app]
-- All reasoning today is implicit inside LLM prompts. There are no explicit, testable reasoning modules.
-  Most of these are low-ROI for a code-generation product, but the **constraint solver** is the one with
-  real near-term value (resolving conflicting blueprint requirements / dependency version constraints).
-- [ ] (MED) `ConstraintSolver.ts` — resolve conflicting requirements & dependency version ranges during planning.
-- [ ] (LOW) Causal & temporal reasoning helpers for multi-step build/debug ordering.
-- [ ] (SKIP unless needed) symbolic / probabilistic / spatial / scientific reasoning — track as N/A-by-design for now.
-- **Files:** new `src/server/AI/reasoning/ConstraintSolver.ts`.
+### P-AI.14 — Explicit Reasoning Engines  🟡 CONSTRAINT-SOLVER DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- All reasoning today is implicit inside LLM prompts. The **constraint solver** was the one with real
+  near-term value (dependency version constraints) — now built and wired into the build gate.
+- [x] (MED) **`ConstraintSolver.ts`** (pure, unit-tested) — `analyzeDependencyConstraints(files)` resolves
+  dependency version conflicts from package.json alone (no registry): react↔react-dom major mismatch (HIGH —
+  crashes React at render), same package pinned to two majors across deps/devDeps (MEDIUM), and @types/X drift
+  (LOW). `dominantMajor()` parses common semver forms and returns null for multi-major/unknown ranges (→ never
+  false-flags). Wired into the readiness gate (ToolDispatcher `evaluate` → the HIGH mismatch is a hard blocker
+  → the builder self-fixes it), folded into the Build-Health aggregate (6th check), and exposed standalone
+  (`POST /api/workspace/dependency-check` + a "Dependency Constraints" panel card). AppKnowledgeBase entry added.
+- [ ] (LOW) Causal & temporal reasoning helpers for multi-step build/debug ordering — deferred (low ROI).
+- [ ] (SKIP unless needed) symbolic / probabilistic / spatial / scientific reasoning — N/A-by-design.
+- **Files:** `src/server/AI/reasoning/ConstraintSolver.ts` (+`.test.ts`, 12), `ToolDispatcher.ts`, `WorkspaceHealth.ts`, `routes/depConstraintCheck.ts`, `ProjectInsightsPanel.tsx`, `AppKnowledgeBase.ts`.
 
 ### P-AI.15 — Ensemble / Voting / Arbitration  🟡 PARTIAL → full  [MED]
 - `Consensus.ts` runs a multi-persona expert panel on hard design decisions, but there is no general

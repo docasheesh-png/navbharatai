@@ -170,6 +170,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setHookResBusy(false); }
   };
 
+  // ── Dependency version-constraint check ──
+  const [depChk, setDepChk] = useState<any>(null);
+  const [depChkBusy, setDepChkBusy] = useState(false);
+  const runDepChk = async () => {
+    setDepChkBusy(true); setDepChk(null);
+    try {
+      const r = await fetch('/api/workspace/dependency-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setDepChk(await r.json());
+    } catch { /* ignore */ }
+    finally { setDepChkBusy(false); }
+  };
+
   // ── One-call Build Health (runs all robustness checks) ──
   const [health, setHealth] = useState<any>(null);
   const [healthBusy, setHealthBusy] = useState(false);
@@ -341,6 +353,23 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <div className="text-red-400 font-bold">{hookRes.undefinedHooks.length} undefined hook(s) — these will crash the app at runtime.</div>
             <div className="space-y-1 max-h-40 overflow-auto">{hookRes.undefinedHooks.slice(0, 30).map((h: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300"><span className="text-white">{h.hook}()</span> <span className="text-[#8b949e]">({h.file}:{h.line})</span></div>
+            ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Dependency version constraints */}
+      <Card icon={<Brain className="w-4 h-4 text-lime-400" />} title="Dependency Constraints"
+        action={<Button size="sm" onClick={runDepChk} disabled={depChkBusy} className="uppercase tracking-widest bg-lime-600 hover:bg-lime-700">{depChkBusy ? 'Checking…' : 'Check Deps'}</Button>}>
+        {!depChk ? (
+          <p className="text-[11px] text-[#8b949e]">Scan package.json for version conflicts that break <span className="font-mono">npm install</span> or crash the app — a react/react-dom major mismatch, the same package pinned to two majors, or <span className="font-mono">@types</span> drift.</p>
+        ) : depChk.ok ? (
+          <div className="text-[11px] text-emerald-400 font-bold">✓ No dependency version conflicts across {depChk.filesScanned} manifest(s).</div>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="text-red-400 font-bold">{depChk.conflicts.length} version conflict(s).</div>
+            <div className="space-y-1 max-h-40 overflow-auto">{depChk.conflicts.slice(0, 30).map((c: any, i: number) => (
+              <div key={i} className="bg-black/30 rounded px-3 py-1 text-[10px] text-amber-300"><span className={`font-bold ${c.severity === 'high' ? 'text-red-400' : c.severity === 'medium' ? 'text-amber-400' : 'text-[#8b949e]'}`}>[{c.severity}]</span> {c.detail} <span className="text-[#484f58]">({c.file})</span></div>
             ))}</div>
           </div>
         )}

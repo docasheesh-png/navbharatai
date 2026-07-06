@@ -37,6 +37,7 @@ import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
+import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -1184,6 +1185,14 @@ export class ToolDispatcher {
         if (undefHookRep.undefinedHooks.length) {
           const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
           extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
+        }
+        // Dependency version conflicts (P-AI.14 ConstraintSolver): a react/react-dom major mismatch crashes
+        // React at render (HIGH blocker); duplicate/`@types` drift lowers the score as a warning. Pure, sync.
+        // Uses the already-read root package.json (pkgForRun) — package.json is not in snap.sources.
+        if (pkgForRun) {
+          for (const c of analyzeDependencyConstraints({ 'package.json': pkgForRun }).conflicts) {
+            extra.push({ severity: c.severity, label: `Dependency conflict (${c.kind}): ${c.detail}` });
+          }
         }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.

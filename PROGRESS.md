@@ -10521,3 +10521,24 @@ v3.0's sandbox actuator is the live one and is fixed. Regression test: ViteConfi
 admin's EXACT case (port-3000 server block in vite.config.js → allowedHosts injected, port preserved).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5181/5181 PASS, build PASS, boot PASS.
+
+## 2026-07-06 — P-AI.14 (ConstraintSolver): dependency version-conflict detector  ✅ DONE
+
+Built the near-term-valuable slice of P-AI.14. New src/server/AI/reasoning/ConstraintSolver.ts (pure,
+unit-tested): analyzeDependencyConstraints(files) resolves dependency version conflicts from package.json
+alone (no registry) — react↔react-dom major mismatch (HIGH — crashes React at render), same package pinned
+to two majors across deps/devDeps (MEDIUM), @types/X drift (LOW). dominantMajor() parses common semver forms
+and returns null for multi-major/unknown ranges (never false-flags). WIRED INTO the self-correcting gate
+(ToolDispatcher evaluate, using the already-read pkgForRun since package.json isn't in snap.sources — the HIGH
+react/react-dom mismatch is a hard blocker → the builder self-fixes it), folded into the Build-Health aggregate
+(now 6 checks), and exposed standalone (POST /api/workspace/dependency-check + a "Dependency Constraints" panel
+card). AppKnowledgeBase dependency-constraints-check entry added.
+
+Bug found+fixed during verification: package.json is excluded from snap.sources (code files only), so the gate
+dep-check initially found nothing — switched it to reuse the already-read pkgForRun. Regression test in
+ToolDispatcher.test.ts (react/react-dom mismatch → NOT READY).
+
+Live prod smoke: mismatch → ok:false HIGH conflict; aggregate reports 6 checks with dependency-constraints
+failing. Tests: ConstraintSolver.test.ts (12) + gate regression (1) + WorkspaceHealth shape → 6.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5193/5193 PASS (13 new), build PASS, boot:check PASS, live smoke PASS.

@@ -1320,6 +1320,15 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).toContain('NOT READY');
   });
 
+  it('BLOCKS readiness on a react/react-dom major mismatch (dependency conflict)', async () => {
+    const dd = makeDispatcher('ws-eval-depconflict');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18.2.0', 'react-dom': '^17.0.2' } }));
+    await write(dd, 'src/App.tsx', "import { useState } from 'react';\nexport function App() { const [v] = useState(0); return v; }\n");
+    const out = await evalText(dd);
+    expect(out).toContain('Dependency conflict');
+    expect(out).toContain('NOT READY');
+  });
+
   it('does NOT introduce these blockers for a clean React app (no false-block)', async () => {
     const dd = makeDispatcher('ws-eval-clean');
     await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));

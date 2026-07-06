@@ -1814,6 +1814,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['usestate is not defined', 'useeffect is not defined', 'hook not imported', 'undefined hook', 'referenceerror hook', 'forgot to import', 'missing hook import', 'react hook error', 'hook not defined'],
   },
   {
+    id: 'dependency-constraints-check',
+    name: 'Dependency Constraints Check',
+    path: 'Settings → Insights & Webhooks → Dependency Constraints',
+    description: `Scans package.json for dependency VERSION CONFLICTS that break "npm install" or crash the app: a react / react-dom MAJOR mismatch (they must share a major or React crashes at render), the same package pinned to two different majors across dependencies vs devDependencies, and @types/X drift (type definitions not matching the installed package). Pure, deterministic analysis from package.json alone — no registry, no network. Conservative: only clear single-major ranges are compared, so complex or multi-major ranges are never falsely flagged. The high-severity react/react-dom mismatch is also auto-enforced in the build's readiness gate, so the builder fixes it before shipping. Backed by POST /api/workspace/dependency-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "Dependency Constraints" → Check Deps. Green means no conflicts; otherwise each conflict shows its severity, the fix, and the manifest.',
+    relatedFeatures: ['build-health-check', 'code-confidence-check', 'app-sbom', 'agentv3_builder'],
+    keywords: ['dependency conflict', 'version conflict', 'react-dom mismatch', 'npm install fails', 'peer dependency', 'incompatible versions', 'types mismatch', 'package version', 'dependency resolution', 'conflicting dependencies'],
+  },
+  {
     id: 'build-health-check',
     name: 'Build Health — Will this app work?',
     path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',

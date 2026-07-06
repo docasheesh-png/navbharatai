@@ -20,6 +20,7 @@ import {
   Loader2,
   QrCode,
 } from 'lucide-react';
+import { TeamLibraryPanel } from './TeamLibraryPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -739,6 +740,9 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                 })}
               </div>
             </div>
+
+            {/* — P-COLLAB.4: Team-scoped shared library (prompts/templates/components) — */}
+            {userId && <TeamLibraryPanel teamId={userId} />}
 
             {/* — Bottom row: Live Presence + Notifications */}
             <div className="flex gap-4 flex-col sm:flex-row">

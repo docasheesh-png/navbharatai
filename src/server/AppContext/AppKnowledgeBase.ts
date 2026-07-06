@@ -1730,6 +1730,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['deploy risk', 'aiops', 'release risk', 'incident analysis', 'rca', 'root cause', 'rollback', 'deployment risk', 'risk score', 'pre-deploy check', 'incident'],
   },
   {
+    id: 'team-library',
+    name: 'Team Library (shared prompts / templates / components)',
+    path: 'Team Collaboration panel → Team Library',
+    description: `A team-scoped shared library where your team can save and reuse curated PROMPTS, project TEMPLATES, and saved COMPONENTS. Unlike the global template gallery (one for everyone), this is private to your team — only ACTIVE members of the team can view and contribute. Each item has a kind (prompt/template/component), a title, and the content to reuse; you can copy an item to the clipboard or delete it. Backed by GET/POST/DELETE /api/team/:teamId/library (member-gated on the server, fail-closed).`,
+    howToUse: 'Open the Team Collaboration panel → scroll to "Team Library". Pick a kind (prompt/template/component), enter a title and the content, and click "Save to library". Team members can copy any saved item or remove it.',
+    relatedFeatures: ['project-templates', 'admin-release-gate'],
+    keywords: ['team library', 'shared prompts', 'shared templates', 'saved components', 'reusable prompts', 'team templates', 'prompt library', 'component library', 'team collaboration', 'reuse', 'curated'],
+  },
+  {
     id: 'admin-release-gate',
     name: 'Release Freeze / Approval Gate',
     path: 'Admin — GET/POST /api/admin/release-gate; the pipeline checks GET /api/release/gate',

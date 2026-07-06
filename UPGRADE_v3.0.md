@@ -2920,11 +2920,17 @@
   `src/server/AppContext/AppKnowledgeBase.ts`.
 - **Verify:** `tsc --noEmit` + `tsc -p tsconfig.server.json` clean · `vitest run` green · `build` OK · boot PASS.
 
-### P-COLLAB.4 — Shared Team Libraries (prompts / templates / components)  🟡 PARTIAL → full  [LOW]
-- `SyncedTemplates` and `ComponentLibrary` are **global** (one instance for everyone); there is no **team-scoped**
-  shared prompt / template / component library a team can curate and reuse.
-- [ ] Add team-scoped libraries (Firestore, keyed by teamId) for prompts, templates, and saved components.
-- **Files:** new `src/server/lib/TeamLibraryStore.ts`, `src/components/ide/{ComponentLibrary,SyncedTemplates}.*`.
+### P-COLLAB.4 — Shared Team Libraries (prompts / templates / components)  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- Added a **team-scoped** curated library (the global SyncedTemplates/ComponentLibrary stay as-is).
+- [x] **`TeamLibraryStore.ts`** (Firestore `teams/{teamId}/library/{itemId}`, VITEST-skip; pure `buildLibraryItem`
+  / `normalizeKind` unit-tested) — prompts / templates / components, title+content, size-capped (200 KB), newest-first.
+- [x] **Member-gated routes** `GET/POST/DELETE /api/team/:teamId/library` (`routes/teamLibrary.ts`) — fail-closed:
+  only the team owner (`teamId === uid`) or an ACTIVE member (via `TeamStore.listMembers`) may read/contribute;
+  deletes are path-scoped so cross-team deletes are impossible.
+- [x] **UI** — a self-contained `TeamLibraryPanel` (save with kind/title/content, copy-to-clipboard, delete)
+  mounted in the Team Collaboration panel. AppKnowledgeBase entry added.
+- **Files:** new `src/server/lib/TeamLibraryStore.ts` (+`.test.ts`, 6), `routes/teamLibrary.ts`, `server.ts`,
+  new `src/components/ide/TeamLibraryPanel.tsx`, `TeamCollaboration.tsx`, `AppKnowledgeBase.ts`.
 
 ### P-COLLAB.5 — Team @Mention + Notification Routing  ❌ MISSING  [LOW]
 - No `@mention` of teammates in the workspace and no routing of an event (mention, role-change, share) to the right

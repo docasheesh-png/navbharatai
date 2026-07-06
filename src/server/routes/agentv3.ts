@@ -175,7 +175,7 @@ import {
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree } from '../AgentV3/WorkspaceFileStore';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -3473,7 +3473,19 @@ export function registerAgentV3Routes(app: Express): void {
       // floor out of its chain: faster, and no silent multi-timeout money burn.
       let editFileTree: string[] | null = null;
       if (isEditMode) {
-        try { editFileTree = await actuator.listFiles(workspaceId); } catch { editFileTree = null; }
+        let sandboxPaths: string[] | null = null;
+        try { sandboxPaths = await actuator.listFiles(workspaceId); } catch { sandboxPaths = null; }
+        // RC-1 ROOT FIX (admin 2026-07-06): the sandbox is EPHEMERAL. On a recycled/cold sandbox
+        // listFiles returns a near-empty set — the FileGuardian restore runs LATER in this handler —
+        // so the true project size was under-seen: a large existing project MISROUTED to the weak
+        // model AND the edit prompt saw a fraction of the files (the exact "25 vs 1654 files on the
+        // SAME repo across two turns" the admin hit). The durable WorkspaceFileStore is the source of
+        // truth for what the project contains, independent of sandbox coldness — reconcile against it
+        // (metadata-only paths read, no content load) so detection + the edit prompt see every file.
+        let durablePaths: string[] = [];
+        try { durablePaths = await listWorkspaceFilePaths(workspaceId); } catch { /* best-effort — the sandbox listing stands */ }
+        const reconciled = reconcileProjectFileTree(sandboxPaths, durablePaths);
+        editFileTree = reconciled.length > 0 ? reconciled : sandboxPaths;
       }
       const largeProject = isLargeExistingProject(editFileTree?.length ?? 0);
       // Admin routing policy: small app → Haiku, complex app → Sonnet, large project → Sonnet,

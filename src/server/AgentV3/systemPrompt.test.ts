@@ -41,9 +41,19 @@ describe('summarizeFileTree (edit at scale — bound the injected tree)', () => 
 
   it('caps the number of directory lines and says how many were elided', () => {
     const paths: string[] = [];
-    for (let d = 0; d < 500; d++) paths.push(`pkg/mod${d}/index.ts`);
+    for (let d = 0; d < 600; d++) paths.push(`pkg/mod${d}/index.ts`); // > fullListMax(500) → summary mode
     const out = summarizeFileTree(paths, { maxDirLines: 50 });
-    expect(out).toContain('and 450 more director');
+    expect(out).toContain('and 550 more director');
+  });
+
+  it('full-list threshold is 500 (admin 2026-07-06): 500 files → full list, 501 → summary', () => {
+    const at = Array.from({ length: 500 }, (_, i) => `pkg/dir${i}/index.ts`);
+    const atOut = summarizeFileTree(at);
+    expect(atOut).not.toContain('LARGE project');   // exactly at the cap → still the full flat list
+    expect(atOut).toContain('pkg/dir499/index.ts');
+    const over = Array.from({ length: 501 }, (_, i) => `pkg/dir${i}/index.ts`);
+    const overOut = summarizeFileTree(over);
+    expect(overOut).toContain('LARGE project');      // one over → bounded directory summary
   });
 
   it('respects a custom fullListMax and handles empty input', () => {

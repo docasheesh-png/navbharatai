@@ -107,7 +107,10 @@ export function summarizeFileTree(
   paths: string[],
   opts?: { fullListMax?: number; maxDirLines?: number },
 ): string {
-  const fullListMax = opts?.fullListMax ?? 400;
+  // Admin 2026-07-06 ("isko 500 file karo"): projects up to 500 EDITABLE files get the full flat file
+  // list (every path shown); only above that does it collapse to the bounded directory summary. Raised
+  // from 400 so more mid-large projects hand the agent an exact, complete file map instead of a summary.
+  const fullListMax = opts?.fullListMax ?? 500;
   const maxDirLines = opts?.maxDirLines ?? 240;
   const all = [...new Set((paths || []).filter((p) => typeof p === 'string' && p.trim()))];
   // Prompt-size governance (autopsy follow-up 3): binary assets are excluded from the listing — the

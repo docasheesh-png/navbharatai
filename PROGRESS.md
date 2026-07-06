@@ -10055,3 +10055,43 @@ and GET /api/export/usage, each ?format=csv|json|xlsx. Identity always from the 
 already-present xlsx dep). Download headers per format. PDF deferred honestly (needs pdfkit, not stubbed).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5039/5039 PASS (7 new), build PASS, boot:check PASS.
+## 2026-07-06 — Large-project autopsy RC-1: cold-sandbox undercount → misroute (the "25 vs 1654 files" bug)
+
+Admin imported NavBharatAI's OWN repo (~1650 files) into v3.0 and it paused on the time limit twice;
+"badi file abhi bhi handle nahi ho rahi — diagnosis banao". Forensic trace found the primary root cause
+and it is fixed here (first of the ledger; remaining root causes queued one-by-one per admin).
+
+ROOT CAUSE (RC-1) — evidence, not theory: `agentv3.ts` listed the edit-mode file tree via
+`actuator.listFiles` (~L3476) and ran `isLargeExistingProject` on it BEFORE the FileGuardian restored a
+recycled sandbox (~L3757). The sandbox is EPHEMERAL, so across turns it goes cold; on that turn listFiles
+returned a near-empty set → the same repo showed "25 source files" one turn and "1654 files" the next.
+Consequences: (a) large-project detection saw 25 < 100 → NOT routed to the strong model → the cheap floor
+took the huge (later-restored) context and timed out → deadline "paused automatically"; (b) the edit
+prompt + banner saw a fraction of the codebase → the agent edited near-blind.
+
+Root fix (single source of truth): the durable WorkspaceFileStore always knows the true file set,
+independent of sandbox coldness.
+- New `listWorkspaceFilePaths(workspaceId)` — metadata-only paths read (no content load; mirrors
+  countWorkspaceFiles), and pure `reconcileProjectFileTree(sandboxPaths, durablePaths)` — dedup UNION,
+  sandbox-first so a warm sandbox stays byte-stable.
+- Route: `editFileTree` is now the reconcile of the sandbox listing with the durable paths, so
+  large-project detection, model selection, the edit prompt (summarizeFileTree) and the "N source files"
+  banner all see EVERY known file even on a cold sandbox. One cheap metadata read; no extra content load.
+
+Admin "isko 500 file karo": `summarizeFileTree` fullListMax 400 → 500 — projects up to 500 editable
+files now get the full flat file list (every path) instead of the bounded directory summary. (NavBharatAI
+scale, 900+, still uses the summary + grep/glob/read_file path — the RC-1 fix is what makes all of it
+visible.)
+
+Regression tests encode the exact failure: reconcileProjectFileTree (25-vs-1532 cold-sandbox union,
+warm-stable, dedup union, null/garbage), listWorkspaceFilePaths no-throw→[], and the 500-file threshold
+boundary (500 → full list, 501 → summary). Siblings hunted: the edit-prompt reuse (~L4007) and banner
+(~L4020) both consume the same reconciled `editFileTree`, so no second under-seeing path remains.
+
+Honest scope: RC-1 (misroute + undercount) is killed. Still OPEN and queued next per admin ("ek ek kar
+ke"): RC-2 time budget is prompt-sized not project-sized (a large edit gets base 30 min, no `deep`
+headroom); RC-3 per-build cold-start tax (restore+install inside the work window); RC-4 auto-continue
+honesty; RC-5 anon identity (needs FIREBASE_PROJECT_ID on Cloud Run + the just-merged Stop/Resume deploy).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5019/5019 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (internal routing/visibility fix, no new user-facing surface).

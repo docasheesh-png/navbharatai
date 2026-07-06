@@ -10124,3 +10124,39 @@ amortizing it is the real fix); RC-4 auto-continue honesty; RC-5 anon identity.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5046/5046 PASS, build PASS, boot PASS. No AppKnowledgeBase
 change (internal build-budget policy, no new user-facing surface).
+
+## 2026-07-06 — Large-project autopsy RC-3 (honest: root fix already exists) + RC-4 (honest deadline-pause wording)
+
+Continuing the NavBharatAI-import autopsy one-by-one.
+
+RC-3 — per-build cold-start tax (restore + npm install inside the work window). INVESTIGATION FINDING
+(rule 6, honesty): the ROOT FIX ALREADY EXISTS and is coherent — `AGENTV3_SANDBOX_RESUME` resumes the
+workspace's OWN warm sandbox (files + node_modules + dev server already there) via E2BActuator's
+Sandbox.connect(resumeSandboxId) with auto-create fallback + idle-pause persistence; `SandboxStore`
+persists the sandbox id across Cloud Run restarts (save at build end, resume at build start, both
+flag-gated); security-safe (workspaceId is server-derived from the verified uid, so a user only ever
+resumes their OWN sandbox). It is OFF by default because keeping E2B VMs warm is a cost/infra decision.
+Building a duplicate would violate the redundant-work safeguard (#6). HONEST OUTCOME: recommend enabling
+`AGENTV3_SANDBOX_RESUME=on` (admin infra/cost call) — and RC-2's `deep` headroom already absorbs the
+cold-start TIME meanwhile, so a cold build no longer pauses just from the restore+install cost. Recorded
+as an admin-side enablement, not a code gap.
+
+RC-4 — the deadline-pause message lied. On a wall-clock pause the narration said "It was likely almost
+done" — an UNVERIFIED guess that is simply false for a big build that timed out EARLY (violates the
+no-fake-success / honesty rule), and the resumable result carried no real progress signal.
+- Root fix: new pure `deadlinePauseMessage(filesChangedSoFar)` (DeadlinePause.ts) — states ONLY the real
+  fact available at the cap: how many files were written so far (`writtenFiles.size`). Never guesses how
+  close the build was; honest "nothing was written yet" branch when zero. Wired into the route's
+  finalize-on-deadline path (replaces the "almost done" line).
+- Client-side exhaustion was ALREADY honest (decideAutoContinue → "type continue" stopMessage once the
+  pause budget is spent) — verified, no change needed. Sibling hunt: grep confirmed only this one site
+  carried the dishonest wording.
+- Tests: DeadlinePause.test.ts (never "almost done"; real N-files wording; singular; honest zero;
+  garbage input → zero).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5051/5051 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (internal messaging honesty + infra recommendation, no new user-facing surface).
+
+Ledger status: RC-1 ✅ merged, RC-2 ✅ merged, RC-3 ✅ root fix exists (enable AGENTV3_SANDBOX_RESUME —
+admin infra call), RC-4 ✅ this PR. RC-5 (anon identity) remains — partly infra (FIREBASE_PROJECT_ID on
+Cloud Run) + the already-merged Stop/Resume deploy.

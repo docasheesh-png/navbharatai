@@ -3,6 +3,7 @@ import { BuildJobManager } from '../AppMakerLab/jobs/BuildJobManager';
 import { aggregateBuildAnalytics } from '../AppMakerLab/jobs/BuildAnalytics';
 import { summarizeSlo } from '../AppMakerLab/intelligence/BuildSLATracker';
 import { computeReliabilityMetrics } from '../QualityEvaluationEngine/QAMetricsCollector';
+import { analyzeBuildOptimizations } from '../AppMakerLab/AIBuildOptimizer';
 
 /**
  * P-BRE.8 — Build analytics endpoint.
@@ -47,6 +48,20 @@ export function registerBuildAnalyticsRoutes(app: Express): void {
     } catch (err) {
       console.error('[BUILD_RELIABILITY] failed:', err);
       res.status(500).json({ error: 'Failed to compute reliability metrics.' });
+    }
+  });
+
+  // P-BRE.11 — AI build optimizer: prioritized, deterministic optimization suggestions from the real
+  // aggregated build telemetry. Empty until 10+ builds have run (never over-fits a tiny sample).
+  app.get('/api/analytics/build-optimizer', async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+      const jobs = await BuildJobManager.listRecent(limit);
+      const analytics = aggregateBuildAnalytics(jobs);
+      res.json({ suggestions: analyzeBuildOptimizations(analytics), window: limit, generatedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error('[BUILD_OPTIMIZER] failed:', err);
+      res.status(500).json({ error: 'Failed to compute build optimizations.' });
     }
   });
 }

@@ -10542,3 +10542,17 @@ Live prod smoke: mismatch → ok:false HIGH conflict; aggregate reports 6 checks
 failing. Tests: ConstraintSolver.test.ts (12) + gate regression (1) + WorkspaceHealth shape → 6.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5193/5193 PASS (13 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — P-BRE.11: AI Build Optimizer (deterministic, over real telemetry)  ✅ DONE
+
+New src/server/AppMakerLab/AIBuildOptimizer.ts (pure, unit-tested): analyzeBuildOptimizations(analytics) turns
+the REAL aggregated BuildAnalytics (over the job store) into prioritized, severity-ranked optimization
+suggestions — high failure rate, a DOMINANT failure signature ("N% of failures share one cause — highest
+leverage fix"), slow average build, slow tail (p95 ≫ avg). Returns nothing below 10 terminal builds (never
+over-fits a tiny sample), per the spec. Honest scope: deterministic rules over real metrics (more trustworthy
+than an LLM guess, no model call — same pattern as FinOpsAdvisor/AiInsights). Exposed via GET
+/api/analytics/build-optimizer (feeds BuildJobManager.listRecent → aggregateBuildAnalytics →
+analyzeBuildOptimizations) and surfaced as a "Build Optimizer" card in AppAnalytics.tsx. AppKnowledgeBase
+build-optimizer entry added.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5202/5202 PASS (8 new), build PASS, boot:check PASS.

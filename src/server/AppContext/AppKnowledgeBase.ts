@@ -1873,8 +1873,17 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     path: 'Analytics view → Build Performance card',
     description: `Real build-pipeline health computed from your recent build jobs (not faked): success rate %, failure rate %, average build duration, p95 (slowest-5%) duration, and the top failure types (the most common build-error signatures). Helps you see if builds are getting slower or failing more often, and what's breaking most. Backed by GET /api/analytics/builds, which aggregates the last 100 jobs from the build-job store; shows honest zeros until builds have run.`,
     howToUse: 'Open the Analytics view. The "Build Performance" card appears once at least one build has run, showing success/failure rate, avg + p95 duration, and the top failure types. Use Refresh to recompute.',
-    relatedFeatures: ['pro_chat', 'admin-metrics', 'build-reliability-metrics'],
+    relatedFeatures: ['pro_chat', 'admin-metrics', 'build-reliability-metrics', 'build-optimizer'],
     keywords: ['build performance', 'build analytics', 'success rate', 'failure rate', 'build duration', 'p95', 'slow build', 'build health', 'failure types', 'pipeline', 'build stats'],
+  },
+  {
+    id: 'build-optimizer',
+    name: 'AI Build Optimizer',
+    path: 'Analytics view → Build Optimizer card',
+    description: `Prioritized, actionable suggestions to make your builds faster and more reliable, computed from your REAL build history (not faked): flags a high failure rate, a DOMINANT failure signature ("80% of failures share one cause — fix this one class"), a slow average build, and a slow tail (p95 much larger than the average). Each suggestion is severity-ranked (critical/warning/info) with a concrete recommendation. Deterministic analysis of the last 100 build jobs — it stays empty until at least 10 builds have run, so it never over-fits a tiny sample. Backed by GET /api/analytics/build-optimizer.`,
+    howToUse: 'Open the Analytics view. The "Build Optimizer" card appears once you have 10+ builds and there is something worth improving; each row shows the issue and a recommended fix.',
+    relatedFeatures: ['build-performance-analytics', 'build-reliability-metrics', 'admin-metrics'],
+    keywords: ['build optimizer', 'optimize build', 'build suggestions', 'faster builds', 'reduce failures', 'build recommendations', 'why builds fail', 'build slow', 'improve builds', 'failure pattern'],
   },
   {
     id: 'build-reliability-metrics',

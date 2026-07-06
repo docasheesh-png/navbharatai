@@ -1164,11 +1164,17 @@
 - **Files:** `src/server/AppMakerLab/SBOMGenerator.ts` (new), `src/server/routes/sbom.ts` (new),
       `tests/sbomGenerator.test.ts` (new), `server.ts`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-BRE.11 — AI Build Optimizer  ❌ MISSING  [LOW]
-- No AI agent analyzes build telemetry to suggest optimizations: "your BackendEngine step takes 12s — consider splitting it", "80% of failures are missing-import errors — adjust code gen prompt".
-- [ ] Add `AIBuildOptimizer.ts`: after 10+ builds, aggregate stage timings + failure patterns from Firestore job store → send to AgentV3 with `intent: optimize_build` → return a structured suggestion.
-- [ ] Surface suggestions as a toast notification or in Build Analytics dashboard.
-- **Files:** new `src/server/AppMakerLab/AIBuildOptimizer.ts`, `src/server/AppMakerLab/jobs/BuildJobManager.ts`.
+### P-BRE.11 — AI Build Optimizer  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW]
+- Nothing analyzed build telemetry to suggest optimizations.
+- [x] **`AIBuildOptimizer.ts`** (pure, unit-tested) — `analyzeBuildOptimizations(analytics)` turns the REAL
+  aggregated `BuildAnalytics` (over the job store) into prioritized, severity-ranked suggestions: high failure
+  rate, a DOMINANT failure signature ("N% of failures share one cause"), slow average, and a slow tail (p95 ≫
+  avg). Returns NOTHING below 10 terminal builds (never over-fits a tiny sample), per the spec.
+- [x] **Honest scope:** suggestions are DETERMINISTIC (rules over real metrics) rather than an LLM guess — more
+  trustworthy and needs no model call (same pattern as FinOpsAdvisor / AiInsights). Surfaced in the Analytics
+  dashboard as a "Build Optimizer" card, backed by `GET /api/analytics/build-optimizer`. AppKnowledgeBase entry added.
+- **Files:** `src/server/AppMakerLab/AIBuildOptimizer.ts` (+`.test.ts`, 8), `routes/buildAnalytics.ts`,
+  `components/ide/AppAnalytics.tsx`, `AppKnowledgeBase.ts`.
 
 ### P-BRE.12 — Watchdog Service (Zombie Process Detection)  ❌ MISSING  [LOW]
 - `AutoRepairEngine.ts` catches build failures reported through the event bus. But if a sandbox child process becomes a zombie (no `exit` event fired, no HTTP response, no OS signal), it sits alive consuming ports until `PreviewRunner.ts` session expiry (default timeout).

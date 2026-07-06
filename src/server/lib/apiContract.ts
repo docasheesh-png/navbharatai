@@ -43,6 +43,17 @@ export const NAVBHARAT_API_ROUTES: RouteSpec[] = [
 
   { method: 'get', path: '/api/appmaker/jobs/:jobId', summary: 'Get the status of a build job', tags: ['Build'],
     params: [{ name: 'jobId', in: 'path', type: 'string' }] },
+
+  { method: 'post', path: '/api/keys', summary: 'Create a public API key (returns the secret once)', tags: ['API Keys'],
+    requestBody: { properties: { name: { type: 'string' }, scopes: { type: 'array' } }, required: ['scopes'] },
+    responses: { '201': { description: 'Created — includes the plaintext key (shown once)' }, '400': { description: 'A valid scope is required' }, '401': { description: 'Unauthorized' } } },
+  { method: 'get', path: '/api/keys', summary: 'List your API keys (metadata only, never the secret)', tags: ['API Keys'] },
+  { method: 'delete', path: '/api/keys/:id', summary: 'Revoke one of your API keys', tags: ['API Keys'],
+    params: [{ name: 'id', in: 'path', type: 'string' }] },
+  { method: 'get', path: '/api/v1/me', summary: 'Get the API-key owner profile + monthly usage (auth: API key, scope read:profile)', tags: ['API v1'],
+    responses: { '200': { description: 'Profile + usage' }, '401': { description: 'Invalid/missing API key' }, '403': { description: 'Missing required scope' } } },
+
+  { method: 'get', path: '/api/health', summary: 'Deep health report (status + uptime/memory + per-dependency checks)', tags: ['System'] },
 ];
 
 /** Build the OpenAPI 3.0.3 document for the platform API. Pure. */

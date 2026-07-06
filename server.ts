@@ -60,6 +60,7 @@ import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
 import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
+import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
 import { apiVersionMiddleware } from './src/server/routes/apiVersion';
 import { tracer, parseCloudTraceContext } from './src/server/observability/Tracer';
 import { registerObservabilityRoutes } from './src/server/routes/observability';
@@ -545,6 +546,7 @@ setInterval(() => {
   registerExportRoutes(app); // P-DATA.7 — user data export (build history + usage as CSV/JSON/Excel)
   registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
   registerKnowledgeDocsRoutes(app); // U-9 — docs site at /guide + machine-readable /api/knowledge-base
+  registerApiKeyRoutes(app); // U-7 — public API keys (/api/keys) + key-gated /api/v1/me
 
   // PWA "App Store" routes — extracted to src/server/routes/pwa.ts (Phase 1).
   registerPwaRoutes(app, pwaStore);

@@ -10270,3 +10270,30 @@ lib + one server.ts line, no AgentV3 touch.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5105/5105 PASS (9 new), build PASS, boot:check PASS, live prod smoke
 (/api/health deep + /status) PASS.
+
+## 2026-07-06 — U-7 (foundation): public API keys + v1 endpoint  🟡 FOUNDATION DONE
+
+Built the public-API foundation (the automation half — headless build trigger + nbai CLI — is honestly
+deferred). New src/server/lib/ApiKeyManager.ts (pure, unit-tested): generateApiKey (nbai_ prefix, 32 url-safe
+random chars), hashApiKey (SHA-256), verifyApiKey (crypto.timingSafeEqual), normalizeScopes/hasScope over a
+fixed scope set (read:profile/read:usage/read:builds), extractApiKey (X-API-Key or Bearer nbai_…, never
+mistakes a Firebase token for a key). Plaintext is returned ONCE at creation; only the hash is ever stored.
+New ApiKeyStore.ts (Firestore, VITEST-skip like UserCostStore, best-effort): create/listForUser (hash never
+leaves the server)/revoke (OWNERSHIP-enforced — can't revoke another user's key)/findByHash (auth resolution,
+rejects revoked)/touchLastUsed. Routes in routes/apiKeys.ts: POST/GET/DELETE /api/keys (Firebase-session-authed
+management) + apiKeyAuth middleware + requireScope guard + GET /api/me (canonical /api/v1/me via
+apiVersionMiddleware rewrite) gated by an API key + read:profile scope, returning the owner's profile + monthly
+usage — proving keys work end-to-end. Frontend ApiKeysCard.tsx in My Profile: create (name + scope chips),
+one-time key reveal with copy, list, revoke. OpenAPI contract (apiContract.ts) + AppKnowledgeBase (api_keys
+entry) updated.
+
+Root-cause note: /api/v1/me first 404'd because apiVersionMiddleware rewrites /api/v1/* → /api/* before routing;
+registered the handler at /api/me (clients call /api/v1/me). Isolated: server/lib + one route file + profile UI,
+no AgentV3 touch.
+
+Live prod smoke: /api/v1/me & /api/me without a key → 401; bogus key → 401 "Invalid or revoked"; POST/GET
+/api/keys without a session token → 401; OpenAPI lists /api/v1/me + /api/keys. (Full create→use flow needs real
+Firebase+Firestore, unavailable in local smoke — the pure core + guards are unit-tested and the routes verified
+reachable with correct auth behavior.)
+
+Gate: frontend tsc 0, server tsc 0, vitest 5114/5114 PASS (9 new), build PASS, boot:check PASS, live smoke PASS.

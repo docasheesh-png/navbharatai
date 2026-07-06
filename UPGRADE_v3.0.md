@@ -3556,3 +3556,76 @@ complex builds, test-driven not just tsc-driven), post-deploy liveness check, au
 > recommendations as **PHASE P-ARCH+** and frontier scope as **PHASE P-FUTURE**. Key admin decision baked
 > in: the pipeline must be **complexity-adaptive** — simple apps keep the fast lane (fast generation is the
 > right call), depth is applied only to complex apps. Doc-only change; no code touched.
+
+---
+
+## 2026-07-06 — v3.0 CAPABILITY AUDIT vs BOTH ROADMAPS (Engineer-AI roadmap ⊕ Roadmap-to-Lead-35)
+
+> **Admin ask:** merge the two roadmaps' capability sets and answer, for each, **"is it IN v3.0 (AgentV3)
+> or not?"** — goal is to make v3.0 stronger. Every verdict below is **evidence-based** (checked against
+> the real code, not assumed): the v3.0 agent tool surface is `ToolCatalog.ts`; capability files cited
+> inline. Verdicts: ✅ **HAI** (in v3.0) · 🟡 **ADHA-ADHURA** (partial / on-request-not-default) · ❌ **NAHI**.
+
+### ✅ HAI — already in v3.0 (do NOT rebuild; defend with tests)
+- **Eyes + Hands + runtime capture** — `screenshot`, `browser_action`, `console_errors` tools (ToolCatalog).
+- **Web search** — `web_search` tool.
+- **Sandbox persistence** — E2B pause/resume + dead-sandbox detect+recreate (`E2BActuator`, `sandboxHealth`).
+- **Checkpoints + rollback** — `scheduleCheckpoint` / `CheckpointStore` + git.
+- **Multi-framework** — vite-react / Next / Vue / Svelte / Astro / Python (`FrameworkRegistry`, `TemplateRegistry`).
+- **Multi-agent** — `task` / `spawnSubAgent`; `second_opinion` + `consensus` reviewers.
+- **Cross-session memory + self-learning** — `WorkspaceMemory`, `recall`, per-user brain, `buildLessonFromDiagnostics`.
+- **App Self-Awareness** — `AppKnowledgeBase.ts` (Engineer-AI Phase 21 — lives in v3.0 too).
+- **Multi-provider routing + cost-first + judge/escalation** — Grok→Anthropic→Vertex→Gemini + GLM/KIMI floor,
+  Sonnet/Grok judge, repair-not-rebuild (`AGENTV3_ESCALATION=on`).
+- **Gates** — `TscGate` (typecheck), readiness gate (`Readiness.ts`), security scan (`CodeSafetyScanner`).
+- **Diagnostics/observability of the BUILD** — `BuildDiagnostics`, `DecisionTrace`, cost telemetry (`UserCostStore`).
+- **Codemods** — `codemod_add_prop` / `codemod_rename` / `replace_symbol` / `check_conventions`.
+- **Doc generators (tools)** — `generate_readme` / `_api_docs` / `_architecture_docs` / `_openapi` / `_release_notes`.
+- **Deploy — MULTI-TARGET** — Vercel + Netlify + Cloudflare + Firebase (`ProDeploy.ts`, `CloudflareProvider.ts`).
+- **Import** — GitHub repo + zip import; own-repo working-branch + "Ship to main".
+
+### 🟡 ADHA-ADHURA — capability exists but not by-default / not full (v3.0 ko yaha strong karna hai)
+1. **BYO Provisioning Broker (Lead F1)** — local Postgres provisioning (`BackendProvisioner`) + `generate_auth`
+   + conjured local secrets exist, but there is **no one-click multi-provider BYO broker** (Supabase / Firebase /
+   Neon adapters writing env back). → build `ProvisioningBroker` + adapters.
+2. **Test generation (Eng-AI 17, Lead 11)** — `generate_tests` tool exists but is **on-request**, not shipped
+   by default; **no E2E (Playwright) generation**. → make a starter test part of every build (F5) + E2E specs.
+3. **Quality defaults by DEFAULT (Lead F5/12)** — error boundary ships, but **SEO / PWA manifest+SW / a11y** are
+   NOT default (no template markers found under `AppMakerLab/generator/templates/`). → App-Scaffold-Defaults engine.
+4. **Observability into generated apps (Lead F3)** — `generate_observability` tool exists (on-request); **no
+   auto-inject + no cost-alerting** (no threshold-alert code found). → default inject + `costAlert` thresholds.
+5. **Deploy EXTRAS (Lead F2/19)** — multi-target deploy ✅, but **custom domain / rollback / preview-per-branch /
+   staging→prod promotion** are partial/absent. → Deploy Broker extras.
+6. **Git ops depth (Lead 23/26)** — own-repo ship-to-main ✅, but **full branch/PR/history/rebase panel** partial.
+7. **Design-to-code (Eng-AI 12)** — vision exists, but **no image/Figma → matching-UI** path wired in v3.0.
+
+### ❌ NAHI — absent in v3.0 (the real upgrade backlog — prioritized)
+| # | Missing capability | Roadmap src | Why it matters | Effort |
+|---|---|---|---|---|
+| U-1 | **Deterministic Build Harness + Lint/Format gate** (pin model/seed, signed build manifest, `LintGate` beside `TscGate`) | Lead F4 | same prompt → same output; strictest gate in field | M |
+| U-2 | **App-Scaffold-Defaults engine** (SEO/OG + PWA manifest+SW + a11y + starter test BY DEFAULT) | Lead F5/12 | every generated app ships production-grade, not on-request | M |
+| U-3 | **BYO Provisioning Broker** (Supabase/Firebase/Neon one-click DB+auth+storage, env written back) | Lead F1 · Eng-AI 10/14 | real full-stack apps on the USER's own account | L |
+| U-4 | **Verified recipe modules** (Stripe payments · email (Resend/FCM) · realtime · search · storage) — generated AND smoke-tested | Lead 15 | "build me X with payments" actually works end-to-end | L |
+| U-5 | **Cost-alerting thresholds** (surface + per-build/per-user alerts on `UserCostStore`) | Lead F3/8 | closes the billing category to a clean Lead | S |
+| U-6 | **Warm-pool / autoscale** (pre-warm E2B + Cloud Run min-instances) — the earlier-deferred E8 | Lead F9 | kills cold-start; real infra-spend decision for admin | M+infra |
+| U-7 | **Public API + Headless build + `nbai` CLI** | Lead F6 | automation, programmatic/headless builds | M |
+| U-8 | **Teams / RBAC / SSO + append-only platform audit-log** (the SOC2 *substrate*) | Lead F7 | enterprise + the controls an auditor checks | L |
+| U-9 | **Docs site (auto-gen from AppKnowledgeBase) + Template Gallery** | Lead F8 | onboarding depth + community substrate | M |
+| U-10 | **Data toolkit on user's DB** (migrations / seed / scheduled backup / import-existing-DB) | Lead 16 · Eng-AI 10 | data lifecycle, not just a first write | M |
+| U-11 | **Multi-environment config** (dev/staging/prod sets) + **encrypted secrets-vault UI** | Lead 17 | real env promotion + safe secrets | M |
+| U-12 | **APK / mobile pipeline** (Capacitor → signed APK artifact) + **SSR/SSG + edge/cron templates** | Lead 21/22 | mobile output + server-render breadth | M–L |
+| U-13 | **Design-to-code** (upload screenshot/Figma → matching UI via vision) | Eng-AI 12 | design-in differentiator | M |
+| U-14 | **Live visible AI-cursor "drive preview"** (autonomous navigate→act→see→fix, cursor shown live) | Eng-AI 6.5 | Devin/Mythos-class "agent driving" UX | M |
+| U-15 | **Status page + SLA instrumentation** (deep `/api/health`, uptime monitor) | Lead F10 | substrate; SLA/uptime *record* is earned over time (Bucket C) |
+| U-16 | **Firebase Emulator Suite in sandbox** (auth/firestore without real keys) — the earlier B1 | P3 slice 2 | Firebase-backed imports boot in preview | L+infra |
+
+### Honesty note (constitution rule 3/5)
+- **Bucket C is real:** uptime track-record, user base, SOC2 attestation, community size, human-support are
+  **earned over time**, not shippable in a PR. U-8/U-9/U-15 build the *substrate*; the badge comes later.
+- **Deploy is stronger than assumed** — multi-target already ships; the gap is *extras* (domain/rollback/preview), not targets.
+- **Many "generate_*" capabilities already exist as tools** — the gap for U-2/U-4 is **by-default + verified**,
+  not "from scratch". Highest leverage, lowest risk to start: **U-5 (cost alerts, S) → U-1 (determinism+lint) →
+  U-2 (quality defaults)**, then the L-items (U-3, U-4, U-8) as dedicated efforts.
+
+> Doc-only change (this audit). No code touched. Source roadmaps: `ENGINEER_AI_ROADMAP.md` (21 phases) +
+> `ROADMAP_TO_LEAD_35.md` (F1–F10 foundations, 35 categories), merged and mapped onto the real v3.0 code.

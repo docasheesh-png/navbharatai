@@ -5,6 +5,7 @@ const JOBS_COLLECTION = 'build_jobs';
 
 import { JobStore } from './store/JobStore';
 import { LocalFileJobStore } from './store/LocalFileJobStore';
+import { isStaleInFlight, staleRecoveryLog, DEFAULT_STALE_MS } from './jobRecovery';
 
 export enum JobStatus {
     QUEUED = 'QUEUED',
@@ -118,5 +119,29 @@ export class BuildJobManager {
     /** P-BRE.8 — the most recent jobs (newest first) for build-analytics aggregation. */
     static async listRecent(limit = 100): Promise<BuildJob[]> {
         return await this.store.listRecentJobs(limit);
+    }
+
+    /**
+     * P-BRE.6 (durable-recovery core) — find build jobs that were in flight when a previous server
+     * instance died/restarted (non-terminal status + a stale `updatedAt` heartbeat) and mark each
+     * FAILED with an honest reason. This turns a SILENTLY-lost build (stuck forever in e.g. BUILDING)
+     * into an honest terminal state — and, via updateStatus, fires the build notification so the user
+     * is told. Best-effort: never throws, so it can run on boot without risking startup. Returns the
+     * ids it recovered. (Full queue-based re-EXECUTION remains infra-blocked — Redis / Cloud Tasks.)
+     */
+    static async recoverStaleJobs(opts?: { nowMs?: number; thresholdMs?: number; scanLimit?: number }): Promise<string[]> {
+        const nowMs = opts?.nowMs ?? Date.now();
+        const thresholdMs = opts?.thresholdMs ?? DEFAULT_STALE_MS;
+        const recovered: string[] = [];
+        try {
+            const jobs = await this.store.listRecentJobs(opts?.scanLimit ?? 200);
+            for (const job of jobs) {
+                if (!isStaleInFlight(job, nowMs, thresholdMs)) continue;
+                const updated = job.updatedAt instanceof Date ? job.updatedAt.getTime() : new Date(job.updatedAt as any).getTime();
+                await this.updateStatus(job.id, JobStatus.FAILED, 0, staleRecoveryLog(nowMs - updated));
+                recovered.push(job.id);
+            }
+        } catch { /* best-effort — recovery must never block or crash boot */ }
+        return recovered;
     }
 }

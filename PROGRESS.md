@@ -10473,3 +10473,51 @@ hook-resolution failing. Tests: UndefinedHookAnalysis.test.ts (11) + ToolDispatc
 hook → NOT READY) + WorkspaceHealth shape updated to 5 checks.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5180/5180 PASS (12 new), build PASS, boot:check PASS, live smoke PASS.
+## 2026-07-06 — v3.0 composer/header UX pass (admin IMG_5726/5727/5729) + JSON report = full session
+
+Admin UI batch on the Pro v3.0 surface:
+- **Header decluttered:** removed **Export .zip**, **Text report**, **Copy report** buttons from the
+  moving toolbar (+ their now-dead handlers/state and the unused Download/Copy icon imports). The single
+  JSON **"Build report"** download stays (the canonical report to send to support) alongside the per-build
+  History dropdown — so report access is NOT lost (verified the contradiction with the admin first).
+- **JSON report now carries the WHOLE session** ("starting se lekar last tak"): the default download
+  fetches `scope=session` (every build 0 → last, from the durable per-workspace history) instead of only
+  the latest build. A specific build picked from History still downloads just that one.
+- **Composer relayout:** the Build/Plan/Advise selector moved to a LEFT COLUMN on top, with
+  settings + attach in a row beneath it, freeing width so the message box is bigger (auto-grow min
+  height 82px to match the 2-row control column). Matches the admin's sketch.
+- **Tighter chat padding** (p-3 → px-2 py-2, gaps 3 → 2.5) so more conversation is visible.
+
+Build-report DURABILITY (empty report / "No build report yet" after a real build) was already root-caused
+and fixed earlier today — PR #1042 (incremental durable save; survives instance rotation) + the anon fix
+(FIREBASE_PROJECT_ID on Cloud Run, which the admin has now set). Those landed AFTER the screenshots, so a
+fresh post-deploy build is the verification; no blind re-code (rule 7).
+
+Gate: frontend tsc 0, vitest 5119/5119 PASS, build PASS. (Client-only + report-download; no server files
+touched.) No AppKnowledgeBase change (UI layout + existing report export, no new capability).
+
+## 2026-07-06 — Preview host fix: Vite "Blocked request … is not allowed" on imported / non-labelled apps
+
+Admin hit a real preview error: `Blocked request. This host ("3000-…e2b.app") is not allowed. … add to
+server.allowedHosts in vite.config.js`. Root-caused, not patched over the symptom.
+
+ROOT CAUSE: the deterministic preview-host gate in E2BActuator (which reads the on-disk vite config and
+injects `allowedHosts: true` via ViteConfigGuard before `npm run dev`) was GATED on
+`framework === 'vite' || /\bvite\b/.test(command)`. An IMPORTED app — or ANY app whose dev script is
+just `npm run dev` (port 3000, no "vite" in the command, framework not labelled 'vite') — matched
+NEITHER signal, so its config was skipped and Vite 5.4+ blocked the E2B proxy host. (Fresh NavBharatAI
+scaffolds already set allowedHosts, and the write-time backstop fires when the AGENT writes a config —
+but an imported config is written by the import path, so only this dev-start net can catch it, and its
+trigger was too narrow.)
+
+FIX (rule 2 — detection-independent trigger): the gate now runs whenever a vite config FILE EXISTS on
+disk, not by framework label or command substring. The per-file `exists()` probe in the loop is the real
+gate, so it's a cheap no-op for a genuinely non-Vite app (no vite config) and always patches a real Vite
+app regardless of how it was launched. `ensureViteAllowedHosts` already injects into an existing
+`server: { … }` block (verified it preserves the app's own `port: 3000`).
+
+Sibling hunt: the legacy (non-AgentV3) EngineerAI E2BActuator has no such patch (different, older path);
+v3.0's sandbox actuator is the live one and is fixed. Regression test: ViteConfigGuard.test.ts +1 — the
+admin's EXACT case (port-3000 server block in vite.config.js → allowedHosts injected, port preserved).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5181/5181 PASS, build PASS, boot PASS.

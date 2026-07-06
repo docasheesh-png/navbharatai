@@ -671,7 +671,13 @@ export class E2BActuator implements IEngineerActuator {
       // request … is not allowed". This last-line net reads the on-disk config and, only if it lacks
       // allowedHosts AND can be safely patched, writes it back — so the very next preview loads.
       // Best-effort: a read/write hiccup must never block the dev server from starting.
-      if (framework === 'vite' || /\bvite\b/.test(command)) {
+      // DETECTION-INDEPENDENT (admin 2026-07-06): patch whenever a vite config EXISTS on disk — NOT only
+      // when the framework label is 'vite' or the command literally contains "vite". An IMPORTED app (or
+      // any app whose dev script is just `npm run dev`) runs Vite with NEITHER signal, so its config was
+      // being skipped here and the preview 502'd with "Blocked request … is not allowed" (the admin hit
+      // this on port 3000). The per-file exists() check below is the real gate — this whole block is a
+      // cheap no-op (a handful of exists() probes) for a non-Vite app that has no vite config.
+      {
         for (const cfg of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs', 'vite.config.mts', 'vite.config.cts']) {
           try {
             const full = `${WORKSPACE_ROOT}/${cfg}`;

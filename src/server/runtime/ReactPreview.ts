@@ -128,6 +128,67 @@ function findEntry(vfs: VirtualFileSystem): string | null {
   return pickBestEntry(vfs.paths().filter((p) => isEntryCandidateFile(p) && /(^|\/)(main|index)\.[jt]sx?$/.test(p)));
 }
 
+/** Strip // line and /* *\/ block comments so a commented tsconfig.json still JSON-parses. */
+function stripJsonComments(raw: string): string {
+  return raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * Build the project's path-alias map for the in-browser resolver — the fix for imported
+ * shadcn/Vite/Next/Lovable/Bolt apps whose `@/…` imports were wrongly sent to the esm.sh CDN
+ * ("Could not load @/components/ui/toaster") instead of resolving to a LOCAL file. Returns a map of
+ * `aliasPrefix → root-absolute target` (e.g. `{ '@': '/client/src' }`), read in priority order from:
+ *   1. tsconfig/jsconfig `compilerOptions.paths` (JSON — the reliable source: `"@/*": ["./client/src/*"]`)
+ *   2. `vite.config.*` `resolve.alias` (best-effort regex)
+ *   3. a heuristic: if `@/…` imports appear but no config declares the alias, infer `@` → the entry's
+ *      src root (shadcn's `@` always maps to the src dir). Pure + unit-testable.
+ */
+export function buildAliasMap(vfs: VirtualFileSystem, entry: string | null): Record<string, string> {
+  const aliases: Record<string, string> = {};
+  const addAlias = (prefix: string, targetDir: string): void => {
+    const p = prefix.replace(/\/\*$/, '').replace(/\*$/, '').replace(/\/$/, '');
+    const d = targetDir.replace(/\/\*$/, '').replace(/\*$/, '').replace(/^\.\//, '').replace(/^\//, '').replace(/\/$/, '');
+    if (p && d && !aliases[p]) aliases[p] = '/' + d;
+  };
+  // 1. tsconfig / jsconfig compilerOptions.paths
+  for (const cfg of ['tsconfig.json', 'tsconfig.app.json', 'tsconfig.base.json', 'jsconfig.json']) {
+    const raw = vfs.readText(cfg);
+    if (!raw) continue;
+    let json: { compilerOptions?: { paths?: Record<string, unknown> } };
+    try { json = JSON.parse(stripJsonComments(raw)); } catch { continue; }
+    const paths = json?.compilerOptions?.paths;
+    if (paths && typeof paths === 'object') {
+      for (const key of Object.keys(paths)) {
+        const t = paths[key];
+        const target = Array.isArray(t) ? t[0] : t;
+        if (typeof key === 'string' && typeof target === 'string') addAlias(key, target);
+      }
+    }
+  }
+  // 2. vite.config.* resolve.alias (best-effort — the config is JS, so a targeted regex, not a parse)
+  for (const cfg of vfs.paths().filter((p) => /(^|\/)vite\.config\.[cm]?[jt]s$/.test(p))) {
+    const raw = vfs.readText(cfg) || '';
+    // Matches  '@': path.resolve(__dirname, './client/src')  |  '@': '/src'  |  "@": fileURLToPath(new URL('./src', …))
+    // The lazy [^}\n]*? spans a helper call's own args (incl. commas) up to the FIRST quoted …src… path.
+    const re = /['"]([^'"]+)['"]\s*:\s*[^}\n]*?['"](\.?\/?[^'"]*src[^'"]*)['"]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw))) addAlias(m[1], m[2]);
+  }
+  // 3. Heuristic default for `@` when the app uses it but no config declared it (very common export shape).
+  if (!aliases['@']) {
+    const usesAt = vfs.paths().some((p) => SOURCE_EXT.some((e) => p.endsWith(e)) && /(?:from|import|require\(|import\()\s*['"]@\//.test(vfs.readText(p) || ''));
+    if (usesAt && entry) {
+      const srcIdx = entry.lastIndexOf('/src/');
+      if (srcIdx >= 0) aliases['@'] = '/' + entry.slice(0, srcIdx + 4);       // client/src/main.tsx → /client/src
+      else if (entry.startsWith('src/')) aliases['@'] = '/src';               // src/main.tsx → /src
+      else if (entry.includes('/')) aliases['@'] = '/' + entry.slice(0, entry.lastIndexOf('/')); // entry dir
+    }
+  }
+  return aliases;
+}
+
 /** Resolve a module path (with/without extension, or /index) against the VFS. */
 function resolveModule(vfs: VirtualFileSystem, path: string): string | null {
   if (vfs.has(path)) return path;
@@ -191,6 +252,8 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
 
   const payload = JSON.stringify({ entry, modules }).replace(/<\//g, '<\\/');
   const importmap = JSON.stringify({ imports: buildImportmap(vfs) }).replace(/<\//g, '<\\/');
+  // Path aliases (@/… → local src) so imported shadcn/Vite/Next apps resolve locally, not via esm.sh.
+  const aliasesJson = JSON.stringify(buildAliasMap(vfs, entry)).replace(/<\//g, '<\\/');
   const css = baseStyles(vfs);
   // TAILWIND: an app that uses Tailwind (its CSS has @tailwind directives, or a tailwind.config exists)
   // needs PostCSS to generate the utility classes — which the no-build in-browser preview can't run, so
@@ -230,6 +293,16 @@ ${babelTag}
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
   var IMAP = ${importmap ? 'JSON.parse(document.querySelector(\'script[type="importmap"]\').textContent).imports' : '{}'};
+  // Path aliases (e.g. '@' -> '/client/src'): rewrite an alias-prefixed import to a root-absolute
+  // LOCAL path so it resolves against the project's own files instead of being fetched from the CDN.
+  var ALIASES = ${aliasesJson};
+  function applyAlias(spec) {
+    for (var a in ALIASES) {
+      if (spec === a) return ALIASES[a];
+      if (spec.indexOf(a + '/') === 0) return ALIASES[a] + spec.slice(a.length);
+    }
+    return spec;
+  }
   var ESM = '${ESM}';
   // Fallback ESM CDN: if esm.sh flakes/times-out for a package, retry from jsdelivr's ESM (esm.run)
   // before giving up — one CDN hiccup should not blank the whole preview. (esm.run has no ?external
@@ -310,6 +383,7 @@ ${babelTag}
     var module = { exports: {} };
     cache[path] = module;
     function localRequire(spec) {
+      spec = applyAlias(spec); // @/… → /client/src/… so it resolves locally, not via the CDN
       if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/') {
         if (bareCache[spec]) return bareCache[spec];
         // Surface the REAL reason the CDN import failed (CSP block, network/fetch error, 404, CORS)
@@ -341,7 +415,7 @@ ${babelTag}
     var found = {}, re = /(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
     Object.keys(SOURCES).forEach(function (p) {
       var src = SOURCES[p] || '', m; re.lastIndex = 0;
-      while ((m = re.exec(src))) { var s = m[1]; if (s && s.charAt(0) !== '.' && s.charAt(0) !== '/') found[s] = true; }
+      while ((m = re.exec(src))) { var s = applyAlias(m[1]); if (s && s.charAt(0) !== '.' && s.charAt(0) !== '/') found[s] = true; }
     });
     return Object.keys(found);
   }

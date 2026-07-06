@@ -160,6 +160,7 @@ import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/Workspace
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { renderPreview } from '../runtime/renderPreview';
@@ -4526,11 +4527,15 @@ export function registerAgentV3Routes(app: Express): void {
           );
         };
         const fastPreview = async (): Promise<void> => {
-          // Re-install when package.json is NEWER than node_modules (the generator added deps like
-          // tailwindcss). The old `[ -d node_modules ] && "deps present"` skipped install on a
-          // restored/scaffolded sandbox even after new deps were added → "Cannot find module
-          // 'tailwindcss'" → dev server crash. This installs exactly when the dep set changed.
-          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install; else echo "deps present"; fi' } }, 'frontend');
+          // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
+          // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
+          // partial node_modules (the E2B base image ships one), which left a transitive babel/
+          // browserslist dep (caniuse-lite/dist/unpacker/agents) missing → the dev server "came up" but
+          // crashed every transform with "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/…'"
+          // (build report 2026-07-06). `npm install` is idempotent + fast when already satisfied, so
+          // always reconciling is correct and cheap — it also covers the earlier "Cannot find module
+          // 'tailwindcss'" case the skip caused. (buildBuildInstallCommand: pure, unit-tested.)
+          await dispatcher.dispatch({ id: 'fast-install', name: 'bash', input: { command: buildBuildInstallCommand() } }, 'frontend');
           // DEPENDENCY RECONCILE (real fix for the broken preview): the AI sometimes imports a package
           // it forgot to add to package.json (real report: `@dnd-kit/modifiers` imported by TodoList.tsx
           // but never declared) → `npm install` never fetched it → Vite "could not be resolved" → the

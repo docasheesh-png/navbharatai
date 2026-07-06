@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -336,6 +336,30 @@ describe('buildDepsStaleCheckCommand', () => {
     expect(cmd).toContain('[ package.json -nt node_modules ]');
     expect(cmd).toContain('echo STALE');
     expect(cmd.trim().endsWith('true')).toBe(true); // clean tree exits 0, never fails the step
+  });
+
+  it('also STALEs a present-but-INCOMPLETE node_modules via a resolve probe (the caniuse-lite fix)', () => {
+    const cmd = buildDepsStaleCheckCommand();
+    // Every declared dep must resolve — catches a pre-baked/pruned image tree that mtime reads as "fresh".
+    expect(cmd).toContain("require.resolve(k+'/package.json')");
+    // For the babel React plugin, its browserslist→caniuse-lite DATA chain (the exact missing module in
+    // "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/dist/unpacker/agents'") must resolve too.
+    expect(cmd).toContain("require.resolve('caniuse-lite/dist/unpacker/agents')");
+    expect(cmd).toContain("d['@vitejs/plugin-react']");
+    // A probe failure must reinstall (echo STALE), and the healthy path must never fail the step.
+    expect(cmd).toContain('echo STALE');
+    expect(cmd.trim().endsWith('true')).toBe(true);
+  });
+});
+
+describe('buildBuildInstallCommand', () => {
+  it('ALWAYS runs a real npm install — never the "deps present" skip that missed transitive deps', () => {
+    const cmd = buildBuildInstallCommand();
+    expect(cmd).toContain('npm install');
+    // No skip/short-circuit: a just-written package.json must have its FULL tree installed.
+    expect(cmd).not.toContain('deps present');
+    expect(cmd).not.toContain('node_modules ]');
+    expect(cmd).not.toMatch(/\bif\b/);
   });
 });
 

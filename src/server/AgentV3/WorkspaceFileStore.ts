@@ -181,6 +181,50 @@ export async function countWorkspaceFiles(workspaceId: string): Promise<number> 
   }
 }
 
+/**
+ * Cheap, metadata-only list of a workspace's persisted file PATHS — reads ONLY the metadata doc's
+ * `paths` array, never per-file content (safe on the hot path, exactly like countWorkspaceFiles). The
+ * durable single source of truth for what a project contains, independent of whether the EPHEMERAL
+ * sandbox is currently warm or was recycled/cold. Returns [] when absent / no Firestore. Never throws.
+ */
+export async function listWorkspaceFilePaths(workspaceId: string): Promise<string[]> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const meta = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!meta.exists) return [];
+    const data = meta.data();
+    return Array.isArray(data?.paths)
+      ? data!.paths.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Pure: the UNION of a project's file paths as seen by the (ephemeral) sandbox and the (durable)
+ * WorkspaceFileStore. RC-1 root fix (admin 2026-07-06): the sandbox listing can be near-empty on a
+ * recycled/cold sandbox — if it alone drove large-project detection and the edit prompt, the true
+ * project size was under-seen (the "25 vs 1654 files" split the admin hit on the SAME repo across two
+ * turns) → misrouted to the weak model and the agent saw a fraction of the codebase. Unioning with the
+ * durable paths makes both see EVERY known file regardless of sandbox coldness. Deduped; order is
+ * sandbox-first then durable-only, so a warm sandbox's tree is byte-stable (durable adds nothing new).
+ */
+export function reconcileProjectFileTree(
+  sandboxPaths: string[] | null | undefined,
+  durablePaths: string[] | null | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const list of [sandboxPaths, durablePaths]) {
+    for (const p of list ?? []) {
+      if (typeof p === 'string' && p.length > 0 && !seen.has(p)) { seen.add(p); out.push(p); }
+    }
+  }
+  return out;
+}
+
 /** Pure: split a current path list into what remains after removing `toRemove`, + the removed paths. */
 export function diffRemovedPaths(current: string[], toRemove: string[]): { remaining: string[]; removed: string[] } {
   const removeSet = new Set((toRemove || []).filter((p) => typeof p === 'string' && p));

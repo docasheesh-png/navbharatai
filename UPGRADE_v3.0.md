@@ -2769,12 +2769,18 @@
 - [ ] For user apps: a "preview → production" promotion flow on top of Firebase preview channels.
 - **Files:** `cloudbuild.yaml`, `.github/workflows/deploy.yml`, `src/server/AppMakerLab/deployment/DeploymentEngine.ts`.
 
-### P-DEPLOY.3 — AI Deployment Ops (AIOps)  🟡 PARTIAL → full  [LOW-MED]
-- `DeploymentPlanner` (AI deploy planning) and `AgentV3CostTelemetry` (cost optimization) exist, but there is no
-  **AI release planner, capacity planner, incident analyzer, deployment-risk predictor, or environment optimizer**.
-- [ ] Add an AI pre-deploy risk assessment (diff size, touched-criticality, test coverage → risk score + advice).
-- [ ] Add an AI incident/RCA analyzer that ingests deploy + error events and proposes a likely cause + rollback advice.
-- **Files:** `src/server/AppMakerLab/deployment/DeploymentPlanner.ts`, new `src/server/AppMakerLab/deployment/DeployRiskAdvisor.ts`.
+### P-DEPLOY.3 — AI Deployment Ops (AIOps)  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW-MED]
+- Added the two highest-value AIOps reasoning engines (deterministic, not an LLM guess).
+- [x] **`DeployRiskAdvisor.ts` → `assessDeployRisk(signals)`** (pure, unit-tested) — real change signals (files
+  changed, lines added/removed, high-criticality files touched, tests included, CI status) → a 0–100 risk score,
+  a low/medium/high band, reasons, and concrete advice. A red CI forces high; tests lower risk; a big untested
+  change raises it. Exposed at `POST /api/admin/deploy-risk` (admin-gated) — callable from CI before promoting.
+- [x] **`analyzeIncident(events)`** (pure, unit-tested) — correlates deploy + error events: an error burst within
+  N minutes after a deploy makes that deploy the prime suspect and names the PREVIOUS revision as the rollback
+  target, with honest handling of the first-deploy / no-deploy cases. Exposed at `POST /api/admin/incident-analysis`.
+- **Honest scope:** deterministic reasoning (reproducible, no model call); the LLM can consume the scores. Capacity
+  planner / environment optimizer remain out of scope (lower ROI). AppKnowledgeBase entry added.
+- **Files:** new `src/server/AppMakerLab/deployment/DeployRiskAdvisor.ts` (+`.test.ts`, 10), `src/server/routes/admin.ts`, `AppKnowledgeBase.ts`.
 
 ### P-DEPLOY.4 — App Store / Mobile Distribution Automation  🟡 PARTIAL → full  [LOW]
 - `ide/APKBuilder.tsx` (Android APK/TWA) and `ide/AppStorePublisher.tsx` exist but are **UI/checklist only** —

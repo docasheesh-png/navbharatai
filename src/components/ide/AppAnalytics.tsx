@@ -338,6 +338,21 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
     return () => { cancelled = true; };
   }, [refreshKey]);
 
+  // P-BRE.11 — AI build optimizer suggestions (real, from GET /api/analytics/build-optimizer).
+  const [optimizer, setOptimizer] = useState<{ suggestions: Array<{ id: string; severity: string; title: string; detail: string }> } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/analytics/build-optimizer?limit=100');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setOptimizer(data);
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshKey]);
+
   // P-TQA.13 — real MTTD/MTTR reliability from the server (GET /api/analytics/reliability).
   interface Reliability {
     mttdMs: number; mttdSampleSize: number;
@@ -658,6 +673,31 @@ export const AppAnalytics: React.FC<AppAnalyticsProps> = ({ userId: _userId }) =
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── AI Build Optimizer (P-BRE.11 — deterministic suggestions from real telemetry) ── */}
+      {optimizer && optimizer.suggestions.length > 0 && (
+        <div className="rounded-xl border p-4" style={{ background: '#161b22', borderColor: '#30363d' }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={16} className="text-violet-400" />
+            <h2 className="font-semibold text-white text-sm">Build Optimizer</h2>
+            <span className="text-xs text-gray-500 ml-auto">Suggestions from your build history</span>
+          </div>
+          <div className="space-y-2">
+            {optimizer.suggestions.map((s) => (
+              <div key={s.id} className="flex items-start gap-3 bg-black/30 rounded-xl p-3">
+                <span className={`mt-0.5 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 ${
+                  s.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                  : s.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : 'bg-white/5 border-white/10 text-gray-400'}`}>{s.severity}</span>
+                <div>
+                  <div className="text-xs font-bold text-white">{s.title}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{s.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

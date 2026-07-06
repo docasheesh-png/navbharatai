@@ -278,6 +278,22 @@ export function workspaceRateLimiter() {
 }
 
 /**
+ * The IN-BROWSER preview render (`/api/agentv3/inbrowser-preview`) needs its OWN, generous limiter —
+ * NOT the tight 60/30-per-hour `workspaceRateLimiter`. Why: it is the ALWAYS-available preview path
+ * (a self-contained HTML render built locally from the workspace files — no AI, no external API, no
+ * cost, and server-side CACHED), yet the client re-renders it on many normal interactions (tab open,
+ * edit, poll). Sharing the general workspace bucket meant an active builder hit "Rate limit exceeded:
+ * max 30 requests per hour" on the CORE preview after only a few apps (admin evidence, 2026-07-06).
+ * This endpoint authenticates by body `userId` (not a Bearer header), so the limiter can't see the
+ * signed-in user and would otherwise apply the ANON limit — hence both tiers are generous. Still
+ * bounded (the render is CPU work) so a runaway client can't hammer the bundler unboundedly.
+ */
+export const INBROWSER_PREVIEW_RATE: RateLimitOptions = { name: 'inbrowser-preview', authed: 1200, anon: 600, noun: 'preview renders' };
+export function inbrowserPreviewRateLimiter() {
+  return rateLimiter(INBROWSER_PREVIEW_RATE);
+}
+
+/**
  * P-SEC.13 — Device binding for sensitive operations. Records the caller's device fingerprint
  * (hashed UA + IP) against the user and DETECTS anomalies. Non-blocking by design (a UA bump or
  * mobile IP change must never lock a real user out — see sessionTracker.ts): on a first-seen

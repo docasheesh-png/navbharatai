@@ -4,7 +4,7 @@
  * no-auth fast-paths and basic input validation.
  */
 import { describe, it, expect } from 'vitest';
-import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
+import { verifyFirebaseToken, requireUserMatch, buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, INBROWSER_PREVIEW_RATE, rateLimiter, verifyIdentityWithReason, adminAppOptions, type VerifierAuth } from '../src/server/lib/authMiddleware';
 import type { Request, Response, NextFunction } from 'express';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
@@ -160,6 +160,28 @@ describe('workspaceRateLimiter (VITEST-skip: always calls next)', () => {
     }
     expect(nextCount).toBe(80);
     expect(res._status).toBeUndefined();
+  });
+});
+
+describe('inbrowserPreviewRateLimiter — the always-available preview must not hit the tight workspace cap', () => {
+  it('builds a usable pass-through middleware (wired, never blocks the core preview in VITEST)', async () => {
+    const req = makeReq();
+    const res = makeRes();
+    let nextCount = 0;
+    const middleware = inbrowserPreviewRateLimiter();
+    for (let i = 0; i < 50; i++) await middleware(req, res as any, () => { nextCount++; });
+    expect(nextCount).toBe(50);
+    expect(res._status).toBeUndefined();
+  });
+
+  it('has a FAR more generous limit than the old 30/hour anon workspace cap that broke an active builder', () => {
+    // Regression guard for the 2026-07-06 report: an active builder hit "max 30 requests per hour" on
+    // the in-browser preview because it shared workspaceRateLimiter (anon:30). This dedicated limiter is
+    // for a cheap, cached, local render — both tiers must stay well above the general workspace bucket.
+    expect(INBROWSER_PREVIEW_RATE.anon).toBeGreaterThanOrEqual(300);
+    expect(INBROWSER_PREVIEW_RATE.authed).toBeGreaterThanOrEqual(600);
+    expect(INBROWSER_PREVIEW_RATE.anon).toBeGreaterThan(30); // strictly beats the old broken cap
+    expect(INBROWSER_PREVIEW_RATE.name).toBe('inbrowser-preview'); // its OWN bucket, not shared with 'workspace'
   });
 });
 

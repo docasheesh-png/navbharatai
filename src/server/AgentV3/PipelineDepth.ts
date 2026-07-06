@@ -20,16 +20,22 @@ export const DEEP_TIME_FACTOR = 1.5;
 
 /**
  * Resolve the pipeline depth from a prompt-derived complexity MAGNITUDE (e.g. moduleCount + featureCount
- * from complexityFromPrompt) and whether power/Only-Opus mode is on. Power mode always earns `deep`
- * (the user explicitly asked for the strongest build). Pure.
+ * from complexityFromPrompt), whether power/Only-Opus mode is on, and whether this is an edit of a LARGE
+ * existing project. Power mode always earns `deep` (the user explicitly asked for the strongest build).
+ * Pure.
+ *
+ * RC-2 (admin 2026-07-06) — `largeExistingProject` also forces `deep`: an EDIT prompt ("retry", "fix the
+ * navbar") is SHORT, so prompt-magnitude alone undersizes the wall-clock budget for a big imported app —
+ * but restoring the project + installing deps + working across a large codebase genuinely needs the
+ * time. Without this, a ~1650-file import got the SAME base cap as a 15-file app and paused at the limit.
  *
  * Thresholds are deliberately conservative so only genuinely complex prompts reach `deep`:
  *   magnitude ≤ 4  → fast      (a small single-purpose app)
  *   magnitude ≥ 12 → deep      (many modules/features — auth + db + several pages, etc.)
  *   otherwise      → standard
  */
-export function resolvePipelineDepth(magnitude: number, powerMode = false): PipelineDepth {
-  if (powerMode) return 'deep';
+export function resolvePipelineDepth(magnitude: number, powerMode = false, largeExistingProject = false): PipelineDepth {
+  if (powerMode || largeExistingProject) return 'deep';
   const m = Number.isFinite(magnitude) ? magnitude : 6; // unknown → middle (standard)
   if (m <= 4) return 'fast';
   if (m >= 12) return 'deep';

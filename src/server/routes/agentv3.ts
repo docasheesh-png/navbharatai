@@ -3313,10 +3313,23 @@ export function registerAgentV3Routes(app: Express): void {
     // runner cap, and the four post-build headroom gates CONSISTENT — a deep build that earns more time
     // must not then be denied its tsc-gate/preview/reviewer against a stale, unscaled deadline. Only
     // `deep` builds are lengthened; simple/standard are unchanged; `0` (disabled) is preserved.
+    // RC-2 (admin 2026-07-06): a LARGE existing project earns `deep` wall-clock headroom just like a
+    // complex fresh build. An edit prompt ("retry", "fix the navbar") is SHORT, so prompt-magnitude
+    // alone undersizes the budget — but restoring the project + installing deps + working across a big
+    // codebase genuinely needs the time (the "paused at the time limit" the admin hit on a ~1650-file
+    // import). Size comes from the DURABLE store (sandbox-independent, cheap metadata-only read) so it is
+    // correct even here, BEFORE the sandbox is ensured/hydrated below. The paths are reused for the RC-1
+    // edit-file-tree reconcile further down — one durable read, no duplication.
+    let durableFilePaths: string[] = [];
+    if (isEditMode) {
+      try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    }
+    const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);
     const buildComplexity = complexityFromPrompt(prompt);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
       onlyOpus,
+      largeEditProject,
     );
     const effectiveBuildSeconds = scaleBuildSeconds(maxBuildSeconds(), buildDepth);
     const deadlineMs = effectiveBuildSeconds * 1000;
@@ -3480,11 +3493,10 @@ export function registerAgentV3Routes(app: Express): void {
         // so the true project size was under-seen: a large existing project MISROUTED to the weak
         // model AND the edit prompt saw a fraction of the files (the exact "25 vs 1654 files on the
         // SAME repo across two turns" the admin hit). The durable WorkspaceFileStore is the source of
-        // truth for what the project contains, independent of sandbox coldness — reconcile against it
-        // (metadata-only paths read, no content load) so detection + the edit prompt see every file.
-        let durablePaths: string[] = [];
-        try { durablePaths = await listWorkspaceFilePaths(workspaceId); } catch { /* best-effort — the sandbox listing stands */ }
-        const reconciled = reconcileProjectFileTree(sandboxPaths, durablePaths);
+        // truth for what the project contains, independent of sandbox coldness — reconcile against it so
+        // detection + the edit prompt see every file. (durableFilePaths was fetched once up-front for the
+        // RC-2 depth decision; reuse it here — one durable read, no duplication.)
+        const reconciled = reconcileProjectFileTree(sandboxPaths, durableFilePaths);
         editFileTree = reconciled.length > 0 ? reconciled : sandboxPaths;
       }
       const largeProject = isLargeExistingProject(editFileTree?.length ?? 0);

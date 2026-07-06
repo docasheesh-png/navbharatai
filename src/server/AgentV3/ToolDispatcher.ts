@@ -36,6 +36,7 @@ import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessRep
 import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
+import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -1162,10 +1163,11 @@ export class ToolDispatcher {
         // so they degrade to "no finding" rather than ever false-blocking a working build.
         const astFiles: Record<string, string> = {};
         for (const s of snap.sources) astFiles[s.path] = s.content;
-        const [hooksRep, importRep, jsxRep] = await Promise.all([
+        const [hooksRep, importRep, jsxRep, undefHookRep] = await Promise.all([
           analyzeHooksRules(astFiles),
           analyzeImportExports(astFiles),
           analyzeJsxComponents(astFiles),
+          analyzeUndefinedHooks(astFiles),
         ]);
         if (hooksRep.violations.length) {
           const sample = hooksRep.violations.slice(0, 3).map((v) => `${v.hook}@${v.file}:${v.line}`).join(', ');
@@ -1178,6 +1180,10 @@ export class ToolDispatcher {
         if (jsxRep.undefinedComponents.length) {
           const sample = jsxRep.undefinedComponents.slice(0, 3).map((c) => `<${c.component}>@${c.file}:${c.line}`).join(', ');
           extra.push({ severity: 'high', label: `${jsxRep.undefinedComponents.length} undefined JSX component(s) — used but never imported/defined (crash at runtime): ${sample}${jsxRep.undefinedComponents.length > 3 ? ', …' : ''}` });
+        }
+        if (undefHookRep.undefinedHooks.length) {
+          const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
         }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.

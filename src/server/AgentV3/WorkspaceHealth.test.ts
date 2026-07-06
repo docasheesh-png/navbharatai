@@ -10,7 +10,7 @@ describe('analyzeWorkspaceHealth', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.totalIssues).toBe(0);
-    expect(r.checks).toHaveLength(4);
+    expect(r.checks).toHaveLength(5);
     expect(r.checks.every(c => c.ok)).toBe(true);
   });
 
@@ -29,9 +29,9 @@ describe('analyzeWorkspaceHealth', () => {
     expect(r.totalIssues).toBeGreaterThanOrEqual(3);
   });
 
-  it('always returns the four named checks in a stable shape', async () => {
+  it('always returns the five named checks in a stable shape', async () => {
     const r = await analyzeWorkspaceHealth({});
-    expect(r.checks.map(c => c.id)).toEqual(['code-confidence', 'react-hooks', 'import-export', 'jsx-resolution']);
+    expect(r.checks.map(c => c.id)).toEqual(['code-confidence', 'react-hooks', 'import-export', 'jsx-resolution', 'hook-resolution']);
     expect(r.ok).toBe(true); // nothing to scan → nothing broken
   });
 

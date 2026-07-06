@@ -158,6 +158,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setJsxChkBusy(false); }
   };
 
+  // ── Undefined-hook check ──
+  const [hookRes, setHookRes] = useState<any>(null);
+  const [hookResBusy, setHookResBusy] = useState(false);
+  const runHookRes = async () => {
+    setHookResBusy(true); setHookRes(null);
+    try {
+      const r = await fetch('/api/workspace/hook-resolution-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setHookRes(await r.json());
+    } catch { /* ignore */ }
+    finally { setHookResBusy(false); }
+  };
+
   // ── One-call Build Health (runs all robustness checks) ──
   const [health, setHealth] = useState<any>(null);
   const [healthBusy, setHealthBusy] = useState(false);
@@ -312,6 +324,23 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <div className="text-red-400 font-bold">{jsxChk.undefinedComponents.length} undefined component(s) — these will crash the app at runtime.</div>
             <div className="space-y-1 max-h-40 overflow-auto">{jsxChk.undefinedComponents.slice(0, 30).map((c: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">&lt;<span className="text-white">{c.component}</span>&gt; <span className="text-[#8b949e]">({c.file}:{c.line})</span></div>
+            ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Undefined hook calls */}
+      <Card icon={<Brain className="w-4 h-4 text-orange-400" />} title="Hook Resolution"
+        action={<Button size="sm" onClick={runHookRes} disabled={hookResBusy} className="uppercase tracking-widest bg-orange-600 hover:bg-orange-700">{hookResBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
+        {!hookRes ? (
+          <p className="text-[11px] text-[#8b949e]">Scan for React hooks called but never imported or defined (e.g. <span className="font-mono">useState(0)</span> with no <span className="font-mono">import &#123; useState &#125;</span>). These throw "useState is not defined" and white-screen the app — exact AST check that never flags imported, local, or member-expression hooks.</p>
+        ) : hookRes.ok ? (
+          <div className="text-[11px] text-emerald-400 font-bold">✓ Every hook call resolves across {hookRes.filesScanned} file(s).</div>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="text-red-400 font-bold">{hookRes.undefinedHooks.length} undefined hook(s) — these will crash the app at runtime.</div>
+            <div className="space-y-1 max-h-40 overflow-auto">{hookRes.undefinedHooks.slice(0, 30).map((h: any, i: number) => (
+              <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300"><span className="text-white">{h.hook}()</span> <span className="text-[#8b949e]">({h.file}:{h.line})</span></div>
             ))}</div>
           </div>
         )}

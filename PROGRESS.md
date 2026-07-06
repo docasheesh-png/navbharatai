@@ -10453,3 +10453,23 @@ the real evaluate path, and a clean React app is NOT false-blocked.
 
 Files: src/server/AgentV3/ToolDispatcher.ts (imports + evaluate block), ToolDispatcher.test.ts (+4).
 Gate: frontend tsc 0, server tsc 0, vitest 5168/5168 PASS (4 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — AgentV3 build-quality: undefined-hook analyzer (+ gate + aggregate)  ✅ DONE (powerful-builder)
+
+Fourth build-breaker analyzer, closing the "reference resolution" family (JSX components ✓, imports-match-
+exports ✓, now hook-call identifiers). Catches a hard crash the others miss: a React hook CALLED but never
+imported/defined — e.g. useState(0) with no `import { useState }` → "useState is not defined" white-screen.
+
+New src/server/AgentV3/UndefinedHookAnalysis.ts (pure, ts-morph, lazily loaded): analyzeUndefinedHooks(files)
+flags `useX()` call identifiers not bound anywhere in the file (import/const/function/param/destructuring),
+skipping member-expression calls (React.useState), locals, params, and non-hook calls → near-zero FP.
+WIRED INTO THE SELF-CORRECTING GATE (ToolDispatcher evaluate: high ExtraFinding → NOT READY → agent fixes it),
+folded into the Build-Health aggregate (now 5 checks), and exposed standalone (POST
+/api/workspace/hook-resolution-check + a "Hook Resolution" panel card). AppKnowledgeBase hook-resolution-check
+entry added.
+
+Live prod smoke: undefined useState → ok:false with exact detail; aggregate reports 5 checks with
+hook-resolution failing. Tests: UndefinedHookAnalysis.test.ts (11) + ToolDispatcher gate regression (1, undefined
+hook → NOT READY) + WorkspaceHealth shape updated to 5 checks.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5180/5180 PASS (12 new), build PASS, boot:check PASS, live smoke PASS.

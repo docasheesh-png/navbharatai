@@ -69,7 +69,7 @@ import {
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
-import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, queueSummary, type QueueItemSource } from '../AgentV3/BuildQueue';
+import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
   InMemoryConversationStore,
   deriveTitle,
@@ -1833,6 +1833,37 @@ export function registerAgentV3Routes(app: Express): void {
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) { res.status(400).json({ error: 'An item id is required.' }); return; }
     const queue = await mutateQueue(workspaceId, (q) => cancelQueueItem(q, id));
+    res.json({ summary: queueSummary(queue), items: queue.items });
+  });
+
+  /** Atomically CLAIM the next pending command (→ 'running') for the serial executor. Returns the
+   *  claimed item, or `claimed:null` when one is already running or nothing is pending. The client-driven
+   *  executor calls this when the app goes idle, submits the returned prompt as a build, then calls
+   *  /queue/complete when that build settles. */
+  app.post('/api/agentv3/queue/next', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    // Cheap short-circuit: a cached read tells us if there's anything to claim. When the queue is empty
+    // or one is already running (the common case — most builds are not queued), return WITHOUT a
+    // transaction/write, so the client-driven executor's per-settle probe costs ~nothing for non-queue users.
+    const current = await loadQueue(workspaceId);
+    if (pendingQueueItems(current).length === 0 || runningQueueItem(current)) {
+      res.json({ claimed: null, summary: queueSummary(current), items: current.items });
+      return;
+    }
+    let claimed: QueueItem | null = null;
+    const queue = await mutateQueue(workspaceId, (q) => { const r = claimNextQueued(q); claimed = r.claimed; return r.queue; });
+    res.json({ claimed, summary: queueSummary(queue), items: queue.items });
+  });
+
+  /** Mark the currently-running queued command done/failed (with an honest note) once its build settles.
+   *  A failure PAUSES the queue client-side (the user decides retry/skip/stop) — recorded here honestly. */
+  app.post('/api/agentv3/queue/complete', async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Not your workspace.' }); return; }
+    const ok = req.body?.ok === true;
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : undefined;
+    const queue = await mutateQueue(workspaceId, (q) => completeQueuedRunning(q, ok, note));
     res.json({ summary: queueSummary(queue), items: queue.items });
   });
 

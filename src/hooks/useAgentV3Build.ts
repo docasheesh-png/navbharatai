@@ -62,6 +62,9 @@ export interface UseAgentV3Build {
   shipToMain: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<ShipResult>;
   /** Revert the last merge on the repo default branch (own-repo storage). Returns an honest result. */
   revertLastMerge: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<RevertResult>;
+  /** Queue executor (FIX #4.3): claim the next queued command (or null); mark the running one complete. */
+  queueNext: (workspaceId?: string) => Promise<{ id: string; prompt: string } | null>;
+  queueComplete: (workspaceId: string | undefined, ok: boolean, note?: string) => Promise<void>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -622,6 +625,33 @@ export function useAgentV3Build(): UseAgentV3Build {
     }
   }, []);
 
+  // QUEUE EXECUTOR (FIX #4.3, client-driven): claim the next queued command (server atomically moves it
+  // to 'running'). Returns the claimed { id, prompt } or null when nothing is runnable. Best-effort.
+  const queueNext = useCallback(async (workspaceId?: string): Promise<{ id: string; prompt: string } | null> => {
+    if (!workspaceId) return null;
+    try {
+      const res = await fetch('/api/agentv3/queue/next', {
+        method: 'POST', headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, userId: userIdRef.current, email: emailRef.current }),
+      });
+      if (!res.ok) return null;
+      const j = await res.json().catch(() => ({}));
+      const c = j?.claimed;
+      return c && typeof c.id === 'string' && typeof c.prompt === 'string' ? { id: c.id, prompt: c.prompt } : null;
+    } catch { return null; }
+  }, []);
+
+  /** Mark the running queued command done/failed once its build settled (a failure pauses the queue). */
+  const queueComplete = useCallback(async (workspaceId: string | undefined, ok: boolean, note?: string): Promise<void> => {
+    if (!workspaceId) return;
+    try {
+      await fetch('/api/agentv3/queue/complete', {
+        method: 'POST', headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, ok, note, userId: userIdRef.current, email: emailRef.current }),
+      });
+    } catch { /* best-effort — a stale 'running' item self-heals to 'failed' on next load */ }
+  }, []);
+
   const respond = useCallback(async (requestId: string, approved: boolean) => {
     // Clear the gate immediately so the UI is responsive; the build resumes.
     setState((prev) => ({ ...prev, pendingPermission: undefined }));
@@ -1007,5 +1037,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

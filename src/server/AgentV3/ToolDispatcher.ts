@@ -33,6 +33,9 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
+import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { analyzeImportExports } from './ImportExportAnalysis';
+import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
@@ -1152,6 +1155,30 @@ export class ToolDispatcher {
         // (manifest / service worker / PWA meta / PWA plugin), so it never nags a plain app. Pure;
         // never a readiness blocker.
         const pwaLine = pwaSummary(analyzePwa(snap.sources, snap.files, mem.graph().dependencies));
+        // AST-accurate build-breaker checks (hooks / import-export / JSX resolution). Each of these
+        // genuinely crashes the app or fails the build, so a real finding is a HARD readiness blocker —
+        // this is what makes the builder SELF-CORRECT them (the end-of-build gate feeds the blockers
+        // back to the agent to fix). Conservative + never-throw (an empty result on any parse/lib issue),
+        // so they degrade to "no finding" rather than ever false-blocking a working build.
+        const astFiles: Record<string, string> = {};
+        for (const s of snap.sources) astFiles[s.path] = s.content;
+        const [hooksRep, importRep, jsxRep] = await Promise.all([
+          analyzeHooksRules(astFiles),
+          analyzeImportExports(astFiles),
+          analyzeJsxComponents(astFiles),
+        ]);
+        if (hooksRep.violations.length) {
+          const sample = hooksRep.violations.slice(0, 3).map((v) => `${v.hook}@${v.file}:${v.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${hooksRep.violations.length} React Rules-of-Hooks violation(s) (crash at runtime): ${sample}${hooksRep.violations.length > 3 ? ', …' : ''}` });
+        }
+        if (importRep.mismatches.length) {
+          const sample = importRep.mismatches.slice(0, 3).map((m) => `${m.imported}←${m.from}@${m.file}:${m.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${importRep.mismatches.length} broken import(s) — a name is imported that the module does not export (the build fails): ${sample}${importRep.mismatches.length > 3 ? ', …' : ''}` });
+        }
+        if (jsxRep.undefinedComponents.length) {
+          const sample = jsxRep.undefinedComponents.slice(0, 3).map((c) => `<${c.component}>@${c.file}:${c.line}`).join(', ');
+          extra.push({ severity: 'high', label: `${jsxRep.undefinedComponents.length} undefined JSX component(s) — used but never imported/defined (crash at runtime): ${sample}${jsxRep.undefinedComponents.length > 3 ? ', …' : ''}` });
+        }
         const readiness = assessReadiness(archReport, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;

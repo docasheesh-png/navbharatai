@@ -6,6 +6,7 @@ import { SvelteProvider } from '../src/server/AppMakerLab/generator/templates/Sv
 import { VueProvider } from '../src/server/AppMakerLab/generator/templates/VueProvider';
 import { PythonFastapiProvider } from '../src/server/AppMakerLab/generator/templates/PythonFastapiProvider';
 import { TemplateRegistry } from '../src/server/AppMakerLab/generator/templates/TemplateRegistry';
+import { NextjsProvider as LiveNextjsProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider';
 
 describe('StaticProvider', () => {
   const provider = new StaticProvider();
@@ -56,6 +57,27 @@ describe('NextjsProvider', () => {
     const files = provider.getFiles([]);
     const keys = Object.keys(files);
     expect(keys.some(k => k.includes('page'))).toBe(true);
+  });
+
+  it('P-CGE.12: ships the App Router special files (loading / error / not-found) + globals', () => {
+    const files = provider.getFiles([]);
+    expect(files['app/layout.tsx']).toBeDefined();
+    expect(files['app/page.tsx']).toBeDefined();
+    expect(files['app/loading.tsx']).toBeDefined();
+    expect(files['app/error.tsx']).toBeDefined();
+    expect(files['app/not-found.tsx']).toBeDefined();
+    expect(files['app/globals.css']).toBeDefined();
+  });
+
+  it('error.tsx is a valid Client Component with a reset handler', () => {
+    const files = provider.getFiles([]);
+    expect(files['app/error.tsx']).toContain("'use client'");
+    expect(files['app/error.tsx']).toContain('reset');
+  });
+
+  it('layout imports globals.css', () => {
+    const files = provider.getFiles([]);
+    expect(files['app/layout.tsx']).toContain("import './globals.css'");
   });
 });
 
@@ -135,5 +157,25 @@ describe('TemplateRegistry', () => {
 
   it('throws for unknown framework', () => {
     expect(() => registry.getProvider('unknown-framework')).toThrow();
+  });
+});
+
+// The LIVE v3.0 flow uses its OWN isolated copy of the sandbox substrate (E2BActuator/ToolDispatcher →
+// AgentV3/sandbox/.../TemplateRegistry). Protect the enriched Next.js scaffold on the copy that actually
+// runs, so the two copies can never silently drift back to the minimal page+layout output.
+describe('NextjsProvider (LIVE v3.0 sandbox copy)', () => {
+  const provider = new LiveNextjsProvider();
+
+  it('ships the full App Router scaffold (loading / error / not-found)', () => {
+    const files = provider.getFiles([]);
+    expect(files['app/loading.tsx']).toBeDefined();
+    expect(files['app/error.tsx']).toContain("'use client'");
+    expect(files['app/not-found.tsx']).toBeDefined();
+    expect(files['app/globals.css']).toBeDefined();
+  });
+
+  it('keeps the E2B-preview host binding in its dev script', () => {
+    const pkg = JSON.parse(provider.getFiles([])['package.json']);
+    expect(pkg.scripts.dev).toContain('--hostname 0.0.0.0');
   });
 });

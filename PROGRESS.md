@@ -10936,3 +10936,28 @@ Shipped P-PME.12 as the pure-engine + route + store pattern (mirrors P-PME.13, a
 - server.ts registration; AppKnowledgeBase `requirement-traceability` entry (engineer_ai).
 
 Gate: tsc fe+server 0, vitest 5293/5293 (11 new), build PASS, boot:check PASS. Infra-only files untouched.
+
+---
+
+## 2026-07-06 — P-CGE.12 Next.js App Router scaffold enriched (roadmap: PARTIAL → Next.js DONE)
+
+User picked "Next.js generator" as the next roadmap item. Investigation FIRST (safeguard #6) found the
+roadmap's target (`AppMakerLab/generator/FrontendGenerationEngine` + `EngineRegistry` via
+`AppMakerOrchestrator`) is DEAD code — invoked by no live route. The LIVE v3.0 flow (AgentV3 →
+E2BActuator/ToolDispatcher → sandbox `TemplateRegistry`) already had a wired `NextjsProvider`, so Next.js
+was already generatable — just a minimal page+layout stub. Building the roadmap's dead-code engine would
+have been a fake feature.
+
+Real fix — enriched the LIVE provider to a production-shaped App Router scaffold (both the live sandbox copy
+and the legacy copy, kept in sync):
+- Added `app/loading.tsx` (Suspense), `app/error.tsx` (correct `'use client'` boundary + `reset`),
+  `app/not-found.tsx` (404), `app/globals.css` (imported by layout) — the exact page/layout/loading/error
+  set the spec asked for.
+- Tests (`tests/templateProviders.test.ts`) assert the full scaffold on BOTH copies incl. the live copy's
+  `--hostname 0.0.0.0` E2B-preview binding, so they can't silently drift back to the stub.
+
+React Native deliberately deferred (honest, rule 6): an Expo/RN app can't render in the Node-only E2B
+preview sandbox, so it can't be verified end-to-end → would violate "real features only". Waits for a real
+RN preview path (AB-1 infra gate).
+
+Gate: tsc fe+server 0, vitest 5298/5298 (5 new), build PASS, boot:check PASS.

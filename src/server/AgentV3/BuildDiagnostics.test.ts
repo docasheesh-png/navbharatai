@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 let clock = 1000;
@@ -556,5 +556,35 @@ describe('isExpectedNonzeroExit — routine non-zero exits that are NOT build fa
     expect(isExpectedNonzeroExit('npm run build', 1)).toBe(false);
     expect(isExpectedNonzeroExit('npx tsc --noEmit', 2)).toBe(false);
     expect(isExpectedNonzeroExit('vite build', 1)).toBe(false);
+  });
+});
+
+describe('capSessionReports — the session download must actually LOAD (the "Load failed" fix)', () => {
+  const mk = (id: number, size: number) => ({ id, pad: 'x'.repeat(size) });
+
+  it('keeps everything when under budget (order preserved oldest → newest)', () => {
+    const reports = [mk(1, 100), mk(2, 100), mk(3, 100)];
+    const { kept, omitted } = capSessionReports(reports, 10_000);
+    expect(kept.map((r) => r.id)).toEqual([1, 2, 3]);
+    expect(omitted).toBe(0);
+  });
+
+  it('drops the OLDEST builds first when over budget and counts them honestly', () => {
+    // Each entry serializes to ~ size+20 bytes; budget fits ~2 of them.
+    const reports = [mk(1, 500), mk(2, 500), mk(3, 500)];
+    const { kept, omitted } = capSessionReports(reports, 1_100);
+    expect(kept.map((r) => r.id)).toEqual([2, 3]); // newest kept, oldest dropped
+    expect(omitted).toBe(1);
+  });
+
+  it('always keeps the newest build even when it alone exceeds the budget (never an empty report)', () => {
+    const reports = [mk(1, 100), mk(2, 5_000)];
+    const { kept, omitted } = capSessionReports(reports, 1_000);
+    expect(kept.map((r) => r.id)).toEqual([2]);
+    expect(omitted).toBe(1);
+  });
+
+  it('empty input → empty output, zero omitted', () => {
+    expect(capSessionReports([], 1_000)).toEqual({ kept: [], omitted: 0 });
   });
 });

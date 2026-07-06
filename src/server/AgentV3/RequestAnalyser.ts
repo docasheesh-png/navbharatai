@@ -15,7 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
-import { COMPLEX_APP_SIGNAL } from '../lib/appComplexitySignals';
+import { isComplexAppPrompt } from '../lib/appComplexitySignals';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -67,10 +67,6 @@ const RE = {
   simpleApp: /\b(calculator|calc|clock|stopwatch|stop-watch|timer|todo|to-do|to do list|counter|dice|ludo|tic[\s-]?tac[\s-]?toe|snake game|memory game|quiz|flashcard|stopwatch|weather widget|color picker|qr code|bouncing ball|3d ball|landing page|portfolio page|single page|simple website|note app|notes app)\b/i,
   coding: /\b(function|component|html|css|javascript|typescript|react|vue|svelte|sql query|regex|snippet|small (fix|bug|utility)|api example|documentation|readme)\b/i,
   debugging: /\b(debug|error|not working|doesn'?t work|broken|crash|exception|stack trace|fix the bug|failing test|why is)\b/i,
-  // Real, multi-part systems. Uses the SHARED complex-app signal (single source of truth) so the
-  // request-tier verdict here can never drift from the pipeline-DEPTH/ETA estimator that reads the
-  // same regex (the bug: "build a SaaS CRM" was complex_app here but 'fast' lane there).
-  complexApp: COMPLEX_APP_SIGNAL,
   architecture: /\b(architecture|architect|system design|scalable|microservice|micro-service|refactor (the|entire|whole)|design pattern|high[- ]availability|distributed|infrastructure|migrate the|production[- ]grade|enterprise)\b/i,
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
@@ -78,7 +74,10 @@ const RE = {
 function detectTaskType(p: string): TaskType {
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return 'architecture';
-  if (RE.complexApp.test(p)) return 'complex_app';
+  // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
+  // two can never route the same prompt two different ways). Page-deliverable-aware: a category THEME
+  // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
+  if (isComplexAppPrompt(p)) return 'complex_app';
   if (RE.debugging.test(p)) return 'debugging';
   if (RE.simpleApp.test(p)) return 'simple_app';
   if (RE.summary.test(p)) return 'summary';

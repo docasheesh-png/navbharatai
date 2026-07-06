@@ -100,7 +100,7 @@ import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetySc
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
@@ -1502,11 +1502,14 @@ export function registerAgentV3Routes(app: Express): void {
       }
       const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
       if (ordered.length === 0) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+      // Byte-budget the payload (newest builds kept whole, oldest dropped, honestly counted) — an
+      // unbounded 20-full-report stitch was tens of MB and died in mobile Safari ("Load failed").
+      const { kept, omitted } = capSessionReports(ordered);
       if (req.query.format === 'text') {
-        res.type('text/plain').send(renderSessionDiagnosticsText(ordered));
+        res.type('text/plain').send(renderSessionDiagnosticsText(kept));
         return;
       }
-      res.json({ session: { builds: ordered, count: ordered.length } });
+      res.json({ session: { builds: kept, count: ordered.length, omittedBuilds: omitted } });
       return;
     }
     // Resolve the report: a SPECIFIC past build (buildId) or the latest one — shared by both the

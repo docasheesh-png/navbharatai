@@ -99,3 +99,25 @@ describe('analyzeRequest — escalation path & ambiguity', () => {
     expect(analyzeRequest({}).startTier).toBe('gemini');
   });
 });
+
+describe('analyzeRequest — page-scoped deliverables route to the fast lane (the 29-min "SaaS landing page" bug)', () => {
+  it('the exact mis-routed prompt gets a cheap tier (fast-lane eligible), not sonnet/agentic', () => {
+    // Real build report 2026-07-06: `saas` forced complex_app → sonnet → blueprint + sub-agents →
+    // 148 steps / 29 min / wall-clock death. A one-page landing site must take the ~2-min fast lane.
+    const r = analyzeRequest({ prompt: 'Make a modern SaaS landing page: sticky navbar with logo + links, a hero section with a headline, subtext and two buttons, a 3-card features row, a pricing section with 3 tiers, and a footer. Clean, responsive, dark theme.' });
+    expect(r.taskType).toBe('simple_app');
+    expect(['gemini', 'haiku']).toContain(r.startTier); // classifyForOneShot() true → fast lane
+  });
+
+  it('a landing page WITH real backend scope still routes complex (never under-provisioned)', () => {
+    const r = analyzeRequest({ prompt: 'SaaS landing page with login system, stripe checkout and a database' });
+    expect(r.taskType).toBe('complex_app');
+    expect(r.startTier).toBe('sonnet');
+  });
+
+  it('a genuine SaaS platform ask is still complex_app → sonnet (unchanged)', () => {
+    const r = analyzeRequest({ prompt: 'build a SaaS CRM with team accounts' });
+    expect(r.taskType).toBe('complex_app');
+    expect(r.startTier).toBe('sonnet');
+  });
+});

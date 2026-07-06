@@ -35,4 +35,35 @@ describe('appComplexitySignals — shared complex-app category signal', () => {
     expect(isComplexAppPrompt('')).toBe(false);
     expect(isComplexAppPrompt(undefined as unknown as string)).toBe(false);
   });
+
+  describe('page-scoped deliverables — a category THEME never makes one page "complex" (the 29-min bug)', () => {
+    it('the EXACT mis-routed prompt: "SaaS landing page" is a landing page, not a SaaS platform', () => {
+      // Real build report 2026-07-06: this prompt scored complex_app via `saas` → sonnet tier →
+      // multi-agent blueprint path → 148 steps / 29 min / died at the wall clock. It is ONE page.
+      const p = 'Make a modern SaaS landing page: sticky navbar with logo + links, a hero section with a headline, subtext and two buttons, a 3-card features row, a pricing section with 3 tiers, and a footer. Clean, responsive, dark theme.';
+      expect(isComplexAppPrompt(p)).toBe(false);
+    });
+
+    it('other theme-on-a-page prompts stay simple too', () => {
+      for (const p of ['an e-commerce landing page', 'CRM portfolio website', 'a coming-soon page for my marketplace', 'social app splash page']) {
+        expect(isComplexAppPrompt(p)).toBe(false);
+      }
+    });
+
+    it('a page ask with REAL build-scope work stays complex (scope words are never discounted)', () => {
+      for (const p of [
+        'SaaS landing page with login system and stripe checkout',
+        'landing page with authentication and a database',
+        'e-commerce landing page plus a full backend rest api',
+      ]) {
+        expect(isComplexAppPrompt(p)).toBe(true);
+      }
+    });
+
+    it('non-page SaaS/CRM asks are still complex (the original centralization guarantee holds)', () => {
+      for (const p of ['build a SaaS CRM', 'a saas billing platform', 'make an e-commerce store']) {
+        expect(isComplexAppPrompt(p)).toBe(true);
+      }
+    });
+  });
 });

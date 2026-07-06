@@ -10978,3 +10978,38 @@ error): the safest, real, collision-free path — enrich only clearly-deficient 
 none had any error boundary), no speculative "more is better", no hot files. Tests guard each on the live copy.
 
 Gate: tsc fe+server 0, vitest 5301/5301 (3 new), build PASS, boot:check PASS.
+## 2026-07-07 — Fix 11: Notes-app report autopsy — the "npm install md" false positive + reviewer criticals now auto-fix by default
+
+**Fix 10 CONFIRMED in production:** the 16-requirement Notes app took the complete-app lane — 29 files,
+3m 12s, tsc verified, preview browser-verified, and the new completeness reviewer verified ALL 16
+requirements PASS (score 85/100). The 29-minute death class is gone. Ledger of what remained:
+
+**❌ RC-A — the engine npm-installed a random package named `md` (supply-chain-shaped class).**
+The dep-reconciler's import regex treated ANY first quoted string on an `import`/`export` line as a
+module specifier — `export const DEFAULT_SIZE = 'md'` (a Button size constant) read as "imports the
+package md" → `npm install --no-audit --no-fund md` ran (report shows it, "added 2 packages") → the
+reviewer then flagged the same `md` as an unused dependency. Any quoted token on an export line could
+have become an npm install. Fix (DependencyReconciler.extractImportedPackages): a quote is a specifier
+ONLY in a `from '…'` clause or directly after `import` (side-effect import). All genuine forms still
+covered (import/from, import type, export * from, export {} from, side-effect, require, dynamic
+import). Sibling check (rule 3): ProjectVerifier.IMPORT_RE already requires `from` on its export arm —
+not vulnerable; ReactPreview's collectBare feeds only the preview importmap (no install) — noted, no
+change. Tests: DependencyReconciler +2 (the EXACT 'md' constant case incl. 'sm'/'dark'/'640px' decoys;
+full-coverage guard).
+
+**⏭️ RC-B — the reviewer found a real [CRITICAL] and v3.0 knowingly shipped it.** The C9
+critical-repair was gated on the OPT-IN runtime autofix env (AGENTV3_AUTOFIX, off in prod), so the
+reviewer's [CRITICAL] (orphaned Toast component) was narrated and… ignored. That breaks the
+"complete app, perfectly" bar: the engine diagnosed its own defect and shipped it. Fix: dedicated
+`reviewerAutoFixEnabled()` — ON by default (kill switch AGENTV3_REVIEWER_AUTOFIX=off), tightly bounded
+(fires only when the reviewer reports criticals on an OK build; one pass; 120s cap; headroom-gated).
+The runtime-error autofix loop stays opt-in as designed. Tests: AutoFix +1.
+
+**🥵 Open root cause (rule 6 — recorded, next up): "Closed Port Error" on preview revisit.** The
+admin's desktop screenshot shows the live preview dead hours after a successful build (sandbox alive,
+port 5173 refused) — the dev server does not survive sandbox idle/pause. The Diagnose button reboots it
+manually; the real fix is an AUTO-reboot when the Live-server tab opens on a sleeping workspace
+(preview-health already classifies 'sleeping'; wire it to auto-call preview-diagnose, loop-guarded).
+Needs careful client work + a live sandbox to verify — not shipping a guess in this PR.
+
+- Gate: frontend tsc 0, server tsc 0, vitest 5285/5285, boot PASS.

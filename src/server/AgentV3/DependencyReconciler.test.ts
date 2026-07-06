@@ -47,6 +47,33 @@ describe('extractImportedPackages — every import/require/dynamic-import form',
     const pkgs = extractImportedPackages(content);
     expect(pkgs.sort()).toEqual(['@scope/types', 'cjs-pkg', 'dynamic-pkg', 'react', 'reexported-pkg', 'some-polyfill'].sort());
   });
+
+  it('NEVER reads an exported string constant as a package (the real "npm install md" bug)', () => {
+    // Build report 2026-07-07: a Notes app's Button size constant `export const DEFAULT_SIZE = 'md'`
+    // was read as "imports the package md" and the reconciler npm-installed the real, unrelated `md`
+    // package into the user's app. Any quoted token on an export line could become an npm install —
+    // a supply-chain-shaped class. Only `from '…'` clauses and import-adjacent quotes are specifiers.
+    const content = [
+      `export const DEFAULT_SIZE = 'md';`,
+      `export type Size = 'sm' | 'md' | 'lg';`,
+      `export const THEME = "dark";`,
+      `export const BREAKPOINTS = { sm: '640px', md: '768px' };`,
+      `import { Button } from './Button';`,
+      `import clsx from 'clsx';`,
+    ].join('\n');
+    const pkgs = extractImportedPackages(content);
+    expect(pkgs).toEqual(['clsx']); // only the real package — no 'md', 'sm', 'dark', '640px'
+  });
+
+  it('still catches every genuine specifier form after the tightening (no lost coverage)', () => {
+    const content = [
+      `export * from 'star-reexport';`,
+      `export { a as b } from 're-export';`,
+      `import 'side-effect';`,
+      `import def, { named } from 'mixed-import';`,
+    ].join('\n');
+    expect(extractImportedPackages(content).sort()).toEqual(['mixed-import', 're-export', 'side-effect', 'star-reexport'].sort());
+  });
 });
 
 describe('findMissingDependencies — the real fix for the broken preview', () => {

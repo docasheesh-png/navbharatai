@@ -61,8 +61,18 @@ export function extractImportedPackages(content: string): string[] {
     let m: RegExpExecArray | null;
     while ((m = re.exec(content))) specs.push(m[1]);
   };
-  // import X from 'y' | import {a} from 'y' | import 'y' | export {a} from 'y' | export * from 'y'
-  push(/(?:^|[\n;])\s*(?:import|export)\b[^'"\n]*?['"]([^'"]+)['"]/g);
+  // MODULE SPECIFIERS ONLY — the quote must belong to a `from '…'` clause or a side-effect
+  // `import '…'`. The old pattern grabbed ANY first quoted string on an import/export line, so
+  // `export const DEFAULT_SIZE = 'md';` (a Button size constant) read as "imports the package md" —
+  // and the reconciler npm-installed the real (unrelated) `md` package into the user's app (build
+  // report 2026-07-07). That class is supply-chain-shaped: any quoted token on an export line could
+  // become an `npm install <token>`. Requiring `from` (or import-adjacent quote) kills the class:
+  //   import X from 'y' | import {a} from 'y' | import type {T} from 'y' | export {a} from 'y' |
+  //   export * from 'y'  → matched via `from 'y'`
+  //   import 'y'          → matched via the side-effect arm (quote directly after `import`)
+  //   export const x='md' | export type S='sm'|'md' → NO match (no `from`, quote not import-adjacent)
+  push(/(?:^|[\n;])\s*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]/g);
+  push(/(?:^|[\n;])\s*import\s*['"]([^'"\n]+)['"]/g); // side-effect import 'y'
   push(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g);   // require('y')
   push(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g);    // dynamic import('y')
   const out = new Set<string>();

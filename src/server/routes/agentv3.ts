@@ -140,7 +140,7 @@ import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -5104,10 +5104,12 @@ export function registerAgentV3Routes(app: Express): void {
           // build. A [CRITICAL] means a feature is missing or broken (e.g. the calculator's Operator
           // logic bug a real report's reviewer caught but never fixed). This complements the Sonnet
           // judge (#876, which only guards CHEAP-floor builds) — the reviewer runs on every agentic
-          // build, so this catches a strong build's critical bug too. ONE bounded repair pass, gated by
-          // autoFixEnabled(), best-effort — never blocks/fails the build; the fix's writes are saved.
+          // build, so this catches a strong build's critical bug too. ONE bounded repair pass —
+          // DEFAULT-ON via reviewerAutoFixEnabled() (2026-07-07: gating this on the opt-in
+          // AGENTV3_AUTOFIX meant v3.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
+          // best-effort — never blocks/fails the build; the fix's writes are saved.
           const criticals = (review.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
-          if (criticals.length && autoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted) {
+          if (criticals.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${criticals.length} critical issue(s) — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,

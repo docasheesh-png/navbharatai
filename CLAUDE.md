@@ -260,6 +260,15 @@ whole loop yourself, autonomously, and immediately start the next phase. This is
 default working mode for all roadmap/march work and it repeats forever until the admin
 says stop (or a phase is genuinely blocked — see safeguard #3).
 
+**100% AUTOMATICITY (admin-mandated, 2026-07-06 — the default for completing the roadmap):**
+The goal is to complete the ENTIRE roadmap with zero hand-holding. One phase/step done →
+push it → its CI runs GREEN **in the background** (poll it with a background task, never
+sit idle blocking on it) → the moment it merges, the NEXT phase/step is already underway →
+repeat, forever, until the roadmap is done or the admin says stop. You never wait for the
+admin to "kick off" the next phase, never park a finished phase waiting for a nod, and never
+let CI polling stall forward progress — while one phase's CI is going green you may already
+be building the next. The cycle is a continuous conveyor, not a request-response loop.
+
 **The cycle (repeat for every phase):**
 
 1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:
@@ -283,6 +292,35 @@ each phase, you make the PR, you wait for green, you merge, you move on — over
 **Only stop the cycle when:** the admin explicitly says stop/pause, there is no next phase
 left, or you hit real doubt/ambiguity/breakage risk (safeguard #3 — then ask the admin).
 A transient CI failure is NOT a stop: diagnose, fix, re-push, wait for green, merge, continue.
+
+### The 60-second auto-answer rule (admin-mandated, 2026-07-06 — keeps the cycle from stalling)
+
+The cycle must NOT freeze waiting on the admin. So:
+
+- **Prefer proceeding over asking.** Reserve real questions for the genuinely
+  consequential fork — a choice that is destructive, irreversible, spends real money, or
+  carries actual breakage risk. For everything else, do NOT ask: pick the option that best
+  serves the app and proceed, stating the assumption in one line so the admin can correct it.
+- **If you DO ask and the admin does not answer within ~60 seconds, auto-adopt the answer
+  yourself** — the answer that makes NavBharatAI the **best, strongest, and better than every
+  other app builder** (Lovable, Bolt, v0, Replit, Cursor, etc.). Announce the assumed answer
+  ("no reply — proceeding with X because it makes the app strongest"), then keep moving. The
+  admin can always course-correct after the fact; a merged, reversible improvement beats a
+  stalled cycle.
+- **The absolute rules still win, always.** Auto-answering never overrides the four absolute
+  rules: never break the app, real features only (no fakes), be honest (no sycophancy),
+  root-cause fixes only. If the forked choice itself carries genuine breakage or
+  irreversibility, the auto-default is the **safe** ambitious path (the strongest option that
+  cannot break the live app), not a reckless one — and if BOTH options are irreversibly risky,
+  that is the rare real block where you still wait for the admin (safeguard #3 stands only for
+  that narrow, genuinely-dangerous case; it no longer justifies stalling on ordinary choices).
+- **Bias toward ambition.** When auto-answering, lean to the choice that makes the app more
+  capable, more complete, and more competitive — not the timid minimum. "Best app builder in
+  the world" is the tie-breaker.
+
+This rule reconciles with safeguard #3: #3 still forces a STOP for true 0.01%-breakage doubt,
+but ordinary ambiguity is now resolved by proceeding with the best-for-the-app default instead
+of blocking. The conveyor keeps moving.
 
 ## Pull request naming convention (mandatory — same format for every account/session)
 

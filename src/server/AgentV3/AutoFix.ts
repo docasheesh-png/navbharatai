@@ -23,6 +23,20 @@ export function autoFixEnabled(): boolean {
   return process.env.AGENTV3_AUTOFIX === 'on';
 }
 
+/**
+ * The post-build REVIEWER's [CRITICAL]-finding repair (C9) is ON by default — unlike the runtime
+ * auto-fix loop above, which stays opt-in. Why the split (build report 2026-07-07): the reviewer
+ * found a real [CRITICAL] on a successful build, but the repair was gated on the SAME opt-in
+ * AGENTV3_AUTOFIX env (off in prod) — so v3.0 diagnosed its own defect and then knowingly shipped it,
+ * which breaks the "complete app, perfectly" bar. This pass is tightly bounded (fires only when the
+ * reviewer reported criticals on an OK build, one pass, 120s hard cap, deadline-headroom gated), so
+ * its cost is small and only ever spent when something is genuinely broken.
+ * Kill switch: AGENTV3_REVIEWER_AUTOFIX=off.
+ */
+export function reviewerAutoFixEnabled(): boolean {
+  return process.env.AGENTV3_REVIEWER_AUTOFIX !== 'off';
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);

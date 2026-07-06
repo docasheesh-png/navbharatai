@@ -581,6 +581,23 @@ setInterval(() => {
         .then(({ BuildJobManager }) => BuildJobManager.recoverStaleJobs())
         .then((ids) => { if (ids.length) console.log(`[P-BRE.6] recovered ${ids.length} orphaned build job(s):`, ids.join(', ')); })
         .catch(() => { /* best-effort — recovery must never affect boot */ });
+
+      // P-DATA.4 — scheduled TTL retention purge. OPT-IN (DATA_RETENTION_PURGE_ENABLED=true) so no
+      // automated deletion runs in production without explicit admin sign-off. When enabled it runs
+      // once at boot and then daily. Best-effort + self-guarded so it can never affect the server.
+      // (Cloud Run min-instances=0 means the interval only ticks while an instance is alive; a
+      // guaranteed cron needs Cloud Scheduler — honest follow-up.)
+      if (process.env.DATA_RETENTION_PURGE_ENABLED === 'true') {
+        const runPurge = () => import('./src/server/lib/DataRetentionManager')
+          .then(({ getRetentionDb, purgeExpired }) => {
+            const db = getRetentionDb();
+            return db ? purgeExpired(db, Date.now()) : null;
+          })
+          .then((r) => { if (r && r.totalDeleted) console.log(`[P-DATA.4] retention purge removed ${r.totalDeleted} expired record(s)`); })
+          .catch(() => { /* best-effort — purge must never affect the server */ });
+        runPurge();
+        setInterval(runPurge, 24 * 60 * 60 * 1000).unref();
+      }
     });
 
     // WebSocket / HMR reverse proxy for live previews. The HTTP side is handled

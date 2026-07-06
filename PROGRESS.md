@@ -10915,3 +10915,24 @@ with no complete app). Model strength was never the difference — the lane alre
   the multi-agent loop's own churn (redundant re-exploration, out-of-scope file creation) is still real
   for the cases that keep it (edits/imports/opus/fallback) — that orchestration-quality overhaul is the
   next big project, now with much smaller blast radius.
+
+---
+
+## 2026-07-06 — P-PME.12 Requirement Traceability Matrix (roadmap: PARTIAL → full → DONE)
+
+Context: user asked to continue the roadmap. Redundant-work check (safeguard #6) FIRST — main had already
+shipped my in-flight build-report fix (#1065 per-user session-scope fallback + #1067 "always loads/delivers"),
+so that fix was dropped as redundant (branch reset to main; PR #1063 to be closed). Then picked the next
+genuinely code-tractable, non-colliding item (most remaining roadmap is infra-gated: Terraform/Cloud
+Armor/Memorystore/KMS/CDN — admin GCP access, not code).
+
+Shipped P-PME.12 as the pure-engine + route + store pattern (mirrors P-PME.13, avoids hot AgentV3/orchestrator files):
+- `RequirementTraceabilityMatrix.ts` (pure, 11 unit tests) — buildTraceabilityMatrix links requirement →
+  files (each file's requirementIds) → covering tests (explicit `covers`, else auth.test.ts↔auth.ts
+  convention). Summary: total/implemented/fully-tested requirements, coverage %, unimplemented
+  (silently-dropped) requirements, untested files, orphan tests. Defensive/dedupe/empty-safe.
+- `TraceabilityStore.ts` — Firestore persist per workspace (VITEST-skip, best-effort, never throws).
+- `routes/traceability.ts` — POST (compute+save) / GET (download latest), rate-limited + validated.
+- server.ts registration; AppKnowledgeBase `requirement-traceability` entry (engineer_ai).
+
+Gate: tsc fe+server 0, vitest 5293/5293 (11 new), build PASS, boot:check PASS. Infra-only files untouched.

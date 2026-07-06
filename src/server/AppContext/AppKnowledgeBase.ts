@@ -1796,6 +1796,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['import error', 'export error', 'not exported', 'is not exported', 'named import', 'default import', 'broken import', 'undefined import', 'module has no exported member', 'barrel file', 'index re-export', 'build fails import'],
   },
   {
+    id: 'jsx-component-resolution',
+    name: 'JSX Component Resolution Check',
+    path: 'Settings → Insights & Webhooks → JSX Component Resolution',
+    description: `Scans the generated JSX for components that are USED but never imported or defined — the classic "ReferenceError: Widget is not defined" that white-screens a React app the moment the element renders. Catches both plain (<Widget />) and member-expression (<styled.button>, <lib.Thing />) forms with real AST analysis (ts-morph). Deliberately conservative: it NEVER flags lowercase host elements (div/span), locally-defined components, components passed as props/params, imported components, or React/Fragment — so a green result is trustworthy. Backed by POST /api/workspace/jsx-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "JSX Component Resolution" → Check JSX. Green means every component resolves; otherwise each undefined component shows the tag and the file:line to import or define it.',
+    relatedFeatures: ['import-export-consistency', 'react-hooks-safety', 'code-confidence-check', 'agentv3_builder'],
+    keywords: ['is not defined', 'referenceerror', 'undefined component', 'component not imported', 'jsx error', 'missing import', 'white screen', 'react not defined', 'unknown component', 'element not defined'],
+  },
+  {
     id: 'insights-integrations-panel',
     name: 'Insights & Integrations',
     path: 'Settings → Insights & Webhooks',

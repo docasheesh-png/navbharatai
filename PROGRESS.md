@@ -10389,3 +10389,26 @@ Tests: ImportExportAnalysis.test.ts (15 — named/default mismatches, renamed im
 re-exports, wildcard silence, external/missing silence, malformed-import robustness, correct line/file).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5148/5148 PASS (15 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — AgentV3 build-quality: JSX undefined-component analyzer  ✅ DONE (powerful-builder)
+
+Third build-hardening evaluator toward the "powerful app builder" aim. Catches the classic
+"ReferenceError: X is not defined" white-screen: a JSX element <Foo/> (or <Foo.Bar/> / <lib.Widget/>)
+whose component is never imported or defined in the file — a hard crash the existing suite misses.
+
+New src/server/AgentV3/JsxComponentAnalysis.ts (pure, ts-morph AST-accurate, lazily loaded, deterministic):
+analyzeJsxComponents(files) collects every bound name in a file (imports, const/let/var, function, class,
+parameter, destructured binding) and flags component-cased or member-expression JSX tags whose root isn't
+bound and isn't a JSX global (React/Fragment). Conservative → never flags host elements (div/span),
+locally-defined components, prop/param components, or imported ones. Same COLD-wiring pattern: route
+POST /api/workspace/jsx-check + one server.ts line + "JSX Component Resolution" card in ProjectInsightsPanel.
+AppKnowledgeBase jsx-component-resolution entry added.
+
+Live prod smoke: undefined component → ok:false with exact detail; imported → ok:true. Tests:
+JsxComponentAnalysis.test.ts (12 — undefined plain + member-expression, de-dupe, multi-file, and no-false-
+positive cases: imports, local defs, props, Fragment, motion.div, host elements, unparseable robustness).
+
+This completes a three-analyzer build-hardening set (hooks + import/export + JSX resolution), each catching a
+distinct hard-failure class the readiness suite previously missed, all wired collision-free from the core loop.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5160/5160 PASS (12 new), build PASS, boot:check PASS, live smoke PASS.

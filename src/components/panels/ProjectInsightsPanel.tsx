@@ -146,6 +146,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setImportChkBusy(false); }
   };
 
+  // ── JSX undefined-component check ──
+  const [jsxChk, setJsxChk] = useState<any>(null);
+  const [jsxChkBusy, setJsxChkBusy] = useState(false);
+  const runJsxChk = async () => {
+    setJsxChkBusy(true); setJsxChk(null);
+    try {
+      const r = await fetch('/api/workspace/jsx-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setJsxChk(await r.json());
+    } catch { /* ignore */ }
+    finally { setJsxChkBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
 
@@ -246,6 +258,23 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             </div>
             <div className="space-y-1 max-h-40 overflow-auto">{importChk.mismatches.slice(0, 30).map((m: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300"><span className="text-white">{m.imported}</span> ✗ {m.from} <span className="text-[#8b949e]">({m.file}:{m.line})</span></div>
+            ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* JSX undefined-component */}
+      <Card icon={<Brain className="w-4 h-4 text-rose-400" />} title="JSX Component Resolution"
+        action={<Button size="sm" onClick={runJsxChk} disabled={jsxChkBusy} className="uppercase tracking-widest bg-rose-600 hover:bg-rose-700">{jsxChkBusy ? 'Checking…' : 'Check JSX'}</Button>}>
+        {!jsxChk ? (
+          <p className="text-[11px] text-[#8b949e]">Scan the generated JSX for components used but never imported or defined (e.g. <span className="font-mono">&lt;Widget /&gt;</span> with no <span className="font-mono">Widget</span> in scope). These throw "Widget is not defined" and white-screen the app — exact AST check that never flags host elements, local components, or props.</p>
+        ) : jsxChk.ok ? (
+          <div className="text-[11px] text-emerald-400 font-bold">✓ Every JSX component resolves across {jsxChk.filesScanned} file(s).</div>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="text-red-400 font-bold">{jsxChk.undefinedComponents.length} undefined component(s) — these will crash the app at runtime.</div>
+            <div className="space-y-1 max-h-40 overflow-auto">{jsxChk.undefinedComponents.slice(0, 30).map((c: any, i: number) => (
+              <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">&lt;<span className="text-white">{c.component}</span>&gt; <span className="text-[#8b949e]">({c.file}:{c.line})</span></div>
             ))}</div>
           </div>
         )}

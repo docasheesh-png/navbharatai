@@ -10626,3 +10626,18 @@ Express/Fastify server whose OWN `dev` script boots it and serves the client) wa
   stays vite-react; Next wins; devScriptRunsNodeServer truth table incl. env-prefixed/nodemon/broken).
 - Gate: server tsc 0, vitest 5223/5223, boot PASS.
 - Fix 2 of 5. Next: Fix 3 (cold-sandbox hydration), Fix 4 (P1 on import turn), Fix 5 (auto-provision DB).
+
+## 2026-07-06 — Fix 4: import turns route directly to the strong model (no Haiku/cheap-floor timeout)
+
+The Mitrify GitHub import ran on Haiku + the GLM/KIMI cheap floor, which then timed out 6× on the huge
+grounding prompt. Root cause: a GitHub-URL clone lands its files AFTER model selection, so the
+large-project file count is 0 at decision time — P1 (large→Sonnet, #997) couldn't see the imported app.
+(A ZIP import lands before selection so P1 already fired for it — this closes the URL-import gap.)
+- New pure `shouldRouteStrongModel(largeProject, hasImportIntent)` = `largeProject || hasImportIntent`.
+  `hasImportIntent` is known at model-selection time (from the request), so any import → strong model +
+  cheap-floor bypass, regardless of when the clone lands. selectBuildModel + allowCheapFloor now use it.
+- Honest narration: large edit → "🏗️ Large project (N files)…"; import → "📦 Imported project — running
+  directly on the strong model for reliability."
+- Tests: agentv3.test.ts +3 (large→strong; the Mitrify fix: import→strong even at 0 files; small
+  non-import stays on the ladder). Gate: server tsc 0, vitest 5234/5234, boot PASS.
+- Fix 4 of 5. Remaining: Fix 3 (cold-sandbox hydration), Fix 5 (auto-provision DB for Drizzle/pg imports).

@@ -795,6 +795,17 @@ export function isLargeExistingProject(fileCount: number): boolean {
   return fileCount >= threshold;
 }
 
+/**
+ * Should this build skip Haiku/the cheap floor and run directly on the strong model? True for a LARGE
+ * existing project OR an IMPORT turn. Imports matter separately: a GitHub-URL clone lands its files
+ * AFTER model selection, so the large-project file count is 0 at decision time (the Mitrify import ran
+ * on Haiku + the cheap floor, which then timed out on the huge grounding prompt). Every import operates
+ * on a real existing app with a big prompt → strong model. Pure + exported for testing.
+ */
+export function shouldRouteStrongModel(largeProject: boolean, hasImportIntent: boolean): boolean {
+  return largeProject === true || hasImportIntent === true;
+}
+
 /** The dev-server port a framework's `npm run dev` listens on — used by the OneShot lane to
  *  publish the preview after a one-shot build. Pure + exported for testing. */
 export function oneShotDevPort(framework: string): number {
@@ -3506,14 +3517,22 @@ export function registerAgentV3Routes(app: Express): void {
         editFileTree = reconciled.length > 0 ? reconciled : sandboxPaths;
       }
       const largeProject = isLargeExistingProject(editFileTree?.length ?? 0);
-      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project → Sonnet,
+      // Fix 4 (2026-07-06): an IMPORT turn ALSO routes to the strong model directly. A GitHub-URL
+      // import clones its files AFTER this point (so editFileTree is empty here and the large-project
+      // check can't see them — the Mitrify import wrongly ran on Haiku + the cheap floor, which then
+      // timed out 6× on the huge grounding prompt). Any import operates on a real existing app with a
+      // large prompt, so treat it like a large edit: strong model, no cheap floor.
+      const routeStrong = shouldRouteStrongModel(largeProject, hasImportIntent);
+      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project / import → Sonnet,
       // power → Opus (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
-      const model = selectBuildModel(analysis?.startTier, onlyOpus, largeProject);
-      if (largeProject && !onlyOpus) {
+      const model = selectBuildModel(analysis?.startTier, onlyOpus, routeStrong);
+      if (routeStrong && !onlyOpus) {
         // Honest + visible: the user sees WHY this build routes to the strong model.
         events.emit({
           type: 'narration', agent: 'architect', ts: Date.now(),
-          text: `🏗️ Large project (${editFileTree?.length ?? 0} files) — running directly on the strong model for reliability.`,
+          text: largeProject
+            ? `🏗️ Large project (${editFileTree?.length ?? 0} files) — running directly on the strong model for reliability.`
+            : `📦 Imported project — running directly on the strong model for reliability.`,
         });
       }
       // BUILD DIAGNOSTICS — capture every struggle (provider fallback, tool error, "replied
@@ -3562,7 +3581,7 @@ export function registerAgentV3Routes(app: Express): void {
         // NEVER for a large existing project (admin 2026-07-05): the floor timed out 8× on a 233KB
         // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
         // Escalation builds below never pass this, so they stay Claude.
-        allowCheapFloor: !largeProject && cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
+        allowCheapFloor: !routeStrong && cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
         onProviderUsed: captureProvider,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',

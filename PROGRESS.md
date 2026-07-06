@@ -11013,3 +11013,22 @@ manually; the real fix is an AUTO-reboot when the Live-server tab opens on a sle
 Needs careful client work + a live sandbox to verify — not shipping a guess in this PR.
 
 - Gate: frontend tsc 0, server tsc 0, vitest 5285/5285, boot PASS.
+
+## 2026-07-07 — Fix 12: self-healing live preview — auto-reboot a dead dev server behind an existing URL (the "Closed Port Error" root cause)
+
+RC-C from the Notes-app autopsy, now closed. The C1 auto-resume only fired when there was NO preview
+URL — but a preview URL is PERMANENT while the dev server behind it is EPHEMERAL (sandbox idle/pause
+kills the process). So a reopened session with a remembered URL rendered E2B's "Closed Port Error"
+page inside the iframe and nothing auto-healed: **URL presence was being used as liveness.**
+- New pure `shouldAutoRebootPreview(signals)` (previewAutoReboot.ts, fully tested): reboot only when
+  idle (autoResume) + Live tab shown + URL present + live backend + probe says sleeping/crashed. Never
+  on live/booting (healthy), never on empty/inbrowser_only (nothing to boot), never on a failed probe
+  (no booting on a guess), never twice per workspace (loop guard), never while a diagnose is in flight.
+- PreviewSurface (C1b effect): probes the REAL health via POST /api/agentv3/preview-health (the
+  warm-sandbox port probe that already exists) and, on a not-live verdict, runs the SAME
+  rehydrate-and-reboot the Diagnose button uses. The manual Diagnose button stays as the fallback.
+- Tests: previewAutoReboot.test.ts +5 (the exact reported case; healthy/unbootable/failed-probe/all
+  gates). Gate: frontend tsc 0, server tsc 0, vitest 5309/5309, boot PASS.
+- Full verification of the actual reboot needs a live E2B sandbox (recorded per rule 6) — the decision
+  logic is CI-locked; the boot path it triggers (preview-diagnose) is the same one already proven by
+  the manual Diagnose button on real sandboxes.

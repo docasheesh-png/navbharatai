@@ -3736,3 +3736,66 @@ complex builds, test-driven not just tsc-driven), post-deploy liveness check, au
 > docker-compose orchestration) and need the admin's infra/spend decisions before they can be built — recorded
 > here as open items per the constitution's rule 6 (never ship a cosmetic patch as if it were the real fix).
 > AB-5..AB-8 are more tractable in code once the sandbox substrate (AB-1..AB-4) exists.
+## Appsmith-class (big / complex / polyglot) apps — REMAINING gaps beyond the 9 runtime items (added 2026-07-06)
+
+Context: the admin added 9 **runtime/infra** unlocks to the roadmap (JVM/polyglot runtime, MongoDB+Redis
+provisioning, docker-compose orchestration, bigger E2B VM, 20k+ file import, polyglot build, monorepo
+service-graph grounding, multi-service env/secret wiring, multi-service preview). Those make a big app
+*run*. The 17 below are the OTHER gaps — mostly **AI-brain, verification, editing-precision, and long-run
+reliability** — that decide whether v3.0 can *understand, safely edit, truly verify, and not fall over*
+on an Appsmith-class app. Each is tagged with honest current state: ❌ missing · ⚠️ partial (exists but
+weak at scale). None fully solves the big-complex-app case today — that is why they are listed.
+
+### A. Understanding a huge codebase (the model can't hold 10k files in context)
+- **A1 — Semantic code-retrieval + code-graph + symbol index** (❌): the agent must *query* the repo
+  (who-defines / who-calls / where-used), not prompt-stuff it. `WorkspaceMemory`/embeddings exist but are
+  weak at Appsmith scale. Highest-leverage of all 17.
+- **A2 — Auto architecture-onboarding pass** (❌): before editing, produce a real map — services,
+  data-flow, entry-points, "how this app works". Without it, edits to a huge unfamiliar app are blind.
+- **A3 — Long-horizon / persistent decision memory** (⚠️): a big build spans many turns; earlier
+  architectural decisions are forgotten. Needs a durable decision-log the agent re-reads.
+
+### B. Verification that actually means "it works"
+- **B4 — Run the project's OWN test suite** (⚠️): detect + run jest/vitest/pytest/JUnit/Playwright and
+  read results — not just `tsc`. Some test-scaffolding exists; running the imported app's real suite does not.
+- **B5 — Real browser drive + console/network capture → auto-fix** (⚠️): click real flows, capture runtime
+  console + network errors, self-fix. A screenshot is not verification. Console-autofix is limited.
+- **B6 — Cross-language typecheck / lint** (❌): Java + Python + TS together, not just frontend `tsc`.
+
+### C. Precise editing at scale
+- **C7 — AST / surgical multi-file edits + codemods** (⚠️): "change an API + all its callers" without
+  whole-file rewrites. `CodemodeExecutor`/AST exist but narrow; whole-file rewrite still dominates and
+  breaks big files.
+- **C8 — Coordinated cross-file refactor / rename at scale** (❌): safe repo-wide renames/moves.
+
+### D. What a real app needs to actually boot
+- **D9 — DB migrations + seed at scale** (⚠️): run Flyway/Liquibase/Prisma/Alembic + seed; a complex app
+  won't boot without its schema migrated. Only light seed exists.
+- **D10 — Third-party integrations: mock/sandbox mode or real-key wiring** (⚠️): OAuth/Stripe/S3/email/APIs.
+  Today: self-issued secrets + Postgres URL only; real external integrations block a working preview.
+- **D11 — Toolchain version pinning** (❌): honor .nvmrc / JDK 17 / Python version + lockfile integrity;
+  big apps pin exact toolchains and fail on drift.
+- **D12 — Monorepo task-runners** (⚠️): detect + drive turborepo / nx / pnpm-yarn workspaces, not just npm.
+
+### E. Reliability + economics of long builds
+- **E13 — Coherent checkpoint-resume** (⚠️): on pause, CONTINUE the same work — never restart from 0.
+  Auto-continue exists but resume coherence on a huge build is weak (files/work lost on rotation — being
+  hardened, see the 2026-07-06 durable-flush autopsy).
+- **E14 — Token / cost budget management for huge builds** (❌): a big build burns credits; needs
+  budget-aware planning + an honest ceiling.
+- **E15 — Robust parallel sub-agent orchestration** (⚠️): parallel specialists must not clobber/lose each
+  other's files (a real failure we hit). Coordination + shared understanding across parallel agents.
+
+### F. The tooling's own scale
+- **F16 — Fast indexing / diff / file-tree for 10k+ files** (⚠️): backend + UI (Files/Diff panels) must
+  stay fast on a huge tree; today bounded/slow at that scale.
+- **F17 — Honest live progress for a long complex build** (⚠️): what's happening, what's stuck, real % —
+  improved recently (durable report, honest pause wording) but needs more at Appsmith scale.
+
+### Highest-leverage to start (honest)
+**A1 (code retrieval/graph) → B4+B5 (real test + browser verification) → C7 (surgical AST edits).** Without
+these three, even after the 9 runtime unlocks the agent stays "blind" on a big app — able to run it but not
+to understand, safely change, or truly verify it. Everything here is a dedicated effort (own PR + tests),
+not a config flag.
+
+> Doc-only change (gap audit, 2026-07-06). No code touched.

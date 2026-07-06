@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown,
   FileCode, Copy, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
 } from 'lucide-react';
-import type { ConversationMeta } from '../../hooks/useAgentV3Build';
+import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
@@ -68,13 +68,21 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  // ── 3-role model UI (FIX #6): composer mode + the per-app command queue ─────────────────────────
+  // 'build' = the normal builder (Chat 1). 'planner'/'advisor' = the read-only role lanes (FIX #5)
+  // that analyze the project and PROPOSE steps; the user approves them into the queue below.
+  const [chatMode, setChatMode] = useState<'build' | 'planner' | 'advisor'>('build');
+  const [queueItems, setQueueItems] = useState<QueueItemView[]>([]);
+  const [queueOpen, setQueueOpen] = useState(false);
+  // Proposed steps already added this turn (disable their buttons — enqueue is idempotent-by-user).
+  const [addedSteps, setAddedSteps] = useState<Set<string>>(new Set());
   const ghToken = () => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } };
   const doShipToMain = useCallback(async () => {
     if (!state.ownRepo || shipping) return;
@@ -668,7 +676,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-    start(msgText, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, importUrl: pendingImportUrl || undefined });
+    start(msgText, {
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework,
+      importUrl: pendingImportUrl || undefined,
+      // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
+      // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
+      chatRole: chatMode === 'build' ? undefined : chatMode,
+    });
   };
 
   // ── Layer 3: bounded auto-continue ──────────────────────────────────────────────
@@ -714,7 +728,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
-  // ── FIX #4.3: client-driven QUEUE executor ──────────────────────────────────────────────────────
+  // ── FIX #4.3 + #6: client-driven QUEUE executor + queue UI plumbing ─────────────────────────────
   // After a build SETTLES (and it is NOT a resumable SPM continue — handled above), this: (1) records
   // the outcome of the queued command that was running, then (2) claims + auto-submits the next queued
   // command. Runs one step at a time (the serial invariant), pauses on error, and is inert when the
@@ -722,13 +736,43 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // pure, tested gate; the two refs prevent double-complete and re-entrant double-submit.
   const activeQueuedItemRef = useRef<string | null>(null);
   const queueClaimInFlightRef = useRef(false);
+
+  // Refresh the queue list shown in the UI (best-effort; also runs after enqueue/settle/cancel).
+  const refreshQueue = useCallback(async () => {
+    setQueueItems(await queueList(expectedWorkspaceId()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueList]);
+
+  // Claim + run the next queued command NOW. Shared by the settle-effect and the post-enqueue kick
+  // (a fresh idle session has no settled build, so the effect alone would never start the queue).
+  // The server's claimNext is the real serial guard — it refuses while one is running, atomically.
+  const claimAndRunNext = useCallback(async () => {
+    if (running || queueClaimInFlightRef.current || state.pendingPermission) return;
+    queueClaimInFlightRef.current = true;
+    try {
+      const item = await queueNext(expectedWorkspaceId());
+      if (!item) return;
+      activeQueuedItemRef.current = item.id;
+      setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
+      if (state.narration.length > 0) {
+        setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
+      }
+      try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
+      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
+      void refreshQueue();
+    } finally {
+      queueClaimInFlightRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, state.pendingPermission, state.narration, queueNext, start, userId, email, onlyOpus, powerLevel, planFirst, thinking, framework, refreshQueue]);
+
   useEffect(() => {
     const hasError = !!(error || state.error);
     // (1) A queued command's build just settled → record its outcome (a failure pauses the queue below).
     if (state.done && !running && activeQueuedItemRef.current) {
       const ok = !hasError && state.ok !== false;
       activeQueuedItemRef.current = null;
-      void queueComplete(expectedWorkspaceId(), ok, ok ? undefined : (error || state.error || 'build did not complete'));
+      void queueComplete(expectedWorkspaceId(), ok, ok ? undefined : (error || state.error || 'build did not complete')).then(() => refreshQueue());
     }
     // (2) Idle after a non-resumable settle → claim + run the next queued command.
     if (!shouldRunNextQueued({
@@ -738,24 +782,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       hasError,
       claimInFlight: queueClaimInFlightRef.current,
     })) return;
-    queueClaimInFlightRef.current = true;
-    void (async () => {
-      try {
-        const item = await queueNext(expectedWorkspaceId());
-        if (!item) return;
-        activeQueuedItemRef.current = item.id;
-        setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
-        if (state.narration.length > 0) {
-          setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
-        }
-        try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-        start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
-      } finally {
-        queueClaimInFlightRef.current = false;
-      }
-    })();
+    void claimAndRunNext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running, state.pendingPermission, error, state.error]);
+
+  // FIX #6 — approve a role chat's proposed step into THIS app's queue (the user's explicit click;
+  // nothing is ever auto-enqueued). If the app is idle, kick the executor so the queue starts NOW.
+  const addStepsToQueue = useCallback(async (steps: string[], source: 'planner' | 'advisor') => {
+    const ws = expectedWorkspaceId();
+    for (const step of steps) {
+      const ok = await queueEnqueue(ws, step, source);
+      if (ok) setAddedSteps((prev) => new Set(prev).add(step));
+    }
+    await refreshQueue();
+    if (!running && !state.pendingPermission) void claimAndRunNext();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueEnqueue, refreshQueue, running, state.pendingPermission, claimAndRunNext]);
+
+  // A new role turn's proposals replace the previous ones — reset the added-marks + show the queue.
+  useEffect(() => {
+    if (state.proposedSteps) { setAddedSteps(new Set()); void refreshQueue(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.proposedSteps]);
+
+  // Load this app's queue once on mount (and when the session changes), so a queue left from a
+  // previous visit is visible (and resumable) immediately — the paused-queue-resumes-on-reopen story.
+  useEffect(() => {
+    void refreshQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freshOpenNonce]);
 
   // Start a brand-new project: fresh sandbox/memory (new session id) and clear chat. Allowed even
   // while a build is actively streaming HERE — reset() detaches from that stream (the underlying
@@ -1881,6 +1936,40 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
             )}
+            {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
+                app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}
+            {state.proposedSteps && state.proposedSteps.steps.length > 0 && !running && (
+              <div className="px-3 py-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                    {state.proposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {state.proposedSteps.steps.length} step{state.proposedSteps.steps.length > 1 ? 's' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => addStepsToQueue(state.proposedSteps!.steps.filter((s) => !addedSteps.has(s)), state.proposedSteps!.role)}
+                    disabled={state.proposedSteps.steps.every((s) => addedSteps.has(s))}
+                    className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
+                  >
+                    {state.proposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
+                  </button>
+                </div>
+                {state.proposedSteps.steps.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
+                    <button
+                      type="button"
+                      onClick={() => addStepsToQueue([s], state.proposedSteps!.role)}
+                      disabled={addedSteps.has(s)}
+                      title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
+                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                    </button>
+                    <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
+                  </div>
+                ))}
+                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+              </div>
+            )}
             {(error || state.error) && (
               <div className="px-3 py-2 bg-red-950/60 text-red-300 text-xs rounded">
                 <div className="flex items-start gap-2">
@@ -1974,6 +2063,64 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               and pb-[env(safe-area-inset-bottom)] always stays so the composer never hides behind
               the phone browser's bottom search/address bar. Normal mode is unchanged. */}
           <div className={`shrink-0 sticky bottom-0 pb-[env(safe-area-inset-bottom)] ${focusMode ? '' : 'bg-zinc-950 border-t border-zinc-800'}`}>
+            {/* FIX #6 — composer mode (3-role model): Build = the normal builder; Plan/Advise = the
+                read-only role lanes that analyze THIS project and propose queue steps. The queue chip
+                shows this app's pending/running commands (tap to expand, cancel pending ones). */}
+            <div className="px-3 pt-1.5 flex items-center gap-1.5 flex-wrap">
+              {([['build', 'Build'], ['planner', 'Plan'], ['advisor', 'Advise']] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setChatMode(mode)}
+                  disabled={running}
+                  title={mode === 'build' ? 'Builder — messages build/edit the app' : mode === 'planner' ? 'Planner — read-only: decompose goals into queueable steps' : 'Advisor — read-only: audit / test / research / explain'}
+                  className={`px-2 h-6 rounded-full text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-50 ${chatMode === mode ? 'bg-indigo-600 text-white' : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  {label}
+                </button>
+              ))}
+              {(() => {
+                const pending = queueItems.filter((i) => i.status === 'pending').length;
+                const runningQ = queueItems.some((i) => i.status === 'running');
+                if (pending === 0 && !runningQ) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
+                    title="This app's command queue — steps run one at a time"
+                    className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
+                  >
+                    <Clock className="w-3 h-3" />
+                    Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
+                  </button>
+                );
+              })()}
+            </div>
+            {queueOpen && queueItems.length > 0 && (
+              <div className="mx-3 mt-1.5 p-2 bg-zinc-900/80 border border-zinc-800 rounded space-y-1 max-h-40 overflow-y-auto">
+                {queueItems.map((item) => (
+                  <div key={item.id} className="flex items-start gap-2 text-[11px]">
+                    <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-indigo-400' : item.status === 'done' ? 'text-green-500' : item.status === 'failed' ? 'text-red-400' : item.status === 'cancelled' ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                      {item.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                    </span>
+                    <span className={`flex-1 break-words ${item.status === 'cancelled' ? 'text-zinc-600 line-through' : item.status === 'done' ? 'text-zinc-500' : 'text-zinc-300'}`}>
+                      {item.prompt}
+                      {item.note ? <span className="text-zinc-500"> — {item.note}</span> : null}
+                    </span>
+                    {item.status === 'pending' && (
+                      <button
+                        type="button"
+                        onClick={() => { void queueCancel(expectedWorkspaceId(), item.id).then(setQueueItems); }}
+                        title="Cancel this queued step"
+                        className="shrink-0 text-zinc-500 hover:text-red-400"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {/* OWN-REPO SHIP BAR (slice 2): when edits are stored on the user's own repo working branch,
                 offer a one-click "Ship to main" — it merges navbharatai/work → the repo default via a PR,
                 server-side merging ONLY on green CI (your main is never touched until you click this). */}

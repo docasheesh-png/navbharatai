@@ -48,6 +48,48 @@ export function countActiveBuildsForUser(builds: Iterable<{ userId?: string | nu
   return n;
 }
 
+/**
+ * Every registry key a caller's build could legitimately live under, in lookup order (deduped):
+ *   1. the primary lock key (workspace key when per-workspace is on, else the account key),
+ *   2. the account key, and
+ *   3. the shared 'anon' bucket.
+ *
+ * WHY 'anon' is always a candidate (admin's dead Stop/Resume, 2026-07-06): /chat registers a build
+ * under the VERIFIED identity — when token verification fails (the known anon fallback) the build and
+ * its lock live under 'anon', while /stop//attach looked up the CLIENT-CLAIMED uid key → a guaranteed
+ * miss → Stop stopped nothing, Resume 404'd, and the 'anon' lock held the account in the 409 loop
+ * forever. Candidates make those routes find the build wherever identity resolution actually put it.
+ * (Safety: any anonymous caller could ALWAYS reach the shared 'anon' bucket — including it for a
+ * signed-in caller adds no new exposure, and attach still enforces its workspaceId cross-check.)
+ */
+export function buildKeyCandidates(userId: string | null, workspaceId: string | null | undefined, perWorkspace: boolean): string[] {
+  const out = [buildLockKey(userId, workspaceId, perWorkspace)];
+  const account = userId ?? 'anon';
+  if (!out.includes(account)) out.push(account);
+  if (!out.includes('anon')) out.push('anon');
+  return out;
+}
+
+/**
+ * Do two workspace ids refer to the SAME chat session? Exact match, or the anon-fallback pair: when
+ * /chat's verified identity fell back to anon, the build's workspace is `agentv3-anon-<sessionId>`
+ * while the client asks about `agentv3-<uid>-<sessionId>` — same session, different owner prefix. The
+ * sessionId (≥6 unguessable chars) is the discriminator, so matching on it never crosses sessions.
+ * Without this, Stop/Resume's workspace cross-check rejected the caller's OWN anon-keyed build.
+ */
+export function workspaceSessionsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ANON = 'agentv3-anon-';
+  const sessionMatches = (anonId: string, other: string): boolean => {
+    const session = anonId.slice(ANON.length);
+    return session.length >= 6 && other.startsWith('agentv3-') && other.endsWith(`-${session}`);
+  };
+  if (a.startsWith(ANON) && sessionMatches(a, b)) return true;
+  if (b.startsWith(ANON) && sessionMatches(b, a)) return true;
+  return false;
+}
+
 export type AcquireResult =
   | { ok: true }
   /** This exact workspace is already building (same-app mutual exclusion) — attach/stop it, don't start a second. */

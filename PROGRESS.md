@@ -9978,3 +9978,41 @@ unit-testable):
   needs Cloud Scheduler; a Settings delete-account button is a thin UI follow-up (capability live via API).
 
 Gate: frontend tsc 0, server tsc 0, vitest 4992/4992 PASS (9 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — HOTFIX (admin IMG_5722): Stop AND Resume were both dead — identity-asymmetry deadlock
+
+Admin report: pressing Stop or Resume did nothing; "A build is still running on your account. Press ⏹
+Stop…" came back forever. ROOT CAUSE (DNA): /chat registers a build under the VERIFIED identity — when
+token verification fails (the known anon fallback, the admin's live situation: app-anon-… repos) the
+build + its lock live under the 'anon' key. But /stop and /attach looked the build up by the
+CLIENT-CLAIMED body uid → guaranteed miss → Stop stopped nothing (stopped:false), Resume 404'd, the
+'anon' lock stayed held → the 409 loop was UNBREAKABLE. A second, compounding defect: even when the
+anon build was found, the workspace cross-check compared EXACT ids — the anon build's workspace is
+agentv3-anon-<sid> while the client asks with agentv3-<uid>-<sid> (same session!) → still refused.
+
+FIX (both defects, root not symptom):
+- New pure `buildKeyCandidates(userId, workspaceId, perWs)` — the deduped list of keys a caller's build
+  can live under: primary lock key → account key → the shared 'anon' bucket. (Safety: any anonymous
+  caller could ALWAYS reach the anon bucket; a signed-in caller gains no new exposure.)
+- New pure `workspaceSessionsMatch(a, b)` — exact match OR the anon-fallback pair for the SAME session
+  (sessionId ≥6 unguessable chars is the discriminator; never crosses sessions/owners).
+- /stop: stops the FIRST live build across the candidates (session-aware anon cross-check), frees the
+  lock the build ACTUALLY held. /attach: candidate lookup with the session-aware cross-check (a
+  signed-in caller may attach the anon bucket ONLY on a positive session match — never blind).
+  /status: buildRunningHere checks all candidates session-aware, so auto-resume offers Resume for the
+  caller's own anon-keyed build. Client stop()/attach send the Bearer token (keys align once verify works).
+- Tests: buildKeyCandidates (4) + workspaceSessionsMatch (3 groups) lock the exact failure pair.
+
+## 2026-07-06 — Concurrency FIX #6: the 3-role UI — Build · Plan · Advise pills + the queue UI
+
+The user-facing layer completing the 3-role model (engine shipped in #3-#5):
+- Composer mode pills (Build / Plan / Advise) above the chat box — Plan/Advise route the message down
+  the read-only role lane of the SAME session (same workspace → steps land in THIS app's queue).
+- Proposed-steps card in chat: "Queue all" + per-step + buttons — steps enter the queue ONLY on the
+  user's click (source planner/advisor); a fresh-idle enqueue KICKS the executor immediately (a fresh
+  session has no settled build, so the settle-effect alone would never start the queue).
+- Queue chip above the composer (N pending · running) → expandable list with per-pending Cancel;
+  refreshes on mount/settle/enqueue/proposals. Executor effect refactored to a shared claimAndRunNext.
+- AppKnowledgeBase: new `agentv3_roles_queue` entry (mandatory user-facing KB rule).
+
+Gate (both changes): frontend tsc 0, server tsc 0, vitest 5004/5004 PASS, build PASS, boot PASS.

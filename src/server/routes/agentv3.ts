@@ -50,6 +50,8 @@ import {
   buildLockKey,
   countActiveBuildsForUser,
   acquireDecision,
+  buildKeyCandidates,
+  workspaceSessionsMatch,
   type RepoInfo,
   type PrCapableClient,
   type OwnRepoTarget,
@@ -1254,16 +1256,27 @@ export function registerAgentV3Routes(app: Express): void {
     // must key off `buildRunningHere`, or a build genuinely still running in a DIFFERENT v3.0
     // session bleeds its progress into whatever session the user currently has open.
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
-    // Under per-workspace locking (FIX #3) the registry is keyed by workspace, so scope the lookups
-    // accordingly: `buildRunningHere` looks up THIS session's key; the account-wide `buildRunning`
-    // counts any of the account's live builds. Flag OFF → both use the account key (today's behaviour).
+    // CANDIDATE KEYS (2026-07-06, with the dead-Stop/Resume fix): the running build may live under the
+    // workspace key, the account key, or the shared 'anon' bucket (verified-identity fallback), and an
+    // anon-keyed build's workspace is `agentv3-anon-<sid>` — so `buildRunningHere` checks every
+    // candidate with the SESSION-aware match, or auto-resume would never even offer the Resume button
+    // for the caller's own anon-keyed build.
     const perWs = perWorkspaceLockEnabled();
-    const hereKey = buildLockKey(userId, workspaceId, perWs);
-    const buildRunning = perWs ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0 : isBuildRunning(userId ?? 'anon');
+    const candidates = buildKeyCandidates(userId, workspaceId, perWs);
+    const buildRunning = perWs
+      ? countActiveBuildsForUser(runningBuilds.values(), userId) > 0
+      : candidates.some((k) => isBuildRunning(k));
+    const buildRunningHere = candidates.some((k) => {
+      const rb = runningBuilds.get(k);
+      if (!rb || rb.ended) return false;
+      if (!workspaceId) return true;          // account-wide back-compat (callers without a session)
+      if (!rb.workspaceId) return true;       // legacy build without a stamped workspace (back-compat)
+      return workspaceSessionsMatch(rb.workspaceId, workspaceId);
+    });
     res.json({
       enabled: isAgentV3Enabled(userId, email),
       buildRunning,
-      buildRunningHere: isBuildRunningForWorkspace(runningBuilds.get(hereKey), workspaceId),
+      buildRunningHere,
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -1788,15 +1801,29 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const stopWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
-    const buildKey = buildLockKey(userId, stopWorkspaceId, perWorkspaceLockEnabled());
-    const rb = runningBuilds.get(buildKey);
-    const wasRunning = !!rb && !rb.ended;
-    if (rb) {
-      rb.abort.abort();                                         // loop stops between turns
-      endBuild(rb);                                             // close all attached streams now
-      if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
+    // CANDIDATE KEYS (admin's dead-Stop fix, 2026-07-06): the build may be registered under the
+    // workspace key, the claimed account key, OR the shared 'anon' bucket (when /chat's verified
+    // identity fell back to anon — the exact case where Stop used to look up the WRONG key, stop
+    // nothing, and leave the 409 loop unbreakable). Stop the FIRST live build found; free its lock.
+    const candidates = buildKeyCandidates(userId, stopWorkspaceId, perWorkspaceLockEnabled());
+    let wasRunning = false;
+    for (const key of candidates) {
+      const rb = runningBuilds.get(key);
+      if (!rb || rb.ended) continue;
+      // The anon bucket is shared: prefer the SESSION-aware cross-check when both sides know their
+      // workspace (the anon build's id is agentv3-anon-<sid> while the client asks with its uid-based
+      // id — same session, so exact match would wrongly refuse). When the stopping client doesn't know
+      // its workspaceId (post-reload), allow — any anonymous caller could always reach this bucket, so
+      // a signed-in caller stopping it adds no new exposure.
+      if (key === 'anon' && userId && stopWorkspaceId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, stopWorkspaceId)) continue;
+      rb.abort.abort();                                       // loop stops between turns
+      endBuild(rb);                                           // close all attached streams now
+      if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
+      activeBuilds.delete(key);                               // free the lock the build actually held
+      wasRunning = true;
+      break;
     }
-    activeBuilds.delete(buildKey);                              // unblock a fresh start immediately
+    activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
     res.json({ stopped: wasRunning });
   });
 
@@ -1991,21 +2018,25 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     // `workspaceId` is OPTIONAL for back-compat, but the panel's auto-resume ALWAYS sends the session
-    // it's asking about. Under per-workspace locking (FIX #3) the registry is keyed by workspace, so we
-    // look the build up by THAT key directly; flag OFF → the account key (today). The workspaceId
-    // cross-check below stays as defense-in-depth either way.
+    // it's asking about. CANDIDATE KEYS (admin's dead-Resume fix, 2026-07-06): the build may live under
+    // the workspace key, the claimed account key, OR the shared 'anon' bucket (verified-identity
+    // fallback) — look in all three, refusing any build from a DIFFERENT session (session-aware match:
+    // an anon-keyed build of the SAME session must attach, a different session's build never may).
     const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
-    const buildKey = buildLockKey(userId, requestedWorkspaceId, perWorkspaceLockEnabled());
-    const rb = runningBuilds.get(buildKey);
-    if (!rb || rb.ended) {
-      res.status(404).json({ error: 'No running build to resume.' });
-      return;
+    let rb: RunningBuild | undefined;
+    for (const key of buildKeyCandidates(userId, requestedWorkspaceId, perWorkspaceLockEnabled())) {
+      const cand = runningBuilds.get(key);
+      if (!cand || cand.ended) continue;
+      // Never replay a DIFFERENT session's build into the open one (defense-in-depth on every key).
+      if (requestedWorkspaceId && cand.workspaceId && !workspaceSessionsMatch(cand.workspaceId, requestedWorkspaceId)) continue;
+      // The shared anon bucket for a SIGNED-IN caller: attach replays a full transcript, so require a
+      // positive session match (unguessable sessionId) — never attach it blind.
+      if (key === 'anon' && userId && !(requestedWorkspaceId && cand.workspaceId && workspaceSessionsMatch(cand.workspaceId, requestedWorkspaceId))) continue;
+      rb = cand;
+      break;
     }
-    // Refuse to attach when the running build belongs to a DIFFERENT session under the same account, so
-    // a build genuinely still running elsewhere never gets silently replayed into the session currently
-    // open (the account-keyed path relies on this; the workspace-keyed path already can't mismatch).
-    if (requestedWorkspaceId && rb.workspaceId && rb.workspaceId !== requestedWorkspaceId) {
-      res.status(404).json({ error: 'No running build to resume for this session.' });
+    if (!rb) {
+      res.status(404).json({ error: 'No running build to resume.' });
       return;
     }
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

@@ -65,6 +65,10 @@ export interface UseAgentV3Build {
   /** Queue executor (FIX #4.3): claim the next queued command (or null); mark the running one complete. */
   queueNext: (workspaceId?: string) => Promise<{ id: string; prompt: string } | null>;
   queueComplete: (workspaceId: string | undefined, ok: boolean, note?: string) => Promise<void>;
+  /** Queue UI (FIX #6): enqueue a command, list this app's queue, cancel a pending item. */
+  queueEnqueue: (workspaceId: string | undefined, prompt: string, source: 'user' | 'planner' | 'advisor') => Promise<boolean>;
+  queueList: (workspaceId?: string) => Promise<QueueItemView[]>;
+  queueCancel: (workspaceId: string | undefined, id: string) => Promise<QueueItemView[]>;
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
@@ -90,6 +94,16 @@ export interface UseAgentV3Build {
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
    *  Pass `workspaceId` so the server (same-instance case) won't mirror a build for a different session. */
   subscribeLive: (opts?: { userId?: string; email?: string; workspaceId?: string }) => (() => void);
+}
+
+/** One command in the per-app queue, as the queue UI renders it (matches the server's QueueItem). */
+export interface QueueItemView {
+  id: string;
+  prompt: string;
+  source: 'user' | 'planner' | 'advisor';
+  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+  createdTs: number;
+  note?: string;
 }
 
 /** Result of "Ship to main" (own-repo storage, slice 2) — an honest, renderable outcome. */
@@ -212,12 +226,17 @@ export function useAgentV3Build(): UseAgentV3Build {
     setError(null);
     // Truly stop the SERVER build (not just this local stream), so it cannot keep
     // running and block the next build. Send `workspaceId` so that under per-workspace locking (FIX #3)
-    // Stop targets THIS app's build, not the whole account (the server ignores it when the flag is off).
-    fetch('/api/agentv3/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current }),
-    }).catch(() => { /* best-effort */ });
+    // Stop targets THIS app's build, and the Bearer token so the server's identity matches the one the
+    // build was registered under (the dead-Stop fix pairs this with server-side candidate keys).
+    void (async () => {
+      try {
+        await fetch('/api/agentv3/stop', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current }),
+        });
+      } catch { /* best-effort */ }
+    })();
   }, []);
 
   // Read the NDJSON event stream line by line and fold each event into the reducer. Used by resume()'s
@@ -537,7 +556,9 @@ export function useAgentV3Build(): UseAgentV3Build {
     try {
       const res = await fetch('/api/agentv3/attach', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Bearer token so the server's identity matches the key the build was registered under
+        // (pairs with the server-side candidate-key lookup — the dead-Resume fix).
+        headers: await authJsonHeaders(),
         body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: opts?.workspaceId }),
         signal: controller.signal,
       });
@@ -650,6 +671,49 @@ export function useAgentV3Build(): UseAgentV3Build {
         body: JSON.stringify({ workspaceId, ok, note, userId: userIdRef.current, email: emailRef.current }),
       });
     } catch { /* best-effort — a stale 'running' item self-heals to 'failed' on next load */ }
+  }, []);
+
+  // QUEUE UI (FIX #6): enqueue / list / cancel for this app's durable command queue. All best-effort.
+  const parseQueueItems = (j: unknown): QueueItemView[] => {
+    const items = (j as { items?: unknown })?.items;
+    return Array.isArray(items)
+      ? items.filter((i): i is QueueItemView => !!i && typeof (i as QueueItemView).id === 'string' && typeof (i as QueueItemView).prompt === 'string')
+      : [];
+  };
+
+  const queueEnqueue = useCallback(async (workspaceId: string | undefined, prompt: string, source: 'user' | 'planner' | 'advisor'): Promise<boolean> => {
+    if (!workspaceId || !prompt.trim()) return false;
+    try {
+      const res = await fetch('/api/agentv3/queue/enqueue', {
+        method: 'POST', headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, prompt, source, userId: userIdRef.current, email: emailRef.current }),
+      });
+      const j = await res.json().catch(() => ({}));
+      return res.ok && j?.added === true;
+    } catch { return false; }
+  }, []);
+
+  const queueList = useCallback(async (workspaceId?: string): Promise<QueueItemView[]> => {
+    if (!workspaceId) return [];
+    try {
+      const params = new URLSearchParams({ workspaceId });
+      if (userIdRef.current) params.set('userId', userIdRef.current);
+      const res = await fetch(`/api/agentv3/queue?${params.toString()}`, { headers: await authJsonHeaders() });
+      if (!res.ok) return [];
+      return parseQueueItems(await res.json().catch(() => ({})));
+    } catch { return []; }
+  }, []);
+
+  const queueCancel = useCallback(async (workspaceId: string | undefined, id: string): Promise<QueueItemView[]> => {
+    if (!workspaceId || !id) return [];
+    try {
+      const res = await fetch('/api/agentv3/queue/cancel', {
+        method: 'POST', headers: await authJsonHeaders(),
+        body: JSON.stringify({ workspaceId, id, userId: userIdRef.current, email: emailRef.current }),
+      });
+      if (!res.ok) return [];
+      return parseQueueItems(await res.json().catch(() => ({})));
+    } catch { return []; }
   }, []);
 
   const respond = useCallback(async (requestId: string, approved: boolean) => {
@@ -1040,5 +1104,5 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser,
-  acquireDecision, MAX_CONCURRENT_BUILDS_DEFAULT,
+  acquireDecision, buildKeyCandidates, workspaceSessionsMatch, MAX_CONCURRENT_BUILDS_DEFAULT,
 } from './BuildConcurrency';
 
 describe('perWorkspaceLockEnabled', () => {
@@ -59,6 +59,49 @@ describe('countActiveBuildsForUser', () => {
   it('is 0 for an account with no live builds', () => {
     expect(countActiveBuildsForUser(builds, 'u3')).toBe(0);
     expect(countActiveBuildsForUser([], 'u1')).toBe(0);
+  });
+});
+
+describe('buildKeyCandidates — Stop/Attach must find the build wherever identity put it', () => {
+  // THE bug (admin, 2026-07-06): the build fell to the 'anon' key (verified-identity fallback) while
+  // /stop looked up the claimed uid key → miss → Stop dead, Resume 404, the 409 loop forever.
+  it("a signed-in caller's candidates end with the shared 'anon' bucket (the dead-Stop fix)", () => {
+    expect(buildKeyCandidates('u1', null, false)).toEqual(['u1', 'anon']);
+  });
+
+  it('per-workspace: workspace key first, then account, then anon (deduped)', () => {
+    expect(buildKeyCandidates('u1', 'agentv3-u1-s1', true)).toEqual(['agentv3-u1-s1', 'u1', 'anon']);
+  });
+
+  it('an anonymous caller collapses to just the anon bucket', () => {
+    expect(buildKeyCandidates(null, null, false)).toEqual(['anon']);
+    expect(buildKeyCandidates(null, null, true)).toEqual(['anon']);
+  });
+
+  it('flag OFF ignores the workspaceId for the primary key (today\'s account key first)', () => {
+    expect(buildKeyCandidates('u1', 'agentv3-u1-s1', false)).toEqual(['u1', 'anon']);
+  });
+});
+
+describe('workspaceSessionsMatch — the anon-fallback session matcher', () => {
+  it('matches exact ids and the anon-fallback pair for the SAME session (the dead-Resume fix)', () => {
+    expect(workspaceSessionsMatch('agentv3-u1-abc123', 'agentv3-u1-abc123')).toBe(true);
+    // The build fell to anon (agentv3-anon-<sid>) while the client asks with its uid-based id.
+    expect(workspaceSessionsMatch('agentv3-anon-abc123', 'agentv3-u1-abc123')).toBe(true);
+    expect(workspaceSessionsMatch('agentv3-u1-abc123', 'agentv3-anon-abc123')).toBe(true);
+  });
+
+  it('never crosses sessions or owners', () => {
+    expect(workspaceSessionsMatch('agentv3-anon-abc123', 'agentv3-u1-zzz999')).toBe(false);
+    expect(workspaceSessionsMatch('agentv3-u1-abc123', 'agentv3-u2-abc123')).toBe(false); // two real uids — no anon side
+    expect(workspaceSessionsMatch('agentv3-anon-abc123', 'other-u1-abc123')).toBe(false);
+  });
+
+  it('guards degenerate inputs (empty/short session, null)', () => {
+    expect(workspaceSessionsMatch('agentv3-anon-', 'agentv3-u1-')).toBe(false);
+    expect(workspaceSessionsMatch('agentv3-anon-ab', 'agentv3-u1-ab')).toBe(false); // <6 chars
+    expect(workspaceSessionsMatch(null, 'agentv3-u1-abc123')).toBe(false);
+    expect(workspaceSessionsMatch('agentv3-u1-abc123', undefined)).toBe(false);
   });
 });
 

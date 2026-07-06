@@ -199,6 +199,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'own_repo':
       return { ...state, ownRepo: { owner: event.owner, repo: event.repo, workBranch: event.workBranch, baseBranch: event.baseBranch } };
 
+    case 'proposed_steps':
+      return { ...state, proposedSteps: { role: event.role, steps: event.steps } };
+
     case 'permission_request':
       return {
         ...state,

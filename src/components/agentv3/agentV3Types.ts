@@ -58,6 +58,9 @@ export type AgentV3WireEvent =
   // Own-repo working-branch storage is active: edits are on `workBranch` inside the user's REAL repo,
   // to be merged into `baseBranch` via a PR. Drives the in-app "Ship to main" / "Revert" controls.
   | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
+  // A read-only role chat (planner/advisor) proposed concrete build steps — shown for the USER to
+  // approve into the executor's queue (never auto-enqueued).
+  | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number };
@@ -129,6 +132,9 @@ export interface AgentV3ClientState {
   /** Present when own-repo working-branch storage is active: edits live on `workBranch` in the user's
    *  REAL repo and reach `baseBranch` via a PR. Drives the "Ship to main" / "Revert last merge" UI. */
   ownRepo?: { owner: string; repo: string; workBranch: string; baseBranch: string };
+  /** Steps a read-only role chat (planner/advisor) proposed this turn — the user approves them into
+   *  the executor's queue via the queue UI (never auto-enqueued). */
+  proposedSteps?: { role: 'planner' | 'advisor'; steps: string[] };
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */

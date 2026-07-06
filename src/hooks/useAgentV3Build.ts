@@ -36,7 +36,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor' }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -757,7 +757,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor' }) => {
       if (running) return;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
@@ -812,6 +812,9 @@ export function useAgentV3Build(): UseAgentV3Build {
             planFirst: opts?.planFirst !== false,
             thinking: opts?.thinking === true,
             sessionId: opts?.sessionId,
+            // Role chats (FIX #5): 'planner' | 'advisor' routes the turn into the read-only role lane
+            // (no tools, no build lock) — absent for normal builder turns.
+            chatRole: opts?.chatRole || undefined,
             attachments: opts?.attachments && opts.attachments.length > 0 ? opts.attachments : undefined,
             framework: opts?.framework || undefined,
             importUrl: opts?.importUrl || undefined,

@@ -69,6 +69,8 @@ import {
 } from '../AgentV3';
 import { randomUUID } from 'crypto';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
+import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
+import { summarizeFileTree } from '../AgentV3/systemPrompt';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
 import {
   InMemoryConversationStore,
@@ -2603,6 +2605,70 @@ export function registerAgentV3Routes(app: Express): void {
       });
       return;
     }
+
+    // ── ROLE CHAT LANE (FIX #5 — the 3-role model's PLANNER + ADVISOR) ─────────────────────────────
+    // A read-only turn: NO tools at all (structurally nothing to write with), grounded in the REAL
+    // project (file tree + a bounded relevance-picked subset of contents), replying with analysis and
+    // optionally a proposed-steps block the USER approves into the executor's queue. Deliberately
+    // BEFORE the build lock: a role turn never writes, so it must run freely WHILE the executor builds
+    // (that concurrency is the whole point of the model). Old clients never send `chatRole` → this
+    // lane is invisible to them.
+    const chatRole = parseChatRole(req.body?.chatRole);
+    if (chatRole) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      const sendLine = (e: unknown) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); };
+      const roleWorkspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
+      try {
+        // Ground the role in the REAL project: durable files → tree + relevance-picked contents.
+        const roleFiles = await raceTimeout(loadWorkspaceFiles(roleWorkspaceId), 8_000, 'roleLoadFiles').catch(() => ({} as Record<string, string>));
+        const fileTree = summarizeFileTree(Object.keys(roleFiles));
+        const picked = selectRoleContextFiles(roleFiles, prompt);
+        const roleRecall = (() => {
+          try { return sessionRecallContextLine(getWorkspaceMemory(roleWorkspaceId).snapshot().episodes); } catch { return ''; }
+        })();
+        const system = LANGUAGE_RULE + '\n\n' + roleSystemPrompt(chatRole) + roleRecall + formatRoleContext(fileTree, picked);
+        const roleRouter = AIRouterManager.getRouter('free');
+        const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
+        const fullReply = response.content || '';
+        const steps = parseProposedSteps(fullReply);
+        const prose = stripStepsBlock(fullReply) || fullReply;
+        sendLine({ type: 'narration', agent: 'architect', text: prose, ts: Date.now() });
+        // Steps are PROPOSED only — the client shows them for approval; nothing is auto-enqueued.
+        if (steps.length > 0) sendLine({ type: 'proposed_steps', role: chatRole, steps, ts: Date.now() });
+        sendLine({ type: 'done', ok: true, summary: prose, ts: Date.now() });
+        sendLine({ type: 'result', ok: true, summary: prose, steps: 0, billedUsd: 0, billedInr: 0 });
+        // Persist the turn + memory exactly like the plain-chat lane (best-effort, bounded).
+        try {
+          const mem = getWorkspaceMemory(roleWorkspaceId);
+          mem.recordRequest(prompt);
+          void saveWorkspaceMemory(roleWorkspaceId, mem.snapshot()).catch(() => {});
+        } catch { /* best-effort */ }
+        try {
+          await raceTimeout(upsertConversationTurn(getConversationStore(), {
+            conversationId: conversationIdForWorkspace(roleWorkspaceId),
+            userId: userId ?? 'anon',
+            workspaceId: roleWorkspaceId,
+            title: deriveTitle(prompt),
+            turn: [
+              { role: 'user', content: prompt },
+              { role: 'assistant', content: prose },
+            ],
+            patch: { status: 'complete', updatedAt: Date.now() },
+          }), 8_000, 'persistRoleTurn');
+        } catch { /* persistence is best-effort */ }
+      } catch (roleErr) {
+        const msg = roleErr instanceof Error ? roleErr.message : String(roleErr);
+        sendLine({ type: 'error', message: `The ${chatRole} could not reply (${msg}). Please try again.`, ts: Date.now() });
+        sendLine({ type: 'result', ok: false, summary: `${chatRole} turn failed.`, steps: 0, billedUsd: 0, billedInr: 0 });
+      }
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
     // BUILD LOCK KEY (FIX #3, flag-gated): per-ACCOUNT today (`userId ?? 'anon'`); per-WORKSPACE when
     // AGENTV3_PER_WORKSPACE_LOCK is on — so two DIFFERENT apps build at once while the SAME app stays
     // mutually exclusive. `lockWorkspaceId` is the stable derived id for THIS session (only used as the

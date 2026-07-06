@@ -9934,3 +9934,29 @@ finalization at the app root (getRedirectResult).
 
 Gate: frontend tsc 0, vitest 4974/4974 PASS, build PASS. (#5 planner/advisor deferred per admin —
 login first.)
+
+## 2026-07-06 — Concurrency FIX #5: PLANNER + ADVISOR role chats (read-only lanes that propose queue steps)
+
+The 3-role model's two advisor roles are now real server-side. Chat 2 (PLANNER: decompose goals into
+ordered buildable steps) and Chat 3 (ADVISOR — priority audit/test/research/explain/compare, admin
+decision: one flexible slot) are READ-ONLY lanes in /chat, selected by a new `chatRole` body field
+('planner' | 'advisor'; absent → today's exact behaviour, old clients unaffected).
+
+- No-write guarantee is STRUCTURAL: a role turn runs the model with NO TOOLS AT ALL — a pure text turn
+  over injected REAL project context (durable file tree via summarizeFileTree + a bounded,
+  relevance-picked subset of file contents). With no tools there is nothing to write with.
+- New pure `RoleChats.ts` (13 tests): parseChatRole, roleSystemPrompt (both roles explicitly read-only,
+  shared steps contract), parseProposedSteps (STRICT fenced ```steps JSON block: trims/dedupes/caps at
+  MAX_QUEUE_ITEMS — nothing unbounded/blank can reach the queue), stripStepsBlock (clean prose in chat),
+  selectRoleContextFiles (deterministic relevance pick, 8 files/4k chars each/24k total, binary+lock
+  skipped), formatRoleContext (honestly labeled subset).
+- Route lane runs BEFORE the build lock (a role turn never writes → it runs freely WHILE the executor
+  builds — the whole point), streams narration + a new `proposed_steps` wire event (server+client
+  unions, reducer state.proposedSteps + test), persists turn+memory like the plain-chat lane, bills 0
+  (free router). Steps are PROPOSED only — the user approves them into the queue (#6 UI); nothing is
+  auto-enqueued.
+- Hook start() accepts chatRole (plumbed to the body).
+
+Gate: frontend tsc 0, server tsc 0, vitest 4997/4997 PASS, build PASS, boot PASS. NEXT: #6 the queue +
+roles UI (Chats switcher, approve-steps-to-queue, queue reorder/cancel) — the user-facing surface, with
+the AppKnowledgeBase entry landing there.

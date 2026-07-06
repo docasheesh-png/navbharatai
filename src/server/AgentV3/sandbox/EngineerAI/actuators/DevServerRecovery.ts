@@ -64,6 +64,30 @@ export function validateProjectForPreview(packageJsonRaw: string | null): { ok: 
 }
 
 /**
+ * The HONEST reason to show when a preview sandbox has NO readable package.json — derived from the
+ * DURABLE project truth (the saved file-path index), not the ephemeral sandbox alone. PURE.
+ *
+ * A missing package.json in the sandbox is usually a FAILED RESTORE of a recycled/cold sandbox, NOT
+ * the user's project genuinely lacking one. Telling a user whose app really does have a package.json
+ * that "the project has no defined dependencies" is a false verdict about their code (build-report
+ * autopsy 2026-07-06 — a freshly-built React+Vite login page whose package.json was written 5/12 and
+ * saved, yet the Diagnose panel claimed "No package.json found"). So:
+ *   • durable index empty        → the files weren't saved/restorable yet — say THAT.
+ *   • durable index HAS pkg      → the project is fine; the restore failed this time — say THAT.
+ *   • durable index, but no pkg  → a genuine structural issue — the original honest message.
+ */
+export function missingPreviewReason(durablePaths: string[]): string {
+  const durableHasPkg = durablePaths.some((p) => p === 'package.json' || p.endsWith('/package.json'));
+  if (durablePaths.length === 0) {
+    return "I couldn't find your saved project files to restore into a preview sandbox — they may not have finished saving yet. Make an edit or re-run the build, then try Diagnose again.";
+  }
+  if (durableHasPkg) {
+    return "Your project's package.json is saved safely, but it couldn't be restored into a fresh preview sandbox this time. Try Diagnose again in a few seconds.";
+  }
+  return 'No package.json found — the project has no defined dependencies or start command to run a live preview.';
+}
+
+/**
  * The port the project's OWN dev script declares — the ground truth the health check must wait
  * on. Framework-based guessing waited on the wrong port for real imported apps (admin evidence,
  * 2026-07-04: the app's script was `tsx server.ts --port 5173 --strictPort` while the check
@@ -177,4 +201,25 @@ export function devServerHealthLine(portUp: boolean, port: number, diagnosis?: D
   // Keep the exact "did not come up on port {n}" phrasing so parseDevServerHealthCheck (agentv3.ts,
   // used by the Diagnose button) still extracts the port from this line.
   return `[health-check] dev server did not come up on port ${port} after automatic recovery.${why}`;
+}
+
+/**
+ * Parse the AUTHORITATIVE health verdict out of a managed dev-server launch's own output. The managed
+ * launcher (E2BActuator) runs the SAME port check (buildPortWaitCommand) that `update_preview` later
+ * re-runs, then prints one of the `devServerHealthLine` strings (or the "already healthy … reused it"
+ * line). When the launcher has ALREADY confirmed the port UP, a second, independent inline re-poll must
+ * NOT be allowed to override that verdict to DOWN — that "two drifting truths, the flaky one wins" bug
+ * reported a genuinely-booted app as "the live preview didn't start automatically" (build report
+ * 2026-07-06: `npm run dev` → "dev server is UP on port 5173", yet the re-poll missed it and no preview
+ * was published). Callers TRUST this verdict: a health-UP can only ever CONFIRM up, never mark it down.
+ * PURE. Returns up:true only on an explicit UP / already-healthy line; up:false on an explicit DOWN
+ * line; null when the output carries no health verdict at all (caller then falls back to its own probe).
+ */
+export function parseDevServerHealthLine(output: string): { up: boolean; port: number | null } | null {
+  const text = output || '';
+  const up = /dev server (?:is UP|already healthy) on port (\d+)/i.exec(text);
+  if (up) return { up: true, port: Number(up[1]) };
+  const down = /dev server did not come up on port (\d+)/i.exec(text);
+  if (down) return { up: false, port: Number(down[1]) };
+  return null;
 }

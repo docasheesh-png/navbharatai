@@ -10654,3 +10654,47 @@ kind/title/content, copy-to-clipboard, delete) mounted in TeamCollaboration. App
 Live smoke: /api/team/:id/library without auth → 403 (fail-closed). Tests: TeamLibraryStore.test.ts (6).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5232/5232 PASS (6 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — Fix 3: the FALSE "live preview didn't start" (fresh build, server WAS up) + honest Diagnose message
+
+Autopsy of a real build report (a fresh React+Vite "welcome login page", 12 files, `ok:true`,
+"Build verified — the app compiles ✓"). The delivered result said **"The live preview didn't start
+automatically"** and the Live-server panel showed **"No package.json found"** — yet the sandbox log
+proves the dev server booted perfectly:
+- `npm run dev` → **exit 0**, `VITE v5.4.21 ready in 280 ms`, `[health-check] dev server is UP on port 5173`
+- `update_preview` → completed (17s)
+- Outcome recorded: **BUILD_PARTIAL**, `previewLive:false`.
+
+Two distinct root causes, both fixed at the class level:
+
+**RC-1 — two drifting port-truth sources; the flaky one wins (the primary user-facing failure).**
+`update_preview`'s heal path re-launches the managed `npm run dev` — which runs the SAME port check
+(`buildPortWaitCommand`) and prints `[health-check] dev server is UP on port N` — but then **threw that
+authoritative verdict away** and re-derived truth with a second inline `pollPort`. When that flaky
+re-poll missed the (genuinely up) port, no `preview` event fired → `lastPreviewUrl` stayed empty →
+`previewLive:false` → the honest-but-WRONG "didn't start automatically" recap + an empty Live panel.
+This is the exact class the repo already fought for port *detection* (`shouldReprobeBoundPort`: a
+re-probe may only ever UPGRADE to UP, never mark a healthy server down) — now applied to preview
+publication. Fix: new pure `parseDevServerHealthLine(output)` (co-located with its producer
+`devServerHealthLine`); `update_preview` now TRUSTS a launcher-confirmed UP (`portReady=true`) and only
+falls back to the inline poll when the launcher gave no verdict. `getPortUrl` still gates the URL, so a
+dead preview is never published.
+
+**RC-2 — the Diagnose "No package.json found" message lied about the user's project (rule 5, honesty).**
+That message (`validateProjectForPreview(null)`) fires when a COLD/recycled sandbox's readFile finds no
+package.json — usually a failed RESTORE, not a project that genuinely lacks one. Telling a user whose
+app really has a package.json that "the project has no defined dependencies" is a false verdict about
+their code. Fix: new pure `missingPreviewReason(durablePaths)` consults the DURABLE file index (the real
+source of truth): empty → "couldn't find your saved files to restore… try again"; has package.json →
+"your package.json is saved safely, the restore failed this time…"; has files but truly no package.json
+→ the original structural message (correct there).
+
+- Tests: DevServerRecovery.test.ts +9 (parseDevServerHealthLine: exact UP line, "already healthy" line,
+  DOWN line, no-verdict→null, buried-in-log; missingPreviewReason: empty / has-pkg / nested-pkg /
+  files-but-no-pkg). Gate: frontend tsc 0, server tsc 0, vitest 5243/5243, boot PASS.
+- **Open root cause (rule 6, infra-blocked — honestly recorded):** WHY the first managed launch's dev
+  server wasn't confirmed by `update_preview`'s own poll (E2B background-process lifetime after
+  `h.disconnect()`, or a flaky inline probe under sandbox load) can't be reproduced or verified in CI
+  without a live E2B sandbox. RC-1 makes the engine ROBUST to it (the authoritative launcher verdict now
+  wins), but the underlying sandbox-process behavior needs a real-sandbox repro to pin definitively.
+- Fix 3 of 5. Remaining: Fix 5 (auto-provision DB for Drizzle/pg imports).

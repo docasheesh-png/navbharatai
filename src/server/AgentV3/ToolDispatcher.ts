@@ -9,6 +9,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
+import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -1739,18 +1740,30 @@ export class ToolDispatcher {
         if (!portReady) {
           const hasPkg = await this.actuator.readFile(this.workspaceId, 'package.json').then(() => true).catch(() => false);
           if (hasPkg) {
+            let healConfirmedUp = false;
             try {
               const heal = await withTimeout(
                 this.actuator.runCommand(this.workspaceId, `PORT=${port} npm run dev`),
                 240_000,
                 'preview-managed-dev-start',
               );
-              const tail = String(heal.stdout || heal.stderr || '').trim().slice(-200);
+              const healOut = `${heal.stdout || ''}\n${heal.stderr || ''}`;
+              const tail = healOut.trim().slice(-200);
               healNote = ` A managed dev-server start was attempted${tail ? ` (${tail})` : ''}.`;
+              // AUTHORITATIVE VERDICT: the managed launcher runs the SAME port check (buildPortWaitCommand)
+              // that pollPort re-runs, then prints its result. When it confirms the port UP, TRUST it — a
+              // second, independent inline re-poll must NEVER override a launcher-confirmed UP to DOWN. That
+              // "two drifting truths, the flaky one wins" bug reported a genuinely-booted app as "the live
+              // preview didn't start automatically" (build report 2026-07-06: npm run dev → "dev server is UP
+              // on port 5173", yet update_preview's re-poll missed it → no preview published, BUILD_PARTIAL).
+              // A health-UP can only ever CONFIRM up; we still fall back to the inline poll when there's no
+              // verdict, and getPortUrl below still gates the actual URL — so we never publish a dead preview.
+              const verdict = parseDevServerHealthLine(healOut);
+              if (verdict?.up) { portReady = true; healConfirmedUp = true; }
             } catch (err) {
               healNote = ` A managed dev-server start was attempted but did not finish in time (${err instanceof Error ? err.message : String(err)}).`;
             }
-            portReady = await pollPort(10_000);
+            if (!healConfirmedUp) portReady = await pollPort(10_000);
           }
         }
         // §12: v3.0-built apps are previewed under the platform's E2B custom domain

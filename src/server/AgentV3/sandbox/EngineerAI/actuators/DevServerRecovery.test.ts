@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -31,6 +31,57 @@ describe('validateProjectForPreview — catch a non-runnable project before the 
     expect(r.ok).toBe(false);
     expect(r.runScript).toBeNull();
     expect(r.issues[0]).toContain('no "dev", "start", or "serve" script');
+  });
+});
+
+describe('parseDevServerHealthLine — trust the managed launcher\'s authoritative verdict', () => {
+  it('reads the exact UP line devServerHealthLine emits (build report: port 5173)', () => {
+    // The real 2026-07-06 case: npm run dev printed this, yet update_preview\'s re-poll missed the port.
+    const line = devServerHealthLine(true, 5173);
+    expect(parseDevServerHealthLine(line)).toEqual({ up: true, port: 5173 });
+  });
+
+  it('reads the "already healthy … reused it" line as UP', () => {
+    const out = '[health-check] dev server already healthy on port 3000 — reused it (no relaunch; edits apply via HMR).';
+    expect(parseDevServerHealthLine(out)).toEqual({ up: true, port: 3000 });
+  });
+
+  it('reads the DOWN line as not-up (with the port preserved)', () => {
+    const line = devServerHealthLine(false, 5173, { cause: 'crash', recovery: 'plain_retry', detail: 'crashed' });
+    expect(parseDevServerHealthLine(line)).toEqual({ up: false, port: 5173 });
+  });
+
+  it('returns null when the output carries no health verdict (caller falls back to its own probe)', () => {
+    expect(parseDevServerHealthLine('VITE v5.4.21  ready in 280 ms')).toBeNull();
+    expect(parseDevServerHealthLine('')).toBeNull();
+  });
+
+  it('finds the UP verdict even when buried in a longer dev-server log', () => {
+    const out = 'npm run dev\n> app@1.0.0 dev\n> vite\n\n  VITE ready\n[health-check] dev server is UP on port 5173. Call update_preview with port=5173.';
+    expect(parseDevServerHealthLine(out)).toEqual({ up: true, port: 5173 });
+  });
+});
+
+describe('missingPreviewReason — honest cause when the sandbox has no readable package.json', () => {
+  it('durable index empty → the files were not saved/restorable (not "no package.json")', () => {
+    const r = missingPreviewReason([]);
+    expect(r).toContain("couldn't find your saved project files");
+    expect(r).not.toContain('No package.json found');
+  });
+
+  it('durable index HAS package.json → a failed restore, NOT a broken project', () => {
+    const r = missingPreviewReason(['package.json', 'src/App.tsx', 'index.html']);
+    expect(r).toContain('package.json is saved safely');
+    expect(r).not.toContain('No package.json found');
+  });
+
+  it('matches a nested package.json (monorepo) as present', () => {
+    expect(missingPreviewReason(['client/package.json', 'server/index.ts'])).toContain('saved safely');
+  });
+
+  it('durable index has files but genuinely NO package.json → the real structural message', () => {
+    const r = missingPreviewReason(['index.html', 'styles.css', 'data.json']);
+    expect(r).toContain('No package.json found');
   });
 });
 

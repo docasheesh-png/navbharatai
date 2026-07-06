@@ -16,6 +16,8 @@ import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
 import { userCostStore } from '../lib/UserCostStore';
+import { buildCostAlertReport } from '../lib/CostAlertEngine';
+import { usdToInr } from '../lib/UsdInrRate';
 
 export function registerProfileRoutes(app: Express): void {
   // ── GET /api/profile ──────────────────────────────────────────────────────────
@@ -89,6 +91,25 @@ export function registerProfileRoutes(app: Express): void {
 
     await userProfileStore.update(userId, { budgetLimitInr });
     return res.json({ ok: true, budgetLimitInr });
+  });
+
+  // ── GET /api/profile/cost-alerts ──────────────────────────────────────────────
+  // U-5 — real month-to-date spend vs the user's own monthly budget → approaching/exceeded alerts.
+  // Identity from the verified token (own data only); spend converted USD→INR at the canonical rate.
+  app.get('/api/profile/cost-alerts', async (req: Request, res: Response) => {
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+
+    const [profile, monthlyUsage] = await Promise.all([
+      userProfileStore.get(userId),
+      userCostStore.get(userId),
+    ]);
+    const spendInr = usdToInr(monthlyUsage?.totalCostUsd ?? 0);
+    const budgetInr = profile?.budgetLimitInr ?? 0;
+    return res.json({
+      ...buildCostAlertReport(spendInr, budgetInr),
+      month: monthlyUsage?.month ?? new Date().toISOString().slice(0, 7),
+    });
   });
 
   // ── GET /api/profile/history ──────────────────────────────────────────────────

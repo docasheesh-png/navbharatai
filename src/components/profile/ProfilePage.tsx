@@ -11,7 +11,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight,
-  Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut,
+  Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle,
 } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 
@@ -118,6 +118,12 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [monthlySpend, setMonthlySpend] = useState<MonthlySpend | null>(null);
+  // U-5 — real cost alerts (spend vs budget) from /api/profile/cost-alerts.
+  interface CostAlertReport {
+    budgetSet: boolean; budgetInr: number; spendInr: number; remainingInr: number; usedPct: number;
+    alerts: Array<{ id: string; severity: 'warning' | 'critical'; title: string; detail: string }>;
+  }
+  const [costAlerts, setCostAlerts] = useState<CostAlertReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -159,6 +165,11 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
       setProfile(data.profile);
       setWallet(data.wallet);
       setMonthlySpend(data.monthlyAiSpend);
+      // U-5 — cost alerts (spend vs budget); best-effort, never blocks the profile.
+      try {
+        const ar = await fetch('/api/profile/cost-alerts', { headers: { Authorization: `Bearer ${token}` } });
+        if (ar.ok) setCostAlerts(await ar.json());
+      } catch { /* non-fatal — banner simply doesn't render */ }
     } catch { /* best-effort */ } finally {
       setLoading(false);
     }
@@ -429,6 +440,25 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── U-5 Cost alerts (real spend vs budget) ─────────────────────── */}
+          {costAlerts && costAlerts.alerts.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {costAlerts.alerts.map(a => (
+                <div key={a.id}
+                  className={`rounded-2xl p-3 border flex items-start gap-3 ${
+                    a.severity === 'critical'
+                      ? 'bg-red-500/10 border-red-500/30'
+                      : 'bg-amber-500/10 border-amber-500/30'}`}>
+                  <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-400' : 'text-amber-400'}`} />
+                  <div>
+                    <p className={`text-xs font-black ${a.severity === 'critical' ? 'text-red-300' : 'text-amber-300'}`}>{a.title}</p>
+                    <p className="text-[11px] text-[#8b949e] mt-0.5">{a.detail}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

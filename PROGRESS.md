@@ -10214,3 +10214,19 @@ Stayed clear of AgentV3/routes/agentv3.ts (the other session's active RC-1..RC-5
 change is entirely in the isolated admin/metrics surface.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5076/5076 PASS (13 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — U-5: per-user cost-alerting thresholds  ✅ DONE (admin-directed)
+
+Admin chose U-5 from the new upgrade backlog. Added real per-user cost alerts on month-to-date spend vs the
+user's own monthly budget. New src/server/lib/CostAlertEngine.ts (pure, unit-tested): buildCostAlertReport(
+spendInr, budgetInr, warnAtPct=0.8) → 80% amber "approaching", ≥100% red "exceeded"; budget≤0 → budgetSet:false
+with NO invented alert; remaining never negative; negative/NaN spend clamped to 0. Wired GET /api/profile/
+cost-alerts (identity from verified token — own data only; monthly USD spend from userCostStore converted to INR
+via the canonical usdToInr, fixing the currency mismatch vs the INR budget). ProfilePage.tsx shows an
+approaching/exceeded banner under the billing grid (best-effort fetch, never blocks profile). AppKnowledgeBase
+my_profile entry updated with the cost-alert capability + keywords. Isolated to billing/profile surface — no
+AgentV3 touch (other session's active area). Noted as U-5 in the upgrade backlog table. Tests:
+CostAlertEngine.test.ts (9 — threshold boundaries, exactly-100% = exceeded, no-budget, custom/out-of-range
+warn pct, negative/NaN spend).
+
+Gate: frontend tsc 0, server tsc 0, vitest 5085/5085 PASS (9 new), build PASS, boot:check PASS.

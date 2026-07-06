@@ -1271,3 +1271,53 @@ describe('boundedWholeFileDiff (E7 — live diff for write_file, bounded)', () =
     expect(boundedWholeFileDiff('', big, 160)).toContain('(1 more line)');
   });
 });
+
+describe('ToolDispatcher — evaluate integration (AST build-breakers → readiness gate)', () => {
+  function makeDispatcher(ws: string): ToolDispatcher {
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    return new ToolDispatcher(a, ws, new WorkspaceState(s), s);
+  }
+  const evalText = async (dd: ToolDispatcher): Promise<string> =>
+    (await dd.dispatch(call('evaluate', {}))).content;
+  const write = (dd: ToolDispatcher, path: string, content: string) =>
+    dd.dispatch(call('write_file', { path, content }));
+
+  it('BLOCKS readiness on a React Rules-of-Hooks violation (conditional hook)', async () => {
+    const dd = makeDispatcher('ws-eval-hooks');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
+    await write(dd, 'src/App.tsx', "import { useState } from 'react';\nexport function App({ on }) {\n  if (on) { const [v] = useState(0); }\n  return null;\n}\n");
+    const out = await evalText(dd);
+    expect(out).toContain('Rules-of-Hooks violation');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('BLOCKS readiness on an undefined JSX component', async () => {
+    const dd = makeDispatcher('ws-eval-jsx');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
+    await write(dd, 'src/App.tsx', 'export function App() { return <Ghost />; }');
+    const out = await evalText(dd);
+    expect(out).toContain('undefined JSX component');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('BLOCKS readiness on a broken import (name not exported)', async () => {
+    const dd = makeDispatcher('ws-eval-import');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: {} }));
+    await write(dd, 'src/util.ts', 'export const add = 1;');
+    await write(dd, 'src/App.tsx', "import { subtract } from './util';\nexport const v = subtract;\n");
+    const out = await evalText(dd);
+    expect(out).toContain('broken import');
+    expect(out).toContain('NOT READY');
+  });
+
+  it('does NOT introduce these blockers for a clean React app (no false-block)', async () => {
+    const dd = makeDispatcher('ws-eval-clean');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
+    await write(dd, 'src/App.tsx', "import { useState } from 'react';\nexport function App() {\n  const [v, setV] = useState(0);\n  return <button onClick={() => setV(v + 1)}>{v}</button>;\n}\n");
+    const out = await evalText(dd);
+    expect(out).not.toContain('Rules-of-Hooks violation');
+    expect(out).not.toContain('undefined JSX component');
+    expect(out).not.toContain('broken import');
+  });
+});

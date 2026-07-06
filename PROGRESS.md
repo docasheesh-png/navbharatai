@@ -10433,3 +10433,23 @@ core loop, giving the user (and, when the team wires it into the gate, the build
 "will this generated app build and run?" verdict.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5164/5164 PASS (4 new), build PASS, boot:check PASS, live smoke PASS.
+
+## 2026-07-06 — AgentV3 build gate: auto-wire the AST build-breaker checks (self-correction)  ✅ DONE (admin-directed)
+
+Admin decision: wire the new build-health analyzers INTO the build gate so the builder self-corrects.
+Integrated the three AST build-breaker analyzers (React Rules-of-Hooks, import/export consistency, JSX
+component resolution) into ToolDispatcher's `evaluate` tool — the exact place readiness is assessed. Each real
+finding is pushed as a HIGH ExtraFinding (hard readiness blocker) into the existing assessReadiness `extra`
+array, alongside secret-leak/runnability/compliance/etc. Result: a build with a conditional hook, a name
+imported-but-not-exported, or an undefined JSX component now scores NOT READY, so the mandatory end-of-build
+gate feeds those exact blockers back to the agent to FIX before it can report the build ready. This closes the
+loop: the checks are no longer just user-invoked in the Insights panel — the builder applies them itself.
+
+Safety: the analyzers are conservative (near-zero false positives, unit-tested on clean code) and never throw
+(empty result on any parse/ts-morph issue), so they degrade to "no finding" rather than ever false-blocking a
+working build. They run only inside the `evaluate` tool (end-of-build verification), not per-keystroke, so the
+cost is bounded. Regression tests added to ToolDispatcher.test.ts (4): each violation kind → NOT READY through
+the real evaluate path, and a clean React app is NOT false-blocked.
+
+Files: src/server/AgentV3/ToolDispatcher.ts (imports + evaluate block), ToolDispatcher.test.ts (+4).
+Gate: frontend tsc 0, server tsc 0, vitest 5168/5168 PASS (4 new), build PASS, boot:check PASS.

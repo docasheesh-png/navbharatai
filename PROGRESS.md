@@ -10194,3 +10194,23 @@ referenced by its own test (legacy scaffold, NOT the live path) — building the
 (violates real-features-only). P-TQA.13 plugs into the live analytics surface instead.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5063/5063 PASS (7 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — P-MON.5: AI insights + NL telemetry query + ops report  ✅ DONE
+
+Added an admin AIOps layer over the REAL MetricsSnapshot. New src/server/lib/AiInsights.ts (pure,
+unit-tested): generateInsights(snap) → deterministic, severity-tagged observations (success/preview rate,
+avg build time, repair burden, top-spend provider + share, per-request cost spread) — every number derived
+from real recorded metrics, no hallucination/projections, honest "no telemetry yet" when empty;
+generateOpsReport(snap, period) → plain-text ops summary; answerMetricQuery(snap, question) → recognized-intent
+NL resolver (cost/success/speed/providers/preview/volume) answering from the real snapshot, unrecognized →
+matched:false + honest capability list (never a guess). Wired admin endpoints GET /api/admin/insights +
+POST /api/admin/insights/query (verifyAdminToken, mirroring /api/admin/finops). AdminDashboard.tsx Overview
+gains an "AI Insights" card: severity-tagged insight list + NL query box. AppKnowledgeBase updated
+(admin-ai-insights entry). Honest scope: insights are deterministic (rules over real metrics — more trustworthy
+than a model guess); NL query is intent-recognition over the real snapshot, not open-ended LLM Q&A, documented
+as such; a free-form LLM narrative can layer on later. Tests: AiInsights.test.ts (13).
+
+Stayed clear of AgentV3/routes/agentv3.ts (the other session's active RC-1..RC-5 root-cause area) — this
+change is entirely in the isolated admin/metrics surface.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5076/5076 PASS (13 new), build PASS, boot:check PASS.

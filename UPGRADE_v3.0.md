@@ -2988,11 +2988,25 @@
   score / 401 no-token).
 - **Files:** new `src/server/lib/HealthScore.ts` + `.test.ts`, `src/server/routes/admin.ts`, `src/components/ide/AppHealthMonitor.tsx`.
 
-### P-MON.5 — AI Insights / NL Query / AI Report Generator  ❌ MISSING  [LOW — AIOps]
-- No way to ask telemetry questions in natural language, get AI-generated insights ("cheap tier success up to 94%"),
-  or auto-generate a periodic ops report.
-- [ ] Add an admin NL→query over the metric snapshots; an AI insights card; a weekly AI-generated ops summary.
-- **Files:** new `src/server/lib/AiInsights.ts`, `src/server/routes/admin.ts`.
+### P-MON.5 — AI Insights / NL Query / AI Report Generator  ✅ DONE (2026-07-06) · 🔌 WIRED  [LOW — AIOps]
+- No way to get insights from telemetry, ask it questions, or auto-generate an ops report.
+- [x] **`AiInsights.ts`** (pure, unit-tested) — three functions over the REAL `MetricsSnapshot`:
+  - `generateInsights(snap)` — deterministic, severity-tagged observations (success/preview rate, avg build time,
+    repair burden, top-spend provider + share, per-request cost spread between providers). Every number is derived
+    from real recorded metrics — no hallucination, no projections; honest "no telemetry yet" when nothing is recorded.
+  - `generateOpsReport(snap, period)` — a plain-text ops summary from the same real data.
+  - `answerMetricQuery(snap, question)` — a recognized-intent NL resolver (cost / success / speed / providers /
+    preview / volume) that answers from the real snapshot; an unrecognized question returns `matched:false` with an
+    honest capability list instead of a guess.
+- [x] **Admin endpoints** — `GET /api/admin/insights` (insights + report) and `POST /api/admin/insights/query`
+  (NL query), both `verifyAdminToken`-gated, mirroring the existing `/api/admin/finops` pattern.
+- [x] **Admin dashboard card** — an "AI Insights" card on the Overview tab: severity-tagged insight list + a
+  natural-language query box (Ask → real answer). Renders honest states; no fabricated data.
+- **Honest scope:** insights are DETERMINISTIC (rules over real metrics), which is more trustworthy for an admin than
+  a model's guess; the NL query is intent-recognition over the real snapshot (not open-ended LLM Q&A) — documented as
+  such, and it never invents an answer. A free-form LLM narrative layer can be added later on top of this real base.
+- **Files:** `src/server/lib/AiInsights.ts` (+ `.test.ts`, 13 tests), `src/server/routes/admin.ts`,
+  `src/components/AdminDashboard.tsx`, `AppKnowledgeBase.ts`.
 
 ### P-MON.6 — Self-Service Dashboards + FinOps Recommendations  🟡 FinOps DONE / dashboard-builder PENDING  [LOW]
 - Cost was tracked but there were no **FinOps recommendations**. Now there is a real, data-driven advisor.

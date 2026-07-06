@@ -1681,8 +1681,17 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
 • Historical data available via GET /api/admin/metrics/history
 • Structured server logs queryable via GET /api/admin/logs`,
     howToUse: 'Admin login required. Open Settings → App Settings → scroll to bottom → Live Metrics button (visible only when logged in as admin). Click Refresh Metrics to update.',
-    relatedFeatures: ['admin', 'engineer_ai', 'pro_chat'],
+    relatedFeatures: ['admin', 'engineer_ai', 'pro_chat', 'admin-ai-insights'],
     keywords: ['metrics', 'stats', 'cost', 'admin', 'dashboard', 'builds', 'usage', 'ai cost', 'success rate', 'observability', 'logs', 'monitoring'],
+  },
+  {
+    id: 'admin-ai-insights',
+    name: 'AI Insights & NL Telemetry Query',
+    path: 'Admin Dashboard → Overview → AI Insights card (admin only)',
+    description: `Admin-only "AI Insights" card that turns the live metrics into readable, ACTIONABLE observations — build success rate, preview rate, average build time, repair burden, top-spend provider + share, and the per-request cost spread between providers. Every insight is DETERMINISTICALLY derived from real recorded metrics (no hallucination, no projections) and severity-tagged (good/info/warning/critical). Includes a natural-language query box: ask "what is my cost?", "how many builds failed?", "which provider is cheapest?", "why are builds slow?" and get an exact answer from the real snapshot; an unrecognized question honestly lists what CAN be answered instead of guessing. Also generates a plain-text ops report. Backend: GET /api/admin/insights and POST /api/admin/insights/query. Shows an honest "no telemetry yet" state until data exists.`,
+    howToUse: 'Admin login required. Open the Admin Dashboard → Overview tab → the "AI Insights" card appears with the current insights. Type a question in the box (cost, success rate, speed, providers, preview, volume) and press Ask.',
+    relatedFeatures: ['admin-metrics', 'build-performance-analytics', 'build-reliability-metrics'],
+    keywords: ['ai insights', 'insights', 'nl query', 'natural language', 'ask metrics', 'ops report', 'telemetry query', 'cost question', 'admin insights', 'recommendations', 'aiops'],
   },
   {
     id: 'admin-mfa',

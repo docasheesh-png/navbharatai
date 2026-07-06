@@ -84,6 +84,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // P-MON.4 — composite platform health score (real, from /api/admin/health-score).
   const [healthScore, setHealthScore] = useState<any>(null);
 
+  // P-MON.5 — AI insights + NL telemetry query (real, from /api/admin/insights).
+  const [insights, setInsights] = useState<any>(null);
+  const [insightQuestion, setInsightQuestion] = useState('');
+  const [insightAnswer, setInsightAnswer] = useState<string | null>(null);
+  const [insightAsking, setInsightAsking] = useState(false);
+
   // P-MON.2 — latency anomaly/trend watch (real, from /api/admin/anomaly/latency).
   const [latencyAnomaly, setLatencyAnomaly] = useState<any>(null);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
@@ -183,8 +189,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     }
   }, [adminToken]);
 
+  const fetchInsights = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/insights', { headers });
+      const d = await r.json();
+      setInsights(d && typeof d === 'object' ? d : null);
+    } catch (e) {
+      console.error(e);
+      setInsights(null);
+    }
+  }, [adminToken]);
+
+  const askInsight = useCallback(async () => {
+    const question = insightQuestion.trim();
+    if (!question) return;
+    setInsightAsking(true);
+    setInsightAnswer(null);
+    try {
+      const r = await fetch('/api/admin/insights/query', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      const d = await r.json();
+      setInsightAnswer(typeof d?.answer === 'string' ? d.answer : 'No answer available.');
+    } catch (e) {
+      console.error(e);
+      setInsightAnswer('Query failed. Please try again.');
+    } finally {
+      setInsightAsking(false);
+    }
+  }, [adminToken, insightQuestion]);
+
   useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
-  useEffect(() => { if (activeTab === 'overview') fetchHealthScore(); }, [activeTab, fetchHealthScore]);
+  useEffect(() => { if (activeTab === 'overview') { fetchHealthScore(); fetchInsights(); } }, [activeTab, fetchHealthScore, fetchInsights]);
   useEffect(() => { if (activeTab === 'users') fetchUsers(); }, [activeTab, fetchUsers]);
   useEffect(() => { if (activeTab === 'settings') fetchPromos(); }, [activeTab, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
@@ -412,6 +450,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       No data yet for: {healthScore.score.missing.join(', ')} — excluded from the score (not faked).
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* ── P-MON.5 AI Insights (real, deterministic from live metrics) + NL query ── */}
+              {insights && (
+                <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">AI Insights</h3>
+                    <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">Derived from live metrics — not projected</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(insights.insights || []).map((i: any) => (
+                      <div key={i.id} className="flex items-start gap-3 bg-black/30 rounded-xl p-3">
+                        <span className={`mt-0.5 text-[9px] font-black uppercase px-2 py-0.5 rounded-full border shrink-0 ${
+                          i.severity === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                          : i.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                          : i.severity === 'good' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                          : 'bg-white/5 border-white/10 text-[#8b949e]'}`}>
+                          {i.severity}
+                        </span>
+                        <div>
+                          <div className="text-xs font-bold text-white">{i.headline}</div>
+                          <div className="text-[11px] text-[#8b949e] mt-0.5">{i.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* NL telemetry query */}
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="flex gap-2">
+                      <input
+                        value={insightQuestion}
+                        onChange={(e) => setInsightQuestion(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') askInsight(); }}
+                        placeholder="Ask: cost? success rate? which provider is cheapest?"
+                        className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder:text-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                      />
+                      <button
+                        onClick={askInsight}
+                        disabled={insightAsking || !insightQuestion.trim()}
+                        className="bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-bold uppercase px-4 rounded-lg disabled:opacity-40 hover:bg-indigo-500/30 transition-colors"
+                      >
+                        {insightAsking ? '…' : 'Ask'}
+                      </button>
+                    </div>
+                    {insightAnswer && (
+                      <p className="text-[11px] text-[#c9d1d9] bg-black/30 rounded-lg p-3 mt-2">{insightAnswer}</p>
+                    )}
+                  </div>
                 </div>
               )}
 

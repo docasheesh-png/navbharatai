@@ -10749,3 +10749,36 @@ tree that's "complete".
    detects `[plugin:vite`/`vite-error-overlay`, so the miss is a TIMING/shadow-DOM race — browseUrl snapshots
    the DOM before Vite injects the (shadow-root) overlay. Fixing that lives in the actuator's browse timing;
    the caniuse-lite fix above removes the crash that made this misreport visible in the first place.
+
+## 2026-07-06 — Fix 7: "preview open nahi hua" (in-browser preview rate-limited) + false "stopped responding" on a successful build
+
+Two blockers surfaced while the admin stress-tested the fresh-build path (both are honesty/UX root causes,
+the app itself built fine each time):
+
+**RC-1 — the in-browser preview was rate-limited to 30/hour.** The admin (actively building several apps)
+hit "Couldn't build the in-browser preview: Rate limit exceeded: max 30 requests per hour." The endpoint
+`/api/agentv3/inbrowser-preview` used `workspaceRateLimiter` (authed:60 / anon:30) — a TIGHT bucket SHARED
+across every workspace endpoint. Worse, this route authenticates by body `userId` (not a Bearer header),
+so the limiter can't see the signed-in user and applied the **anon:30** tier. But the in-browser preview
+is the ALWAYS-available preview path: a self-contained HTML render built LOCALLY from the files — no AI,
+no external API, no cost, and already server-side CACHED — yet the client re-renders it on many normal
+interactions. Capping the CORE preview at 30/hour is wrong. Fix: dedicated `inbrowserPreviewRateLimiter`
+(`INBROWSER_PREVIEW_RATE`, its OWN bucket, authed:1200 / anon:600 — generous but still bounded so a
+runaway client can't hammer the bundler). Test: authMiddleware.test.ts +2 (config far above the old 30;
+own bucket name).
+
+**RC-2 — a successful build showed "The build stopped responding".** On the 10m/98-step landing page, the
+app built + preview-verified + "Done · 98 steps" rendered — then the silent post-build REVIEWER phase kept
+the stream quiet past the client's 35s stall window. The watchdog probed, saw the build had FINISHED
+server-side (buildRunning=false), and wrongly showed "stopped responding" on an app that actually
+succeeded. Root cause: the watchdog treated "not running" as a stall even AFTER the terminal `result` was
+already received + rendered. Fix: pure `stallWatchdogAction({alive, sawResult})` → reconnect / finish /
+error; a `sawResultRef` (reset per build, set the instant `result` arrives on any stream path) means "gone
+but result already seen" = clean FINISH (no scary error), only "gone with no result" = the honest error.
+Test: useAgentV3Build.stallWatchdog.test.ts +3.
+
+- Gate: frontend tsc 0, server tsc 0, vitest 5267/5267, boot PASS.
+- NOTE (still open, needs the build-diagnostics JSON): WHY a simple landing page took the 10m/98-step
+  AGENTIC path (not the ~2-3m fast lane) is a routing/classification question — asked the admin for that
+  run's Build report to autopsy it properly rather than guess. The 2m52s/33-step run shows the fast path
+  is healthy when taken.

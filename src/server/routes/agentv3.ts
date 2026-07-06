@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -2325,7 +2325,7 @@ export function registerAgentV3Routes(app: Express): void {
   const INBROWSER_CACHE_TTL_MS = 5 * 60_000;
   const INBROWSER_CACHE_MAX = 30;
 
-  app.post('/api/agentv3/inbrowser-preview', workspaceRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/inbrowser-preview', inbrowserPreviewRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {

@@ -163,6 +163,26 @@ export interface ConversationMeta {
   deadTranscript?: boolean;
 }
 
+/**
+ * Decide what the silence WATCHDOG should do when our stream has gone quiet (no events for STALL_MS)
+ * and we've probed the server for whether the build is still running. PURE + unit-tested.
+ *
+ * The bug this closes: after a SUCCESSFUL build (its terminal `result` already arrived and rendered
+ * "Done · N steps"), a long SILENT post-build phase — e.g. the advisory reviewer's multi-call
+ * sub-agent — kept the stream quiet past STALL_MS. The watchdog then probed, saw the build had since
+ * FINISHED server-side (buildRunning=false), and wrongly showed "The build stopped responding" on an
+ * app that actually built and preview-verified fine (build report 2026-07-06, 10m/98-step landing
+ * page). "Not running" after we already saw the terminal result means FINISHED, not stalled — so:
+ *   • alive server-side          → reconnect (reattach the stream, keep going)
+ *   • gone, but we saw `result`  → finish cleanly (stop the spinner, NO scary error)
+ *   • gone, and no `result`      → the honest "stopped responding" error
+ */
+export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }): 'reconnect' | 'finish' | 'error' {
+  if (opts.alive) return 'reconnect';
+  if (opts.sawResult) return 'finish';
+  return 'error';
+}
+
 export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunning] = useState(false);
@@ -174,6 +194,11 @@ export function useAgentV3Build(): UseAgentV3Build {
   const workspaceIdRef = useRef<string | undefined>(undefined);
   // WATCHDOG — timestamp of the last stream event, so a silent/dead stream can be detected.
   const lastEventTsRef = useRef<number>(Date.now());
+  // WATCHDOG — did the CURRENT build already emit its terminal `result`? If so, a later "build not
+  // running" probe means it FINISHED (post-result reviewer/cleanup went quiet), NOT that it stalled —
+  // so the watchdog must not show "stopped responding" on a build that actually succeeded. Reset at
+  // every build start (start/resume), set the instant `result` arrives on any stream path.
+  const sawResultRef = useRef<boolean>(false);
   // Guards resume() against OVERLAPPING reconnects. (It must NOT guard on `running`: the watchdog
   // reconnects WHILE running is true, and the old `if (running) return` made that reconnect a no-op,
   // leaving the spinner stuck forever after a genuinely dead stream.)
@@ -281,6 +306,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         // sub-agents also emit on this shared stream. See the same guard in start()'s stream loop.
         if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
           if (sink) sink.sawResult = true; // build is terminal — a later stream drop is not a failure
+          sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
           setRunning(false);
           setServerBuildRunning(false);
         }
@@ -848,6 +874,7 @@ export function useAgentV3Build(): UseAgentV3Build {
       // WATCHDOG — begin the silence window at build start (not stale mount time), so the
       // stall detector measures THIS build and never fires before the first event arrives.
       lastEventTsRef.current = Date.now();
+      sawResultRef.current = false; // fresh build — its terminal result hasn't arrived yet
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -979,6 +1006,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             // bounded auto-continue re-arms it via state.resumable.
             if ((event as { type?: string }).type === 'result' && !isStale(gen)) {
               sawResult = true; // build is terminal — a later stream drop is not a failure
+              sawResultRef.current = true; // WATCHDOG — a later "not running" probe = finished, not stalled
               setRunning(false);
               setServerBuildRunning(false);
             }
@@ -1087,16 +1115,22 @@ export function useAgentV3Build(): UseAgentV3Build {
           const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
-          if (alive) {
+          const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
+          if (action === 'reconnect') {
             // The build is alive but OUR stream went quiet — reconnect and keep going.
             abortRef.current?.abort();
             await resume({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current });
           } else {
-            // The build is no longer running server-side — stop the spinner instead of hanging.
+            // Build no longer running server-side — stop the spinner instead of hanging.
             abortRef.current?.abort();
             setRunning(false);
             setServerBuildRunning(false);
-            setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+            // Only 'error' shows the scary notice. When we ALREADY saw the terminal `result`, this is a
+            // clean FINISH (a silent post-build reviewer/cleanup phase just ended) — never overwrite a
+            // succeeded-and-rendered build with "stopped responding".
+            if (action === 'error') {
+              setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+            }
           }
         } catch { /* probe failed — leave running and try again next tick */ }
       })();

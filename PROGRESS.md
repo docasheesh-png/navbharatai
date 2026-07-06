@@ -10249,3 +10249,24 @@ gains a user_guide_docs entry. Isolated to server/lib + server.ts routing — no
 
 Gate: frontend tsc 0, server tsc 0, vitest 5096/5096 PASS (11 new), build PASS, boot:check PASS, live prod
 smoke (/guide 200 HTML + /api/knowledge-base JSON) PASS.
+
+## 2026-07-06 — U-15: status page + deep /api/health  ✅ DONE (admin-directed)
+
+Admin chose U-15. Added a public status page + a deep health probe from real signals. New
+src/server/lib/HealthReport.ts (pure, unit-tested): buildHealthReport(signals) → overall status (down if
+not ready; degraded on maintenance or any degraded/down dependency; else ok) + real uptime/memory/version/
+node; formatUptime (d/h/m/s); renderStatusPageHtml (self-contained, CSP-safe, HTML-escaped, polls /api/health
+every 15s). GET /api/health upgraded from a shallow {status,uptime,port} to the deep report with per-dependency
+checks (server init, Firestore backup, AI providers count, maintenance mode) assembled from real serverStats +
+process signals; still returns status:'ok' when healthy so existing probes keep passing; 503 only while not
+ready (degraded deps don't 503, mirroring /api/ready). ROOT-CAUSE: removed the legacy inline /api/health handler
+in server.ts that was shadowing registerHealthRoutes' deeper one (first-match wins) — one health endpoint now.
+Public /status page added to the SPA-fallback allowlist. AppKnowledgeBase status_page entry added.
+
+Live prod smoke verified: /api/health → deep JSON (honestly reported degraded because FIRESTORE_BACKUP_BUCKET
+unset locally, 4 providers enabled), /status → 200 page. Honest scope: current-instance uptime is real; the
+long-term SLA/uptime record accrues from monitoring over time (Bucket C) — not faked. Isolated: health route +
+lib + one server.ts line, no AgentV3 touch.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5105/5105 PASS (9 new), build PASS, boot:check PASS, live prod smoke
+(/api/health deep + /status) PASS.

@@ -11,6 +11,8 @@
 import type { Express, Request, Response } from 'express';
 import { firestoreBackup } from '../lib/FirestoreBackup';
 import { doraMetrics } from '../lib/DoraMetrics';
+import { serverStats } from '../lib/serverStats';
+import { buildHealthReport, renderStatusPageHtml, type HealthCheck } from '../lib/HealthReport';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -41,6 +43,38 @@ function adminOk(req: Request): boolean {
   return !!process.env.ADMIN_PASSWORD && req.query.admin === process.env.ADMIN_PASSWORD;
 }
 
+/** Assemble per-dependency health checks from real, live server state. */
+function collectHealthChecks(): HealthCheck[] {
+  const checks: HealthCheck[] = [];
+
+  checks.push({
+    name: 'Server initialization',
+    status: isServerReady() ? 'ok' : 'down',
+    detail: isServerReady() ? 'Ready' : 'Still initializing',
+  });
+
+  const backupOk = firestoreBackup.isConfigured();
+  checks.push({
+    name: 'Firestore backup',
+    status: backupOk ? 'ok' : 'degraded',
+    detail: backupOk ? 'Configured' : 'Not configured (set FIRESTORE_BACKUP_BUCKET)',
+  });
+
+  const providers = serverStats.providerEnabled || ({} as Record<string, boolean>);
+  const enabled = Object.entries(providers).filter(([, on]) => on).map(([name]) => name);
+  checks.push({
+    name: 'AI providers',
+    status: enabled.length > 0 ? 'ok' : 'down',
+    detail: enabled.length > 0 ? `${enabled.length} enabled (${enabled.join(', ')})` : 'All providers disabled',
+  });
+
+  if (serverStats.maintenanceMode) {
+    checks.push({ name: 'Maintenance mode', status: 'degraded', detail: 'Maintenance mode is ON' });
+  }
+
+  return checks;
+}
+
 export function registerHealthRoutes(app: Express): void {
   app.get('/api/live', (_req: Request, res: Response) => {
     res.json({ status: 'live', uptime: process.uptime() });
@@ -49,6 +83,27 @@ export function registerHealthRoutes(app: Express): void {
   app.get('/api/ready', (_req: Request, res: Response) => {
     const report = buildReadiness(isServerReady(), process.uptime(), firestoreBackup.isConfigured());
     res.status(report.ready ? 200 : 503).json(report);
+  });
+
+  // U-15 — deep health probe: overall status + real uptime/memory/version + per-dependency checks.
+  // Public + machine-readable; the /status page polls this. Never 503s on a degraded dependency
+  // (mirrors /api/ready) so a healthy instance isn't pulled from rotation for a non-fatal issue.
+  app.get('/api/health', (_req: Request, res: Response) => {
+    const report = buildHealthReport({
+      ready: isServerReady(),
+      uptimeSec: process.uptime(),
+      version: (process.env.K_REVISION || process.env.SERVICE_VERSION || process.env.GAE_VERSION || 'unknown').trim(),
+      nodeVersion: process.version,
+      memory: process.memoryUsage(),
+      maintenanceMode: !!serverStats.maintenanceMode,
+      checks: collectHealthChecks(),
+    });
+    res.status(isServerReady() ? 200 : 503).json(report);
+  });
+
+  // U-15 — public status page (self-contained, polls /api/health).
+  app.get('/status', (_req: Request, res: Response) => {
+    res.type('html').send(renderStatusPageHtml());
   });
 
   // DR — trigger a Firestore export. Admin-gated; returns an honest result (incl. a clear

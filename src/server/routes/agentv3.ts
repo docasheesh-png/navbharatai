@@ -159,7 +159,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview, devScriptPort } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort, missingPreviewReason } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { renderPreview } from '../runtime/renderPreview';
@@ -1697,7 +1697,16 @@ export function registerAgentV3Routes(app: Express): void {
       const scriptPort = devScriptPort(pkgRaw);
       const effectivePort = scriptPort ?? expectedPort;
       if (!structure.ok) {
-        finish({ ok: false, portListening: false, reason: structure.issues.join(' '), detail: '' });
+        let reason = structure.issues.join(' ');
+        // HONESTY (build-report autopsy 2026-07-06): a MISSING package.json in the (cold/recycled)
+        // sandbox is usually a failed RESTORE, not the user's project genuinely lacking one — so don't
+        // tell a user whose app really has a package.json that "the project has no defined dependencies".
+        // Consult the durable file index (the real source of truth) and report the true cause instead.
+        if (!pkgRaw || !pkgRaw.trim()) {
+          const durablePaths = await listWorkspaceFilePaths(workspaceId).catch(() => [] as string[]);
+          reason = missingPreviewReason(durablePaths);
+        }
+        finish({ ok: false, portListening: false, reason, detail: '' });
         return;
       }
       // 90s — matches the SimpleBuilder fastPreview default (deps install + start + port-wait +

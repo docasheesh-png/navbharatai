@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from 'lucide-react';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
+import { shouldAutoRebootPreview } from './previewAutoReboot';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -160,6 +161,45 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     autoResumedFor.current = workspaceId;
     void runDiagnose();
   }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox, runDiagnose]);
+
+  // C1b — auto-REBOOT a dead live preview behind an EXISTING URL. C1 above only fires when there is NO
+  // url — but a preview URL is PERMANENT while the dev server behind it is EPHEMERAL (sandbox
+  // idle/pause kills the process): a reopened session rendered E2B's "Closed Port Error" page inside
+  // the iframe and nothing auto-healed (admin report 2026-07-07). URL presence is NOT liveness — probe
+  // the server's REAL preview health and, when it is sleeping/crashed, run the SAME rehydrate-and-
+  // reboot as the Diagnose button. Decision logic is pure + tested (shouldAutoRebootPreview); gated
+  // once per workspace, idle-only, and never on a failed probe.
+  const autoRebootedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoResume || mode !== 'live' || !workspaceId || diagnosing) return;
+    const hasUrl = !!(url || foundUrl);
+    if (!hasUrl || sandbox?.livePreviewAvailable !== true || autoRebootedFor.current === workspaceId) return;
+    let cancelled = false;
+    void (async () => {
+      let status: string | null = null;
+      try {
+        const res = await fetch('/api/agentv3/preview-health', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId, userId, email, framework }),
+        });
+        const health = await res.json().catch(() => null) as { status?: unknown } | null;
+        if (res.ok && health && typeof health.status === 'string') status = health.status;
+      } catch { /* probe failed → status stays null → never reboot on a guess */ }
+      if (cancelled) return;
+      const decide = shouldAutoRebootPreview({
+        autoResume: !!autoResume, liveTabShown: mode === 'live', hasUrl,
+        liveBackend: sandbox?.livePreviewAvailable === true, diagnosing,
+        alreadyRebooted: autoRebootedFor.current === workspaceId, healthStatus: status,
+      });
+      if (decide) {
+        autoRebootedFor.current = workspaceId; // once per workspace — never a boot loop
+        void runDiagnose();
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoResume, mode, workspaceId, url, foundUrl, diagnosing, sandbox]);
 
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).

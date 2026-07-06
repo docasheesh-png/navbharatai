@@ -10230,3 +10230,22 @@ CostAlertEngine.test.ts (9 — threshold boundaries, exactly-100% = exceeded, no
 warn pct, negative/NaN spend).
 
 Gate: frontend tsc 0, server tsc 0, vitest 5085/5085 PASS (9 new), build PASS, boot:check PASS.
+
+## 2026-07-06 — U-9: docs site auto-generated from AppKnowledgeBase  ✅ DONE (admin-directed)
+
+Admin chose U-9. Turned the AppKnowledgeBase (single source of truth, 158 features) into a browsable,
+searchable docs site so humans get the same authoritative, never-drifting answers every AI reads. New
+src/server/lib/KnowledgeDocs.ts (pure, unit-tested): buildDocsModel(features) groups every feature exactly
+once into ordered sections (App Builder v3.0 / Engineer AI / Pro Chat / Free Chat / SDA / Repo Analyst /
+Professional AI Assistants / Platform & App Features — the 100+ single professional AIs funnel into one
+group); renderDocsHtml(model) emits a self-contained, CSP-safe (no external CDN), HTML-escaped page with a
+live client-side search filter. Served GET /guide (site) + GET /api/knowledge-base (JSON), wired in server.ts
+with /guide added to the SPA-fallback allowlist (else the catch-all would swallow it). Live production smoke
+verified: /guide → 200 docs HTML with real features, /api/knowledge-base → JSON totalFeatures:158.
+
+Template Gallery half NOT rebuilt (safeguard #6): it already ships as the in-app Templates panel
+(CURATED_TEMPLATES / project-templates entry) — the docs link to it instead of duplicating. AppKnowledgeBase
+gains a user_guide_docs entry. Isolated to server/lib + server.ts routing — no AgentV3 touch.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5096/5096 PASS (11 new), build PASS, boot:check PASS, live prod
+smoke (/guide 200 HTML + /api/knowledge-base JSON) PASS.

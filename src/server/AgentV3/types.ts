@@ -146,6 +146,9 @@ export type AgentEvent =
   | { type: 'repo'; url: string; fullName: string; ts: number }
   // Own-repo working-branch storage is active — drives the client's "Ship to main" / "Revert" controls.
   | { type: 'own_repo'; owner: string; repo: string; workBranch: string; baseBranch: string; ts: number }
+  // A read-only role chat (planner/advisor) proposed concrete build steps — the user approves them
+  // into the executor's queue (they are NEVER auto-enqueued).
+  | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
   | { type: 'security_warning'; filePath: string; safe: boolean; findings: Array<{ severity: string; rule: string; description: string; line: number }>; report: string; ts: number };

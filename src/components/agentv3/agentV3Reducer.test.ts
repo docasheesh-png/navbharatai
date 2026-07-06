@@ -11,6 +11,13 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.ownRepo).toEqual({ owner: 'aashish', repo: 'mitrify', workBranch: 'navbharatai/work', baseBranch: 'main' });
   });
 
+  it('records a role chat\'s proposed steps (approved into the queue by the USER, never auto)', () => {
+    let s = initialAgentV3State();
+    expect(s.proposedSteps).toBeUndefined();
+    s = agentV3Reducer(s, { type: 'proposed_steps', role: 'planner', steps: ['Build login', 'Add API'], ts: 1 });
+    expect(s.proposedSteps).toEqual({ role: 'planner', steps: ['Build login', 'Add API'] });
+  });
+
   it('tracks the live AI-team card from a tool_call then clears active on result', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, {

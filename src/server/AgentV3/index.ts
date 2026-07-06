@@ -69,6 +69,8 @@ export type { StorageTarget, OwnRepoTarget, MirrorTarget, ResolveStorageTargetIn
 export { perWorkspaceLockEnabled, maxConcurrentBuilds, buildLockKey, countActiveBuildsForUser, acquireDecision, MAX_CONCURRENT_BUILDS_DEFAULT } from './BuildConcurrency';
 export type { AcquireResult } from './BuildConcurrency';
 export { emptyQueue, enqueue, claimNext, completeRunning, cancelItem, reorderPending, pendingItems, runningItem, queueSummary, MAX_QUEUE_ITEMS } from './BuildQueue';
+export { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from './RoleChats';
+export type { ChatRole } from './RoleChats';
 export type { CommandQueue, QueueItem, QueueItemStatus, QueueItemSource, EnqueueResult, ClaimResult } from './BuildQueue';
 export { roleConfig, isWorkerRole, WORKER_ROLES, allRoles, findRolesByCapability, rolesByLayer, rosterBriefing } from './AgentRegistry';
 export type { RoleConfig } from './AgentRegistry';

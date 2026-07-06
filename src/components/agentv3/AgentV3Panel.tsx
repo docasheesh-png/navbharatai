@@ -20,6 +20,7 @@ import { buildChatBlocks } from './activityTimeline';
 import { ActionGroupRow } from './ActivityTimeline';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
+import { deliverTextFile } from '../../lib/downloadFile';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
@@ -1270,21 +1271,22 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (userId) params.set('userId', userId);
         if (email) params.set('email', email);
         const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
-        if (!res.ok) { alert('No build report yet — build an app first, then download the report.'); return; }
+        if (!res.ok) {
+          // Honest cause (not a blanket "no report"): 404 = genuinely none yet; anything else is a
+          // fetch/server hiccup the user should retry, not a claim that their build produced no report.
+          alert(res.status === 404
+            ? 'No build report yet — build an app first, then download the report.'
+            : `Couldn't fetch the build report (server said ${res.status}). Please try again in a moment.`);
+          return;
+        }
         payload = await res.json();
       } else {
         payload = await getLatestDiagnostics(null);
         if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
       }
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `navbharatai-v3-build-diagnostics-${Date.now()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      // iOS Safari IGNORES <a download> (nothing saves) — deliverTextFile prefers the Web Share API
+      // (share sheet → "Save to Files") on mobile and falls back to the anchor download on desktop.
+      await deliverTextFile(`navbharatai-v3-build-diagnostics-${Date.now()}.json`, JSON.stringify(payload, null, 2));
     } catch (e) {
       alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
     } finally {

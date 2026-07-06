@@ -10782,3 +10782,30 @@ Test: useAgentV3Build.stallWatchdog.test.ts +3.
   AGENTIC path (not the ~2-3m fast lane) is a routing/classification question — asked the admin for that
   run's Build report to autopsy it properly rather than guess. The 2m52s/33-step run shows the fast path
   is healthy when taken.
+
+## 2026-07-06 — Fix 8: "build report ban hi nahi rahi / save-download nahi ho rahi" (two root causes)
+
+The admin's "Build report" button showed the alert "No build report yet — build an app first…" right
+after a real, SUCCESSFUL build (REVIEWER/Done visible behind the dialog). Two independent root causes:
+
+**RC-1 (server — the real blocker): the session download 404'd on a workspaceId mismatch.** The button
+downloads via `/api/agentv3/diagnostics?scope=session`. That path aggregated ONLY this workspaceId's
+durable history + latest doc, and 404'd when empty. But a workspaceId mismatch is common and expected —
+an anon-degraded build saves under `agentv3-anon-*`, or a fresh session mints a NEW workspaceId — so the
+history is empty even though the user HAS a durable last-build report. The NON-scope path already recovers
+from exactly this via `loadLatestForUser(userId)` (its own comment documents the case); the session path
+FORGOT the fallback and 404'd → the client's blanket "No build report yet". Fix: add the same per-user
+durable fallback to the `scope=session` branch (mirror the proven non-scope recovery).
+
+**RC-2 (client — iOS can't save + a masking message):** the download used `<a download>` + a Blob URL,
+which iOS Safari IGNORES (the admin is on iPhone) — nothing saves. New `src/lib/downloadFile.ts`
+(`deliverTextFile` + pure `pickFileDeliveryStrategy`) prefers the Web Share API with a real File (iOS
+share sheet → "Save to Files") and falls back to the anchor download on desktop. Also: the client showed
+"No build report yet" for ANY non-ok status — now it distinguishes 404 (genuinely none) from a
+fetch/server hiccup (honest "server said N, try again"), so a transient failure never masquerades as
+"your build produced no report".
+
+- Tests: downloadFile.test.ts +2 (share on iOS-capable, anchor on desktop). Gate: frontend tsc 0,
+  server tsc 0, vitest 5269/5269, boot PASS.
+- Both fixes are complementary: RC-1 makes the fetch SUCCEED (report found via per-user fallback), RC-2
+  makes the found report actually SAVE on iPhone.

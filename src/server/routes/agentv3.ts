@@ -1490,6 +1490,16 @@ export function registerAgentV3Routes(app: Express): void {
       const byStart = new Map<number, BuildDiagnosticsReport>();
       for (const r of full) if (r) byStart.set(r.startedAt, r);
       if (latest) byStart.set(latest.startedAt, latest);
+      // FALLBACK — the exact "build report ban hi nahi rahi / No build report yet" the admin hit on a
+      // real, successful build (2026-07-06): this workspaceId's history can be EMPTY even though the
+      // user has a durable last-build report — an anon-degraded build saved under `agentv3-anon-*`, or a
+      // fresh session minted a NEW workspaceId. The non-scope path already recovers via loadLatestForUser
+      // (see below); the session download forgot it and 404'd → the client's blanket "No build report
+      // yet". Mirror that per-user fallback so the whole-session download never falsely reports "none".
+      if (byStart.size === 0) {
+        const perUser = await loadLatestForUser(userId).catch(() => null);
+        if (perUser) byStart.set(perUser.startedAt, perUser);
+      }
       const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
       if (ordered.length === 0) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
       if (req.query.format === 'text') {

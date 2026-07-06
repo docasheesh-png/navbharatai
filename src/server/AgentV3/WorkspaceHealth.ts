@@ -13,9 +13,10 @@ import { detectHallucinations } from './HallucinationDetector';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
+import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 
 export interface HealthCheckResult {
-  id: 'code-confidence' | 'react-hooks' | 'import-export' | 'jsx-resolution';
+  id: 'code-confidence' | 'react-hooks' | 'import-export' | 'jsx-resolution' | 'hook-resolution';
   name: string;
   ok: boolean;
   /** Number of issues this check found (0 when ok). */
@@ -35,10 +36,11 @@ export interface WorkspaceHealthReport {
 export async function analyzeWorkspaceHealth(files: Record<string, string>): Promise<WorkspaceHealthReport> {
   // Code confidence is synchronous; the three AST analyzers are async. Run the async ones in parallel.
   const conf = detectHallucinations(files);
-  const [hooks, imports, jsx] = await Promise.all([
+  const [hooks, imports, jsx, undefHooks] = await Promise.all([
     analyzeHooksRules(files),
     analyzeImportExports(files),
     analyzeJsxComponents(files),
+    analyzeUndefinedHooks(files),
   ]);
 
   const confIssues = conf.signals.length;
@@ -73,11 +75,18 @@ export async function analyzeWorkspaceHealth(files: Record<string, string>): Pro
       issues: jsx.undefinedComponents.length,
       summary: jsx.ok ? 'Every JSX component resolves.' : `${jsx.undefinedComponents.length} component(s) used but never imported/defined.`,
     },
+    {
+      id: 'hook-resolution',
+      name: 'Hook Resolution',
+      ok: undefHooks.ok,
+      issues: undefHooks.undefinedHooks.length,
+      summary: undefHooks.ok ? 'Every hook call resolves.' : `${undefHooks.undefinedHooks.length} hook(s) called but never imported/defined.`,
+    },
   ];
 
   const totalIssues = checks.reduce((s, c) => s + c.issues, 0);
   // filesScanned: the widest coverage among the AST passes (they scan overlapping subsets by file type).
-  const filesScanned = Math.max(hooks.filesScanned, imports.filesScanned, jsx.filesScanned);
+  const filesScanned = Math.max(hooks.filesScanned, imports.filesScanned, jsx.filesScanned, undefHooks.filesScanned);
 
   return {
     ok: checks.every((c) => c.ok),

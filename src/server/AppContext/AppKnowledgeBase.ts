@@ -1805,6 +1805,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     keywords: ['is not defined', 'referenceerror', 'undefined component', 'component not imported', 'jsx error', 'missing import', 'white screen', 'react not defined', 'unknown component', 'element not defined'],
   },
   {
+    id: 'hook-resolution-check',
+    name: 'Hook Resolution Check',
+    path: 'Settings → Insights & Webhooks → Hook Resolution',
+    description: `Scans the generated code for React hooks that are CALLED but never imported or defined — e.g. useState(0) without "import { useState } from 'react'". This throws "useState is not defined" (ReferenceError) and white-screens the app. Complements the JSX and Import/Export checks (which cover components and named-import mismatches) by covering the hook-call identifier itself. Exact AST analysis (ts-morph), conservative: never flags imported hooks, locally-defined hooks, hooks passed as props/params, member-expression calls (React.useState), or non-hook functions. Also auto-enforced inside the build's readiness gate, so the builder fixes it before shipping. Backed by POST /api/workspace/hook-resolution-check.`,
+    howToUse: 'Open Settings → Insights & Webhooks → "Hook Resolution" → Check Hooks. Green means every hook resolves; otherwise each undefined hook shows the call and the file:line to import or define it.',
+    relatedFeatures: ['jsx-component-resolution', 'react-hooks-safety', 'import-export-consistency', 'build-health-check', 'agentv3_builder'],
+    keywords: ['usestate is not defined', 'useeffect is not defined', 'hook not imported', 'undefined hook', 'referenceerror hook', 'forgot to import', 'missing hook import', 'react hook error', 'hook not defined'],
+  },
+  {
     id: 'build-health-check',
     name: 'Build Health — Will this app work?',
     path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',

@@ -1311,6 +1311,15 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).toContain('NOT READY');
   });
 
+  it('BLOCKS readiness on a hook called but never imported', async () => {
+    const dd = makeDispatcher('ws-eval-undefhook');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
+    await write(dd, 'src/App.tsx', 'export function App() { const [v] = useState(0); return v; }');
+    const out = await evalText(dd);
+    expect(out).toContain('never imported/defined');
+    expect(out).toContain('NOT READY');
+  });
+
   it('does NOT introduce these blockers for a clean React app (no false-block)', async () => {
     const dd = makeDispatcher('ws-eval-clean');
     await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
@@ -1319,5 +1328,6 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).not.toContain('Rules-of-Hooks violation');
     expect(out).not.toContain('undefined JSX component');
     expect(out).not.toContain('broken import');
+    expect(out).not.toContain('never imported/defined');
   });
 });

@@ -3693,3 +3693,46 @@ complex builds, test-driven not just tsc-driven), post-deploy liveness check, au
 
 > Doc-only change (this audit). No code touched. Source roadmaps: `ENGINEER_AI_ROADMAP.md` (21 phases) +
 > `ROADMAP_TO_LEAD_35.md` (F1–F10 foundations, 35 categories), merged and mapped onto the real v3.0 code.
+
+---
+
+## 🧱 Appsmith-class / Polyglot Multi-Service Gap Analysis (admin-added 2026-07-06)
+
+> **Why this matters:** to build/import a real **Appsmith-class** app — a polyglot, multi-service monorepo
+> (Java + TypeScript + config, backend + Mongo + Redis + frontend) — v3.0 needs capabilities beyond a single
+> Node `npm run dev`. This is the admin's own field assessment of what's missing, kept at the end of the roadmap
+> as the north-star backlog for making v3.0 handle production-grade, multi-service repos. Not yet built —
+> prioritized honestly; most of the 🔴 items are **infra/sandbox decisions** (bigger E2B VM, multi-runtime images)
+> that need admin sign-off before they can ship.
+
+### 🔴 Hard blockers (without these, Appsmith-class simply won't run)
+
+- **AB-1 — Multi-language runtime sandbox.** Today: only Node (`npm run dev`). Needed: **JVM (JDK 17) + Maven/Gradle,
+  Python (pip), Go** — install + run inside the sandbox. *(Infra: multi-runtime sandbox image / provisioning.)*
+- **AB-2 — Multi-database / services provisioning.** Today: Postgres only. Needed: **MongoDB, Redis**, and a generic
+  "bring up whatever DB/service the app needs" provisioner. *(Infra: service provisioning broker — ties U-3.)*
+- **AB-3 — Multi-service orchestration (Docker/Compose).** Today: one single dev server. Needed: **docker-compose**
+  support — backend + mongo + redis + frontend running together, ports/proxy wired, health-checked. *(Infra.)*
+- **AB-4 — Bigger sandbox (resources).** Needed: an E2B VM with **more CPU/RAM/disk** (Appsmith builds are heavy) +
+  a **longer build budget** (JVM + large frontend builds are slow). *(Infra spend decision — admin sign-off.)*
+
+### 🟠 Medium gaps
+
+- **AB-5 — Reliable import at 10k+ files.** Today: ~10k is the edge (can overflow). Needed: **20k+ files, 100MB+**,
+  fast/streamed import.
+- **AB-6 — Polyglot build / deps.** Needed: per-service correct build detection + run (**Maven/Gradle/webpack**),
+  not just `npm install`.
+- **AB-7 — Monorepo-scale code understanding.** Needed: **cross-language + cross-service grounding** (Java + TS +
+  config) and a **module/service graph** (which service owns what) so edits are "understood", not guessed.
+
+### 🟡 Smaller (easy once the big ones land)
+
+- **AB-8 — Multi-service env/secrets wiring.** Today: Postgres URL + self-issued secrets. Needed: **Mongo/Redis URLs
+  + inter-service URLs** auto-wired.
+- **AB-9 — Multi-service preview model.** Needed: preview the **full graph** (frontend → running backend → running
+  DBs), not a single dev server.
+
+> **Honest status:** AB-1..AB-4 and AB-9 are **infra-gated** (multi-runtime sandbox images, bigger E2B VM,
+> docker-compose orchestration) and need the admin's infra/spend decisions before they can be built — recorded
+> here as open items per the constitution's rule 6 (never ship a cosmetic patch as if it were the real fix).
+> AB-5..AB-8 are more tractable in code once the sandbox substrate (AB-1..AB-4) exists.

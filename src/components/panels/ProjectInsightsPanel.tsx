@@ -122,6 +122,18 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setConfBusy(false); }
   };
 
+  // ── React Rules-of-Hooks safety check ──
+  const [hooksRules, setHooksRules] = useState<any>(null);
+  const [hooksRulesBusy, setHooksRulesBusy] = useState(false);
+  const runHooksRules = async () => {
+    setHooksRulesBusy(true); setHooksRules(null);
+    try {
+      const r = await fetch('/api/workspace/hooks-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
+      if (r.ok) setHooksRules(await r.json());
+    } catch { /* ignore */ }
+    finally { setHooksRulesBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
 
@@ -179,6 +191,29 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
                 <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">{s.kind}: <span className="text-white">{s.detail}</span> <span className="text-[#8b949e]">({s.file})</span></div>
               ))}</div>
             )}
+          </div>
+        )}
+      </Card>
+
+      {/* React Rules-of-Hooks safety */}
+      <Card icon={<Brain className="w-4 h-4 text-sky-400" />} title="React Hooks Safety (Rules of Hooks)"
+        action={<Button size="sm" onClick={runHooksRules} disabled={hooksRulesBusy} className="uppercase tracking-widest bg-sky-600 hover:bg-sky-700">{hooksRulesBusy ? 'Checking…' : 'Check Hooks'}</Button>}>
+        {!hooksRules ? (
+          <p className="text-[11px] text-[#8b949e]">Scan the generated React code for Rules-of-Hooks violations — hooks called conditionally, after an early return, inside a loop, or from a nested callback. These crash the app at runtime (white screen), so catching them here prevents a broken preview.</p>
+        ) : hooksRules.ok ? (
+          <div className="text-[11px] text-emerald-400 font-bold">✓ No Rules-of-Hooks violations across {hooksRules.filesScanned} React file(s).</div>
+        ) : (
+          <div className="space-y-2 text-[11px]">
+            <div className="text-red-400 font-bold">{hooksRules.violations.length} violation(s) found — these will crash the app at runtime.</div>
+            <div className="text-[#8b949e]">
+              Conditional: <span className="text-white font-bold">{hooksRules.counts['conditional-hook']}</span> ·
+              After return: <span className="text-white font-bold">{hooksRules.counts['hook-after-return']}</span> ·
+              In loop: <span className="text-white font-bold">{hooksRules.counts['hook-in-loop']}</span> ·
+              In callback: <span className="text-white font-bold">{hooksRules.counts['hook-in-callback']}</span>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-auto">{hooksRules.violations.slice(0, 30).map((v: any, i: number) => (
+              <div key={i} className="bg-black/30 rounded px-3 py-1 font-mono text-[10px] text-amber-300">{v.kind}: <span className="text-white">{v.hook}()</span> <span className="text-[#8b949e]">({v.file}:{v.line})</span></div>
+            ))}</div>
           </div>
         )}
       </Card>

@@ -12,6 +12,7 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
+import { generateInsights, generateOpsReport, answerMetricQuery } from '../lib/AiInsights';
 import { aggregateProviderLatency, type SpanLike } from '../lib/Percentiles';
 import { tracer } from '../observability/Tracer';
 import { analyzeSeries, type Point } from '../lib/AnomalyDetector';
@@ -313,6 +314,26 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // per-request cost outliers). No hardcoded prices, no projections — observed waste only.
   app.get('/api/admin/finops', verifyAdminToken, (_req: Request, res: Response) => {
     res.json({ ...analyzeFinOps(getMetrics().snapshot()), generatedAt: Date.now() });
+  });
+
+  // P-MON.5 — AI insights + ops report, deterministically derived from the real MetricsSnapshot
+  // (no hallucination, no projections). Honest "no telemetry yet" when nothing has been recorded.
+  app.get('/api/admin/insights', verifyAdminToken, (req: Request, res: Response) => {
+    const snap = getMetrics().snapshot();
+    const period = typeof req.query.period === 'string' ? req.query.period : 'current window';
+    res.json({
+      insights: generateInsights(snap),
+      report: generateOpsReport(snap, period),
+      generatedAt: Date.now(),
+    });
+  });
+
+  // P-MON.5 — natural-language telemetry query. Recognized-intent resolver over the real snapshot;
+  // an unrecognized question returns matched:false with an honest capability list (never a guess).
+  app.post('/api/admin/insights/query', verifyAdminToken, (req: Request, res: Response) => {
+    const question = typeof req.body?.question === 'string' ? req.body.question : '';
+    if (!question.trim()) return res.status(400).json({ error: 'A "question" string is required.' });
+    res.json({ ...answerMetricQuery(getMetrics().snapshot(), question), generatedAt: Date.now() });
   });
 
   // G2 — daily metrics history (last N days of persisted MetricsSnapshots).

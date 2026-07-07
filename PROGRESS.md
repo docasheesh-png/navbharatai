@@ -11332,3 +11332,13 @@ turns (0 files written) and free-explored the 100-file CoreUI import to a 2.2M-t
 - Ships together with Fix 23 (hopeless-oversize ladder abort). Remaining root (sub-agent transcript
   bounding for turns that DO build) stays the recorded urgent next task.
 - Gate: frontend tsc 0, server tsc 0, vitest 5340/5340, boot PASS.
+
+## 2026-07-07 — VAJRA_V4_DESIGN.md: the v4.0 blueprint (admin mandate: "sabki acchi cheez lekar apna new system — in sab se accha")
+
+Synthesized from the Replit/Lovable/Bolt/Cursor analysis + our 24 root-cause fixes. Five pillars:
+Nirman Workers (deploy/network-proof builds via job queue + Firestore event stream), BrowserBox
+(esbuild-wasm in-browser bundler → WebContainers evaluation later), Smriti Index (embeddings
+retrieval + sub-agent transcript budgets), Satya Gates (our verify/honesty law, formalized), Kavach
+(git-first + shrink-guarded durable store). Sequenced V4-1…V4-6, each shipping via the normal cycle;
+V4-1 (auto-resume + graceful drain) = the already-recorded next task. Read the doc before starting
+any v4 work.

@@ -186,7 +186,7 @@ import {
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild } from '../AgentV3/WorkspaceFileStore';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -3636,6 +3636,12 @@ export function registerAgentV3Routes(app: Express): void {
           type: 'narration', agent: 'architect', ts: Date.now(),
           text: '🔄 Rebuild confirmed — building a fresh app from scratch.',
         });
+        // GENERATION RESET (Fix 36c): the user explicitly approved replacing the old app — its
+        // durable file index must not survive, or the File Guardian later resurrects the previous
+        // generation INTO the fresh build (old+new type systems mixed = hours of thrash). The old
+        // code stays recoverable via git/GitHub history; only the auto-restore pointer is cleared.
+        await resetWorkspaceFilesForApprovedRebuild(workspaceId, 'user-approved-rebuild').catch(() => {});
+        durableFilePaths = [];
       }
     }
     const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);

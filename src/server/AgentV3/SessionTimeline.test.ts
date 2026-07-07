@@ -278,7 +278,7 @@ describe('compactTranscriptForModel', () => {
       // Every tool_result now fits the ceiling (+ the short gap note) — the 500KB dumps are gone.
       const result = out[2] as { content: Array<{ content: string }> };
       expect(result.content[0].content.length).toBeLessThan(41_000);
-      expect(result.content[0].content).toContain('trimmed');
+      expect(result.content[0].content).toContain('hidden from this VIEW');
       // The whole prompt is bounded regardless of how big the raw reads were.
       expect(JSON.stringify(out).length).toBeLessThan(200_000);
     });

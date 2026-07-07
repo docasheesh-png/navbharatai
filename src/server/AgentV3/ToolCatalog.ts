@@ -12,11 +12,13 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
   return [
     {
       name: 'read_file',
-      description: 'Read the full contents of a file in the workspace.',
+      description: 'Read a file in the workspace. IMPORTANT: a very large file is shown with its MIDDLE trimmed from the view — the file on disk is ALWAYS complete. To see a hidden section, call read_file again with start_line/end_line. Never conclude a file is truncated/corrupted from a trimmed view.',
       input_schema: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Workspace-relative file path.' },
+          start_line: { type: 'number', description: 'Optional 1-based first line to read (for slicing a large file).' },
+          end_line: { type: 'number', description: 'Optional 1-based last line to read (inclusive).' },
         },
         required: ['path'],
       },

@@ -720,8 +720,21 @@ export class ToolDispatcher {
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
     const input = call.input;
     switch (call.name) {
-      case 'read_file':
-        return this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+      case 'read_file': {
+        const full = await this.actuator.readFile(this.workspaceId, reqStr(input, 'path'));
+        // RANGED READ (Fix 36b — HMS report 2026-07-07): a big file's tool result gets its middle
+        // trimmed by the transcript ceiling, and a plain re-read returns the SAME trimmed view — the
+        // model concluded the FILE was "truncated at exactly N lines" and destructively 'repaired' a
+        // healthy file. start_line/end_line make any slice of a large file genuinely readable.
+        const sl = typeof (input as Record<string, unknown>).start_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).start_line as number)) : null;
+        const el = typeof (input as Record<string, unknown>).end_line === 'number' ? Math.max(1, Math.floor((input as Record<string, unknown>).end_line as number)) : null;
+        if (sl === null && el === null) return full;
+        const lines = full.split('\n');
+        const from = (sl ?? 1) - 1;
+        const to = el ?? lines.length;
+        const slice = lines.slice(from, to).join('\n');
+        return `[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
+      }
 
       case 'write_file': {
         const path = reqStr(input, 'path');

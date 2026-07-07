@@ -11915,3 +11915,34 @@ the verdict had NO effect on MONEY, and the client had no at-a-glance signals. S
   durable store), rendered as a 99+-capped badge. Footer-api effect moved below the workspaceFiles
   declaration it reads (TDZ). Tests: +6 (billing matrix; green-dot matrix incl. no-fake-green cases).
   Gate: frontend tsc 0, server tsc 0, vitest 5458/5458, boot PASS.
+
+## 2026-07-07 — AUTOPSY (zip-stall + HMS thrash report) → Fix 36 a/b/c: three DNA classes killed
+
+Admin report: (1) "zip upload band ho gayi" — two zips sent, instant stall banner; (2) an HMS build that
+thrashed for hours (type conflicts, "truncated" files, a mid-run restore of 63 old files over 48 new).
+Honest context first: the HMS run's deploy stamp (b:07-07 16:20) predates Fix 27/28 — today's rebuild
+guard + confirmation gate already prevent its trigger (manifest lane over an existing app). But three
+NEW classes are proven by the transcript regardless of version, all fixed:
+
+**36a — attachment size guard (the zip-stall):** an oversized zip base64-inflates past the platform's
+request-body cap and the request dies BEFORE the server sees it — the client only showed the stall
+banner, reading as "upload broken". New pure `checkAttachmentSizes` (18 MB/file, 22 MB combined, both
+safely under the 32 MB cap) refuses the send IN the composer with the honest reason + real alternatives
+(shrink the zip / remove node_modules / import via GitHub URL). Tests: +3 (incl. the two-zips case).
+
+**36b — ranged read_file + unambiguous trim marker (the "truncated file" catastrophe):** the V4-2
+tool-result ceiling trims a big file's middle from the VIEW, and a plain re-read returns the SAME view —
+the model concluded the FILE was "truncated at exactly 674 lines", then destructively 'repaired' a
+healthy file (appending closers), poisoning the whole build. Fixed at the capability root: read_file now
+accepts start_line/end_line (any slice of any file is genuinely readable — the response is prefixed
+"[lines A-B of N — the file is complete on disk]"), the tool description forbids concluding corruption
+from a trimmed view, and the trim marker itself now says the file is COMPLETE and names the ranged-read
+escape hatch. (Existing V4-2 test updated to the new marker wording.)
+
+**36c — approved-rebuild generation reset (the 63-over-48 Frankenstein):** after the user explicitly
+approves a rebuild-from-scratch, the OLD app's durable file index used to survive — so the File Guardian
+later "restored" the previous generation INTO the fresh build, mixing two type systems. New
+`resetWorkspaceFilesForApprovedRebuild(workspaceId, 'user-approved-rebuild')` — the ONLY legitimate
+index wipe, gated by a literal consent token so no automatic path can ever call it; wired exactly in the
+Fix-28 Approve branch (durableFilePaths also cleared for the routing below). Old code stays recoverable
+via git/GitHub. Gate: frontend tsc 0, server tsc 0, vitest 5461/5461, boot PASS.

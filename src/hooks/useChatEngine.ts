@@ -11,6 +11,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ErrorContext, ViewType, FileSystem } from '../types';
 import { classifyError } from '../lib/appUtils';
+import { asMessageArray } from '../lib/chatUtils';
 import { trackEvent } from '../lib/analytics';
 import { auth, rememberGithubOwner } from '../App';
 
@@ -241,9 +242,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
     const currentInput = input;
     const currentMessages = messages;
     const activeSession = sessions.find(s => s.id === currentSessionId);
-    const restoredMessages = activeSession?.restoredMessages || [];
+    const restoredMessages = asMessageArray(activeSession?.restoredMessages);
     const memorySummary = activeSession?.memorySummary || '';
-    const historyForAPI = [...restoredMessages, ...currentMessages];
+    const historyForAPI = [...restoredMessages, ...asMessageArray(currentMessages)];
     const setMessagesForTab = setMessages;
     const setInputForTab = setInput;
     const setIsLoadingForTab = setIsLoading;

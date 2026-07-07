@@ -12019,3 +12019,25 @@ Gate: tsc fe+server 0, vitest 5432/5432, build PASS, boot:check PASS. 20 store f
 
 Other errors seen (next autopsies): 48× `(restoredMessages||[]) is not iterable` (non-array guard needed);
 321× express-rate-limit IPv6 keyGenerator (older, likely fixed); frontend dynamic-import chunk failures (post-deploy).
+
+---
+
+## 2026-07-07 — PROD-ERROR AUTOPSY #2 (rule 5): restoredMessages "not iterable" crash
+
+Second error mined from Cloud Error Reporting: `(restoredMessages || []) is not iterable` — 48 occurrences.
+A session's `restoredMessages` read back from Firestore could be a truthy NON-array (legacy/corrupted doc,
+or a side-effect of the pre-fix undefined-write bug). `x || []` does NOT guard a truthy non-array, so the
+later `[...restoredMessages]` spread / `for..of` threw "not iterable".
+
+ROOT CAUSE: the array invariant was never enforced at the boundary where the data enters (Firestore read).
+
+FIX (rule 2 — enforce invariant at entry; rule 3 — centralize):
+- New pure `asMessageArray(x)` in chatUtils.ts (`Array.isArray(x) ? x : []`), unit-tested.
+- `dedupAndSortMessages` hardened to coerce its input (defensive sink — it iterates internally).
+- Applied at the entry boundary + spread sites: useSessionManager (Firestore-load line + history spread),
+  useChatEngine (history spread). App.tsx sites left untouched (very hot) — safe because the entry-boundary
+  guard makes in-memory `session.restoredMessages` always an array.
+- Regression tests: asMessageArray (array passthrough, object/string/number/null/undefined → []) +
+  dedupAndSortMessages non-array guard.
+
+Gate: tsc fe+server 0, vitest 5468/5468 (7 new), build PASS, boot:check PASS. No hot files (App.tsx/agentv3.ts) touched.

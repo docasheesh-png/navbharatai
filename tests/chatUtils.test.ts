@@ -11,6 +11,7 @@ import {
   classifyBuildIntent,
   classifyAutoIntent,
   dedupAndSortMessages,
+  asMessageArray,
 } from '../src/lib/chatUtils';
 
 // ─── generateUCI ─────────────────────────────────────────────────────────────
@@ -270,5 +271,29 @@ describe('dedupAndSortMessages', () => {
 
   it('returns an empty array for empty input', () => {
     expect(dedupAndSortMessages([])).toEqual([]);
+  });
+
+  it('does not throw on a non-array input (prod crash guard)', () => {
+    // A corrupted Firestore `restoredMessages` (object/null/etc.) must not crash "not iterable".
+    expect(dedupAndSortMessages(undefined as unknown as Message[])).toEqual([]);
+    expect(dedupAndSortMessages({} as unknown as Message[])).toEqual([]);
+  });
+});
+
+// ─── asMessageArray (prod crash guard for restoredMessages) ──────────────────
+
+describe('asMessageArray', () => {
+  it('passes an array through unchanged', () => {
+    const arr = [{ id: '1' }] as unknown as Message[];
+    expect(asMessageArray(arr)).toBe(arr);
+  });
+  it('coerces a truthy non-array (the crash case) to []', () => {
+    expect(asMessageArray({ 0: 'x' })).toEqual([]); // object read back from a corrupted Firestore doc
+    expect(asMessageArray('not an array')).toEqual([]);
+    expect(asMessageArray(42)).toEqual([]);
+  });
+  it('coerces null / undefined to []', () => {
+    expect(asMessageArray(null)).toEqual([]);
+    expect(asMessageArray(undefined)).toEqual([]);
   });
 });

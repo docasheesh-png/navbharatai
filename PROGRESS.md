@@ -11946,3 +11946,22 @@ later "restored" the previous generation INTO the fresh build, mixing two type s
 index wipe, gated by a literal consent token so no automatic path can ever call it; wired exactly in the
 Fix-28 Approve branch (durableFilePaths also cleared for the routing below). Old code stays recoverable
 via git/GitHub. Gate: frontend tsc 0, server tsc 0, vitest 5461/5461, boot PASS.
+
+## 2026-07-07 — Fix 37 (admin-requested): failure memory + data-loss forensics INSIDE the build report
+
+Admin: "build report me likho app kitni baar fail hui; sara data ud jaye to bhi report ka data na ude;
+aur report me likh kar aaye data KYU udha, taaki fix kar pao."
+
+Honest finding first: ask (b) was ALREADY built — the report flushes durably after every recorded
+issue (buildDiag onUpdate → saveDiagnostics, throttled), so a crash/rotation mid-build cannot lose it,
+and it saves per-workspace AND per-user. Shipped the two genuinely-missing halves:
+
+- **37a `priorFailedBuilds`**: every report now stamps how many earlier builds in THIS workspace's
+  durable history ended not-ok (from listDiagnosticsHistory, best-effort/non-blocking) — a repeat
+  failure никогда looks like a first attempt, and "kitni baar fail hui" is answered in the JSON itself.
+- **37c `dataLossEvents[]`**: a new first-class report section. The File Guardian now records the
+  OBSERVED cause before every restore — 'sandbox recycled/empty' (live listing 0 vs N durable) vs
+  'files missing from sandbox' (partial gap) — with counts + mode, and the same event lands on the
+  timeline as a DATA_LOSS_EVENT warning. "Data kyu udha" is now diagnosable from the report, not
+  guessed. Tests: +3 (stamp + invalid-input guard; cause+detail+timeline; clean-build omission).
+  Gate: frontend tsc 0, server tsc 0, vitest 5464/5464, boot PASS.

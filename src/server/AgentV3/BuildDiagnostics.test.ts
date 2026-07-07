@@ -612,3 +612,28 @@ describe('narration classification — long analytical prose is never a fake err
     expect(r.problems.length).toBeGreaterThan(0);
   });
 });
+
+describe('Fix 37 — failure memory + data-loss forensics live IN the report', () => {
+  it('stamps priorFailedBuilds so a repeat failure never looks like a first attempt', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.setPriorFailedBuilds(3);
+    expect(d.report().priorFailedBuilds).toBe(3);
+    d.setPriorFailedBuilds(-1); // invalid input ignored
+    expect(d.report().priorFailedBuilds).toBe(3);
+  });
+  it('records a data-loss event WITH its observed cause ("data kyu udha")', () => {
+    const d = new BuildDiagnostics({ now: () => 42 });
+    d.recordDataLoss('sandbox recycled/empty', 'durable store holds 63 file(s); the live sandbox listed 0 — restoring 63 (mode: full).');
+    const r = d.report();
+    expect(r.dataLossEvents).toHaveLength(1);
+    expect(r.dataLossEvents?.[0].cause).toBe('sandbox recycled/empty');
+    expect(r.dataLossEvents?.[0].detail).toContain('restoring 63');
+    // Also visible on the timeline as a warning, so the problems view carries it too.
+    expect(r.issues.some((i) => i.code === 'DATA_LOSS_EVENT' && i.severity === 'warning')).toBe(true);
+  });
+  it('omits the fields entirely when nothing was recorded (clean builds stay clean)', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    expect(d.report().priorFailedBuilds).toBeUndefined();
+    expect(d.report().dataLossEvents).toBeUndefined();
+  });
+});

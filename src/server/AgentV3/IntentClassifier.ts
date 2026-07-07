@@ -291,11 +291,53 @@ export interface IntentWithConfidence {
  * Same as classifyIntent but also returns a confidence level so callers can
  * optionally upgrade borderline results with an LLM call.
  */
+/**
+ * ANSWER-ONLY OVERRIDE — the user EXPLICITLY said "don't build / just tell me". Checked FIRST,
+ * above every build signal, because a negated build verb previously did the OPPOSITE: the word
+ * "build" inside "build mat karna, bas yeh batao!" hit NEW_BUILD_SIGNALS as high-confidence
+ * new_build and started a rebuild while the user was asking where their files went (admin,
+ * 2026-07-07: "query/question ka answer hi dena hai! har bat par build karna theek nahi"). An
+ * explicit negation is an INSTRUCTION, not a keyword to weigh. Pure + tested.
+ */
+const ANSWER_ONLY_PATTERNS: readonly RegExp[] = [
+  /\b(?:build|bana\w*|banao|create|change|edit|code)\s+(?:mat|na)\b/,          // "build mat karna", "banao mat"
+  /\bmat\s+(?:banao|bana\w*|build|badlo)\b/,                                   // "mat banao", "mat bana" (bare "mat karo" stays ambiguous — not matched)
+  /\b(?:don'?t|do\s+not|never)\s+(?:build|create|change|modify|rebuild|touch|edit)\b/,
+  /\bno\s+(?:code\s+)?changes?\b/,
+  /\b(?:bas|sirf|keval)\s+(?:yeh?\s+|ye\s+)?(?:batao|bata|jawab|answer|explain)\b/, // "bas yeh batao", "sirf batao"
+  /\bjust\s+(?:tell|answer|explain|say)\b/,
+  /\banswer\s+only\b|\bonly\s+(?:tell|answer|explain)\b/,
+];
+
+/**
+ * PROJECT-STATE QUESTIONS — "where did my files go?", "kitni files bani?", "what happened?" — the
+ * user wants an ANSWER about the project's state/history, never a build. Narrow by design: broad
+ * "why is X broken" stays a PROBLEM_SIGNALS edit (a fix request), but state/whereabouts/count
+ * questions are pure queries.
+ */
+const STATE_QUESTION_SIGNALS: readonly string[] = [
+  // Hindi / Hinglish
+  'kaha gayi', 'kaha gaya', 'kahan gayi', 'kahan gaya', 'kaha gayin', 'kidhar gayi', 'kidhar gaya',
+  'kya hua', 'kyu hua', 'kaise hua', 'kitni file', 'kitne file', 'kitni files', 'kitne files',
+  'file kaha', 'files kaha', 'file kahan', 'files kahan',
+  // English
+  'where did', 'where are my', 'where is my', 'what happened', 'how many files', 'how many pages',
+];
+
 export function classifyIntentWithConfidence(message: string): IntentWithConfidence {
   const text = typeof message === 'string' ? message.trim() : '';
   if (!text) return { intent: 'new_build', confidence: 'low' };
 
   const lower = text.toLowerCase();
+
+  // Step 0 — the user explicitly said DON'T build / just answer, or asked a pure state question.
+  // Absolute priority: an instruction/question must never be out-voted by a keyword inside it.
+  for (const pattern of ANSWER_ONLY_PATTERNS) {
+    if (pattern.test(lower)) return { intent: 'chat', confidence: 'high', signal: 'answer-only' };
+  }
+  if (matchesSignal(lower, STATE_QUESTION_SIGNALS)) {
+    return { intent: 'chat', confidence: 'high', signal: 'state-question' };
+  }
 
   // Steps 1–4 → high confidence (strong, explicit signals). Uses the shared whole-word scanner so an
   // embedded first occurrence can't hide a valid standalone one later (the mis-route root cause).

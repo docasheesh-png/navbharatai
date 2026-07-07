@@ -11220,3 +11220,20 @@ Phase 3 next: Plan approve → queue → runs after the current build; build-awa
 Advise capability cards (Scan bugs / Compare / Speed test / Security scan / …).
 
 Gate: frontend tsc 0, vitest 5269/5269 PASS, build PASS. Client-only.
+## 2026-07-07 — Fix 19: questions get ANSWERS, never builds (answer-only override + state questions)
+
+Admin: "v3.0 se puchu file kaha gayi, to woh wapas build karne lag jata hai! query ka answer hi dena
+hai — har bat par build karna theek nahi." Confirmed root cause: the word "build" INSIDE the negation
+"build mat karna, bas yeh batao!" hit NEW_BUILD_SIGNALS (the very first classifier check) as
+HIGH-confidence new_build — the LLM gatekeeper was never even consulted — and a rebuild started while
+the user was asking where their files went. A negated verb was being read as the verb itself.
+- New Step 0 in classifyIntentWithConfidence (absolute priority, before every build signal):
+  (a) ANSWER_ONLY_PATTERNS — "build mat karna", "mat banao", "don't/do not build|change|touch",
+  "no code changes", "bas/sirf batao", "just tell/answer/explain", "answer only" → chat (high);
+  an explicit instruction can never be out-voted by a keyword inside it.
+  (b) STATE_QUESTION_SIGNALS — "file kaha gayi", "kya hua", "kitni files", "what happened",
+  "where did/are my", "how many files" → chat (high). Narrow by design: "why is X broken" stays a
+  PROBLEM_SIGNALS fix; bare "mat karo" stays ambiguous (not matched).
+- Tests: IntentClassifier +4 (the EXACT reported message; negations EN+Hinglish; state questions;
+  real build/edit/problem requests untouched). Gate: frontend tsc 0, server tsc 0, vitest 5338/5338,
+  boot PASS.

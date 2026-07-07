@@ -256,14 +256,16 @@ export function ViewPanels({
           }}
           onRenameFile={(oldPath: string, newPath: string) => {
             const prev = files as Record<string, string>;
-            if (prev[newPath] !== undefined) return; // target exists, abort
+            // Source must verifiably hold a string — writing `undefined` into the map crashed the
+            // whole app at render (report 2026-07-07: "undefined is not an object ('ce.split')").
+            if (prev[newPath] !== undefined || typeof prev[oldPath] !== 'string') return; // target exists / source unreadable, abort
             const next = { ...prev, [newPath]: prev[oldPath] };
             delete next[oldPath];
             setFiles(next as any);
           }}
           onDuplicateFile={(sourcePath: string, targetPath: string) => {
             const prev = files as Record<string, string>;
-            if (prev[targetPath] !== undefined) return; // target exists, abort
+            if (prev[targetPath] !== undefined || typeof prev[sourcePath] !== 'string') return; // target exists / source unreadable, abort
             setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
           }}
           sessionId={currentProSessionId}

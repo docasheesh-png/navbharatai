@@ -272,7 +272,12 @@ export function FilesPanel({
                   .map(([path, content]) => {
                     const ext = path.split('.').pop() || '';
                     const color = EXT_COLOR[ext] || 'text-white/50';
-                    const contentStr = content as string;
+                    // DEFENSIVE (crash report 2026-07-07: "undefined is not an object (evaluating
+                    // 'ce.split')" — the WHOLE app died at the error boundary because one map entry
+                    // held a non-string). A single bad value must never take the app down: render the
+                    // row with an empty body instead. Write-side guards keep the map clean; this is
+                    // the belt to their braces.
+                    const contentStr = typeof content === 'string' ? content : '';
                     const lines = contentStr.split('\n').length;
                     const bytes = contentStr.length;
                     const sizeLabel = bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}K`;

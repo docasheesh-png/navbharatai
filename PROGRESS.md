@@ -11792,3 +11792,25 @@ Base` entry yet: the surfaces are unreachable until the flag flips; the KB entry
 so the docs never claim a capability users can't see.
 
 Gate: server tsc 0, frontend tsc 0, vitest 5425/5425 PASS, build PASS, boot PASS.
+## 2026-07-07 — Fix 29 (Ashok Chakra preview loader + honest fail reasons) + Fix 30 (files-map crash killed)
+
+**Fix 29 (admin-requested):** the in-browser preview showed a blank WHITE screen between iframe mount
+and the app's first paint — "load ho raha hai ya fail, dikh hi nahi raha". Now: a rotating **Ashok
+Chakra** (24-spoke, flag-navy — shared SVG source `src/lib/ashokChakra.ts` used by BOTH the
+server-generated preview HTML and the client surface, so they can never drift) + a live seconds
+counter shows from first paint; it hides the moment the app actually mounts (MutationObserver on
+#root + explicit post-entry hide for portal apps); `showError` always replaces it. NEW 25s stuck
+watchdog: a silent hang becomes an explicit reason — names the exact npm packages that failed from
+the CDN (bareLoadErrors), detects OFFLINE, else says the network is slow with a retry hint. The outer
+PreviewSurface loading state uses the same chakra. Tests: +2 (24 spokes/rim/hub/navy; size+color).
+
+**Fix 30 (crash report: "SOMETHING WENT WRONG — undefined is not an object ('ce.split')"):** clicking
+the ＋ (duplicate) icon in the Files list killed the ENTIRE app at the error boundary. Root class: the
+app-wide `files` map is rendered as `content.split('\n')` with NO tolerance — one non-string value
+(a stale/missing source copied by duplicate/rename, or a malformed sync payload) crashes everything.
+Fixed at all three layers: (1) WRITE guards — duplicate/rename in App.tsx + ViewPanels.tsx refuse to
+copy a source that isn't verifiably a string (both sibling sites swept); (2) ENTRY sanitizer — new pure
+`sanitizeFileMap()` (src/lib/fileMapSanitize.ts) applied at the v3.0→App onFilesSync merge boundary so
+only strings ever enter the map; (3) RENDER tolerance — FilesPanel renders a row with an empty body
+instead of throwing. Tests: +4 (the exact crash class: undefined/null/object/number values dropped;
+bad keys dropped; never throws). Gate: frontend tsc 0, server tsc 0, vitest 5382/5382, boot PASS.

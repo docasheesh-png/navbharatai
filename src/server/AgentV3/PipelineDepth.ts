@@ -52,3 +52,22 @@ export function scaleBuildSeconds(baseSeconds: number, depth: PipelineDepth): nu
   const factor = depth === 'deep' ? DEEP_TIME_FACTOR : 1;
   return Math.min(Math.round(baseSeconds * factor), MAX_SCALED_BUILD_SECONDS);
 }
+
+/**
+ * How long the post-build REVIEWER (completeness check) may run, SCALED to project size and CLAMPED to
+ * the wall-clock headroom left. Pure + unit-tested.
+ *
+ * ROOT CAUSE (build report 2026-07-07 — 40-file Hospital OPD system): the reviewer had a fixed 90s cap.
+ * On a large app it read a dozen files + a dozen searches and was killed mid-review, so its verdict was
+ * silently lost (empty `review`, no [CRITICAL] captured) — the completeness safety net vanished on
+ * exactly the big apps that need it most. So: give bigger apps more time (they have more to check), but
+ * NEVER eat into the wall-clock safety margin — a reviewer must never be the reason a finished app
+ * times out. `headroomMs` = ms left before the wall-clock cap (Infinity when no cap is configured).
+ */
+export function reviewerBudgetMs(fileCount: number, headroomMs: number): number {
+  const BASE = 90_000, PER_FILE = 4_000, MIN = 45_000, MAX = 210_000, SAFETY = 60_000;
+  const files = Number.isFinite(fileCount) && fileCount > 0 ? Math.floor(fileCount) : 0;
+  const scaled = Math.min(BASE + Math.max(0, files - 20) * PER_FILE, MAX);
+  if (!Number.isFinite(headroomMs)) return scaled;          // no wall-clock cap → the scaled budget
+  return Math.max(MIN, Math.min(scaled, headroomMs - SAFETY)); // else leave a 60s wall-clock safety margin
+}

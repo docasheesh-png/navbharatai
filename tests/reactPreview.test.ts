@@ -236,3 +236,34 @@ describe('buildReactPreview — @/ alias resolves locally, not via the CDN (Fix 
     expect(html).toContain('client/src/components/ui/toaster.tsx');
   });
 });
+
+// Fix 33 (CoreUI report 2026-07-07) — the in-browser loader must handle a REAL Vite app's imports:
+// root-local specs ('src/…'), npm CSS subpaths, node: builtins, and local image imports. These assert
+// the loader machinery is present in the generated HTML (the loader itself runs in the browser).
+describe('buildReactPreview — imported-app loader resilience (Fix 33)', () => {
+  it('ships the root-local specifier machinery (src/… is LOCAL, never a CDN package)', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('ROOT_SEGS');
+    expect(html).toContain('isLocalRootSpec');
+  });
+  it('ships the bare-CSS-as-<link> handling (npm package stylesheets are not ES modules)', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain("link.rel = 'stylesheet'");
+  });
+  it('ships the node: builtin stub + skips node: in bare collection', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('node builtin stubbed');
+    expect(html).toContain("indexOf('node:') !== 0");
+  });
+  it('ships the local-image placeholder (an image import is a URL string, Vite semantics)', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('IMG_PLACEHOLDER');
+    expect(html).toContain('data:image/gif;base64');
+  });
+  it('ships the Ashok Chakra boot overlay + the 25s stuck watchdog (Fix 29 lock)', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('__nbai_boot');
+    expect(html).toContain('__nbai_spin');
+    expect(html).toContain('did not start within 25 seconds');
+  });
+});

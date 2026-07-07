@@ -167,7 +167,7 @@ import { planAnalysisSummary } from '../AgentV3/PlanIntelligence';
 import { collectWorkspaceFiles, writeWorkspaceFiles } from '../AgentV3/WorkspaceFiles';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
-import { validateProjectForPreview, devScriptPort, missingPreviewReason } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
+import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
@@ -1863,7 +1863,11 @@ export function registerAgentV3Routes(app: Express): void {
           else if (heartbeat) clearInterval(heartbeat);
         }, 5_000);
       }
-      const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 90_000, 'preview-diagnose');
+      // Fix 32: Diagnose must also boot with the project's OWN run script (dev → start → serve) —
+      // an imported app whose script is `start` (CoreUI) otherwise fails here with the same
+      // `Missing script: "dev"` the automatic boot hit. Best-effort read; scaffold default on miss.
+      const diagPkgRaw = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
+      const result = await withTimeout(actuator.runCommand(workspaceId, resolveDevRunCommand(diagPkgRaw)), 90_000, 'preview-diagnose');
       if (heartbeat) clearInterval(heartbeat);
       sendStage('Running the health check', 85);
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
@@ -3457,7 +3461,10 @@ export function registerAgentV3Routes(app: Express): void {
               if (extNote) emitLive({ type: 'narration', agent: 'architect', text: extNote, ts: Date.now() });
             }
             emitLive({ type: 'narration', agent: 'architect', text: '⚙️ Setting up the live preview in the background (npm install + dev server) — your app keeps loading while I reply…', ts: Date.now() });
-            const result = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), 240_000, 'import-preview-boot');
+            // Fix 32 (CoreUI report 2026-07-07): launch with the PROJECT'S OWN run script (dev →
+            // start → serve), never a hardcoded `npm run dev` — CoreUI's script is `start`, so the
+            // blind command failed with `Missing script: "dev"` and the live preview never booted.
+            const result = await withTimeout(actuator.runCommand(workspaceId, resolveDevRunCommand(importedFiles['package.json'] ?? null)), 240_000, 'import-preview-boot');
             const combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
             const { up, port } = parseDevServerHealthCheck(combined);
             if (up) {

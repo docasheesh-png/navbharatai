@@ -11833,3 +11833,36 @@ replies stay instant)". Plain-chat thinking deliberately NOT added: the chat lan
 zero-cost path; routing it to a paid thinking model needs billing plumbing — recorded as a possible
 future slice, honestly labeled in the UI instead of faked. Gate: frontend tsc 0, server tsc 0, vitest
 5438/5438, boot PASS.
+
+## 2026-07-07 — AUTOPSY (CoreUI import report) → Fix 32 (dev-script mismatch) + Fix 33 (loader: real-Vite imports)
+
+Admin imported the CoreUI React admin template (100 files). Ledger: ✅ import + survey turn perfect
+(honest incomplete-import warning naming all 20 missing files; survey; no rebuild — Fixes 19/24/27
+held). ✅ **Fix 29's watchdog delivered its first real catch** — instead of a silent white preview the
+user got the EXACT failed-module list, which is precisely the evidence this autopsy is built on.
+❌ Live server dead. ❌ In-browser preview dead. Both root-caused and killed:
+
+**Fix 32 — `Missing script: "dev"` (live server):** the import-preview boot and the Diagnose button
+hardcoded `npm run dev`; CoreUI's script is `start`. The recovery loop then re-ran the SAME wrong
+command and reported "no recognisable error" (the classifier had no missing-script rule) — a double
+honesty failure. Root fix: new pure `resolveDevRunCommand(packageJsonRaw)` in DevServerRecovery.ts
+(dev → start → serve, the SAME priority validateProjectForPreview uses — one source of truth), wired
+into BOTH call sites (import boot uses the imported package.json; Diagnose reads it from the sandbox).
+Classifier: new `missing_script` cause → `code_fix` (never a futile restart) with an actionable
+detail naming the mismatch. The fast-lane's own `npm run dev` (agentv3.ts:4849) is NOT changed — the
+scaffold it just generated always defines a `dev` script (not a sibling of this bug). Tests: +5.
+
+**Fix 33 — in-browser loader vs a REAL Vite app:** four sibling gaps, all from the watchdog's list:
+1. Root-local specifiers (`import … from 'src/assets/brand/logo'`, `'src/components'` — Vite
+   resolve.alias/baseUrl style) were treated as npm packages → `https://esm.sh/src/...` → dead. Now:
+   a spec whose first segment names a top-level dir/file that EXISTS in the project resolves LOCALLY
+   (ROOT_SEGS + isLocalRootSpec), so `src/assets/brand/logo` genuinely loads logo.js from the project.
+2. npm CSS subpaths (`simplebar-react/dist/simplebar.min.css`) are stylesheets, not ES modules —
+   dynamic import() always failed. Now loaded as a `<link>` from the CDN (raw file, no ?external),
+   import satisfied with an empty module — bundler semantics.
+3. `node:` builtins (vite.config's `node:path` swept into collectBare) are skipped in bare collection
+   and stubbed with a warning if ever required at runtime — one config import can't kill the preview.
+4. Local IMAGE imports (avatars/*.jpg — binaries, never in the text map) now resolve to a transparent
+   placeholder URL (Vite semantics: an image import IS a URL) instead of dying at the CDN.
+Tests: +5 (loader machinery present incl. a Fix-29 overlay/watchdog lock). Gate: frontend tsc 0,
+server tsc 0, vitest 5448/5448, boot PASS.

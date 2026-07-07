@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -194,5 +194,33 @@ describe('devScriptPort (port truth from the app\'s own dev script)', () => {
     expect(devScriptPort('{broken')).toBeNull();
     expect(devScriptPort(null)).toBeNull();
     expect(devScriptPort(pkg('serve --port 999999'))).toBeNull(); // out of range
+  });
+});
+
+describe('resolveDevRunCommand (Fix 32) — launch with the PROJECT\'S own run script, never a blind `npm run dev`', () => {
+  it('uses `npm start` for a start-script app (the CoreUI report: Missing script "dev")', () => {
+    expect(resolveDevRunCommand(JSON.stringify({ scripts: { start: 'vite', build: 'vite build' } }))).toBe('npm start');
+  });
+  it('prefers `dev` when both dev and start exist (the scaffold convention)', () => {
+    expect(resolveDevRunCommand(JSON.stringify({ scripts: { dev: 'vite', start: 'node server.js' } }))).toBe('npm run dev');
+  });
+  it('falls through to `serve` when it is the only run script', () => {
+    expect(resolveDevRunCommand(JSON.stringify({ scripts: { serve: 'vue-cli-service serve' } }))).toBe('npm run serve');
+  });
+  it('defaults to `npm run dev` when package.json is missing/unreadable/script-less', () => {
+    expect(resolveDevRunCommand(null)).toBe('npm run dev');
+    expect(resolveDevRunCommand('not json')).toBe('npm run dev');
+    expect(resolveDevRunCommand(JSON.stringify({ scripts: { build: 'vite build' } }))).toBe('npm run dev');
+  });
+});
+
+describe('classifyDevServerFailure — "Missing script" is a launch-command mismatch, never "no recognisable error"', () => {
+  it('classifies the exact CoreUI log with an honest, actionable detail and no futile restart', () => {
+    const log = 'npm error Missing script: "dev"\nnpm error\nnpm error To see a list of scripts, run:\nnpm error   npm run';
+    const d = classifyDevServerFailure(log);
+    expect(d.cause).toBe('missing_script');
+    expect(d.recovery).toBe('code_fix'); // restarting re-runs the same wrong command — never retry
+    expect(d.detail).toContain('"dev"');
+    expect(d.detail).toContain('npm start');
   });
 });

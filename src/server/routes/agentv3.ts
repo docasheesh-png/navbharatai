@@ -4787,10 +4787,19 @@ export function registerAgentV3Routes(app: Express): void {
             // Grok) is safe here — no tool-use hallucination risk — and it keeps the complete-app lane
             // alive when the Anthropic account is down/out of credits (the real outage where the lane
             // died on its very first call and every build fell to the grinding agentic ladder).
+            // Fix 31 (admin: "Thinking button nonfunctional"): the fast lane is the DEFAULT complete-app
+            // path, and it silently DROPPED the user's Thinking toggle — thinking worked only on the
+            // agentic/edit lanes. Pass it through (ClaudeClient gates by model capability, so a Haiku/
+            // fallback tier degrades gracefully) and stream the live reasoning summary into the build
+            // feed so the toggle has a real, visible effect on every lane.
+            const fastTurnId = randomUUID();
             t = await makeResilientTurnRunner(new ClaudeClient(undefined, { maxRetries: 2 })).runTurn({
               // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
               // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
               model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+              thinking,
+              onThinking: (delta: string) =>
+                events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
             });
           } catch (err) {
             try { buildDiag.recordLlmCall({ model: fbModel, provider: 'anthropic', promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }

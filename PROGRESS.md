@@ -12041,3 +12041,26 @@ FIX (rule 2 — enforce invariant at entry; rule 3 — centralize):
   dedupAndSortMessages non-array guard.
 
 Gate: tsc fe+server 0, vitest 5468/5468 (7 new), build PASS, boot:check PASS. No hot files (App.tsx/agentv3.ts) touched.
+## 2026-07-07 — AUTOPSY (Task-Manager report: 3 verify layers ne PASS bola, app 10 pages missing + broken CSS) → Fix 38
+
+The most valuable report of the day: "Build verified — compiles ✓" + "✅ Preview verified — renders
+correctly" while the REVIEWER (correctly!) found src/pages/ does not exist (10 lazy-imported pages
+never written) and the live preview showed postcss "Unclosed block" (index.css:795). Three DNA roots:
+
+- **38a — the silent manifest cap:** parseFileManifest sliced the model's plan at 40 files with no
+  trace — the 10 pages were PLANNED (App.tsx imports prove it) and silently dropped. "Building 40
+  file(s)" was the cap itself. Now bounded at 60 and, critically, never load-bearing (38c below
+  catches any gap honestly). Old cap test updated to the new deliberate bound.
+- **38b — fail-open verification:** fastVerify ran `npx --no-install tsc … || true`; when tsc
+  couldn't run, the output had no "error TS" → "verified ✓" WITHOUT ANY CHECK. Now a __TSC_CLEAN__
+  marker prints only when tsc genuinely ran and exited 0 — no errors AND no marker = honest
+  "VERIFICATION DID NOT RUN" failure. A check that didn't happen can never again report success.
+- **38c — missing-files gate:** the deterministic findUnresolvedLocalImports (already proven on the
+  import pipeline) now runs INSIDE fastVerify over the written set (+scaffold): any local module a
+  written file references that was never written fails verify with the exact list — and the SAME
+  repair pass then CREATES those files instead of shipping a shell that crashes on first navigation.
+- **38d — CSS syntax gate:** tsc never reads CSS. New pure cssBraceImbalance() (comments stripped)
+  fails verify on unclosed/extra braces with the file named — the exact "Unclosed block" class.
+Preview-verify's "renders correctly" on a spinner-shell (timing leniency) recorded as a follow-up.
+Tests: +4 (the @layer-unclosed exact case, balanced/negative, the 50-file manifest kept whole).
+Gate: frontend tsc 0, server tsc 0, vitest 5468/5468, boot PASS.

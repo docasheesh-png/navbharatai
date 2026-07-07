@@ -50,7 +50,27 @@ export function parseFileManifest(text: string): SimpleFileSpec[] {
     seen.add(path);
     out.push({ path, purpose: purpose.slice(0, 300) });
   }
-  return out.slice(0, 40); // a simple app never needs more — keeps the build bounded
+  // Fix 38a (Task-Manager report 2026-07-07): the old silent 40-file slice DROPPED the model's own
+  // planned files — App.tsx imported 10 pages the cap had cut, three verify layers then lied "✓".
+  // 60 bounds a runaway manifest; anything the model plans within it is BUILT, never silently dropped
+  // (and the unresolved-local-imports verify below catches any remaining gap honestly).
+  return out.slice(0, 60);
+}
+
+/**
+ * Cheap CSS sanity: net brace imbalance of a stylesheet (comments stripped). A positive number means
+ * unclosed block(s) — postcss/vite will refuse the whole file ("Unclosed block", the exact overlay
+ * from the Task-Manager report) and the app renders unstyled/dead while tsc stays green (it never
+ * reads CSS). Pure.
+ */
+export function cssBraceImbalance(css: string): number {
+  const noComments = String(css || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  let open = 0, close = 0;
+  for (const ch of noComments) {
+    if (ch === '{') open++;
+    else if (ch === '}') close++;
+  }
+  return open - close;
 }
 
 /**

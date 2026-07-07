@@ -87,6 +87,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [roleBusy, setRoleBusy] = useState(false);
   const roleAbortRef = useRef<AbortController | null>(null);
   const [roleProposedSteps, setRoleProposedSteps] = useState<{ role: 'planner' | 'advisor'; steps: string[] } | null>(null);
+  // 3 SEPARATE PAGES (admin 2026-07-06): Build / Plan / Advise are 3 tabs, ONE shared session + project
+  // memory but their OWN visible thread. The Build tab is the existing thread (userMsgs + agentHistory +
+  // live state.narration); Plan/Advise each keep their own messages here so switching tabs shows a
+  // distinct chat page while the build keeps running underneath.
+  const [roleThreads, setRoleThreads] = useState<{ planner: ChatMsg[]; advisor: ChatMsg[] }>({ planner: [], advisor: [] });
   const [queueItems, setQueueItems] = useState<QueueItemView[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
   // Proposed steps already added this turn (disable their buttons — enqueue is idempotent-by-user).
@@ -129,10 +134,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [showWorkspace, setShowWorkspace] = useState(false);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Compact Build/Plan/Advise mode dropdown (moved off its own full-width row into the input row to
-  // save space; stays selectable even while a build runs so the user can multitask — switch to the
-  // read-only Plan/Advise lanes to analyze the code while a build is in flight).
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
@@ -329,7 +331,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // narration (which streams in word-by-word and finalizes in place), ordered by
   // timestamp. Reading narration straight from state means streaming updates show
   // live instead of being frozen into a one-time snapshot.
-  const convo: ChatMsg[] = [
+  // The BUILD tab's thread (its own messages + live build narration). Build keeps running underneath
+  // regardless of which tab is showing.
+  const buildConvo: ChatMsg[] = [
     ...agentHistory,
     ...userMsgs,
     ...state.narration.map((n) => ({
@@ -350,6 +354,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     .filter((m) => running || !/^⏱️\s*Still building…/.test(m.text || ''))
     .sort((a, b) => a.ts - b.ts);
 
+  // The thread the ACTIVE tab renders — Build's, or the Plan/Advise lane's own page. History-save and
+  // build activity/diffs are BUILD-only, so the role tabs render a clean read-only conversation.
+  const convo: ChatMsg[] = chatMode === 'build'
+    ? buildConvo
+    : [...roleThreads[chatMode]].sort((a, b) => a.ts - b.ts);
+
   // Proposed steps to approve into the queue — from a Plan/Advise role turn (roleProposedSteps, the
   // decoupled lane) OR, for backward-compat, a build-stream turn (state.proposedSteps). The role one
   // wins when present. Shown even while a build runs (Plan/Advise are concurrent, read-only).
@@ -359,7 +369,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // rows — everything the engine did between two prose lines ("Created 33 files", "Ran `npm
   // install`", real +N/-M from the actual patches) in one glanceable, expandable row, instead of
   // the old flat spam of per-file ticks and ⏱ heartbeats. Pure grouping in activityTimeline.ts.
-  const chatBlocks = buildChatBlocks(convo, state.activity, state.diffs);
+  // Build actions (activity/diffs) decorate ONLY the Build tab; the read-only Plan/Advise pages render a
+  // clean conversation.
+  const chatBlocks = buildChatBlocks(convo, chatMode === 'build' ? state.activity : [], chatMode === 'build' ? state.diffs : {});
 
   // All checkpoints across the session (prior turns + the live build), deduped by
   // sha so the History tab keeps showing earlier checkpoints across messages.
@@ -585,7 +597,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // PREVIOUS session while `convo` is already reduced, so a write here would retitle the previous
     // session's row from the wrong thread. The post-switch state change re-runs this effect safely.
     if (sessionSwitchRef.current) return;
-    const firstUser = convo.find((m) => m.role === 'user')?.text;
+    // Title from the BUILD thread (the durable session) regardless of which tab is active — a Plan/Advise
+    // page's first message must never retitle the session.
+    const firstUser = buildConvo.find((m) => m.role === 'user')?.text;
     if (!firstUser) return; // nothing meaningful to save yet
     const title = firstUser.slice(0, 40) + (firstUser.length > 40 ? '…' : '');
     const docId = `v3_${sessionIdRef.current}`;
@@ -712,7 +726,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const sendRole = async (role: 'planner' | 'advisor', override?: string) => {
     const text = (override ?? prompt).trim();
     if (!text || roleBusy) return;
-    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    // Append to THIS lane's own thread (Plan or Advise page) — not the Build thread.
+    setRoleThreads((t) => ({ ...t, [role]: [...t[role], { role: 'user', text, ts: Date.now() }] }));
     if (override === undefined) { setPrompt(''); setComposerExpanded(false); }
     setRoleProposedSteps(null);
     setRoleBusy(true);
@@ -752,11 +767,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         }
       }
       const reply = prose.trim() || `The ${role} had nothing to add.`;
-      setAgentHistory((h) => [...h, { role: 'agent', agent: 'architect', text: reply, ts: Date.now() }]);
+      setRoleThreads((t) => ({ ...t, [role]: [...t[role], { role: 'agent', agent: 'architect', text: reply, ts: Date.now() }] }));
     } catch (e) {
       if (!controller.signal.aborted) {
         const msg = e instanceof Error ? e.message : String(e);
-        setAgentHistory((h) => [...h, { role: 'agent', agent: 'architect', text: `⚠️ The ${role} could not reply: ${msg}. Please try again.`, ts: Date.now() }]);
+        setRoleThreads((t) => ({ ...t, [role]: [...t[role], { role: 'agent', agent: 'architect', text: `⚠️ The ${role} could not reply: ${msg}. Please try again.`, ts: Date.now() }] }));
       }
     } finally {
       setRoleBusy(false);
@@ -1895,13 +1910,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             workspace is open it shares the width on desktop, and is HIDDEN on
             mobile (the workspace takes over so it's usable on a phone). */}
         <div className={`${showWorkspace ? 'hidden sm:flex sm:w-1/2 sm:border-r border-zinc-800' : 'flex flex-1'} flex-col min-h-0`}>
+          {/* 3 PAGES (admin 2026-07-06): Build · Plan · Advise — one shared session + project memory, each
+              its OWN visible thread. Switching tabs shows a distinct chat page; the build keeps running
+              underneath whichever tab is shown (a pulsing dot on Build marks that). */}
+          <div className="shrink-0 flex items-center gap-1 px-2 pt-2 border-b border-zinc-800/60 pb-2">
+            {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setChatMode(m)}
+                title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${chatMode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+              >
+                <span>{icon}</span>{label}
+                {m === 'build' && running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
+                {m === 'planner' && roleThreads.planner.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.planner.length / 2)}</span>}
+                {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
+              </button>
+            ))}
+            {chatMode !== 'build' && running && (
+              <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />Build running</span>
+            )}
+          </div>
           {/* Conversation */}
           {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
             {convo.length === 0 && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />
-                Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.
+                {chatMode === 'planner'
+                  ? <>🧠 <b className="text-zinc-300">Plan</b> — read-only. Describe a goal and I’ll plan it with you (aware of your build); approve the steps into the build queue.</>
+                  : chatMode === 'advisor'
+                  ? <>🔍 <b className="text-zinc-300">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
+                  : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
               </div>
             )}
             {chatBlocks.map((b) => b.kind === 'msg'
@@ -2168,40 +2209,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               {/* LEFT COLUMN (admin 2026-07-06): Build selector on TOP, settings + attach in a row
                   BELOW it — moved off the input row into the empty left space so the message box gets
                   the freed width. */}
-              <div className="flex flex-col gap-1 shrink-0">
-              {/* Compact Build/Plan/Advise mode dropdown. Always selectable — even mid-build — so the
-                  user can switch to the read-only Plan/Advise lanes and analyze while a build runs. */}
-              <div className="relative">
-                {modeMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-32 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1 space-y-0.5">
-                      {([['build', 'Build'], ['planner', 'Plan'], ['advisor', 'Advise']] as const).map(([mode, label]) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          onClick={() => { setChatMode(mode); setModeMenuOpen(false); }}
-                          title={mode === 'build' ? 'Builder — messages build/edit the app' : mode === 'planner' ? 'Planner — read-only: decompose goals into queueable steps' : 'Advisor — read-only: audit / test / research / explain'}
-                          className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors ${chatMode === mode ? 'bg-indigo-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setModeMenuOpen((v) => !v)}
-                  title="Mode — Build / Plan / Advise (switchable anytime, even during a build)"
-                  className={`h-[38px] w-full px-2 flex items-center justify-center gap-1 rounded border text-[10px] font-semibold uppercase tracking-wide ${modeMenuOpen || chatMode !== 'build' ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
-                >
-                  {chatMode === 'build' ? 'Build' : chatMode === 'planner' ? 'Plan' : 'Advise'}
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-              </div>
-              {/* settings + attach in a row directly BELOW the Build selector */}
-              <div className="flex gap-1">
+              {/* Mode is now the 3-tab switcher at the TOP of the chat (Build/Plan/Advise) — admin
+                  2026-07-06. The composer keeps just the build options + attach. */}
+              <div className="flex gap-1 shrink-0">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
                 {settingsOpen && (
@@ -2285,7 +2295,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
               </button>
               </div>{/* /settings + attach row */}
-              </div>{/* /left column */}
               <div className="relative flex-1" data-tour="chat">
                 <textarea
                   ref={composerRef}

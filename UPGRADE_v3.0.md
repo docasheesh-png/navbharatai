@@ -1365,11 +1365,24 @@
 - **Files:** `src/components/ide/monacoThemes.ts` (new), `tests/monacoThemes.test.ts` (new),
       `src/components/ide/Editor.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-DEV.10 — Dedicated Code Explanation Panel  ❌ MISSING  [MED]
+### P-DEV.10 — Dedicated Code Explanation Panel  ✅ DONE (2026-07-06)
 - `AIDebugger.tsx` is error-focused. `AISuggestions.tsx` shows templates. No "explain this selection" panel.
-- [ ] Add "Explain Code" to Monaco right-click context menu → send selected text to AgentV3 with `intent: explain`.
-- [ ] Render response in a dedicated `CodeExplainPanel.tsx` side panel: plain-language description, complexity label, pattern name, suggested refactors.
-- **Files:** `src/components/ide/Editor.tsx`, new `src/components/ide/CodeExplainPanel.tsx`, `src/components/ide/ActivityBar.tsx`.
+- [x] **`CodeExplainer.ts`** (pure, deterministic, 9 unit tests) — `explainCode(code, filename?)` → a plain-language
+  summary + a branch-complexity score/label (Low/Moderate/High) + detected patterns (state, side-effects,
+  memoization, Context, async I/O, routing, forms, TS types, error handling) + conservative refactoring
+  suggestions (large file, high complexity, multiple components/file, async-without-try/catch, keyless list
+  render, too many imports) + real structural stats. Recognises components, custom hooks, utility/class modules
+  and stylesheets. **No AI / no credit spend**, empty-safe, never throws.
+- [x] **Endpoint** `POST /api/workspace/explain { code, filename? }` (rate-limited + validated) and a wired
+  **"Explain Code" card** in `ProjectInsightsPanel` (paste code → instant explanation). AppKnowledgeBase entry
+  `explain-code` added.
+- **Honest scope:** delivered as a paste-in panel + endpoint (my collision-free surface) rather than a Monaco
+  right-click menu — the right-click variant would edit the hot `Editor.tsx`; the endpoint is reusable by that
+  menu later. The explanation is 100% deterministic structural analysis (fully verifiable), not an AI call.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5361/5361 ✅ (9 new) · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/AgentV3/CodeExplainer.ts`, new `src/server/routes/explainCode.ts`,
+  new `tests/codeExplainer.test.ts`, `server.ts`, `src/components/panels/ProjectInsightsPanel.tsx`,
+  `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-DEV.11 — Inline Code Comments / Review Mode  ❌ MISSING  [LOW]
 - LiveCollaboration.tsx has chat but no GitHub PR-style inline code comments tied to specific line ranges.

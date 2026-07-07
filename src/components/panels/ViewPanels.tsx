@@ -250,6 +250,9 @@ export function ViewPanels({
             const next = { ...(files as Record<string, string>) };
             delete next[path];
             setFiles(next as any);
+            // REAL delete: also purge IndexedDB + the v3.0 durable workspace, or the file
+            // silently resurrects on the next reload (fake delete).
+            onFilesRemoved?.([path]);
           }}
           onRenameFile={(oldPath: string, newPath: string) => {
             const prev = files as Record<string, string>;

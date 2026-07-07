@@ -11463,3 +11463,19 @@ guidance) — no behavioral duplicate; hard router is `isEditMode = intent==='ed
 corrected by the intent fix. Regression tests: +4 (the exact report prompt + short complete-build forms
 + spec-without-"complete" + the must-not-flip edits). Gate: frontend tsc 0, server tsc 0, vitest
 5356/5356, boot PASS. Honesty bugs (report-not-saved, plan 0/7) queued as the next autopsy items.
+
+### Autopsy follow-up — the two honesty bugs (report-not-saved, plan 0/7): honest root-cause status
+- **Plan showed 0/7 despite "Done":** plan progress is `todos.filter(done)/todos.length` (AgentV3Panel).
+  The page-by-page surgical-edit run created MULTIPLE plans ("Updated the plan" ~5×) and ended with the
+  last one (Queue page, 7 steps) at 0 done. This fragmentation is a DOWNSTREAM symptom of the Fix-25
+  misroute — the efficient manifest/blueprint lane produces ONE coherent plan, so this should not recur
+  once the fresh build is routed correctly. To be CONFIRMED on the admin's retest with Fix 25.
+- **"No build report yet" after a Done build:** the diagnostics save (agentv3.ts ~5517) writes per-
+  workspace AND per-user (`saveLatestForUser`) on the finalize path, and it is best-effort with a
+  swallowed `.catch(() => {})`. From the screenshot alone the exact failure (a swallowed Firestore
+  write error, or a workspaceId/userId mismatch on the download fallback `getLatestDiagnostics(null)`)
+  CANNOT be proven — fixing from a guess would violate the evidence-first rule (rule 1). Honest status
+  (rule 6): recorded as an OPEN item; will root-cause it with real evidence if it persists after Fix 25
+  (a correctly-routed full build exercises the standard finalize path, so it may already resolve). If it
+  recurs, the concrete next step is to make that save failure OBSERVABLE (log the swallowed error) so the
+  true cause is visible, then fix it — rather than ship a cosmetic patch now.

@@ -61,6 +61,24 @@ export function isTimeoutProviderError(error: unknown): boolean {
   return /timed? ?out|timeout/i.test(text);
 }
 
+/** The largest context window any provider in the fleet offers (Claude/Vertex/Gemini ≈ 1M tokens). */
+const MAX_FLEET_CONTEXT_TOKENS = 1_048_576;
+
+/**
+ * A prompt so large that NO provider in the fleet can accept it — falling through the ladder is
+ * guaranteed-fail (real case, 2026-07-07: a reviewer sub-agent on a 100-file CoreUI template grew its
+ * transcript to 2,204,128 tokens; CLAUDE(1M) → HAIKU(200k) → VERTEX(1M) → GEMINI(1M) all rejected the
+ * SAME doomed request — 4 wasted round-trips). Only classified hopeless when the error itself reports
+ * a token count above the fleet maximum — a merely-large prompt (e.g. 500k that a smaller provider
+ * bounced) still falls through, because a bigger-window provider later in the chain might fit it. Pure.
+ */
+export function isHopelesslyOversizedError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  if (!/prompt is too long|input token count|exceeds the maximum number of tokens|context length/i.test(text)) return false;
+  const m = /(\d{6,})\s*(?:tokens)?/.exec(text.replace(/[,_]/g, ''));
+  return !!m && Number(m[1]) > MAX_FLEET_CONTEXT_TOKENS;
+}
+
 /** Rough prompt size (chars) of a turn — system + every message's text/tool content. Pure. */
 export function estimatePromptChars(params: RunTurnParams): number {
   let n = typeof params.system === 'string' ? params.system.length : 0;
@@ -210,6 +228,11 @@ export function makeMultiProviderTurnRunner(
             deadForRun.set(name, err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
             timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
+          } else if (isHopelesslyOversizedError(err)) {
+            // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
+            // Abort now instead of replaying the same doomed multi-megabyte request down the chain.
+            const reason0 = err instanceof Error ? err.message : String(err);
+            throw new Error(`This request is too large for every AI provider (${fellBackFrom.join(' → ')} tried). Last error: ${reason0} [The conversation/sub-agent transcript has grown past the largest context window — a shorter request or a fresh turn is required.]`);
           }
           // Fall through to the next provider; the last one is the backstop.
         }

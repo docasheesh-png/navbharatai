@@ -199,3 +199,23 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     expect((await runner.runTurn(PARAMS)).text).toBe('from glm'); // small turn still reaches GLM — not benched
   });
 });
+
+describe('hopelessly-oversized prompts abort the ladder (the 2.2M-token reviewer case, 2026-07-07)', () => {
+  it('classifies the real errors: >1M tokens = hopeless; a merely-large prompt still falls through', async () => {
+    const { isHopelesslyOversizedError } = await import('./MultiProviderTurnRunner');
+    expect(isHopelesslyOversizedError(new Error('400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 2204128 tokens > 1000000 maximum"}}'))).toBe(true);
+    expect(isHopelesslyOversizedError(new Error('The input token count (1885546) exceeds the maximum number of tokens allowed (1048576).'))).toBe(true);
+    // 209k > Haiku's 200k but far under the 1M fleet max — a bigger-window provider might fit it.
+    expect(isHopelesslyOversizedError(new Error('prompt is too long: 209130 tokens > 200000 maximum'))).toBe(false);
+    expect(isHopelesslyOversizedError(new Error('529 overloaded_error'))).toBe(false);
+  });
+
+  it('aborts the chain on the FIRST hopeless error instead of replaying the doomed request downward', async () => {
+    const { makeMultiProviderTurnRunner: make } = await import('./MultiProviderTurnRunner');
+    const claude = runnerFail('prompt is too long: 2204128 tokens > 1000000 maximum');
+    const haiku = runnerOk('never reached');
+    const runner = make([{ name: 'CLAUDE', runner: claude }, { name: 'CLAUDE_HAIKU', runner: haiku }]);
+    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/too large for every AI provider/);
+    expect(haiku.runTurn).not.toHaveBeenCalled(); // the 3 wasted round-trips are gone
+  });
+});

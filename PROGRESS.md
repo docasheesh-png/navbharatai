@@ -11301,3 +11301,21 @@ the v3 engine never writes) whenever no v3 workspace was active — three gates,
   extras into PreviewSurface, and migrate WorkspacePane's internal PreviewPanel usage — then delete
   ide/PreviewPanel.tsx entirely.
 - Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot PASS.
+
+## 2026-07-07 — Fix 23: hopelessly-oversized prompts abort the ladder + ⚠️ reviewer transcript bounding is now URGENT
+
+CoreUI-template report (100-file zip import): the import + survey were flawless (no files changed, rich
+analysis, stale-imports spotted) and Fix 15's Vertex/Gemini last-resort ran live for the first time.
+But the REVIEWER sub-agent free-explored the 100-file template until its transcript hit **2,204,128
+tokens** — beyond EVERY provider's window (Claude 1M, Haiku 200k, Vertex/Gemini 1M) — and the ladder
+then replayed the same doomed multi-megabyte request through all four providers.
+- Fixed here: `isHopelesslyOversizedError` — an oversize error reporting a token count above the fleet
+  maximum (1,048,576) ABORTS the turn immediately with an honest message ("too large for every AI
+  provider… the transcript must be shortened"); a merely-large prompt (e.g. Haiku's 209k bounce) still
+  falls through, since a bigger-window provider later in the chain may fit it. Tests +2 (the real 2.2M
+  and 1.88M errors classified; chain aborts on first hopeless error, later providers never called).
+- ⚠️ URGENT NEXT (the actual root): the reviewer/sub-agent transcript is UNBOUNDED — the main loop has
+  A1 compaction, sub-agents do not. Bound sub-agent transcripts (compaction or hard cap + summarize)
+  and/or make the reviewer sample-based (already recorded at Fix 13). Also: the review label said
+  "(85/100)" on an ERRORED review — score must not render when the review failed (honesty).
+- Gate: frontend tsc 0, server tsc 0, vitest 5340/5340, boot PASS.

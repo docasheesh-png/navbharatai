@@ -2452,7 +2452,10 @@ export function registerAgentV3Routes(app: Express): void {
       // matching how every other v3.0 file write persists. Actuator write is best-effort: a VFS-tier
       // or cold sandbox has no live copy to write into, and the durable save below is authoritative.
       try { await actuator.writeFile(workspaceId, filePath, result.newSource); } catch { /* best-effort */ }
-      await saveWorkspaceFiles(workspaceId, { [filePath]: result.newSource });
+      // MERGE, never replace: a single-file edit must UPSERT into the durable index — the old
+      // saveWorkspaceFiles call REPLACED the whole path index with this ONE file (the "sab gayab" wipe
+      // class; the store's shrink-guard now also blocks it, this is the correct semantics at the source).
+      await mergeWorkspaceFiles(workspaceId, { [filePath]: result.newSource });
       res.json({ ok: true, file: filePath, content: result.newSource });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to apply the visual edit.' });
@@ -5161,7 +5164,12 @@ export function registerAgentV3Routes(app: Express): void {
           // AGENTV3_AUTOFIX meant v3.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
           // best-effort — never blocks/fails the build; the fix's writes are saved.
           const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
-          if (criticals.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted) {
+          // NEVER on an import/survey turn (2026-07-07): the user said "do not change any files yet",
+          // the reviewer found criticals in the IMPORTED code, and this pass went and edited the
+          // project anyway — a direct instruction violation. On import turns the findings stay
+          // advisory; the user decides ("create the missing files") — the AI turn already has the
+          // [IMPORT COMPLETENESS] context to do it on request.
+          if (criticals.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted && !isImportTurn) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${criticals.length} critical issue(s) — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,
@@ -5172,8 +5180,11 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, criticals)), 120_000, 'reviewer-critical-autofix');
               if (fix.ok) result = fix;
-              // Persist the repair's writes (the reviewer runs AFTER the main save, so save again).
-              if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+              // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
+              // TURN's writes (on an edit turn that's a handful of files), and the old
+              // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
+              // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
+              if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
               try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${criticals.length} reviewer critical issue(s)`, autoResolved: true }); } catch { /* best-effort */ }
             } catch (e) { console.log(`[AGENTV3] reviewer-critical auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
           }

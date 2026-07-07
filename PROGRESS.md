@@ -11136,3 +11136,33 @@ exactly those files (never renames imports).
 - Session note: "sab gayab, 0 file" after hard refresh was the designed new-session behavior — the
   admin recovered everything from the GitHub copy (every build auto-pushes there); History restore
   remains available too.
+
+## 2026-07-07 — Fix 17 (SEVERITY: DATA LOSS): the "49 files → 3, sab gayab" wipe — shrink guard + merge semantics + import-turn autofix gate
+
+The admin's imported OPD project dropped from 49 files to 3. Full honest autopsy — the root cause chain
+includes a fix from THIS session:
+
+**The wipe chain:** (1) `saveWorkspaceFiles` REPLACES the durable path index with exactly the given
+set; (2) several callers pass a PARTIAL set — the reviewer critical-fix pass persists only
+`writtenFiles` (this turn's few writes), and the visual-editor endpoint saves ONE file; (3) Fix 11
+turned the reviewer critical-fix ON by default, and on the admin's import+survey turn it wrote ~3 fix
+files and then REPLACED the 49-file index with just those → every other file vanished from the durable
+store ("sab gayab"). The reviewer fix ALSO violated the user's explicit "do not change any files yet".
+File CONTENT docs remain in Firestore (only the index shrank) and the GitHub repo holds the full app —
+recovery = re-import; nothing is permanently lost.
+
+**The class fixes (all three levels):**
+1. **Invariant at the store (kills the class forever):** pure `savePlanForFileSet(existing, new)` —
+   a save that would shrink an established index (>3 files) to under HALF its size is a partial update
+   and is routed to `mergeWorkspaceFiles` (union) instead, with a visible persistenceHealth note. No
+   current or future call site can wipe a project again. Genuine full rebuilds (comparable count)
+   still replace; deletions still go through removeWorkspaceFiles.
+2. **Correct semantics at the two worst call sites:** the visual-editor single-file save and the
+   reviewer-fix save now call `mergeWorkspaceFiles` directly.
+3. **Instruction honesty:** the reviewer critical-autofix is now GATED OFF on import/survey turns
+   (`!isImportTurn`) — findings stay advisory; the user decides ("create the missing files"), which the
+   [IMPORT COMPLETENESS] context (Fix 16) already enables.
+- Tests: WorkspaceFilePersistence.test.ts +3 (the exact 49→3 and 48→1 wipes → merge; comparable/half
+  → replace; fresh/tiny → replace). Gate: frontend tsc 0, server tsc 0, vitest 5330/5330, boot PASS.
+- Honest accountability note: Fix 11's default-on autofix EXPOSED this latent wipe class (the replace
+  semantics + partial-set saves predate it); the class is now dead at the store level.

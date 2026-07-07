@@ -188,6 +188,46 @@ export function wantsFreshStart(message: string): boolean {
 }
 
 /**
+ * True when the message is an EXPLICIT request to build a COMPLETE, whole application — not a
+ * targeted edit. This must WIN over the "non-empty workspace ⇒ treat as edit" heuristic.
+ *
+ * Real report (2026-07-07): "Create a complete Hospital OPD Management System" with a full feature
+ * spec was downgraded to a surgical edit because a handful of scaffold/test files had been restored
+ * from history (projectExists=true) — so the engine "edited" the app page-by-page over 3 junk files
+ * (26 min, 146 steps, incomplete app, wrong "Editing your existing app" message). An explicit
+ * "create a complete <app/system>" request is unambiguously a fresh build regardless of stray files.
+ *
+ * Strict by design so it can NEVER reclassify a genuine edit ("add a logout button", "fix the
+ * header") as a rebuild: it requires a build VERB, a whole-application NOUN, AND either the
+ * "complete/full/production-ready <app>" construction or a sizeable structured brief (a real spec —
+ * feature list + length — never a one-line edit instruction). Pure.
+ */
+export function isExplicitCompleteBuild(message: string): boolean {
+  if (typeof message !== 'string' || !message.trim()) return false;
+  const m = message.toLowerCase();
+  const BUILD_VERB = /\b(create|build|generate|develop|design|make|banao|bana\s?do|bana\s?de)\b/;
+  if (!BUILD_VERB.test(m)) return false;
+  const APP_NOUN =
+    '(app|application|web\\s?app|website|site|system|platform|dashboard|portal|saas|software|tool|clone|management\\s+system)';
+  // "a complete / full / production-ready <app/system>" — the build-a-whole-app construction, where
+  // the completeness word sits just before the application noun ("a complete Hospital OPD Management
+  // System"). Reverse phrasings ("make the dashboard complete") deliberately do NOT match.
+  const completeApp = new RegExp(
+    '\\b(complete|full|entire|whole|production[-\\s]?ready|end[-\\s]?to[-\\s]?end|comprehensive)\\b[\\s\\S]{0,40}\\b' +
+      APP_NOUN +
+      '\\b',
+  );
+  if (completeApp.test(m)) return true;
+  // Or a build-verb + app-noun request carrying a sizeable structured brief (a genuine spec), which
+  // a short edit instruction never has.
+  const hasAppNoun = new RegExp('\\b' + APP_NOUN + '\\b').test(m);
+  const hasSpec =
+    message.length > 220 &&
+    /\b(features?|requirements?|modules?|pages?|screens?|technolog(?:y|ies)|tech\s+stack)\b/i.test(message);
+  return hasAppNoun && hasSpec;
+}
+
+/**
  * Clear social/conversational patterns. A message matches 'chat' only if it has
  * NO build signal AND hits one of these (or is a very short, signal-free message).
  */

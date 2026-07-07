@@ -1,5 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart, wantsFreshStart } from './IntentClassifier';
+import { classifyIntent, classifyIntentWithConfidence, classifyIntentSmart, wantsFreshStart, isExplicitCompleteBuild } from './IntentClassifier';
+
+describe('isExplicitCompleteBuild — a full-app build wins over the non-empty-workspace "treat as edit" rule', () => {
+  it('detects the exact report prompt that was wrongly downgraded to an edit (2026-07-07)', () => {
+    const prompt = [
+      'Create a complete Hospital OPD Management System.',
+      'Technology: React, TypeScript, Vite, Tailwind CSS',
+      'Features:',
+      'Dashboard - Today\'s patients, Waiting patients, Completed consultations',
+      'Patient Module - Add patient, Edit patient, Delete patient, Search patient',
+      'OPD Registration - Auto OPD Number, Visit Date, Department, Doctor',
+      'Generate a production-ready application with clean architecture.',
+    ].join('\n');
+    expect(isExplicitCompleteBuild(prompt)).toBe(true);
+  });
+  it('detects short "complete/full/production-ready <app>" build phrasings', () => {
+    expect(isExplicitCompleteBuild('build a complete e-commerce website')).toBe(true);
+    expect(isExplicitCompleteBuild('create a full CRM system')).toBe(true);
+    expect(isExplicitCompleteBuild('generate a production-ready SaaS dashboard')).toBe(true);
+    expect(isExplicitCompleteBuild('design a comprehensive admin platform')).toBe(true);
+  });
+  it('detects a build request carrying a real structured spec even without the word "complete"', () => {
+    const spec = [
+      'Build a booking application using React, TypeScript, Vite and Tailwind CSS.',
+      'Features: search rooms, availability calendar, payments, email notifications, an admin panel, and reporting.',
+      'Requirements: fully responsive, dark mode, localStorage persistence, form validation, toast notifications, reusable components, and a modular folder structure.',
+    ].join('\n');
+    expect(spec.length).toBeGreaterThan(220);
+    expect(isExplicitCompleteBuild(spec)).toBe(true);
+  });
+  it('does NOT flip a genuine surgical edit into a rebuild (must never regress the editor use-case)', () => {
+    expect(isExplicitCompleteBuild('add a logout button')).toBe(false);
+    expect(isExplicitCompleteBuild('fix the header color')).toBe(false);
+    expect(isExplicitCompleteBuild('make the dashboard complete')).toBe(false); // "complete" AFTER the noun, no build-a-whole-app construction
+    expect(isExplicitCompleteBuild('update the patient form validation')).toBe(false);
+    expect(isExplicitCompleteBuild('build a profile component')).toBe(false); // a component, not a whole app; no spec
+    expect(isExplicitCompleteBuild('change the app name to Acme')).toBe(false);
+    expect(isExplicitCompleteBuild('')).toBe(false);
+  });
+});
 
 describe('wantsFreshStart — only an EXPLICIT reset overrides "edit the existing project"', () => {
   it('detects clear start-over phrases (English)', () => {

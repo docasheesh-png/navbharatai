@@ -168,7 +168,7 @@ import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY } from '../lib/prompts';
-import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
@@ -2996,8 +2996,19 @@ export function registerAgentV3Routes(app: Express): void {
     // the keyword fallback returned new_build, a build-intent turn on a NON-empty project — with no
     // explicit "start over" — is an EDIT, never a rebuild-from-scratch. The smart classifier usually
     // already returns edit; this guarantees it when the LLM didn't run.
-    if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt)) {
+    // EXPLICIT full-app build WINS over the non-empty-workspace heuristic (report 2026-07-07): a
+    // detailed "Create a complete Hospital OPD Management System" was downgraded to a surgical edit
+    // because 3 scaffold/test files restored from history made projectExists=true — so the engine
+    // "edited" the app page-by-page over junk files (26 min, 146 steps, incomplete). An explicit
+    // build-a-complete-app request is a fresh build regardless of stray files in the workspace.
+    const explicitCompleteBuild = isExplicitCompleteBuild(prompt);
+    if (intent === 'new_build' && projectExists && !wantsFreshStart(prompt) && !explicitCompleteBuild) {
       intent = 'edit_existing';
+    } else if (intent === 'edit_existing' && explicitCompleteBuild) {
+      // Rescue a spurious edit classification (the LLM biased by projectExists, or a keyword edit
+      // signal) when the user EXPLICITLY asked to CREATE A COMPLETE new app. Strict detector, so a
+      // genuine edit ("add a logout button", "fix the header") can never be flipped to a rebuild.
+      intent = 'new_build';
     }
     // An import turn (zip attachment OR a set GitHub import URL) must NEVER take the cheap chat
     // early-exit — the Landing Pipeline (and the follow-up survey/edit) lives in the build path

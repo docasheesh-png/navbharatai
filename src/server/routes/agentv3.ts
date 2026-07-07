@@ -694,6 +694,37 @@ function endBuild(rb: RunningBuild): void {
   rb.subscribers.clear();
   if (rb.key) { try { liveChannel.close(rb.key); } catch { /* best-effort */ } }
 }
+
+/**
+ * VAJRA V4-1c (NIRMAN Phase A, server half) — how long to wait for in-flight builds to flush before a
+ * SIGTERM shutdown proceeds. Cloud Run gives ~10s of grace after SIGTERM; leave headroom so the HTTP
+ * server still closes cleanly. No builds → 0 (exit immediately). PURE + unit-tested.
+ */
+export function shutdownGraceMs(buildCount: number, capMs = 6_000): number {
+  if (!(buildCount > 0)) return 0;
+  return Math.min(capMs, 6_000);
+}
+
+/**
+ * Gracefully drain every in-flight AgentV3 build on shutdown (a deploy/rotation). For each live build:
+ * emit an HONEST "server is restarting — your build resumes automatically, files are safe" narration
+ * (the client's V4-1a auto-continue then re-sends the turn cleanly instead of seeing an abrupt drop),
+ * and ABORT its controller so the build's own `finally` (durable file + diagnostics save) runs before
+ * the process exits — bounding lost work to the ≤6s flush already in place. Best-effort + bounded:
+ * returns the number of builds signalled; never throws, never hangs (the caller caps the total wait).
+ */
+export function drainRunningBuilds(): number {
+  let drained = 0;
+  for (const rb of runningBuilds.values()) {
+    if (rb.ended) continue;
+    drained++;
+    try {
+      broadcastBuild(rb, { type: 'narration', agent: 'architect', text: '⚙️ The server is restarting (a deploy) — your build will resume automatically in a moment. Your files are safe.', ts: Date.now() });
+    } catch { /* best-effort — a dead subscriber never blocks the drain */ }
+    try { rb.abort.abort(); } catch { /* the build's own finally still saves durably */ }
+  }
+  return drained;
+}
 /** Is a build currently running for this account? (Account-wide — unscoped by session. Kept for
  *  callers that only care "is this account building anything", e.g. the /chat route's own
  *  reconnect-on-drop, which is always reconnecting to a build IT started, so it can't attach to the

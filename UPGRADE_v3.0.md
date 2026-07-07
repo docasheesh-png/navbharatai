@@ -1907,6 +1907,10 @@
   boundary to each: **Nuxt** `error.vue` (with `clearError`), **SvelteKit** `+error.svelte` + `+layout.svelte`
   + `app.d.ts`, **Remix** `ErrorBoundary` export in `root.tsx` (`useRouteError`/`isRouteErrorResponse`). Tests
   guard each on the live sandbox copy. (`vitest run` 5301/5301, +3.)
+- [x] **Error-handling theme completed across the remaining frameworks (2026-07-06):** **Vue** now registers a
+  global `app.config.errorHandler` in `main.ts` (an uncaught component/lifecycle error no longer silently
+  blanks the app), and **Astro** now ships the canonical `src/pages/404.astro`. Live-copy tests guard both.
+  (`vitest run` 5414/5414, +2.)
 - **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5298/5298 ✅ (5 new) · `build` ✅ · `boot:check` PASS.
 - **Files:** `src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NextjsProvider.ts` (live),
   `src/server/AppMakerLab/generator/templates/NextjsProvider.ts` (legacy, synced), `tests/templateProviders.test.ts`.

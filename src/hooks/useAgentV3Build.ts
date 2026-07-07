@@ -177,6 +177,19 @@ export interface ConversationMeta {
  *   • gone, but we saw `result`  → finish cleanly (stop the spinner, NO scary error)
  *   • gone, and no `result`      → the honest "stopped responding" error
  */
+/**
+ * VAJRA V4-1a — should an INTERRUPTED build auto-continue instead of dead-ending on the error?
+ * (NIRMAN Phase A; admin: "chat dead nahi honi chahiye".) A network cut / instance rotation killed
+ * the server-side build mid-flight (gone + no terminal result). The files are durable (≤6s flush),
+ * and the manual recovery is always the same one message ("please continue") — so send it
+ * AUTOMATICALLY, exactly once per interruption: alreadyContinued guards a loop (a second death of
+ * the SAME turn falls back to the honest error), and hasLastPrompt guards a fresh mount with
+ * nothing to continue. PURE + unit-tested.
+ */
+export function shouldAutoContinue(opts: { sawResult: boolean; alreadyContinued: boolean; hasLastPrompt: boolean }): boolean {
+  return !opts.sawResult && !opts.alreadyContinued && opts.hasLastPrompt;
+}
+
 export function stallWatchdogAction(opts: { alive: boolean; sawResult: boolean }): 'reconnect' | 'finish' | 'error' {
   if (opts.alive) return 'reconnect';
   if (opts.sawResult) return 'finish';
@@ -199,6 +212,12 @@ export function useAgentV3Build(): UseAgentV3Build {
   // so the watchdog must not show "stopped responding" on a build that actually succeeded. Reset at
   // every build start (start/resume), set the instant `result` arrives on any stream path.
   const sawResultRef = useRef<boolean>(false);
+  // V4-1a — the last user turn's shape (for auto-continue) + the once-per-interruption guard.
+  const lastStartRef = useRef<{ prompt: string; opts: { userId?: string; email?: string; sessionId?: string; framework?: string } } | null>(null);
+  const autoContinuedRef = useRef<boolean>(false);
+  // True only for the auto-continue's own start() call — so it does NOT re-arm the one-shot guard
+  // (a second death of the same interrupted turn must fall back to the honest error, never loop).
+  const autoStartRef = useRef<boolean>(false);
   // Guards resume() against OVERLAPPING reconnects. (It must NOT guard on `running`: the watchdog
   // reconnects WHILE running is true, and the old `if (running) return` made that reconnect a no-op,
   // leaving the spinner stuck forever after a genuinely dead stream.)
@@ -849,6 +868,11 @@ export function useAgentV3Build(): UseAgentV3Build {
   const start = useCallback(
     async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor' }) => {
       if (running) return;
+      // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
+      // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
+      lastStartRef.current = { prompt, opts: { userId: opts?.userId, email: opts?.email, sessionId: opts?.sessionId, framework: opts?.framework } };
+      if (!autoStartRef.current) autoContinuedRef.current = false; // only a REAL user turn re-arms the one-shot
+      autoStartRef.current = false;
       userIdRef.current = opts?.userId;
       emailRef.current = opts?.email;
       // This build's generation — reset() can now fire WHILE this loop is streaming (the user
@@ -1129,14 +1153,26 @@ export function useAgentV3Build(): UseAgentV3Build {
             // clean FINISH (a silent post-build reviewer/cleanup phase just ended) — never overwrite a
             // succeeded-and-rendered build with "stopped responding".
             if (action === 'error') {
-              setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+              // V4-1a (NIRMAN Phase A, admin: "chat dead nahi honi chahiye"): the build was
+              // interrupted mid-flight (network cut / instance rotation). Files are durable — so
+              // instead of dead-ending on the notice, AUTO-CONTINUE with the proven recovery message,
+              // exactly once per interruption. A second death of the same turn (or nothing to
+              // continue) falls back to the honest notice.
+              if (shouldAutoContinue({ sawResult: sawResultRef.current, alreadyContinued: autoContinuedRef.current, hasLastPrompt: !!lastStartRef.current })) {
+                autoContinuedRef.current = true;
+                const last = lastStartRef.current!;
+                setError(null);
+                setTimeout(() => { autoStartRef.current = true; void start('please continue', last.opts); }, 400);
+              } else {
+                setError('The build stopped responding — your files are saved. Send a message and I\'ll continue from where it left off.');
+              }
             }
           }
         } catch { /* probe failed — leave running and try again next tick */ }
       })();
     }, 10_000);
     return () => clearInterval(id);
-  }, [running, resume]);
+  }, [running, resume, start]);
 
   return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
 }

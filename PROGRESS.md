@@ -11332,3 +11332,48 @@ turns (0 files written) and free-explored the 100-file CoreUI import to a 2.2M-t
 - Ships together with Fix 23 (hopeless-oversize ladder abort). Remaining root (sub-agent transcript
   bounding for turns that DO build) stays the recorded urgent next task.
 - Gate: frontend tsc 0, server tsc 0, vitest 5340/5340, boot PASS.
+
+## 2026-07-07 — VAJRA_V4_DESIGN.md: the v4.0 blueprint (admin mandate: "sabki acchi cheez lekar apna new system — in sab se accha")
+
+Synthesized from the Replit/Lovable/Bolt/Cursor analysis + our 24 root-cause fixes. Five pillars:
+Nirman Workers (deploy/network-proof builds via job queue + Firestore event stream), BrowserBox
+(esbuild-wasm in-browser bundler → WebContainers evaluation later), Smriti Index (embeddings
+retrieval + sub-agent transcript budgets), Satya Gates (our verify/honesty law, formalized), Kavach
+(git-first + shrink-guarded durable store). Sequenced V4-1…V4-6, each shipping via the normal cycle;
+V4-1 (auto-resume + graceful drain) = the already-recorded next task. Read the doc before starting
+any v4 work.
+
+## 2026-07-07 — VAJRA V4-1a SHIPPED: interrupted builds auto-continue ("chat dead nahi honi chahiye")
+
+The first VAJRA stone. When the stall-watchdog finds the build GONE with no terminal result (network
+cut / instance rotation — the two real "sab gayab" deaths), the client no longer dead-ends on "The
+build stopped responding": it AUTO-SENDS the proven recovery turn ("please continue", same
+session/workspace — the engine's continuation signals resume from the durable files), exactly ONCE
+per interruption. Pure `shouldAutoContinue` guards it: never after a finished build, never twice for
+the same turn (an auto-start does not re-arm the one-shot — a second death falls back to the honest
+notice), never with nothing to continue. A new REAL user turn re-arms it. Tests +3.
+Remaining V4-1 parts (panel file-restore on gone + server graceful drain) stay queued; V4-2…V4-6 per
+VAJRA_V4_DESIGN.md. Gate: tsc 0/0, vitest 5343/5343, boot PASS.
+
+## 2026-07-07 — VAJRA V4-2 SHIPPED: hard ceiling on recent tool_result dumps (the 2.2M-token blowup, killed at the root)
+
+Fix 23 ABORTED a hopeless-oversize prompt; V4-2 makes it IMPOSSIBLE to build one. Root cause: A1
+compaction (compactTranscriptForModel) trimmed only OLD tool_results — the last ~6 messages were sent
+VERBATIM, so a few huge read_file/glob/grep dumps in that recent window alone grew a reviewer's prompt
+to 2,204,128 tokens. New `maxAnyToolResultChars` (default 40000 ≈ ~10k tokens) hard-caps EVERY
+tool_result payload including the recent window — assistant reasoning and the latest screenshot pass
+through untouched (only runaway tool dumps shrink); the model re-reads specific lines if it needs full
+content. Applies to the main loop AND every sub-agent (both run through AgentRunner). Identity return
+preserved when nothing shrinks (stable cache prefix). Tests: SessionTimeline +3, one existing recent-
+verbatim test updated to pass a high cap. Gate: frontend tsc 0, server tsc 0, vitest 5346/5346, boot
+PASS. Ships in the same PR as the VAJRA blueprint + V4-1a.
+
+## 2026-07-07 — VAJRA V4-2 (honesty half): a FAILED reviewer never renders a fake "(85/100)"
+
+`reviewBuild` destructured only `summary` and IGNORED the sub-agent's `ok` flag — so a reviewer that
+FAILED (its own prompt hit a provider limit) had its error-summary parsed as a real review with no
+criticals → default score 85 → "⚠️ Build Review (85/100): Error: All v3.0 providers failed…" (report
+2026-07-07). Fix: honor `ok`, and a new pure `isReviewFailureSummary` catches an error-string summary
+even when ok:true (provider-failed / too-large / step-limit / budget-cap / empty) → score 0 →
+formatReview renders NOTHING; the build stands on its own verify gates, no invented number. Tests:
+ReviewerAgent +4. Gate: frontend tsc 0, server tsc 0, vitest 5350/5350, boot PASS.

@@ -305,6 +305,15 @@ export interface ModelCompactOptions {
   keepRecentMessages?: number;
   /** Truncate an OLD tool_result's string content beyond this many chars (default 2000). */
   maxOldToolResultChars?: number;
+  /**
+   * VAJRA V4-2 (SMRITI discipline) — HARD ceiling on EVERY tool_result payload, INCLUDING the recent
+   * verbatim window (default 40000 chars ≈ ~10k tokens). Root cause it kills: A1 compaction trimmed
+   * only OLD results, so a few huge read_file/glob/grep dumps in the last 6 messages alone grew a
+   * reviewer's prompt to 2,204,128 tokens — past every provider window (report 2026-07-07). No single
+   * tool dump can now exceed this; the model re-reads specific lines if it needs the full content.
+   * Only tool_result content is capped — assistant reasoning and the latest screenshot pass through.
+   */
+  maxAnyToolResultChars?: number;
 }
 
 const MODEL_OMITTED_IMAGE = '[screenshot from an earlier turn omitted to keep context small — it was already analyzed; take a new screenshot if you need to see the page again]';
@@ -343,23 +352,58 @@ function compactOldBlockForModel(block: unknown, maxToolResultChars: number): un
 }
 
 /**
- * Bound the transcript SENT TO THE MODEL (not stored): recent messages verbatim, older large
- * tool_results head+tail truncated. Never mutates the input. Pure + deterministic.
+ * Cap ONLY tool_result payloads in a RECENT message (VAJRA V4-2) — assistant reasoning and the latest
+ * screenshot/image pass through untouched, so in-flight work keeps full fidelity; only a runaway tool
+ * dump (a huge read_file/glob/grep) is bounded so it can't blow the context window on its own.
+ */
+function capRecentToolResults(block: unknown, max: number): unknown {
+  if (!block || typeof block !== 'object') return block;
+  const b = block as Record<string, unknown>;
+  if (b.type !== 'tool_result') return b; // images + assistant text stay verbatim in the recent window
+  const content = b.content;
+  if (typeof content === 'string') {
+    const t = headTailTruncate(content, max);
+    return t === content ? b : { ...b, content: t };
+  }
+  if (Array.isArray(content)) {
+    let changed = false;
+    const nc = content.map((c) => {
+      const cc = c as Record<string, unknown>;
+      if (cc && cc.type === 'text' && typeof cc.text === 'string' && cc.text.length > max) { changed = true; return { ...cc, text: headTailTruncate(cc.text, max) }; }
+      return c;
+    });
+    return changed ? { ...b, content: nc } : b;
+  }
+  return b;
+}
+
+/**
+ * Bound the transcript SENT TO THE MODEL (not stored): recent messages keep reasoning + images
+ * verbatim but their tool_result dumps are hard-capped (V4-2); older large tool_results are head+tail
+ * truncated more aggressively. Never mutates the input. Pure + deterministic.
  */
 export function compactTranscriptForModel(messages: unknown[], opts: ModelCompactOptions = {}): unknown[] {
   const keepRecent = Math.max(0, opts.keepRecentMessages ?? 6);
   const maxChars = Math.max(200, opts.maxOldToolResultChars ?? 2_000);
-  const cutoff = Math.max(0, messages.length - keepRecent); // messages BEFORE cutoff are "old"
-  if (cutoff === 0) return messages; // everything is recent → nothing to do
-  return messages.map((m, i) => {
-    if (i >= cutoff) return m; // recent → verbatim (shared reference, no copy)
+  const maxAny = Math.max(maxChars, opts.maxAnyToolResultChars ?? 40_000); // recent cap ≥ old cap
+  let anyChanged = false;
+  const out = messages.map((m, i) => {
     if (!m || typeof m !== 'object') return m;
     const msg = m as { role?: unknown; content?: unknown };
     if (!Array.isArray(msg.content)) return m; // plain-string turns (the user's request) are small — keep
+    const recent = i >= messages.length - keepRecent;
     let changed = false;
-    const content = msg.content.map((b) => { const r = compactOldBlockForModel(b, maxChars); if (r !== b) changed = true; return r; });
-    return changed ? { ...msg, content } : m;
+    const content = msg.content.map((b) => {
+      // Recent → cap only tool_result dumps at the generous ceiling; old → aggressive trim + drop images.
+      const r = recent ? capRecentToolResults(b, maxAny) : compactOldBlockForModel(b, maxChars);
+      if (r !== b) changed = true;
+      return r;
+    });
+    if (!changed) return m;
+    anyChanged = true;
+    return { ...msg, content };
   });
+  return anyChanged ? out : messages; // stable identity when nothing shrank (cache prefix + no-op guarantee)
 }
 
 // ── AI-side recall (the "same memory" half of the order) ───────────────────────────────────────

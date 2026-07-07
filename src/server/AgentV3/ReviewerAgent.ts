@@ -118,7 +118,14 @@ export async function reviewBuild(opts: {
   ].join('\n');
 
   try {
-    const { summary } = await opts.spawn('reviewer', instruction);
+    const { ok, summary } = await opts.spawn('reviewer', instruction);
+    // VAJRA V4-2 honesty: a reviewer that FAILED (ok:false — e.g. its own prompt hit a provider
+    // limit) or whose "summary" is itself a provider-failure error must NOT render as a real review
+    // with a made-up "(85/100)" score (report 2026-07-07: "⚠️ Build Review (85/100): Error: All v3.0
+    // providers failed…"). Score 0 → formatReview shows nothing; the build stands on its own gates.
+    if (ok === false || isReviewFailureSummary(summary)) {
+      return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };
+    }
     const issues = parseReviewOutput(summary);
     const criticalCount = issues.filter((i) => i.severity === 'critical').length;
     const passed = criticalCount === 0;
@@ -132,6 +139,12 @@ export async function reviewBuild(opts: {
   } catch {
     return { passed: true, score: 0, issues: [], summary: 'Review skipped.' };
   }
+}
+
+/** True when a reviewer's returned summary is actually a failure/error string, not a real review. Pure. */
+export function isReviewFailureSummary(summary: unknown): boolean {
+  if (typeof summary !== 'string' || !summary.trim()) return true;
+  return /^\s*error\b|all v3\.0 providers failed|providers? (failed|are unavailable)|too large for every ai provider|step limit reached|budget (cap|limit) reached/i.test(summary);
 }
 
 /** Format a ReviewResult as a narration string. Returns '' if score is 0 (skipped). */

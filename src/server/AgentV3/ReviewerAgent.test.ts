@@ -1,10 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { reviewBuild, formatReview } from './ReviewerAgent';
+import { reviewBuild, formatReview, isReviewFailureSummary } from './ReviewerAgent';
 import type { SubAgentSpawn } from './ToolDispatcher';
 
 const makeSpawn =
   (summary: string): SubAgentSpawn =>
   async () => ({ ok: true, summary });
+
+describe('isReviewFailureSummary + reviewBuild honesty (no fake "(85/100)" on an errored review)', () => {
+  it('classifies real reviewer-failure summaries as failures', () => {
+    expect(isReviewFailureSummary('Error: All v3.0 providers failed (CLAUDE → CLAUDE_HAIKU → VERTEX → GEMINI).')).toBe(true);
+    expect(isReviewFailureSummary('This request is too large for every AI provider')).toBe(true);
+    expect(isReviewFailureSummary('Step limit reached (40)')).toBe(true);
+    expect(isReviewFailureSummary('')).toBe(true);
+    expect(isReviewFailureSummary(undefined)).toBe(true);
+  });
+  it('a real review is NOT a failure', () => {
+    expect(isReviewFailureSummary('[CRITICAL] Login missing. Score: 40')).toBe(false);
+    expect(isReviewFailureSummary('[PASS] App looks complete. Score: 92')).toBe(false);
+  });
+  it('score 0 (no rendered review) when the reviewer sub-agent returned ok:false — the report bug', async () => {
+    const failed: SubAgentSpawn = async () => ({ ok: false, summary: 'Error: All v3.0 providers failed. Last error: prompt is too long: 2204128 tokens > 1000000 maximum' });
+    const r = await reviewBuild({ userRequest: 'x', fileTree: ['a'], fileSample: [], spawn: failed });
+    expect(r.score).toBe(0);
+    expect(formatReview(r)).toBe(''); // never "⚠️ Build Review (85/100): Error: All v3.0 providers failed…"
+  });
+  it('score 0 even when ok:true but the summary IS an error string (belt-and-suspenders)', async () => {
+    const r = await reviewBuild({ userRequest: 'x', fileTree: ['a'], fileSample: [], spawn: makeSpawn('Error: All v3.0 providers failed') });
+    expect(r.score).toBe(0);
+    expect(formatReview(r)).toBe('');
+  });
+});
 
 describe('reviewBuild', () => {
   it('returns passed=true and high score when reviewer says PASS', async () => {

@@ -11946,3 +11946,28 @@ later "restored" the previous generation INTO the fresh build, mixing two type s
 index wipe, gated by a literal consent token so no automatic path can ever call it; wired exactly in the
 Fix-28 Approve branch (durableFilePaths also cleared for the routing below). Old code stays recoverable
 via git/GitHub. Gate: frontend tsc 0, server tsc 0, vitest 5461/5461, boot PASS.
+
+## 2026-07-07 — CLOSED open root cause: silent swallowed diagnostics saves → report can no longer vanish silently
+
+**Admin mandate:** "build report gayab nahi honi chahiye chahe kuch bhi ho." The last live leak path
+was the recorded open root cause: every report save (`saveDiagnostics` / `saveDiagnosticsHistory` /
+`saveLatestForUser`) swallowed its failure — `.catch(() => {})` at all 4 route callsite clusters AND
+`catch { /* best-effort */ }` inside the store — so a Firestore write failure (quota, network, IAM)
+lost the report with no log, no retry, no trace.
+
+**Fix (class-level, centralized in DiagnosticsStore.ts — callsites untouched, every caller inherits):**
+1. **RETRY** — `persistWithRetry()`: bounded retries with backoff (400ms/1.5s) so transient failures
+   self-heal.
+2. **HONESTY** — a final failure is LOUD forever: structured `[DIAGNOSTICS] SAVE FAILED` console.error
+   (greppable in Cloud Logging) + a `DIAGNOSTICS_SAVE_FAILED` audit event. "Best-effort" still holds
+   for the build (persistence failure never blocks/breaks a build) — it no longer means "silent".
+3. **FALLBACK** — the trimmed report is stashed in a bounded in-memory emergency cache (LRU, 10 per
+   kind, ≤~18MB absolute worst case), and BOTH loaders (`loadDiagnostics`, `loadLatestForUser`) fall
+   back to it when the durable read is empty — so even with Firestore fully down the report stays
+   downloadable from the instance until durability returns. Privacy preserved: null user never
+   stashes/recalls (no shared anon bucket, same as #937).
+
+**Regression tests (+9):** retry-to-success on transient failure (THE class case), exhausted retries
+return the real error, LRU eviction + refresh, loader fallback serves the emergency copy, null-user
+privacy, and the VITEST no-op save contract locked. Full store suite 28/28.
+**Gate:** server tsc 0 · frontend tsc · full vitest · boot PASS (below).

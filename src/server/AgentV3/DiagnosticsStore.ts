@@ -10,6 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { audit } from '../lib/audit';
 import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 const COLLECTION = 'workspace_diagnostics_v3';
@@ -29,6 +30,88 @@ function getDb(): admin.firestore.Firestore | null {
   } catch {
     return null;
   }
+}
+
+// ── NEVER-LOSE-THE-REPORT layer (admin 2026-07-07: "build report gayab nahi honi chahiye chahe
+// kuch bhi ho") ─────────────────────────────────────────────────────────────────────────────────
+// Root cause (recorded as an open root cause in PROGRESS.md until now): every persistence path
+// swallowed its failure — `.catch(() => {})` at the callsites AND `catch { /* best-effort */ }`
+// here — so a Firestore write failure (quota, network, IAM) lost the report SILENTLY: no log, no
+// retry, no trace. The class dies here, centrally, in three layers:
+//   1. RETRY    — every write gets bounded retries with backoff (transient failures self-heal).
+//   2. HONESTY  — a final failure is LOUD: a structured console.error (greppable in Cloud Logging)
+//                 plus a DIAGNOSTICS_SAVE_FAILED audit event. Never silent again.
+//   3. FALLBACK — the trimmed report is stashed in a bounded in-memory emergency cache that the
+//                 loaders consult whenever the durable read comes back empty — so even with
+//                 Firestore fully down, the report stays downloadable from this instance until
+//                 durability returns.
+// "Best-effort" still holds for the BUILD (a persistence failure never blocks or breaks a build);
+// it no longer means "silent".
+
+const RETRY_DELAYS_MS = [400, 1500];
+
+/**
+ * Run one persistence attempt with bounded retries + backoff. Returns the outcome instead of
+ * throwing, so callers can report honestly. Pure control flow (sleep injectable) + unit-tested.
+ */
+export async function persistWithRetry(
+  attempt: () => Promise<void>,
+  opts?: { delaysMs?: number[]; sleep?: (ms: number) => Promise<void> },
+): Promise<{ ok: boolean; error?: unknown; attempts: number }> {
+  const delays = opts?.delaysMs ?? RETRY_DELAYS_MS;
+  const sleep = opts?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let lastErr: unknown;
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      await attempt();
+      return { ok: true, attempts: i + 1 };
+    } catch (err) {
+      lastErr = err;
+      if (i < delays.length) await sleep(delays[i]);
+    }
+  }
+  return { ok: false, error: lastErr, attempts: delays.length + 1 };
+}
+
+export type EmergencyKind = 'workspace' | 'user';
+/** Bounded: reports are already trimmed to ≤900 KB, so 10+10 entries ≈ ≤18 MB absolute worst case. */
+const EMERGENCY_MAX_ENTRIES = 10;
+const emergencyCaches: Record<EmergencyKind, Map<string, { report: BuildDiagnosticsReport; savedAt: number }>> = {
+  workspace: new Map(),
+  user: new Map(),
+};
+
+/** Hold a report in the in-memory emergency cache (LRU, bounded). Unit-tested. */
+export function emergencyStash(kind: EmergencyKind, key: string, report: BuildDiagnosticsReport): void {
+  if (!key || !report) return;
+  const cache = emergencyCaches[kind];
+  if (cache.has(key)) cache.delete(key); // refresh LRU position
+  cache.set(key, { report, savedAt: Date.now() });
+  while (cache.size > EMERGENCY_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+/** Recall a report from the emergency cache, or null. Unit-tested. */
+export function emergencyRecall(kind: EmergencyKind, key: string): BuildDiagnosticsReport | null {
+  if (!key) return null;
+  return emergencyCaches[kind].get(key)?.report ?? null;
+}
+
+/** Test hook: wipe the emergency caches so unit tests stay independent of each other. */
+export function emergencyClearForTest(): void {
+  emergencyCaches.workspace.clear();
+  emergencyCaches.user.clear();
+}
+
+/** A save definitively failed (after retries / with Firestore unavailable): stash + be LOUD. */
+function reportSaveFailure(kind: EmergencyKind, key: string, report: BuildDiagnosticsReport, error: unknown): void {
+  emergencyStash(kind, key, report);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[DIAGNOSTICS] SAVE FAILED (${kind}=${key}) after retries — report held in the in-memory emergency cache. Cause: ${message}`);
+  try { audit('DIAGNOSTICS_SAVE_FAILED', { kind, key, error: message.slice(0, 300) }); } catch { /* the honesty layer itself must never throw */ }
 }
 
 /** Keep the last `n` items of an array (newest), or the whole array if shorter. */
@@ -110,10 +193,10 @@ export function compactReportForRecord(report: BuildDiagnosticsReport): BuildDia
   };
 }
 
-/** Persist a workspace's final diagnostics report. Best-effort — never throws. */
+/** Persist a workspace's final diagnostics report. Never blocks a build; never loses silently. */
 export async function saveDiagnostics(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
-  const db = getDb();
-  if (!db || !workspaceId || !report) return;
+  if (!workspaceId || !report) return;
+  if (process.env.VITEST) return; // unit-test contract: no Firestore, no stash (see DiagnosticsStore.test.ts)
   try {
     let stored = trimReportForStorage(report);
     // Final safety net: if it is still somehow over the limit, drop the heaviest channels entirely
@@ -128,24 +211,35 @@ export async function saveDiagnostics(workspaceId: string, report: BuildDiagnost
         problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
       };
     }
-    await db.collection(COLLECTION).doc(workspaceId).set({ report: stored, savedAt: Date.now() }, { merge: false });
-  } catch {
-    /* best-effort — a persistence failure never blocks or breaks a build */
+    const db = getDb();
+    if (!db) { reportSaveFailure('workspace', workspaceId, stored, new Error('Firestore unavailable (init failed)')); return; }
+    const result = await persistWithRetry(async () => {
+      await db.collection(COLLECTION).doc(workspaceId).set({ report: stored, savedAt: Date.now() }, { merge: false });
+    });
+    if (!result.ok) reportSaveFailure('workspace', workspaceId, stored, result.error);
+  } catch (err) {
+    // Unexpected (e.g. a pathological report shape): still never silent, never build-breaking.
+    reportSaveFailure('workspace', workspaceId, report, err);
   }
 }
 
-/** Load a workspace's last persisted diagnostics report, or null when absent. Never throws. */
+/** Load a workspace's last persisted diagnostics report, or null when absent. Never throws.
+ *  Falls back to the in-memory emergency cache when the durable read comes back empty — the
+ *  other half of the never-lose-the-report guarantee. */
 export async function loadDiagnostics(workspaceId: string): Promise<BuildDiagnosticsReport | null> {
+  if (!workspaceId) return null;
   const db = getDb();
-  if (!db || !workspaceId) return null;
-  try {
-    const doc = await db.collection(COLLECTION).doc(workspaceId).get();
-    if (!doc.exists) return null;
-    const data = doc.data();
-    return (data?.report as BuildDiagnosticsReport) ?? null;
-  } catch {
-    return null;
+  if (db) {
+    try {
+      const doc = await db.collection(COLLECTION).doc(workspaceId).get();
+      if (doc.exists) {
+        const data = doc.data();
+        const report = (data?.report as BuildDiagnosticsReport) ?? null;
+        if (report) return report;
+      }
+    } catch { /* fall through to the emergency cache */ }
   }
+  return emergencyRecall('workspace', workspaceId);
 }
 
 // ── Durable per-USER "latest report" (P-REPORT.5 — "the report vanishes on every message/reload") ──
@@ -174,35 +268,45 @@ export function perUserDiagnosticsDocId(userId: string | null | undefined): stri
   return id ? id : null;
 }
 
-/** Persist the user's LATEST settled build report, retrievable by userId alone. Best-effort. */
+/** Persist the user's LATEST settled build report, retrievable by userId alone.
+ *  Never blocks a build; never loses silently (retry + loud failure + emergency stash). */
 export async function saveLatestForUser(userId: string | null, report: BuildDiagnosticsReport): Promise<void> {
-  const db = getDb();
   const uid = perUserDiagnosticsDocId(userId);
-  if (!db || !report || !uid) return; // no real user → no shared 'anon' bucket (privacy)
+  if (!report || !uid) return; // no real user → no shared 'anon' bucket (privacy)
+  if (process.env.VITEST) return; // unit-test contract: no Firestore, no stash (see DiagnosticsStore.test.ts)
   try {
     let stored = trimReportForStorage(report);
     if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
       const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
       stored = { ...stored, commands: undefined, llmCalls: undefined, issues: furtherTrimmedIssues, problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')) };
     }
-    await db.collection(USER_COLLECTION).doc(uid).set({ report: stored, savedAt: Date.now() }, { merge: false });
-  } catch {
-    /* best-effort — never blocks or breaks a build */
+    const db = getDb();
+    if (!db) { reportSaveFailure('user', uid, stored, new Error('Firestore unavailable (init failed)')); return; }
+    const result = await persistWithRetry(async () => {
+      await db.collection(USER_COLLECTION).doc(uid).set({ report: stored, savedAt: Date.now() }, { merge: false });
+    });
+    if (!result.ok) reportSaveFailure('user', uid, stored, result.error);
+  } catch (err) {
+    reportSaveFailure('user', uid, report, err);
   }
 }
 
-/** Load the user's LATEST settled build report (durable, cold-start-proof), or null. Never throws. */
+/** Load the user's LATEST settled build report (durable, cold-start-proof), or null. Never throws.
+ *  Falls back to the in-memory emergency cache when the durable read comes back empty. */
 export async function loadLatestForUser(userId: string | null): Promise<BuildDiagnosticsReport | null> {
-  const db = getDb();
   const uid = perUserDiagnosticsDocId(userId);
-  if (!db || !uid) return null; // no real user → never read the shared 'anon' bucket (would leak another anon's report)
-  try {
-    const doc = await db.collection(USER_COLLECTION).doc(uid).get();
-    if (!doc.exists) return null;
-    return (doc.data()?.report as BuildDiagnosticsReport) ?? null;
-  } catch {
-    return null;
+  if (!uid) return null; // no real user → never read the shared 'anon' bucket (would leak another anon's report)
+  const db = getDb();
+  if (db) {
+    try {
+      const doc = await db.collection(USER_COLLECTION).doc(uid).get();
+      if (doc.exists) {
+        const report = (doc.data()?.report as BuildDiagnosticsReport) ?? null;
+        if (report) return report;
+      }
+    } catch { /* fall through to the emergency cache */ }
   }
+  return emergencyRecall('user', uid);
 }
 
 // ── History (P-REPORT.4 — "the report disappears the moment the next build starts") ────────────
@@ -234,8 +338,8 @@ export interface DiagnosticsHistoryEntry {
  * entry, so an in-progress build never pollutes the list. Best-effort — never throws.
  */
 export async function saveDiagnosticsHistory(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
-  const db = getDb();
-  if (!db || !workspaceId || !report || report.endedAt === undefined) return;
+  if (!workspaceId || !report || report.endedAt === undefined) return;
+  if (process.env.VITEST) return; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
   try {
     let stored = trimReportForStorage(report);
     // Same final safety net as saveDiagnostics — a history entry that fails to write because it's
@@ -250,14 +354,32 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
         problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')),
       };
     }
-    await db
-      .collection(COLLECTION)
-      .doc(workspaceId)
-      .collection(HISTORY_SUBCOLLECTION)
-      .doc(String(report.startedAt))
-      .set({ report: stored, savedAt: Date.now() }, { merge: false });
-  } catch {
-    /* best-effort — history is a convenience, never blocks or breaks a build */
+    const db = getDb();
+    // History gets retry + LOUD failure but no emergency stash: the same report is already held by
+    // the workspace + per-user latest paths (both stash), so the user-facing report survives; only
+    // this archive entry is at risk, and losing it silently is still forbidden — hence the log/audit.
+    if (!db) {
+      console.error(`[DIAGNOSTICS] HISTORY SAVE FAILED (workspace=${workspaceId}) — Firestore unavailable (init failed).`);
+      try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: 'Firestore unavailable (init failed)' }); } catch { /* never throws */ }
+      return;
+    }
+    const result = await persistWithRetry(async () => {
+      await db
+        .collection(COLLECTION)
+        .doc(workspaceId)
+        .collection(HISTORY_SUBCOLLECTION)
+        .doc(String(report.startedAt))
+        .set({ report: stored, savedAt: Date.now() }, { merge: false });
+    });
+    if (!result.ok) {
+      const message = result.error instanceof Error ? result.error.message : String(result.error);
+      console.error(`[DIAGNOSTICS] HISTORY SAVE FAILED (workspace=${workspaceId}) after retries: ${message}`);
+      try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[DIAGNOSTICS] HISTORY SAVE FAILED (workspace=${workspaceId}) unexpectedly: ${message}`);
+    try { audit('DIAGNOSTICS_SAVE_FAILED', { kind: 'history', key: workspaceId, error: message.slice(0, 300) }); } catch { /* never throws */ }
   }
 }
 

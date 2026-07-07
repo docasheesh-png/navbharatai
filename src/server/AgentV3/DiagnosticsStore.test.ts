@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { trimReportForStorage, compactReportForRecord, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId } from './DiagnosticsStore';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { trimReportForStorage, compactReportForRecord, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId, persistWithRetry, emergencyStash, emergencyRecall, emergencyClearForTest } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -162,6 +162,77 @@ describe('saveLatestForUser / loadLatestForUser (VITEST-skip, best-effort)', () 
   it('loadLatestForUser resolves to null (never throws) when Firestore is unreachable', async () => {
     await expect(loadLatestForUser('user-1')).resolves.toBeNull();
     await expect(loadLatestForUser(null)).resolves.toBeNull();
+  });
+});
+
+// ── NEVER-LOSE-THE-REPORT layer (admin 2026-07-07: "build report gayab nahi honi chahiye chahe
+// kuch bhi ho"). The old class: every save swallowed its failure (`catch {}`) — a Firestore write
+// error lost the report with no log, no retry, no trace. These tests lock the three replacement
+// layers: bounded retry, loud observable failure, and the in-memory emergency fallback the loaders
+// consult when the durable read is empty.
+describe('persistWithRetry — transient persistence failures self-heal, final failures are reported', () => {
+  it('succeeds first try without sleeping', async () => {
+    let slept = 0;
+    const r = await persistWithRetry(async () => {}, { delaysMs: [1, 1], sleep: async () => { slept++; } });
+    expect(r).toMatchObject({ ok: true, attempts: 1 });
+    expect(slept).toBe(0);
+  });
+  it('THE CLASS FIX: a write that fails twice then succeeds is retried to success (was: lost silently)', async () => {
+    let calls = 0;
+    const r = await persistWithRetry(async () => { calls++; if (calls < 3) throw new Error('UNAVAILABLE'); }, { delaysMs: [1, 1], sleep: async () => {} });
+    expect(r).toMatchObject({ ok: true, attempts: 3 });
+  });
+  it('exhausted retries return ok:false WITH the real error (never swallowed)', async () => {
+    const boom = new Error('quota exceeded');
+    const r = await persistWithRetry(async () => { throw boom; }, { delaysMs: [1], sleep: async () => {} });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(boom);
+    expect(r.attempts).toBe(2);
+  });
+});
+
+describe('emergency cache — the report survives even a total Firestore outage', () => {
+  beforeEach(() => emergencyClearForTest());
+  const rep = (id: string) => baseReport({ sessionId: id, endedAt: 2000 });
+
+  it('stash → recall roundtrip, per kind, no cross-kind bleed', () => {
+    emergencyStash('workspace', 'ws-1', rep('a'));
+    expect(emergencyRecall('workspace', 'ws-1')?.sessionId).toBe('a');
+    expect(emergencyRecall('user', 'ws-1')).toBeNull();
+    expect(emergencyRecall('workspace', 'ws-other')).toBeNull();
+  });
+  it('bounded LRU: the 11th entry evicts the OLDEST, refreshed entries survive', () => {
+    for (let i = 1; i <= 10; i++) emergencyStash('workspace', `ws-${i}`, rep(String(i)));
+    emergencyStash('workspace', 'ws-1', rep('1-refreshed')); // refresh → ws-2 is now oldest
+    emergencyStash('workspace', 'ws-11', rep('11'));
+    expect(emergencyRecall('workspace', 'ws-2')).toBeNull();               // evicted
+    expect(emergencyRecall('workspace', 'ws-1')?.sessionId).toBe('1-refreshed'); // survived
+    expect(emergencyRecall('workspace', 'ws-11')?.sessionId).toBe('11');
+  });
+  it('empty keys are inert', () => {
+    emergencyStash('workspace', '', rep('x'));
+    expect(emergencyRecall('workspace', '')).toBeNull();
+  });
+});
+
+describe('loaders fall back to the emergency cache when the durable read is empty', () => {
+  beforeEach(() => emergencyClearForTest());
+
+  it('loadDiagnostics serves the emergency copy (Firestore unreachable here, exactly like an outage)', async () => {
+    await expect(loadDiagnostics('ws-em')).resolves.toBeNull();
+    emergencyStash('workspace', 'ws-em', baseReport({ sessionId: 'em', endedAt: 2000 }));
+    await expect(loadDiagnostics('ws-em')).resolves.toMatchObject({ sessionId: 'em' });
+  });
+  it('loadLatestForUser serves the emergency copy — but NEVER for a null user (privacy unchanged)', async () => {
+    emergencyStash('user', 'user-em', baseReport({ sessionId: 'uem', endedAt: 2000 }));
+    await expect(loadLatestForUser('user-em')).resolves.toMatchObject({ sessionId: 'uem' });
+    await expect(loadLatestForUser(null)).resolves.toBeNull();
+  });
+  it('locks the VITEST save contract: saves are no-ops (no Firestore, no stash) so loads stay null', async () => {
+    await saveDiagnostics('ws-noop', baseReport({ endedAt: 2000 }));
+    await saveLatestForUser('user-noop', baseReport({ endedAt: 2000 }));
+    await expect(loadDiagnostics('ws-noop')).resolves.toBeNull();
+    await expect(loadLatestForUser('user-noop')).resolves.toBeNull();
   });
 });
 

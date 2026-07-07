@@ -11166,3 +11166,19 @@ recovery = re-import; nothing is permanently lost.
   → replace; fresh/tiny → replace). Gate: frontend tsc 0, server tsc 0, vitest 5330/5330, boot PASS.
 - Honest accountability note: Fix 11's default-on autofix EXPOSED this latent wipe class (the replace
   semantics + partial-set saves predate it); the class is now dead at the store level.
+
+## 2026-07-07 — ⚠️ TOP OPEN ROOT CAUSE (next session, highest priority): rolling deploys KILL in-flight builds
+
+Real case (admin, 03:47 UTC): "make a music player" was building (16 files written) when the Fix 17
+merge's Cloud Run rollout replaced the instance — the in-memory build state died with it; the client
+showed "That build isn't running anymore" and (on a fresh mobile session) Files (0). Every merge to
+main auto-deploys, so DURING ACTIVE ADMIN TESTING each merge is a build-killer. What holds today:
+mid-build durable flush (≤6s loss bound) means the 16 files ARE in the durable store under that
+chat's workspace (History → reopen restores them); GitHub checkpoints also persist mid-build work.
+What's missing (the class): deploy-safe builds. Candidate fixes for the next session, in order:
+(1) client auto-RESUME: on "build isn't running", automatically re-send the last prompt as a
+continue-turn against the same workspace (the engine's edit-mode picks up from the durable files) —
+pure client, no infra; (2) Cloud Run graceful drain (SIGTERM handler: finish/checkpoint in-flight
+builds, mark conversation resumable before exit); (3) build-state handoff via Firestore so a new
+instance can adopt a killed build. ALSO record: batch merges outside admin-testing windows until (1)
+ships. Fixes 1–17 all remain merged + live; 5330 tests green at last gate.

@@ -882,6 +882,18 @@ export function parseModelLadder(env: string | undefined, fallback: string[]): s
  * name stays the provider (`GLM`/`KIMI`) so the PR4 `deliveredVia` cheap-vs-Claude split stays clean.
  * Pure-ish + flag-gated; exported for unit testing. Base URLs/models are env-overridable.
  */
+/**
+ * Whether Vertex/Gemini join the build chain as the TRUE LAST RESORT (after the cheap floor, CLAUDE,
+ * and the forced-Haiku backstop have ALL thrown). Default ON — admin go-ahead 2026-07-07 ("jab sab
+ * fail ho jaye to last me gemini/vertex se try karwao"), given during a real all-provider outage
+ * (GLM/KIMI timeouts + Anthropic credits exhausted). '0' / 'off' rolls back to the old exclusion;
+ * '1' (the old opt-in) still enables. Pure + exported for testing.
+ */
+export function geminiLastResortEnabled(flag: string | undefined): boolean {
+  const v = (flag || '').trim().toLowerCase();
+  return v !== '0' && v !== 'off';
+}
+
 export function cheapBuildFloorRunners(): NamedRunner[] {
   const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
   if (floor === 'off' || floor === '') return [];
@@ -1041,17 +1053,18 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   const withBackstop = process.env.AGENTV3_DISABLE_HAIKU_BACKSTOP === '1' ? [] : [haikuBackstop];
   // Builds run on CLAUDE FIRST (Haiku/Sonnet/Opus do REAL tool-use → real files). Gemini/Vertex CAN
   // hallucinate in the tool-use loop — reply describing files ("creating index.html…") without ever
-  // calling write_file — which is why they were EXCLUDED entirely from the build chain until now.
+  // calling write_file — which is why they were EXCLUDED entirely from the build chain for a while
+  // (a REAL past incident: every build silently on Gemini/Vertex with ZERO files).
   //
-  // Wired as the TRUE LAST RESORT (admin request, 2026-07-01: "Claude fail to vertex/gemini") — only
-  // after Claude's primary model AND its forced-Haiku backstop have BOTH thrown. Kept as an OPT-IN
-  // flag (AGENTV3_BUILD_ALLOW_GEMINI=1), NOT the new default: the exclusion above documents a REAL
-  // past incident (every build silently running on Gemini/Vertex with ZERO real files, $0 Claude
-  // spend on the dashboard) — not a theoretical risk. Safety nets built since (the empty-build
-  // retry-on-stronger-model net, the mandatory readiness gate, the G3 tsc verification gate) likely
-  // catch a repeat of that today, but "likely" isn't the bar for silently flipping a fix for an
-  // incident the admin personally hit — that decision needs an explicit, informed go-ahead first.
-  const fallback = process.env.AGENTV3_BUILD_ALLOW_GEMINI === '1' ? cheap : [];
+  // NOW DEFAULT-ON as the TRUE LAST RESORT — the explicit, informed admin go-ahead this comment used
+  // to demand was given on 2026-07-07 ("jab sab fail ho jaye to last me gemini/vertex se try
+  // karwao"), during a real outage where GLM/KIMI were timing out AND the Anthropic account was out
+  // of credits — every build died with NO final resort. Vertex/Gemini only ever run after every
+  // prior provider (cheap floor → CLAUDE → forced-Haiku backstop) has thrown, and the old incident's
+  // failure mode is now caught by the safety nets built since: the empty-build retry-on-stronger-
+  // model net, the mandatory readiness gate, and the tsc verification gate — a zero-file hallucinated
+  // "build" cannot ship as success anymore. AGENTV3_BUILD_ALLOW_GEMINI=0/off rolls back the exclusion.
+  const fallback = geminiLastResortEnabled(process.env.AGENTV3_BUILD_ALLOW_GEMINI) ? cheap : [];
   const claudeFirst = resolveClaudeFirst(opts?.claudeFirst, process.env.AGENTV3_BUILD_CLAUDE_FIRST);
   // NOTE: fallback (Vertex/Gemini) sits AFTER withBackstop in the claudeFirst branch — Claude and its
   // forced-Haiku backstop are exhausted FIRST, Vertex/Gemini is the absolute last resort, matching the
@@ -4521,7 +4534,12 @@ export function registerAgentV3Routes(app: Express): void {
           const startedAt = Date.now();
           let t;
           try {
-            t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+            // RESILIENT (admin 2026-07-07, "jab sab fail ho jaye to last me gemini/vertex"): the lane's
+            // calls are TEXT-ONLY (tools: []), so the multi-provider text fallback (Vertex → Gemini →
+            // Grok) is safe here — no tool-use hallucination risk — and it keeps the complete-app lane
+            // alive when the Anthropic account is down/out of credits (the real outage where the lane
+            // died on its very first call and every build fell to the grinding agentic ladder).
+            t = await makeResilientTurnRunner(new ClaudeClient(undefined, { maxRetries: 2 })).runTurn({
               // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
               // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
               model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,

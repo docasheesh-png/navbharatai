@@ -11085,3 +11085,31 @@ before dying at +670s — a fatal billing/auth failure was retried like a transi
 - Tests: MultiProviderTurnRunner +6 (real credit-400 classification; transient stays retryable;
   fatal-skip across turns; transient-retry unchanged; all-dead instant fail; honest hint). Gate:
   frontend tsc 0, server tsc 0, vitest 5321/5321, boot PASS.
+
+## 2026-07-07 — Fix 15: Vertex/Gemini as the TRUE LAST RESORT, default ON (admin go-ahead: "jab sab fail ho jaye to last me gemini/vertex se try karwao")
+
+Admin directive during the real all-provider outage (GLM/KIMI timeouts + Anthropic credits exhausted —
+every build died with NO final resort). Two changes:
+
+**1. Build chain: Vertex/Gemini last-resort now DEFAULT ON.** The wiring existed since 2026-07-01 but
+was opt-in (AGENTV3_BUILD_ALLOW_GEMINI=1) because of a real past incident (Gemini hallucinated tool
+calls — narrated file creation without ever calling write_file → silent zero-file builds). The old
+comment demanded "an explicit, informed go-ahead" before flipping the default — the admin gave exactly
+that on 2026-07-07. The old failure mode is now caught by the nets built since: the empty-build
+retry-on-stronger-model net, the mandatory readiness gate, and the tsc verification gate — a zero-file
+hallucinated "build" cannot ship as success anymore. Vertex/Gemini only ever run after the cheap floor,
+CLAUDE, and the forced-Haiku backstop have ALL thrown. New pure `geminiLastResortEnabled(flag)`:
+default on; '0'/'off' rolls back the exclusion; '1' (old opt-in) still enables. Chain is now:
+[GLM → KIMI →] CLAUDE → CLAUDE_HAIKU → VERTEX → GEMINI.
+
+**2. The complete-app lane survives an Anthropic outage.** The lane's `fastGenerate` was ClaudeClient-
+only — in the credit-death report it died on its VERY FIRST call and every build fell to the grinding
+agentic ladder. Its calls are TEXT-ONLY (tools: []), so the existing `makeResilientTurnRunner`
+(Claude → Vertex/Gemini/Grok text fallback, honest note on total failure) is safe there — no tool-use
+hallucination risk. On total failure the fallback text parses to no manifest → clean fall-through to
+the agentic loop (never a hang, never fake success).
+
+- Tests: agentv3.test.ts +2 (default on / '1' still enables; '0'/'off' rollback). Gate: frontend tsc 0,
+  server tsc 0, vitest 5323/5323, boot PASS.
+- ⚠️ REMINDER (open infra root cause): the Anthropic credits still need topping up — Vertex/Gemini is a
+  survival net, not a replacement; the complete-app lane's QUALITY path is Sonnet.

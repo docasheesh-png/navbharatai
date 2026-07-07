@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -1010,5 +1010,21 @@ describe('resolveBuildIdentity — C1 verified-identity gate for the build path'
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.code).toBe('mismatch');
+  });
+});
+
+describe('geminiLastResortEnabled — Vertex/Gemini as the true last resort, DEFAULT ON (admin 2026-07-07)', () => {
+  it('is ON by default ("jab sab fail ho jaye to last me gemini/vertex se try karwao")', () => {
+    // Given during a real all-provider outage: GLM/KIMI timing out + Anthropic credits exhausted —
+    // every build died with no final resort. Vertex/Gemini only run after CLAUDE + HAIKU both threw.
+    expect(geminiLastResortEnabled(undefined)).toBe(true);
+    expect(geminiLastResortEnabled('')).toBe(true);
+    expect(geminiLastResortEnabled('1')).toBe(true); // the old opt-in still enables
+  });
+
+  it("rolls back to the old exclusion with '0' or 'off'", () => {
+    expect(geminiLastResortEnabled('0')).toBe(false);
+    expect(geminiLastResortEnabled('off')).toBe(false);
+    expect(geminiLastResortEnabled(' OFF ')).toBe(false);
   });
 });

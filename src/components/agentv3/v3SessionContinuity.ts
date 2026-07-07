@@ -15,6 +15,8 @@
 // This module is the ONE source of truth for the sticky-session storage key + clear, shared by the
 // panel (which reads/writes it) and App's closeTab (which clears it on ✕) so they can never drift.
 
+import { normalizeUid } from '../../lib/agentv3Workspace';
+
 /** The per-user storage key holding the sticky (active) v3.0 session id. */
 export function v3SessionStorageKey(userId: string | null | undefined): string {
   return `agentv3_session_${userId || 'anon'}`;
@@ -32,4 +34,23 @@ export function clearStickySession(userId: string | null | undefined): void {
   const key = v3SessionStorageKey(userId);
   try { localStorage.removeItem(key); } catch { /* storage unavailable */ }
   try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
+}
+
+/**
+ * The client-side mirror of the server's `deriveWorkspaceId(userId, sessionId)` — including the
+ * ANON identity ('anon' when signed out / auth not yet resolved), so continuity features can compute
+ * the real workspace id in every identity state instead of silently going dead.
+ *
+ * ROOT CAUSE this kills (report 2026-07-07, "tab switch → sab gayab"): the panel derived the
+ * workspace as `userId && sid ? \`agentv3-\${uid}-\${sid}\` : undefined` in several places — so for a
+ * build that ran under the anon identity (workspaceId `agentv3-anon-<sid>`, proven by the admin's
+ * diagnostics JSON), EVERY continuity organ (sticky chat restore, durable file rehydrate, checkpoint
+ * timeline, history row, report download by workspace) was disabled client-side, while the durable
+ * data sat safely on the server (the recovery import reported "42/46 unchanged since the last
+ * build"). The panel looked wiped; nothing was actually lost. Returns '' only when there is no
+ * session id at all. Pure.
+ */
+export function clientWorkspaceId(userId: string | null | undefined, sessionId: string | null | undefined): string {
+  if (!sessionId) return '';
+  return `agentv3-${normalizeUid(userId)}-${sessionId}`;
 }

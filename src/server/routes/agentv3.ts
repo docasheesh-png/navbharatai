@@ -464,6 +464,47 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
 }
 
 /**
+ * FAIL-SAFE REBUILD GUARD (Fix 27 — report 2026-07-07: "isne pura app wapas banaya. yeh to bilkul
+ * accepted nahi hai"). The intent probe (countWorkspaceFiles) FAILS OPEN: a transient Firestore
+ * timeout/error yields 0, so an edit turn ("add a share button") on a 46-file imported app kept its
+ * `new_build` classification and the complete-app manifest lane REBUILT all 40 files over the user's
+ * app. This is the second, independent check on the durable path list: a new_build turn on a
+ * workspace that verifiably holds real source files — without an explicit fresh-start or
+ * complete-app request — must flip to an EDIT. The destructive rebuild path must never be reachable
+ * through an infra hiccup. Pure.
+ */
+export function rebuildGuardFlipsToEdit(opts: {
+  intent: string;
+  isEditMode: boolean;
+  durableSourceCount: number;
+  freshStart: boolean;
+  explicitCompleteBuild: boolean;
+}): boolean {
+  return !opts.isEditMode && opts.intent === 'new_build' && opts.durableSourceCount > 0
+    && !opts.freshStart && !opts.explicitCompleteBuild;
+}
+
+/**
+ * REBUILD CONFIRMATION GATE (Fix 28 — admin, 2026-07-07: "agar AI rebuild ki koshish kare, to
+ * pehle user se puch le"). After the fail-safe guard above, the ONLY way a turn is still
+ * rebuild-shaped over a non-empty workspace is an explicit fresh-start / complete-app request —
+ * or a wrong call. Either way the app that exists is about to be REPLACED, so the build must
+ * pause and ASK (the same permission_request gate plan-mode uses): Approve = rebuild from
+ * scratch; Deny (or the 10-min timeout) = keep the app and apply the request as an EDIT. The
+ * user can always Stop and type something else — the "other" option. An import turn is exempt
+ * (its pipeline forces edit mode and never scaffolds over the imported app). Pure predicate.
+ */
+export function shouldConfirmRebuild(opts: {
+  intent: string;
+  isEditMode: boolean;
+  hasImportIntent: boolean;
+  durableSourceCount: number;
+}): boolean {
+  return opts.intent === 'new_build' && !opts.isEditMode && !opts.hasImportIntent
+    && opts.durableSourceCount > 0;
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -3454,8 +3495,62 @@ export function registerAgentV3Routes(app: Express): void {
     // correct even here, BEFORE the sandbox is ensured/hydrated below. The paths are reused for the RC-1
     // edit-file-tree reconcile further down — one durable read, no duplication.
     let durableFilePaths: string[] = [];
-    if (isEditMode) {
-      try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    // FAIL-SAFE INTENT RE-CHECK (Fix 27 — report 2026-07-07: "isne pura app wapas banaya"): the intent
+    // probe above (countWorkspaceFiles) FAILS OPEN — a transient Firestore timeout/error returns 0, so
+    // "add a share button" on a 46-file imported app classified as a FRESH build and the complete-app
+    // manifest lane REBUILT all 40 files over the user's app. The durable path list here is a second,
+    // independent read of the same truth; if it shows real source files, a new_build turn (without an
+    // explicit fresh-start / complete-app request) is an EDIT — the destructive rebuild path must never
+    // be reachable through an infra hiccup. This read is fetched unconditionally (cheap metadata-only
+    // doc) and reused below exactly as before.
+    if (rebuildGuardFlipsToEdit({
+      intent,
+      isEditMode,
+      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      freshStart: wantsFreshStart(prompt),
+      explicitCompleteBuild,
+    })) {
+      intent = 'edit_existing';
+      isEditMode = true;
+    }
+    // REBUILD CONFIRMATION GATE (Fix 28): a turn that is STILL rebuild-shaped over a non-empty
+    // workspace (explicit fresh-start / complete-app ask — or a wrong call the guard couldn't
+    // catch) is about to REPLACE the user's existing app. Never silently: pause and ask. Approve
+    // = rebuild from scratch; Deny or the timeout = keep the app and run this request as an EDIT.
+    if (shouldConfirmRebuild({
+      intent,
+      isEditMode,
+      hasImportIntent,
+      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+    })) {
+      const srcCount = countEditableSourceFiles(durableFilePaths);
+      const confirmId = randomUUID();
+      emit({
+        type: 'narration', agent: 'architect', ts: Date.now(),
+        text: `⚠️ This workspace already contains your app (${srcCount} source files). Rebuilding from scratch will REPLACE it.`,
+      });
+      emit({
+        type: 'permission_request',
+        agent: 'architect',
+        action: `Rebuild from scratch? Approve = replace the existing ${srcCount}-file app with a brand-new build. Deny = keep your app and apply this request as a targeted EDIT instead. (You can also Stop and type something else.)`,
+        callId: confirmId,
+        ts: Date.now(),
+      });
+      const rebuildApproved = await awaitApproval(confirmId);
+      if (!rebuildApproved) {
+        intent = 'edit_existing';
+        isEditMode = true;
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: '✅ Keeping your existing app — applying your request as a targeted edit.',
+        });
+      } else {
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: '🔄 Rebuild confirmed — building a fresh app from scratch.',
+        });
+      }
     }
     const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);
     const buildComplexity = complexityFromPrompt(prompt);

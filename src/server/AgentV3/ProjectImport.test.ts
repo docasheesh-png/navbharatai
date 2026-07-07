@@ -413,3 +413,54 @@ describe('envTemplateNote', () => {
     expect(note).toContain('+8 more');
   });
 });
+
+describe('findUnresolvedLocalImports — an incomplete repo snapshot is named AT IMPORT TIME', () => {
+  const app = (imports: string) => `import React from 'react';\n${imports}\nexport default function App(){return null}`;
+
+  it('the exact reported case: App.tsx imports five src/pages/* files the repo never contained', async () => {
+    const { findUnresolvedLocalImports } = await import('./ProjectImport');
+    const files = {
+      'src/App.tsx': app([
+        `import Patients from './pages/Patients';`,
+        `import OPD from './pages/OPD';`,
+        `import Queue from './pages/Queue';`,
+        `import Medicines from './pages/Medicines';`,
+        `import Reports from './pages/Reports';`,
+      ].join('\n')),
+      'src/main.tsx': `import App from './App';`,
+      'package.json': '{}',
+    };
+    const missing = findUnresolvedLocalImports(files);
+    expect(missing.map((m) => m.missing).sort()).toEqual([
+      'src/pages/Medicines', 'src/pages/OPD', 'src/pages/Patients', 'src/pages/Queue', 'src/pages/Reports',
+    ]);
+    expect(missing[0].importedBy).toBe('src/App.tsx');
+  });
+
+  it('resolves extension + index variants and the @/ alias — a COMPLETE repo reports nothing', async () => {
+    const { findUnresolvedLocalImports } = await import('./ProjectImport');
+    const files = {
+      'src/App.tsx': app(`import P from './pages/Patients';\nimport U from '@/utils/helpers';\nimport Q from './pages/Queue';`),
+      'src/pages/Patients.tsx': 'export default 1;',
+      'src/pages/Queue/index.tsx': 'export default 1;',
+      'src/utils/helpers.ts': 'export const x = 1;',
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('ignores bare npm packages, builtins, and non-source files (dependency territory, not missing files)', async () => {
+    const { findUnresolvedLocalImports } = await import('./ProjectImport');
+    const files = {
+      'src/App.tsx': app(`import clsx from 'clsx';\nimport fs from 'node:fs';`),
+      'README.md': `import broken from './nowhere';`, // not a source file — never scanned
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('is bounded at 20 named misses (a truncated story is still an honest one)', async () => {
+    const { findUnresolvedLocalImports } = await import('./ProjectImport');
+    const imports = Array.from({ length: 30 }, (_, i) => `import X${i} from './gone/M${i}';`).join('\n');
+    const files = { 'src/App.tsx': app(imports) };
+    expect(findUnresolvedLocalImports(files)).toHaveLength(20);
+  });
+});

@@ -348,6 +348,62 @@ export function validateImportedProject(files: Record<string, string>): ImportVa
   return { ok: true, issues, framework, hasPackageJson };
 }
 
+/** Extensions + index variants a bundler tries when resolving a local import without one. */
+const LOCAL_RESOLVE_SUFFIXES = ['', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.vue', '.svelte', '.json', '.css',
+  '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
+
+/** Normalize a/b/../c → a/c (no filesystem). */
+function normalizeRel(path: string): string {
+  const out: string[] = [];
+  for (const part of path.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') { out.pop(); continue; }
+    out.push(part);
+  }
+  return out.join('/');
+}
+
+/**
+ * Find LOCAL imports (./ ../ or the `@/` src alias) that resolve to NO imported file — the honest
+ * "this repo snapshot is INCOMPLETE" detector, run at IMPORT time.
+ *
+ * ROOT CAUSE (admin, 2026-07-07 — "isko rocksolid banao"): a GitHub repo pushed from an interrupted
+ * mid-build state imported cleanly (47 files), but its App.tsx referenced five src/pages/* files the
+ * repo never contained — the user discovered it only as a stubbed, blank preview. An incomplete
+ * import must be named AT IMPORT TIME, with the exact missing list, so the user (and the AI turn)
+ * can repair it immediately instead of hitting a silent dead-end. PURE + unit-tested; bare npm
+ * packages and builtins are ignored (they are dependency territory, not missing files).
+ */
+export function findUnresolvedLocalImports(files: Record<string, string>): Array<{ missing: string; importedBy: string }> {
+  const paths = new Set(Object.keys(files));
+  const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
+  const out: Array<{ missing: string; importedBy: string }> = [];
+  const seen = new Set<string>();
+  const importRe = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/g;
+  for (const [path, content] of Object.entries(files)) {
+    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof content !== 'string') continue;
+    let m: RegExpExecArray | null;
+    importRe.lastIndex = 0;
+    while ((m = importRe.exec(content))) {
+      const spec = m[1];
+      let base: string | null = null;
+      if (spec.startsWith('./') || spec.startsWith('../')) {
+        base = normalizeRel(`${path.split('/').slice(0, -1).join('/')}/${spec}`);
+      } else if (spec.startsWith('@/') && hasSrc) {
+        base = normalizeRel(`src/${spec.slice(2)}`);
+      }
+      if (!base) continue; // bare package / builtin / other alias — dependency territory, not a missing file
+      const resolves = LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s));
+      if (!resolves && !seen.has(base)) {
+        seen.add(base);
+        out.push({ missing: base, importedBy: path });
+        if (out.length >= 20) return out; // bounded — 20 named misses is already the full story
+      }
+    }
+  }
+  return out;
+}
+
 /** The honest "— skipped …" tail explaining every entry an extraction dropped, or ''. Pure. */
 export function droppedDetailNote(extracted: ExtractedProject): string {
   const d = extracted.dropped;

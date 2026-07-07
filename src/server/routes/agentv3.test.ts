@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -1108,5 +1108,17 @@ describe('shouldConfirmRebuild (Fix 28) — a rebuild over an existing app alway
     expect(shouldConfirmRebuild({
       intent: 'new_build', isEditMode: false, hasImportIntent: true, durableSourceCount: 46,
     })).toBe(false);
+  });
+});
+
+describe('zeroBillForUnrenderedPreview (Fix 35) — "preview theek chala to hi paise" enforced on the money', () => {
+  it('bills ZERO when the server-verified preview did not render on an artifact build', () => {
+    expect(zeroBillForUnrenderedPreview(true, true)).toBe(true);
+  });
+  it('bills normally when the preview verified OK, or verification never concluded failure', () => {
+    expect(zeroBillForUnrenderedPreview(true, false)).toBe(false);
+  });
+  it('never zeroes a chat/analysis turn (no artifacts expected)', () => {
+    expect(zeroBillForUnrenderedPreview(false, true)).toBe(false);
   });
 });

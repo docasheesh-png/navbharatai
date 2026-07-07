@@ -11891,3 +11891,27 @@ rootCause. Root fix in BuildDiagnostics narration classification: only a SHORT s
 (≤300 chars, no markdown headings/tables) can classify as a problem — long analytical prose is a
 deliverable, recorded as info AGENT_STEP. Tests: +4 (the survey case, the short-status case, the CRA
 line, the loader rung markers). Gate: frontend tsc 0, server tsc 0, vitest 5452/5452, boot PASS.
+
+## 2026-07-07 — Fix 35 (admin-requested): "haath aur aankhein" — preview-verified billing + footer green dot + real file count
+
+Admin: "v3 app complete hone ke baad real preview khole, load ka wait kare, dekhe — preview theek chala
+to hi user se paise len. Footer me preview-ready green dot + Files par built-file count."
+
+Honest finding first (rule 3): the EYES AND HANDS largely existed — post-build the server already opens
+the running app in a real browser (actuator.browseUrl), reads the rendered DOM (analyzePreviewHtml) +
+console errors, self-heals once, and reports honestly (agentv3.ts preview-verify loop). What was missing:
+the verdict had NO effect on MONEY, and the client had no at-a-glance signals. Shipped:
+
+- **Billing enforcement**: new pure `zeroBillForUnrenderedPreview()` — when the server's own browser
+  visit concludes the preview did NOT render (after the bounded heal), an artifact build bills ₹0 with
+  an honest "this build is FREE — no charge" narration. Server-side verdict ONLY (a client-reported
+  failure can never zero a bill — not spoofable). Chat/analysis turns unaffected; extends the existing
+  "no artifacts, no charge" law to "not rendered, not charged". Where verification cannot run (no E2B
+  browser / in-browser-only lane), billing behaves exactly as before — honestly noted here as the open
+  half: full coverage needs a server-side headless render of the in-browser bundle (infra).
+- **Footer green dot** (mobile/tablet v3 footer): `previewReady` via pure `previewReadySignal()` — live
+  URL exists OR build done+ok with real files. Real state, never a timer.
+- **Files count badge**: `fileCount` = the ACTUAL built list (live build files, else the rehydrated
+  durable store), rendered as a 99+-capped badge. Footer-api effect moved below the workspaceFiles
+  declaration it reads (TDZ). Tests: +6 (billing matrix; green-dot matrix incl. no-fake-green cases).
+  Gate: frontend tsc 0, server tsc 0, vitest 5458/5458, boot PASS.

@@ -512,6 +512,16 @@ export function shouldConfirmRebuild(opts: {
 }
 
 /**
+ * BILLING HONESTY (Fix 35 — admin 2026-07-07: "preview theek chal gaya to hi user se paise len").
+ * True when an artifact-producing build's live preview was verified by the SERVER'S OWN browser
+ * visit as NOT rendering (after the bounded self-heal) — that build is not a delivered app and
+ * bills ₹0. Server-side verdict only; a client-reported failure can never zero a bill. Pure.
+ */
+export function zeroBillForUnrenderedPreview(expectsArtifacts: boolean, previewVerifiedFailed: boolean): boolean {
+  return expectsArtifacts === true && previewVerifiedFailed === true;
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -5173,6 +5183,11 @@ export function registerAgentV3Routes(app: Express): void {
       // re-verifies. This is what makes v3.0 AWARE of its own preview and able to fix what it sees.
       // Best-effort, time-budgeted, abortable — it can never break or hang the build. Disable with
       // AGENTV3_PREVIEW_VERIFY=off.
+      // Admin rule (2026-07-07, "preview theek chala to hi paise len"): when v3.0's own eyes — the
+      // real-browser verification below — conclude the delivered preview does NOT render even after
+      // the bounded self-heal, that build is not a delivered app and must not be billed. Server-side
+      // verdict only (a client-reported failure can never zero a bill — not spoofable).
+      let previewVerifiedFailed = false;
       if (
         process.env.AGENTV3_PREVIEW_VERIFY !== 'off' && result.ok && lastPreviewUrl && actuator.browseUrl
         && !abort.signal.aborted
@@ -5198,6 +5213,7 @@ export function registerAgentV3Routes(app: Express): void {
           buildDiag.record({ phase: 'preview', severity: 'warning', code: 'PREVIEW_NOT_RENDERED', message: problems.slice(0, 4).join(' | ').slice(0, 500), autoResolved: false });
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+            previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
             break;
           }
@@ -5635,6 +5651,13 @@ export function registerAgentV3Routes(app: Express): void {
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
       if (expectsArtifacts && writtenFiles.size === 0) {
         effectiveBilledUsd = 0;
+      }
+      // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal
+      // budget — the app was not delivered, so the build is free. Same "preview is EARNED" law,
+      // now enforced on the money too.
+      if (zeroBillForUnrenderedPreview(expectsArtifacts, previewVerifiedFailed)) {
+        effectiveBilledUsd = 0;
+        events.emit({ type: 'narration', agent: 'architect', text: '🛡️ Because the preview did not fully render on my verification, this build is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore

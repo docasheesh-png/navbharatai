@@ -27,6 +27,20 @@ export interface V3FooterApi {
   reportBusy: boolean;
   /** Open the More sheet (framework, diff, terminal, checkpoints, GitHub, deploy, live site…). */
   openMore: () => void;
+  /** Admin 2026-07-07: green dot on the Preview item the moment the app is genuinely viewable. */
+  previewReady: boolean;
+  /** Admin 2026-07-07: the REAL number of built files, shown on the Files item (0 = hidden). */
+  fileCount: number;
+}
+
+/**
+ * "App ban gayi" signal for the footer's green dot (admin 2026-07-07): true when a live preview URL
+ * exists (the server booted the app), OR the build finished successfully with real files (the
+ * in-browser preview renders those). Honest by construction — no timer, no guess. Pure.
+ */
+export function previewReadySignal(hasPreviewUrl: boolean, done: boolean, ok: boolean | undefined, fileCount: number): boolean {
+  if (hasPreviewUrl) return true;
+  return done === true && ok !== false && fileCount > 0;
 }
 
 /** The footer section that should highlight, from the panel's real surface state. Pure. */

@@ -1157,6 +1157,18 @@ export default function App() {
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
 
+  // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v3.0 panel inside
+  // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
+  // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const view = (e as CustomEvent<{ view?: ViewType }>).detail?.view;
+      if (view) toggleTab(view);
+    };
+    window.addEventListener('navbharat:navigate', onNavigate as EventListener);
+    return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
+  }, [toggleTab]);
+
   // Persist ONLY the v3.0 view so a reload lands back in Pro v3.0 (see activeView init). Any other
   // view clears the flag, so leaving v3.0 and reloading correctly returns to Home.
   useEffect(() => {

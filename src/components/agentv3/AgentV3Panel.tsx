@@ -5,7 +5,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
+  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet,
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -71,13 +71,18 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
+  // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
+  // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
+  const [billed, setBilled] = useState(false);
+  const [walletBalanceInr, setWalletBalanceInr] = useState<number | null>(null);
   // ── 3-role model UI (FIX #6): composer mode + the per-app command queue ─────────────────────────
   // 'build' = the normal builder (Chat 1). 'planner'/'advisor' = the read-only role lanes (FIX #5)
   // that analyze the project and PROPOSE steps; the user approves them into the queue below.
@@ -145,6 +150,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
   }, [showWorkspace, tab]);
+  // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
+  // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
+  // Refetches when the user changes, after a build finishes (balance was just spent), and after a 402.
+  useEffect(() => {
+    if (!userId) { setBilled(false); setWalletBalanceInr(null); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = await authJsonHeaders();
+        const qs = `?userId=${encodeURIComponent(userId)}${email ? `&email=${encodeURIComponent(email)}` : ''}`;
+        const sres = await fetch(`/api/agentv3/status${qs}`, { headers });
+        const sj = await sres.json().catch(() => ({} as Record<string, unknown>));
+        const isBilled = sres.ok && (sj as { billed?: unknown }).billed === true;
+        if (cancelled) return;
+        setBilled(isBilled);
+        if (!isBilled) { setWalletBalanceInr(null); return; }
+        const wres = await fetch(`/api/wallet/${encodeURIComponent(userId)}${email ? `?email=${encodeURIComponent(email)}` : ''}`, { headers });
+        const wj = await wres.json().catch(() => ({} as Record<string, unknown>));
+        const bal = (wj as { remaining_balance?: unknown }).remaining_balance;
+        if (!cancelled) setWalletBalanceInr(typeof bal === 'number' && Number.isFinite(bal) ? bal : null);
+      } catch { if (!cancelled) { setBilled(false); setWalletBalanceInr(null); } }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, email, state.done, billingBlock]);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
@@ -1864,6 +1893,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <Bot className="w-5 h-5 text-indigo-400" />
           <span className="font-semibold">NavBharatAI Pro v3.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
+          {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
+              actually on paid billing (server `billed:true`), so admin/free-list users and the
+              flag-off state never see it. Tapping it opens Wallet & Billing to top up. */}
+          {billed && walletBalanceInr !== null && (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
+              title="Your NavBharatAI Pro credits — tap to add more"
+              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-all ${walletBalanceInr <= 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'}`}
+            >
+              <Wallet className="w-3 h-3" /> ₹{walletBalanceInr.toFixed(2)}
+            </button>
+          )}
           <button
             onClick={() => setShowFrameworkPicker(true)}
             className="flex items-center gap-1 text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-400 hover:text-white px-2 py-0.5 rounded-full transition-all"
@@ -2086,6 +2127,42 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   </div>
                 ))}
                 <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+              </div>
+            )}
+            {billingBlock && (
+              // Paid-public (billing PR 5): credits ran out → the build was refused BEFORE it started, so
+              // "Fix with AI" (the code-error treatment) would be wrong. This is its own actionable card:
+              // add credits, or dismiss. Any build already running is unaffected (nothing was started).
+              <div className="px-3 py-2.5 bg-amber-950/50 text-amber-100 text-xs rounded border border-amber-500/30">
+                <div className="flex items-start gap-2">
+                  <Wallet className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="font-semibold text-amber-200">Add credits to build</div>
+                    <div className="mt-0.5 whitespace-pre-wrap break-words">{billingBlock.notice}</div>
+                    {(typeof billingBlock.balanceInr === 'number' || typeof billingBlock.estimateInr === 'number') && (
+                      <div className="mt-1 text-[11px] text-amber-300/80">
+                        {typeof billingBlock.balanceInr === 'number' && <span>Balance: ₹{billingBlock.balanceInr.toFixed(2)}</span>}
+                        {typeof billingBlock.balanceInr === 'number' && typeof billingBlock.estimateInr === 'number' && <span> · </span>}
+                        {typeof billingBlock.estimateInr === 'number' && <span>This build ≈ ₹{billingBlock.estimateInr.toFixed(2)}</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
+                    title="Open Wallet & Billing to add credits"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-white bg-amber-600 hover:bg-amber-500 rounded px-2.5 py-1"
+                  >
+                    <Wallet className="w-3.5 h-3.5" /> Add credits
+                  </button>
+                  <button
+                    onClick={clearBillingBlock}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-200 bg-white/5 hover:bg-white/10 rounded px-2.5 py-1"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
             {(error || state.error) && (

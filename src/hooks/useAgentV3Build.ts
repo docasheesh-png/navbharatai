@@ -94,6 +94,21 @@ export interface UseAgentV3Build {
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
    *  Pass `workspaceId` so the server (same-instance case) won't mirror a build for a different session. */
   subscribeLive: (opts?: { userId?: string; email?: string; workspaceId?: string }) => (() => void);
+  /** Paid-public (billing PR 5): set when the last build was refused pre-start for want of credits
+   *  (HTTP 402). Null otherwise. The panel renders a dedicated "Add credits" screen from it. */
+  billingBlock: BillingBlock | null;
+  /** Dismiss the add-credits screen (e.g. after the user tops up, or to retry). */
+  clearBillingBlock: () => void;
+}
+
+/** A pre-start build refusal for want of credits (paid-public HTTP 402). All money figures are ₹. */
+export interface BillingBlock {
+  /** Honest user-facing message from the server (e.g. "Your credits are used up. Add credits…"). */
+  notice: string;
+  /** The user's wallet balance at refusal time, if the server reported it. */
+  balanceInr?: number;
+  /** The estimated cost of the refused build, if the server reported it. */
+  estimateInr?: number;
 }
 
 /** One command in the per-app queue, as the queue UI renders it (matches the server's QueueItem). */
@@ -206,6 +221,9 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [running, setRunning] = useState(false);
   const [serverBuildRunning, setServerBuildRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Paid-public (billing PR 5): set when a build is refused pre-start with HTTP 402 INSUFFICIENT_CREDITS.
+  // Drives a dedicated "Add credits" screen instead of a bare error banner. Null unless credits ran out.
+  const [billingBlock, setBillingBlock] = useState<BillingBlock | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const userIdRef = useRef<string | undefined>(undefined);
   const emailRef = useRef<string | undefined>(undefined);
@@ -262,6 +280,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     setRunning(false);
     setState(initialAgentV3State());
     setError(null);
+    setBillingBlock(null);
   }, []);
 
   const stop = useCallback(() => {
@@ -899,6 +918,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         repoUrl: prev.repoUrl,
       }));
       setError(null);
+      setBillingBlock(null); // a fresh send clears any prior add-credits screen.
       setRunning(true);
       // WATCHDOG — begin the silence window at build start (not stale mount time), so the
       // stall detector measures THIS build and never fires before the first event arrives.
@@ -952,12 +972,27 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (!res.ok || !res.body) {
           let msg = `AgentV3 request failed (${res.status}).`;
           let resumable = false;
+          let body: Record<string, unknown> = {};
           try {
             const j = await res.json();
-            if (j && typeof j.error === 'string') msg = j.error;
-            resumable = (j as { resumable?: unknown })?.resumable === true;
+            if (j && typeof j === 'object') body = j as Record<string, unknown>;
+            if (typeof body.error === 'string') msg = body.error;
+            resumable = body.resumable === true;
           } catch {
             /* non-JSON error body */
+          }
+          // PAID-PUBLIC (billing PR 5): credits ran out → the server refused the build pre-start with a
+          // clean 402 (no build was started). Render a dedicated "Add credits" screen from the structured
+          // body instead of a bare error banner, so the user sees their balance, the estimate, and a way
+          // to top up. Only reachable when AGENTV3_PAID_PUBLIC is on and the user is a paying (non-free) one.
+          if (res.status === 402 && body.code === 'INSUFFICIENT_CREDITS') {
+            setBillingBlock({
+              notice: msg,
+              balanceInr: typeof body.balanceInr === 'number' ? body.balanceInr : undefined,
+              estimateInr: typeof body.estimateInr === 'number' ? body.estimateInr : undefined,
+            });
+            setRunning(false);
+            return;
           }
           // AUTO-REATTACH on "a build is already running" (test #5): the user closed the tab
           // mid-build, reopened, and typed a message — their OWN build from before the reload is
@@ -1179,5 +1214,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     return () => clearInterval(id);
   }, [running, resume, start]);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive };
+  const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
+
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

@@ -11032,3 +11032,31 @@ page inside the iframe and nothing auto-healed: **URL presence was being used as
 - Full verification of the actual reboot needs a live E2B sandbox (recorded per rule 6) — the decision
   logic is CI-locked; the boot path it triggers (preview-diagnose) is the same one already proven by
   the manual Diagnose button on real sandboxes.
+
+## 2026-07-07 — Fix 13: completeness reviewer scales with app size (40-file OPD system autopsy)
+
+**Fix 10 CONFIRMED at production scale:** a 40-file, 30+-feature Hospital OPD Management System took the
+complete-app lane — 40 files / 4211 lines / 4m8s / tsc verified / preview browser-verified. No random
+`md` install (Fix 11 holding), 0 errors, 0 unresolved. The "Closed Port Error" in the screenshot is the
+Fix-12 idle-death case on a build made BEFORE Fix 12 deployed. Two report facts mined:
+
+**RC — the reviewer's completeness verdict was silently LOST on the big app.** The post-build reviewer
+had a fixed 90s cap; on 40 files it read 12 files + ran 11 searches + second_opinion and was killed
+mid-review at minute 11 → `raceTimeout` rejected → the outer catch swallowed it → `review` empty, no
+[CRITICAL] captured, no honest note. The completeness safety net vanished on exactly the big apps that
+need it most. Fix: pure `reviewerBudgetMs(fileCount, headroomMs)` — 90s base, +4s/file over 20, capped
+at 210s, and CLAMPED to `headroom - 60s` so the reviewer can NEVER be the reason a finished app times
+out (with a 45s floor). On timeout it now emits an HONEST note ("app is built + compiles + saved; the
+deeper review didn't finish on this large app — send 'review it'") and records REVIEW_INCOMPLETE,
+instead of silently dropping the check. `review` is now nullable → C9 criticals read `review?.issues`.
+
+**Verified-not-a-bug:** a captured `npm run dev` showed "did not come up on 5173", but update_preview's
+authoritative-health heal (Fix 3) then brought it up and browseUrl rendered it → "Preview verified" was
+REAL, not a false positive; the later Closed Port Error is idle-death (Fix 12). The GLM provider
+fallback (1 warning) auto-resolved — the fallback chain worked as designed.
+
+- Tests: pipelineDepth.test.ts +6 (base / large-app scale / MAX / headroom-clamp / floor / junk input).
+  Gate: frontend tsc 0, server tsc 0, vitest 5315/5315, boot PASS.
+- Open (rule 6): the reviewer sub-agent still free-explores (12 reads + 11 searches) rather than using
+  its 5-file sample — giving it more time is the safe fix now; teaching it to review from the provided
+  sample (fewer tool calls) is the deeper orchestration-quality follow-up.

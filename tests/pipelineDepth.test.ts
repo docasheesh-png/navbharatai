@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolvePipelineDepth,
   scaleBuildSeconds,
+  reviewerBudgetMs,
   MAX_SCALED_BUILD_SECONDS,
   DEEP_TIME_FACTOR,
 } from '../src/server/AgentV3/PipelineDepth';
@@ -54,5 +55,37 @@ describe('scaleBuildSeconds', () => {
   });
   it('treats negative/invalid base as disabled (returns as-is)', () => {
     expect(scaleBuildSeconds(-5, 'deep')).toBe(-5);
+  });
+});
+
+describe('reviewerBudgetMs — the completeness reviewer scales with app size, clamped to wall-clock headroom', () => {
+  it('a small app keeps the ~90s base (no wall-clock cap)', () => {
+    expect(reviewerBudgetMs(8, Infinity)).toBe(90_000);
+    expect(reviewerBudgetMs(20, Infinity)).toBe(90_000);
+  });
+
+  it('a large app gets MORE time (the 40-file Hospital OPD case that was killed at 90s)', () => {
+    // 40 files → 90s + (40-20)*4s = 170s. The fixed 90s cap lost this app's completeness verdict.
+    expect(reviewerBudgetMs(40, Infinity)).toBe(170_000);
+  });
+
+  it('never exceeds the hard MAX even for a huge app', () => {
+    expect(reviewerBudgetMs(500, Infinity)).toBe(210_000);
+  });
+
+  it('never eats the wall-clock safety margin — clamps to headroom minus 60s', () => {
+    // 40 files wants 170s, but only 120s of headroom is left → 120s - 60s safety = 60s.
+    expect(reviewerBudgetMs(40, 120_000)).toBe(60_000);
+  });
+
+  it('honours a hard floor so the reviewer is never given an unusably tiny budget', () => {
+    expect(reviewerBudgetMs(40, 70_000)).toBe(45_000); // 70s-60s=10s → floored to 45s
+    expect(reviewerBudgetMs(40, 0)).toBe(45_000);
+  });
+
+  it('tolerates junk file counts', () => {
+    expect(reviewerBudgetMs(0, Infinity)).toBe(90_000);
+    expect(reviewerBudgetMs(-3, Infinity)).toBe(90_000);
+    expect(reviewerBudgetMs(NaN, Infinity)).toBe(90_000);
   });
 });

@@ -131,7 +131,7 @@ import { dialoguePhaseContext } from '../AgentV3/DialogueStateManager';
 import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
-import { resolvePipelineDepth, scaleBuildSeconds, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
@@ -5087,13 +5087,30 @@ export function registerAgentV3Routes(app: Express): void {
                 : await actuator.readFile(workspaceId, p).catch(() => ''),
             })),
           );
-          const review = await raceTimeout(reviewBuild({
-            userRequest: prompt,
-            fileTree: rFiles,
-            fileSample: rSample,
-            spawn: spawnSubAgent,
-          }), 90_000, 'post-build-review');
-          const reviewText = formatReview(review);
+          // SIZE-SCALED, HEADROOM-CLAMPED reviewer budget (2026-07-07): a fixed 90s cap killed the
+          // reviewer mid-review on a 40-file app and silently lost its completeness verdict. Bigger apps
+          // get more time, never past the wall-clock safety margin. Honest note on timeout, not silence.
+          const reviewHeadroomMs = effectiveBuildSeconds === 0 ? Infinity : (effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt));
+          const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs);
+          let review;
+          try {
+            review = await raceTimeout(reviewBuild({
+              userRequest: prompt,
+              fileTree: rFiles,
+              fileSample: rSample,
+              spawn: spawnSubAgent,
+            }), reviewBudget, 'post-build-review');
+          } catch (e) {
+            // Timeout (or a reviewer error): the app is built + compiles + saved — say so HONESTLY
+            // instead of silently dropping the completeness check (the empty-`review` report gap).
+            const timedOut = e instanceof Error && /timed out/i.test(e.message);
+            events.emit({ type: 'narration', agent: 'architect', text: timedOut
+              ? '📋 Your app is built, compiles, and is saved. The deeper completeness review didn\'t finish on this large app — send "review it" and I\'ll run it on its own.'
+              : '📋 Your app is built and saved (the post-build review could not run this time).', ts: Date.now() });
+            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms on ${rFiles.length} files` : 'Post-build review errored', autoResolved: true }); } catch { /* best-effort */ }
+            review = null;
+          }
+          const reviewText = review ? formatReview(review) : '';
           if (reviewText) {
             events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
             // Capture the FULL review (every small problem it listed) into the report — the narration
@@ -5108,7 +5125,7 @@ export function registerAgentV3Routes(app: Express): void {
           // DEFAULT-ON via reviewerAutoFixEnabled() (2026-07-07: gating this on the opt-in
           // AGENTV3_AUTOFIX meant v3.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
           // best-effort — never blocks/fails the build; the fix's writes are saved.
-          const criticals = (review.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
+          const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
           if (criticals.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${criticals.length} critical issue(s) — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({

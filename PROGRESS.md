@@ -11391,3 +11391,35 @@ platform; a second signal is ignored. `drainRunningBuilds()` + `shutdownGraceMs`
 handler in server.ts. Tests: agentv3 +2 (shutdownGraceMs bounds). Gate: frontend tsc 0, server tsc 0,
 vitest 5352/5352, boot PASS. NIRMAN Phase A (V4-1a client + V4-1c server) is now complete; the full
 job-queue/worker split is V4-4.
+
+## 2026-07-07 — VAJRA remaining-phases AUDIT: honest gating status (rule 3 + rule 6), no speculative builds
+
+Directive was "jo bache hai woh bhi complete karo" (complete what's left). Before building, I audited
+the actual codebase against the VAJRA_V4_DESIGN.md sequence (safeguard #6 redundant-work check) — and
+the honest, code-verified finding is that everything shippable-without-infra is already shipped, so the
+professional call (rule 3: no yes-man; rule 2: real features only; rule 1: never break) is to record the
+truth, NOT to force-build the gated/redundant remainder:
+
+- **V4-1 (NIRMAN Phase A)** ✅ shipped — V4-1a client auto-continue (#1087) + V4-1c server graceful drain
+  (#1088, merged c80166d today).
+- **V4-2 (transcript ceiling + reviewer honesty)** ✅ shipped (#1087).
+- **Smriti lexical core** ✅ already built, tested, AND wired: `ContextReranker.ts` (BM25 + structural
+  anchors + import-graph centrality, intent-aware) is called from the surgical-edit turn at
+  `agentv3.ts:4229` (`contentSearchTerms`/`selectGroundingCandidates`/`buildGroundedContext`).
+- **Dependency-won't-run class** ✅ already handled (`DependencyReconciler`/`DependencyAnalysis`/
+  `DependencyAutoFix`) — the old G6 "DependencySync" plan is obsolete for AgentV3.
+- **V4-3 BrowserBox (esbuild-wasm)** ⏸️ HELD — its goal (in-browser CDN npm resolution + multi-file
+  bundling) is ALREADY delivered by `ReactPreview.ts` (esm.sh importmap for every dep + react-external
+  + jsdelivr fallback + babel JSX + `@/` alias + self-heal). Rewriting the most breakage-prone surface
+  with a ~10 MB WASM bundler for a marginal gain is a rule-1 risk with no evidence behind it. Re-open
+  only on a real report showing the current preview failing where esbuild-wasm would not (rule 5).
+- **V4-4 Nirman workers** 🔒 infra-gated (Cloud Run Jobs + Firestore queue; no gcloud from session). Core
+  interruption-resilience already delivered in-process by V4-1a/V4-1c.
+- **V4-5 Smriti embeddings** 🔒 infra-gated (needs `OPENAI_API_KEY`/Vertex; lexical retriever already
+  covers grounding with zero infra).
+- **V4-6 WebContainers** 🔒 license-gated (StackBlitz commercial license — a business decision, not code).
+
+Recorded the same per-phase status + unblock conditions in VAJRA_V4_DESIGN.md's sequencing section
+(rule 5: fix the system's honesty). No code behavior changed — docs-only truth update. Next real lever is
+evidence-driven: a fresh v3.0 build report → forensic autopsy → targeted fix, or the admin unblocking a
+specific infra/decision above. Gate: docs-only, full verification gate still run green before push.

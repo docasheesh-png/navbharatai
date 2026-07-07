@@ -57,12 +57,40 @@ certificate: each pillar kills one of the classes we bled from.
   becomes the single source Nirman workers read/write (no sandbox-only state, ever).
 
 ## Sequencing (each phase ships via the normal cycle, no big-bang)
-1. **V4-1** Auto-resume + graceful drain (Nirman Phase A) — kills the two "sab gayab" UX deaths now.
-2. **V4-2** Sub-agent transcript bounding + errored-review honesty (Smriti discipline, cheap).
-3. **V4-3** esbuild-wasm BrowserBox (replaces babel-iframe; biggest UX jump per rupee).
-4. **V4-4** Nirman queue + workers (the architectural core).
-5. **V4-5** Smriti embeddings retrieval.
-6. **V4-6** WebContainers evaluation gate (license vs Phase-A gaps).
+1. **V4-1** Auto-resume + graceful drain (Nirman Phase A) — kills the two "sab gayab" UX deaths now. ✅ **SHIPPED** (V4-1a client auto-continue #1087 + V4-1c server graceful drain #1088).
+2. **V4-2** Sub-agent transcript bounding + errored-review honesty (Smriti discipline, cheap). ✅ **SHIPPED** (#1087).
+3. **V4-3** esbuild-wasm BrowserBox (replaces babel-iframe). ⏸️ **HELD — goal already met by the current preview.**
+   Honest finding (2026-07-07, code-verified): the stated V4-3 goal — "real npm-package resolution
+   (CDN-backed) + real multi-file bundling in-browser" — is **already delivered** by
+   `src/server/runtime/ReactPreview.ts`. It resolves EVERY `package.json` dependency via an `esm.sh`
+   importmap (with `react`/`react-dom` externalized to a single shared copy and a jsdelivr fallback
+   CDN), transforms JSX/TS via babel-standalone, resolves relative + CSS + `@/`-alias imports locally,
+   and self-heals (previewAutoReboot/Reload). Swapping this working, lighter mechanism for a ~10 MB
+   esbuild-wasm payload + Service Worker on the single most breakage-prone surface is a large rule-1
+   (never-break) risk for a marginal gain (local bundling vs CDN). **Do NOT build blind.** Re-open only
+   if a real build report shows babel/esm.sh actually failing on a real app that esbuild-wasm would
+   fix — evidence first (rule 5), not a speculative rewrite.
+4. **V4-4** Nirman queue + workers (the architectural core). 🔒 **INFRA-GATED.** Needs Cloud Run Jobs (or a
+   second min-instances service) + a Firestore `build_jobs` queue provisioned — no `gcloud` access from
+   the Claude session, so it cannot be code-completed AND verified here. Its core UX value (a build
+   survives an interruption) is already delivered **in-process** by V4-1a/V4-1c for the common
+   deploy/network-cut case. Unblock: admin provisions the worker infra.
+5. **V4-5** Smriti embeddings retrieval. 🔒 **INFRA-GATED.** `EmbeddingSearch` needs an embeddings key
+   (`OPENAI_API_KEY`/Vertex), absent in prod. The **lexical** retriever (BM25 + structural anchors +
+   import-graph centrality) already ships real, zero-infra grounding and is wired into the edit turn
+   (`ContextReranker.ts` → `agentv3.ts`). Embeddings is a marginal upgrade blocked on the key. Unblock:
+   admin sets the embeddings key.
+6. **V4-6** WebContainers evaluation gate (license vs Phase-A gaps). 🔒 **LICENSE-GATED.** StackBlitz
+   WebContainers requires a commercial license for our use — a business/legal decision, not code.
+
+### Honest status roll-up (2026-07-07)
+Everything in VAJRA that is code-completable and verifiable WITHOUT new infra or a license is **shipped**
+(V4-1, V4-2, the Smriti lexical core, Satya gates, Kavach shrink-guard/durable store). The four remaining
+sequence items are either **redundant with a working system** (V4-3) or **infra/license-gated**
+(V4-4/V4-5/V4-6). Per the absolute rules (never break, real features only, honesty), these are NOT
+force-built as speculative or half-wired code. The correct next lever is evidence-driven: a fresh v3.0
+build report → forensic autopsy → targeted root-cause fix (rule 5), or the admin unblocking the specific
+infra/decision above.
 
 ## The one-line promise
 Replit की अमरता + Bolt की browser-आज़ादी + Lovable का git-धर्म + Cursor की सटीक नज़र —

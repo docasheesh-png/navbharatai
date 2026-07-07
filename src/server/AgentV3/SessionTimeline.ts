@@ -326,7 +326,7 @@ function headTailTruncate(s: string, max: number): string {
   const dropped = s.length - headLen - tailLen;
   return (
     s.slice(0, headLen) +
-    `\n… [${dropped} chars from an earlier tool result trimmed to keep the prompt small — call read_file / the tool again if you need the full content] …\n` +
+    `\n… [${dropped} chars hidden from this VIEW only — the underlying file/output is COMPLETE and intact on disk. To see a hidden section of a file, call read_file with start_line/end_line. NEVER conclude a file is truncated or corrupted from this marker] …\n` +
     s.slice(s.length - tailLen)
   );
 }

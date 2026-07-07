@@ -124,6 +124,27 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
 }
 
 /**
+ * DELIBERATE GENERATION RESET (Fix 36c — HMS report 2026-07-07). The ONLY legitimate wipe of a
+ * workspace's durable file index: when the user EXPLICITLY APPROVED a rebuild-from-scratch (the
+ * Fix-28 confirmation gate), the OLD app's durable files must stop existing — otherwise the File
+ * Guardian later "restores" the previous generation INTO the fresh build (the 63-old-files-over-
+ * 48-new-files Frankenstein that produced hours of type-conflict thrash). Clears the path index
+ * (count 0) but leaves per-file docs in place as orphans (cheap, and the git/GitHub history is the
+ * real archive). Never callable from any automatic path — the caller must pass the literal consent
+ * token so a bug can't wipe a project without the human Approve. Best-effort — never throws.
+ */
+export async function resetWorkspaceFilesForApprovedRebuild(workspaceId: string, consent: 'user-approved-rebuild'): Promise<void> {
+  if (consent !== 'user-approved-rebuild') return;
+  const db = getDb();
+  if (!db) return;
+  try {
+    await db.collection(COLLECTION).doc(workspaceId).set({ paths: [], count: 0, savedAt: Date.now(), resetByApprovedRebuild: true }, { merge: false });
+  } catch (e) {
+    notePersistenceFailure('workspace_files', 'write', e);
+  }
+}
+
+/**
  * MERGE a PARTIAL set of files into the durable workspace (upsert only the given files, UNION their
  * paths into the authoritative list). Unlike `saveWorkspaceFiles` (which REPLACES the path list and
  * would drop every unchanged file when given a partial set), this never forgets existing files — so

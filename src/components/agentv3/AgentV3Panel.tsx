@@ -13,6 +13,7 @@ import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -756,6 +757,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // Also preserve this turn's git checkpoints before start() resets them.
     if (state.checkpoints.length > 0) {
       setCheckpointHistory((h) => [...h, ...state.checkpoints]);
+    }
+    // SIZE GUARD (Fix 36a): an oversized zip dies at the platform's request-body limit BEFORE the
+    // server sees it — the user only saw the stall banner ("zip upload band ho gayi"). Refuse it
+    // HERE with the honest reason + the workable alternatives, and keep the composer state intact.
+    if (sendFiles.length > 0) {
+      const sizeVerdict = checkAttachmentSizes(sendFiles);
+      if (!sizeVerdict.ok) {
+        setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${sizeVerdict.reason}`, ts: Date.now() }]);
+        return;
+      }
     }
     const attachments = sendFiles.length > 0 ? await Promise.all(sendFiles.map(fileToAttachment)) : undefined;
     // A file with no text gets a sensible default prompt (the server requires one).

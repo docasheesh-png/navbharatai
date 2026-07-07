@@ -83,7 +83,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports } from '../AgentV3/ProjectImport';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -3219,6 +3219,23 @@ export function registerAgentV3Routes(app: Express): void {
         const envNote = envTemplateNote(importedFiles);
         if (envNote) emit({ type: 'narration', agent: 'architect', text: envNote, ts: Date.now() });
       } catch { /* the env note is best-effort */ }
+      // ROCK-SOLID IMPORT (admin 2026-07-07): an imported repo can itself be INCOMPLETE — a snapshot
+      // pushed from an interrupted mid-build state (real case: App.tsx importing five src/pages/*
+      // files the repo never contained). Detect unresolved LOCAL imports deterministically at IMPORT
+      // time and say so with the exact list + a one-line repair path — the user must never discover
+      // this later as a stubbed, blank preview. The AI turn also gets the list, so "fix it" works.
+      try {
+        const unresolved = findUnresolvedLocalImports(importedFiles);
+        if (unresolved.length > 0) {
+          const list = unresolved.slice(0, 8).map((u) => `${u.missing} (imported by ${u.importedBy})`).join('; ');
+          const more = unresolved.length > 8 ? ` …and ${unresolved.length - 8} more` : '';
+          emit({
+            type: 'narration', agent: 'architect', ts: Date.now(),
+            text: `⚠️ This import looks INCOMPLETE — ${unresolved.length} file(s) its code references are missing from the repo: ${list}${more}. The snapshot may have been saved mid-build. Say "create the missing files" and I'll build them to match the imports.`,
+          });
+          attachmentContext += `\n\n[IMPORT COMPLETENESS] These local imports resolve to NO imported file (the repo snapshot is incomplete): ${unresolved.map((u) => `${u.missing} ← ${u.importedBy}`).join('; ')}. If the user asks to fix/complete/repair the app, CREATE exactly these files (matching what the importing code expects) — do not rename the imports.`;
+        }
+      } catch { /* completeness check is best-effort — never blocks an import */ }
       // Project memory: the import is a durable fact of this session, and the imported sources
       // are indexed so the very first edit request works with real context.
       try {

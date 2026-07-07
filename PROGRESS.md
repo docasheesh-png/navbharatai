@@ -11113,3 +11113,26 @@ the agentic loop (never a hang, never fake success).
   server tsc 0, vitest 5323/5323, boot PASS.
 - ⚠️ REMINDER (open infra root cause): the Anthropic credits still need topping up — Vertex/Gemini is a
   survival net, not a replacement; the complete-app lane's QUALITY path is Sonnet.
+
+## 2026-07-07 — Fix 16: incomplete imports named AT IMPORT TIME (admin: "isko rocksolid banao")
+
+The admin recovered their OPD app by importing its GitHub repo (Fix 4 routing confirmed: "Imported
+project — running directly on the strong model"). But the repo snapshot itself was INCOMPLETE — pushed
+from an interrupted mid-build state: App.tsx referenced five src/pages/* files the repo never
+contained. The import landed 47 files "successfully" and the user discovered the gap only later, as a
+stubbed blank in-browser preview — a silent dead-end ("yeh bar bar hoga to user bhag jaega").
+
+**The class:** imports were validated for RUNNABILITY (package.json/index.html) but never for
+COMPLETENESS (do the code's own local imports resolve?). Fix: pure `findUnresolvedLocalImports(files)`
+in ProjectImport.ts — scans every source file's `./`, `../` and `@/` imports, resolves against the
+imported set with bundler suffixes (ext + /index variants), ignores bare packages/builtins (dependency
+territory), bounded at 20. Wired into `landImportedProject` (zip AND github paths): on any miss the
+user gets an immediate honest narration — the exact missing list + "Say 'create the missing files' and
+I'll build them" — and the AI turn gets an [IMPORT COMPLETENESS] context block so a repair ask creates
+exactly those files (never renames imports).
+- Tests: ProjectImport.test.ts +4 (the EXACT 5-missing-pages case; complete repo incl. @/ + index
+  variants → clean; bare/builtin/non-source ignored; 20-cap). Gate: frontend tsc 0, server tsc 0,
+  vitest 5327/5327, boot PASS.
+- Session note: "sab gayab, 0 file" after hard refresh was the designed new-session behavior — the
+  admin recovered everything from the GitHub copy (every build auto-pushes there); History restore
+  remains available too.

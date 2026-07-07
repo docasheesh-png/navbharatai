@@ -2436,8 +2436,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     {/* outside-click catcher */}
                     <div className="fixed inset-0 z-10" onClick={() => setSettingsOpen(false)} />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
-                      <ToggleRow label="Planning" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
-                      <ToggleRow label="Thinking" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
+                      <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
+                      <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
                       {/* Power level (Opus effort tiers): Off (normal) / Strong (low) / Powerful Force (high) / Full Team (ultracode). All Opus tiers bill real Opus cost × 2. */}
                       <div className="px-3 py-2">
                         <div className="text-sm text-zinc-200 mb-1.5">Power</div>

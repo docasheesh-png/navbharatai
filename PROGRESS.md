@@ -11814,3 +11814,22 @@ copy a source that isn't verifiably a string (both sibling sites swept); (2) ENT
 only strings ever enter the map; (3) RENDER tolerance — FilesPanel renders a row with an empty body
 instead of throwing. Tests: +4 (the exact crash class: undefined/null/object/number values dropped;
 bad keys dropped; never throws). Gate: frontend tsc 0, server tsc 0, vitest 5382/5382, boot PASS.
+
+## 2026-07-07 — Fix 31: the Thinking toggle is now REAL on every build lane (+ honest hints on both toggles)
+
+Admin: "thinking wala button nonfunctional hai — functional banao". Code-verified truth first (rule 3):
+Thinking was ALREADY fully wired on the agentic/edit lanes and the plan runner (ClaudeClient adaptive
+thinking `{type:'adaptive', display:'summarized'}` on Opus 4.x / Sonnet 4.6+, streamed to the UI as
+thinking bubbles) — but it was silently DROPPED on the DEFAULT complete-app fast lane (SimpleBuilder's
+fastGenerate never passed it), and plain chat replies run on the free router (which cannot think). So
+the most common flows showed zero effect → "nonfunctional".
+
+Fix: fastGenerate now passes `thinking` + streams the live reasoning summary into the build feed
+(`stream_delta kind:'thinking'`, unique turn id per call). ClaudeClient's model-capability gate keeps
+degraded tiers (Haiku/fallback providers) graceful — the param is never sent where unsupported. Client:
+both toggles now carry honest inline hints — Planning = "plan-first with your approval gate before
+building"; Thinking = "deeper reasoning on build/edit/plan turns, live summary in chat (plain chat
+replies stay instant)". Plain-chat thinking deliberately NOT added: the chat lane is the free-router
+zero-cost path; routing it to a paid thinking model needs billing plumbing — recorded as a possible
+future slice, honestly labeled in the UI instead of faked. Gate: frontend tsc 0, server tsc 0, vitest
+5438/5438, boot PASS.

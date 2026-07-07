@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from './MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, type NamedRunner } from './MultiProviderTurnRunner';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
@@ -65,6 +65,61 @@ describe('makeMultiProviderTurnRunner', () => {
 
   it('throws if constructed with an empty chain', () => {
     expect(() => makeMultiProviderTurnRunner([])).toThrow(/at least one runner/);
+  });
+});
+
+const CREDIT_ERR = '400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}';
+
+describe('fatal provider errors — billing/auth failures are never re-ground (build report 2026-07-07)', () => {
+  it('classifies the real credit-balance 400 and auth/permission/key errors as FATAL', () => {
+    expect(isFatalProviderError(new Error(CREDIT_ERR))).toBe(true);
+    expect(isFatalProviderError(new Error('authentication_error: invalid x-api-key'))).toBe(true);
+    expect(isFatalProviderError(new Error('permission_error: model not allowed'))).toBe(true);
+    expect(isFatalProviderError(new Error('account suspended'))).toBe(true);
+  });
+
+  it('keeps transient failures retryable (overload / rate limit / timeout / 5xx are NOT fatal)', () => {
+    for (const msg of ['529 overloaded_error', '429 rate_limit_error', 'Request timed out.', '500 internal server error', 'ECONNRESET']) {
+      expect(isFatalProviderError(new Error(msg))).toBe(false);
+    }
+  });
+
+  it('a provider that fails FATALLY is skipped on every later turn of the same run (no re-grind)', async () => {
+    // The report's build re-hit the same credit error after grinding the ladder for 8+ minutes.
+    const glm = runnerOk('from glm');
+    const claude = runnerFail(CREDIT_ERR);
+    const chain: NamedRunner[] = [{ name: 'CLAUDE', runner: claude }, { name: 'GLM', runner: glm }];
+    const runner = makeMultiProviderTurnRunner(chain);
+    expect((await runner.runTurn(PARAMS)).text).toBe('from glm'); // turn 1: CLAUDE fatal → GLM carries
+    expect((await runner.runTurn(PARAMS)).text).toBe('from glm'); // turn 2: CLAUDE skipped cold
+    expect(claude.runTurn).toHaveBeenCalledTimes(1); // never retried after the fatal error
+    expect(glm.runTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a TRANSIENT failure is retried on the next turn (behaviour unchanged)', async () => {
+    const flaky = runnerFail('529 overloaded_error');
+    const backstop = runnerOk('from backstop');
+    const runner = makeMultiProviderTurnRunner([{ name: 'GLM', runner: flaky }, { name: 'CLAUDE', runner: backstop }]);
+    await runner.runTurn(PARAMS);
+    await runner.runTurn(PARAMS);
+    expect(flaky.runTurn).toHaveBeenCalledTimes(2); // still tried each turn — transient ≠ dead
+  });
+
+  it('when EVERY provider is known-fatal, later turns fail INSTANTLY with the honest platform hint', async () => {
+    const claude = runnerFail(CREDIT_ERR);
+    const haiku = runnerFail(CREDIT_ERR);
+    const runner = makeMultiProviderTurnRunner([{ name: 'CLAUDE', runner: claude }, { name: 'CLAUDE_HAIKU', runner: haiku }]);
+    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/credit balance/i);           // turn 1: real calls
+    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/known-fatal|PLATFORM ISSUE/); // turn 2: instant
+    expect(claude.runTurn).toHaveBeenCalledTimes(1);
+    expect(haiku.runTurn).toHaveBeenCalledTimes(1); // neither re-called on turn 2
+  });
+
+  it('the final error names the platform problem in plain words (honesty to the user)', async () => {
+    const runner = makeMultiProviderTurnRunner([{ name: 'CLAUDE', runner: runnerFail(CREDIT_ERR) }]);
+    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/PLATFORM ISSUE.*out of credits/i);
+    expect(fatalProviderHint('blah credit balance is too low blah')).toMatch(/Plans & Billing/);
+    expect(fatalProviderHint('529 overloaded')).toBe(''); // transient failures get no platform blame
   });
 });
 

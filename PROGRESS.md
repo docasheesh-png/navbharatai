@@ -11060,3 +11060,28 @@ fallback (1 warning) auto-resolved — the fallback chain worked as designed.
 - Open (rule 6): the reviewer sub-agent still free-explores (12 reads + 11 searches) rather than using
   its 5-file sample — giving it more time is the safe fix now; teaching it to review from the provided
   sample (fewer tool calls) is the deeper orchestration-quality follow-up.
+
+## 2026-07-07 — Fix 14: fail-fast on FATAL provider errors + ⚠️ OPEN INFRA ROOT CAUSE: Anthropic credits exhausted
+
+**⚠️ ADMIN ACTION REQUIRED (rule 6 — the true root cause is infra only the admin can fix):** the OPD
+rebuild at 01:35 UTC failed with the Anthropic API's `400 "Your credit balance is too low"` on BOTH
+CLAUDE and CLAUDE_HAIKU. **Every v3.0 build will fail until the NavBharatAI Anthropic account is topped
+up (Anthropic Console → Plans & Billing).** GLM was also timing out (6×) and KIMI failed (2×), so no
+provider could carry the build. The engine reported the failure honestly (ok:false, BUILD_FAILED, real
+error surfaced) — the honesty pipeline worked.
+
+**Engine-side class bug fixed:** the first deterministic credit-error landed at +165s, yet the build
+kept grinding for another ~8.5 minutes (GLM timeouts ×6, KIMI ×2, then the SAME credit error again)
+before dying at +670s — a fatal billing/auth failure was retried like a transient one. Fixes in
+`MultiProviderTurnRunner` (all pure + tested):
+- `isFatalProviderError(err)` — narrow classifier: credit-balance-too-low, authentication_error,
+  permission_error, invalid/revoked API key, account disabled/suspended. Overloads / rate limits /
+  timeouts / 5xx stay TRANSIENT (retryable) — behaviour unchanged for them.
+- Chain-level memory: a provider that fails FATALLY is dead for the rest of the run — skipped cold on
+  every later turn (no re-grind); a still-alive cheap provider (GLM) can STILL carry the build alone.
+- When every provider is known-fatal, later turns fail INSTANTLY; and the final error now carries an
+  honest platform hint: "[PLATFORM ISSUE — not your app: the AI provider account has run out of
+  credits… (Plans & Billing)]" — the user learns the truth instead of a generic "providers failed".
+- Tests: MultiProviderTurnRunner +6 (real credit-400 classification; transient stays retryable;
+  fatal-skip across turns; transient-retry unchanged; all-dead instant fail; honest hint). Gate:
+  frontend tsc 0, server tsc 0, vitest 5321/5321, boot PASS.

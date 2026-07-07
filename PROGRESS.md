@@ -11377,3 +11377,17 @@ criticals → default score 85 → "⚠️ Build Review (85/100): Error: All v3.
 even when ok:true (provider-failed / too-large / step-limit / budget-cap / empty) → score 0 →
 formatReview renders NOTHING; the build stands on its own verify gates, no invented number. Tests:
 ReviewerAgent +4. Gate: frontend tsc 0, server tsc 0, vitest 5350/5350, boot PASS.
+
+## 2026-07-07 — VAJRA V4-1c SHIPPED: server graceful drain on deploy (NIRMAN Phase A complete)
+
+The deploy-kill server-half, pairing with V4-1a's client auto-continue. On SIGTERM/SIGINT (Cloud Run
+sends it ~10s before killing the instance) the server now: signals every in-flight AgentV3 build with
+an HONEST "the server is restarting — your build resumes automatically, files are safe" narration
+(so the client's V4-1a auto-continue re-sends cleanly instead of seeing an abrupt drop), and ABORTS
+each build's controller so its own finally (durable file + diagnostics save) runs before exit —
+bounding lost work to the ≤6s flush already in place. Fully bounded + catch-all: `shutdownGraceMs`
+(pure, capped at 6s) plus a 9s absolute backstop timer (unref'd) so shutdown can NEVER hang the
+platform; a second signal is ignored. `drainRunningBuilds()` + `shutdownGraceMs` in agentv3.ts, the
+handler in server.ts. Tests: agentv3 +2 (shutdownGraceMs bounds). Gate: frontend tsc 0, server tsc 0,
+vitest 5352/5352, boot PASS. NIRMAN Phase A (V4-1a client + V4-1c server) is now complete; the full
+job-queue/worker split is V4-4.

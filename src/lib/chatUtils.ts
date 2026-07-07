@@ -179,13 +179,24 @@ export function classifyAutoIntent(
 }
 
 /**
+ * Coerce an unknown value (e.g. a `restoredMessages` field read back from Firestore) into a Message[].
+ * Firestore can store a session's `restoredMessages` as a non-array (legacy/corrupted doc), and `x || []`
+ * does NOT guard a truthy non-array — spreading/iterating it then throws "... is not iterable" (a real
+ * production crash class). This enforces the array invariant at the boundary. Pure + unit-tested.
+ */
+export function asMessageArray(x: unknown): Message[] {
+  return Array.isArray(x) ? (x as Message[]) : [];
+}
+
+/**
  * Deduplicate messages by id and return them sorted by ascending timestamp.
  * Used when restoring a session: combines restoredMessages + messages, drops
  * duplicates (last write wins), and produces a stable chronological history.
+ * Defensive: a non-array input is treated as empty instead of throwing "not iterable".
  */
 export function dedupAndSortMessages(messages: Message[]): Message[] {
   const byId: Record<string, Message> = {};
-  for (const msg of messages) {
+  for (const msg of asMessageArray(messages)) {
     if (msg && msg.id) byId[msg.id] = msg;
   }
   return Object.values(byId).sort(

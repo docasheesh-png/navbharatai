@@ -10,7 +10,7 @@ import { collection, query, where, getDocs, doc, deleteDoc } from 'firebase/fire
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ChatSession, ViewType } from '../types';
 import { db, authedHeaders, safeLS } from '../App';
-import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages } from '../lib/chatUtils';
+import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages, asMessageArray } from '../lib/chatUtils';
 import { pickGreetingForAgent } from '../lib/agentGreetings';
 import { resolveSessionSurface } from '../lib/sessionRouting';
 
@@ -85,7 +85,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
             currentAgent: docData.current_agent,
             memorySummary: docData.memory_summary || '',
             editLog: docData.edit_log || [],
-            restoredMessages: docData.restoredMessages || [],
+            restoredMessages: asMessageArray(docData.restoredMessages),
             meta: { tab: docData.tab }
           } as any;
         }
@@ -136,7 +136,7 @@ export function useSessionManager(deps: SessionManagerDeps) {
     const isVishwakarma = targetAgent.startsWith('vishwakarma');
     
     // Build combined list of old messages to collapse (dedup by id + sort by time)
-    const uniqueHistory = dedupAndSortMessages([...(targetSession.restoredMessages || []), ...targetSession.messages]);
+    const uniqueHistory = dedupAndSortMessages([...asMessageArray(targetSession.restoredMessages), ...asMessageArray(targetSession.messages)]);
 
     let memSummary = targetSession.memorySummary || '';
     if (!memSummary && uniqueHistory.length > 0) {

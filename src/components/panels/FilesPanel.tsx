@@ -40,6 +40,13 @@ export interface FilesPanelProps {
   sessionId?: string;
   /** Phase 2.1 — called when user restores a version; parent updates workspace files */
   onRestoreVersion?: (files: Record<string, string>, commitMessage: string) => void;
+  /**
+   * Touch mode (admin 2026-07-07 — the v3.0 mobile footer's Files list): tapping a file opens an
+   * inline action menu (Open · Copy file · Copy path · Delete) instead of opening it immediately —
+   * hover-revealed actions don't exist on touch, so without this the actions were unreachable on
+   * phones. Desktop (default) keeps tap-to-open + hover actions.
+   */
+  tapActions?: boolean;
 }
 
 const EXT_COLOR: Record<string, string> = {
@@ -72,6 +79,7 @@ export function FilesPanel({
   onDuplicateFile,
   sessionId,
   onRestoreVersion,
+  tapActions,
 }: FilesPanelProps) {
   const uploadRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<'files' | 'history'>('files');
@@ -85,6 +93,17 @@ export function FilesPanel({
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [fileSearch, setFileSearch] = useState('');
+  // Touch mode: which file's inline action menu is open, + honest copy feedback ("Copied ✓" /
+  // the real failure) — a copy that silently did nothing would be a fake success.
+  const [actionPath, setActionPath] = useState<string | null>(null);
+  const [copyNote, setCopyNote] = useState<string | null>(null);
+  const copyToClipboard = (text: string, what: string) => {
+    navigator.clipboard.writeText(text).then(
+      () => setCopyNote(`${what} copied ✓`),
+      () => setCopyNote(`Could not copy ${what.toLowerCase()} — your browser blocked clipboard access.`),
+    );
+    setTimeout(() => setCopyNote(null), 2000);
+  };
 
   const commitRename = () => {
     const trimmed = renameValue.trim();
@@ -259,7 +278,8 @@ export function FilesPanel({
                     const sizeLabel = bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}K`;
                     const isRenaming = renamingPath === path;
                     return (
-                      <div key={path} className="group flex items-center gap-1 rounded-xl hover:bg-white/5 transition-colors">
+                      <div key={path} className="rounded-xl hover:bg-white/5 transition-colors">
+                      <div className="group flex items-center gap-1">
                         {isRenaming ? (
                           <div className="flex-1 flex items-center gap-1 px-2 py-1.5">
                             <input
@@ -275,15 +295,16 @@ export function FilesPanel({
                         ) : (
                           <>
                             <button
-                              onClick={() => onOpenFile(path)}
-                              className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left min-w-0"
+                              onClick={() => (tapActions ? setActionPath(actionPath === path ? null : path) : onOpenFile(path))}
+                              className="flex-1 flex items-center gap-3 px-3 py-2.5 text-left min-w-0 touch-manipulation"
                             >
                               <FileCode className={`w-4 h-4 flex-shrink-0 ${color}`} />
                               <span className="text-[11px] font-medium text-[#c9d1d9] flex-1 truncate">{path}</span>
                               <span className="text-[8px] text-[#484f58] font-mono shrink-0">{lines}L · {sizeLabel}</span>
                             </button>
-                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete (appear on hover) */}
-                            <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            {/* C1/C2/C8/C17 — copy path, duplicate, rename, delete. Hover-revealed on
+                                desktop; on touch layouts they stay visible (hover doesn't exist there). */}
+                            <div className="flex items-center gap-0.5 pr-2 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                               <button
                                 onClick={() => navigator.clipboard.writeText(path).catch(() => {})}
                                 title="Copy file path"
@@ -328,6 +349,40 @@ export function FilesPanel({
                             </div>
                           </>
                         )}
+                      </div>
+                      {/* Touch mode — inline action menu (admin 2026-07-07): Open · Copy file ·
+                          Copy path · Delete. Real full-width buttons (guaranteed tap→click on iOS). */}
+                      {tapActions && actionPath === path && !isRenaming && (
+                        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
+                          <button
+                            onClick={() => { setActionPath(null); onOpenFile(path); }}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/40 text-[10px] font-semibold text-indigo-300 touch-manipulation"
+                          >
+                            <FileCode className="w-3 h-3" /> Open
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(contentStr, 'File')}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-semibold text-[#c9d1d9] touch-manipulation"
+                          >
+                            <Copy className="w-3 h-3" /> Copy file
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(path, 'Path')}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-semibold text-[#c9d1d9] touch-manipulation"
+                          >
+                            <Copy className="w-3 h-3" /> Copy path
+                          </button>
+                          {onDeleteFile && (
+                            <button
+                              onClick={() => { if (window.confirm(`Delete ${path}?`)) { setActionPath(null); onDeleteFile(path); } }}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/40 text-[10px] font-semibold text-red-300 touch-manipulation"
+                            >
+                              <Trash2 className="w-3 h-3" /> Delete
+                            </button>
+                          )}
+                          {copyNote && <span className="text-[10px] text-emerald-400">{copyNote}</span>}
+                        </div>
+                      )}
                       </div>
                     );
                   })}

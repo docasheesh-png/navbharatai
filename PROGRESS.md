@@ -11503,3 +11503,42 @@ green "Live" label on every saved session whose workspace has an ACTIVE publishe
 VITEST no-op safety (empty/blank input, never throws), sessionStatusMeta live + precedence cases.
 **Gate:** frontend tsc 0 · server tsc 0 · vitest 4838/4838 (496 files) · boot-check PASS · CI green
 on branch → squash-merged as `0e13016` (#1092) → Cloud Run auto-deploy.
+
+## 2026-07-07 — v3.0 mobile footer (dynamic per-view bottom nav) + preview keep-alive + REAL file delete
+
+**Admin ask (approved spec):** footer ko dynamic karna hai (har view ka apna footer); filhal v3.0 ka —
+mobile/tablet par v3.0 ke bottom nav me 6 items: History · Pro Chat · Preview · Files · Build Report ·
+More; v3.0 ka do-row header slim ho kar sirf title · beta · ⚛ · build-stamp · Stop/Resume rahe (React +
+Vite picker More me); Preview iframe tab-switch par unmount na ho; Files tap → Open / Copy file / Copy
+path / Delete (Delete REAL — server workspace se bhi). Desktop bilkul unchanged.
+
+**What shipped (one PR):**
+- **Dynamic footer architecture** — the App.tsx bottom nav is ONE bar whose items follow the active
+  view. v3.0 registers its REAL actions via `onFooterApi` (`v3FooterApi.ts` — typed contract + pure
+  `footerSection`/`v3MobileFooterActive`, both unit-tested). v3.0 closed → api null → default items
+  (never dead buttons).
+- **v3.0 mobile footer** — History opens the SAME session list as the desktop ☰ (one shared
+  `historyListBody` — same data, live dots, delete) as a bottom sheet; Pro Chat collapses to chat;
+  Preview/Files open the real surfaces; Report runs the same diagnostics download (spinner while
+  preparing); More sheet carries the whole header row-2: Framework picker, Diff, Terminal, Checkpoints,
+  Report history (inline), GitHub, Deploy (+ provider select), Live site, New chat.
+- **Slim mobile header** — ☰ hidden (footer owns History), framework NAME hidden (icon stays; picker in
+  More), row-2 pills hidden — all `hidden lg:*` so ≥1024px (where the nav is CSS-hidden) the header
+  controls return. Stop/Resume stays in the header always (admin: "Stop button rakho").
+- **Preview keep-alive (root fix)** — the workspace pane + PreviewSurface were UNMOUNTED on tab switch
+  and on collapsing to chat, destroying the iframe ("preview gayab"). Now the pane hides via CSS and
+  PreviewSurface stays mounted once first opened (lazy first mount so never-opened preview costs
+  nothing). Pure policy in `previewKeepAlive.ts` + regression tests (same pattern as v3SurfaceMount).
+- **REAL file delete (root-caused the class)** — three drifted delete paths found: filesPanel bundle
+  (React state ONLY — file resurrected on reload), sidebar ViewPanels copy (same), dead `deleteFile`
+  helper. Centralized: `deleteWorkspaceFiles` in App.tsx = state + open-editor fix + IndexedDB +
+  `/api/agentv3/delete-files` (durable store); both FilesPanel callsites now route through it; the
+  v3.0 unified Files tab also purges its own sandbox-files cache so the row disappears everywhere.
+- **Files tap actions (mobile)** — FilesPanel `tapActions` mode: tap a file → Open (Code Studio) /
+  Copy file (contents) / Copy path / Delete, with honest copy feedback (real failure message when the
+  browser blocks clipboard). Hover-only action strip now also touch-visible (hover doesn't exist on
+  phones — same class of bug as the old history-menu delete).
+- AppKnowledgeBase: v3.0 entry updated (mobile footer bullet + keywords) in the same commit.
+
+**Gate:** tsc frontend 0 · tsc server 0 · vitest full run green (read the real line) · CI on branch →
+merge. (Server code untouched this PR; delete endpoint + store tests already existed.)

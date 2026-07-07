@@ -17,6 +17,7 @@ import { DeployModal } from './components/panels/DeployModal';
 import { WorkspacePane } from './components/panels/WorkspacePane';
 import { SettingsPanel } from './components/panels/SettingsPanel';
 import { ProV3Surface } from './components/agentv3/ProV3Surface';
+import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3FooterApi';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
@@ -43,7 +44,7 @@ import {
   Bell, Minimize2, Moon, IndianRupee as RupeeIcon,
   Wand2, Package,
   Kanban, CloudUpload, LayoutTemplate, HeartPulse,
-  Briefcase
+  Briefcase, FileText
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
@@ -1609,15 +1610,7 @@ export default function App() {
 
 
 
-  const deleteFile = (path: string) => {
-    setFiles(prev => {
-      const next = { ...prev };
-      delete next[path];
-      if (activeFile === path) setActiveFile(Object.keys(next)[0] || '');
-      return next;
-    });
-    storageDeleteFile(path).catch(() => {}); // also remove from IndexedDB so it doesn't resurrect on reload
-  };
+  // (the old single-file `deleteFile` helper was dead code — superseded by deleteWorkspaceFiles below)
 
   // Batch removal side-effect from the IDE file explorer (multi-select / delete-all). The React
   // `files` state is updated by the caller via onFilesChange; here we clear the deleted paths from
@@ -1644,6 +1637,24 @@ export default function App() {
       });
     } catch { /* best-effort — never block the IDE delete */ }
   }, [user]);
+
+  // THE one real file delete — every UI delete (Files panel, v3.0 Files tab, sidebar Files) flows
+  // through here: React state + open-editor fix + IndexedDB + the v3.0 durable workspace. Before
+  // this, the Files-panel delete only touched React state, so a "deleted" file silently resurrected
+  // on the next reload (a fake delete — forbidden by the real-features rule).
+  const deleteWorkspaceFiles = useCallback((paths: string[]) => {
+    if (!paths.length) return;
+    setFiles(prev => {
+      const next = { ...(prev as Record<string, string>) };
+      for (const p of paths) delete next[p];
+      return next as typeof prev;
+    });
+    if (paths.includes(activeFile)) {
+      const remaining = Object.keys(files as Record<string, string>).filter((k) => !paths.includes(k));
+      setActiveFile(remaining[0] || '');
+    }
+    void handleFilesRemoved(paths); // IndexedDB + v3.0 workspace (durable, best-effort)
+  }, [activeFile, files, handleFilesRemoved]);
 
   // Push the IDE workspace files into the NavBharatAI Pro v3.0 (AgentV3) workspace so v3.0 KNOWS
   // which files exist (e.g. after a ZIP upload). Best-effort: needs a signed-in user; the server
@@ -1865,6 +1876,10 @@ export default function App() {
   // feature parity with the in-panel one — auto-resuming a dead sandbox and the framework-aware
   // Diagnose flow both need them (previously only the in-panel PreviewSurface received these props).
   const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }>({});
+  // Dynamic per-view footer (admin 2026-07-07): while v3.0 is the active view on mobile/tablet, the
+  // bottom nav swaps to v3.0's own items. AgentV3Panel registers its REAL actions here (null when
+  // v3.0 is closed/unmounted — the nav then falls back to the default items, never dead buttons).
+  const [v3FooterApi, setV3FooterApi] = useState<V3FooterApi | null>(null);
   // "Fix with AI" clicked from the SIDEBAR preview (outside the v3.0 panel's own UI) — prefills the
   // v3.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
@@ -2490,6 +2505,10 @@ export default function App() {
               /* In focus mode (header hidden) the v3.0 composer drops its outer frame so the
                  input reads as a clean floating popup — see AgentV3Panel's footer. */
               focusMode={focusMode}
+              /* Dynamic footer (admin 2026-07-07): mobile/tablet only — exactly when the bottom nav
+                 is visible, so v3.0's header controls and their footer replacements never both hide. */
+              mobileFooter={v3MobileFooterActive(effectiveDeviceMode, focusMode)}
+              onFooterApi={setV3FooterApi}
               onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
               /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
@@ -2515,11 +2534,9 @@ export default function App() {
                   setActiveFile(path);
                   toggleTab('studio');
                 },
-                onDeleteFile: (path: string) => {
-                  const next = { ...(files as Record<string, string>) };
-                  delete next[path];
-                  setFiles(next as any);
-                },
+                // REAL delete — state + IndexedDB + v3.0 durable workspace (deleteWorkspaceFiles),
+                // so the file never resurrects on reload and v3.0 forgets it too.
+                onDeleteFile: (path: string) => deleteWorkspaceFiles([path]),
                 onRenameFile: (oldPath: string, newPath: string) => {
                   const prev = files as Record<string, string>;
                   if (prev[newPath] !== undefined) return;
@@ -2538,6 +2555,9 @@ export default function App() {
                   addLog(`Restored to: ${commitMsg}`, 'success');
                   toggleTab('studio');
                 },
+                // Mobile (admin 2026-07-07): tap a file → Open / Copy file / Copy path / Delete
+                // (hover actions don't exist on touch). Desktop keeps tap-to-open.
+                tapActions: effectiveDeviceMode !== 'desktop',
               }}
             />
           </div>
@@ -3334,12 +3354,40 @@ export default function App() {
           controls on other surfaces (e.g. the v3.0 chat composer). */}
       <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} currentView={activeView} />
 
-      {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too). */}
+      {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too).
+          DYNAMIC PER-VIEW FOOTER (admin 2026-07-07): the bar is ONE component (same design, same
+          gating) but its ITEMS follow the active view. v3.0 active → its own six items (History ·
+          Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
+          via onFooterApi. Every other view keeps the default items. */}
       {effectiveDeviceMode !== 'desktop' && !focusMode && (
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[#0d1117]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 h-14"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
-          {[
+          {activeView === 'nbi_pro_chat' && v3FooterApi ? (
+            [
+              { key: 'history', icon: History,        label: 'History',  onTap: v3FooterApi.openHistory, active: false },
+              { key: 'chat',    icon: MessageSquare,  label: 'Pro Chat', onTap: v3FooterApi.openChat,    active: v3FooterApi.section === 'chat' },
+              { key: 'preview', icon: Monitor,        label: 'Preview',  onTap: v3FooterApi.openPreview, active: v3FooterApi.section === 'preview' },
+              { key: 'files',   icon: FolderOpen,     label: 'Files',    onTap: v3FooterApi.openFiles,   active: v3FooterApi.section === 'files' },
+              { key: 'report',  icon: FileText,       label: 'Report',   onTap: v3FooterApi.buildReport, active: false, busy: v3FooterApi.reportBusy },
+              { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
+            ].map(({ key, icon: Icon, label, onTap, active, busy }) => (
+              <button
+                key={key}
+                onClick={onTap}
+                aria-label={label}
+                aria-current={active ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${active ? 'text-indigo-400' : 'text-[#484f58]'}`}
+              >
+                {busy
+                  ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+                  : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
+                <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${active ? 'text-indigo-400' : ''}`}>{label}</span>
+                {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
+              </button>
+            ))
+          ) : (
+          [
             { id: 'home' as ViewType,      icon: menuItems.find(m => m.id === 'home')?.icon      ?? Bot,         label: 'Home' },
             { id: (activeAgent === 'navbharatai-pro' ? 'nbi_pro_chat' : 'nbi_chat') as ViewType, icon: activeAgent === 'navbharatai-pro' ? (menuItems.find(m => m.id === 'nbi_pro_chat')?.icon ?? Zap) : (menuItems.find(m => m.id === 'nbi_chat')?.icon ?? MessageSquare), label: 'AI' },
             { id: 'preview' as ViewType,   icon: menuItems.find(m => m.id === 'preview')?.icon   ?? Monitor,     label: 'Preview' },
@@ -3366,7 +3414,8 @@ export default function App() {
                 {isActive && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>
             );
-          })}
+          })
+          )}
         </nav>
       )}
 

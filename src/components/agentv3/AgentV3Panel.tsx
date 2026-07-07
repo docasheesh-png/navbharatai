@@ -11,6 +11,8 @@ import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Buil
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
+import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
+import { footerSection, type V3FooterApi } from './v3FooterApi';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -68,7 +70,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -132,6 +134,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Workspace is collapsed by default so the chat takes the full width; opening a
   // header tab pill surfaces it. On mobile an open workspace takes over the area.
   const [showWorkspace, setShowWorkspace] = useState(false);
+  // PREVIEW PERSISTENCE (admin 2026-07-07): once the Preview tab has been opened once, its
+  // PreviewSurface (and the iframe inside) stays mounted for the whole session — hidden via CSS on
+  // other tabs — so switching tabs / going back to chat never destroys the rendered preview. The
+  // first mount stays lazy so a session that never opens Preview never pays its compile/boot cost.
+  const [previewEverOpened, setPreviewEverOpened] = useState(false);
+  useEffect(() => {
+    if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
+  }, [showWorkspace, tab]);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
@@ -1071,6 +1081,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // chats opened EMPTY. The finally below re-arms saving once the new session is fully adopted.
     sessionSwitchRef.current = true;
     setHistoryOpen(false);
+    setMobileSheet(null); // opening from the mobile History sheet must also dismiss the sheet
     try {
       // DETACH the current build first (same as startNewSession): reset() aborts this UI's stream,
       // clears `running` (so the opened chat's composer is enabled, not stuck disabled) and bumps the
@@ -1232,7 +1243,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       sessionSwitchRef.current = false;
     }
   };
-  const newChatFromHistory = () => { setHistoryOpen(false); startNewSession(); };
+  const newChatFromHistory = () => { setHistoryOpen(false); setMobileSheet(null); startNewSession(); };
   // Delete a saved session from the history list. Confirms first (destructive + irreversible —
   // the Firestore record and its transcript are gone). If the deleted session is the one currently
   // open, starts a fresh session so the panel never keeps showing a chat that no longer exists.
@@ -1280,6 +1291,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
     setTab(t);
     setShowWorkspace(true);
+  };
+  // ── Mobile footer (admin 2026-07-07): v3.0 owns the app's bottom nav while it is the active view.
+  // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
+  // nav; any footer navigation action closes them.
+  const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more'>(null);
+  const openSurfaceFromFooter = (t: SurfaceTab) => {
+    setMobileSheet(null);
+    setTab(t);
+    setShowWorkspace(true); // explicit open (never the toggle-collapse openTab does on re-tap)
   };
   // U3 (audit): error/failure banners must offer a next step, not dead-end. Prefill the composer with a
   // repair instruction, bring the chat into view, and focus — the user reviews and hits send (no
@@ -1388,6 +1408,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Admin 2026-07-06: the Text-report download and Copy-report buttons were removed from the header.
   // The JSON "Build report" download (downloadDiagnostics) remains the single report export; the
   // server still keeps the full "0 → last" session history behind it and the History dropdown.
+
+  // ── Mobile footer API (admin 2026-07-07): register the panel's REAL actions with the app-level
+  // bottom nav — the same code paths the desktop header uses (openTab, the history loader, the
+  // diagnostics download). Re-registered whenever the active surface changes so the nav's highlight
+  // tracks reality; unregistered on unmount so a closed v3.0 never leaves stale footer buttons.
+  useEffect(() => {
+    if (!onFooterApi) return;
+    onFooterApi({
+      section: footerSection(showWorkspace, tab),
+      openHistory: () => {
+        if (mobileSheet === 'history') { setMobileSheet(null); return; } // re-tap closes, no refetch
+        setMobileSheet('history');
+        void loadHistory();
+      },
+      openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
+      openPreview: () => openSurfaceFromFooter('preview'),
+      openFiles: () => openSurfaceFromFooter('files'),
+      buildReport: () => { setMobileSheet(null); void downloadDiagnostics(); },
+      reportBusy: downloadingDiag,
+      openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onFooterApi, showWorkspace, tab, downloadingDiag, mobileSheet]);
+  useEffect(() => () => { onFooterApi?.(null); }, [onFooterApi]);
 
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
@@ -1627,6 +1671,105 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const currentTodo = state.todos.find((t) => t.status === 'in_progress')
     ?? state.todos.find((t) => t.status !== 'done');
 
+  // Shared session-history list — rendered by BOTH the desktop ☰ dropdown and the mobile footer's
+  // History sheet, so there is exactly ONE history UI (same data, same live dots, same actions).
+  const historyListBody = (
+    <>
+      {tapDebug && (
+        <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
+          {lastTap || 'tap tracer ON — ab kisi chat par tap kijiye'}
+        </div>
+      )}
+      <button
+        onClick={newChatFromHistory}
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+      >
+        <Plus className="w-4 h-4 text-indigo-400" /> New chat
+      </button>
+      <div className="my-1 border-t border-zinc-800" />
+      {historyLoading ? (
+        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
+      ) : historyError ? (
+        <div className="px-3 py-4 text-xs text-center">
+          <div className="flex items-center justify-center gap-1.5 text-amber-400">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>Couldn't load your history</span>
+          </div>
+          <div className="mt-1 text-zinc-500">{historyError}</div>
+          <button
+            onClick={loadHistory}
+            className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-zinc-800 font-medium"
+          >
+            <RotateCcw className="w-3 h-3" /> Try again
+          </button>
+        </div>
+      ) : historyItems.length === 0 ? (
+        <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
+      ) : (
+        groupSessionsByDate(historyItems, Date.now()).map((group) => (
+          <div key={group.label}>
+            <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
+            {group.items.map((c) => {
+              const meta = sessionStatusMeta(c.status, c.live);
+              const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
+              const isDeleting = deletingHistoryId === c.id;
+              // MOBILE TAP FIX: this row used to be a <div role="button"> with a NESTED
+              // delete <button> inside it. On iOS Safari, tapping a non-interactive div
+              // inside a scrollable (overflow-y-auto) menu is often treated as scroll
+              // intent and never dispatches a click — so on phones "clicking an old chat
+              // did nothing" while desktop mouse clicks worked. The open action is now a
+              // REAL full-width <button> (guaranteed tap → click on iOS, keyboard support
+              // for free), and delete is a SIBLING absolutely-positioned button (valid
+              // HTML — no nested interactive). Delete was also opacity-0 until :hover,
+              // which doesn't exist on touch — an invisible tap-eater on the row's right
+              // edge; it now stays visible on touch layouts and hover-reveals on desktop.
+              return (
+                <div key={c.id} className={`relative group ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={() => { if (!isDeleting) openConversation(c.id); }}
+                    disabled={isDeleting}
+                    title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
+                    className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
+                  >
+                    <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
+                      {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
+                          like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
+                      <span
+                        className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
+                        title={meta.live ? 'Live — this app is published' : meta.label}
+                      />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">{c.title || 'Untitled build'}</span>
+                      <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+                        {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
+                        {c.deadTranscript
+                          ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
+                          : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
+                        {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleDeleteConversation(e, c)}
+                    disabled={running || isDeleting}
+                    title="Delete this session"
+                    aria-label="Delete this session"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+                  >
+                    {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))
+      )}
+    </>
+  );
+
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
@@ -1635,8 +1778,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             room on the right so the header's own trailing controls (Stop/Resume) don't sit under it. */}
         <div className={`flex items-center gap-2 pl-4 pt-3 pb-2 ${focusMode ? 'pr-14' : 'pr-4'}`}>
           {/* History menu (3-line): this account's saved chats + New chat. Per-user (Firestore), so the
-              same list and the same project/memory continue from any device the user signs in on. */}
-          <div className="relative">
+              same list and the same project/memory continue from any device the user signs in on.
+              MOBILE FOOTER (admin 2026-07-07): on mobile/tablet the footer's History item owns this —
+              the header ☰ hides there (hidden lg:block) so the control exists exactly once. */}
+          <div className={mobileFooter ? 'relative hidden lg:block' : 'relative'}>
             <button
               onClick={toggleHistory}
               title="Chat history"
@@ -1653,98 +1798,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <div className="fixed inset-0 z-40 cursor-pointer touch-manipulation" onClick={() => setHistoryOpen(false)} aria-hidden="true" />
                 <div className="absolute left-0 top-9 z-50 w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl py-1.5">
                   <div className="px-3 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Session history</div>
-                  {tapDebug && (
-                    <div className="mx-2 mb-1 rounded bg-amber-500/10 border border-amber-500/40 px-2 py-1 text-[10px] font-mono text-amber-300 break-all select-text">
-                      {lastTap || 'tap tracer ON — ab kisi chat par tap kijiye'}
-                    </div>
-                  )}
-                  <button
-                    onClick={newChatFromHistory}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
-                  >
-                    <Plus className="w-4 h-4 text-indigo-400" /> New chat
-                  </button>
-                  <div className="my-1 border-t border-zinc-800" />
-                  {historyLoading ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
-                  ) : historyError ? (
-                    <div className="px-3 py-4 text-xs text-center">
-                      <div className="flex items-center justify-center gap-1.5 text-amber-400">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                        <span>Couldn't load your history</span>
-                      </div>
-                      <div className="mt-1 text-zinc-500">{historyError}</div>
-                      <button
-                        onClick={loadHistory}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-zinc-800 font-medium"
-                      >
-                        <RotateCcw className="w-3 h-3" /> Try again
-                      </button>
-                    </div>
-                  ) : historyItems.length === 0 ? (
-                    <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
-                  ) : (
-                    groupSessionsByDate(historyItems, Date.now()).map((group) => (
-                      <div key={group.label}>
-                        <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
-                        {group.items.map((c) => {
-                          const meta = sessionStatusMeta(c.status, c.live);
-                          const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
-                          const isDeleting = deletingHistoryId === c.id;
-                          // MOBILE TAP FIX: this row used to be a <div role="button"> with a NESTED
-                          // delete <button> inside it. On iOS Safari, tapping a non-interactive div
-                          // inside a scrollable (overflow-y-auto) menu is often treated as scroll
-                          // intent and never dispatches a click — so on phones "clicking an old chat
-                          // did nothing" while desktop mouse clicks worked. The open action is now a
-                          // REAL full-width <button> (guaranteed tap → click on iOS, keyboard support
-                          // for free), and delete is a SIBLING absolutely-positioned button (valid
-                          // HTML — no nested interactive). Delete was also opacity-0 until :hover,
-                          // which doesn't exist on touch — an invisible tap-eater on the row's right
-                          // edge; it now stays visible on touch layouts and hover-reveals on desktop.
-                          return (
-                            <div key={c.id} className={`relative group ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
-                              <button
-                                type="button"
-                                onClick={() => { if (!isDeleting) openConversation(c.id); }}
-                                disabled={isDeleting}
-                                title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
-                                className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
-                              >
-                                <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
-                                  {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
-                                      like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
-                                  <span
-                                    className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
-                                    title={meta.live ? 'Live — this app is published' : meta.label}
-                                  />
-                                </span>
-                                <span className="flex-1 min-w-0">
-                                  <span className="block truncate">{c.title || 'Untitled build'}</span>
-                                  <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
-                                    {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
-                                    {c.deadTranscript
-                                      ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
-                                      : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
-                                    {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
-                                  </span>
-                                </span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteConversation(e, c)}
-                                disabled={running || isDeleting}
-                                title="Delete this session"
-                                aria-label="Delete this session"
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
-                              >
-                                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))
-                  )}
+                  {historyListBody}
                 </div>
               </>
             )}
@@ -1758,7 +1812,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             title="Change framework"
           >
             <span>{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
-            <span>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+            {/* Mobile (admin 2026-07-07): the header keeps only the framework ICON — the full
+                name + picker entry lives in the footer's More sheet. */}
+            <span className={mobileFooter ? 'hidden lg:inline' : ''}>{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
           </button>
           <span className="text-[9px] text-zinc-600 font-mono" title="Deployed build time — if this doesn't change after a deploy, your browser is serving cached code.">{(() => { try { return 'b:' + (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '').slice(5, 16).replace('T', ' '); } catch { return ''; } })()}</span>
           {running ? (
@@ -1790,7 +1846,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </div>
           ) : null}
         </div>
-        <div className="flex gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {/* Row 2 (workspace pills + report/deploy actions): on mobile/tablet this whole row moves
+            into the footer (direct items + the More sheet) — admin 2026-07-07. Desktop unchanged. */}
+        <div className={`${mobileFooter ? 'hidden lg:flex' : 'flex'} gap-1 px-3 pb-2 overflow-x-auto whitespace-nowrap`} style={{ WebkitOverflowScrolling: 'touch' }}>
           <TabPill active={showWorkspace && tab === 'preview'} onClick={() => openTab('preview')} icon={<Globe className="w-3.5 h-3.5" />} dataTour="preview">Preview</TabPill>
           <TabPill active={showWorkspace && tab === 'files'} onClick={() => openTab('files')} icon={<FolderOpen className="w-3.5 h-3.5" />}>Files ({state.files.length})</TabPill>
           <TabPill active={showWorkspace && tab === 'diff'} onClick={() => openTab('diff')} icon={<FileDiff className="w-3.5 h-3.5" />}>Diff ({diffPaths.length})</TabPill>
@@ -2368,9 +2426,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
         {/* RIGHT: merged workspace surfaces. Opened from the header tab pills;
             collapses back to full-width chat via the ✕ button (or re-tapping the
-            active pill). On mobile it takes over the area; on desktop it shares. */}
-        {showWorkspace && (
-        <div className="flex-1 sm:flex-none sm:w-1/2 flex flex-col min-h-0">
+            active pill). On mobile it takes over the area; on desktop it shares.
+            PREVIEW PERSISTENCE (admin 2026-07-07): the pane stays MOUNTED and is hidden via CSS when
+            collapsed — unmounting it destroyed the preview iframe, so every tab switch / back-to-chat
+            lost the rendered preview and forced a full re-build of it. */}
+        <div className={`flex-1 sm:flex-none sm:w-1/2 flex-col min-h-0 ${showWorkspace ? 'flex' : 'hidden'}`}>
           <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs">
             <span className="font-medium text-zinc-300 capitalize">{tab}</span>
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" className="flex items-center gap-1 text-zinc-400 hover:text-white">
@@ -2388,38 +2448,46 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </div>
           )}
 
-          {tab === 'preview' ? (
-            <PreviewSurface
-              url={state.previewUrl}
-              workspaceId={state.workspaceId}
-              userId={userId}
-              email={email}
-              framework={framework}
-              // U1 — auto-refresh the preview as files are written during the build (debounced inside).
-              reloadSignal={filesVersion}
-              // C1 — when the panel is idle (no build running), let the preview auto-boot a dead
-              // sandbox ONCE on reopen so a returning user's live preview restores itself instead of
-              // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL
-              // arrives from the build itself — no need to boot a second sandbox).
-              autoResume={!running}
-              onFixError={(errText) => {
-                // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
-                // (collapse the workspace) so the user can review and send the fix request.
-                setPrompt(
-                  `The in-browser preview failed to build with this error:\n\n${errText}\n\n` +
-                    'Please find the cause in the project files and fix it so the app builds and runs.',
-                );
-                setShowWorkspace(false);
-              }}
-              onFileEdited={(path, content) => {
-                // Visual Editor saved a real edit — keep this panel's OWN Files-tab cache honest, and
-                // push it through the SAME onFilesSync bridge a build's own file writes use, so the
-                // main app's shared files state (Code Studio, sidebar Files, Git) picks it up too.
-                setWorkspaceFiles((prev) => (prev ? { ...prev, [path]: content } : prev));
-                onFilesSync?.({ [path]: content });
-              }}
-            />
-          ) : tab === 'files' ? (
+          {/* PREVIEW PERSISTENCE: once the preview has been opened ONCE, PreviewSurface stays
+              mounted for the rest of the session (hidden via CSS on other tabs / collapsed chat) —
+              the iframe + its rendered app survive tab switches instead of being torn down. First
+              mount stays LAZY (previewEverOpened) so a user who never opens Preview never pays the
+              in-browser compile / sandbox auto-resume cost. */}
+          {previewMounted(previewEverOpened, showWorkspace, tab) && (
+            <div className={previewWrapClass(showWorkspace, tab)}>
+              <PreviewSurface
+                url={state.previewUrl}
+                workspaceId={state.workspaceId}
+                userId={userId}
+                email={email}
+                framework={framework}
+                // U1 — auto-refresh the preview as files are written during the build (debounced inside).
+                reloadSignal={filesVersion}
+                // C1 — when the panel is idle (no build running), let the preview auto-boot a dead
+                // sandbox ONCE on reopen so a returning user's live preview restores itself instead of
+                // requiring a manual "Diagnose" click. Suppressed during an active build (the live URL
+                // arrives from the build itself — no need to boot a second sandbox).
+                autoResume={!running}
+                onFixError={(errText) => {
+                  // P-UX.3 — prepopulate the chat with the preview error and bring the chat into view
+                  // (collapse the workspace) so the user can review and send the fix request.
+                  setPrompt(
+                    `The in-browser preview failed to build with this error:\n\n${errText}\n\n` +
+                      'Please find the cause in the project files and fix it so the app builds and runs.',
+                  );
+                  setShowWorkspace(false);
+                }}
+                onFileEdited={(path, content) => {
+                  // Visual Editor saved a real edit — keep this panel's OWN Files-tab cache honest, and
+                  // push it through the SAME onFilesSync bridge a build's own file writes use, so the
+                  // main app's shared files state (Code Studio, sidebar Files, Git) picks it up too.
+                  setWorkspaceFiles((prev) => (prev ? { ...prev, [path]: content } : prev));
+                  onFilesSync?.({ [path]: content });
+                }}
+              />
+            </div>
+          )}
+          {!showWorkspace ? null : tab === 'preview' ? null : tab === 'files' ? (
             // Unified Files — the SAME rich FilesPanel the sidebar "Files" menu uses, so both
             // entry points are ONE feature with two gates. It shows the union of the live v3.0
             // sandbox files (workspaceFiles) and the main-app files (user uploads + already-synced
@@ -2430,7 +2498,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               const unified: Record<string, string> = { ...(filesPanel?.files || {}), ...(workspaceFiles || {}) };
               const hasAny = Object.keys(unified).length > 0;
               if (filesPanel && hasAny) {
-                return <FilesPanel {...filesPanel} files={unified} hasGeneratedCode={hasAny} />;
+                return (
+                  <FilesPanel
+                    {...filesPanel}
+                    files={unified}
+                    hasGeneratedCode={hasAny}
+                    // REAL delete in the unified view: the parent's onDeleteFile purges the main-app
+                    // state + IndexedDB + the v3.0 durable store — but this panel's OWN sandbox-files
+                    // cache (workspaceFiles) also lists the path, so purge it here too or the row
+                    // reappears in the union and the delete looks fake.
+                    onDeleteFile={(path: string) => {
+                      setWorkspaceFiles((prev) => {
+                        if (!prev) return prev;
+                        const next = { ...prev };
+                        delete next[path];
+                        return next;
+                      });
+                      filesPanel.onDeleteFile?.(path);
+                    }}
+                  />
+                );
               }
               return (
                 <div className="flex-1 overflow-auto p-3 font-mono text-xs">
@@ -2517,8 +2604,156 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             </div>
           )}
         </div>
-        )}
       </div>
+
+      {/* ── Mobile footer sheets (admin 2026-07-07): History and More open as bottom sheets anchored
+          above the app's bottom nav (which stays tappable — backdrop and sheet sit BELOW its z-150).
+          lg:hidden — on desktop these controls live in the header exactly as before. */}
+      {mobileFooter && mobileSheet && (
+        <>
+          <div className="fixed inset-0 z-[140] bg-black/50 cursor-pointer touch-manipulation lg:hidden" onClick={() => setMobileSheet(null)} aria-hidden="true" />
+          <div
+            className="fixed inset-x-0 z-[145] lg:hidden max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-zinc-700 bg-zinc-900 shadow-2xl pb-2"
+            style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))' }}
+          >
+            <div className="sticky top-0 z-10 bg-zinc-900 flex items-center justify-between px-4 pt-3 pb-2 border-b border-zinc-800">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {mobileSheet === 'history' ? 'Session history' : 'More'}
+              </span>
+              <button onClick={() => setMobileSheet(null)} aria-label="Close" className="p-1 rounded text-zinc-400 hover:text-white touch-manipulation">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {mobileSheet === 'history' ? (
+              <div className="py-1.5">{historyListBody}</div>
+            ) : (
+              <div className="py-1.5">
+                {/* Framework — moved here from the header (admin: "React + Vite ko More me bhej do") */}
+                <button
+                  onClick={() => { setMobileSheet(null); setShowFrameworkPicker(true); }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                >
+                  <span className="w-4 text-center shrink-0">{FRAMEWORKS.find(f => f.id === framework)?.iconChar ?? '⚛'}</span>
+                  <span className="flex-1 text-left">Framework</span>
+                  <span className="text-xs text-zinc-500">{FRAMEWORKS.find(f => f.id === framework)?.name ?? 'React + Vite'}</span>
+                </button>
+                <button onClick={() => openSurfaceFromFooter('diff')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
+                  <FileDiff className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Diff</span>
+                  <span className="text-xs text-zinc-500">{diffPaths.length}</span>
+                </button>
+                <button onClick={() => openSurfaceFromFooter('terminal')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
+                  <Terminal className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Terminal</span>
+                </button>
+                <button onClick={() => openSurfaceFromFooter('history')} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation">
+                  <History className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Checkpoints</span>
+                  <span className="text-xs text-zinc-500">{allCheckpoints.length}</span>
+                </button>
+                {/* Report history — the same real per-build report list as the desktop dropdown */}
+                <button
+                  onClick={() => void toggleHistoryReport()}
+                  disabled={!state.workspaceId}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                >
+                  <Clock className="w-4 h-4 shrink-0 text-zinc-400" />
+                  <span className="flex-1 text-left">Report history</span>
+                  {selectedHistoryBuildId && <span className="text-xs text-indigo-400">viewing past build</span>}
+                </button>
+                {historyReportOpen && (
+                  <div className="mx-4 mb-1 rounded-lg border border-zinc-800 overflow-hidden">
+                    {selectedHistoryBuildId && (
+                      <button
+                        onClick={() => { setSelectedHistoryBuildId(null); setHistoryReportOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-300 hover:bg-zinc-800 touch-manipulation"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Back to latest report
+                      </button>
+                    )}
+                    {historyReportLoading ? (
+                      <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                    ) : historyReportItems.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
+                    ) : (
+                      historyReportItems.map((h) => (
+                        <button
+                          key={h.id}
+                          onClick={() => { setSelectedHistoryBuildId(h.id); setHistoryReportOpen(false); }}
+                          title={h.rootCause || ''}
+                          className={`w-full flex items-start gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 touch-manipulation ${selectedHistoryBuildId === h.id ? 'bg-indigo-500/10 text-white' : 'text-zinc-300'}`}
+                        >
+                          <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${h.ok === true ? 'bg-emerald-500' : h.ok === false ? 'bg-red-500' : 'bg-zinc-600'}`} />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[10px] text-zinc-500">{new Date(h.startedAt).toLocaleString()}</span>
+                            <span className="block truncate">{h.rootCause || '(no root cause recorded)'}</span>
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+                {state.repoUrl && (
+                  <a
+                    href={state.repoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                  >
+                    <Github className="w-4 h-4 shrink-0 text-zinc-400" />
+                    <span className="flex-1 text-left">GitHub{state.repoFullName ? ` — ${state.repoFullName}` : ''}</span>
+                    <ExternalLink className="w-3 h-3 opacity-60" />
+                  </a>
+                )}
+                {configuredProviders.length > 1 && (
+                  <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200">
+                    <Rocket className="w-4 h-4 shrink-0 text-emerald-400/70" />
+                    <span className="flex-1 text-left">Deploy to</span>
+                    <select
+                      value={deployProvider}
+                      onChange={(e) => setDeployProvider(e.target.value)}
+                      disabled={running}
+                      className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
+                    >
+                      {configuredProviders.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <button
+                  onClick={() => { setMobileSheet(null); deployLive(); }}
+                  disabled={running || !state.workspaceId}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
+                >
+                  <Rocket className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 text-left">Deploy — publish to a permanent live URL</span>
+                </button>
+                {liveUrl && (
+                  <a
+                    href={liveUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 touch-manipulation"
+                  >
+                    <Globe className="w-4 h-4 shrink-0" />
+                    <span className="flex-1 text-left truncate">Live site — {liveUrl.replace(/^https?:\/\//, '')}</span>
+                    <ExternalLink className="w-3 h-3 opacity-60" />
+                  </a>
+                )}
+                <div className="my-1 border-t border-zinc-800" />
+                <button
+                  onClick={newChatFromHistory}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-800 touch-manipulation"
+                >
+                  <Plus className="w-4 h-4 shrink-0 text-indigo-400" />
+                  <span className="flex-1 text-left">New chat</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* LOUD open-failure toast — a history chat that fails to open must say WHY, never no-op. */}
       {openChatError && (

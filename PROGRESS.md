@@ -11201,3 +11201,22 @@ prompts, while small turns succeeded 7/7 — they are slow, not broken. The join
 - Tests: MultiProviderTurnRunner +4 (gate skips instantly + small passes; diet trims with marker,
   structure intact; 2-timeout bench + success reset; skips don't bench). Gate: frontend tsc 0, server
   tsc 0, vitest 5334/5334, boot PASS.
+
+## 2026-07-06 — 3-role chat Phase 2: Build/Plan/Advise as 3 SEPARATE PAGES (one shared session), tab switcher
+
+Admin (final model): 3 tabs — Build · Plan · Advise — each its OWN visible chat page, but ONE shared
+session + project memory; the build keeps running underneath whichever tab is shown.
+- New 3-tab switcher at the TOP of the chat (Build default). A pulsing 🟢 dot on the Build tab (from any
+  tab) + a "Build running" chip on Plan/Advise show the build is live underneath.
+- Per-lane threads: `roleThreads.{planner,advisor}` — `sendRole` now writes the user turn + reply into
+  the ACTIVE lane's own thread (not the Build thread). The Build tab keeps its existing thread
+  (userMsgs + agentHistory + live state.narration).
+- `convo` is tab-aware (Build thread vs the role lane's page); build activity/diffs decorate ONLY the
+  Build tab; the session TITLE always comes from the Build thread (a Plan/Advise message never retitles).
+- Mode-aware empty state + placeholder per page; the composer's mode dropdown is removed (the tabs are
+  the single mode control now). Plan/Advise Send works even while a build runs (Phase 1).
+
+Phase 3 next: Plan approve → queue → runs after the current build; build-aware responses. Phase 4:
+Advise capability cards (Scan bugs / Compare / Speed test / Security scan / …).
+
+Gate: frontend tsc 0, vitest 5269/5269 PASS, build PASS. Client-only.

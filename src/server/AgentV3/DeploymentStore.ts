@@ -83,6 +83,26 @@ class DeploymentStore {
     } catch { /* best-effort — never block a deploy */ }
   }
 
+  /**
+   * Batch-fetch the latest deployments for a set of workspaces (doc ID = workspaceId, so this is
+   * ONE `getAll` RPC, not N reads). Used by the history-list live-dot enrichment. Best-effort —
+   * returns an empty map when Firestore is unavailable; never throws.
+   */
+  async getMany(workspaceIds: Array<string | undefined | null>): Promise<Map<string, DeploymentRecord>> {
+    const out = new Map<string, DeploymentRecord>();
+    const db = this.getDb();
+    const ids = [...new Set(workspaceIds.filter((id): id is string => typeof id === 'string' && id.length > 0))].slice(0, 100);
+    if (!db || ids.length === 0) return out;
+    try {
+      const refs = ids.map((id) => db.collection('agentv3_deployments').doc(id));
+      const snaps = await db.getAll(...refs);
+      for (const snap of snaps) {
+        if (snap.exists) out.set(snap.id, snap.data() as DeploymentRecord);
+      }
+    } catch { /* best-effort — a store hiccup must never break the caller's list */ }
+    return out;
+  }
+
   /** Fetch the latest deployment for a workspace, or null if none / unavailable. */
   async get(workspaceId: string): Promise<DeploymentRecord | null> {
     const db = this.getDb();
@@ -146,6 +166,16 @@ class DeploymentStore {
 }
 
 export const deploymentStore = new DeploymentStore();
+
+/**
+ * True when a deployment record means the app is REALLY reachable at its URL right now:
+ * it has a URL and its registry status is 'active' (not held for review, not taken down).
+ * Pure — this is the single definition the history-menu "Live" dot keys off, so the dot can
+ * never claim live for a held/taken-down/urlless record (no fake status, rule #2).
+ */
+export function isLiveDeployment(rec: Pick<DeploymentRecord, 'url' | 'status'> | null | undefined): boolean {
+  return !!rec && typeof rec.url === 'string' && rec.url.length > 0 && (rec.status ?? 'active') === 'active';
+}
 
 /**
  * Wrap a DeployFn so every successful deploy is also durably recorded (R5 §5.1). The returned

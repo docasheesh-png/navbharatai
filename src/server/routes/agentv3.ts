@@ -148,7 +148,7 @@ function sessionCostCapUsd(): number {
   const v = parseFloat(process.env.SESSION_COST_CAP_USD ?? '');
   return Number.isFinite(v) && v > 0 ? v : 5.0;
 }
-import { deploymentStore, withDeploymentPersistence } from '../AgentV3/DeploymentStore';
+import { deploymentStore, withDeploymentPersistence, isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
@@ -1363,11 +1363,24 @@ export function registerAgentV3Routes(app: Express): void {
     }
     try {
       const list = await getConversationStore().listByUser(userId, 50);
+      // LIVE-DOT enrichment: mark each session whose workspace has an ACTIVE published deployment
+      // (agentv3_deployments, doc ID = workspaceId — one batched read) so the history menu can show
+      // a real green "Live" dot. Bounded + best-effort: a deployment-store hiccup must never break
+      // or slow the history list, it just omits the dots (honest degradation, not an error).
+      const deployments = await Promise.race([
+        deploymentStore.getMany(list.map((c) => c.workspaceId)),
+        new Promise<Map<string, DeploymentRecord>>((resolve) => setTimeout(() => resolve(new Map()), 3_000)),
+      ]).catch(() => new Map<string, DeploymentRecord>());
       res.json({
-        conversations: list.map((c) => ({
-          id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
-          billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
-        })),
+        conversations: list.map((c) => {
+          const dep = c.workspaceId ? deployments.get(c.workspaceId) : undefined;
+          const live = isLiveDeployment(dep);
+          return {
+            id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
+            billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            ...(live ? { live: true, liveUrl: dep!.url } : {}),
+          };
+        }),
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

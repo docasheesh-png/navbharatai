@@ -241,6 +241,19 @@ describe('sessionStatusMeta (history-menu status dot)', () => {
     expect(sessionStatusMeta(undefined)).toMatchObject({ dot: 'bg-zinc-600', label: '' });
     expect(sessionStatusMeta('bogus')).toMatchObject({ dot: 'bg-zinc-600', label: '' });
   });
+  it('upgrades a deployed session to the green "Live" dot (built / stopped / unknown status)', () => {
+    expect(sessionStatusMeta('complete', true)).toMatchObject({ dot: 'bg-green-400', label: 'Live', live: true });
+    expect(sessionStatusMeta('stopped', true)).toMatchObject({ dot: 'bg-green-400', label: 'Live', live: true });
+    expect(sessionStatusMeta(undefined, true)).toMatchObject({ dot: 'bg-green-400', label: 'Live', live: true });
+  });
+  it('Live never paints over a running build or a failure (activity + safety win)', () => {
+    expect(sessionStatusMeta('running', true)).toMatchObject({ dot: 'bg-indigo-400', label: 'Building…', pulse: true });
+    expect(sessionStatusMeta('error', true)).toMatchObject({ dot: 'bg-red-500', label: 'Failed' });
+  });
+  it('no deployment → the plain status dot, exactly as before', () => {
+    expect(sessionStatusMeta('complete', false)).toMatchObject({ dot: 'bg-emerald-500', label: 'Built' });
+    expect(sessionStatusMeta('complete')).toMatchObject({ dot: 'bg-emerald-500', label: 'Built' });
+  });
 });
 
 describe('sessionDateBucket (history-menu date grouping)', () => {

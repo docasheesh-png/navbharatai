@@ -1688,7 +1688,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       <div key={group.label}>
                         <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
                         {group.items.map((c) => {
-                          const meta = sessionStatusMeta(c.status);
+                          const meta = sessionStatusMeta(c.status, c.live);
                           const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
                           const isDeleting = deletingHistoryId === c.id;
                           // MOBILE TAP FIX: this row used to be a <div role="button"> with a NESTED
@@ -1711,7 +1711,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                                 className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
                               >
                                 <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
-                                  <span className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''}`} title={meta.label} />
+                                  {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
+                                      like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
+                                  <span
+                                    className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
+                                    title={meta.live ? 'Live — this app is published' : meta.label}
+                                  />
                                 </span>
                                 <span className="flex-1 min-w-0">
                                   <span className="block truncate">{c.title || 'Untitled build'}</span>
@@ -1719,7 +1724,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                                     {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
                                     {c.deadTranscript
                                       ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
-                                      : meta.label && <span>{meta.label}</span>}
+                                      : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
                                     {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
                                   </span>
                                 </span>

@@ -11694,3 +11694,23 @@ Editor.tsx — avoided; the endpoint is reusable by that menu later).
   pattern chips, refactor tips). AppKnowledgeBase `explain-code` entry (engineer_ai).
 
 Gate: tsc fe+server 0, vitest 5361/5361 (9 new), build PASS, boot:check PASS. No hot files touched.
+
+---
+
+## 2026-07-06 — Error-handling theme completed across frameworks (Vue + Astro; P-CGE.12 siblings)
+
+Continuing the safe roadmap conveyor (admin: complete the roadmap, safe items). Analyzer space is now
+SATURATED (23 *Analysis.ts files incl. SecretLeak/Seo/AsyncPattern/ErrorBoundary/HardcodedUrl/TestCoverage) —
+a new analyzer would be redundant (safeguard #6). P-DEV.11 needs workspaceId threaded into ProjectInsightsPanel
+(only gets user+files) = not collision-free. P-UX.10 Storybook = heavy devDeps, unverifiable here.
+
+So finished the error-handling theme (rule 3, hunt the siblings) on the remaining LIVE framework providers:
+- Vue → global `app.config.errorHandler` in main.ts (uncaught component/lifecycle error no longer blanks app).
+- Astro → canonical `src/pages/404.astro`.
+Live-copy tests guard both.
+
+Gate: tsc fe+server 0, vitest 5414/5414 (+2), build PASS, boot:check PASS. No hot files touched.
+
+NOTE (honest, rule 3): the safe + collision-free + verifiable + non-redundant code vein is now essentially
+exhausted. Remaining roadmap needs one of: hot-file work (agentv3.ts/App.tsx/Editor.tsx/AIRouter — merge-race +
+breakage risk), heavy/unverifiable tooling (Storybook/mutation), or infra/credentials (admin GCP action).

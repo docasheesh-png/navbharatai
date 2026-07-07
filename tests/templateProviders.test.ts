@@ -10,6 +10,8 @@ import { NextjsProvider as LiveNextjsProvider } from '../src/server/AgentV3/sand
 import { NuxtProvider as LiveNuxtProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/NuxtProvider';
 import { SvelteKitProvider as LiveSvelteKitProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/SvelteKitProvider';
 import { RemixProvider as LiveRemixProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/RemixProvider';
+import { VueProvider as LiveVueProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/VueProvider';
+import { AstroProvider as LiveAstroProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/AstroProvider';
 
 describe('StaticProvider', () => {
   const provider = new StaticProvider();
@@ -203,5 +205,16 @@ describe('LIVE framework scaffolds — error boundaries', () => {
     const files = new LiveRemixProvider().getFiles([]);
     expect(files['app/root.tsx']).toContain('export function ErrorBoundary');
     expect(files['app/root.tsx']).toContain('useRouteError');
+  });
+
+  it('Vue registers a global errorHandler in main.ts', () => {
+    const files = new LiveVueProvider().getFiles([]);
+    expect(files['src/main.ts']).toContain('app.config.errorHandler');
+  });
+
+  it('Astro ships a canonical 404 page', () => {
+    const files = new LiveAstroProvider().getFiles([]);
+    expect(files['src/pages/404.astro']).toBeDefined();
+    expect(files['src/pages/404.astro']).toContain('404');
   });
 });

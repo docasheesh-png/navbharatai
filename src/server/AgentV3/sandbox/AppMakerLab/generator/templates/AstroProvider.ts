@@ -39,12 +39,31 @@ const title = 'Hello from Astro!';
 </html>
 `;
 
+// Astro's canonical custom 404 page — served for any unmatched route instead of a bare server 404.
+const NOT_FOUND_ASTRO = `---
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Not Found</title>
+  </head>
+  <body style="padding: 2rem; font-family: sans-serif;">
+    <h1>404 — Page not found</h1>
+    <p>The page you're looking for doesn't exist. <a href="/">Go home</a>.</p>
+  </body>
+</html>
+`;
+
 export class AstroProvider implements ITemplateProvider {
   getFiles(_features: string[]): Record<string, string> {
     return {
       'package.json': PKG,
       'astro.config.mjs': ASTRO_CONFIG,
       'src/pages/index.astro': INDEX_ASTRO,
+      'src/pages/404.astro': NOT_FOUND_ASTRO,
     };
   }
 }

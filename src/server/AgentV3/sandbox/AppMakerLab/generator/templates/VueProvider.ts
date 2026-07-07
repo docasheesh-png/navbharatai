@@ -62,7 +62,16 @@ const INDEX_HTML = `<!doctype html>
 
 const MAIN_TS = `import { createApp } from 'vue';
 import App from './App.vue';
-createApp(App).mount('#app');
+
+const app = createApp(App);
+
+// Global error handler — catches uncaught errors in components/lifecycle so one failure never
+// silently blanks the whole app. Wire this to a real error reporter in production.
+app.config.errorHandler = (err, _instance, info) => {
+  console.error('[app error]', info, err);
+};
+
+app.mount('#app');
 `;
 
 const APP_VUE = `<template>

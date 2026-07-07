@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -25,10 +25,10 @@ describe('parseFileManifest', () => {
     expect(parseFileManifest(text).map((f) => f.path)).toEqual(['src/App.tsx']);
   });
 
-  it('caps at 40 files and returns [] for empty', () => {
+  it('caps at 60 files (Fix 38a — the old silent 40 cap dropped planned pages) and returns [] for empty', () => {
     expect(parseFileManifest('')).toEqual([]);
-    const many = Array.from({ length: 60 }, (_, i) => `src/f${i}.tsx :: file ${i}`).join('\n');
-    expect(parseFileManifest(many)).toHaveLength(40);
+    const many = Array.from({ length: 70 }, (_, i) => `src/f${i}.tsx :: file ${i}`).join('\n');
+    expect(parseFileManifest(many)).toHaveLength(60);
   });
 
   it('does NOT eat a leading digit/dot that is part of a real path (only strips true list markers)', () => {
@@ -423,5 +423,25 @@ describe('blueprintAdvisoryBlock (P-ARCH+.3 — advisory blueprint for the agent
     expect(withC).toContain('export enum Role');
     const withoutC = blueprintAdvisoryBlock(manifest, '   ');
     expect(withoutC).not.toContain('Proposed shared contract');
+  });
+});
+
+describe('cssBraceImbalance (Fix 38d) — the "Unclosed block" postcss killer, caught at verify time', () => {
+  it('flags the exact report failure: an @layer block never closed', () => {
+    expect(cssBraceImbalance('@layer utilities {\n  .text-primary { color: red; }\n')).toBe(1);
+  });
+  it('passes balanced css (comments ignored)', () => {
+    expect(cssBraceImbalance('/* { not a brace } */ .a { color: red; } @media (x) { .b { y: z; } }')).toBe(0);
+    expect(cssBraceImbalance('')).toBe(0);
+  });
+  it('flags extra closing braces as negative', () => {
+    expect(cssBraceImbalance('.a { color: red; } }')).toBe(-1);
+  });
+});
+
+describe('parseFileManifest cap (Fix 38a) — planned files are never silently dropped at 40', () => {
+  it('keeps a 50-file manifest intact (old cap sliced it to 40, dropping the pages)', () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `src/pages/Page${i}.tsx :: page ${i}`).join('\n');
+    expect(parseFileManifest(lines).length).toBe(50);
   });
 });

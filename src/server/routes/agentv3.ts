@@ -110,7 +110,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -4895,7 +4895,35 @@ export function registerAgentV3Routes(app: Express): void {
         // type error is detected by the "error TSxxxx" marker. A throw → "couldn't verify" (non-blocking).
         const fastVerify = async (): Promise<{ ok: boolean; errors: string }> => {
           try {
-            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; npx --no-install tsc --noEmit 2>&1 | tail -200 || true');
+            // MISSING-FILES GATE (Fix 38c — Task-Manager report 2026-07-07: App.tsx lazy-imported 10
+            // pages that were never written, yet verify said "compiles ✓"). Deterministic + free:
+            // every LOCAL module a written file references must exist (in the written set or the
+            // scaffold). A gap fails verify with the exact list, so the SAME repair pass CREATES the
+            // missing files instead of the build shipping a shell that crashes on first navigation.
+            try {
+              const writtenMap = Object.fromEntries(writtenFiles);
+              const withScaffold: Record<string, string> = { ...Object.fromEntries(scaffold.map((sp) => [sp, ''])), ...writtenMap };
+              const unresolved = findUnresolvedLocalImports(withScaffold)
+                .filter((u) => writtenMap[u.importedBy] !== undefined); // judge only OUR writes
+              if (unresolved.length > 0) {
+                const list = unresolved.slice(0, 12).map((u) => `${u.missing} (imported by ${u.importedBy})`).join('\n  ');
+                return { ok: false, errors: `MISSING FILES — these local modules are imported but were never written. CREATE each of them fully:\n  ${list}${unresolved.length > 12 ? `\n  …and ${unresolved.length - 12} more` : ''}` };
+              }
+            } catch { /* the missing-files gate is best-effort — tsc below still runs */ }
+            // CSS SYNTAX GATE (Fix 38d): tsc never reads CSS — an unclosed block makes postcss/vite
+            // reject the whole stylesheet at runtime (the exact "Unclosed block" overlay from the
+            // report) while every other check stays green. Deterministic brace balance per css file.
+            for (const [cssPath, cssContent] of writtenFiles) {
+              if (!/\.css$/i.test(cssPath)) continue;
+              const imbalance = cssBraceImbalance(cssContent);
+              if (imbalance !== 0) {
+                return { ok: false, errors: `CSS SYNTAX ERROR in ${cssPath}: ${Math.abs(imbalance)} ${imbalance > 0 ? 'unclosed' : 'extra closing'} brace(s) — postcss will reject the whole file ("Unclosed block") and the app will render unstyled. Rewrite ${cssPath} with balanced braces.` };
+              }
+            }
+            // Fix 38b — the old command hid a tsc that never ran (`--no-install … || true` → no
+            // "error TS" → fake "verified ✓"). The __TSC_CLEAN__ marker prints ONLY when tsc really
+            // ran and exited 0; no errors AND no marker now means UNVERIFIED, which fails honestly.
+            const r = await actuator.runCommand(workspaceId, 'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; if npx --no-install tsc --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true');
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
             const hasErrors = /error TS\d+/.test(out);
             if (hasErrors) {
@@ -4924,6 +4952,11 @@ export function registerAgentV3Routes(app: Express): void {
               const cssErr = cssConsistencyError(Object.fromEntries(writtenFiles));
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
+            if (!out.includes('__TSC_CLEAN__')) {
+              // No compile errors AND no clean marker = the compiler never actually ran (tsc not
+              // installed / npx failed). NEVER report "verified" for a check that didn't happen.
+              return { ok: false, errors: 'VERIFICATION DID NOT RUN — the TypeScript compiler could not be executed in the sandbox (tsc missing or npx failed). Ensure typescript is in devDependencies and package.json installs cleanly.' };
+            }
             return { ok: true, errors: '' };
           } catch {
             return { ok: true, errors: '' }; // could not verify → don't block (best-effort)

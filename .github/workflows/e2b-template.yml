@@ -33,6 +33,7 @@ on:
         options:
           - default
           - android
+          - fullstack
         default: 'default'
       template_name:
         description: 'E2B template name (alias used by Sandbox.create) — leave blank to use the kind''s default alias'
@@ -64,21 +65,33 @@ jobs:
         id: params
         run: |
           if [ "${{ github.event.inputs.template_kind }}" = "android" ]; then
-            echo "dockerfile=e2b-android.Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "default_name=navbharat-android-builder" >> "$GITHUB_OUTPUT"
-            echo "cpu_count=4" >> "$GITHUB_OUTPUT"
-            echo "memory_mb=8192" >> "$GITHUB_OUTPUT"
+            DOCKERFILE=e2b-android.Dockerfile
+            DEFAULT_NAME=navbharat-android-builder
+            CPU_COUNT=4
+            MEMORY_MB=8192
+          elif [ "${{ github.event.inputs.template_kind }}" = "fullstack" ]; then
+            # Polyglot / multi-service template (AB-1 / AB-2): Node + Python + JDK17/Maven + Go +
+            # MongoDB + Redis. Sized like the Android template (4 vCPU / 8 GB) because a JVM/Go build
+            # plus a local Mongo/Redis needs materially more headroom than a plain React build.
+            DOCKERFILE=e2b-fullstack.Dockerfile
+            DEFAULT_NAME=navbharat-fullstack-builder
+            CPU_COUNT=4
+            MEMORY_MB=8192
           else
-            echo "dockerfile=e2b.Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "default_name=navbharat-builder" >> "$GITHUB_OUTPUT"
-            echo "cpu_count=2" >> "$GITHUB_OUTPUT"
+            DOCKERFILE=e2b.Dockerfile
+            DEFAULT_NAME=navbharat-builder
+            CPU_COUNT=2
             # 4 GB (was 2 GB): a real build report showed the Vite dev server getting OOM-killed at 2 GB
             # (server repeatedly died mid-build → blank preview despite a clean build). 4 GB gives the
             # dev server + npm + the app headroom. Rebuild the template for this to take effect.
-            echo "memory_mb=4096" >> "$GITHUB_OUTPUT"
+            MEMORY_MB=4096
           fi
+          echo "dockerfile=$DOCKERFILE" >> "$GITHUB_OUTPUT"
+          echo "default_name=$DEFAULT_NAME" >> "$GITHUB_OUTPUT"
+          echo "cpu_count=$CPU_COUNT" >> "$GITHUB_OUTPUT"
+          echo "memory_mb=$MEMORY_MB" >> "$GITHUB_OUTPUT"
           NAME="${{ github.event.inputs.template_name }}"
-          echo "name=${NAME:-$(if [ "${{ github.event.inputs.template_kind }}" = "android" ]; then echo navbharat-android-builder; else echo navbharat-builder; fi)}" >> "$GITHUB_OUTPUT"
+          echo "name=${NAME:-$DEFAULT_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Build & publish template (E2B build system v2)
         working-directory: infra/e2b
@@ -105,6 +118,10 @@ jobs:
             echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
             echo "1. Set Cloud Run env \`ANDROID_E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
             echo "2. Run the Bubblewrap/APK-build code-wiring PR (not built yet — see infra/e2b/README.md)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$KIND" = "fullstack" ]; then
+            echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
+            echo "1. Set Cloud Run env \`FULLSTACK_E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "2. Run the polyglot/multi-service code-wiring PR (per-build routing to this template + runtime/DB detection — see infra/e2b/README.md)." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "The alias is usable directly as the template id. Next:" >> "$GITHUB_STEP_SUMMARY"
             echo "1. Set Cloud Run env \`E2B_TEMPLATE_ID=$NAME\`" >> "$GITHUB_STEP_SUMMARY"

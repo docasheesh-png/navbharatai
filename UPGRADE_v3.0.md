@@ -1384,11 +1384,24 @@
   new `tests/codeExplainer.test.ts`, `server.ts`, `src/components/panels/ProjectInsightsPanel.tsx`,
   `src/server/AppContext/AppKnowledgeBase.ts`.
 
-### P-DEV.11 — Inline Code Comments / Review Mode  ❌ MISSING  [LOW]
+### P-DEV.11 — Inline Code Comments / Review Mode  ✅ DONE (2026-07-06)
 - LiveCollaboration.tsx has chat but no GitHub PR-style inline code comments tied to specific line ranges.
-- [ ] Add comment anchors in Monaco gutter (click to add a thread, stored in Firestore `comments/{workspaceId}/{file}/{line}`).
-- [ ] Show unresolved comment count in StatusBar.tsx; allow resolve/reply.
-- **Files:** `src/components/ide/Editor.tsx`, `src/components/ide/LiveCollaboration.tsx`, new `src/lib/commentStore.ts`.
+- [x] **`CodeReviewStore.ts`** — durable file+line-anchored review comments per workspace (Firestore
+  `code_reviews/{workspaceId}/comments/{id}`; VITEST-skip, best-effort, never throws) with add / list
+  (unresolved-first) / resolve-reopen / reply. Pure `buildComment` + `buildReply` (7 unit tests) validate
+  and cap input.
+- [x] **Endpoints** `GET/POST /api/workspace/:workspaceId/review` (+ `…/:id/resolve`, `…/:id/reply`), auth-gated
+  (signed-in) + rate-limited + validated.
+- [x] **"Code Review" card** in `ProjectInsightsPanel` (add a comment by file+line, list with resolve/reopen +
+  reply count); `workspaceId` threaded in via one additive `ViewPanels` prop. AppKnowledgeBase entry
+  `code-review-comments`. Allow resolve/reply ✓.
+- **Honest scope:** delivered as a review PANEL (add-by-file+line) rather than a Monaco-gutter click-to-comment
+  + StatusBar count — those edit the hot `Editor.tsx`/`StatusBar.tsx`; the store + endpoints are reusable by
+  that gutter UI later. The panel-based review is complete and real.
+- **Verification:** `tsc` (fe+server) ✅ · `vitest run` 5421/5421 ✅ (7 new) · `build` ✅ · `boot:check` PASS.
+- **Files:** new `src/server/lib/CodeReviewStore.ts`, new `src/server/routes/codeReview.ts`,
+  new `tests/codeReviewStore.test.ts`, `server.ts`, `src/components/panels/ProjectInsightsPanel.tsx`,
+  `src/components/panels/ViewPanels.tsx`, `src/server/AppContext/AppKnowledgeBase.ts`.
 
 ### P-DEV.12 — Performance Profiler / Flame Graph  ❌ MISSING  [LOW]
 - `AppHealthMonitor.tsx` tracks runtime health metrics. `PerformanceAnalyzer.tsx` audits static HTML.

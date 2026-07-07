@@ -33,6 +33,7 @@ import { registerReleaseGateRoutes } from './src/server/routes/releaseGate';
 import { registerTeamLibraryRoutes } from './src/server/routes/teamLibrary';
 import { registerTraceabilityRoutes } from './src/server/routes/traceability';
 import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
+import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
 import { registerPaymentRoutes } from './src/server/routes/payment';
@@ -555,6 +556,7 @@ setInterval(() => {
   registerTeamLibraryRoutes(app); // P-COLLAB.4 — team-scoped shared library (prompts/templates/components)
   registerTraceabilityRoutes(app); // P-PME.12 — requirement→file→test traceability matrix (POST/GET /api/workspace/traceability)
   registerExplainCodeRoutes(app); // P-DEV.10 — deterministic code explanation (POST /api/workspace/explain)
+  registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
   registerPreviewRoutes(app, chatLimiter);

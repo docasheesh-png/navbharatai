@@ -369,7 +369,7 @@ export function ViewPanels({
       {/* Insights & Integrations — surfaces SLO / SBOM / Webhooks (wiring sweep) */}
       {activeView === 'insights' && (
         <div className="flex-1 h-full overflow-hidden">
-          <ProjectInsightsPanel user={user} files={files as Record<string, string>} />
+          <ProjectInsightsPanel user={user} files={files as Record<string, string>} workspaceId={v3Preview?.workspaceId} />
         </div>
       )}
 

@@ -21,6 +21,8 @@ import { cardClasses } from '../ui/variants';
 interface ProjectInsightsPanelProps {
   user: FirebaseUser | null;
   files: Record<string, string>;
+  /** Current build workspace — enables the durable Code Review comments (P-DEV.11). */
+  workspaceId?: string;
 }
 
 const WEBHOOK_EVENTS = ['BUILD_COMPLETE', 'BUILD_FAILED', 'DEPLOY_COMPLETE', 'DEPLOY_FAILED'] as const;
@@ -44,7 +46,7 @@ const Card: React.FC<{ icon: React.ReactNode; title: string; children: React.Rea
   </div>
 );
 
-export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user, files }) => {
+export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user, files, workspaceId }) => {
   // ── Build SLO ──
   const [slo, setSlo] = useState<any>(null);
   const fetchSlo = useCallback(async () => {
@@ -211,6 +213,42 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
   const cxColor = (l: string) => (l === 'Low' ? 'text-emerald-400' : l === 'Moderate' ? 'text-amber-400' : 'text-red-400');
+
+  // ── Inline Code Review comments (P-DEV.11) ──
+  const [comments, setComments] = useState<any[]>([]);
+  const [rvFile, setRvFile] = useState('');
+  const [rvLine, setRvLine] = useState('');
+  const [rvBody, setRvBody] = useState('');
+  const [rvBusy, setRvBusy] = useState(false);
+  const loadComments = useCallback(async () => {
+    if (!workspaceId) return;
+    try {
+      const r = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review`, { headers: await authedHeaders() });
+      if (r.ok) { const d = await r.json(); setComments(Array.isArray(d?.comments) ? d.comments : []); }
+    } catch { /* ignore */ }
+  }, [workspaceId]);
+  useEffect(() => { loadComments(); }, [loadComments]);
+  const addComment = async () => {
+    if (!workspaceId || !rvFile.trim() || !rvBody.trim()) return;
+    setRvBusy(true);
+    try {
+      const r = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review`, {
+        method: 'POST', headers: await authedHeaders(),
+        body: JSON.stringify({ file: rvFile.trim(), line: Math.max(0, parseInt(rvLine, 10) || 0), body: rvBody.trim() }),
+      });
+      if (r.ok) { setRvBody(''); setRvLine(''); await loadComments(); }
+    } catch { /* ignore */ }
+    finally { setRvBusy(false); }
+  };
+  const toggleResolve = async (id: string, resolved: boolean) => {
+    if (!workspaceId) return;
+    try {
+      await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review/${encodeURIComponent(id)}/resolve`, {
+        method: 'POST', headers: await authedHeaders(), body: JSON.stringify({ resolved }),
+      });
+      await loadComments();
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
@@ -422,6 +460,32 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           </div>
         )}
       </Card>
+
+      {/* Inline Code Review (P-DEV.11) */}
+      {workspaceId && (
+        <Card icon={<Send className="w-4 h-4 text-violet-400" />} title="Code Review"
+          action={<Button size="sm" onClick={loadComments} className="uppercase tracking-widest"><RefreshCcw className="w-3.5 h-3.5" /></Button>}>
+          <p className="text-[11px] text-[#8b949e]">Leave GitHub-style review comments on a specific file + line — resolve or reply as you go. Saved to this project.</p>
+          <div className="flex gap-2">
+            <input value={rvFile} onChange={(e) => setRvFile(e.target.value)} placeholder="file path" className="flex-1 bg-black/40 border border-[#30363d] rounded px-2 py-1 text-[10px] font-mono text-[#c9d1d9] focus:outline-none focus:border-violet-500" />
+            <input value={rvLine} onChange={(e) => setRvLine(e.target.value)} placeholder="line" inputMode="numeric" className="w-16 bg-black/40 border border-[#30363d] rounded px-2 py-1 text-[10px] font-mono text-[#c9d1d9] focus:outline-none focus:border-violet-500" />
+          </div>
+          <textarea value={rvBody} onChange={(e) => setRvBody(e.target.value)} placeholder="Comment…" className="w-full h-14 bg-black/40 border border-[#30363d] rounded px-2 py-1 text-[10px] text-[#c9d1d9] resize-y focus:outline-none focus:border-violet-500" />
+          <Button size="sm" onClick={addComment} disabled={rvBusy || !rvFile.trim() || !rvBody.trim()} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700">{rvBusy ? 'Adding…' : 'Add comment'}</Button>
+          {comments.length > 0 && (
+            <div className="space-y-1 max-h-52 overflow-auto">{comments.map((c) => (
+              <div key={c.id} className={cn('bg-black/30 rounded px-3 py-2 text-[10px] space-y-1', c.resolved && 'opacity-50')}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-violet-300">{c.file}:{c.line}</span>
+                  <button onClick={() => toggleResolve(c.id, !c.resolved)} className={cn('text-[9px] uppercase tracking-widest', c.resolved ? 'text-[#8b949e]' : 'text-emerald-400')}>{c.resolved ? 'Reopen' : 'Resolve'}</button>
+                </div>
+                <div className="text-[#c9d1d9]">{c.body}</div>
+                {Array.isArray(c.replies) && c.replies.length > 0 && <div className="text-[#484f58]">{c.replies.length} repl{c.replies.length === 1 ? 'y' : 'ies'}</div>}
+              </div>
+            ))}</div>
+          )}
+        </Card>
+      )}
 
       {/* SBOM */}
       <Card icon={<ShieldCheck className="w-4 h-4 text-indigo-400" />} title="App SBOM + License Check"

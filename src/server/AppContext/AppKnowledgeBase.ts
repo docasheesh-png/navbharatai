@@ -1883,6 +1883,15 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     aiSurface: 'engineer_ai',
   },
   {
+    id: 'code-review-comments',
+    name: 'Code Review Comments',
+    path: 'Settings → Insights & Webhooks → Code Review  (also backend /api/workspace/:workspaceId/review)',
+    description: `Leave GitHub-PR-style review comments anchored to a specific file + line of your project, then resolve or reply as you work through them. Comments are saved durably per project (workspace) so they persist across reloads. Each comment shows its file:line, body, resolve/reopen toggle, and reply count; unresolved comments sort to the top. Useful for self-review before shipping, or leaving notes for a teammate. Backend: POST /api/workspace/:workspaceId/review (add), GET (list), POST …/:id/resolve (resolve/reopen), POST …/:id/reply (reply).`,
+    howToUse: 'Open Settings → Insights & Webhooks → the "Code Review" card → type a file path + line + your comment → Add comment. Use Resolve to close a thread or Reopen to bring it back. Requires you to be signed in.',
+    relatedFeatures: ['explain-code', 'build-health-check', 'team-library'],
+    keywords: ['code review', 'review comments', 'inline comments', 'pr comments', 'leave a comment', 'resolve comment', 'review mode', 'code feedback', 'annotate code', 'comment on line'],
+  },
+  {
     id: 'build-health-check',
     name: 'Build Health — Will this app work?',
     path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',

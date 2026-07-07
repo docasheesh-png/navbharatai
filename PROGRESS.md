@@ -11319,3 +11319,16 @@ then replayed the same doomed multi-megabyte request through all four providers.
   and/or make the reviewer sample-based (already recorded at Fix 13). Also: the review label said
   "(85/100)" on an ERRORED review — score must not render when the review failed (honesty).
 - Gate: frontend tsc 0, server tsc 0, vitest 5340/5340, boot PASS.
+
+## 2026-07-07 — Fix 24: no reviewer on analysis-only turns (admin design: "bina provider ko bheje — github + preview; edit maange to surgical")
+
+The admin's architecture instinct, now enforced end-to-end: BIG projects are handled like an editor,
+not like a model-feed — the import lands files into GitHub + the durable store + boots the preview
+with ZERO model reads; the AI touches file content only when the user asks (survey on request, edits
+surgical + grounded). The one violator was the post-build REVIEWER: it ran even on analysis-only
+turns (0 files written) and free-explored the 100-file CoreUI import to a 2.2M-token transcript.
+- `reviewerAllowed` now requires `writtenFiles.size > 0` — the reviewer verifies what was BUILT;
+  a survey/import turn that wrote nothing gets no reviewer (and no runaway exploration).
+- Ships together with Fix 23 (hopeless-oversize ladder abort). Remaining root (sub-agent transcript
+  bounding for turns that DO build) stays the recorded urgent next task.
+- Gate: frontend tsc 0, server tsc 0, vitest 5340/5340, boot PASS.

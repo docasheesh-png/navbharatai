@@ -11342,3 +11342,15 @@ retrieval + sub-agent transcript budgets), Satya Gates (our verify/honesty law, 
 (git-first + shrink-guarded durable store). Sequenced V4-1…V4-6, each shipping via the normal cycle;
 V4-1 (auto-resume + graceful drain) = the already-recorded next task. Read the doc before starting
 any v4 work.
+
+## 2026-07-07 — VAJRA V4-1a SHIPPED: interrupted builds auto-continue ("chat dead nahi honi chahiye")
+
+The first VAJRA stone. When the stall-watchdog finds the build GONE with no terminal result (network
+cut / instance rotation — the two real "sab gayab" deaths), the client no longer dead-ends on "The
+build stopped responding": it AUTO-SENDS the proven recovery turn ("please continue", same
+session/workspace — the engine's continuation signals resume from the durable files), exactly ONCE
+per interruption. Pure `shouldAutoContinue` guards it: never after a finished build, never twice for
+the same turn (an auto-start does not re-arm the one-shot — a second death falls back to the honest
+notice), never with nothing to continue. A new REAL user turn re-arms it. Tests +3.
+Remaining V4-1 parts (panel file-restore on gone + server graceful drain) stay queued; V4-2…V4-6 per
+VAJRA_V4_DESIGN.md. Gate: tsc 0/0, vitest 5343/5343, boot PASS.

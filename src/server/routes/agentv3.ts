@@ -485,6 +485,26 @@ export function rebuildGuardFlipsToEdit(opts: {
 }
 
 /**
+ * REBUILD CONFIRMATION GATE (Fix 28 — admin, 2026-07-07: "agar AI rebuild ki koshish kare, to
+ * pehle user se puch le"). After the fail-safe guard above, the ONLY way a turn is still
+ * rebuild-shaped over a non-empty workspace is an explicit fresh-start / complete-app request —
+ * or a wrong call. Either way the app that exists is about to be REPLACED, so the build must
+ * pause and ASK (the same permission_request gate plan-mode uses): Approve = rebuild from
+ * scratch; Deny (or the 10-min timeout) = keep the app and apply the request as an EDIT. The
+ * user can always Stop and type something else — the "other" option. An import turn is exempt
+ * (its pipeline forces edit mode and never scaffolds over the imported app). Pure predicate.
+ */
+export function shouldConfirmRebuild(opts: {
+  intent: string;
+  isEditMode: boolean;
+  hasImportIntent: boolean;
+  durableSourceCount: number;
+}): boolean {
+  return opts.intent === 'new_build' && !opts.isEditMode && !opts.hasImportIntent
+    && opts.durableSourceCount > 0;
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -3493,6 +3513,44 @@ export function registerAgentV3Routes(app: Express): void {
     })) {
       intent = 'edit_existing';
       isEditMode = true;
+    }
+    // REBUILD CONFIRMATION GATE (Fix 28): a turn that is STILL rebuild-shaped over a non-empty
+    // workspace (explicit fresh-start / complete-app ask — or a wrong call the guard couldn't
+    // catch) is about to REPLACE the user's existing app. Never silently: pause and ask. Approve
+    // = rebuild from scratch; Deny or the timeout = keep the app and run this request as an EDIT.
+    if (shouldConfirmRebuild({
+      intent,
+      isEditMode,
+      hasImportIntent,
+      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+    })) {
+      const srcCount = countEditableSourceFiles(durableFilePaths);
+      const confirmId = randomUUID();
+      emit({
+        type: 'narration', agent: 'architect', ts: Date.now(),
+        text: `⚠️ This workspace already contains your app (${srcCount} source files). Rebuilding from scratch will REPLACE it.`,
+      });
+      emit({
+        type: 'permission_request',
+        agent: 'architect',
+        action: `Rebuild from scratch? Approve = replace the existing ${srcCount}-file app with a brand-new build. Deny = keep your app and apply this request as a targeted EDIT instead. (You can also Stop and type something else.)`,
+        callId: confirmId,
+        ts: Date.now(),
+      });
+      const rebuildApproved = await awaitApproval(confirmId);
+      if (!rebuildApproved) {
+        intent = 'edit_existing';
+        isEditMode = true;
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: '✅ Keeping your existing app — applying your request as a targeted edit.',
+        });
+      } else {
+        emit({
+          type: 'narration', agent: 'architect', ts: Date.now(),
+          text: '🔄 Rebuild confirmed — building a fresh app from scratch.',
+        });
+      }
     }
     const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);
     const buildComplexity = complexityFromPrompt(prompt);

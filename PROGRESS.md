@@ -11562,3 +11562,23 @@ edit mode BEFORE any lane runs. Fix 25 semantics kept (explicit "create a comple
 explicit "start over" still rebuilds). Regression tests: +5 (the exact 46-file report scenario, fresh
 build, fresh-start, explicit-complete, no-double-flip). Gate: frontend tsc 0, server tsc 0, vitest
 5372/5372, boot PASS. Ships together with Fix 26 (PR #1094) — the same identity-degradation autopsy.
+
+## 2026-07-07 — Fix 28 (admin-requested): rebuild NEVER silent — a confirmation gate before replacing an existing app
+
+Admin: "agar AI rebuild ki koshish kare, to pehle user se puch le — rebuild or edit... ek confirmation
+message aaye?" Implemented exactly that, reusing the existing plan-approval infrastructure
+(permission_request event + awaitApproval + POST /api/agentv3/respond — real blocking gate, heartbeats
+keep the stream alive):
+
+- New pure `shouldConfirmRebuild()`: a turn that is STILL rebuild-shaped after the Fix-27 fail-safe
+  (i.e. an explicit fresh-start / complete-app ask — or a wrong call the guard couldn't catch) over a
+  workspace that verifiably holds source files → the build PAUSES and asks. Approve = rebuild from
+  scratch (honest "🔄 Rebuild confirmed"); Deny or the 10-minute timeout = keep the app and run the
+  request as a targeted EDIT ("✅ Keeping your existing app"). Stop + typing something else is the
+  natural "other" option. Import turns exempt (their pipeline forces edit mode). Fresh builds on an
+  empty workspace never see the gate — zero friction on the common path.
+- Defense in depth now: Fix 27 (silent fail-safe flip for misclassifications) + Fix 28 (explicit
+  human confirmation for genuinely rebuild-shaped asks). The destructive path requires BOTH an
+  explicit rebuild-shaped request AND a human Approve. Timeout defaults to the safe side (edit).
+Tests: +4 (asks over existing app incl. small ones; never on empty/edit/import turns). Gate: frontend
+tsc 0, server tsc 0, vitest 5376/5376, boot PASS.

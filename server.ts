@@ -659,6 +659,32 @@ setInterval(() => {
       upstream.on('error', () => clientSocket.destroy());
       clientSocket.on('error', () => upstream.destroy());
     });
+
+    // VAJRA V4-1c (NIRMAN Phase A, server half) — graceful drain on a deploy/rotation. Cloud Run
+    // sends SIGTERM ~10s before killing the instance; without this, in-flight AgentV3 builds die
+    // abruptly. Here we signal every live build honestly ("restarting — resumes automatically") and
+    // abort it so its own finally (durable file + diagnostics save) runs, then close the HTTP server.
+    // Fully bounded + catch-all: a hard timer force-exits so shutdown can NEVER hang the platform.
+    let draining = false;
+    const gracefulShutdown = (signal: string) => {
+      if (draining) return; // a second signal must not re-run the drain
+      draining = true;
+      try {
+        void import('./src/server/routes/agentv3')
+          .then(({ drainRunningBuilds, shutdownGraceMs }) => {
+            let n = 0;
+            try { n = drainRunningBuilds(); } catch { /* best-effort */ }
+            const grace = shutdownGraceMs(n);
+            if (n) console.log(`[VAJRA V4-1c] ${signal}: draining ${n} in-flight build(s), grace ${grace}ms`);
+            setTimeout(() => { try { server.close(); } catch { /* already closing */ } process.exit(0); }, grace).unref();
+          })
+          .catch(() => { try { server.close(); } catch { /* noop */ } process.exit(0); });
+      } catch { process.exit(0); }
+      // Absolute backstop: never let shutdown hang past the platform's grace window.
+      setTimeout(() => process.exit(0), 9_000).unref();
+    };
+    process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.once('SIGINT', () => gracefulShutdown('SIGINT'));
   } catch (startupError: any) {
     console.error('❌ FATAL: Server failed to start:', startupError);
     process.exit(1);

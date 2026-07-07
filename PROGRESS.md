@@ -11479,3 +11479,27 @@ corrected by the intent fix. Regression tests: +4 (the exact report prompt + sho
   (a correctly-routed full build exercises the standard finalize path, so it may already resolve). If it
   recurs, the concrete next step is to make that save failure OBSERVABLE (log the swallowed error) so the
   true cause is visible, then fix it — rather than ship a cosmetic patch now.
+
+## 2026-07-07 — History-menu green "Live" dot (PR #1092, merged): see which builds are published, server-verified
+
+**Admin ask:** "v3.0 ki 3 line ke andar jo chat history aati hai — jo builds live hain un chats par
+green dot aa sakta hai." Shipped as a REAL indicator, never a painted one (rule 2).
+
+**What shipped:** the v3.0 session-history (3-line ☰) menu now shows a glowing green "Live" dot +
+green "Live" label on every saved session whose workspace has an ACTIVE published deployment.
+- Server truth, not client guess: `GET /api/agentv3/conversations` batch-reads the user's sessions'
+  workspaces from the `agentv3_deployments` registry (new `DeploymentStore.getMany()` — ONE Firestore
+  `getAll` RPC, doc ID = workspaceId) and enriches each row with `live`/`liveUrl`.
+- Single pure definition: new `isLiveDeployment()` — live ⇔ status 'active' (legacy default) AND has a
+  URL. Held-for-review / taken-down / urlless records are NEVER painted live.
+- Honest precedence in `sessionStatusMeta(status, live)`: Live upgrades Built/Stopped/unknown dots but
+  never covers 'Building…' (current activity) or red 'Failed' (safety visibility).
+- Fail-open: deployment lookup bounded to 3s + best-effort — a store hiccup omits dots, never breaks
+  or slows the history list.
+- AppKnowledgeBase history entry updated in the same commit (self-awareness sync rule) + keywords
+  ("green dot", "kaunsi app live hai", …).
+
+**Regression tests:** isLiveDeployment truth table (active/held/taken_down/urlless/null), getMany
+VITEST no-op safety (empty/blank input, never throws), sessionStatusMeta live + precedence cases.
+**Gate:** frontend tsc 0 · server tsc 0 · vitest 4838/4838 (496 files) · boot-check PASS · CI green
+on branch → squash-merged as `0e13016` (#1092) → Cloud Run auto-deploy.

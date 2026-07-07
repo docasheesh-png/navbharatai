@@ -38,7 +38,7 @@ class EventStore {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
         const db = admin.firestore();
-        db.settings({ databaseId: firestoreDatabaseId() });
+        db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
         this.db = db;
       }
       return this.db;

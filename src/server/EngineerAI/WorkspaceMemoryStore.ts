@@ -28,7 +28,7 @@ class WorkspaceMemoryStore {
           admin.initializeApp({});
         }
         const db = admin.firestore();
-        db.settings({ databaseId: firestoreDatabaseId() });
+        db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
         this.db = db;
       }
       return this.db;

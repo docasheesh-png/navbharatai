@@ -17,7 +17,7 @@ export class FirestoreJobStore implements JobStore {
         // a second call throwing means it is already configured. Without this guard the
         // constructor throw silently demoted job persistence to whatever fallback the caller had.
         try {
-            this.db.settings({ databaseId: firestoreDatabaseId() });
+            this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
         } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
     }
 

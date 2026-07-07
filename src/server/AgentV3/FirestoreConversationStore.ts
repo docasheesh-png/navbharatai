@@ -79,7 +79,7 @@ export class FirestoreConversationStore implements ConversationStore {
     // same throw by caching their db reference BEFORE calling settings(); this constructor's
     // exception instead discarded the store entirely.
     try {
-      this.db.settings({ databaseId: firestoreDatabaseId() });
+      this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
     } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
   }
 

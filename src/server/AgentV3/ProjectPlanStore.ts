@@ -34,7 +34,7 @@ function getDb(): admin.firestore.Firestore | null {
     // Cache the instance BEFORE settings() so a settings() throw can't leave the store disabled.
     _db = admin.firestore();
     try {
-      _db.settings({ databaseId: firestoreDatabaseId() });
+      _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
     } catch {
       // Another store already configured this shared instance — same databaseId, safe to proceed.
     }

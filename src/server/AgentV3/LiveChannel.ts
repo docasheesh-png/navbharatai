@@ -84,7 +84,7 @@ class FirestoreLiveChannel implements LiveChannel {
     try {
       if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
       this.db = admin.firestore();
-      this.db.settings({ databaseId: firestoreDatabaseId() });
+      this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
       return this.db;
     } catch {
       return null;

@@ -22,7 +22,7 @@ function getDb(): admin.firestore.Firestore | null {
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     _db = admin.firestore();
-    try { _db.settings({ databaseId: firestoreDatabaseId() }); } catch { /* shared instance already configured */ }
+    try { _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true }); } catch { /* shared instance already configured */ }
     return _db;
   } catch (e) {
     notePersistenceFailure('build_queue', 'init', e);

@@ -1873,6 +1873,16 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
     aiSurface: 'engineer_ai',
   },
   {
+    id: 'explain-code',
+    name: 'Explain Code',
+    path: 'Settings → Insights & Webhooks → Explain Code  (also backend POST /api/workspace/explain)',
+    description: `Paste a function, component, or whole file and get an INSTANT, FREE (no AI credits) plain-language explanation of it. Deterministic structural analysis — every number is a real count of your actual code, never fabricated: (1) a plain-language summary of what the code is and does; (2) a branch-complexity score + Low/Moderate/High label; (3) the design patterns it uses (state management, side effects, memoization, React Context, async data/I·O, routing, forms, TypeScript types, error handling); (4) concrete refactoring suggestions (file too large, high complexity, multiple components in one file, async without try/catch, a list render missing a key, too many imports); and (5) structural stats (lines, functions, components, hook calls, imports, exports, JSX elements). Recognises React components, custom hooks, utility modules, class modules, and stylesheets. Backed by POST /api/workspace/explain.`,
+    howToUse: 'Open Settings → Insights & Webhooks → the "Explain Code" card → paste your code → Explain. The summary, complexity, patterns, and refactor tips appear instantly. Backend API: POST /api/workspace/explain { code, filename? }.',
+    relatedFeatures: ['build-health-check', 'code-confidence-check', 'requirement-traceability'],
+    keywords: ['explain code', 'what does this code do', 'understand code', 'code explanation', 'complexity', 'refactor suggestions', 'code review', 'samjhao code', 'code kya karta hai', 'explain function', 'explain component'],
+    aiSurface: 'engineer_ai',
+  },
+  {
     id: 'build-health-check',
     name: 'Build Health — Will this app work?',
     path: 'Settings → Insights & Webhooks → Build Health (top card) → Run All Checks',

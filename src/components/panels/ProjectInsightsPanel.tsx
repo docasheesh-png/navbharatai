@@ -194,8 +194,23 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
     finally { setHealthBusy(false); }
   };
 
+  // ── Code Explanation (P-DEV.10) — instant, free, deterministic ──
+  const [explainInput, setExplainInput] = useState('');
+  const [explainResult, setExplainResult] = useState<any>(null);
+  const [explainBusy, setExplainBusy] = useState(false);
+  const runExplain = async () => {
+    if (!explainInput.trim()) return;
+    setExplainBusy(true); setExplainResult(null);
+    try {
+      const r = await fetch('/api/workspace/explain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: explainInput }) });
+      if (r.ok) setExplainResult(await r.json());
+    } catch { /* ignore */ }
+    finally { setExplainBusy(false); }
+  };
+
   const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
   const confColor = (c: number) => (c >= 85 ? 'text-emerald-400' : c >= 70 ? 'text-amber-400' : 'text-red-400');
+  const cxColor = (l: string) => (l === 'Low' ? 'text-emerald-400' : l === 'Moderate' ? 'text-amber-400' : 'text-red-400');
 
   return (
     <div className="flex-1 h-full overflow-auto bg-[#0d1117] p-6 space-y-5">
@@ -371,6 +386,39 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
             <div className="space-y-1 max-h-40 overflow-auto">{depChk.conflicts.slice(0, 30).map((c: any, i: number) => (
               <div key={i} className="bg-black/30 rounded px-3 py-1 text-[10px] text-amber-300"><span className={`font-bold ${c.severity === 'high' ? 'text-red-400' : c.severity === 'medium' ? 'text-amber-400' : 'text-[#8b949e]'}`}>[{c.severity}]</span> {c.detail} <span className="text-[#484f58]">({c.file})</span></div>
             ))}</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Code Explanation (P-DEV.10) */}
+      <Card icon={<Activity className="w-4 h-4 text-cyan-400" />} title="Explain Code"
+        action={<Button size="sm" onClick={runExplain} disabled={explainBusy || !explainInput.trim()} className="uppercase tracking-widest bg-cyan-600 hover:bg-cyan-700">{explainBusy ? 'Reading…' : 'Explain'}</Button>}>
+        <p className="text-[11px] text-[#8b949e] mb-2">Paste a function, component, or file — get an instant, free (no AI credits) plain-language explanation: what it is, its complexity, the patterns it uses, and concrete refactoring tips.</p>
+        <textarea
+          value={explainInput}
+          onChange={(e) => setExplainInput(e.target.value)}
+          placeholder="Paste code here…"
+          spellCheck={false}
+          className="w-full h-24 bg-black/40 border border-[#30363d] rounded px-2 py-1 text-[10px] font-mono text-[#c9d1d9] resize-y focus:outline-none focus:border-cyan-500"
+        />
+        {explainResult && explainResult.kind !== 'empty' && (
+          <div className="mt-2 space-y-2 text-[11px]">
+            <div className="text-[#c9d1d9]">{explainResult.summary}</div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-[#8b949e]">Complexity: <span className={`font-bold ${cxColor(explainResult.complexity.label)}`}>{explainResult.complexity.label}</span> <span className="text-[#484f58]">({explainResult.complexity.score})</span></span>
+              <span className="text-[#484f58]">·</span>
+              <span className="text-[#8b949e]">{explainResult.stats.lines} lines · {explainResult.stats.functions} fn · {explainResult.stats.hooks} hooks</span>
+            </div>
+            {explainResult.patterns.length > 0 && (
+              <div className="flex flex-wrap gap-1">{explainResult.patterns.map((p: string, i: number) => (
+                <span key={i} className="bg-cyan-950/60 text-cyan-300 rounded px-2 py-0.5 text-[10px]">{p}</span>
+              ))}</div>
+            )}
+            {explainResult.refactors.length > 0 && (
+              <div className="space-y-1">{explainResult.refactors.map((r: string, i: number) => (
+                <div key={i} className="bg-black/30 rounded px-3 py-1 text-[10px] text-amber-300">💡 {r}</div>
+              ))}</div>
+            )}
           </div>
         )}
       </Card>

@@ -11676,3 +11676,21 @@ pre-flight estimate → wire the Affordability decision into the route (flag-gat
 
 Gate: server tsc 0, frontend tsc 0, vitest 5395/5395 PASS, build PASS, boot PASS. No AppKnowledgeBase
 change (internal identity helper, no user-facing surface yet).
+---
+
+## 2026-07-06 — P-DEV.10 Code Explanation (MISSING → DONE)
+
+User asked to continue the safe 🟢/🖥️ roadmap items. Picked P-DEV.10 and shipped it via the collision-free
+pure-engine + own-route + Insights-card pattern (the roadmap's Monaco-right-click variant would edit the hot
+Editor.tsx — avoided; the endpoint is reusable by that menu later).
+
+- `CodeExplainer.ts` (pure, deterministic, 9 unit tests) — `explainCode(code, filename?)` → plain-language
+  summary + branch-complexity score/label + detected patterns (state/effects/memo/context/async/routing/
+  forms/TS-types/error-handling) + conservative refactor suggestions + real structural stats. Recognises
+  components / custom hooks / utility & class modules / stylesheets. NO AI, NO credit spend, empty-safe,
+  never throws.
+- `routes/explainCode.ts` — POST /api/workspace/explain (rate-limited + validated).
+- `ProjectInsightsPanel.tsx` — a wired "Explain Code" card (paste → instant explanation, complexity colour,
+  pattern chips, refactor tips). AppKnowledgeBase `explain-code` entry (engineer_ai).
+
+Gate: tsc fe+server 0, vitest 5361/5361 (9 new), build PASS, boot:check PASS. No hot files touched.

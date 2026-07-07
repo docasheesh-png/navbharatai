@@ -68,7 +68,14 @@ import {
   formatRecalledLessons,
   detectLanguageHint,
   classifyIntent,
+  isAgentV3FreeUser,
+  isAgentV3PaidPublicEnabled,
+  estimateBuildCost,
+  readWalletBalanceInr,
+  firestoreWalletReader,
+  decidePaidGate,
 } from '../AgentV3';
+import { getDb } from '../lib/db';
 import { randomUUID } from 'crypto';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
@@ -687,6 +694,16 @@ export function providerDebugTag(label: string): string {
 /** One concurrent build per account — guards against runaway cost / abuse. */
 const activeBuilds = new Set<string>();
 const MAX_PROMPT_LEN = 20_000;
+/**
+ * Overdraft tolerance (₹) for the paid-public affordability gate: a build whose real cost slightly
+ * overruns its pre-flight estimate may push the balance a little negative; the account is then blocked
+ * for the NEXT build until top-up. This absorbs the unavoidable inaccuracy of a pre-build estimate so a
+ * near-boundary user's work is never cut off mid-way. Overridable via AGENTV3_PAID_OVERDRAFT_INR.
+ */
+const PAID_OVERDRAFT_INR = (() => {
+  const raw = Number(process.env.AGENTV3_PAID_OVERDRAFT_INR);
+  return Number.isFinite(raw) && raw > 0 ? raw : 20;
+})();
 
 // ── Resumable / stoppable builds ────────────────────────────────────────────────
 // A running BUILD's events are buffered and fanned out to subscribers, so the user can
@@ -2905,6 +2922,47 @@ export function registerAgentV3Routes(app: Express): void {
     const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
     const powerSpecResolved = powerSpec(powerLevelReq);
     const onlyOpus = powerSpecResolved.powerMode;
+
+    // PAID-PUBLIC AFFORDABILITY GATE (admin plan 2026-07-06) — flag-gated OFF by default.
+    // Runs BEFORE flushHeaders() so a refusal is a clean pre-stream HTTP 402 (no stream started). The
+    // whole block is inert unless AGENTV3_PAID_PUBLIC=true; free-list users (admin/testers) bypass it and
+    // are never even read from the wallet. A build that is ALLOWED to start always runs to completion —
+    // this never kills a running build; settlement on the ACTUAL cost happens afterwards (the graceful
+    // overdraft in Affordability absorbs any estimate miss). `paidEconomyNotice` is emitted once the
+    // stream opens (below) so a low-balance user is told honestly, without blocking their work.
+    let paidEconomyNotice: string | null = null;
+    if (isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(userId, email)) {
+      // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
+      const balanceInr = userId ? await readWalletBalanceInr(firestoreWalletReader(getDb()), userId) : null;
+      const estimate = estimateBuildCost(prompt, powerLevelReq, usdInrRate());
+      const gate = decidePaidGate({
+        paidPublicEnabled: true,
+        isFreeUser: false,
+        balanceInr,
+        estimateInr: estimate.inr,
+        overdraftInr: PAID_OVERDRAFT_INR,
+      });
+      if (gate.action === 'block') {
+        activeBuilds.delete(buildKey); // release the lock acquired above; the build never starts.
+        audit('AGENTV3_BUILD_BLOCKED_NO_CREDITS', { userId, balanceInr, estimateInr: estimate.inr }, 'warn');
+        res.status(402).json({
+          error: gate.notice || 'Your credits are used up. Add credits to start a new build.',
+          code: 'INSUFFICIENT_CREDITS',
+          balanceInr,
+          estimateInr: estimate.inr,
+        });
+        return;
+      }
+      if (gate.action === 'economy') {
+        // HONEST notice: the dedicated cheap "economy engine" routing is not yet enabled (it is gated on
+        // the provider bake-off), so we do NOT claim to switch engines — the build simply continues on
+        // the standard engine and the user is told to top up. No fake capability.
+        paidEconomyNotice =
+          'Low balance — your build will continue as normal. Add credits to keep full speed on every build.';
+        audit('AGENTV3_BUILD_LOW_BALANCE_ECONOMY', { userId, balanceInr, estimateInr: estimate.inr }, 'info');
+      }
+    }
+
     // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
     // 2-3 min. planFirst=false from the client always wins (explicit user skip).
     // planFirst=true (or absent) defers to the complexity classifier — a simple
@@ -2933,6 +2991,12 @@ export function registerAgentV3Routes(app: Express): void {
     // OWN honest terminal error instead of the bare "no response" message. A `ping` is
     // the contract-safe choice: the client already ignores the 15 s keepalive pings.
     send({ type: 'ping' });
+    // PAID-PUBLIC low-balance notice (honest): when the affordability gate returned 'economy', the build
+    // proceeds normally but the user is told, in-chat, that their balance is low. Emitted as a system
+    // narration so it renders in the build conversation right away. Null (the default / gate-off) → nothing.
+    if (paidEconomyNotice) {
+      send({ type: 'narration', agent: 'system', text: paidEconomyNotice, ts: Date.now() });
+    }
     // SSE keepalive: send a ping every 15 s so Chrome never throttles/drops the
     // connection when the tab is backgrounded or minimised. Cleared on response end.
     const heartbeatTimer = setInterval(() => {

@@ -11714,3 +11714,37 @@ Gate: tsc fe+server 0, vitest 5414/5414 (+2), build PASS, boot:check PASS. No ho
 NOTE (honest, rule 3): the safe + collision-free + verifiable + non-redundant code vein is now essentially
 exhausted. Remaining roadmap needs one of: hot-file work (agentv3.ts/App.tsx/Editor.tsx/AIRouter — merge-race +
 breakage risk), heavy/unverifiable tooling (Storybook/mutation), or infra/credentials (admin GCP action).
+## 2026-07-07 — Paid-public v3.0 billing: PR 3 (pre-flight estimate) + PR 4 (route enforcement)
+
+Continued the paid-public v3.0 plan (v3.0 free for the 3 admin/tester accounts, paid for everyone else
+once public). Two more dormant, flag-gated increments on top of billing PR 1 (Affordability, #1097) and
+PR 2 (FREE-list split, #1098).
+
+**Billing PR 3 (#1099, MERGED)** — `src/server/AgentV3/PreflightEstimate.ts`: pure, dormant module that
+turns a prompt into an estimated billed cost (₹ + $) BEFORE a build starts. `estimateBuildTokens` (base
+overhead + per-module/feature marginal, conservative/errs-high, clamps negative/NaN) and
+`estimateBuildCost(prompt, power, usdInrRate)` — reuses the repo's single sources of truth
+(`complexityFromPrompt` for size, `billedAmountUsd`/`billedAmountInr` for price, the EXACT functions that
+charge post-build). No private formula. 8 tests. Imported nowhere → zero runtime change.
+
+**Billing PR 4 (this)** — wallet reader + route enforcement, flag-gated OFF behind `AGENTV3_PAID_PUBLIC`:
+- `WalletBalance.ts` — `readWalletBalanceInr(reader, userId)` (pure, FAIL-OPEN: unknown/missing/NaN/throw
+  → null → proceed, never blocks a build on infra failure) + `firestoreWalletReader(db)` bound to the same
+  `user_token_wallets/{userId}.remaining_balance` doc the wallet routes use.
+- `PaidGate.ts` — `decidePaidGate` single pure decision point: flag-off → proceed(gate-off); free-list →
+  proceed(free-list); balance-unknown → proceed(fail-open); else the Affordability proceed/economy/block
+  rules. 6 tests.
+- `featureFlag.ts` — `isAgentV3PaidPublicEnabled()` (default OFF; only exact 'true' enables).
+- Wired into `/api/agentv3/chat` AFTER power resolution, BEFORE flushHeaders → a `block` is a clean
+  pre-stream HTTP 402 (lock released, build never starts); anonymous callers have no wallet → fail-open.
+  `economy` → HONEST in-chat notice that the build continues on the standard engine (the dedicated cheap
+  "economy engine" routing is gated on the provider bake-off — NOT claimed as a switch we can't deliver).
+  Overdraft `PAID_OVERDRAFT_INR` = 20 (override `AGENTV3_PAID_OVERDRAFT_INR`).
+
+Free-list users and flag-off = byte-for-byte today's behavior (the money path is inert until the flag flips).
+
+Gate: server tsc 0, frontend tsc 0, vitest 5414/5414 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change yet (paid-public is dormant/unreachable; the KB entry lands with the flag-flip PR that makes credits
+user-visible). Next: client billing UI (balance display / add-credits / 402 block screen / economy notice),
+then invited-beta flag, then full public — and separately the provider bake-off that unlocks true economy
+routing.

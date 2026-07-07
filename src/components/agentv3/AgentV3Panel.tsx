@@ -12,7 +12,7 @@ import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { historyOpen404Action } from './historyOpenPolicy';
-import { v3SessionStorageKey, readStickySession } from './v3SessionContinuity';
+import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
@@ -317,15 +317,21 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // ☰ "+New chat", ☰ opening another chat, or the header tab ✕ (which CLEARS the sticky id — see
     // App.closeTab → clearStickySession). The 07-01 rule existed for a once-stuck chat that could not
     // be cleared; that bug class is fixed and the admin retired the rule ("is rule ki need nahi hai").
-    sessionIdRef.current = readStickySession(userId) || newSessionId();
+    // ANON-KEY HEAL (Fix 26): a panel that mounted BEFORE auth resolved stored its sticky id under
+    // the anon key; a later mount with the real uid must still find that session (same device, same
+    // human) instead of minting a fresh empty one — the split-key half of the "sab gayab" wipe.
+    sessionIdRef.current = readStickySession(userId) || readStickySession(undefined) || newSessionId();
     persistSessionId(sessionIdRef.current);
   }
   // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
   // only auto-attaches/mirrors a build that actually belongs to THIS session, never one still running
   // under a DIFFERENT v3.0 chat on the same account (root-caused 2026-07-01: "+ New chat" — and, more
   // generally, opening any v3.0 session — could show an unrelated session's in-progress build).
+  // ANON PARITY (Fix 26, report 2026-07-07): mirrors the server's deriveWorkspaceId INCLUDING the
+  // anon identity — a signed-out/auth-degraded session builds under `agentv3-anon-<sid>`, and every
+  // continuity feature must compute that same id instead of silently going dead (`undefined`).
   const expectedWorkspaceId = (): string | undefined =>
-    state.workspaceId || (userId && sessionIdRef.current ? `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}` : undefined);
+    state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current) || undefined;
 
   // The chat thread merges the user's own messages with the engine's live
   // narration (which streams in word-by-word and finalizes in place), ordered by
@@ -473,7 +479,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // WITHOUT bumping the nonce (stays 0) → this effect takes the RESTORE branch instead, bringing the
   // same project's messages/files/preview back. Each distinct nonce is handled at most once.
   useEffect(() => {
-    if (running || !userId || state.narration.length > 0 || userMsgs.length > 0) return;
+    // ANON PARITY (Fix 26): no `!userId` gate — a signed-out/auth-degraded session restores exactly
+    // like a signed-in one. The restore is a DIRECT lookup by the deterministic conversation id
+    // (`v3_<sessionId>`, an unguessable UUID this device minted), which the server's anon bucket
+    // serves without a verified identity — so this never exposes anyone else's data. Without this,
+    // an anon session that lost its panel state (remount/tab close) had NO recovery path at all:
+    // the admin's "tab switch → sab gayab" wipe (2026-07-07), where the durable data was intact
+    // server-side but the client refused to restore it.
+    if (running || state.narration.length > 0 || userMsgs.length > 0) return;
     // STICKY-SESSION RESTORE (admin rule 2026-07-05 — replaces the retired 2026-07-01 always-fresh
     // rule): opening v3.0 with an empty panel restores the STICKY session's saved chat — text back
     // where the user left it after a reload / phone-off / browser kill — and, if that session's build
@@ -555,11 +568,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // devices and sandbox recycles (not just this session's RAM). Runs on sign-in, on resume, and when a
   // build settles (to pick up just-persisted commits). Merged + deduped by sha; best-effort.
   useEffect(() => {
-    if (!userId || !sessionIdRef.current) return;
+    // ANON PARITY (Fix 26): the checkpoint timeline loads for the anon identity too.
+    if (!sessionIdRef.current) return;
     let cancelled = false;
-    const workspaceId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
+    const workspaceId = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
     (async () => {
-      const durable = await getCheckpoints({ workspaceId, userId, email });
+      let durable = await getCheckpoints({ workspaceId, userId, email });
+      // IDENTITY-DEGRADATION FALLBACK (Fix 26): a session whose build ran anon keeps its checkpoints
+      // under `agentv3-anon-<sid>` — try that candidate when the user-keyed workspace has none.
+      const anonWs = clientWorkspaceId(undefined, sessionIdRef.current);
+      if (durable.length === 0 && anonWs && anonWs !== workspaceId && workspaceId === clientWorkspaceId(userId, sessionIdRef.current)) {
+        durable = await getCheckpoints({ workspaceId: anonWs, userId, email });
+      }
       if (!cancelled && durable.length > 0) {
         setCheckpointHistory((prev) => {
           const seen = new Set<string>();
@@ -1372,7 +1392,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
         }
       } else {
-        payload = await getLatestDiagnostics(null);
+        // NO LIVE WORKSPACE (a reopened/remounted panel — Fix 26, the "No build report yet" after a
+        // finished build, 2026-07-07): the report is stored per-WORKSPACE, and this session's workspace
+        // is derivable even without a live build. Try the session-derived candidates (user-keyed, then
+        // the anon-degraded twin) BEFORE the per-user "latest" fallback, which misses anon-run builds.
+        for (const wsId of [clientWorkspaceId(userId, sessionIdRef.current), clientWorkspaceId(undefined, sessionIdRef.current)]) {
+          if (!wsId || payload) continue;
+          try {
+            const params = new URLSearchParams({ workspaceId: wsId, scope: 'session' });
+            if (userId) params.set('userId', userId);
+            if (email) params.set('email', email);
+            const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
+            if (res.ok) {
+              const j = await res.json();
+              // The session stitch returns an empty shell when the workspace has no reports — only
+              // adopt a payload that actually carries content.
+              if (j && (Array.isArray(j.builds) ? j.builds.length > 0 : true)) payload = j;
+            }
+          } catch { /* try the next candidate / the latest-report fallback */ }
+        }
+        if (!payload) payload = await getLatestDiagnostics(null);
         if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
       }
       // iOS Safari IGNORES <a download> (nothing saves) — deliverTextFile prefers the Web Share API
@@ -1493,24 +1532,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // On a COLD reopen there is no live build yet, so state.workspaceId is empty — derive the durable
     // workspaceId from the session so files still rehydrate from storage (the server falls back to the
     // saved file store when the sandbox is cold). An explicit arg wins (the rehydrate effect passes it).
-    const wsId = wsIdArg || state.workspaceId || (userId && sessionIdRef.current ? `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}` : '');
+    // ANON PARITY (Fix 26): the anon identity derives its real `agentv3-anon-<sid>` workspace too.
+    const wsId = wsIdArg || state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
     if (!wsId) return null;
-    try {
-      const res = await fetch('/api/agentv3/workspace-files', {
-        method: 'POST',
-        headers: await authJsonHeaders(),
-        body: JSON.stringify({ workspaceId: wsId, userId, email }),
-      });
-      if (!res.ok) throw new Error(`server returned ${res.status}`);
-      const data = await res.json() as { files?: Record<string, string> };
-      const files = data.files ?? {};
-      setWorkspaceFiles(files);
-      setWorkspaceFilesFor(wsId); // tag which workspace these files belong to (stale-switch guard)
-      return files;
-    } catch (e) {
-      setFileError(e instanceof Error ? e.message : 'Failed to load file contents');
-      return null;
+    // IDENTITY-DEGRADATION FALLBACK (Fix 26 — the "tab switch → sab gayab" wipe, 2026-07-07): a build
+    // that ran while the auth token was transiently missing lives under `agentv3-anon-<sid>`, but a
+    // signed-in client derives `agentv3-<uid>-<sid>` — a DIFFERENT, empty workspace. The transcript
+    // reads already try both candidates (candidateConversationIds, #829/#837); files must do the
+    // same, or the panel shows 0 files while every file sits safely in the durable store.
+    const sid = sessionIdRef.current;
+    const anonCandidate = clientWorkspaceId(undefined, sid);
+    const candidates = [wsId, ...(anonCandidate && anonCandidate !== wsId && wsId === clientWorkspaceId(userId, sid) ? [anonCandidate] : [])];
+    let lastError: unknown = null;
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch('/api/agentv3/workspace-files', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ workspaceId: candidate, userId, email }),
+        });
+        if (!res.ok) throw new Error(`server returned ${res.status}`);
+        const data = await res.json() as { files?: Record<string, string> };
+        const files = data.files ?? {};
+        if (Object.keys(files).length === 0 && candidate !== candidates[candidates.length - 1]) continue; // empty → try the anon-degraded candidate
+        setWorkspaceFiles(files);
+        setWorkspaceFilesFor(candidate); // tag which workspace these files belong to (stale-switch guard)
+        return files;
+      } catch (e) {
+        lastError = e;
+      }
     }
+    setFileError(lastError instanceof Error ? lastError.message : 'Failed to load file contents');
+    return null;
   };
 
   // Open a file in the viewer — fetch contents once, then read from cache.
@@ -1607,8 +1660,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // in-browser preview (which renders from the same durable files server-side) comes back. Runs once
   // per workspace (rehydratedWsRef), re-armed on session switch; never during a live build.
   useEffect(() => {
-    if (running || !userId || !sessionIdRef.current) return;
-    const wsId = state.workspaceId || `agentv3-${normalizeUid(userId)}-${sessionIdRef.current}`;
+    // ANON PARITY (Fix 26): rehydrate durable files for the anon identity too — `!userId` here is
+    // why "sari file gone" showed after a panel reset even though the durable store held every file.
+    if (running || !sessionIdRef.current) return;
+    const wsId = state.workspaceId || clientWorkspaceId(userId, sessionIdRef.current);
     // Skip only if we've already rehydrated THIS workspace, or the cache already holds THIS workspace's
     // files. A stale in-flight load for a PREVIOUS workspace (workspaceFilesFor !== wsId) must NOT block
     // loading the current one.

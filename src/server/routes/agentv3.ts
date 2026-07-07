@@ -5144,7 +5144,14 @@ export function registerAgentV3Routes(app: Express): void {
       // the deterministic lane built DOES get the reviewer — tsc proves it compiles, only the reviewer
       // checks it's feature-complete against the request, and its [CRITICAL] findings are auto-fixed
       // in the same build (C9). Bounded (90s review + 120s repair caps), so it can't stall the finish.
-      const reviewerAllowed = !fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on' || analysis?.startTier === 'sonnet';
+      // ANALYSIS-ONLY turns get NO reviewer (admin design 2026-07-07, "bina provider ko bheje…
+      // surgical fix"): the reviewer exists to check what was BUILT — on a survey/import turn where
+      // ZERO files were written it has nothing to verify, yet on a 100-file CoreUI import it
+      // free-explored the whole template until its transcript hit 2.2M tokens and every provider
+      // rejected it. Big projects live in GitHub + the durable store + the preview WITHOUT any model
+      // reading them; the AI touches files only when the user asks for an edit (surgical, grounded).
+      const reviewerAllowed = writtenFiles.size > 0
+        && (!fastLaneGated || process.env.AGENTV3_REVIEW_FASTLANE === 'on' || analysis?.startTier === 'sonnet');
       if (result.ok && reviewHeadroomOk && reviewerAllowed) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);

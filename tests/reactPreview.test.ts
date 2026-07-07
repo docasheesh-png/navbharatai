@@ -267,3 +267,13 @@ describe('buildReactPreview — imported-app loader resilience (Fix 33)', () => 
     expect(html).toContain('did not start within 25 seconds');
   });
 });
+
+// Fix 34b (Conduit report 2026-07-07): legacy-interop fallback — a third bare-import rung WITHOUT
+// react-externalization, and honest recording of every rung's failure.
+describe('buildReactPreview — legacy react interop fallback (Fix 34b)', () => {
+  it('ships the no-external last rung + multi-rung error recording', () => {
+    const html = buildReactPreview(reactVfs());
+    expect(html).toContain('WITHOUT react-externalization (legacy interop fallback)');
+    expect(html).toContain('on all 3 rungs');
+  });
+});

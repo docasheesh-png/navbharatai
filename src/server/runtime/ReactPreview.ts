@@ -559,10 +559,24 @@ ${babelTag}
             bareCache[spec] = interop(await import(specUrlAlt(spec)));
             console.warn('[preview] loaded', spec, 'from fallback CDN after esm.sh failed');
           } catch (e2) {
-            // Record the EXACT failure so a later "Could not load react" names the real cause
-            // (e.g. "Failed to fetch dynamically imported module: https://esm.sh/react@18.3.1").
-            bareLoadErrors[spec] = (e && e.message) ? e.message : String(e);
-            console.warn('[preview] failed to load', spec, 'from', specUrl(spec), 'AND fallback', specUrlAlt(spec), '—', bareLoadErrors[spec]);
+            // LAST RUNG (Conduit report 2026-07-07): plain esm.sh WITHOUT the react-externalization
+            // query. A legacy package (React 16/17 era) whose externalized \`import {Component} from
+            // 'react'\` hits a named-export binding mismatch ("does not provide an export named
+            // 'Component'") loads fine when it bundles its OWN react copy. Class-component apps
+            // tolerate that; a rare dual-React hook conflict then surfaces as its own honest error.
+            try {
+              bareCache[spec] = interop(await import(ESM + spec));
+              console.warn('[preview] loaded', spec, 'WITHOUT react-externalization (legacy interop fallback)');
+            } catch (e3) {
+              // Record EVERY rung's real failure so the surfaced error names the true causes,
+              // not just the first rung's message.
+              bareLoadErrors[spec] = [
+                (e && e.message) ? e.message : String(e),
+                (e2 && e2.message) ? 'alt CDN: ' + e2.message : '',
+                (e3 && e3.message) ? 'plain: ' + e3.message : '',
+              ].filter(Boolean).join(' | ');
+              console.warn('[preview] failed to load', spec, 'on all 3 rungs —', bareLoadErrors[spec]);
+            }
           }
         }
       }));

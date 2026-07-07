@@ -224,3 +224,12 @@ describe('classifyDevServerFailure — "Missing script" is a launch-command mism
     expect(d.detail).toContain('npm start');
   });
 });
+
+describe('classifyDevServerFailure — CRA port phrasing (Fix 34a, Conduit report 2026-07-07)', () => {
+  it('recognises "Something is already running on port 4100." as port_in_use → kill_port_retry', () => {
+    const d = classifyDevServerFailure('> cross-env PORT=4100 react-scripts start\nSomething is already running on port 4100.');
+    expect(d.cause).toBe('port_in_use');
+    expect(d.recovery).toBe('kill_port_retry');
+    expect(d.detail).toContain('4100');
+  });
+});

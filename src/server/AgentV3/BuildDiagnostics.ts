@@ -490,7 +490,13 @@ export class BuildDiagnostics {
         // errors remaining, retries) is flagged warning/error; everything else is recorded as a
         // normal AGENT_STEP so the report shows WHAT the agent was doing minute-to-minute, not only
         // its struggles.
-        if (/\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(t)) {
+        // LONG ANALYTICAL PROSE IS NEVER A PROBLEM (report honesty, 2026-07-07 ×3): a successful
+        // survey/summary containing phrases like "No error boundaries" was keyword-matched into a
+        // severity=error AGENT_NOTE and even became the report's rootCause. Only a SHORT status-like
+        // line (no markdown headings/tables, bounded length) can be classified as a problem — a
+        // multi-paragraph analysis is a deliverable, not a struggle.
+        const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t);
+        if (statusLike && /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(t)) {
           this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(t) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });

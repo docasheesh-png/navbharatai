@@ -149,8 +149,12 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   const text = (log || '').slice(-8000); // the tail carries the fatal line; bound the scan
   const make = (cause: DevServerFailureCause, detail: string): DevServerDiagnosis => ({ cause, recovery: recoveryFor(cause), detail });
 
-  // 1) Port already in use — free it and retry (never a code problem).
-  if (/\bEADDRINUSE\b/i.test(text) || /port\s+\d+\s+is\s+(?:already\s+)?in\s+use/i.test(text) || /address already in use/i.test(text)) {
+  // 1) Port already in use — free it and retry (never a code problem). Covers Node's EADDRINUSE,
+  //    Vite's "port X is in use", AND Create-React-App's phrasing "Something is already running on
+  //    port 4100." (RealWorld/Conduit report 2026-07-07 — CRA's wording matched nothing, so the
+  //    recovery plain-retried into the same conflict instead of freeing the port).
+  if (/\bEADDRINUSE\b/i.test(text) || /port\s+\d+\s+is\s+(?:already\s+)?in\s+use/i.test(text) || /address already in use/i.test(text)
+    || /already running on port\s+\d+/i.test(text)) {
     const m = text.match(/(?:port\s+|:)(\d{2,5})\b/i);
     return make('port_in_use', `Port ${m ? m[1] : '(the dev-server port)'} is already in use — freeing it and restarting.`);
   }

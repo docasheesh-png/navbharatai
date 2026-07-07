@@ -19,6 +19,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
+import { ashokChakraSvg } from '../../lib/ashokChakra';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -286,6 +287,15 @@ ${babelTag}
 </head>
 <body>
 <div id="root"></div>
+<!-- BOOT OVERLAY (admin 2026-07-07: "preview load ho raha hai ya fail, dikh hi nahi raha"): from the
+     very first paint until the app actually mounts, a rotating Ashok Chakra + a live seconds counter
+     make the loading phase VISIBLE — the blank-white mystery screen is gone. showError() and the
+     25s watchdog below replace it with an explicit reason when the boot fails or hangs. -->
+<div id="__nbai_boot" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#ffffff;z-index:99998">
+  <div style="width:64px;height:64px;animation:__nbai_spin 1.6s linear infinite">${ashokChakraSvg(64)}</div>
+  <div style="font:13px/1.4 system-ui;color:#555">Loading preview… <span id="__nbai_boot_s" style="font-family:monospace;color:#888"></span></div>
+</div>
+<style>@keyframes __nbai_spin{to{transform:rotate(360deg)}}</style>
 <script type="application/json" id="__bundle__">${payload}</script>
 <script>
 (function () {
@@ -315,7 +325,44 @@ ${babelTag}
   var missingLocal = {};   // resolved path → importer, for local files referenced but never created
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 
+  // Boot-overlay lifecycle: hidden the moment the app REALLY paints (first child in #root) or an
+  // error takes over; a 25s watchdog turns a silent hang into an explicit, named failure.
+  var bootEl = document.getElementById('__nbai_boot');
+  var bootStart = Date.now();
+  var bootTick = setInterval(function () {
+    var s = document.getElementById('__nbai_boot_s');
+    if (s) s.textContent = Math.round((Date.now() - bootStart) / 1000) + 's';
+  }, 1000);
+  var bootWatchdog = setTimeout(function () {
+    if (!bootEl) return; // already mounted or errored
+    var failed = Object.keys(bareLoadErrors);
+    var reason = 'The preview did not start within 25 seconds.\\n\\n';
+    if (failed.length) {
+      reason += 'These npm packages FAILED to load from the CDN:\\n'
+        + failed.map(function (s) { return '  • ' + s + ' — ' + bareLoadErrors[s]; }).join('\\n')
+        + '\\n\\nCheck your network and tap the reload (↻) button to retry.';
+    } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      reason += 'You appear to be OFFLINE. The preview needs the network once to download npm packages — reconnect and tap the reload (↻) button.';
+    } else {
+      reason += 'npm packages are still downloading (a slow network), or a module hung while loading. Tap the reload (↻) button to retry.';
+    }
+    showError(reason);
+  }, 25000);
+  function hideBoot() {
+    if (!bootEl) return;
+    bootEl.style.display = 'none';
+    bootEl = null;
+    clearInterval(bootTick);
+    clearTimeout(bootWatchdog);
+  }
+  try {
+    new MutationObserver(function () {
+      if (document.getElementById('root').childNodes.length > 0) hideBoot();
+    }).observe(document.getElementById('root'), { childList: true });
+  } catch (e) { /* observer unavailable — the explicit post-mount hide below still fires */ }
+
   function showError(msg) {
+    hideBoot(); // an explicit reason always replaces the loading chakra — never both, never neither
     var el = document.getElementById('root');
     el.innerHTML = '<pre style="white-space:pre-wrap;color:#b00;padding:16px;font:13px/1.5 monospace">Preview error:\\n' +
       String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
@@ -473,6 +520,10 @@ ${babelTag}
         }
       }));
       requireModule(ENTRY);
+      // The entry executed without throwing — the app is mounting. The MutationObserver above
+      // normally hides the boot overlay on the first real paint; this explicit hide covers apps
+      // that render outside #root (portals) so the chakra can never sit over a working app.
+      setTimeout(hideBoot, 300);
       // If any local file was missing, the app still rendered (stubbed) — show an honest, non-blocking
       // banner naming the missing files and report them to the host so the build report captures them.
       var miss = Object.keys(missingLocal);

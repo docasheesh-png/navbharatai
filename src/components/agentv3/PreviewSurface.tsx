@@ -10,6 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from '
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { ashokChakraSvg } from '../../lib/ashokChakra';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -464,8 +465,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
       )}
       {loading ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-zinc-500 text-sm">
-          <div className="flex items-center"><Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading files &amp; compiling preview…{loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}</div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
+          {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
+          <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
+          <div className="flex items-center">Loading files &amp; compiling preview…{loadSeconds > 0 ? <span className="ml-1.5 font-mono text-zinc-600">{loadSeconds}s</span> : null}</div>
           {loadSeconds >= 8 && (
             <p className="text-[11px] text-zinc-600 max-w-xs text-center">Still working — the first load after a long gap fetches your saved files from storage, which can take a few extra seconds. Repeat opens are much faster.</p>
           )}

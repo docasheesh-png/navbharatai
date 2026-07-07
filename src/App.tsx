@@ -3,6 +3,7 @@ import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
 import { ProductTour } from './components/ProductTour';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
+import { sanitizeFileMap } from './lib/fileMapSanitize';
 // AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
@@ -2521,7 +2522,7 @@ export default function App() {
                  is visible, so v3.0's header controls and their footer replacements never both hide. */
               mobileFooter={v3MobileFooterActive(effectiveDeviceMode, focusMode)}
               onFooterApi={setV3FooterApi}
-              onFilesSync={(synced) => { workspaceSyncerRef.current?.noteRemote(synced); setFiles((prev) => ({ ...prev, ...synced })); }}
+              onFilesSync={(synced) => { const clean = sanitizeFileMap(synced); workspaceSyncerRef.current?.noteRemote(clean); setFiles((prev) => ({ ...prev, ...clean })); }}
               /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
                  hand edits are what v3.0 reads/acknowledges). Best-effort — never blocks the build. */
@@ -2551,14 +2552,16 @@ export default function App() {
                 onDeleteFile: (path: string) => deleteWorkspaceFiles([path]),
                 onRenameFile: (oldPath: string, newPath: string) => {
                   const prev = files as Record<string, string>;
-                  if (prev[newPath] !== undefined) return;
+                  // Source must verifiably hold a string — writing `undefined` into the map crashed
+                  // the whole app at render (report 2026-07-07: "undefined is not an object ('ce.split')").
+                  if (prev[newPath] !== undefined || typeof prev[oldPath] !== 'string') return;
                   const next = { ...prev, [newPath]: prev[oldPath] };
                   delete next[oldPath];
                   setFiles(next as any);
                 },
                 onDuplicateFile: (sourcePath: string, targetPath: string) => {
                   const prev = files as Record<string, string>;
-                  if (prev[targetPath] !== undefined) return;
+                  if (prev[targetPath] !== undefined || typeof prev[sourcePath] !== 'string') return;
                   setFiles({ ...prev, [targetPath]: prev[sourcePath] } as any);
                 },
                 sessionId: currentProSessionId,

@@ -3347,7 +3347,9 @@ export default function App() {
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
           ].map(({ id, icon: Icon, label }) => {
             const isActive = activeView === id;
-            const isDisabled = (id === 'preview' || id === 'studio') && !hasGeneratedCode;
+            // Preview is v3.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
+            // workspace exists, not only for the retired v2 generatedCode path.
+            const isDisabled = id === 'preview' ? !(v3Preview.workspaceId || hasGeneratedCode) : (id === 'studio' && !hasGeneratedCode);
             return (
               <button
                 key={id}

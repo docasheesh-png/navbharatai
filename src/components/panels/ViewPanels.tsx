@@ -1,5 +1,4 @@
 import React, { lazy } from 'react';
-import { PreviewPanel } from '../ide/PreviewPanel';
 import { PreviewSurface } from '../agentv3/PreviewSurface';
 import { FilesPanel } from './FilesPanel';
 import { ZipSizeModal } from '../ide/ZipSizeModal';
@@ -203,38 +202,22 @@ export function ViewPanels({
 
       {activeView === 'preview' && (
         <div className="flex-1 h-full overflow-hidden">
-          {v3Preview?.workspaceId ? (
-            // A v3.0 build is active → show the SAME working v3.0 preview (live URL or in-browser
-            // build of the saved files), not the retired v2.0 generatedCode the v3 engine never writes.
-            // `framework`/`autoResume`/`onFixError` bring this to full parity with the in-panel Preview
-            // tab (2026-07-01, admin request) — same PreviewSurface component, same feature set,
-            // regardless of which of the two entry points the user opens it from.
-            <PreviewSurface
-              url={v3Preview.previewUrl}
-              workspaceId={v3Preview.workspaceId}
-              userId={user?.uid}
-              email={user?.email ?? undefined}
-              framework={v3Preview.framework}
-              autoResume={!v3Preview.running}
-              onFixError={onV3FixError}
-              onFileEdited={(path, content) => setFiles((prev: any) => ({ ...prev, [path]: content }))}
-            />
-          ) : (
-            <PreviewPanel
-              files={files}
-              onRun={() => updatePreview(files)}
-              generatedCode={generatedCode}
-              previewHistory={previewHistory}
-              onRestoreHistory={(html: string) => setGeneratedCode(html)}
-              onHtmlChange={(html: string) => setGeneratedCode(html)}
-              onGoPro={() => toggleTab('nbi_pro_chat')}
-              onEditWithAI={(hint: string) => {
-                setMode('build');
-                if (hint) setProInput(hint);
-                toggleTab('nbi_pro_chat');
-              }}
-            />
-          )}
+          {/* ONE PREVIEW EVERYWHERE (admin 2026-07-07: "3 gate, andar sab same — v3.0 wala hi"):
+              every entry point (the v3.0 panel tab, the footer PREVIEW tab, the slide-menu Preview)
+              renders the SAME v3.0 PreviewSurface. The retired v2.0 PreviewPanel branch (generatedCode,
+              which the v3 engine never writes) is removed — with no v3 workspace yet, PreviewSurface
+              shows its own honest "it appears the moment the agent starts the app" state. Porting the
+              old panel's download/install/tags extras into PreviewSurface is tracked in PROGRESS.md. */}
+          <PreviewSurface
+            url={v3Preview?.previewUrl}
+            workspaceId={v3Preview?.workspaceId}
+            userId={user?.uid}
+            email={user?.email ?? undefined}
+            framework={v3Preview?.framework}
+            autoResume={!v3Preview?.running}
+            onFixError={onV3FixError}
+            onFileEdited={(path, content) => setFiles((prev: any) => ({ ...prev, [path]: content }))}
+          />
         </div>
       )}
 

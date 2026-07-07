@@ -11285,3 +11285,19 @@ enforced: files exist ⇒ the empty state cannot be terminal.
 - The empty state now says "Loading your saved files into the preview…" and carries a manual
   "Load preview" button as the final escape hatch.
 - Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot PASS.
+
+## 2026-07-07 — Fix 22: ONE preview, three gates (admin: "teeno ko ek hi banao — v3.0 wala sab jagah")
+
+The app had 3 preview entry points (the v3.0 panel tab, the footer PREVIEW tab, the slide-menu
+Preview) and the latter two fell back to the RETIRED v2.0 PreviewPanel (generatedCode-based — which
+the v3 engine never writes) whenever no v3 workspace was active — three gates, two different worlds.
+- ViewPanels' `activeView === 'preview'` now ALWAYS renders the v3.0 PreviewSurface (same component,
+  same feature set — live/in-browser tabs, self-healing load, Diagnose, visual edit, Fix-with-AI) —
+  with no workspace it shows its own honest empty state. The v2.0 PreviewPanel branch is removed from
+  this surface (import dropped).
+- The footer Preview tab's enable-rule is v3-aware: enabled whenever a v3 workspace exists (was
+  gated on the retired v2 hasGeneratedCode only).
+- FOLLOW-UP (recorded, admin-approved copy list): port the old panel's download/install(PWA)/tags
+  extras into PreviewSurface, and migrate WorkspacePane's internal PreviewPanel usage — then delete
+  ide/PreviewPanel.tsx entirely.
+- Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot PASS.

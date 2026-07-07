@@ -11768,3 +11768,27 @@ Honest scope: panel-based (add-by-file+line) instead of Monaco-gutter click-to-c
 (those edit hot Editor.tsx/StatusBar.tsx); the store+endpoints are reusable by that gutter UI later.
 
 Gate: tsc fe+server 0, vitest 5421/5421 (7 new), build PASS, boot:check PASS.
+## 2026-07-07 — Paid-public v3.0 billing PR 5: client billing UX (402 add-credits screen + balance chip)
+
+Admin chose to build the client UX next. Completes the paid-public loop on the client, all still inert
+until `AGENTV3_PAID_PUBLIC` is flipped on.
+
+- `/api/agentv3/status` now returns `billed` = `isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(...)`.
+  The client shows money UI ONLY when this is true → nothing visible for admin/free-list users or while
+  the flag is off (today).
+- `useAgentV3Build`: a 402 `INSUFFICIENT_CREDITS` no longer falls to the generic red error banner — it
+  sets a structured `billingBlock` ({ notice, balanceInr?, estimateInr? }) exposed with `clearBillingBlock`.
+  Cleared on a fresh send and on reset.
+- `AgentV3Panel`: (a) a dedicated amber "Add credits to build" card (shows balance vs this-build estimate,
+  an "Add credits" button, and Dismiss) rendered from `billingBlock` instead of the "Fix with AI" code-error
+  treatment (running out of credits is not a code bug); (b) a live ₹ wallet-balance chip in the header,
+  shown only when `billed` — turns amber at ≤ ₹0. Both refetch after a build finishes and after a 402.
+- Cross-component nav without prop-threading: the panel dispatches `navbharat:navigate` { view } and App
+  listens → `toggleTab(view)`; "Add credits" opens Wallet & Billing.
+
+Honesty: a 402 already surfaced the server's honest "add credits" text via setError before this PR — this
+is a UX upgrade (dedicated actionable screen + balance visibility), not a fake-state fix. No `AppKnowledge
+Base` entry yet: the surfaces are unreachable until the flag flips; the KB entry lands with that flag-flip PR
+so the docs never claim a capability users can't see.
+
+Gate: server tsc 0, frontend tsc 0, vitest 5425/5425 PASS, build PASS, boot PASS.

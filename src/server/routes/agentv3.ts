@@ -1400,6 +1400,11 @@ export function registerAgentV3Routes(app: Express): void {
     });
     res.json({
       enabled: isAgentV3Enabled(userId, email),
+      // BILLED: is this user actually on paid-public billing right now? True only when the paid-public
+      // flag is ON and the user is NOT on the free-list. The client shows the wallet-balance chip and the
+      // add-credits block screen only when this is true — so nothing money-related is visible while the
+      // flag is off (today) or for admin/tester free-list accounts.
+      billed: isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(userId, email),
       buildRunning,
       buildRunningHere,
       ...agentV3Status(),

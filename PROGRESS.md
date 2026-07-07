@@ -11866,3 +11866,28 @@ scaffold it just generated always defines a `dev` script (not a sibling of this 
    placeholder URL (Vite semantics: an image import IS a URL) instead of dying at the CDN.
 Tests: +5 (loader machinery present incl. a Fix-29 overlay/watchdog lock). Gate: frontend tsc 0,
 server tsc 0, vitest 5448/5448, boot PASS.
+
+## 2026-07-07 — AUTOPSY (Conduit/RealWorld import) → Fix 34a (CRA port phrasing) + 34b (legacy react interop) + report-honesty root fix
+
+Admin imported react-redux-realworld (Conduit, 43 files). **Fix 32 verified working in the wild** — the
+boot ran `npm start` (CRA) with the project's own script. Three remaining roots, all killed:
+
+**Fix 34a — CRA port conflict unrecognised:** boot log said "Something is already running on port
+4100." — Create-React-App's phrasing matched NEITHER of the port_in_use regexes (EADDRINUSE / "port N
+is in use"), so the recovery PLAIN-RETRIED into the same conflict instead of freeing the port. Added
+the CRA phrasing → kill_port_retry. Test: the exact Conduit log line.
+
+**Fix 34b — legacy React named-export binding:** in-browser preview died with "'react' does not
+provide an export named 'Component'" while importing react-redux — the react-externalization strategy
+(?external=react,react-dom + importmap) hits an ESM named-export interop mismatch on React 16/17-era
+version pins. New LAST RUNG in the bare-import ladder: plain esm.sh WITHOUT the external flag (the
+package bundles its own react — class-component apps tolerate it; a rare dual-React hook conflict then
+surfaces as its own honest error). Also fixed silent evidence loss: bareLoadErrors recorded only rung
+1's message — now all 3 rungs' real failures are recorded and surfaced.
+
+**Report honesty (3 reports in a row):** a SUCCESSFUL survey containing prose like "No error
+boundaries" was keyword-scanned into a severity=error AGENT_NOTE and even became the report's
+rootCause. Root fix in BuildDiagnostics narration classification: only a SHORT status-like line
+(≤300 chars, no markdown headings/tables) can classify as a problem — long analytical prose is a
+deliverable, recorded as info AGENT_STEP. Tests: +4 (the survey case, the short-status case, the CRA
+line, the loader rung markers). Gate: frontend tsc 0, server tsc 0, vitest 5452/5452, boot PASS.

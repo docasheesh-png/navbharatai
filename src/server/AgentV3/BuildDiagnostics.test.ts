@@ -588,3 +588,27 @@ describe('capSessionReports — the session download must actually LOAD (the "Lo
     expect(capSessionReports([], 1_000)).toEqual({ kept: [], omitted: 0 });
   });
 });
+
+describe('narration classification — long analytical prose is never a fake error (2026-07-07 x3)', () => {
+  it('records a SURVEY containing "No error boundaries" as an info AGENT_STEP, not an error/rootCause', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    const survey = [
+      "Here's an honest survey of the imported app:",
+      '## App Survey', '| Layer | Technology |', '|---|---|', '| UI | React |',
+      'Notable: No error boundaries. Package versions are fairly old.',
+      'What would you like to do with this app?',
+    ].join('\n');
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: survey, ts: 1 } as AgentEvent);
+    const r = d.report();
+    const note = r.issues.find((i) => i.message.startsWith("Here's an honest survey"));
+    expect(note?.severity).toBe('info');
+    expect(note?.code).toBe('AGENT_STEP');
+    expect(r.problems.some((p) => p.message.startsWith("Here's an honest survey"))).toBe(false);
+  });
+  it('still flags a SHORT real status problem as a warning/error', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'The dev server timed out on port 5173 — retrying.', ts: 1 } as AgentEvent);
+    const r = d.report();
+    expect(r.problems.length).toBeGreaterThan(0);
+  });
+});

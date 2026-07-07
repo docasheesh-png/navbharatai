@@ -14,6 +14,7 @@
 /** What actually went wrong with the dev server, derived from its log output. */
 export type DevServerFailureCause =
   | 'missing_module'  // an import/dependency isn't installed ("Cannot find module 'X'")
+  | 'missing_script'  // the launch command names a script package.json doesn't have ("Missing script: dev")
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
@@ -61,6 +62,21 @@ export function validateProjectForPreview(packageJsonRaw: string | null): { ok: 
     issues.push('package.json has no "dev", "start", or "serve" script — there is no command to start the live preview server.');
   }
   return { ok: issues.length === 0, issues, runScript };
+}
+
+/**
+ * The npm command that actually starts THIS project's dev server, derived from its package.json
+ * scripts (`dev` → `start` → `serve`, the same priority validateProjectForPreview uses — one source
+ * of truth, no drift). Root cause this kills (CoreUI report 2026-07-07): the preview boot hardcoded
+ * `npm run dev`, but CoreUI's script is `start` — so the boot failed with `npm error Missing script:
+ * "dev"`, was restarted once (same wrong command), and died with "no recognisable error". Falls back
+ * to `npm run dev` when package.json is missing/unreadable (the scaffold default). PURE.
+ */
+export function resolveDevRunCommand(packageJsonRaw: string | null): string {
+  const { runScript } = validateProjectForPreview(packageJsonRaw);
+  if (!runScript || runScript === 'dev') return 'npm run dev';
+  if (runScript === 'start') return 'npm start';
+  return `npm run ${runScript}`;
 }
 
 /**
@@ -115,6 +131,7 @@ export function devScriptPort(packageJsonRaw: string | null): number | null {
 function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
   switch (cause) {
     case 'missing_module': return 'reinstall';
+    case 'missing_script': return 'code_fix'; // restarting re-runs the same wrong command forever — the LAUNCH COMMAND must change
     case 'port_in_use': return 'kill_port_retry';
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
@@ -138,7 +155,17 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('port_in_use', `Port ${m ? m[1] : '(the dev-server port)'} is already in use — freeing it and restarting.`);
   }
 
-  // 2) Missing dependency / uninstalled tool — reinstall, then restart.
+  // 2) Wrong launch command — the script doesn't exist in package.json ("npm error Missing script:
+  //    \"dev\"" — the CoreUI report 2026-07-07: its script is `start`, not `dev`). Restarting re-runs
+  //    the SAME wrong command; this must surface as a launch-command mismatch, never "no recognisable
+  //    error". resolveDevRunCommand() upstream prevents it; this classifier keeps the report honest
+  //    if any path still launches blind.
+  const missScript = text.match(/Missing script:\s*"?([\w:-]+)"?/i);
+  if (missScript) {
+    return make('missing_script', `package.json has no "${missScript[1]}" script — the app must be started with its own run script (e.g. \`npm start\`), not \`npm run ${missScript[1]}\`. This is a launch-command mismatch, not an app error.`);
+  }
+
+  // 3) Missing dependency / uninstalled tool — reinstall, then restart.
   const mod = text.match(/Cannot find module ['"]([^'"\n]+)['"]/i)
     || text.match(/Cannot find package ['"]([^'"\n]+)['"]/i)
     || text.match(/Failed to resolve (?:import|entry|module) ['"]([^'"\n]+)['"]/i);

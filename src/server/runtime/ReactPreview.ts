@@ -324,6 +324,21 @@ ${babelTag}
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
   var missingLocal = {};   // resolved path → importer, for local files referenced but never created
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
+  // ROOT-LOCAL SPECIFIERS (CoreUI report 2026-07-07): real Vite apps import from the project ROOT
+  // without a leading './' — \`import { logo } from 'src/assets/brand/logo'\`, \`from 'src/components'\`
+  // (Vite resolve.alias / jsconfig baseUrl). The loader treated every such spec as an npm package and
+  // sent it to the CDN (https://esm.sh/src/assets/brand/logo → dead preview). A spec whose first
+  // segment names a top-level dir/file that actually EXISTS in this project is LOCAL, not bare.
+  var ROOT_SEGS = {};
+  Object.keys(SOURCES).forEach(function (p) { ROOT_SEGS[p.split('/')[0]] = true; });
+  function isLocalRootSpec(spec) {
+    if (!spec || spec.indexOf(':') >= 0) return false; // node:path / http(s): are never local
+    return ROOT_SEGS.hasOwnProperty(spec.split('/')[0]);
+  }
+  // Local binary assets (images) are not in the text file map — imports of them resolve to a tiny
+  // transparent placeholder URL so the app renders (Vite semantics: an image import IS a URL string).
+  var IMG_RE = /\\.(png|jpe?g|gif|webp|avif|ico|bmp|svg)$/i;
+  var IMG_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
   // Boot-overlay lifecycle: hidden the moment the app REALLY paints (first child in #root) or an
   // error takes over; a 25s watchdog turns a silent hang into an explicit, named failure.
@@ -431,6 +446,17 @@ ${babelTag}
     cache[path] = module;
     function localRequire(spec) {
       spec = applyAlias(spec); // @/… → /client/src/… so it resolves locally, not via the CDN
+      // node: builtins cannot run in a browser — stub them (usually only config-file imports) so one
+      // stray \`import path from 'node:path'\` never kills the whole preview.
+      if (spec.indexOf('node:') === 0) {
+        console.warn('[preview] node builtin stubbed in the browser preview:', spec);
+        var nodeStub = new Proxy(function () { return ''; }, {
+          get: function (_t, k) { if (k === '__esModule') return true; if (k === 'default') return nodeStub; return function () { return ''; }; },
+        });
+        return nodeStub;
+      }
+      // Root-local Vite import ('src/…') → make it a local absolute path, NEVER a CDN package.
+      if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/' && isLocalRootSpec(spec)) spec = '/' + spec;
       if (spec.charAt(0) !== '.' && spec.charAt(0) !== '/') {
         if (bareCache[spec]) return bareCache[spec];
         // Surface the REAL reason the CDN import failed (CSP block, network/fetch error, 404, CORS)
@@ -444,6 +470,13 @@ ${babelTag}
       // Instead of throwing, substitute a forgiving stub so the rest of the app renders, and record
       // the gap so a banner can tell the user exactly which file is missing (honest, not hidden).
       if (!SOURCES.hasOwnProperty(resolved)) {
+        // A local IMAGE import (binary — never in the text file map) is a URL string in Vite
+        // semantics: hand back a transparent placeholder so avatars/logos degrade gracefully
+        // instead of the import dying at the CDN (the CoreUI avatars/*.jpg failure).
+        if (IMG_RE.test(resolved)) {
+          cache[resolved] = { exports: { __esModule: true, default: IMG_PLACEHOLDER } };
+          return cache[resolved].exports;
+        }
         missingLocal[resolved] = path;
         var stub = new Proxy(function () { return ''; }, {
           get: function (_t, k) { if (k === '__esModule') return true; if (k === 'default') return stub; return function () { return ''; }; },
@@ -462,7 +495,9 @@ ${babelTag}
     var found = {}, re = /(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
     Object.keys(SOURCES).forEach(function (p) {
       var src = SOURCES[p] || '', m; re.lastIndex = 0;
-      while ((m = re.exec(src))) { var s = applyAlias(m[1]); if (s && s.charAt(0) !== '.' && s.charAt(0) !== '/') found[s] = true; }
+      // Skip node: builtins (browser can't load them; vite.config imports land here too) and
+      // root-local Vite specs ('src/…' — they resolve from THIS project's files, never the CDN).
+      while ((m = re.exec(src))) { var s = applyAlias(m[1]); if (s && s.charAt(0) !== '.' && s.charAt(0) !== '/' && s.indexOf('node:') !== 0 && !isLocalRootSpec(s)) found[s] = true; }
     });
     return Object.keys(found);
   }
@@ -504,6 +539,18 @@ ${babelTag}
       var bare = collectBare();
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
       await Promise.all(bare.map(async function (spec) {
+        // An npm package's CSS file ('simplebar-react/dist/simplebar.min.css') is a STYLESHEET, not
+        // an ES module — dynamic import() of it fails outright (the CoreUI failure). Load it as a
+        // <link> from the CDN (raw file, no ?external query) and satisfy the import with an empty
+        // module, exactly what a bundler does with CSS imports.
+        if (/\\.css$/i.test(spec)) {
+          var link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = specUrl(spec).split('?')[0];
+          document.head.appendChild(link);
+          bareCache[spec] = { __esModule: true, default: {} };
+          return;
+        }
         try { bareCache[spec] = interop(await import(specUrl(spec))); }
         catch (e) {
           // esm.sh flaked for this package — retry ONCE from the fallback CDN before giving up, so a

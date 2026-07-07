@@ -11622,3 +11622,13 @@ keep the stream alive):
   explicit rebuild-shaped request AND a human Approve. Timeout defaults to the safe side (edit).
 Tests: +4 (asks over existing app incl. small ones; never on empty/edit/import turns). Gate: frontend
 tsc 0, server tsc 0, vitest 5376/5376, boot PASS.
+
+## 2026-07-07 — Build/Plan/Advise switcher back to the composer (dropup selector) — position only
+
+Admin (screenshot): "header ke pas jo 3 option (build/plan/advise) hai usko utha kar old position me
+rakho — input box ke pas, dropdown selector, pyramid bana kar. change only position and not function."
+Done exactly: the top 3-tab row is removed; the mode lives again in the composer's LEFT column (its
+pre-2026-07-06 home) as a compact "🔨 Build ▾" button whose menu opens UPWARD above the input (the
+"pyramid"). Function untouched: same setChatMode, same read-only Plan/Advise lanes, same thread
+counts, same build-running pulse dot (now on the selector button), same tooltips. AppKnowledgeBase
+path/howToUse for the 3-role workflow updated to the new location. tsc 0; ships in PR #1096.

@@ -4,7 +4,7 @@ import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
-  ChevronLeft, ChevronRight, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles,
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
@@ -82,6 +82,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // 'build' = the normal builder (Chat 1). 'planner'/'advisor' = the read-only role lanes (FIX #5)
   // that analyze the project and PROPOSE steps; the user approves them into the queue below.
   const [chatMode, setChatMode] = useState<'build' | 'planner' | 'advisor'>('build');
+  // Mode dropup open/closed (admin 2026-07-07: the Build/Plan/Advise switcher moved back to the
+  // composer as a dropdown selector — position only, identical function).
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   // Plan/Advise (read-only lanes) run on their OWN request, fully DECOUPLED from the build stream, so
   // they can be sent ANYTIME — even WHILE a build is running (the whole point of the model) — and can
   // never clobber the live build's state. `roleBusy` is their own in-flight flag (independent of the
@@ -2028,28 +2031,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             workspace is open it shares the width on desktop, and is HIDDEN on
             mobile (the workspace takes over so it's usable on a phone). */}
         <div className={`${showWorkspace ? 'hidden sm:flex sm:w-1/2 sm:border-r border-zinc-800' : 'flex flex-1'} flex-col min-h-0`}>
-          {/* 3 PAGES (admin 2026-07-06): Build · Plan · Advise — one shared session + project memory, each
-              its OWN visible thread. Switching tabs shows a distinct chat page; the build keeps running
-              underneath whichever tab is shown (a pulsing dot on Build marks that). */}
-          <div className="shrink-0 flex items-center gap-1 px-2 pt-2 border-b border-zinc-800/60 pb-2">
-            {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setChatMode(m)}
-                title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${chatMode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
-              >
-                <span>{icon}</span>{label}
-                {m === 'build' && running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
-                {m === 'planner' && roleThreads.planner.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.planner.length / 2)}</span>}
-                {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
-              </button>
-            ))}
-            {chatMode !== 'build' && running && (
-              <span className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />Build running</span>
-            )}
-          </div>
+          {/* 3 PAGES: Build · Plan · Advise — one shared session + project memory, each its OWN
+              visible thread. The switcher moved BACK to the composer's left column as a dropup
+              selector (admin 2026-07-07: "old position me rakho, input box ke pas, dropdown selector"
+              — position only, function unchanged). See the mode selector next to the settings button. */}
           {/* Conversation */}
           {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
@@ -2324,11 +2309,48 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
             />
             <div className="flex items-stretch gap-1.5 px-2 py-1">
-              {/* LEFT COLUMN (admin 2026-07-06): Build selector on TOP, settings + attach in a row
-                  BELOW it — moved off the input row into the empty left space so the message box gets
-                  the freed width. */}
-              {/* Mode is now the 3-tab switcher at the TOP of the chat (Build/Plan/Advise) — admin
-                  2026-07-06. The composer keeps just the build options + attach. */}
+              {/* LEFT COLUMN (admin 2026-07-07 — back to the OLD position): the Build/Plan/Advise
+                  MODE SELECTOR on TOP as a dropup ("pyramid" — opens upward above the input), with
+                  settings + attach in a row BELOW it. Same function as the old top tab row: same
+                  setChatMode, same running dot, same thread counts, same tooltips. */}
+              <div className="flex flex-col gap-1 shrink-0">
+              <div className="relative">
+                {modeMenuOpen && (
+                  <>
+                    {/* outside-click catcher */}
+                    <div className="fixed inset-0 z-10" onClick={() => setModeMenuOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-60 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
+                      {([['build', 'Build', '🔨'], ['planner', 'Plan', '🧠'], ['advisor', 'Advise', '🔍']] as const).map(([m, label, icon]) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => { setChatMode(m); setModeMenuOpen(false); }}
+                          title={m === 'build' ? 'Build — code, build & chat' : m === 'planner' ? 'Plan — read-only planning; approve steps into the build queue' : 'Advise — read-only analysis (audit / scan / compare)'}
+                          className={`w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left ${chatMode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                        >
+                          <span>{icon}</span>{label}
+                          {m === 'build' && running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
+                          {m === 'planner' && roleThreads.planner.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.planner.length / 2)}</span>}
+                          {m === 'advisor' && roleThreads.advisor.length > 0 && <span className="text-[9px] opacity-70">{Math.ceil(roleThreads.advisor.length / 2)}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setModeMenuOpen((v) => !v)}
+                  title="Chat mode — Build / Plan / Advise"
+                  className={`h-[26px] w-full min-w-[84px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white'}`}
+                >
+                  <span className="flex items-center gap-1">
+                    <span>{chatMode === 'build' ? '🔨' : chatMode === 'planner' ? '🧠' : '🔍'}</span>
+                    {chatMode === 'build' ? 'Build' : chatMode === 'planner' ? 'Plan' : 'Advise'}
+                    {running && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="A build is running" />}
+                  </span>
+                  {modeMenuOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                </button>
+              </div>
               <div className="flex gap-1 shrink-0">
               {/* Build-options popover (Planning / Thinking / Power) — anchored above the input */}
               <div className="relative shrink-0">
@@ -2413,6 +2435,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
               </button>
               </div>{/* /settings + attach row */}
+              </div>{/* /left column (mode selector + settings/attach) */}
               <div className="relative flex-1" data-tour="chat">
                 <textarea
                   ref={composerRef}

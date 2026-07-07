@@ -241,6 +241,22 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workspaceId]);
 
+  // INVARIANT (admin 2026-07-07: "file hai aur app already build hai — to preview chalna hi chalna
+  // chahiye"): the in-browser EMPTY state is never terminal while a workspace exists. A full browser
+  // close-and-reopen restored Files (19) but landed on "No preview yet — build something first" —
+  // whatever race skipped the one-shot auto-load above (workspaceId arriving around the effect's
+  // single run, a transiently-empty response), nothing ever retried. This effect watches the empty
+  // state itself and self-heals with a BOUNDED retry (3 attempts, 1.2s apart — the guard deps reset
+  // it on success/error/tab-switch, and `err` routes to the existing error+Fix-with-AI surface, so
+  // it can never loop forever).
+  const emptyRetries = useRef(0);
+  useEffect(() => {
+    if (mode !== 'inbrowser' || !workspaceId || html || loading || err) { emptyRetries.current = 0; return; }
+    if (emptyRetries.current >= 3) return;
+    const t = setTimeout(() => { emptyRetries.current += 1; void loadInBrowser(); }, 1_200);
+    return () => clearTimeout(t);
+  }, [mode, workspaceId, html, loading, err, loadInBrowser]);
+
   // U1 — AUTO-REFRESH the preview as the build writes files. The parent bumps `reloadSignal` on every
   // file_changed/diff event; we DEBOUNCE so a burst of writes (a 20-file batch) triggers ONE reload
   // after they settle, not one per file. In-browser re-compiles from the fresh files; live re-connects
@@ -482,7 +498,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
         />
       ) : (
-        <div className="flex-1 flex items-center justify-center p-6"><Empty>{workspaceId ? 'No preview yet — build something first.' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty></div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
+          <Empty>{workspaceId ? 'Loading your saved files into the preview…' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty>
+          {workspaceId && (
+            // Manual escape hatch for the invariant "files exist ⇒ the preview renders": if every
+            // bounded auto-retry above somehow lost, one tap reloads from the durable files.
+            <button
+              onClick={() => { emptyRetries.current = 0; void loadInBrowser(); }}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+              title="Compile the saved files into the in-browser preview"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Load preview
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

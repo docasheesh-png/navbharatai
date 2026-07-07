@@ -11270,3 +11270,18 @@ FINAL design for the next session (implement as ONE fix, all three parts):
    never has to manually re-send. Guard: once per interruption, never while another build runs.
 3. Server graceful drain (SIGTERM: checkpoint in-flight builds + mark conversation resumable) — the
    deploy-kill half. (1)+(2) alone already make both the deploy-kill and network-cut cases self-heal.
+
+## 2026-07-07 — Fix 21: the in-browser empty state SELF-HEALS ("file hai to preview chalna hi chahiye — life long")
+
+Admin closed the browser fully and reopened: Files (19) restored correctly, but the In-browser preview
+sat on "No preview yet — build something first" forever. Root cause class: the tab's auto-load was a
+ONE-SHOT effect keyed on [mode, workspaceId] — whatever race skipped that single run (workspaceId
+arriving around the effect's execution on a cold reopen, a transiently-empty response), NOTHING ever
+retried, so the empty state was terminal despite durable files existing. The admin's invariant is now
+enforced: files exist ⇒ the empty state cannot be terminal.
+- New effect watches the EMPTY state itself (inbrowser tab + workspaceId + no html/err/loading) and
+  self-heals with a bounded retry (3 attempts, 1.2s apart; resets on success/error/tab-switch; `err`
+  routes to the existing error+Fix-with-AI surface — no infinite loop possible).
+- The empty state now says "Loading your saved files into the preview…" and carries a manual
+  "Load preview" button as the final escape hatch.
+- Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot PASS.

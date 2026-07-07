@@ -12,7 +12,7 @@ import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
-import { footerSection, type V3FooterApi } from './v3FooterApi';
+import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
 import { loadDraft, saveDraft } from './composerDraft';
@@ -1480,28 +1480,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // The JSON "Build report" download (downloadDiagnostics) remains the single report export; the
   // server still keeps the full "0 → last" session history behind it and the History dropdown.
 
-  // ── Mobile footer API (admin 2026-07-07): register the panel's REAL actions with the app-level
-  // bottom nav — the same code paths the desktop header uses (openTab, the history loader, the
-  // diagnostics download). Re-registered whenever the active surface changes so the nav's highlight
-  // tracks reality; unregistered on unmount so a closed v3.0 never leaves stale footer buttons.
-  useEffect(() => {
-    if (!onFooterApi) return;
-    onFooterApi({
-      section: footerSection(showWorkspace, tab),
-      openHistory: () => {
-        if (mobileSheet === 'history') { setMobileSheet(null); return; } // re-tap closes, no refetch
-        setMobileSheet('history');
-        void loadHistory();
-      },
-      openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
-      openPreview: () => openSurfaceFromFooter('preview'),
-      openFiles: () => openSurfaceFromFooter('files'),
-      buildReport: () => { setMobileSheet(null); void downloadDiagnostics(); },
-      reportBusy: downloadingDiag,
-      openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onFooterApi, showWorkspace, tab, downloadingDiag, mobileSheet]);
+  // ── Mobile footer API (admin 2026-07-07): registration moved BELOW the workspaceFiles state
+  // declaration (it feeds the Files count + green-dot signal) — see the effect after it.
   useEffect(() => () => { onFooterApi?.(null); }, [onFooterApi]);
 
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
@@ -1593,6 +1573,35 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // them, and reuse the same map both to (a) show a file's content when clicked
   // and (b) sync the built project into the main app's Files view (onFilesSync).
   const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, string> | null>(null);
+  // ── Mobile footer API (admin 2026-07-07): register the panel's REAL actions with the app-level
+  // bottom nav — the same code paths the desktop header uses (openTab, the history loader, the
+  // diagnostics download). Re-registered whenever the active surface changes so the nav's highlight
+  // tracks reality; unregistered on unmount (effect above) so a closed v3.0 never leaves stale
+  // footer buttons. Lives below the workspaceFiles declaration it reads (TDZ).
+  useEffect(() => {
+    if (!onFooterApi) return;
+    const realFileCount = state.files.length || (workspaceFiles ? Object.keys(workspaceFiles).length : 0);
+    onFooterApi({
+      section: footerSection(showWorkspace, tab),
+      openHistory: () => {
+        if (mobileSheet === 'history') { setMobileSheet(null); return; } // re-tap closes, no refetch
+        setMobileSheet('history');
+        void loadHistory();
+      },
+      openChat: () => { setMobileSheet(null); setShowWorkspace(false); },
+      openPreview: () => openSurfaceFromFooter('preview'),
+      openFiles: () => openSurfaceFromFooter('files'),
+      buildReport: () => { setMobileSheet(null); void downloadDiagnostics(); },
+      reportBusy: downloadingDiag,
+      openMore: () => setMobileSheet(mobileSheet === 'more' ? null : 'more'),
+      // Admin 2026-07-07 — real state, never faked: the green dot fires only when the app is
+      // genuinely viewable (live URL, or a finished OK build with real files), and the Files badge
+      // shows the ACTUAL built/restored file count (live build list, else the rehydrated store).
+      previewReady: previewReadySignal(!!state.previewUrl, state.done, state.ok, realFileCount),
+      fileCount: realFileCount,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onFooterApi, showWorkspace, tab, downloadingDiag, mobileSheet, state.previewUrl, state.done, state.ok, state.files.length, workspaceFiles]);
   // Which workspaceId the cached `workspaceFiles` belong to. Guards a race: on a fast session switch,
   // an in-flight load for the OLD workspace could set `workspaceFiles`, then the rehydrate effect would
   // see it non-null and skip loading the NEW workspace — leaving stale files visible. Comparing this to

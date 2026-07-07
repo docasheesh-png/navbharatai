@@ -3382,21 +3382,29 @@ export default function App() {
             [
               { key: 'history', icon: History,        label: 'History',  onTap: v3FooterApi.openHistory, active: false },
               { key: 'chat',    icon: MessageSquare,  label: 'Pro Chat', onTap: v3FooterApi.openChat,    active: v3FooterApi.section === 'chat' },
-              { key: 'preview', icon: Monitor,        label: 'Preview',  onTap: v3FooterApi.openPreview, active: v3FooterApi.section === 'preview' },
-              { key: 'files',   icon: FolderOpen,     label: 'Files',    onTap: v3FooterApi.openFiles,   active: v3FooterApi.section === 'files' },
+              { key: 'preview', icon: Monitor,        label: 'Preview',  onTap: v3FooterApi.openPreview, active: v3FooterApi.section === 'preview', dot: v3FooterApi.previewReady },
+              { key: 'files',   icon: FolderOpen,     label: 'Files',    onTap: v3FooterApi.openFiles,   active: v3FooterApi.section === 'files', count: v3FooterApi.fileCount },
               { key: 'report',  icon: FileText,       label: 'Report',   onTap: v3FooterApi.buildReport, active: false, busy: v3FooterApi.reportBusy },
               { key: 'more',    icon: MoreHorizontal, label: 'More',     onTap: v3FooterApi.openMore,    active: v3FooterApi.section === 'diff' || v3FooterApi.section === 'terminal' || v3FooterApi.section === 'history' },
-            ].map(({ key, icon: Icon, label, onTap, active, busy }) => (
+            ].map(({ key, icon: Icon, label, onTap, active, busy, dot, count }: { key: string; icon: React.ComponentType<{ className?: string }>; label: string; onTap: () => void; active: boolean; busy?: boolean; dot?: boolean; count?: number }) => (
               <button
                 key={key}
                 onClick={onTap}
                 aria-label={label}
                 aria-current={active ? 'page' : undefined}
-                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${active ? 'text-indigo-400' : 'text-[#484f58]'}`}
+                className={`relative flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-h-[44px] transition-all active:scale-90 ${active ? 'text-indigo-400' : 'text-[#484f58]'}`}
               >
-                {busy
-                  ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
-                  : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
+                <span className="relative inline-flex">
+                  {busy
+                    ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+                    : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
+                  {/* Admin 2026-07-07: green dot = the app is genuinely viewable (real state, never a timer). */}
+                  {dot && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_5px_rgba(52,211,153,0.9)]" aria-label="Preview ready" />}
+                  {/* Admin 2026-07-07: the REAL built-file count on the Files item. */}
+                  {typeof count === 'number' && count > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[14px] px-0.5 h-3.5 rounded-full bg-indigo-600 text-white text-[8px] font-black leading-[14px] text-center" aria-label={`${count} files`}>{count > 99 ? '99+' : count}</span>
+                  )}
+                </span>
                 <span className={`text-[9px] font-black uppercase tracking-wider leading-none truncate max-w-full px-0.5 ${active ? 'text-indigo-400' : ''}`}>{label}</span>
                 {active && <span className="w-1 h-1 bg-indigo-400 rounded-full mt-0.5" />}
               </button>

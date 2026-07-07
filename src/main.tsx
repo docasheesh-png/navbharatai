@@ -10,6 +10,7 @@ import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
+import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -58,20 +59,28 @@ try {
   }
 } catch { /* storage unavailable — default to animations on, font-scale 1 */ }
 
-// Chunk load error recovery — new deployment invalidates old Vite chunks.
-// When a lazy import 404s, force a hard reload ONCE to pick up the new bundle.
-window.addEventListener('unhandledrejection', (e) => {
-  const msg = String(e.reason?.message || e.reason || '');
-  if (msg.toLowerCase().includes('importing a module script failed') ||
-      msg.toLowerCase().includes('failed to fetch dynamically imported module') ||
-      msg.toLowerCase().includes('error loading chunk')) {
-    const RELOAD_KEY = 'navbharat_chunk_reload';
-    if (!sessionStorage.getItem(RELOAD_KEY)) {
-      sessionStorage.setItem(RELOAD_KEY, '1');
+// Chunk load error recovery — a new deployment content-hashes old Vite chunks, so a tab opened before
+// the deploy requests a chunk URL that no longer exists → blank screen / dead feature. Reload once to
+// pick up the fresh bundle. Uses a TIMESTAMPED flag (not a permanent per-session flag): the flag is
+// cleared once the app successfully mounts (see below), so a long-open tab recovers on EVERY deploy —
+// not just the first — while the cooldown guarantees a still-broken build can never spin in a loop.
+const CHUNK_RELOAD_KEY = 'navbharat_chunk_reload_at';
+function recoverFromStaleChunk(): void {
+  try {
+    const lastRaw = localStorage.getItem(CHUNK_RELOAD_KEY);
+    const last = lastRaw ? Number(lastRaw) : null;
+    if (shouldReloadForStaleChunk(Date.now(), Number.isFinite(last as number) ? last : null)) {
+      localStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
       window.location.reload();
     }
-  }
+  } catch { /* storage unavailable — best effort */ }
+}
+window.addEventListener('unhandledrejection', (e) => {
+  if (isChunkLoadError(e.reason)) recoverFromStaleChunk();
 });
+// Vite's dedicated event for a failed dynamic import preload — fires even when the rejection is handled,
+// so the unhandledrejection listener above would otherwise miss it.
+window.addEventListener('vite:preloadError', () => recoverFromStaleChunk());
 
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
 // service worker takes control, reload once so the user is never stuck on stale
@@ -203,3 +212,9 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>,
 );
+
+// The app shell mounted successfully → the current bundle is good, so clear the stale-chunk reload flag.
+// This is what lets a long-open tab recover on EVERY future deploy (not just the first): the next stale
+// chunk after the next deploy gets a fresh one-time reload. A build that never mounts leaves the flag set,
+// so a genuinely-broken deploy still can't loop.
+requestAnimationFrame(() => { try { localStorage.removeItem('navbharat_chunk_reload_at'); } catch { /* best effort */ } });

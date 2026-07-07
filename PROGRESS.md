@@ -12064,3 +12064,27 @@ never written) and the live preview showed postcss "Unclosed block" (index.css:7
 Preview-verify's "renders correctly" on a spinner-shell (timing leniency) recorded as a follow-up.
 Tests: +4 (the @layer-unclosed exact case, balanced/negative, the 50-file manifest kept whole).
 Gate: frontend tsc 0, server tsc 0, vitest 5468/5468, boot PASS.
+
+---
+
+## 2026-07-07 — PROD-ERROR AUTOPSY #3 (rule 5): stale-chunk white-screen resilience
+
+Continued mining Cloud Error Reporting.
+- (a) 321× express-rate-limit "keyGenerator uses IP without ipKeyGenerator" — AUDITED: already fixed. All 3
+  express-rate-limit keyGenerators in server.ts use ipKeyGenerator(req); authMiddleware/adaptiveRateLimit are
+  CUSTOM middleware (own Map, not express-rate-limit) so the warning can't originate there. Error last fired
+  13 Jun (~24 days ago). Skipped (safeguard #6 — no redundant work).
+- (b) 20× frontend `Failed to fetch dynamically imported module` (post-deploy stale chunk → blank screen).
+  A one-time reload handler already existed in main.tsx, but had two real gaps: it did NOT listen for Vite's
+  dedicated `vite:preloadError` event (which can fire even when the rejection is handled → the reload was
+  missed), and its reload flag was a PERMANENT per-session flag that was never cleared — so a long-open tab
+  (this app's known pattern) only recovered on the FIRST deploy, then got stuck on later ones.
+
+FIX (root-cause):
+- New pure `chunkReload.ts`: `isChunkLoadError(msg)` (centralized message match incl. the Firefox/Safari/
+  webpack variants) + `shouldReloadForStaleChunk(now, lastReloadAt, cooldown)`. Unit-tested (6).
+- main.tsx: recovery now fires on BOTH `unhandledrejection` AND `vite:preloadError`; uses a TIMESTAMPED
+  localStorage flag with a 30s cooldown; and CLEARS the flag once the app shell mounts — so every future
+  deploy gets a fresh one-time reload while a still-broken build can never loop.
+
+Gate: tsc fe+server 0, vitest 5483/5483 (6 new), build PASS, boot:check PASS. No hot files (App.tsx/agentv3.ts).

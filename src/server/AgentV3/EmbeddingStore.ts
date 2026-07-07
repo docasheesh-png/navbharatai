@@ -48,7 +48,7 @@ function getDb(): admin.firestore.Firestore | null {
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     _db = admin.firestore();
-    _db.settings({ databaseId: firestoreDatabaseId() });
+    _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
     return _db;
   } catch {
     return null;

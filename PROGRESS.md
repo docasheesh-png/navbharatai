@@ -11965,3 +11965,32 @@ and it saves per-workspace AND per-user. Shipped the two genuinely-missing halve
   timeline as a DATA_LOSS_EVENT warning. "Data kyu udha" is now diagnosable from the report, not
   guessed. Tests: +3 (stamp + invalid-input guard; cause+detail+timeline; clean-build omission).
   Gate: frontend tsc 0, server tsc 0, vitest 5464/5464, boot PASS.
+
+---
+
+## 2026-07-07 — PROD-ERROR AUTOPSY (rule 5): Firestore "undefined" write crash — root-caused
+
+Admin opened Google Cloud Error Reporting on desktop (confirming the built-in Cloud Error Reporting tracking
+is LIVE — so Sentry is redundant, not built). The top error was mined per the fifth absolute rule:
+
+TOP ERROR: `Value for argument "data" is not a valid Firestore document. Cannot use "undefined"` —
+**731 occurrences, still firing 26 min before the autopsy** (@google-cloud/firestore serializer). The app
+was writing objects with `undefined` field values; Firestore rejects `undefined` unless the instance is
+configured with `ignoreUndefinedProperties: true`.
+
+ROOT CAUSE (class, not instance): none of the 20 server-side Firestore stores set `ignoreUndefinedProperties`
+— they only set `{ databaseId }`. So EVERY store's writes could throw on any optional/undefined field.
+
+FIX (rule 3 — hunt the siblings): added `ignoreUndefinedProperties: true` to all 20 `.settings({ databaseId })`
+calls. The stores share one Firestore instance, so the winning settings call now applies the flag globally →
+undefined fields are silently omitted (Google-recommended behaviour) instead of crashing the write. Eliminates
+the entire 731× error class + all future undefined-write crashes.
+
+Honest note: this is a Firestore CONFIGURATION fix; a full behavioural regression test needs a live Firestore
+(integration, not a VITEST unit) — verified via server tsc + boot + the setting applied across all stores.
+Centralising the settings into one shared helper (so a new store can't forget the flag) is a good follow-up.
+
+Gate: tsc fe+server 0, vitest 5432/5432, build PASS, boot:check PASS. 20 store files, one-line each.
+
+Other errors seen (next autopsies): 48× `(restoredMessages||[]) is not iterable` (non-array guard needed);
+321× express-rate-limit IPv6 keyGenerator (older, likely fixed); frontend dynamic-import chunk failures (post-deploy).

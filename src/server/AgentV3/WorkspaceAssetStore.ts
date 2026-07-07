@@ -34,7 +34,7 @@ function getDb(): admin.firestore.Firestore | null {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     _db = admin.firestore(); // cache BEFORE settings() so a settings() throw can't disable the store (#873)
     try {
-      _db.settings({ databaseId: firestoreDatabaseId() });
+      _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
     } catch {
       // Another store already configured this shared instance — same databaseId, safe to proceed.
     }

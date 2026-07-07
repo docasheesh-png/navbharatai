@@ -15,7 +15,16 @@ export {
   agentV3Allowlist,
   agentV3FreeList,
   isAgentV3FreeUser,
+  isAgentV3PaidPublicEnabled,
 } from './featureFlag';
+export { decideAffordability } from './Affordability';
+export type { AffordabilityAction, AffordabilityInput, AffordabilityDecision } from './Affordability';
+export { estimateBuildTokens, estimateBuildCost } from './PreflightEstimate';
+export type { EstimatedUsage, PreflightEstimate } from './PreflightEstimate';
+export { readWalletBalanceInr, firestoreWalletReader } from './WalletBalance';
+export type { WalletReader, WalletDocData } from './WalletBalance';
+export { decidePaidGate } from './PaidGate';
+export type { PaidGateInput } from './PaidGate';
 export { ClaudeClient, parseMessage, isRetryableError, sanitizeApiKey } from './ClaudeClient';
 export type {
   ClaudeToolDef,

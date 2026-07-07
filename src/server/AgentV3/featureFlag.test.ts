@@ -1,12 +1,27 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { agentV3FreeList, isAgentV3FreeUser } from './featureFlag';
+import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled } from './featureFlag';
 
 const save = { ...process.env };
 afterEach(() => {
   process.env.AGENTV3_FREE_LIST = save.AGENTV3_FREE_LIST;
   process.env.AGENTV3_ALLOWLIST = save.AGENTV3_ALLOWLIST;
+  process.env.AGENTV3_PAID_PUBLIC = save.AGENTV3_PAID_PUBLIC;
   if (save.AGENTV3_FREE_LIST === undefined) delete process.env.AGENTV3_FREE_LIST;
   if (save.AGENTV3_ALLOWLIST === undefined) delete process.env.AGENTV3_ALLOWLIST;
+  if (save.AGENTV3_PAID_PUBLIC === undefined) delete process.env.AGENTV3_PAID_PUBLIC;
+});
+
+describe('isAgentV3PaidPublicEnabled — money-path master switch (default OFF)', () => {
+  it('is OFF unless AGENTV3_PAID_PUBLIC is exactly "true"', () => {
+    delete process.env.AGENTV3_PAID_PUBLIC;
+    expect(isAgentV3PaidPublicEnabled()).toBe(false);
+    process.env.AGENTV3_PAID_PUBLIC = 'false';
+    expect(isAgentV3PaidPublicEnabled()).toBe(false);
+    process.env.AGENTV3_PAID_PUBLIC = '1';
+    expect(isAgentV3PaidPublicEnabled()).toBe(false);
+    process.env.AGENTV3_PAID_PUBLIC = 'true';
+    expect(isAgentV3PaidPublicEnabled()).toBe(true);
+  });
 });
 
 describe('agentV3FreeList / isAgentV3FreeUser (paid-public FREE-list)', () => {

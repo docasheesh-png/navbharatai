@@ -62,3 +62,13 @@ export function agentV3FreeList(): string[] {
 export function isAgentV3FreeUser(userId?: string | null, email?: string | null): boolean {
   return matchesIdentityList(agentV3FreeList(), userId, email);
 }
+
+/**
+ * PAID-PUBLIC master switch (admin plan 2026-07-06). When ON, non-free-list users' v3.0 builds pass
+ * through the affordability gate (wallet balance vs pre-flight estimate → proceed / economy / block).
+ * Default OFF: absent/any-non-'true' value = today's exact behavior (no billing gate for anyone). This is
+ * the single flag that keeps the whole money path inert until it is explicitly turned on.
+ */
+export function isAgentV3PaidPublicEnabled(): boolean {
+  return process.env.AGENTV3_PAID_PUBLIC === 'true';
+}

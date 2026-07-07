@@ -11503,3 +11503,62 @@ green "Live" label on every saved session whose workspace has an ACTIVE publishe
 VITEST no-op safety (empty/blank input, never throws), sessionStatusMeta live + precedence cases.
 **Gate:** frontend tsc 0 · server tsc 0 · vitest 4838/4838 (496 files) · boot-check PASS · CI green
 on branch → squash-merged as `0e13016` (#1092) → Cloud Run auto-deploy.
+## 2026-07-07 — AUTOPSY (report: Expense Tracker "tab switch → sab gayab") → Fix 26: identity-degradation wipe killed at the root
+
+Admin's report: built the complete Expense Tracker, preview live, everything perfect → clicked the
+in-app "NavBharatAI Free" tab → v3.0 went COMPLETELY empty (files, chat, preview, build report — all
+gone). Recovery attempt (GitHub re-import) worked and its diagnostics JSON became the key evidence.
+
+**Ledger:** ❌ the wipe itself (root-caused below). ✅ Kavach held: the durable store had EVERYTHING
+(the re-import reported "♻️ 42/46 unchanged since the last build" — data was never lost server-side).
+✅ the recovery import turn ran perfectly (survey only, no rebuild — Fixes 19/24 held). ⏭️ honesty bug
+found IN the report: the successful survey text was logged as severity=error AGENT_NOTE and became
+`rootCause` (queued). 🥵 4-minute GitHub import as the only visible recovery path.
+
+**Root cause (DNA, proven from the diagnostics JSON):** the build ran under the ANON identity —
+`workspaceId: agentv3-anon-e361e8bb-…` — the known identity-degradation class (a transiently token-less
+but genuinely signed-in caller; the server documents it in conversationAccess #829). The server handles
+it (anon exemption + candidateConversationIds trying the anon twin). **The CLIENT did not:** every
+continuity organ either gated on `!userId` (sticky chat restore, durable file rehydrate, checkpoint
+timeline) or derived ONLY the user-keyed `agentv3-<uid>-<sid>` (expectedWorkspaceId, loadWorkspaceFiles,
+report download) — the WRONG workspace for an anon-degraded session. So the moment the panel's live
+state reset, the client looked in an empty workspace and refused to restore: files "gone", chat "gone",
+preview "gone", "No build report yet" — while everything sat intact under agentv3-anon-<sid>.
+
+**Fix (the class, not the instance):**
+- New pure `clientWorkspaceId(userId, sessionId)` in v3SessionContinuity.ts — the client mirror of the
+  server's deriveWorkspaceId INCLUDING anon (single source of truth; kills the userId&&-→undefined class).
+- Sticky-restore effect: `!userId` gate removed — anon restores by its deterministic unguessable
+  conversation id (server's anon bucket serves it; no cross-user exposure).
+- Durable file rehydrate + loadWorkspaceFiles: dual-candidate fallback (user-keyed → anon twin), the
+  exact sibling of candidateConversationIds extended to FILES ("sari file gone" organ).
+- Checkpoint timeline: same dual-candidate fallback.
+- Report download: with no live workspace, tries the session-derived candidates (user + anon) before
+  the per-user latest fallback — kills the "No build report yet after a Done build" bug (OPD report).
+- Session-ref init: reads the user sticky key THEN the anon sticky key — heals the split-key case where
+  the panel mounted before auth resolved and stored its session under anon.
+- Deliberately NOT opened for anon: History LIST + client chat_sessions writes (shared anon bucket —
+  privacy; restore-by-id is capability-scoped, listing is not).
+Regression tests: +5 (clientWorkspaceId user/anon/sanitize/empty + the dual-candidate pair with the real
+session id from the report). Gate: frontend tsc 0, server tsc 0, vitest 5361/5361 (client-only change).
+
+## 2026-07-07 — AUTOPSY (report: "share button add karo" → 40-file REBUILD) → Fix 27: fail-open probe killed
+
+Admin's follow-up on the recovered Expense Tracker: "isme ek share button add karo…" — a clear surgical
+edit. v3.0 instead ran the complete-app manifest lane and REBUILT all 40 files (+3671 −3238) over the
+imported app. Admin: "yeh to bilkul accepted nahi hai" — correct.
+
+**Root cause (from the diagnostics JSON):** the turn ran in the same anon workspace that held 46
+durable files, yet intent stayed `new_build` — possible only because the project-existence probe
+returned 0. `countWorkspaceFiles` FAILS OPEN (`catch { return 0 }` + the route's 4s
+`raceTimeout(...).catch(() => 0)`): a transient Firestore hiccup reads as "no project", and the
+edit→rebuild downgrade never fires. A destructive full rebuild was reachable through an infra blip.
+
+**Fix (fail-safe, class-level):** new pure `rebuildGuardFlipsToEdit()` in agentv3.ts — a SECOND,
+independent re-check on the durable path list (already fetched for edit sizing; now fetched
+unconditionally — cheap metadata-only read). A `new_build` turn on a workspace that verifiably holds
+real source files, without an explicit fresh-start or complete-app ask, flips to `edit_existing` +
+edit mode BEFORE any lane runs. Fix 25 semantics kept (explicit "create a complete X" still rebuilds;
+explicit "start over" still rebuilds). Regression tests: +5 (the exact 46-file report scenario, fresh
+build, fresh-start, explicit-complete, no-double-flip). Gate: frontend tsc 0, server tsc 0, vitest
+5372/5372, boot PASS. Ships together with Fix 26 (PR #1094) — the same identity-degradation autopsy.

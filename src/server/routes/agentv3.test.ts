@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -1040,3 +1040,43 @@ describe('shutdownGraceMs (VAJRA V4-1c) — bounded grace for the SIGTERM build 
     expect(shutdownGraceMs(3, 3_000)).toBe(3_000);
   });
 })
+
+describe('rebuildGuardFlipsToEdit (Fix 27) — an infra hiccup can never turn an edit into a full rebuild', () => {
+  // The real report (2026-07-07): "isme ek share button add karo" on a 46-file imported Expense
+  // Tracker classified new_build (the countWorkspaceFiles probe failed open to 0) and the manifest
+  // lane rebuilt all 40 files over the user's app.
+  it('flips the report scenario to an edit: new_build + 46 durable source files + no fresh-start ask', () => {
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'new_build', isEditMode: false, durableSourceCount: 46,
+      freshStart: false, explicitCompleteBuild: false,
+    })).toBe(true);
+  });
+  it('does NOT flip a genuinely fresh build (empty durable store)', () => {
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'new_build', isEditMode: false, durableSourceCount: 0,
+      freshStart: false, explicitCompleteBuild: false,
+    })).toBe(false);
+  });
+  it('respects an explicit fresh start ("scrap this and start over")', () => {
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'new_build', isEditMode: false, durableSourceCount: 46,
+      freshStart: true, explicitCompleteBuild: false,
+    })).toBe(false);
+  });
+  it('respects an explicit complete-app build (Fix 25 semantics kept)', () => {
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'new_build', isEditMode: false, durableSourceCount: 3,
+      freshStart: false, explicitCompleteBuild: true,
+    })).toBe(false);
+  });
+  it('is a no-op when the turn is already an edit (never double-flips)', () => {
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'edit_existing', isEditMode: true, durableSourceCount: 46,
+      freshStart: false, explicitCompleteBuild: false,
+    })).toBe(false);
+    expect(rebuildGuardFlipsToEdit({
+      intent: 'new_build', isEditMode: true, durableSourceCount: 46,
+      freshStart: false, explicitCompleteBuild: false,
+    })).toBe(false);
+  });
+});

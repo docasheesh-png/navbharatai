@@ -143,6 +143,11 @@ export interface ConversationMeta {
    * The list renders it honestly as lost instead of an ordinary chat that "won't open".
    */
   deadTranscript?: boolean;
+  /** True when this session's workspace has an ACTIVE published deployment (server-verified against
+   *  the agentv3_deployments registry — never inferred client-side). Drives the green "Live" dot. */
+  live?: boolean;
+  /** The published app's URL (present exactly when `live` is true). */
+  liveUrl?: string;
 }
 
 export function useAgentV3Build(): UseAgentV3Build {

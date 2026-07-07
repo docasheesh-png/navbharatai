@@ -247,13 +247,22 @@ export function legacyPrependMessages(
 // date-bucketed, each item showing its build status (running/built/failed/stopped), not just text.
 
 /** Visual status dot + label for a saved build session, keyed by ConversationStatus. Pure. */
-const SESSION_STATUS_META: Record<string, { dot: string; label: string; pulse?: boolean }> = {
+const SESSION_STATUS_META: Record<string, { dot: string; label: string; pulse?: boolean; live?: boolean }> = {
   running: { dot: 'bg-indigo-400', label: 'Building…', pulse: true },
   complete: { dot: 'bg-emerald-500', label: 'Built' },
   error: { dot: 'bg-red-500', label: 'Failed' },
   stopped: { dot: 'bg-zinc-500', label: 'Stopped' },
 };
-export function sessionStatusMeta(status?: string): { dot: string; label: string; pulse?: boolean } {
+/**
+ * `live` = the session's app has an ACTIVE published deployment (server-verified). It upgrades the
+ * dot to a green "Live" indicator — EXCEPT while a build is running ("Building…" is the current
+ * activity and must stay visible) and after a failed build ("Failed" is safety-relevant and must
+ * never be painted over by a happier badge).
+ */
+export function sessionStatusMeta(status?: string, live?: boolean): { dot: string; label: string; pulse?: boolean; live?: boolean } {
+  if (live && status !== 'running' && status !== 'error') {
+    return { dot: 'bg-green-400', label: 'Live', live: true };
+  }
   return SESSION_STATUS_META[status || ''] ?? { dot: 'bg-zinc-600', label: '' };
 }
 

@@ -98,7 +98,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -898,12 +898,20 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
   if (floor === 'off' || floor === '') return [];
   const runners: NamedRunner[] = [];
+  // ADMIN DESIGN (2026-07-07, combined plan): every GLM/KIMI failure that day was "Request timed
+  // out." on the LARGEST prompts while small turns succeeded 7/7. So: (1) timeout 25s → 60s (they
+  // are slow, not broken — give real work time to finish); (2) prompt-size-aware routing — a turn
+  // over the size limit SKIPS the floor instantly (straight to Claude, no gamble); (3) prompt diet —
+  // oversized blocks are trimmed before reaching the cheap model (sizeGatedRunner does 2+3); the
+  // 2-consecutive-timeout BENCH lives in makeMultiProviderTurnRunner. All env-tunable.
+  const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
+  const floorMaxPromptChars = Number(process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS) || 45_000;
   const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[]): void => {
     if (!apiKey) return; // no key → a second, independent off-switch
     for (const model of models) {
       try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: 25_000, maxRetries: 0 });
-        runners.push({ name, runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) });
+        const client = new OpenAI({ apiKey, baseURL, timeout: floorTimeoutMs, maxRetries: 0 });
+        runners.push({ name, runner: sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }), floorMaxPromptChars) });
       } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
     }
   };

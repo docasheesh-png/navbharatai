@@ -147,3 +147,55 @@ describe('forceModelRunner (P7 — fixed-model Haiku backstop)', () => {
     expect(res.text).toBe('done on claude-haiku-4-5'); // backstop ran on the forced model
   });
 });
+
+describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt diet + timeout bench', () => {
+  it('a turn over the size limit SKIPS the cheap runner instantly (falls through, inner never called)', async () => {
+    const { sizeGatedRunner, estimatePromptChars } = await import('./MultiProviderTurnRunner');
+    const inner = runnerOk('from glm');
+    const gated = sizeGatedRunner(inner, 100);
+    const big = { ...PARAMS, system: 'x'.repeat(200) };
+    expect(estimatePromptChars(big)).toBeGreaterThan(100);
+    await expect(gated.runTurn(big)).rejects.toThrow(/skipped: prompt .* exceeds the cheap-floor limit/);
+    expect(inner.runTurn).not.toHaveBeenCalled();
+    // Small turns pass through untouched.
+    expect((await gated.runTurn(PARAMS)).text).toBe('from glm');
+  });
+
+  it('prompt diet: oversized tool_result/text blocks are trimmed with an honest marker; structure preserved', async () => {
+    const { capMessageContentForCheapFloor } = await import('./MultiProviderTurnRunner');
+    const fat = 'y'.repeat(10_000);
+    const capped = capMessageContentForCheapFloor({
+      model: 'm',
+      messages: [
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: fat }, { type: 'text', text: 'small' }] },
+      ],
+    } as never, 6_000);
+    const blocks = (capped.messages[0] as { content: Array<{ content?: string; text?: string }> }).content;
+    expect(blocks).toHaveLength(2); // no block dropped — tool pairing intact
+    expect(blocks[0].content!.length).toBeLessThan(7_000);
+    expect(blocks[0].content).toContain('chars trimmed for the fast model');
+    expect(blocks[1].text).toBe('small'); // small blocks untouched
+  });
+
+  it('2 CONSECUTIVE timeouts bench a provider for the rest of the run; a success resets the streak', async () => {
+    const { makeMultiProviderTurnRunner: make } = await import('./MultiProviderTurnRunner');
+    const glm = runnerFail('Request timed out.');
+    const backstop = runnerOk('from claude');
+    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: backstop }]);
+    await runner.runTurn(PARAMS); // timeout 1
+    await runner.runTurn(PARAMS); // timeout 2 → benched
+    await runner.runTurn(PARAMS); // benched — GLM not called
+    expect(glm.runTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a size-gate skip does NOT count toward the timeout bench (skips are free, not failures)', async () => {
+    const { makeMultiProviderTurnRunner: make, sizeGatedRunner: gate, isTimeoutProviderError } = await import('./MultiProviderTurnRunner');
+    expect(isTimeoutProviderError(new Error('skipped: prompt 999 chars exceeds the cheap-floor limit 100 (routed to the next provider)'))).toBe(false);
+    const inner = runnerOk('from glm');
+    const runner = make([{ name: 'GLM', runner: gate(inner, 100) }, { name: 'CLAUDE', runner: runnerOk('from claude') }]);
+    const big = { ...PARAMS, system: 'x'.repeat(200) };
+    await runner.runTurn(big); // skip
+    await runner.runTurn(big); // skip
+    expect((await runner.runTurn(PARAMS)).text).toBe('from glm'); // small turn still reaches GLM — not benched
+  });
+});

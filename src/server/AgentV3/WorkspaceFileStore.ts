@@ -65,9 +65,29 @@ export function capPathsToDocLimit(paths: string[], maxBytes = 950_000): { paths
 }
 
 /**
+ * SHRINK GUARD — decide whether a save may REPLACE the authoritative path index or must MERGE.
+ *
+ * ROOT CAUSE (admin, 2026-07-07 — "49 files thi! 3 rah gayi kyu?!"): `saveWorkspaceFiles` REPLACES
+ * the path index with exactly the given set, and several callers pass a PARTIAL set — the reviewer's
+ * critical-fix pass saved only its ~3 fixed files after an import turn, and a visual edit saves ONE
+ * file. Each such save silently WIPED every other file from the index: 49 files → 3, "sab gayab".
+ * The class fix lives HERE, where the data enters (not at each call site): a save that would shrink
+ * an established index to under half its size is treated as a partial update and MERGED instead —
+ * so no current or FUTURE call site can ever wipe a project again. A genuine full rebuild writes a
+ * comparable file count (replace allowed); genuine deletions go through removeWorkspaceFiles, which
+ * is unaffected. PURE + unit-tested.
+ */
+export function savePlanForFileSet(existingCount: number, newCount: number): 'replace' | 'merge' {
+  if (existingCount <= 3) return 'replace';            // empty/tiny index — nothing meaningful to protect
+  if (newCount >= existingCount / 2) return 'replace'; // comparable size — a real full save
+  return 'merge';                                      // drastic shrink — a partial set; never wipe
+}
+
+/**
  * Persist the current set of workspace source files. The `paths` metadata list is authoritative:
  * a file removed from `files` won't be returned by loadWorkspaceFiles even if its content doc
- * lingers. Best-effort — never throws.
+ * lingers. GUARDED: a drastically-smaller partial set is MERGED, never a wipe (savePlanForFileSet).
+ * Best-effort — never throws.
  */
 export async function saveWorkspaceFiles(workspaceId: string, files: Record<string, string>): Promise<void> {
   const db = getDb();
@@ -76,6 +96,15 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
   if (entries.length === 0) return; // never overwrite a good saved set with nothing
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
+    // SHRINK GUARD (the "49 → 3 files" wipe): read the existing index BEFORE replacing it; a partial
+    // set routes to mergeWorkspaceFiles (union) and the wipe is recorded visibly, never silent.
+    const guardMeta = await root.get().catch(() => null);
+    const existingPaths: string[] = guardMeta?.exists && Array.isArray(guardMeta.data()?.paths) ? guardMeta.data()!.paths : [];
+    if (savePlanForFileSet(existingPaths.length, entries.length) === 'merge') {
+      notePersistenceFailure('workspace_files', 'write', new Error(`shrink-guard: a save of ${entries.length} path(s) would have wiped an index of ${existingPaths.length} — merged instead`));
+      await mergeWorkspaceFiles(workspaceId, files);
+      return;
+    }
     const filesCol = root.collection('files');
     for (let i = 0; i < entries.length; i += BATCH) {
       const batch = db.batch();

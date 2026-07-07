@@ -87,3 +87,24 @@ describe('capPathsToDocLimit (huge-repo durable-index safety)', () => {
     expect(capPathsToDocLimit([])).toEqual({ paths: [], capped: 0 });
   });
 });
+
+describe('savePlanForFileSet — the shrink guard (the "49 files → 3, sab gayab" wipe can never recur)', () => {
+  it('the EXACT reported wipe: a 3-file partial save against a 49-file index → merge, never replace', async () => {
+    const { savePlanForFileSet } = await import('./WorkspaceFileStore');
+    expect(savePlanForFileSet(49, 3)).toBe('merge');   // the reviewer-fix partial save
+    expect(savePlanForFileSet(48, 1)).toBe('merge');   // a visual single-file edit
+  });
+
+  it('a genuine full save (comparable or larger file count) still replaces', async () => {
+    const { savePlanForFileSet } = await import('./WorkspaceFileStore');
+    expect(savePlanForFileSet(40, 40)).toBe('replace');
+    expect(savePlanForFileSet(40, 45)).toBe('replace'); // rebuild grew the app
+    expect(savePlanForFileSet(40, 20)).toBe('replace'); // exactly half — boundary allows a real trim
+  });
+
+  it('an empty/tiny index has nothing to protect — fresh builds replace freely', async () => {
+    const { savePlanForFileSet } = await import('./WorkspaceFileStore');
+    expect(savePlanForFileSet(0, 1)).toBe('replace');
+    expect(savePlanForFileSet(3, 1)).toBe('replace');
+  });
+});

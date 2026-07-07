@@ -464,6 +464,27 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
 }
 
 /**
+ * FAIL-SAFE REBUILD GUARD (Fix 27 — report 2026-07-07: "isne pura app wapas banaya. yeh to bilkul
+ * accepted nahi hai"). The intent probe (countWorkspaceFiles) FAILS OPEN: a transient Firestore
+ * timeout/error yields 0, so an edit turn ("add a share button") on a 46-file imported app kept its
+ * `new_build` classification and the complete-app manifest lane REBUILT all 40 files over the user's
+ * app. This is the second, independent check on the durable path list: a new_build turn on a
+ * workspace that verifiably holds real source files — without an explicit fresh-start or
+ * complete-app request — must flip to an EDIT. The destructive rebuild path must never be reachable
+ * through an infra hiccup. Pure.
+ */
+export function rebuildGuardFlipsToEdit(opts: {
+  intent: string;
+  isEditMode: boolean;
+  durableSourceCount: number;
+  freshStart: boolean;
+  explicitCompleteBuild: boolean;
+}): boolean {
+  return !opts.isEditMode && opts.intent === 'new_build' && opts.durableSourceCount > 0
+    && !opts.freshStart && !opts.explicitCompleteBuild;
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -3454,8 +3475,24 @@ export function registerAgentV3Routes(app: Express): void {
     // correct even here, BEFORE the sandbox is ensured/hydrated below. The paths are reused for the RC-1
     // edit-file-tree reconcile further down — one durable read, no duplication.
     let durableFilePaths: string[] = [];
-    if (isEditMode) {
-      try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    try { durableFilePaths = await listWorkspaceFilePaths(workspaceId); } catch { durableFilePaths = []; }
+    // FAIL-SAFE INTENT RE-CHECK (Fix 27 — report 2026-07-07: "isne pura app wapas banaya"): the intent
+    // probe above (countWorkspaceFiles) FAILS OPEN — a transient Firestore timeout/error returns 0, so
+    // "add a share button" on a 46-file imported app classified as a FRESH build and the complete-app
+    // manifest lane REBUILT all 40 files over the user's app. The durable path list here is a second,
+    // independent read of the same truth; if it shows real source files, a new_build turn (without an
+    // explicit fresh-start / complete-app request) is an EDIT — the destructive rebuild path must never
+    // be reachable through an infra hiccup. This read is fetched unconditionally (cheap metadata-only
+    // doc) and reused below exactly as before.
+    if (rebuildGuardFlipsToEdit({
+      intent,
+      isEditMode,
+      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      freshStart: wantsFreshStart(prompt),
+      explicitCompleteBuild,
+    })) {
+      intent = 'edit_existing';
+      isEditMode = true;
     }
     const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);
     const buildComplexity = complexityFromPrompt(prompt);

@@ -11541,3 +11541,24 @@ preview "gone", "No build report yet" — while everything sat intact under agen
   privacy; restore-by-id is capability-scoped, listing is not).
 Regression tests: +5 (clientWorkspaceId user/anon/sanitize/empty + the dual-candidate pair with the real
 session id from the report). Gate: frontend tsc 0, server tsc 0, vitest 5361/5361 (client-only change).
+
+## 2026-07-07 — AUTOPSY (report: "share button add karo" → 40-file REBUILD) → Fix 27: fail-open probe killed
+
+Admin's follow-up on the recovered Expense Tracker: "isme ek share button add karo…" — a clear surgical
+edit. v3.0 instead ran the complete-app manifest lane and REBUILT all 40 files (+3671 −3238) over the
+imported app. Admin: "yeh to bilkul accepted nahi hai" — correct.
+
+**Root cause (from the diagnostics JSON):** the turn ran in the same anon workspace that held 46
+durable files, yet intent stayed `new_build` — possible only because the project-existence probe
+returned 0. `countWorkspaceFiles` FAILS OPEN (`catch { return 0 }` + the route's 4s
+`raceTimeout(...).catch(() => 0)`): a transient Firestore hiccup reads as "no project", and the
+edit→rebuild downgrade never fires. A destructive full rebuild was reachable through an infra blip.
+
+**Fix (fail-safe, class-level):** new pure `rebuildGuardFlipsToEdit()` in agentv3.ts — a SECOND,
+independent re-check on the durable path list (already fetched for edit sizing; now fetched
+unconditionally — cheap metadata-only read). A `new_build` turn on a workspace that verifiably holds
+real source files, without an explicit fresh-start or complete-app ask, flips to `edit_existing` +
+edit mode BEFORE any lane runs. Fix 25 semantics kept (explicit "create a complete X" still rebuilds;
+explicit "start over" still rebuilds). Regression tests: +5 (the exact 46-file report scenario, fresh
+build, fresh-start, explicit-complete, no-double-flip). Gate: frontend tsc 0, server tsc 0, vitest
+5372/5372, boot PASS. Ships together with Fix 26 (PR #1094) — the same identity-degradation autopsy.

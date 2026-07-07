@@ -11632,3 +11632,26 @@ pre-2026-07-06 home) as a compact "🔨 Build ▾" button whose menu opens UPWAR
 "pyramid"). Function untouched: same setChatMode, same read-only Plan/Advise lanes, same thread
 counts, same build-running pulse dot (now on the selector button), same tooltips. AppKnowledgeBase
 path/howToUse for the 3-role workflow updated to the new location. tsc 0; ships in PR #1096.
+
+## 2026-07-06 — Paid public v3.0, Billing PR 1: pure pre-flight affordability decision (admin-approved rules)
+
+First slice of the "make v3.0 public + paid" plan (admin 2026-07-06). Pure, fully-tested DECISION module
+`Affordability.ts` (dormant — not wired into the live billing path yet, zero live-app risk). Encodes the
+admin's exact rules:
+- FREE-LIST (3 admin/testers) → proceed exactly as today (no gate).
+- balance ≥ estimate → proceed exactly as today (no routing change).
+- floor < balance < estimate → ECONOMY engine (cheap provider) + honest "low balance" notice — the
+  low-budget user's work is NEVER stopped.
+- balance ≤ floor → BLOCK (the one refusal) with an add-credits notice.
+Graceful overdraft: floor = -overdraft (a small ~₹20 tolerance) so a build that slightly overruns its
+pre-flight estimate isn't killed mid-way — it pushes the balance a little negative and only the NEXT
+build is gated. The check is pre-flight ONLY; a started build always runs to completion (settlement on
+the actual cost happens afterwards). `Affordability.test.ts` (6) locks every rule + the floor boundary +
+junk-overdraft.
+
+Next PRs (flag-gated, each reversible): free-list/access split (ACCESS-list vs FREE-list, verified
+identity) → wallet-balance read + pre-flight estimate → wire the decision into the route (economy routing
+via the cheap floor, block screen) → client billing UI → invited beta → full public.
+
+Gate: server tsc 0, frontend tsc 0, vitest 5340/5340 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (dormant internal module, no user-facing surface yet).

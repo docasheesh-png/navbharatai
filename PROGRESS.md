@@ -11423,3 +11423,43 @@ Recorded the same per-phase status + unblock conditions in VAJRA_V4_DESIGN.md's 
 (rule 5: fix the system's honesty). No code behavior changed — docs-only truth update. Next real lever is
 evidence-driven: a fresh v3.0 build report → forensic autopsy → targeted fix, or the admin unblocking a
 specific infra/decision above. Gate: docs-only, full verification gate still run green before push.
+
+## 2026-07-07 — AUTOPSY (report: Hospital OPD, 26m/146 steps) → Fix 25: fresh full-app build misrouted to surgical EDIT
+
+Admin sent a live v3.0 run: "Create a complete Hospital OPD Management System" + a full feature/tech
+spec. Forensic autopsy (5th rule):
+
+**Ledger (5 buckets):**
+- ❌ **Still broken (root cause):** the fresh, fully-specified build was classified `edit_existing` and
+  ran in SURGICAL-EDIT mode — "✏️ Editing your existing app (3 source files) — targeted changes, not
+  rebuild it" — hand-building pages one-by-one via sub-agents. 26 min, 146 steps, plan 0/7, app
+  incomplete (only Patients/OPDRegistration + starting Queue of a 7-page spec).
+- 🥵 **Struggle:** each page sub-agent re-read 7-11 files ("Now I have everything I need…" repeated) —
+  the surgical-edit path re-explores per page instead of one manifest pass.
+- 🔀 **Workaround that masked it:** FileGuardian correctly restored 3 lost scaffold/test files from
+  history ("🛡️ restored all 3 file(s)") — GOOD on its own, but it POISONED intent (see root cause).
+- ⏭️ / ❌ **Honesty bugs (separate, queued next):** download-report said "No build report yet" AFTER a
+  26-min Done build; the plan showed 0/7 despite "Done · 146 steps".
+
+**Root cause (DNA level):** `agentv3.ts` intent safety-net —
+`if (intent==='new_build' && projectExists && !wantsFreshStart) intent='edit_existing'` — treats ANY
+non-empty workspace as "an established app to edit". FileGuardian had just restored 3 stray
+scaffold/test files (Badge.test.tsx + 2), so `projectExists` (= `fileCount > 0`) was true, and
+"Create a complete …" doesn't match `wantsFreshStart` (only "start over/from scratch" phrasing). So a
+clearly-fresh full build was downgraded to an edit over 3 junk files. This is the CLASS the admin's own
+"big project → edit, don't rebuild" rule created — correct for real edits, wrong when the request is an
+explicit build-a-whole-app.
+
+**Fix (root, not symptom):** new pure `isExplicitCompleteBuild(prompt)` in IntentClassifier.ts — strict
+(build VERB + whole-app NOUN + either "complete/full/production-ready <app>" construction OR a sizeable
+structured spec). Wired into the safety-net: (a) never downgrade an explicit complete-build to an edit,
+and (b) RESCUE a spurious `edit_existing` (LLM biased by projectExists, or a keyword edit signal) back
+to `new_build` when the user explicitly asked to create a complete app. new_build then unlocks the
+efficient manifest/simple + blueprint lanes (one complete-app pass) instead of the page-by-page editor —
+fixing the 26-min/146-step struggle AND the incompleteness at once. Strict detector proven not to flip
+genuine edits ("add a logout button", "fix the header", "make the dashboard complete" all stay edits).
+Sibling checked: DialogueStateManager only sets posture (both new_build paths → 'building', same
+guidance) — no behavioral duplicate; hard router is `isEditMode = intent==='edit_existing'`, fully
+corrected by the intent fix. Regression tests: +4 (the exact report prompt + short complete-build forms
++ spec-without-"complete" + the must-not-flip edits). Gate: frontend tsc 0, server tsc 0, vitest
+5356/5356, boot PASS. Honesty bugs (report-not-saved, plan 0/7) queued as the next autopsy items.

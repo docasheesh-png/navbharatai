@@ -11253,3 +11253,20 @@ report's rootCause said BUILD_FAILED (the manifest attempt's outcome) while ok:t
 - Screenshots also confirmed: Closed Port on the Live tab = idle-death (Fix 12's auto-reboot needs the
   idle state; the panel was mid-session). Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot
   PASS.
+
+## 2026-07-07 — the network-cut case CONFIRMS the resume class (next session #1, design finalized)
+
+Second real occurrence in one day (admin: number-guess game, 16 files built, a 1-minute internet cut →
+"That build isn't running anymore", Files (0), transcript reduced to one message). Same class as the
+deploy-kill: the server-side build dies (or the stream is lost) and the CLIENT abandons the session
+instead of resuming it. The files are ALWAYS durable (≤6s flush) — only the client view "loses" them.
+FINAL design for the next session (implement as ONE fix, all three parts):
+1. On the watchdog's build-gone path AND on the attach "That build isn't running anymore" path:
+   immediately RESTORE the panel from the durable stores — fetch the workspace file list → dispatch
+   files_restored (Files(N) never shows 0 for a workspace that has durable files), and reload the
+   conversation transcript. "sab gayab" becomes visually impossible.
+2. AUTO-CONTINUE (bounded, once): after the restore, automatically re-send the last user prompt as a
+   continue-turn against the same workspace (edit-mode resumes from the durable files) — the user
+   never has to manually re-send. Guard: once per interruption, never while another build runs.
+3. Server graceful drain (SIGTERM: checkpoint in-flight builds + mark conversation resumable) — the
+   deploy-kill half. (1)+(2) alone already make both the deploy-kill and network-cut cases self-heal.

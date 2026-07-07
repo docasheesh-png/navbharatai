@@ -29,7 +29,36 @@ export function isAgentV3Enabled(userId?: string | null, email?: string | null):
   if (!isAgentV3GloballyEnabled()) return false;
   const allow = agentV3Allowlist();
   if (allow.length === 0) return true;
+  return matchesIdentityList(allow, userId, email);
+}
+
+/** Pure: does a uid OR (case-insensitive) email match any entry in a comma-parsed identity list? */
+function matchesIdentityList(list: string[], userId?: string | null, email?: string | null): boolean {
   const id = (userId ?? '').trim();
   const mail = (email ?? '').trim().toLowerCase();
-  return allow.some((entry) => (id !== '' && entry === id) || (mail !== '' && entry.toLowerCase() === mail));
+  return list.some((entry) => (id !== '' && entry === id) || (mail !== '' && entry.toLowerCase() === mail));
+}
+
+/**
+ * FREE-LIST (paid-public plan, admin 2026-07-06). The verified accounts for whom v3.0 is FREE — the
+ * admin/tester accounts. Everyone ELSE (once v3.0 is public) is a paying user, billed via the wallet.
+ *
+ * Source: `AGENTV3_FREE_LIST` (comma-separated uid/email). BACKWARD-COMPAT: when it is unset, the free
+ * list DEFAULTS to the current `AGENTV3_ALLOWLIST` — i.e. today, exactly the allowlisted admins are the
+ * free users, so this changes nothing until public billing is turned on and the two lists are set apart
+ * (ACCESS = who may use v3.0; FREE = who uses it for ₹0).
+ */
+export function agentV3FreeList(): string[] {
+  const raw = process.env.AGENTV3_FREE_LIST;
+  const src = raw === undefined || raw.trim() === '' ? (process.env.AGENTV3_ALLOWLIST || '') : raw;
+  return src.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Is this VERIFIED user on the free-list (admin/tester → v3.0 is free, no billing gate)? Match by uid
+ * OR email (case-insensitive). MUST be called with the server-VERIFIED identity, never a client-claimed
+ * one — a spoofed email could otherwise claim free access. Pure over the env-derived list.
+ */
+export function isAgentV3FreeUser(userId?: string | null, email?: string | null): boolean {
+  return matchesIdentityList(agentV3FreeList(), userId, email);
 }

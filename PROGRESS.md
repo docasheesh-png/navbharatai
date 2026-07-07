@@ -11655,3 +11655,24 @@ via the cheap floor, block screen) → client billing UI → invited beta → fu
 
 Gate: server tsc 0, frontend tsc 0, vitest 5340/5340 PASS, build PASS, boot PASS. No AppKnowledgeBase
 change (dormant internal module, no user-facing surface yet).
+
+## 2026-07-06 — Paid public v3.0, Billing PR 2: FREE-list / ACCESS split (Phase A)
+
+Second billing slice. Splits the single `AGENTV3_ALLOWLIST` concept into two orthogonal ideas so v3.0 can
+go public while the 3 admin/tester accounts stay free:
+- ACCESS (who may use v3.0) — still `isAgentV3Enabled` / `AGENTV3_ALLOWLIST` (unchanged; empty list =
+  public once the admin opens it).
+- FREE (who uses it for ₹0) — new `agentV3FreeList()` + `isAgentV3FreeUser(uid,email)` from
+  `AGENTV3_FREE_LIST`. BACKWARD-COMPAT: unset → defaults to the current allowlist, so TODAY exactly the
+  allowlisted admins are the free users → zero behaviour change until public billing is enabled and the
+  two lists are set apart. Match by verified uid OR case-insensitive email (must be the server-VERIFIED
+  identity — never client-claimed — or a spoofed email could claim free access).
+- Exported from AgentV3 index; `isAgentV3FreeUser` is the `isFreeUser` input to Affordability (PR 1).
+- Tests: featureFlag.test.ts (backward-compat default, explicit-list precedence, empty→all-paid, never
+  matches blank identity).
+
+Dormant: nothing gates on it in the live path yet (access unchanged). Next: wallet-balance read +
+pre-flight estimate → wire the Affordability decision into the route (flag-gated OFF) → client billing UI.
+
+Gate: server tsc 0, frontend tsc 0, vitest 5395/5395 PASS, build PASS, boot PASS. No AppKnowledgeBase
+change (internal identity helper, no user-facing surface yet).

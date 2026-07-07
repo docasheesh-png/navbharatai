@@ -13,6 +13,8 @@ export {
   isAgentV3Enabled,
   isAgentV3GloballyEnabled,
   agentV3Allowlist,
+  agentV3FreeList,
+  isAgentV3FreeUser,
 } from './featureFlag';
 export { ClaudeClient, parseMessage, isRetryableError, sanitizeApiKey } from './ClaudeClient';
 export type {

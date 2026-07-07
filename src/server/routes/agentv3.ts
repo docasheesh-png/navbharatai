@@ -101,6 +101,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock } from '../AgentV3/SimpleBuilder';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
@@ -4687,7 +4688,35 @@ export function registerAgentV3Routes(app: Express): void {
           //    one 8k-token call — it falls straight through to the agentic loop instead.
           const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
-          if (os.ok) fastResult(os.summary, os.filesWritten);
+          if (os.ok) {
+            // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
+            // mid-JSX by max_tokens shipped as "built" — only the manifest lane had the tsc gate, the
+            // one-shot secondary had NONE, and the workspace can also hold the failed manifest
+            // attempt's partial files, which only a whole-project compile check catches). Same
+            // fastVerify + ONE bounded fastRepair; on a still-broken result we do NOT claim success —
+            // the agentic loop below finishes the job. "Preview is EARNED."
+            let osVerified: boolean | null = null;
+            if (process.env.AGENTV3_ONESHOT_VERIFY !== 'off') {
+              try {
+                let v = await fastVerify();
+                if (!v.ok) {
+                  fastLog('Found build errors in the one-shot app — fixing them…');
+                  const cur = [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
+                  const fixed = (await fastRepair(v.errors, cur).catch(() => [])).filter((f) => f && f.path && f.content);
+                  if (fixed.length) { await fastWrite(fixed); v = await fastVerify(); }
+                }
+                osVerified = v.ok;
+              } catch { osVerified = null; /* could not verify → don't block (matches fastVerify's own policy) */ }
+            }
+            const osOutcome = classifyBuildOutcome({ filesWritten: os.filesWritten, typecheckOk: osVerified });
+            buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${osOutcome}`, message: `Build outcome: ${osOutcome}`, autoResolved: true });
+            if (osVerified === false) {
+              buildDiag.record({ phase: 'build', severity: 'warning', code: 'ONESHOT_VERIFY_FAILED', message: 'One-shot app did not compile after one repair — handing to the full builder.', autoResolved: true });
+              fastLog('The one-shot app still has build errors — switching to the full builder to finish it.');
+            } else {
+              fastResult(os.summary, os.filesWritten);
+            }
+          }
         }
         // C — BULLETPROOF PREVIEW: persist the produced files to the durable store SYNCHRONOUSLY the
         // moment the fast lane succeeds — not via the 3s debounce or the fire-and-forget end-of-flow

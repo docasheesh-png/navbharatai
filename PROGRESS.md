@@ -11237,3 +11237,19 @@ the user was asking where their files went. A negated verb was being read as the
 - Tests: IntentClassifier +4 (the EXACT reported message; negations EN+Hinglish; state questions;
   real build/edit/problem requests untouched). Gate: frontend tsc 0, server tsc 0, vitest 5338/5338,
   boot PASS.
+
+## 2026-07-07 — Fix 20: the one-shot lane gets the verify gate too (truncated-file class) + honest outcome
+
+Music-player report autopsy: the 32-file manifest lane failed → the ONE-SHOT secondary built "11
+files" and claimed success — but the one-shot lane had NO tsc verify gate, so a NowPlaying.tsx
+TRUNCATED mid-JSX by max_tokens ("Unexpected token (53:10)", `<div` cut off) shipped as "built", and
+the workspace also mixed the failed manifest attempt's partial files with the one-shot app. Also the
+report's rootCause said BUILD_FAILED (the manifest attempt's outcome) while ok:true (the one-shot's).
+- One-shot success now runs the SAME fastVerify (whole-project tsc — catches the truncated file AND
+  bad leftovers from the failed manifest attempt) + ONE bounded fastRepair; still broken → NO success
+  claim, the agentic loop finishes the job ("preview is EARNED"). AGENTV3_ONESHOT_VERIFY=off reverts.
+- The one-shot path now records its own OUTCOME_* (classifyBuildOutcome with its real typecheck
+  verdict), so rootCause can no longer carry a stale failed-attempt label over a delivered app.
+- Screenshots also confirmed: Closed Port on the Live tab = idle-death (Fix 12's auto-reboot needs the
+  idle state; the panel was mid-session). Gate: frontend tsc 0, server tsc 0, vitest 5338/5338, boot
+  PASS.

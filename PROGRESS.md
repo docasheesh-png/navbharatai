@@ -11367,3 +11367,13 @@ content. Applies to the main loop AND every sub-agent (both run through AgentRun
 preserved when nothing shrinks (stable cache prefix). Tests: SessionTimeline +3, one existing recent-
 verbatim test updated to pass a high cap. Gate: frontend tsc 0, server tsc 0, vitest 5346/5346, boot
 PASS. Ships in the same PR as the VAJRA blueprint + V4-1a.
+
+## 2026-07-07 — VAJRA V4-2 (honesty half): a FAILED reviewer never renders a fake "(85/100)"
+
+`reviewBuild` destructured only `summary` and IGNORED the sub-agent's `ok` flag — so a reviewer that
+FAILED (its own prompt hit a provider limit) had its error-summary parsed as a real review with no
+criticals → default score 85 → "⚠️ Build Review (85/100): Error: All v3.0 providers failed…" (report
+2026-07-07). Fix: honor `ok`, and a new pure `isReviewFailureSummary` catches an error-string summary
+even when ok:true (provider-failed / too-large / step-limit / budget-cap / empty) → score 0 →
+formatReview renders NOTHING; the build stands on its own verify gates, no invented number. Tests:
+ReviewerAgent +4. Gate: frontend tsc 0, server tsc 0, vitest 5350/5350, boot PASS.

@@ -55,6 +55,80 @@ export function isFatalProviderError(error: unknown): boolean {
   return FATAL_PROVIDER_PATTERNS.some((re) => re.test(text));
 }
 
+/** A TIMEOUT failure (transient class, but grind-prone — see the consecutive-timeout bench). Pure. */
+export function isTimeoutProviderError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return /timed? ?out|timeout/i.test(text);
+}
+
+/** Rough prompt size (chars) of a turn — system + every message's text/tool content. Pure. */
+export function estimatePromptChars(params: RunTurnParams): number {
+  let n = typeof params.system === 'string' ? params.system.length : 0;
+  for (const m of params.messages ?? []) {
+    const c = (m as { content?: unknown }).content;
+    if (typeof c === 'string') { n += c.length; continue; }
+    if (Array.isArray(c)) {
+      for (const b of c) {
+        const bb = b as { text?: unknown; content?: unknown };
+        if (typeof bb.text === 'string') n += bb.text.length;
+        if (typeof bb.content === 'string') n += bb.content.length;
+      }
+    }
+  }
+  return n;
+}
+
+/**
+ * PROMPT DIET for the cheap floor (admin design, 2026-07-07: "prompt chote karo"): shrink a turn's
+ * messages before they reach GLM/KIMI by truncating OVERSIZED individual content blocks (giant
+ * tool_results — file dumps — are the bulk of a big prompt). Structure is preserved (no message or
+ * block is dropped, so tool_use/tool_result pairing stays intact); each oversized string keeps its
+ * head + tail with an honest truncation marker. Claude always receives the FULL context. PURE.
+ */
+export function capMessageContentForCheapFloor(params: RunTurnParams, perBlockCap = 6_000): RunTurnParams {
+  const cap = (s: string): string => s.length <= perBlockCap
+    ? s
+    : `${s.slice(0, perBlockCap - 1_200)}\n…[${s.length - perBlockCap} chars trimmed for the fast model]…\n${s.slice(-1_000)}`;
+  const messages = (params.messages ?? []).map((m) => {
+    const c = (m as { content?: unknown }).content;
+    if (typeof c === 'string') return { ...(m as object), content: cap(c) };
+    if (Array.isArray(c)) {
+      return {
+        ...(m as object),
+        content: c.map((b) => {
+          const bb = b as { text?: unknown; content?: unknown };
+          if (typeof bb.text === 'string' && bb.text.length > perBlockCap) return { ...(b as object), text: cap(bb.text) };
+          if (typeof bb.content === 'string' && bb.content.length > perBlockCap) return { ...(b as object), content: cap(bb.content) };
+          return b;
+        }),
+      };
+    }
+    return m;
+  }) as RunTurnParams['messages'];
+  return { ...params, messages };
+}
+
+/**
+ * Wrap a CHEAP-FLOOR runner with the admin's combined design (2026-07-07):
+ *   1. prompt-size-aware routing — a turn whose prompt exceeds `skipOverChars` SKIPS this runner
+ *      instantly (throws a cheap, non-timeout error → the chain falls through in ~0ms) instead of
+ *      gambling a long timeout on it; evidence: every GLM/KIMI failure today was "Request timed out."
+ *      on the largest prompts, while small turns succeeded 7/7.
+ *   2. prompt diet — turns that DO go to the cheap model get oversized blocks trimmed first.
+ * PURE wrapper; the inner runner is injected (unit-testable without providers).
+ */
+export function sizeGatedRunner(inner: TurnRunner, skipOverChars: number, perBlockCap = 6_000): TurnRunner {
+  return {
+    runTurn(params: RunTurnParams): Promise<TurnResult> {
+      const size = estimatePromptChars(params);
+      if (size > skipOverChars) {
+        return Promise.reject(new Error(`skipped: prompt ${size} chars exceeds the cheap-floor limit ${skipOverChars} (routed to the next provider)`));
+      }
+      return inner.runTurn(capMessageContentForCheapFloor(params, perBlockCap));
+    },
+  };
+}
+
 /**
  * An honest, admin-facing hint appended when a FATAL provider error is the final failure — the user
  * must see "the platform's account needs attention", not a generic "providers failed". PURE.
@@ -98,8 +172,11 @@ export function makeMultiProviderTurnRunner(
   }
   // Providers that failed FATALLY (billing/auth — deterministic) are dead for this runner's whole
   // life (one runner instance = one build). A transient failure (overload/timeout/5xx) is NOT
-  // remembered — the provider is retried on the next turn, exactly as before.
+  // remembered — EXCEPT the timeout BENCH (admin design 2026-07-07): 2 CONSECUTIVE timeouts bench
+  // the provider for the rest of the run, so a degraded GLM/KIMI evening can't grind every turn.
   const deadForRun = new Map<string, string>(); // name → the fatal reason
+  const timeoutStreak = new Map<string, number>(); // name → consecutive timeout count
+  const TIMEOUT_BENCH_AFTER = 2;
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -107,6 +184,10 @@ export function makeMultiProviderTurnRunner(
       let alive = 0;
       for (let i = 0; i < chain.length; i++) {
         const { name, runner } = chain[i];
+        if ((timeoutStreak.get(name) ?? 0) >= TIMEOUT_BENCH_AFTER) {
+          fellBackFrom.push(name); // benched — skip without spending its timeout again this run
+          continue;
+        }
         const fatalReason = deadForRun.get(name);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
@@ -118,6 +199,7 @@ export function makeMultiProviderTurnRunner(
         alive++;
         try {
           const result = await runner.runTurn(params);
+          timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
           opts.onProviderUsed?.(name, [...fellBackFrom]);
           return result;
         } catch (err) {
@@ -126,6 +208,8 @@ export function makeMultiProviderTurnRunner(
           opts.onProviderError?.(name, err);
           if (isFatalProviderError(err)) {
             deadForRun.set(name, err instanceof Error ? err.message : String(err));
+          } else if (isTimeoutProviderError(err)) {
+            timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
           }
           // Fall through to the next provider; the last one is the backstop.
         }

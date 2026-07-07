@@ -11182,3 +11182,22 @@ pure client, no infra; (2) Cloud Run graceful drain (SIGTERM handler: finish/che
 builds, mark conversation resumable before exit); (3) build-state handoff via Firestore so a new
 instance can adopt a killed build. ALSO record: batch merges outside admin-testing windows until (1)
 ships. Fixes 1–17 all remain merged + live; 5330 tests green at last gate.
+
+## 2026-07-07 — Fix 18: GLM/KIMI combined design (admin + Claude jointly): 60s timeout + size-gate + prompt diet + 2-timeout bench
+
+Diagnosis (from the day's reports): every GLM/KIMI failure was "Request timed out." on the LARGEST
+prompts, while small turns succeeded 7/7 — they are slow, not broken. The jointly-agreed design:
+1. **Timeout 25s → 60s** (admin decision; AGENTV3_CHEAP_FLOOR_TIMEOUT_MS overrides) — give real work
+   time to finish on the slow-but-cheap models.
+2. **Prompt-size-aware routing** (`sizeGatedRunner`): a turn whose prompt exceeds
+   AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS (default 45k chars) SKIPS the cheap floor instantly (a ~0ms
+   non-timeout throw → chain falls straight to Claude) — the losing 60s gamble is never placed.
+3. **Prompt diet** (`capMessageContentForCheapFloor`): turns that DO go to GLM/KIMI get oversized
+   individual blocks (giant tool_result file dumps) trimmed head+tail with an honest marker — no
+   message/block dropped, tool_use/tool_result pairing intact; Claude always gets FULL context.
+4. **2-consecutive-timeout bench** (in makeMultiProviderTurnRunner): a provider that times out twice
+   in a row is benched for the rest of the run (a success resets the streak; size-gate skips do NOT
+   count) — a degraded provider evening can't grind every turn.
+- Tests: MultiProviderTurnRunner +4 (gate skips instantly + small passes; diet trims with marker,
+  structure intact; 2-timeout bench + success reset; skips don't bench). Gate: frontend tsc 0, server
+  tsc 0, vitest 5334/5334, boot PASS.

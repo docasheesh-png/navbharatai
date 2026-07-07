@@ -1,7 +1,7 @@
 # VAJRA — NavBharatAI v4.0 Engine Design (वज्र: अटूट)
 
 **Mandate (admin, 2026-07-07):** "Sabki acchi cheez lekar apna new system banao — in sab se inspire,
-in sab se accha." This document is the blueprint. Every pillar names its inspiration, what we take,
+in sab se accha." This document is the blueprint — **admin-APPROVED 2026-07-07** ("yeh sab bhi add karo, v3.0 me"): every pillar ships INSIDE NavBharatAI Pro v3.0 progressively via the normal phase cycle (branch → CI green → merge) — VAJRA is v3.0's upgrade track, not a separate product. Every pillar names its inspiration, what we take,
 and what we do BETTER. Supersedes nothing in v3.0 — VAJRA is v3.0's proven core re-housed on
 unbreakable foundations. The 24 root-cause fixes of 2026-07-06/07 (PROGRESS.md) are its birth
 certificate: each pillar kills one of the classes we bled from.

@@ -356,3 +356,39 @@ describe('classifyIntentWithConfidence — whole-word scan across ALL occurrence
     expect(r.signal).not.toBe('change');
   });
 });
+
+describe('answer-only override + state questions (admin 2026-07-07: "query ka answer do, har bat par build mat karo")', () => {
+  it('the EXACT reported message: "build mat karna, bas yeh batao!" → chat, never a build', async () => {
+    const { classifyIntentWithConfidence } = await import('./IntentClassifier');
+    // The word "build" inside the NEGATION previously hit NEW_BUILD_SIGNALS as high-confidence
+    // new_build and started a rebuild while the user was asking where their files went.
+    const r = classifyIntentWithConfidence('build mat karna, bas yeh batao! 49 files thi! 3 rah gayi kyu?');
+    expect(r.intent).toBe('chat');
+    expect(r.confidence).toBe('high');
+    expect(r.signal).toBe('answer-only');
+  });
+
+  it('explicit negations and answer-only asks → chat (English + Hinglish)', async () => {
+    const { classifyIntentWithConfidence } = await import('./IntentClassifier');
+    for (const m of ["don't build anything, just tell me what broke", 'do not change any files, only explain the error', 'mat banao, sirf batao kya problem hai', 'no code changes — just answer']) {
+      expect(classifyIntentWithConfidence(m).intent).toBe('chat');
+    }
+  });
+
+  it('pure state questions ("file kaha gayi", "what happened", "kitni files bani") → chat', async () => {
+    const { classifyIntentWithConfidence } = await import('./IntentClassifier');
+    for (const m of ['file kaha gayi?', 'meri files kahan gayi', 'what happened to my project', 'kitni files bani ab tak', 'where are my files']) {
+      const r = classifyIntentWithConfidence(m);
+      expect(r.intent).toBe('chat');
+      expect(r.confidence).toBe('high');
+    }
+  });
+
+  it('real build/edit/problem requests are UNTOUCHED by the new overrides', async () => {
+    const { classifyIntentWithConfidence } = await import('./IntentClassifier');
+    expect(classifyIntentWithConfidence('build a music player').intent).toBe('new_build');
+    expect(classifyIntentWithConfidence('ek todo app banao').intent).toBe('new_build');
+    expect(classifyIntentWithConfidence('fix the navbar color').intent).toBe('edit_existing');
+    expect(classifyIntentWithConfidence('preview nahi chala').intent).toBe('edit_existing'); // problem report stays a fix
+  });
+});

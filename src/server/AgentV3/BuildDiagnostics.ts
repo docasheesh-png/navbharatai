@@ -161,6 +161,13 @@ export interface BuildDiagnosticsReport {
    *  [CRITICAL] finding, the first fully-captured error, or the first real problem — whichever is most
    *  specific. Undefined only when the build is still running with nothing to report yet. */
   rootCause?: string;
+  /** Fix 37a (admin 2026-07-07: "app kitni baar fail hui yeh bhi likho") — how many EARLIER builds in
+   *  THIS workspace's durable history ended not-ok before this one started. Makes repeat failure
+   *  visible in every report instead of each report looking like the first attempt. */
+  priorFailedBuilds?: number;
+  /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
+   *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
+  dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
 }
 
 export interface BuildDiagnosticsMeta {
@@ -240,6 +247,8 @@ export class BuildDiagnostics {
    *  downloadable report answer "kaun sa reply kis provider se aaya" — the cheap-floor-vs-Claude split. */
   private readonly providerDelivery = new Map<string, number>();
   private reviewText?: string;
+  private priorFailedBuilds: number | undefined;
+  private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
@@ -555,6 +564,17 @@ export class BuildDiagnostics {
     this.notify();
   }
 
+  /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
+  setPriorFailedBuilds(n: number): void {
+    if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
+  }
+
+  /** Fix 37c — record a data-loss/recovery event WITH its observed cause ("data kyu udha"). */
+  recordDataLoss(cause: string, detail: string): void {
+    this.dataLossEvents.push({ ts: this.now(), cause: String(cause).slice(0, 120), detail: String(detail).slice(0, 400) });
+    this.record({ phase: 'build', severity: 'warning', code: 'DATA_LOSS_EVENT', message: `${cause}: ${detail}`.slice(0, 400), autoResolved: true });
+  }
+
   report(): BuildDiagnosticsReport {
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;
@@ -587,6 +607,8 @@ export class BuildDiagnostics {
       previewErrors: this.previewErrors.length ? [...this.previewErrors] : undefined,
       providerDelivery: this.providerDelivery.size ? Object.fromEntries(this.providerDelivery) : undefined,
       review: this.reviewText,
+      priorFailedBuilds: this.priorFailedBuilds,
+      dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
     };
   }
 }

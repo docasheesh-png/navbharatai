@@ -3871,6 +3871,12 @@ export function registerAgentV3Routes(app: Express): void {
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
+      // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
+      // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
+      // report instead of each report looking like a first attempt. Best-effort, non-blocking.
+      void listDiagnosticsHistory(workspaceId, 50)
+        .then((h) => buildDiag.setPriorFailedBuilds(h.filter((e) => e.ok === false).length))
+        .catch(() => { /* history read is best-effort */ });
       // PR4 — delivery telemetry: count which provider drove each build turn across the WHOLE
       // build (first attempt + any escalation), so `deliveredVia` records the dominant builder
       // (GLM/KIMI/CLAUDE). This is the cheap-floor-vs-Claude rollback tripwire. Best-effort.
@@ -4131,6 +4137,17 @@ export function registerAgentV3Routes(app: Express): void {
           const existing = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
           const plan = planFileGuardian(saved, existing.files);
           if (plan.count > 0) {
+            // Fix 37c (admin: "data kyu udha, report me likh kar aaye"): record the OBSERVED cause of
+            // the loss the guardian is about to repair — an empty sandbox listing means the ephemeral
+            // sandbox was recycled/cold; a partial gap means specific files went missing. This lands
+            // in the report's dataLossEvents so the WHY is diagnosable after the fact, not guessed.
+            try {
+              const existingCount = Object.keys(existing.files).length;
+              buildDiag.recordDataLoss(
+                existingCount === 0 ? 'sandbox recycled/empty' : 'files missing from sandbox',
+                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
+              );
+            } catch { /* diagnostics are best-effort */ }
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
             // A recycled sandbox loses binary assets too (they aren't in the text-file store or the
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.

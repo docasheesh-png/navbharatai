@@ -199,7 +199,9 @@ describe('compactTranscriptForModel', () => {
 
   it('truncates OLD large tool_result payloads but keeps the recent window verbatim', () => {
     const msgs = transcript(6, bigRead); // 13 messages
-    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4, maxOldToolResultChars: 2000 }) as any[];
+    // High maxAny so the recent window stays verbatim — this test guards the OLD-trim mechanic; the
+    // V4-2 recent-cap has its own describe block below.
+    const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4, maxOldToolResultChars: 2000, maxAnyToolResultChars: 200_000 }) as any[];
     // The whole payload dropped a lot (the recent window legitimately keeps its ~2 big reads verbatim).
     expect(JSON.stringify(out).length).toBeLessThan(JSON.stringify(msgs).length / 2);
     // The LAST 4 messages are the SAME object references (verbatim, untouched).
@@ -265,5 +267,41 @@ describe('compactTranscriptForModel', () => {
     const msgs = transcript(8, bigRead);
     const out = compactTranscriptForModel(msgs, { keepRecentMessages: 4 }) as any[];
     expect(out[0]).toEqual({ role: 'user', content: 'survey my app' });
+  });
+
+  describe('VAJRA V4-2 — hard ceiling on RECENT tool_result dumps (the 2.2M-token reviewer blowup)', () => {
+    const huge = 'Y'.repeat(500_000); // a minified bundle / giant glob dump — the real blowup shape
+
+    it('caps a huge tool_result even in the RECENT window (no single dump can blow the context)', () => {
+      const msgs = transcript(2, huge); // 5 messages, all "recent"
+      const out = compactTranscriptForModel(msgs, { keepRecentMessages: 10, maxAnyToolResultChars: 40_000 }) as any[];
+      // Every tool_result now fits the ceiling (+ the short gap note) — the 500KB dumps are gone.
+      const result = out[2] as { content: Array<{ content: string }> };
+      expect(result.content[0].content.length).toBeLessThan(41_000);
+      expect(result.content[0].content).toContain('trimmed');
+      // The whole prompt is bounded regardless of how big the raw reads were.
+      expect(JSON.stringify(out).length).toBeLessThan(200_000);
+    });
+
+    it('leaves a recent tool_result UNDER the ceiling untouched (verbatim, same reference)', () => {
+      const msgs = transcript(1, 'a small file body'); // 3 messages
+      const out = compactTranscriptForModel(msgs, { keepRecentMessages: 10, maxAnyToolResultChars: 40_000 });
+      expect(out).toBe(msgs); // nothing shrank → identity preserved
+    });
+
+    it('preserves recent assistant reasoning and the latest screenshot (only tool dumps are capped)', () => {
+      const msgs: unknown[] = [
+        { role: 'user', content: 'test' },
+        { role: 'assistant', content: [{ type: 'text', text: 'my detailed plan '.repeat(5000) }] }, // long reasoning
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1', content: [
+          { type: 'text', text: 'ok' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'Z'.repeat(300_000) } },
+        ] }] },
+      ];
+      const out = compactTranscriptForModel(msgs, { keepRecentMessages: 10, maxAnyToolResultChars: 40_000 }) as any[];
+      expect(out[1]).toBe(msgs[1]); // assistant reasoning verbatim — never capped
+      const tr = (out[2] as { content: Array<{ content: Array<{ type: string }> }> }).content[0];
+      expect(tr.content.find((c) => c.type === 'image')).toBeTruthy(); // latest screenshot kept
+    });
   });
 });

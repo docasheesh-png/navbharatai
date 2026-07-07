@@ -11354,3 +11354,16 @@ the same turn (an auto-start does not re-arm the one-shot — a second death fal
 notice), never with nothing to continue. A new REAL user turn re-arms it. Tests +3.
 Remaining V4-1 parts (panel file-restore on gone + server graceful drain) stay queued; V4-2…V4-6 per
 VAJRA_V4_DESIGN.md. Gate: tsc 0/0, vitest 5343/5343, boot PASS.
+
+## 2026-07-07 — VAJRA V4-2 SHIPPED: hard ceiling on recent tool_result dumps (the 2.2M-token blowup, killed at the root)
+
+Fix 23 ABORTED a hopeless-oversize prompt; V4-2 makes it IMPOSSIBLE to build one. Root cause: A1
+compaction (compactTranscriptForModel) trimmed only OLD tool_results — the last ~6 messages were sent
+VERBATIM, so a few huge read_file/glob/grep dumps in that recent window alone grew a reviewer's prompt
+to 2,204,128 tokens. New `maxAnyToolResultChars` (default 40000 ≈ ~10k tokens) hard-caps EVERY
+tool_result payload including the recent window — assistant reasoning and the latest screenshot pass
+through untouched (only runaway tool dumps shrink); the model re-reads specific lines if it needs full
+content. Applies to the main loop AND every sub-agent (both run through AgentRunner). Identity return
+preserved when nothing shrinks (stable cache prefix). Tests: SessionTimeline +3, one existing recent-
+verbatim test updated to pass a high cap. Gate: frontend tsc 0, server tsc 0, vitest 5346/5346, boot
+PASS. Ships in the same PR as the VAJRA blueprint + V4-1a.

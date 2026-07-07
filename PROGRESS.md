@@ -11748,3 +11748,23 @@ change yet (paid-public is dormant/unreachable; the KB entry lands with the flag
 user-visible). Next: client billing UI (balance display / add-credits / 402 block screen / economy notice),
 then invited-beta flag, then full public — and separately the provider bake-off that unlocks true economy
 routing.
+
+---
+
+## 2026-07-06 — P-DEV.11 Inline Code Review comments (MISSING → DONE) [path "a": careful frontend]
+
+Admin chose "a+b": I carefully take on frontend/hot items, they action infra. First "a" item: P-DEV.11.
+Delivered via the store+endpoints+ProjectInsightsPanel-card pattern with the SMALLEST possible hot-file
+touch — ONE additive prop line in ViewPanels.tsx (passing v3Preview?.workspaceId). No agentv3.ts/App.tsx/
+Editor.tsx touched.
+
+- `CodeReviewStore.ts` — Firestore file+line-anchored comments per workspace (VITEST-skip, best-effort);
+  add/list(unresolved-first)/resolve-reopen/reply. Pure buildComment+buildReply (7 tests).
+- `routes/codeReview.ts` — GET/POST /api/workspace/:workspaceId/review (+resolve/reply), auth-gated + validated.
+- `ProjectInsightsPanel.tsx` — "Code Review" card (add by file+line, list, resolve/reopen, reply count);
+  workspaceId prop threaded via one ViewPanels line. AppKnowledgeBase `code-review-comments`.
+
+Honest scope: panel-based (add-by-file+line) instead of Monaco-gutter click-to-comment + StatusBar count
+(those edit hot Editor.tsx/StatusBar.tsx); the store+endpoints are reusable by that gutter UI later.
+
+Gate: tsc fe+server 0, vitest 5421/5421 (7 new), build PASS, boot:check PASS.

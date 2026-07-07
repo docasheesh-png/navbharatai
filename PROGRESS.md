@@ -12088,3 +12088,29 @@ FIX (root-cause):
   deploy gets a fresh one-time reload while a still-broken build can never loop.
 
 Gate: tsc fe+server 0, vitest 5483/5483 (6 new), build PASS, boot:check PASS. No hot files (App.tsx/agentv3.ts).
+
+---
+
+## 2026-07-07 — E2B fullstack (polyglot/multi-service) template FOUNDATION (AB-1/AB-2, dormant infra)
+
+Admin: continue the roadmap. Prod-error autopsy floor reached; safe roadmap items exhausted; biggest
+remaining item = E2B fullstack multi-language builder. Shipped the FOUNDATION only (dormant infra, zero
+prod impact, matches the Android-template "infra published+verified FIRST, wiring SECOND" precedent).
+
+- NEW `infra/e2b/e2b-fullstack.Dockerfile` — a SEPARATE on-demand image (NOT the default builder, so
+  ordinary React builds stay fast/cheap): default image superset (Node22 + Python + pnpm/yarn +
+  create-vite/next + Playwright/Chromium + warm vite-react node_modules) + OpenJDK 17 + Maven, Go 1.23,
+  MongoDB 7.0, Redis. Mongo/Redis run as NATIVE processes (honest alternative to docker-compose/AB-3 —
+  DinD isn't reliable in an E2B microVM). Build-time gate asserts java/mvn/go/redis/mongod/python/node.
+- `.github/workflows/e2b-template.yml` — new `template_kind: fullstack` (alias navbharat-fullstack-builder,
+  4 vCPU / 8 GB; shell-var params so nothing reads steps.outputs mid-step); summary surfaces
+  FULLSTACK_E2B_TEMPLATE_ID.
+- `infra/e2b/README.md` — "Polyglot / multi-service builder template" section (build/publish steps + honest
+  docker-compose/cost notes + what's deferred = actuator routing + Java/Go providers).
+
+Validated: workflow YAML parses, param resolution simulated for all 3 kinds, base64 warm package.json decodes
+to valid JSON, Dockerfile FROM/RUN sane. Infra-only — no TS/code touched; nothing changes in prod until the
+follow-up routing PR reads FULLSTACK_E2B_TEMPLATE_ID.
+
+ADMIN NEXT STEP: GitHub → Actions → "Build E2B Builder Template" → Run workflow → kind=fullstack → publish the
+image → later set Cloud Run FULLSTACK_E2B_TEMPLATE_ID. Then the routing PR (next) activates multi-language builds.

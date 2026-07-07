@@ -43,7 +43,8 @@ here pins Node 22, so MODE A will run the same way in the sandbox.
 |------|---------|
 | `e2b.Dockerfile` | The DEFAULT sandbox image recipe (used by every v3.0 build): Node 22 (pinned) + git, netcat, python3, build tools + pre-warmed `create-vite` / `create-next-app` |
 | `e2b-android.Dockerfile` | A SEPARATE, on-demand template for the Android APK builder (JDK 17 + Android SDK + Bubblewrap CLI) — see "Android APK builder template" below |
-| `build.mjs` | **Build system v2** script — builds EITHER template (env-var selected) via `fromDockerfile()` + `Template.build()`. Defaults to the original `e2b.Dockerfile` behavior unchanged. |
+| `e2b-fullstack.Dockerfile` | A SEPARATE, on-demand POLYGLOT / MULTI-SERVICE template (AB-1 / AB-2): the default image PLUS JDK 17 + Maven, Go, MongoDB and Redis — see "Polyglot / multi-service builder template" below |
+| `build.mjs` | **Build system v2** script — builds ANY template (env-var selected) via `fromDockerfile()` + `Template.build()`. Defaults to the original `e2b.Dockerfile` behavior unchanged. |
 | `package.json` | Declares the `e2b` SDK dependency for `build.mjs` |
 | `e2b.toml` | Legacy v1 config — **not used by the v2 build** (CPU/RAM now live in `build.mjs`). Kept for reference only. |
 | `README.md` | This guide |
@@ -197,6 +198,48 @@ sdkmanager --list_installed                     # must list platform-tools, plat
 bubblewrap --version                            # must print a version, not "command not found"
 exit
 ```
+
+---
+
+## Polyglot / multi-service builder template (AB-1 / AB-2 — infra only, NOT wired to any feature yet)
+
+Admin goal: build apps that need a **backend language runtime** (Java/Go, not just Node) and/or a
+**local database** (MongoDB/Redis) — the "Appsmith-class" gap. Same honest reasoning as the Android
+template: the DEFAULT builder deliberately does NOT carry a JDK + Go + MongoDB + Redis (it would slow
+every ordinary React build's cold-start and raise E2B cost for capability most builds never use). So this
+is a SEPARATE, on-demand image: `e2b-fullstack.Dockerfile`.
+
+**What THIS template provides (a superset of the default image):**
+- Node 22 + Python 3 (the default builder's runtimes), PLUS
+- **Java** — OpenJDK 17 + Maven · **Go** — pinned official 1.23 toolchain
+- **MongoDB 7.0** and **Redis** — run as NATIVE PROCESSES inside the sandbox (`mongod` / `redis-server`
+  on localhost). This is the honest, working alternative to **docker-compose (AB-3)**, which needs
+  Docker-in-Docker that an E2B microVM does not reliably permit — so it is deliberately NOT attempted.
+- The same Playwright/Chromium + pre-warmed generators + warm `vite-react` node_modules the default bakes,
+  so a build routed here behaves EXACTLY like a normal build, just with the extra runtimes/DBs.
+
+Resources: **4 vCPU / 8 GB**. A build-time gate asserts every runtime (java/mvn/go/redis/mongod/python/node)
+is present, so a published template can always run what it claims.
+
+**What's still missing (deliberately NOT built yet):** the actuator code that DETECTS a build needs a
+polyglot/multi-service stack and ROUTES its sandbox to this template (via a new `FULLSTACK_E2B_TEMPLATE_ID`
+env var), plus the per-runtime build/run commands (`mvn package`, `go build`, starting `mongod`/`redis-server`)
+and the Java/Go template providers. That is the follow-up code-wiring — matching the SAME "infra template
+published + verified FIRST, code wiring SECOND" sequencing this directory already uses, so the feature can
+never be pointed at a half-built image.
+
+### Build & publish (same GitHub Actions workflow, different input)
+
+1. Repo → **Settings → Secrets and variables → Actions** → confirm `E2B_API_KEY` is set (same secret the
+   other templates use).
+2. Repo → **Actions → "Build E2B Builder Template" → Run workflow** → set **template_kind: `fullstack`**
+   (leave `template_name` blank to use the default alias `navbharat-fullstack-builder`).
+3. Open the finished run → the job summary shows the usable template alias.
+4. Set Cloud Run env `FULLSTACK_E2B_TEMPLATE_ID=navbharat-fullstack-builder` (a NEW, separate env var — it
+   does nothing until the follow-up routing PR reads it, so setting it early is safe).
+
+> The image is multi-GB and its cloud build takes real minutes (JDK + Go + MongoDB + Chromium + warm
+> node_modules). One-time cost per rebuild — see the Cost note below.
 
 ---
 

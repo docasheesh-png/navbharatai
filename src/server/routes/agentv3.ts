@@ -1457,6 +1457,10 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'userId is required.' });
       return;
     }
+    // SECURITY Phase 3.1 — the shared-anon bucket is never enumerable (would leak every user's
+    // degraded-session workspaceIds/sessionIds). The store enforces this too; guarded here for a
+    // clear empty response instead of relying on the enable gate. Anon sessions restore by-id only.
+    if (userId === 'anon') { res.json({ conversations: [] }); return; }
     try {
       const list = await getConversationStore().listByUser(userId, 50);
       // LIVE-DOT enrichment: mark each session whose workspace has an ACTIVE published deployment

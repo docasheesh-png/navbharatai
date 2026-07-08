@@ -12480,3 +12480,21 @@ submission actions only the admin can perform (documented step by step). No AppK
 build/packaging infra, not an in-app user-facing navigation feature.
 
 Gate: server tsc 0, frontend tsc 0, vitest 5432/5432 PASS, build PASS, `npm ci` lock consistent.
+
+## 2026-07-07 — SECURITY Phase 3.1 SHIPPED: the shared-anon bucket is never enumerable (kills the IDOR "key")
+
+Master Plan Phase 3 (IDOR), slice 1 — the enumeration leak the plan called "baaki sab attacks ki
+chaabi". `listByUser(userId)` groups by stored userId; the literal `'anon'` bucket holds EVERY user's
+identity-degraded session (Fix 26). A caller sending `?userId=anon` (no token) could dump every user's
+workspaceIds + sessionIds — the exact ids needed to then open their conversations, download their build
+reports, and read their decision traces (Phase 3.2 closes those reads too). New pure
+`isEnumerableUserId()` in ConversationStore.ts; BOTH stores (InMemory + Firestore — sibling hunt) refuse
+to enumerate the `'anon'`/empty sentinel; the conversations-list route guards it too for a clean empty
+response. Fix 26 is UNTOUCHED: anon restore is by-id (candidateConversationIds → get(agentv3-anon-{sid}))
+— a get(), not a list — so a specific anon record is still fetchable by its exact unguessable id; only
+blind enumeration of the whole shared bucket is refused. The two internal recent-build callers degrade
+gracefully for anon (recap skipped; the fallback-persist upsert is idempotent) and a real/token-blip uid
+is unaffected (it lists its own records normally). Regression tests +2: the leak (anon/empty never
+enumerate; a real user still lists; get(id) still works for an anon record) + the pure rule.
+Gate: fe tsc 0 · server tsc 0 · vitest 5552/5552 (553 files) · boot PASS. Phase 3 remaining: 3.2
+ownership checks on the diagnostics + decision-trace GET routes.

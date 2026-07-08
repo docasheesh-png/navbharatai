@@ -12170,3 +12170,41 @@ Gate: tsc fe+server 0, vitest 5501/5501 (8 new fullstackRouting tests), build PA
 Root-cause discipline: the routing is a single shared pure helper (not duplicated per call site), gated at the
 env-entry point, and locked with a regression test encoding every branch (fullstack+env, fullstack-no-env,
 non-fullstack, unset, blank-env).
+## 2026-07-07 — AUTOPSY (history-reopen: "na chat, na preview, na report") → Fix 39 + honest triage
+
+Admin reopened the Task-Manager session from History: files restored (badge 42 ✓ — Fix 26/35 proven
+in the field) but the chat showed only 2 bubbles, the preview was white, no report. Three separate
+truths, honestly separated:
+
+- **Chat thin — ROOT FIXED (Fix 39):** fast-lane builds' fallback conversation record saved ONLY
+  prompt + one-line summary (agentv3.ts fallback persist) — the full story was never SAVED, so reopen
+  had nothing richer to show. The fallback turn now also persists the build's real narration digest
+  (AGENT_STEP timeline the user watched live; heartbeats excluded; ≤30 steps, ≤4000 chars) as an
+  assistant message — reopen replays the story, not a stub.
+- **Preview white — that APP's own bug, not a platform regression:** the reopened build predates Fix
+  38 and is the exact app the reviewer flagged (10 lazy-loaded pages never written). The shell mounts
+  (chakra hides), the lazy import fails, Suspense leaves white. Files restored + rendered correctly;
+  the app itself is incomplete. Course of action for the admin: say "create the missing pages" in that
+  session. New builds can't hit this class (Fix 38c).
+- **Report missing:** the other session's #1111 (report-vanish retry + loud failure + emergency
+  fallback) + Fix 26's candidates cover this; the admin's test likely ran on the pre-#1111 binary.
+  Retest after deploy — the button now either delivers or names the exact reason.
+Gate: frontend tsc 0, server tsc 0, vitest 5481/5481, boot PASS.
+
+## 2026-07-07 — Field validation + open item: E2B dev-server dies ~2 min into a HEAVY app (own-app import)
+
+Admin imported navbharat-ai.zip (their whole platform — node-express, port 3000). The session report
+PROVES today's fixes live in the field: zip passed the new size guard; import+survey clean (no rebuild);
+**Fix 37 delivering** — `priorFailedBuilds: 0` and a `dataLossEvents[]` entry with the exact observed
+cause ("durable 59, sandbox listed 59, restoring 1 — mode: missing"). The remaining incident: the LIVE
+preview served ~2 minutes, then the dev process died INSIDE a still-running sandbox (E2B "Closed Port
+Error — connection refused on 3000").
+
+**Honest status (open item — evidence needed before any fix):** the death happened AFTER the turn ended,
+so this report cannot contain the killer's log. Likeliest classes for a heavy full-stack app in E2B:
+(1) OOM-kill (tsx + vite + firebase-admin in one sandbox), (2) the app's own boot/runtime crash when its
+real env (Firebase creds etc.) is absent in the sandbox — its APIs die on first touch, (3) a watcher
+crash. The Diagnose button now names the exact cause (DevServerRecovery classifies OOM "Killed" / crash
+stack / port conflict / missing script honestly). NEXT EVIDENCE: admin taps Diagnose on that session and
+sends the detail log — the classifier line IS the root cause. No blind patch shipped (rule 4/6). The
+In-browser preview remains the E2B-independent path for the frontend ("e2b ke bina kaam chal jaye").

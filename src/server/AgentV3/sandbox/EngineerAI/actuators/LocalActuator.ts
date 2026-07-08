@@ -5,8 +5,16 @@ import util from 'util';
 import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
 import { FileSanitizer } from '../../AppMakerLab/FileSanitizer';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
+import { assertLocalActuatorExecAllowed } from '../../../../lib/actuatorGuard';
 
-const execPromise = util.promisify(exec);
+const rawExec = util.promisify(exec);
+// SECURITY Phase 2.3 — single exec choke point: every shell command this actuator runs passes the
+// production guard first, so LocalActuator can NEVER execute code in the server process outside dev
+// (configure E2B/Docker, or ALLOW_LOCAL_ACTUATOR=true to opt in). One wrapper covers all call sites.
+const execPromise: typeof rawExec = ((command: string, options?: Parameters<typeof rawExec>[1]) => {
+  assertLocalActuatorExecAllowed();
+  return rawExec(command, options as any);
+}) as typeof rawExec;
 const NAMESPACE = 'engineer';
 const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT
   ? path.join(process.env.WORKSPACES_ROOT, NAMESPACE)

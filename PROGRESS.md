@@ -12388,3 +12388,18 @@ paths read it. Regression tests +4: prod+no-key → encrypt throws (the vuln), p
 dev+no-key works, and the COMPAT case (fallback-written data still decrypts in production).
 Gate: fe tsc 0 · server tsc 0 · vitest 5538/5538 (552 files) · boot PASS. Phase 2 remaining: 2.3
 LocalActuator prod-guard, 2.4 printenv/cat-.env governance block.
+
+## 2026-07-07 — SECURITY Phase 2.3 SHIPPED: LocalActuator can never run shell commands in production
+
+Master Plan Phase 2, slice 3. LocalActuator runs the agent's bash commands with child_process.exec
+INSIDE the NavBharatAI server process — an agent (or a prompt-injected instruction) could execute
+arbitrary code on the host. The engineer route already 503s in prod without a sandbox, but that is ONE
+call site; this is the root-cause defense in the actuator itself. New pure `actuatorGuard.ts`
+(localActuatorExecAllowed / assertLocalActuatorExecAllowed): allowed ONLY under an explicit opt-in
+(ALLOW_LOCAL_ACTUATOR=true), VITEST, or NODE_ENV dev/test/unset — any real NODE_ENV (production,
+staging) is refused with a clear error naming E2B/Docker. Wired as a SINGLE exec choke point in BOTH
+LocalActuator files (agentv3 sandbox + EngineerAI — sibling hunt, rule 3): the `execPromise` wrapper
+asserts the guard before every command, so no call site can bypass it. Regression tests +6 (prod/staging
+refused, dev/test/unset allowed, opt-in + VITEST override, the throw names the sandbox vars).
+Gate: fe tsc 0 · server tsc 0 · vitest 5544/5544 (553 files) · boot PASS. Phase 2 remaining: 2.4
+governance block for bare printenv / cat .env.

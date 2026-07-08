@@ -366,6 +366,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'run_tests',
+      description:
+        "Detect and RUN the project's OWN test suite and report honest pass/fail — stronger proof the build " +
+        'works than a typecheck. Auto-detects the runner from the workspace (a real npm "test" script, or ' +
+        'vitest/jest/playwright config, or Python pytest, or Java Maven/JUnit, or Go tests) and runs it in ' +
+        'the sandbox, then returns parsed counts (passed/failed/total) and the names of failing tests. Takes ' +
+        'no arguments. If it reports failures, fix them and run it again; if it reports no suite, seed real ' +
+        'tests with generate_tests first — never claim the build is verified without running its tests.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_observability',
       description:
         'Add real, dependency-free observability to the app you built and write the files to the ' +
@@ -688,6 +699,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',
+  'run_tests',
   'generate_observability',
   'generate_bundle_optimization',
   'generate_seed_data',

@@ -5,6 +5,7 @@ import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1407,6 +1408,44 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+      }
+
+      case 'run_tests': {
+        // B4 — detect and RUN the project's OWN test suite (vitest/jest/playwright/pytest/JUnit/go),
+        // then read honest pass/fail counts. Stronger evidence than `tsc` alone: the build is EARNED.
+        // Detection + parsing are pure (testRunner.ts); this only wires them to the sandbox actuator.
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plan = detectTestPlan(files, pkgRaw);
+        if (!plan) {
+          const msg = 'run_tests: no test suite detected (no real npm "test" script, no vitest/jest/playwright ' +
+            'config, no pytest/JUnit/go tests). Seed real tests with generate_tests, then run_tests again — ' +
+            'do NOT report the build verified without running tests.';
+          this.state?.appendTerminal(msg);
+          return msg;
+        }
+        const started = Date.now();
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+        try { this.onCommand?.({ command: plan.command, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
+        const outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
+        const mem = getWorkspaceMemory(this.workspaceId);
+        if (outcome.ok) {
+          mem.recordAudit(`run_tests PASS — ${outcome.summary} (${plan.command})`);
+        } else {
+          mem.recordError(
+            `run_tests FAIL — ${outcome.summary}` +
+            (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 10).join(', ')}` : ''),
+          );
+        }
+        const detail =
+          `${outcome.summary}\n` +
+          `command: ${plan.command} — ${plan.reason}\n` +
+          (outcome.failingTests.length ? `failing:\n  ${outcome.failingTests.slice(0, 20).join('\n  ')}\n` : '') +
+          `\n[stdout tail]\n${stdout.slice(-1500)}` +
+          (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
+        this.state?.appendTerminal(detail);
+        return detail;
       }
 
       case 'generate_observability': {

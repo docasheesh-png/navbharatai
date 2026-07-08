@@ -12638,3 +12638,26 @@ blueprint), RUNBOOK.md, security_spec.md, AGENTS.md.
 Also recorded in ROADMAP: the old P1-P100 upgrade plan's status table was never reconciled
 with AgentV3 (read "0/1000 closed" while most phases had shipped) → mandatory redundancy-check
 (safeguard #6) before building any item from it. Docs-only change; no source touched.
+
+---
+
+## 2026-07-08 — Roadmap Tier 2A / B4: run the project's OWN test suite (Earned Verification)
+
+First item off the newly-consolidated ROADMAP.md. The agent could typecheck (`tsc`) and seed
+test skeletons (`generate_tests`) but had NO way to DETECT + RUN a project's real test suite and
+read honest results — so "verified" leaned on tsc, and an imported repo's own tests never ran.
+
+- NEW `testRunner.ts` (pure, 15 unit tests): `detectTestPlan(files, packageJson)` picks the
+  project's own suite — a real npm "test" script (skips the npm-init placeholder), else vitest/
+  jest/playwright config or dep, else Python pytest, else Java Maven, else Go `*_test.go`; honest
+  `null` when none. `parseTestOutcome(plan, exit, stdout, stderr)` reads real passed/failed/total +
+  failing-test names per framework, and falls back to the exit code when counts can't be parsed —
+  never invents a pass.
+- `run_tests` tool wired in ToolDispatcher (detect → actuator.runCommand → parse → record to
+  workspace memory as PASS audit / FAIL error), declared in ToolCatalog (+ CATALOG_TOOL_NAMES),
+  added to `ToolName` + `BUILD_TOOLS` grant, and taught in systemPrompt ("EARNED verification;
+  never claim verified without running tests" — while still not BLOCKING a working preview on a
+  fully-green suite, per the existing rule).
+- AppKnowledgeBase: new "RUNS THE PROJECT'S OWN TESTS" capability bullet on the v3.0 entry.
+
+Gate: tsc fe+server 0, vitest 5561/5561 (15 new), build PASS, boot:check PASS.

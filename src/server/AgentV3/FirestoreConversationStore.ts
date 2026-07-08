@@ -24,6 +24,7 @@ import type {
   CreateConversationInput,
   ConversationPatch,
 } from './ConversationStore';
+import { isEnumerableUserId } from './ConversationStore';
 import type { TurnUsage } from './ClaudeClient';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
 
@@ -204,6 +205,7 @@ export class FirestoreConversationStore implements ConversationStore {
   }
 
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
+    if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     const cap = Math.max(0, limit);
     // List view: transcript omitted (empty messages) — call get(id) for the full build.
     try {

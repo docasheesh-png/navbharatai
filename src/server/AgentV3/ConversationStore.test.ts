@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryConversationStore, deriveTitle, upsertConversationTurn } from './ConversationStore';
+import { InMemoryConversationStore, deriveTitle, upsertConversationTurn, isEnumerableUserId } from './ConversationStore';
 
 const base = (over: Partial<{ id: string; userId: string; workspaceId: string; title: string; createdAt: number }> = {}) => ({
   id: over.id ?? 'build-1',
@@ -81,6 +81,31 @@ describe('InMemoryConversationStore', () => {
     expect(u1.map((r) => r.id)).toEqual(['a', 'b']); // u2's 'c' excluded; 'a' first
     expect((await store.listByUser('u1', 1)).map((r) => r.id)).toEqual(['a']);
     expect(await store.listByUser('nobody')).toEqual([]);
+  });
+
+  // SECURITY Phase 3.1 — the shared-anon bucket must NEVER be enumerable (it holds every user's
+  // identity-degraded sessions; listing it leaks their workspaceIds/sessionIds — the key to the
+  // diagnostics/decision IDORs). Anon records stay reachable only by their exact unguessable id.
+  it('THE LEAK: never enumerates the shared-anon bucket (nor an empty user), but get(id) still works', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create(base({ id: 'anon-a', userId: 'anon' }));
+    await store.create(base({ id: 'anon-b', userId: 'anon' }));
+    expect(await store.listByUser('anon')).toEqual([]); // no cross-anon enumeration
+    expect(await store.listByUser('')).toEqual([]);
+    expect(await store.listByUser('   ')).toEqual([]);
+    // a real user still lists normally
+    await store.create(base({ id: 'r1', userId: 'real-uid' }));
+    expect((await store.listByUser('real-uid')).map((r) => r.id)).toEqual(['r1']);
+    // Fix-26 restore is by-id — an anon record is STILL fetchable by its exact (unguessable) id.
+    expect((await store.get('anon-a'))?.id).toBe('anon-a');
+  });
+
+  it('isEnumerableUserId — pure rule: real ids yes, anon/empty/blank no', () => {
+    expect(isEnumerableUserId('real-uid')).toBe(true);
+    expect(isEnumerableUserId('anon')).toBe(false);
+    expect(isEnumerableUserId(null)).toBe(false);
+    expect(isEnumerableUserId(undefined)).toBe(false);
+    expect(isEnumerableUserId('  ')).toBe(false);
   });
 
   it('removes a build (and is a no-op for an unknown id)', async () => {

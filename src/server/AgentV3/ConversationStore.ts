@@ -110,6 +110,19 @@ export interface ConversationStore {
  */
 export const MAX_TIMELINE_EVENTS_TOTAL = 20_000;
 
+/**
+ * SECURITY Phase 3.1 (admin-approved 2026-07-07) — the shared-anon sentinel is NEVER enumerable.
+ * `listByUser` groups records by their stored `userId`; the literal `'anon'` bucket holds EVERY
+ * identity-degraded session of EVERY user (Fix 26). Listing it (e.g. `?userId=anon` with no token)
+ * would dump every user's workspaceIds/sessionIds — the "key" that unlocks the diagnostics/decision
+ * IDORs. So both stores refuse to enumerate it. Anon records stay reachable ONLY by their exact
+ * unguessable id via get() (Fix-26 restore is by-id, not by-list — so it is unaffected). Pure.
+ */
+export function isEnumerableUserId(userId: string | null | undefined): boolean {
+  const id = (userId ?? '').trim();
+  return id !== '' && id !== 'anon';
+}
+
 /** Deep-ish clone so stored records never alias a caller's mutable arrays/objects. */
 function cloneRecord(rec: ConversationRecord): ConversationRecord {
   return {
@@ -185,6 +198,7 @@ export class InMemoryConversationStore implements ConversationStore {
   }
 
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
+    if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     return [...this.records.values()]
       .filter((r) => r.userId === userId)
       .sort((a, b) => b.updatedAt - a.updatedAt)

@@ -12286,3 +12286,26 @@ NOTE (honest debt, rule 4 step 2): the frontend FrameworkPicker keeps its OWN du
 them into one shared source. Recorded so it isn't forgotten.
 
 Gate: tsc fe+server 0, vitest 5506/5506 (5 new), build PASS, boot:check PASS.
+
+## 2026-07-07 — SECURITY Phase 1.2 SHIPPED: Engineer AI quota + GitHub-token secret keyed to the VERIFIED uid
+
+Master Plan Phase 1, slice 2. `/api/engineer-chat` drove BOTH its daily build quota AND a
+`getSecretValue(userId, 'GITHUB_TOKEN')` read off the SPOOFABLE body `userId` — two exploits from one
+root cause:
+- **Unlimited free builds:** a fresh random body userId minted a fresh quota bucket every call, each
+  spending E2B/platform money.
+- **Cross-user secret leak (IDOR):** claiming another user's id read THEIR stored GitHub token.
+`/api/engineer-guider-plan` was additionally UNAUTHENTICATED with its model-spending branch reachable
+via a client-set `agentic:true`.
+
+Root-cause fix (both siblings, one place): resolve the caller once from the VERIFIED Firebase token
+(`identityPolicy.verifiedIdentity`, Phase-0 module) and key quota AND the secret read to that uid; the
+body userId is no longer sent or trusted. guider-plan now requires a verified identity before the
+model call (anon → confirm:false, no spend). Client: Engineer AI now attaches the Bearer token via a
+new shared `src/lib/authHeaders.ts` (extracted so every money/secret fetch sends it the same way, vs
+the duplicated inline copy in useAgentV3Build) — without it the signed-in admin would miss the verified
+path. A caller with no verified identity keeps working, bounded by the existing IP rate limiter
+(Phase 1.3/1.4 add durable anon spend limits). Regression test: the exact exploit (agentic:true + no
+identity → confirm:false, model never touched). Existing engineer route tests unaffected (they return
+at 400/503 before the quota code).
+Gate: fe tsc 0 · server tsc 0 · vitest 5521/5521 (550 files) · boot PASS. Safety rail unchanged.

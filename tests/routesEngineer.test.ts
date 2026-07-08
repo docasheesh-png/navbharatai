@@ -168,4 +168,19 @@ describe('Engineer routes — engineer-guider-plan validation', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body?.error).toMatch(/instruction/i);
   });
+
+  // SECURITY Phase 1.2 — the model-spending branch of guider-plan was reachable by any
+  // unauthenticated caller via a client-set `agentic:true`. It must now spend NOTHING without a
+  // verified identity: an anonymous caller always gets confirm:false, no model touched.
+  it('THE EXPLOIT: agentic:true + no verified identity → confirm:false (never spends the model budget)', async () => {
+    const register = await importEngineerRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/engineer-guider-plan');
+    // No x-test-verified-uid header → verifiedIdentity() resolves null even though agentic:true.
+    const req = mockReq({ body: { instruction: 'build a complete banking app with auth and payments', agentic: true } });
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.confirm).toBe(false); // gated before any router.route() call
+  });
 });

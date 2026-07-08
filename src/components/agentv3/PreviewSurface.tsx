@@ -10,6 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from '
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
@@ -303,6 +304,19 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // (onFileEdited) so Files/Code Studio/Git pick up the change immediately too — same as any other
   // v3.0 file write.
   const inBrowserIframeRef = useRef<HTMLIFrameElement | null>(null);
+  // SECURITY Phase 4 — when a separate preview origin is configured (VITE_PREVIEW_ORIGIN), the
+  // in-browser preview loads a tiny host page on THAT origin and receives the built HTML via
+  // postMessage, so the untrusted app runs in an isolated origin (can't read the platform's Firebase
+  // token). Null → keep the exact current same-origin srcDoc path (unchanged, safe under the allowlist).
+  const previewSandboxUrl = (() => {
+    try { return configuredPreviewSandboxUrl(window.location.origin); } catch { return null; }
+  })();
+  // Cross-origin path only: re-post the built HTML to the isolated host whenever it changes (a static
+  // `src` iframe doesn't auto-reload the way `srcDoc` does). The onLoad handler covers the first mount.
+  useEffect(() => {
+    if (!previewSandboxUrl || !html) return;
+    try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
+  }, [previewSandboxUrl, html]);
   const [editMode, setEditMode] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
@@ -489,10 +503,30 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             </button>
           )}
         </div>
+      ) : html && previewSandboxUrl ? (
+        // SECURITY Phase 4 — CROSS-ORIGIN preview (VITE_PREVIEW_ORIGIN set): the iframe loads a tiny
+        // host page on the SEPARATE preview origin and receives the built HTML via postMessage (below),
+        // so the untrusted app runs in an isolated origin. `allow-same-origin` is safe now — it's the
+        // preview origin's (empty) localStorage, never the platform's Firebase token — and `import()`
+        // still works because the preview origin is a real https origin.
+        <iframe
+          ref={inBrowserIframeRef}
+          title="In-browser preview"
+          src={previewSandboxUrl}
+          onLoad={() => {
+            // Hand the built HTML to the isolated host once it's loaded (the effect below re-posts on
+            // every subsequent html change, since a static `src` iframe won't auto-reload like srcDoc).
+            try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
+          }}
+          className="flex-1 w-full bg-white"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        />
       ) : html ? (
-        // NOTE: allow-same-origin is REQUIRED here — without it the srcDoc has an opaque origin and a
-        // dynamic ES-module import() (how the preview loads React from the CDN) is blocked, so React
-        // never loads → "Missing dependency react". The live-server iframe above already sets it.
+        // DEFAULT (no separate preview origin configured) — same-origin srcDoc. allow-same-origin is
+        // REQUIRED here: without it the srcDoc has an opaque origin and the dynamic ES-module import()
+        // (how the preview loads React from the CDN) is blocked → "Missing dependency react". Safe under
+        // the allowlist (trusted admins only); Phase 4 cross-origin isolation activates once
+        // VITE_PREVIEW_ORIGIN is set. The live-server iframe above already sets allow-same-origin.
         <iframe
           ref={inBrowserIframeRef}
           title="In-browser preview"

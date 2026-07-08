@@ -5361,6 +5361,20 @@ export function registerAgentV3Routes(app: Express): void {
           // UPSERT on the stable per-session id (shared helper — the ONE server write shape for
           // history): first turn creates the record, later turns append; a create race retries
           // as an append so a turn is never silently dropped.
+          // Fix 39 (history-reopen report 2026-07-07: "na chat recover hui"): the fallback used to
+          // save ONLY prompt + one-line summary, so a reopened fast-lane session showed exactly two
+          // bubbles — the whole build story looked wiped. Persist the build's REAL narration digest
+          // (the AGENT_STEP timeline the user watched live, bounded) as the assistant turn, so a
+          // reopen replays the story instead of a stub.
+          const narrationDigest = (() => {
+            try {
+              const steps = buildDiag.report().issues
+                .filter((i) => i.code === 'AGENT_STEP' && !/^⏱/.test(i.message))
+                .map((i) => i.message.split('\n')[0].slice(0, 160));
+              const digest = steps.slice(0, 30).join('\n');
+              return digest.length > 40 ? digest.slice(0, 4000) : '';
+            } catch { return ''; }
+          })();
           await upsertConversationTurn(store, {
             conversationId: mainConversationId,
             userId: userId ?? 'anon',
@@ -5372,6 +5386,7 @@ export function registerAgentV3Routes(app: Express): void {
             // put the prompt underneath its own build's activity.
             turn: [
               { role: 'user', content: prompt, ts: buildStartedAt },
+              ...(narrationDigest ? [{ role: 'assistant' as const, content: narrationDigest, ts: buildStartedAt + 1 }] : []),
               { role: 'assistant', content: result.summary || '', ts: Date.now() },
             ],
             patch: { status: result.ok ? ('complete' as const) : ('error' as const), billedUsd: result.billedUsd, updatedAt: Date.now() },

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -1120,5 +1120,20 @@ describe('zeroBillForUnrenderedPreview (Fix 35) — "preview theek chala to hi p
   });
   it('never zeroes a chat/analysis turn (no artifacts expected)', () => {
     expect(zeroBillForUnrenderedPreview(false, true)).toBe(false);
+  });
+});
+
+describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never make the AI re-ask for the URL', () => {
+  it('produces an instruction naming the exact URL + reason for a private-repo clone failure (the report)', () => {
+    const note = failedImportPromptNote({ url: 'https://github.com/docasheesh-png/navbharatai', reason: 'the clone failed — most likely a PRIVATE repo the connected GitHub account cannot access, or the URL is wrong' });
+    expect(note).toContain('https://github.com/docasheesh-png/navbharatai');
+    expect(note).toContain('Do NOT ask the user for the repository URL');
+    expect(note).toContain('⚙ → GitHub');
+    expect(note.toLowerCase()).toContain('private');
+  });
+  it('is empty when no import failed (normal turns are unchanged)', () => {
+    expect(failedImportPromptNote(null)).toBe('');
+    expect(failedImportPromptNote(undefined)).toBe('');
+    expect(failedImportPromptNote({ url: '', reason: 'x' })).toBe('');
   });
 });

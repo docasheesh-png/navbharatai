@@ -482,6 +482,27 @@ export function deriveWorkspaceId(userId: string | null, sessionId: unknown): st
  * complete-app request — must flip to an EDIT. The destructive rebuild path must never be reachable
  * through an infra hiccup. Pure.
  */
+/**
+ * Fix 41 (report 2026-07-08) — the instruction injected into the architect prompt when a GitHub-URL
+ * import FAILED this turn. Without it the model, seeing an empty workspace and a "survey this repo"
+ * ask, replied "I don't see a repository URL in your message — please share it" 15 seconds after the
+ * platform itself said "I couldn't clone <url>". This makes the model ACKNOWLEDGE the exact URL and
+ * the real reason (private/no-access/bad-url) and tell the user how to grant access — never re-ask
+ * for the URL they already gave. Returns '' when no import failed. Pure.
+ */
+export function failedImportPromptNote(failed: { url: string; reason: string } | null | undefined): string {
+  if (!failed || !failed.url) return '';
+  return [
+    'IMPORTANT — A GITHUB IMPORT WAS ALREADY ATTEMPTED AND FAILED THIS TURN.',
+    `The user DID provide a repository URL: ${failed.url}`,
+    `The import failed because ${failed.reason}.`,
+    'Do NOT ask the user for the repository URL — they already gave it. Acknowledge that this exact',
+    'URL could not be accessed, and if it is private tell them to connect the GitHub account that owns',
+    'it via ⚙ → GitHub (or double-check the URL). Keep the reply short and do not contradict the',
+    'message the platform already showed them.',
+  ].join('\n');
+}
+
 export function rebuildGuardFlipsToEdit(opts: {
   intent: string;
   isEditMode: boolean;
@@ -3378,6 +3399,9 @@ export function registerAgentV3Routes(app: Express): void {
     // success (not a failed/escalated build), and the mandatory readiness gate must not audit the
     // user's freshly-imported existing code and declare it "NOT READY". Set by the zip + URL landers.
     let isImportTurn = false;
+    // Fix 41: a failed GitHub-URL import (private/no-access/bad-url) recorded here so the architect
+    // prompt can acknowledge it instead of re-asking the user for the URL they already gave.
+    let failedImport: { url: string; reason: string } | null = null;
     const landImportedProject = async (
       importedFiles: Record<string, string>,
       opts: { source: string; writeToSandbox: boolean; droppedNote?: string; sandboxOnly?: Record<string, string>; assets?: Record<string, string> },
@@ -4096,6 +4120,11 @@ export function registerAgentV3Routes(app: Express): void {
         // GITHUB IMPORT: if the user specified an existing repo URL, clone it now (before
         // durable-restore and git-native hydrate, so the import takes priority). Best-effort —
         // any failure emits a friendly narration and falls through to the normal empty workspace.
+        // Fix 41 (report 2026-07-08): when the clone FAILS, the platform prints an honest "I couldn't
+        // clone <url>" — but the AI turn that runs next had NO idea a URL was even tried, so it asked
+        // "I don't see a repository URL in your message — please share it", contradicting the platform
+        // 15 seconds later (amnesiac + unprofessional). This flag carries the failed URL + reason into
+        // the architect prompt so the model acknowledges the failure instead of re-asking for the URL.
         if (importUrl) {
           try {
             // SECURITY (C2): reject a non-GitHub / malformed importUrl up front with a clear message,
@@ -4104,6 +4133,7 @@ export function registerAgentV3Routes(app: Express): void {
             // injected into the SAME validated shape, and GitRepoSync re-validates at the sink.
             const cleanImportUrl = sanitizeRepoUrl(importUrl);
             if (!cleanImportUrl) {
+              failedImport = { url: importUrl, reason: 'the URL is not a supported GitHub repository URL (expected https://github.com/owner/repo)' };
               events.emit({ type: 'narration', agent: 'architect', text: `That import URL isn't a supported GitHub repository URL (expected https://github.com/owner/repo). Starting with an empty workspace instead.`, ts: Date.now() });
             } else {
             events.emit({ type: 'narration', agent: 'architect', text: `Importing your project from ${cleanImportUrl}…`, ts: Date.now() });
@@ -4136,6 +4166,7 @@ export function registerAgentV3Routes(app: Express): void {
             } else if (h.skipped) {
               // The clone genuinely failed AND added no files — a bad URL, a PRIVATE repo without
               // access, or git being unavailable. Say so instead of silently building empty.
+              failedImport = { url: cleanImportUrl, reason: 'the clone failed — most likely a PRIVATE repo the connected GitHub account cannot access, or the URL is wrong' };
               events.emit({ type: 'narration', agent: 'architect', text: `I couldn't clone ${cleanImportUrl}. If it's private, connect the GitHub account that owns it (⚙ → GitHub) so I have access; otherwise check the URL. Starting with an empty workspace for now.`, ts: Date.now() });
             } else {
               // Cloned successfully but the repo had no content beyond .git (a brand-new empty repo).
@@ -4144,6 +4175,7 @@ export function registerAgentV3Routes(app: Express): void {
             }
           } catch (importErr) {
             const m = importErr instanceof Error ? importErr.message : String(importErr);
+            failedImport = { url: importUrl, reason: `the import errored (${m})` };
             events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${m}). Starting with an empty workspace instead.`, ts: Date.now() });
           }
         }
@@ -4387,6 +4419,11 @@ export function registerAgentV3Routes(app: Express): void {
         const { guidance } = dialoguePhaseContext({ intent, prompt, hasExistingFiles: isEditMode, planning: planFirst });
         if (guidance) architectSystem = `${guidance}\n\n---\n\n${architectSystem}`;
       } catch { /* dialogue phase is best-effort — a failure leaves the prompt unchanged */ }
+
+      // Fix 41: if a GitHub-URL import was attempted and FAILED this turn, tell the model plainly so it
+      // never asks the user for the URL they already provided (the amnesiac "I don't see a URL" reply).
+      const importFailNote = failedImportPromptNote(failedImport);
+      if (importFailNote) architectSystem = `${importFailNote}\n\n---\n\n${architectSystem}`;
 
       // P-ARCH+.3 — up-front BLUEPRINT (advisory) for DEEP, agentic, NEW builds. The fast lane already
       // freezes a file-manifest + shared contract; the agentic loop plans free-form (update_todo only),

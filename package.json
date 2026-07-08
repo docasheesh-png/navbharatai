@@ -25,13 +25,17 @@
     "audit:gate": "node scripts/auditGate.mjs",
     "license:gate": "node scripts/licenseGate.mjs",
     "sbom": "node scripts/genSbom.mjs",
-    "bakeoff": "tsx scripts/agentv3-bakeoff.ts"
+    "bakeoff": "tsx scripts/agentv3-bakeoff.ts",
+    "mobile:sync": "npm run build && npx cap sync",
+    "mobile:android": "npm run build && npx cap sync android && npx cap open android",
+    "mobile:ios": "npm run build && npx cap add ios && npx cap sync ios && npx cap open ios"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
     "@babel/standalone": "^7.26.4",
     "@capacitor/android": "^8.4.1",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "@google-cloud/vertexai": "^1.12.0",
     "@google/genai": "^2.2.0",
     "@google/generative-ai": "^0.24.1",

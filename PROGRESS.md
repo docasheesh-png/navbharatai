@@ -12425,3 +12425,58 @@ flagged). Gate: fe tsc 0 · server tsc 0 · vitest 5548/5548 (553 files) · boot
 - 2.4 (this): governance hard-blocks bare env-dump / cat .env.
 Safety rail unchanged (AGENTV3_PAID_PUBLIC OFF + allowlist ON until the Phase-5 re-audit is clean).
 Next: Phase 3 (IDOR — kill enumeration + ownership checks, without breaking Fix-26 anon restore).
+
+## 2026-07-08 — AUTOPSY (GitHub-import report) → Fix 41: after a failed import, the AI must not re-ask for the URL it was given
+
+Report: user asked "Import https://github.com/docasheesh-png/navbharatai and survey it." The clone
+FAILED (private repo / the connected account lacked access), the platform correctly said "I couldn't
+clone <url> — connect the owning GitHub account (⚙ → GitHub)". Then the architect LLM turn ran and
+replied "I don't see a repository URL in your message — please share it" — contradicting the platform
+15 seconds later, looking amnesiac/unprofessional. The report proves it: the llmCall prompt was the
+"REQUIREMENTS: brief/open-ended, no project exists" phase with NO context that a URL was tried and
+failed.
+
+**Root cause:** the failed-import fact was emitted to the USER (narration) but never carried into the
+subsequent architect prompt, so the model had no idea a URL had been provided and failed. **Fix:** a
+`failedImport {url, reason}` flag set in all three failure branches (bad-url / clone-skipped / error),
+hoisted to turn scope, injected into the architect system prompt via new pure `failedImportPromptNote`
+— it names the exact URL + real reason and instructs the model to acknowledge the failure and point to
+⚙ → GitHub, never to re-ask for the URL. Empty string on non-failed turns (zero change to normal
+builds). Tests: +2 (the exact report URL/reason; empty on no-failure). Gate: frontend tsc 0, server
+tsc 0, vitest 5546/5546, boot PASS.
+
+Open (separate, needs evidence): the clone of the PRIVATE repo failing itself — likely the build
+request did not carry a `githubToken` with access to docasheesh-png/navbharatai (clone at agentv3.ts
+~4116 uses `req.body.githubToken`; unauthenticated → private repo 404s). Honest user guidance: connect
+the account that owns the repo. Not blind-patched.
+
+---
+
+## 2026-07-08 — Mobile app: iOS/App Store support + dual-store publishing runbook
+
+Admin: "navbharatai ka hi app banana hai jo Play Store & App Store par post kar sakun". Investigated:
+Android was already ~80% done (Capacitor hosted mode, committed `android/` project, appId
+com.navbharatai.app), but iOS was absent and there was no publish guide. Admin chose "Dono stores ready +
+full runbook".
+
+- `@capacitor/ios@8.4.1` installed (matches core/android/cli). `capacitor.config.ts` extended with iOS
+  (hosted mode `iosScheme: 'https'`, `ios.contentInset: 'automatic'`). ios/ project is NOT committed — it's
+  generated on a Mac with `npx cap add ios` (an iOS build requires macOS + Xcode, Apple's hard rule).
+- npm scripts: `mobile:sync`, `mobile:android`, `mobile:ios`.
+- `MOBILE_PUBLISHING.md` — full end-to-end runbook: prerequisites/accounts, one-time icon+splash gen
+  (`npx @capacitor/assets`), signed Play AAB (keytool keystore → gradlew bundleRelease → Play Console),
+  iOS on a Mac (cap add ios → Xcode Archive → App Store Connect/TestFlight), the **payments policy**
+  (store billing required for in-app digital credits → v1 keeps purchases web-only, as already decided),
+  the 4.2 "just a website" rejection risk + how push notifications resolve it, and the store-assets
+  checklist. Honest about what only the admin can do (paid accounts, Mac, signing, submission, review).
+- `.gitignore`: android/keystore.properties, *.keystore, *.jks, /ios/, /assets/ (never commit signing
+  secrets / per-machine iOS project).
+- NOT added: `@capacitor/assets` (pulls `sharp` → libvips binary blocked by the sandbox proxy; it's a
+  local icon-gen tool, so the runbook invokes it via `npx` instead of adding a heavy repo dependency).
+
+Honest state: the Android app can be built + uploaded today on any machine with Android Studio; iOS needs a
+Mac. Repo now carries everything on the code side for BOTH stores; the remaining steps are account/signing/
+submission actions only the admin can perform (documented step by step). No AppKnowledgeBase entry — this is
+build/packaging infra, not an in-app user-facing navigation feature.
+
+Gate: server tsc 0, frontend tsc 0, vitest 5432/5432 PASS, build PASS, `npm ci` lock consistent.

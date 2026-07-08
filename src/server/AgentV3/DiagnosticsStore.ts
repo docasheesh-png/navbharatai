@@ -12,6 +12,7 @@ import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
 import { audit } from '../lib/audit';
 import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { redactSecrets } from './SecretRedactor';
 
 const COLLECTION = 'workspace_diagnostics_v3';
 /** Firestore's hard per-document limit is 1 MB; stay well under it after trimming. */
@@ -125,11 +126,42 @@ function cap(s: string | undefined, n: number): string | undefined {
 }
 
 /**
+ * SECURITY Phase 2.1 (admin-approved 2026-07-07) — mask secrets in EVERY free-text channel of a
+ * report before it is persisted or downloaded. A build's stdout/stderr, model prompt/response
+ * previews, error messages/stacks, generated-file bodies and the prompt/summary/root-cause can
+ * inline an API key, a `TOKEN=…` env line, a JWT or a DB URL with a password — which would otherwise
+ * be written to Firestore and handed out verbatim in the downloadable "Build report". This is the
+ * single choke point: `trimReportForStorage` and `compactReportForRecord` both run it, and the
+ * download reads only from the (redacted) persisted copy, so no un-redacted report can escape.
+ * High-precision (redactSecrets masks only well-known secret shapes + secret-NAMED assignments), so
+ * ordinary code is untouched. Pure; never throws (redactSecrets returns its input on any error).
+ */
+export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const rs = (s: string | undefined): string | undefined => (s == null ? s : redactSecrets(s));
+  return {
+    ...report,
+    prompt: rs(report.prompt),
+    summary: rs(report.summary),
+    rootCause: rs(report.rootCause),
+    review: rs(report.review),
+    issues: report.issues?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
+    problems: report.problems?.map((i) => ({ ...i, message: redactSecrets(i.message), detail: rs(i.detail) })),
+    commands: report.commands?.map((c) => ({ ...c, command: redactSecrets(c.command), stdout: redactSecrets(c.stdout), stderr: redactSecrets(c.stderr) })),
+    llmCalls: report.llmCalls?.map((c) => ({ ...c, promptPreview: rs(c.promptPreview), responsePreview: rs(c.responsePreview) })),
+    errors: report.errors?.map((e) => ({ ...e, message: redactSecrets(e.message), stack: rs(e.stack) })),
+    generatedFiles: report.generatedFiles?.map((f) => ({ ...f, content: redactSecrets(f.content) })),
+    previewErrors: report.previewErrors?.map((p) => ({ ...p, message: redactSecrets(p.message) })),
+  };
+}
+
+/**
  * Bound a report so its JSON fits comfortably under the 1 MB Firestore doc limit. Deterministic
  * caps (no size-measuring loop): trims the heavy channels (issues / commands / llm previews /
  * errors) to safe sizes while keeping the most recent, most useful detail. Pure + exported + tested.
+ * SECURITY 2.1: secrets are redacted first, so every persisted/downloaded copy is clean.
  */
-export function trimReportForStorage(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const report = redactReportSecrets(reportIn);
   const trimmedIssues = (report.issues ?? []).slice(-500);
   return {
     ...report,
@@ -163,7 +195,8 @@ const EMBED_MAX_ISSUES = 120;
  * (sandbox command logs, LLM I/O, full error stacks, generated-file bodies), which stay in the
  * workspace-keyed forensic report. Pure + exported + unit-tested.
  */
-export function compactReportForRecord(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const report = redactReportSecrets(reportIn); // SECURITY 2.1 — the embedded copy is redacted too
   const issues = (report.issues ?? []).slice(-EMBED_MAX_ISSUES).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
   return {
     schema: report.schema,

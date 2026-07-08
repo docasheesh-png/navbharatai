@@ -193,7 +193,7 @@ import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
@@ -1675,6 +1675,11 @@ export function registerAgentV3Routes(app: Express): void {
       if (!report) report = await loadLatestForUser(userId).catch(() => null);
       if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     }
+    // SECURITY Phase 2.1 — redact secrets on the OUTPUT path too. Durable copies are already redacted
+    // at save, but the in-memory `lastDiagnostics` fallback (line above) holds the RAW build report;
+    // masking here guarantees no download — JSON or text — ever emits a key/token, whatever its source.
+    // Idempotent over an already-redacted copy (a mask contains no secret shape to re-match).
+    report = redactReportSecrets(report);
     // Human/Claude-readable plain-text render — root cause first, problems only, full AI Diagnosis
     // Bundle (sandbox commands, LLM I/O, preview errors, the reviewer's complete findings). Previously
     // built but reachable from nowhere; wired here so "Text report" can actually download it.

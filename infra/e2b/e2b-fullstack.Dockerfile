@@ -67,13 +67,18 @@ ENV PATH="${JAVA_HOME}/bin:${PATH}"
 # pinned toolchain tarball so `go build` / `go mod` match a modern Go app. Pin
 # the version so the image never drifts under us (bump deliberately).
 ENV GO_VERSION=1.23.5
+# Symlink the go/gofmt binaries into /usr/bin (always on the default PATH). The E2B build system does
+# NOT reliably apply `ENV PATH="/usr/local/go/bin:${PATH}"`, so `go` was "command not found" in later
+# steps even though it installed correctly (java/mvn only worked because apt puts them in /usr/bin). The
+# symlink makes `go` findable everywhere without depending on PATH env handling.
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz \
   && tar -C /usr/local -xzf /tmp/go.tgz \
   && rm /tmp/go.tgz \
-  && /usr/local/go/bin/go version
-ENV PATH="/usr/local/go/bin:${PATH}"
+  && ln -sf /usr/local/go/bin/go /usr/bin/go \
+  && ln -sf /usr/local/go/bin/gofmt /usr/bin/gofmt \
+  && go version
 ENV GOPATH=/home/user/go
-ENV PATH="${GOPATH}/bin:${PATH}"
+ENV PATH="/usr/local/go/bin:/home/user/go/bin:${PATH}"
 
 # --- AB-2: Redis (native process) -------------------------------------------
 # Installed from Debian; started per-build by the agent as `redis-server`

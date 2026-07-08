@@ -12351,3 +12351,24 @@ Gate: fe tsc 0 · server tsc 0 · vitest 5531/5531 (551 files) · boot PASS.
 - 1.4 (this): durable cross-instance rate limits + global anon ceiling.
 Safety rail unchanged (AGENTV3_PAID_PUBLIC OFF + allowlist ON until the Phase-5 re-audit is clean).
 Next: Phase 2 (secrets containment).
+
+## 2026-07-07 — SECURITY Phase 2.1 SHIPPED: the build report can never leak a secret
+
+Master Plan Phase 2 (secrets containment), slice 1. A build's diagnostics report carries the most
+sensitive free text in the app — sandbox stdout/stderr, model prompt/response previews, error
+messages/stacks, generated-file bodies (incl. a generated `.env`), and the prompt/summary/root-cause.
+Any of these can inline an API key, a `TOKEN=…`/`SECRET_KEY=…` env line, a JWT, or a DB URL with a
+password — which was written verbatim to Firestore AND handed out in the downloadable "Build report".
+
+Root-cause fix, one choke point: new pure `redactReportSecrets(report)` (DiagnosticsStore.ts) masks
+secrets in EVERY channel via the existing high-precision `redactSecrets`. Applied at both SAVE choke
+points — `trimReportForStorage` (every durable save: workspace, per-user, history, emergency stash)
+and `compactReportForRecord` (the chat-embedded copy) — so no persisted copy is dirty. Also applied on
+the OUTPUT path (the `/diagnostics` GET, JSON + `?format=text`) as belt-and-suspenders, since the
+in-memory `lastDiagnostics` fallback holds the RAW report; masking there guarantees no download ever
+emits a secret whatever its source. Idempotent over an already-redacted copy. High precision — a clean
+report is untouched (ordinary code, `npm run build`, etc. pass through verbatim).
+Regression tests +3: 11 real secret shapes (OpenAI/GitHub/AWS/Stripe keys, TOKEN=, PASSWORD=, JWT-ish,
+postgres:// + db:// creds) masked across all 8 channels; clean-report no-op; both save choke points
+verified to emit no raw secret. Gate: fe tsc 0 · server tsc 0 · vitest 5534/5534 (551 files) · boot PASS.
+Phase 2 remaining slices: 2.2 hardcoded-enc-fallback, 2.3 LocalActuator prod-guard, 2.4 printenv block.

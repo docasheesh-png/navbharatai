@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { trimReportForStorage, compactReportForRecord, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId, persistWithRetry, emergencyStash, emergencyRecall, emergencyClearForTest } from './DiagnosticsStore';
+import { trimReportForStorage, compactReportForRecord, saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, perUserDiagnosticsDocId, persistWithRetry, emergencyStash, emergencyRecall, emergencyClearForTest, redactReportSecrets } from './DiagnosticsStore';
 import type { BuildDiagnosticsReport } from './BuildDiagnostics';
 
 function baseReport(over: Partial<BuildDiagnosticsReport> = {}): BuildDiagnosticsReport {
@@ -233,6 +233,64 @@ describe('loaders fall back to the emergency cache when the durable read is empt
     await saveLatestForUser('user-noop', baseReport({ endedAt: 2000 }));
     await expect(loadDiagnostics('ws-noop')).resolves.toBeNull();
     await expect(loadLatestForUser('user-noop')).resolves.toBeNull();
+  });
+});
+
+// SECURITY Phase 2.1 — a build report must never carry a secret. A build's stdout/stderr, model
+// I/O previews, error stacks, generated-file bodies and the prompt/summary can inline an API key,
+// a TOKEN= env line, a JWT or a DB URL with a password. redactReportSecrets masks them in EVERY
+// channel; trimReportForStorage (all durable saves) and compactReportForRecord (the embedded copy)
+// both run it, so no persisted or downloaded report can leak.
+describe('redactReportSecrets — every free-text channel is scrubbed of secrets', () => {
+  // Fake secrets are assembled from fragments at RUNTIME so no complete secret literal ever sits in
+  // this source file (which would trip GitHub push-protection / secret scanners). redactSecrets sees
+  // the fully-joined string at runtime exactly as a real leak would appear.
+  const S = {
+    openai: 'sk-' + 'abcdef1234567890abcdefghijklmnop',
+    pgpw: 'super' + 'secretpw',
+    aws: 'wJalr' + 'XUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    ghpIssue: 'ghp_' + '0123456789abcdef0123456789abcdef0123',
+    apiKeyCmd: 'sk-' + 'secretvalue0000000000000000000000000000',
+    ghpStdout: 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789',
+    proj: 'sk-proj-' + 'aaaaaaaaaaaaaaaaaaaaaaaa',
+    pw: 'hunter2' + 'secretlongvalue',
+    secretKey: 'top' + 'secretvalue12345678',
+    dbpw: 'pw' + '123456',
+    stripe: 'sk_' + 'live_' + '51abcdefghijklmnopqrstuvwx',
+  };
+  const dirty = baseReport({
+    endedAt: 2000,
+    prompt: `use OPENAI_API_KEY=${S.openai} for the app`,
+    summary: `built ok; connected to postgres://user:${S.pgpw}@db.host:5432/app`,
+    rootCause: `AWS_SECRET_ACCESS_KEY=${S.aws} leaked in logs`,
+    issues: [{ ts: 1, phase: 'build', severity: 'error', code: 'X', message: `token TOKEN=${S.ghpIssue}`, autoResolved: false }],
+    commands: [{ ts: 1, command: `export API_KEY=${S.apiKeyCmd}`, exitCode: 0, stdout: `GITHUB_TOKEN=${S.ghpStdout}`, stderr: '' }],
+    llmCalls: [{ ts: 1, ok: true, promptPreview: `here is my key ${S.proj}`, responsePreview: `stored PASSWORD="${S.pw}"` }],
+    errors: [{ ts: 1, message: `auth failed with SECRET_KEY=${S.secretKey}`, stack: `at db://admin:${S.dbpw}@host/x` }],
+    generatedFiles: [{ ts: 1, path: '.env', content: `STRIPE_SECRET_KEY=${S.stripe}`, note: 'env' }],
+  });
+
+  it('masks the secret in prompt / summary / rootCause / issues / commands / llmCalls / errors / generatedFiles', () => {
+    const clean = redactReportSecrets(dirty);
+    const blob = JSON.stringify(clean);
+    // None of the raw secret values survive anywhere in the report.
+    for (const secret of Object.values(S)) {
+      expect(blob).not.toContain(secret);
+    }
+  });
+
+  it('is a no-op for a clean report (high precision — ordinary code is untouched)', () => {
+    const clean = baseReport({ endedAt: 2000, summary: 'built a todo app with 12 files', commands: [{ ts: 1, command: 'npm run build', exitCode: 0, stdout: 'compiled ok', stderr: '' }] });
+    expect(redactReportSecrets(clean).summary).toBe('built a todo app with 12 files');
+    expect(redactReportSecrets(clean).commands![0].stdout).toBe('compiled ok');
+  });
+
+  it('the SAVE choke points redact too: trimReportForStorage + compactReportForRecord emit no raw secret', () => {
+    const stored = JSON.stringify(trimReportForStorage(dirty));
+    const embedded = JSON.stringify(compactReportForRecord(dirty));
+    expect(stored).not.toContain(S.pgpw);
+    expect(stored).not.toContain(S.ghpStdout);
+    expect(embedded).not.toContain(S.pgpw); // summary is kept in the compact copy, redacted
   });
 });
 

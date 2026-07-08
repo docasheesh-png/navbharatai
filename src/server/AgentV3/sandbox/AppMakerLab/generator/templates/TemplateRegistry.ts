@@ -7,6 +7,8 @@ import { SvelteKitProvider } from './SvelteKitProvider';
 import { NodeExpressProvider } from './NodeExpressProvider';
 import { NestJSProvider } from './NestJSProvider';
 import { FastifyProvider } from './FastifyProvider';
+import { SpringBootProvider } from './SpringBootProvider';
+import { GoProvider } from './GoProvider';
 import { PythonFastapiProvider } from './PythonFastapiProvider';
 import { DjangoProvider } from './DjangoProvider';
 import { FlaskProvider } from './FlaskProvider';
@@ -37,6 +39,9 @@ export class TemplateRegistry {
     'python-fastapi': new PythonFastapiProvider(),
     'django': new DjangoProvider(),
     'flask': new FlaskProvider(),
+    // JVM / Go backends — run on the fullstack E2B template (JDK 17 + Maven, Go 1.23)
+    'spring-boot': new SpringBootProvider(),
+    'go': new GoProvider(),
     // Other frontend
     'astro': new AstroProvider(),
     'angular': new AngularProvider(),

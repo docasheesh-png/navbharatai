@@ -12,6 +12,9 @@ import { SvelteKitProvider as LiveSvelteKitProvider } from '../src/server/AgentV
 import { RemixProvider as LiveRemixProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/RemixProvider';
 import { VueProvider as LiveVueProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/VueProvider';
 import { AstroProvider as LiveAstroProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/AstroProvider';
+import { SpringBootProvider as LiveSpringBootProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/SpringBootProvider';
+import { GoProvider as LiveGoProvider } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/GoProvider';
+import { TemplateRegistry as LiveTemplateRegistry } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 
 describe('StaticProvider', () => {
   const provider = new StaticProvider();
@@ -216,5 +219,46 @@ describe('LIVE framework scaffolds — error boundaries', () => {
     const files = new LiveAstroProvider().getFiles([]);
     expect(files['src/pages/404.astro']).toBeDefined();
     expect(files['src/pages/404.astro']).toContain('404');
+  });
+});
+
+// P-CGE / AB-1: Java (Spring Boot) + Go backend providers — run on the fullstack E2B template.
+// These are the LIVE sandbox providers (E2BActuator/ToolDispatcher → sandbox TemplateRegistry).
+describe('SpringBootProvider (LIVE, fullstack)', () => {
+  const files = new LiveSpringBootProvider().getFiles([]);
+  it('ships a Maven pom with spring-boot-starter-web (Java 17)', () => {
+    expect(files['pom.xml']).toContain('spring-boot-starter-web');
+    expect(files['pom.xml']).toContain('<java.version>17</java.version>');
+  });
+  it('has a @SpringBootApplication main and a @RestController', () => {
+    expect(files['src/main/java/com/example/demo/Application.java']).toContain('@SpringBootApplication');
+    expect(files['src/main/java/com/example/demo/HelloController.java']).toContain('@RestController');
+  });
+  it('binds 0.0.0.0 and $PORT for the E2B preview', () => {
+    const props = files['src/main/resources/application.properties'];
+    expect(props).toContain('server.address=0.0.0.0');
+    expect(props).toContain('${PORT:8080}'); // literal — Spring resolves it at runtime
+  });
+});
+
+describe('GoProvider (LIVE, fullstack)', () => {
+  const files = new LiveGoProvider().getFiles([]);
+  it('ships go.mod (go 1.23) and main.go', () => {
+    expect(files['go.mod']).toContain('go 1.23');
+    expect(files['main.go']).toContain('package main');
+  });
+  it('serves an http handler bound to 0.0.0.0:$PORT', () => {
+    expect(files['main.go']).toContain('http.ListenAndServe');
+    expect(files['main.go']).toContain('"0.0.0.0:"');
+    expect(files['main.go']).toContain('os.Getenv("PORT")');
+  });
+});
+
+describe('LIVE TemplateRegistry registers spring-boot + go', () => {
+  const reg = new LiveTemplateRegistry();
+  it('resolves the new backend frameworks', () => {
+    expect(reg.getProvider('spring-boot').getFiles([])['pom.xml']).toBeDefined();
+    expect(reg.getProvider('go').getFiles([])['main.go']).toBeDefined();
+    expect(reg.listFrameworks()).toEqual(expect.arrayContaining(['spring-boot', 'go']));
   });
 });

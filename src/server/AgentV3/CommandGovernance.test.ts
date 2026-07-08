@@ -61,6 +61,35 @@ describe('classifyCommandRisk — NONE (no false positives on normal build comma
   });
 });
 
+// SECURITY Phase 2.4 — a bare env dump or reading a .env file exposes every server/app secret into
+// the command output (→ build report, transcript, model context). These are HIGH-risk, so the
+// dispatcher hard-blocks them. Must NOT flag the legitimate `env FOO=bar cmd` prefix or a script
+// literally named "env"/reading a non-dotenv file.
+describe('classifyCommandRisk — HIGH: secret exposure (Phase 2.4)', () => {
+  it('blocks a bare env / printenv dump (standalone, piped, or redirected)', () => {
+    expect(classifyCommandRisk('printenv').level).toBe('high');
+    expect(classifyCommandRisk('env').level).toBe('high');
+    expect(classifyCommandRisk('env | grep KEY').level).toBe('high');
+    expect(classifyCommandRisk('printenv > /tmp/dump.txt').level).toBe('high');
+    expect(classifyCommandRisk('ls && env').level).toBe('high');
+  });
+  it('blocks reading a .env secrets file with any text tool', () => {
+    expect(classifyCommandRisk('cat .env').level).toBe('high');
+    expect(classifyCommandRisk('cat .env.local').level).toBe('high');
+    expect(classifyCommandRisk('head -n 5 .env.production').level).toBe('high');
+    expect(classifyCommandRisk('grep SECRET .env').level).toBe('high');
+  });
+  it('does NOT flag the legitimate `env VAR=val command` prefix (env used to SET vars, not dump)', () => {
+    expect(classifyCommandRisk('env NODE_ENV=production node app.js').level).toBe('none');
+    expect(classifyCommandRisk('env PORT=3000 npm start').level).toBe('none');
+  });
+  it('does NOT flag a script named env or reading a non-dotenv file', () => {
+    expect(classifyCommandRisk('npm run env').level).toBe('none');
+    expect(classifyCommandRisk('cat environment.md').level).toBe('none');
+    expect(classifyCommandRisk('cat package.json').level).toBe('none');
+  });
+});
+
 describe('governanceNote', () => {
   it('is empty for no-risk commands', () => {
     expect(governanceNote({ level: 'none', reasons: [] })).toBe('');

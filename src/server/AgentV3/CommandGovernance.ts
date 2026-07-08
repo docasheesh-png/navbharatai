@@ -36,6 +36,14 @@ const HIGH_RULES: Rule[] = [
   { level: 'high', test: /\b(curl|wget|fetch)\b[^\n|]*\|[^\n]*\b(sh|bash|zsh|python[0-9.]*|node)\b/i, reason: 'pipes downloaded content straight into a shell/interpreter (remote code execution)' },
   { level: 'high', test: /\b(printenv|env|cat)\b[^\n]*\|[^\n]*\b(curl|wget|nc|netcat)\b/i, reason: 'pipes environment/secrets to the network (exfiltration)' },
   { level: 'high', test: /\b(cat|cp|scp)\b[^\n]*(\.ssh\/|id_rsa|id_ed25519|\.aws\/credentials|\.netrc)/i, reason: 'reads/copies private keys or credentials' },
+  // SECURITY Phase 2.4 — a BARE env dump (`printenv`, `env` as a standalone command, optionally piped/
+  // redirected) exposes EVERY server secret (ANTHROPIC_API_KEY, SECRET_ENCRYPTION_KEY, …) into the
+  // command output → the build report, transcript and model context. Blocked. Note the negative
+  // lookahead: `env FOO=bar cmd` (env used to SET a var for a real command) is NOT a dump and stays
+  // allowed — only `env`/`printenv` with no command after it matches.
+  { level: 'high', test: /(^|[;&|]\s*)(printenv|env)\s*($|[|;&>])/i, reason: 'dumps all environment variables (exposes every server secret)' },
+  // Reading a dotenv file (`.env`, `.env.local`, …) with any text tool leaks its secrets the same way.
+  { level: 'high', test: /\b(cat|less|more|head|tail|nl|xxd|od|strings|grep|awk|sed)\b[^\n|]*(^|[\s/'"=])\.env(\.[A-Za-z0-9_.-]+)?\b/i, reason: 'reads a .env secrets file (exposes stored keys)' },
   { level: 'high', test: /\bchmod\s+(-[a-z]*\s+)*777\s+(\/|~|\$HOME)\b/i, reason: 'chmod 777 on a root/home path (insecure + dangerous)' },
   { level: 'high', test: /\bsudo\b/i, reason: 'runs with elevated privileges (sudo)' },
   { level: 'high', test: /\bgit\s+push\b[^\n]*(--force\b|\s-f\b)/i, reason: 'force-push rewrites remote history (can destroy others\' commits)' },

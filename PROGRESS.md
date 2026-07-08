@@ -12403,3 +12403,25 @@ asserts the guard before every command, so no call site can bypass it. Regressio
 refused, dev/test/unset allowed, opt-in + VITEST override, the throw names the sandbox vars).
 Gate: fe tsc 0 · server tsc 0 · vitest 5544/5544 (553 files) · boot PASS. Phase 2 remaining: 2.4
 governance block for bare printenv / cat .env.
+
+## 2026-07-07 — SECURITY Phase 2.4 SHIPPED: governance hard-blocks bare env-dump / cat .env (Phase 2 COMPLETE)
+
+Master Plan Phase 2, final slice. CommandGovernance only flagged `printenv|env|cat` when PIPED to the
+network; a BARE `printenv`/`env` dump or `cat .env` (which spills EVERY server/app secret —
+ANTHROPIC_API_KEY, SECRET_ENCRYPTION_KEY, the user's provider keys — into the command output → build
+report, transcript, model context) was un-flagged. Added two HIGH rules (HIGH = hard-blocked by the
+dispatcher, not just annotated): (1) a standalone/piped/redirected `env`/`printenv` dump, with a
+negative-lookahead so the legitimate `env VAR=val command` prefix stays allowed; (2) reading a
+`.env`/`.env.*` file with any text tool (cat/less/head/tail/grep/awk/sed/…). High precision — `npm run
+env`, `cat package.json`, `cat environment.md` are untouched. The agent can still read a real config
+via the readFile tool (proper path); only the secret-spilling SHELL dump is blocked. Regression tests
++4 (bare dumps blocked, .env reads blocked, `env VAR=val cmd` + script-named-env + non-dotenv NOT
+flagged). Gate: fe tsc 0 · server tsc 0 · vitest 5548/5548 (553 files) · boot PASS.
+
+### Phase 2 (secrets containment) — COMPLETE. Summary of the 4 slices:
+- 2.1 (#1129): build report redacts secrets in every channel (save + output choke points).
+- 2.2 (#1130): encrypt() refuses the hardcoded fallback key in prod; decrypt() keeps it (compat).
+- 2.3 (#1131): LocalActuator refuses shell exec outside dev (root-cause guard in the exec choke point).
+- 2.4 (this): governance hard-blocks bare env-dump / cat .env.
+Safety rail unchanged (AGENTV3_PAID_PUBLIC OFF + allowlist ON until the Phase-5 re-audit is clean).
+Next: Phase 3 (IDOR — kill enumeration + ownership checks, without breaking Fix-26 anon restore).

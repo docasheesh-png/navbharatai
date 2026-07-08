@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
+import { SESSION_ID_RE } from '../lib/identityPolicy';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -411,8 +412,8 @@ export function needsFallbackConversationPersist(
 }
 
 /** A client-supplied session id must be a safe, bounded token (it becomes part of
- *  the workspace id, which is interpolated into sandbox paths/commands). */
-const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+ *  the workspace id, which is interpolated into sandbox paths/commands).
+ *  The single definition lives in the Phase-0 identity policy module (imported at the top). */
 
 /**
  * Derive the workspace id for a request. A stable `sessionId` → a stable workspace

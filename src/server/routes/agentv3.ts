@@ -1065,6 +1065,16 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
     add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));
   }
+  // Amazon Bedrock — Z.AI GLM 5 as a cheap-floor rung (admin 2026-07-08). Bedrock exposes its
+  // SERVERLESS models via an OpenAI-COMPATIBLE endpoint, so the SAME OpenAiToolRunner the GLM/KIMI
+  // rungs use works unchanged — no AWS SDK. Its own off-switch is the BEDROCK_API_KEY (the `add`
+  // helper skips a keyless rung), so this is inert until the admin sets the key in Cloud Run and
+  // selects it via AGENTV3_CHEAP_FLOOR=bedrock. Region default us-west-2 (where the admin enabled
+  // GLM 5); model default `zai.glm-5` — both env-overridable.
+  if (floor === 'bedrock') {
+    const region = (process.env.BEDROCK_REGION || 'us-west-2').trim();
+    add('BEDROCK-GLM', process.env.BEDROCK_API_KEY, `https://bedrock-runtime.${region}.amazonaws.com/openai/v1`, parseModelLadder(process.env.BEDROCK_GLM_MODEL, ['zai.glm-5']));
+  }
   return runners;
 }
 

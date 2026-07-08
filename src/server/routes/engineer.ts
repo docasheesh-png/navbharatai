@@ -14,6 +14,7 @@ import { DbProviderConfig } from '../EngineerAI/EngineerAITypes';
 import { backendScaffolder } from '../EngineerAI/BackendScaffolder';
 import { getSecretValue } from '../lib/secrets';
 import { consumeEngineerQuota } from '../lib/engineerQuota';
+import { verifiedIdentity } from '../lib/identityPolicy';
 import { Guider } from '../Guider/Guider';
 import { shouldConfirm } from '../Guider/GuiderGate';
 import { eventBus } from '../lib/eventBus';
@@ -53,6 +54,12 @@ export function registerEngineerRoutes(app: Express): void {
       if (!enabled || !shouldConfirm({ prompt: instruction, hasExistingFiles, isEdit: hasExistingFiles })) {
         return res.json({ confirm: false });
       }
+      // SECURITY Phase 1.2: the model call below spends NavBharatAI's budget, and this route was
+      // UNAUTHENTICATED with the paid branch reachable via a client-set `agentic:true`. Require a
+      // VERIFIED identity before spending; an unidentified caller degrades to confirm:false (the same
+      // no-op the client already handles when the guider flag is off) — no model is touched.
+      const verified = await verifiedIdentity(req);
+      if (!verified?.uid) return res.json({ confirm: false });
       // Bridge Engineer AI's AIRouter to the guider's ModelCall shape.
       const callModel = async (system: string, user: string) => (await router.route(user, system)).response.content;
       const guider = new Guider({ callModel, generate: async () => ({ ok: false, gradeContext: '' }) });
@@ -71,16 +78,25 @@ export function registerEngineerRoutes(app: Express): void {
       return;
     }
 
-    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig, userId } = req.body || {};
+    const { workspaceId, instruction, projectType, resumeSandboxId, attachedImage, dbConfig } = req.body || {};
     if (typeof workspaceId !== 'string' || !workspaceId || typeof instruction !== 'string' || !instruction) {
       res.status(400).json({ error: 'workspaceId and instruction are required.' });
       return;
     }
 
-    // Cost guard — enforce a per-user daily build quota (shared across instances
-    // via Firestore). Fails open on infra errors; anon users still hit the IP limiter.
-    if (typeof userId === 'string' && userId) {
-      const quota = await consumeEngineerQuota(userId);
+    // SECURITY Phase 1.2 (money + secret IDOR): resolve the caller's identity from the VERIFIED
+    // Firebase token — NEVER the spoofable body `userId`, which drove BOTH the daily quota AND the
+    // GitHub-token secret read below. The two exploits it closes:
+    //   • unlimited free builds: a fresh random body userId minted a fresh quota bucket every call,
+    //     each one spending E2B/platform money — now quota is keyed to the verified uid, which a
+    //     caller cannot change, so a signed-in user can never escape their own limit.
+    //   • cross-user secret leak: getSecretValue(bodyUserId, 'GITHUB_TOKEN') let anyone read ANY
+    //     user's stored GitHub token by claiming their id — now the token is read only for the
+    //     verified owner. A caller with no verified identity gets no per-user quota and no secret
+    //     (bounded by the IP rate limiter above; Phase 1.3/1.4 add durable anon spend limits).
+    const verifiedUid = (await verifiedIdentity(req))?.uid ?? null;
+    if (verifiedUid) {
+      const quota = await consumeEngineerQuota(verifiedUid);
       if (!quota.allowed) {
         res.status(429).json({ error: `Daily build limit reached (${quota.limit}/day). Please try again tomorrow or upgrade your plan.` });
         return;
@@ -138,9 +154,10 @@ export function registerEngineerRoutes(app: Express): void {
     // so the agent can clone/push to the user's repos. Falls back to process.env.
     // Best-effort: a lookup failure simply means no GitHub actions are available.
     let githubToken: string | undefined;
-    if (typeof userId === 'string' && userId) {
+    if (verifiedUid) {
       try {
-        githubToken = (await getSecretValue(userId, 'GITHUB_TOKEN')) || undefined;
+        // Read the GitHub token ONLY for the VERIFIED owner (Phase 1.2) — never a claimed body userId.
+        githubToken = (await getSecretValue(verifiedUid, 'GITHUB_TOKEN')) || undefined;
       } catch { /* non-fatal — agent works without GitHub */ }
     } else if (process.env.GITHUB_TOKEN) {
       githubToken = process.env.GITHUB_TOKEN;

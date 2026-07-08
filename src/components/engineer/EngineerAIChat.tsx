@@ -5,6 +5,7 @@ import {
   ExternalLink, RefreshCw, History, Rocket, Copy, Check, Database,
   ImagePlus, X, ChevronDown, ChevronUp, Bot,
 } from 'lucide-react';
+import { authJsonHeaders } from '../../lib/authHeaders';
 
 interface ChatMessage {
   id: string;
@@ -750,15 +751,16 @@ export function EngineerAIChat({ userId }: EngineerAIChatProps) {
     try {
       const res = await fetch('/api/engineer-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // SECURITY Phase 1.2: send the verified Firebase token so the server keys the daily quota
+        // AND the GitHub-token secret read to the REAL uid — not the spoofable body userId (which is
+        // no longer sent or trusted for either).
+        headers: await authJsonHeaders(),
         body: JSON.stringify({
           workspaceId: workspaceIdRef.current,
           instruction,
           resumeSandboxId: sandboxIdRef.current || undefined,
           attachedImage: sendImage || undefined,
           dbConfig: dbConfig || undefined,
-          // Phase 5 — lets the server read this user's GITHUB_TOKEN from Secrets & Keys.
-          userId: userId || undefined,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`API error: ${res.status}`);

@@ -9,6 +9,7 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, t
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError } from './sandboxHealth';
+import { resolveTemplateId } from './fullstackRouting';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
 // billing on abandoned sessions. Must be less than SANDBOX_TIMEOUT_MS so the
@@ -267,10 +268,13 @@ export class E2BActuator implements IEngineerActuator {
 
   /** Build the e2b SDK options, injecting the per-user key when set, and — A3 — the custom template
    *  when E2B_TEMPLATE_ID is configured (else omitted → E2B default base image, unchanged behavior).
+   *  AB-1: when `framework` is a polyglot backend (spring-boot/go) AND FULLSTACK_E2B_TEMPLATE_ID is
+   *  published, route that build onto the fullstack image (JDK 17 + Maven, Go, Mongo, Redis) instead;
+   *  otherwise resolveTemplateId falls back to the exact default behaviour (doubly env-gated no-op).
    *  SandboxOpts.template is ignored by Sandbox.connect (which reattaches by id), so sharing this
    *  across create+connect is harmless. */
-  private _opts(extra?: Record<string, unknown>): { timeoutMs: number; apiKey?: string; template?: string } {
-    const template = resolveE2bTemplate();
+  private _opts(extra?: Record<string, unknown>, framework?: string): { timeoutMs: number; apiKey?: string; template?: string } {
+    const template = resolveTemplateId(framework);
     return {
       timeoutMs: SANDBOX_TIMEOUT_MS,
       ...(this.apiKey ? { apiKey: this.apiKey } : {}),
@@ -357,7 +361,7 @@ export class E2BActuator implements IEngineerActuator {
     }
   }
 
-  private async getSandbox(workspaceId: string, resumeSandboxId?: string): Promise<Sandbox> {
+  private async getSandbox(workspaceId: string, resumeSandboxId?: string, framework?: string): Promise<Sandbox> {
     // Refresh activity FIRST so any in-flight operation protects its sandbox from
     // the idle sweep for the full IDLE_LIMIT_MS window.
     this._lastActivity.set(workspaceId, Date.now());
@@ -382,11 +386,11 @@ export class E2BActuator implements IEngineerActuator {
         sandbox = await withTimeout(Sandbox.connect(resumeSandboxId, this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.connect');
         await sandbox.setTimeout(SANDBOX_TIMEOUT_MS).catch(() => {});
       } catch {
-        sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
+        sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
         freshCreate = true;
       }
     } else {
-      sandbox = await withTimeout(Sandbox.create(this._opts()), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
+      sandbox = await withTimeout(Sandbox.create(this._opts(undefined, framework)), SANDBOX_CREATE_TIMEOUT_MS, 'Sandbox.create');
       freshCreate = true;
     }
     this.sandboxes.set(workspaceId, sandbox);
@@ -420,7 +424,10 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   async ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
-    const sandbox = await this.getSandbox(workspaceId, resumeSandboxId);
+    // AB-1: pass the framework so the FIRST sandbox create for this workspace can route a polyglot
+    // backend (spring-boot/go) onto the fullstack E2B image. Follow-up getSandbox() calls reuse the
+    // cached sandbox, so the framework only needs to be known here at creation time.
+    const sandbox = await this.getSandbox(workspaceId, resumeSandboxId, projectType);
     // Bound each setup file op (15-30s) so a stalled E2B can't hang workspace setup — this runs at
     // the very START of a build and a hang here means "stuck at 'setting up workspace…'" forever.
     const exists = await withTimeout(sandbox.files.exists(WORKSPACE_ROOT), 15_000, 'files.exists');

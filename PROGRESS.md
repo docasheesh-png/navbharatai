@@ -12136,3 +12136,37 @@ frameworks ONLY when the fullstack template is configured. Until then these prov
 but the agent won't select them (no behaviour change, safe).
 
 Gate: tsc fe+server 0, vitest 5493/5493 (8 new), build PASS, boot:check PASS. No hot files touched.
+
+---
+
+## 2026-07-08 — E2B fullstack step 3: gated actuator routing for spring-boot/go (AB-1)
+
+The FINAL piece that ACTIVATES multi-language builds. The Java/Go providers existed in the sandbox
+TemplateRegistry (prev PR) but every sandbox still launched from the DEFAULT E2B image (no JDK/Go runtime),
+so a spring-boot/go scaffold could be written but never compile or run. This PR routes those builds onto the
+published navbharat-fullstack-builder image.
+
+- NEW `fullstackRouting.ts` — pure, unit-tested helpers:
+  - `needsFullstackTemplate(framework)` → true only for `spring-boot`/`go` (case/space tolerant).
+  - `resolveTemplateId(framework, env)` → doubly env-gated: a fullstack framework AND FULLSTACK_E2B_TEMPLATE_ID
+    set → the fullstack image; else E2B_TEMPLATE_ID; else undefined (E2B default base = EXACT current
+    behaviour). A non-fullstack build can NEVER be routed onto the fullstack image.
+- `E2BActuator.ts` — tiny additive thread: `ensureWorkspace(workspaceId, projectType, resumeSandboxId)` now
+  passes `projectType` (the framework) → `getSandbox(…, framework?)` → `_opts(extra?, framework?)` →
+  `resolveTemplateId(framework)`. The framework only matters on the FIRST create for a workspace (follow-up
+  getSandbox() calls reuse the cached sandbox), so no other call site needed the framework. `resolveE2bTemplate`
+  kept (exported, still tested) as the base primitive resolveTemplateId falls through to.
+- `AppKnowledgeBase.ts` — new POLYGLOT BACKENDS capability bullet + java/go/spring-boot/mongo/redis keywords on
+  the v3.0 flagship entry, so every AI answers "can you build a Java/Go backend?" correctly.
+
+Doubly-gated no-op until BOTH conditions hold (framework is spring-boot/go AND FULLSTACK_E2B_TEMPLATE_ID set) —
+which is now true in prod (admin set the env var). So multi-language builds are LIVE. JS/Python/frontend builds
+are byte-identical (default sandbox unchanged).
+
+DEFERRED (separate follow-up, deliberately): make the agent actively OFFER spring-boot/go in its systemPrompt /
+ArchitectureSelector so users are told these frameworks exist (right now they work when explicitly requested).
+
+Gate: tsc fe+server 0, vitest 5501/5501 (8 new fullstackRouting tests), build PASS, boot:check PASS.
+Root-cause discipline: the routing is a single shared pure helper (not duplicated per call site), gated at the
+env-entry point, and locked with a regression test encoding every branch (fullstack+env, fullstack-no-env,
+non-fullstack, unset, blank-env).

@@ -12246,3 +12246,15 @@ hollow-uid refusal, capability exact-match (wrong/empty/prefix proofs denied), r
 never capability-gated, malformed anon ids rejected, enumeration rules, session-token shape.
 **Gate:** fe tsc 0 · server tsc 0 · full vitest · boot PASS. Safety rail intact: AGENTV3_PAID_PUBLIC
 stays OFF + allowlist ON until the Phase-5 re-audit is clean.
+
+## 2026-07-07 — SECURITY Phase 1.1 SHIPPED: retire the unauthenticated Pro v2 money-bleed routes
+
+Master Plan Phase 1 (money bleeding), slice 1 — the lowest-risk, highest-value cut. `/api/pro-chat`
+and `/api/pro-build` (routes/pro.ts) were UNAUTHENTICATED and spent NavBharatAI's OWN model budget on
+every call (`aiRouter.route(..., 'navbharat', ...)`) — any anonymous request could burn the platform
+account. Verified they have ZERO client callers (no `fetch('/api/pro-chat'|'/api/pro-build')` anywhere
+in the app; superseded by NavBharatAI Pro v3.0). Both handler bodies removed and replaced with an
+honest 410 Gone — no model is ever touched. Routes stay registered so path-based rate-limit config
+(isGuardedPath) is unaffected. Regression tests: +2 (each returns 410 without touching a model).
+Gate: fe tsc 0 · server tsc 0 · vitest 5515/5515 (549 files) · boot PASS. Safety rail unchanged
+(AGENTV3_PAID_PUBLIC OFF + allowlist ON until the Phase-5 re-audit is clean).

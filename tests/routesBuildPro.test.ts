@@ -135,6 +135,32 @@ describe('Build routes — cost/history attribution identity (security)', () => 
 
 // ── Pro routes ────────────────────────────────────────────────────────────────
 
+describe('Pro routes — legacy /api/pro-chat + /api/pro-build are RETIRED (Phase 1.1 money-bleed fix)', () => {
+  it('POST /api/pro-chat returns 410 Gone WITHOUT touching a model (was: unauthenticated platform-budget spend)', async () => {
+    const register = await importProRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/pro-chat');
+    expect(handler).toBeDefined();
+    const req = mockReq({ body: { message: 'build me something for free on your dime' } });
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(410);
+    expect(res.body?.code).toBe('gone');
+  });
+
+  it('POST /api/pro-build returns 410 Gone WITHOUT touching a model', async () => {
+    const register = await importProRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/pro-build');
+    expect(handler).toBeDefined();
+    const req = mockReq({ body: { message: 'free build please' } });
+    const res = mockRes();
+    await handler!(req, res);
+    expect(res.statusCode).toBe(410);
+    expect(res.body?.code).toBe('gone');
+  });
+});
+
 describe('Pro routes — /api/pro/code-review', () => {
   it('returns 400 when files are missing', async () => {
     const register = await importProRoutes();

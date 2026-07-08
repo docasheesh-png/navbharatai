@@ -26,19 +26,22 @@ function keyBuf(raw: string): Buffer {
   return Buffer.from(raw.padEnd(32, '0').slice(0, 32));
 }
 
-/** Resolve all available key versions from env + the latest (highest) version number. */
-function resolveKeys(): { keys: Record<number, Buffer>; latest: number } {
-  const legacy = process.env.SECRET_ENCRYPTION_KEY || (() => {
-    console.warn('[SECURITY] SECRET_ENCRYPTION_KEY is not set — using insecure fallback. Set this env var in production.');
-    return LEGACY_FALLBACK;
-  })();
-  const keys: Record<number, Buffer> = { 1: keyBuf(process.env.SECRET_KEY_V1 || legacy) };
+/** Resolve all available key versions from env + the latest (highest) version number.
+ *  `usingFallback` is true when v1 fell back to the HARDCODED key (no real key configured) — the
+ *  encrypt path refuses this in production (Phase 2.2); decrypt keeps it so legacy data still reads. */
+function resolveKeys(): { keys: Record<number, Buffer>; latest: number; usingFallback: boolean } {
+  const realLegacy = process.env.SECRET_ENCRYPTION_KEY || process.env.SECRET_KEY_V1;
+  const usingFallback = !realLegacy;
+  if (usingFallback) {
+    console.warn('[SECURITY] SECRET_ENCRYPTION_KEY is not set — using insecure fallback (dev/test only; encryption is refused in production). Set this env var in production.');
+  }
+  const keys: Record<number, Buffer> = { 1: keyBuf(process.env.SECRET_KEY_V1 || process.env.SECRET_ENCRYPTION_KEY || LEGACY_FALLBACK) };
   let latest = 1;
   for (let v = 2; v <= 16; v++) {
     const k = process.env[`SECRET_KEY_V${v}`];
     if (k) { keys[v] = keyBuf(k); latest = v; }
   }
-  return { keys, latest };
+  return { keys, latest, usingFallback: usingFallback && latest === 1 };
 }
 
 /** Current (highest) key version that encryption writes with. */
@@ -47,7 +50,14 @@ export function getLatestKeyVersion(): number {
 }
 
 export const encrypt = (text: string): string => {
-  const { keys, latest } = resolveKeys();
+  const { keys, latest, usingFallback } = resolveKeys();
+  // SECURITY Phase 2.2 — NEVER write a NEW secret under the hardcoded fallback key in production: it
+  // lives in source, so anyone with the repo could decrypt every stored secret. A misconfigured prod
+  // (no SECRET_ENCRYPTION_KEY / SECRET_KEY_V1) must FAIL LOUD here rather than silently persist an
+  // attacker-decryptable secret. Dev/test keep the fallback so local runs and unit tests work.
+  if (usingFallback && process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to encrypt a secret: SECRET_ENCRYPTION_KEY (or SECRET_KEY_V1) is not configured. Set it in the Cloud Run console before storing user secrets.');
+  }
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-256-cbc', keys[latest], iv);
   const encrypted = Buffer.concat([cipher.update(text), cipher.final()]);

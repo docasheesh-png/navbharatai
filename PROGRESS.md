@@ -12372,3 +12372,19 @@ Regression tests +3: 11 real secret shapes (OpenAI/GitHub/AWS/Stripe keys, TOKEN
 postgres:// + db:// creds) masked across all 8 channels; clean-report no-op; both save choke points
 verified to emit no raw secret. Gate: fe tsc 0 · server tsc 0 · vitest 5534/5534 (551 files) · boot PASS.
 Phase 2 remaining slices: 2.2 hardcoded-enc-fallback, 2.3 LocalActuator prod-guard, 2.4 printenv block.
+
+## 2026-07-07 — SECURITY Phase 2.2 SHIPPED: never encrypt a NEW secret under the hardcoded fallback key (prod)
+
+Master Plan Phase 2, slice 2. `secrets.ts` fell back to a HARDCODED key (`LEGACY_FALLBACK`, in source)
+when `SECRET_ENCRYPTION_KEY`/`SECRET_KEY_V1` were unset — so a misconfigured production would silently
+encrypt every user secret (GitHub tokens, provider keys) under a key ANYONE with the repo can read →
+full decrypt of all stored secrets. Fix: `encrypt()` now REFUSES the fallback in production (throws a
+loud, actionable error naming the missing env var) instead of persisting an attacker-decryptable
+secret. `decrypt()` KEEPS the fallback so any data already written under it (dev, or a past
+misconfigured run) still reads — decryption never breaks (admin ask: "purana data padhne ke liye compat
+rahega"). Dev/test keep the fallback for encrypt too (only production is hard-gated), so local runs and
+the existing encrypt/decrypt suite are unaffected. resolveKeys() now reports `usingFallback`; both
+paths read it. Regression tests +4: prod+no-key → encrypt throws (the vuln), prod+real-key works,
+dev+no-key works, and the COMPAT case (fallback-written data still decrypts in production).
+Gate: fe tsc 0 · server tsc 0 · vitest 5538/5538 (552 files) · boot PASS. Phase 2 remaining: 2.3
+LocalActuator prod-guard, 2.4 printenv/cat-.env governance block.

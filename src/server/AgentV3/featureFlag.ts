@@ -72,3 +72,20 @@ export function isAgentV3FreeUser(userId?: string | null, email?: string | null)
 export function isAgentV3PaidPublicEnabled(): boolean {
   return process.env.AGENTV3_PAID_PUBLIC === 'true';
 }
+
+/**
+ * SECURITY Phase 1.3 (admin-approved 2026-07-07) — must a v3.0 build be REFUSED for lack of a
+ * billable identity? A build spends NavBharatAI's paid model budget, so it may run ONLY for:
+ *   • a VERIFIED user (`verifiedUserId` present — billable / free-list-checkable), or
+ *   • the Fix-26 graceful degrade of an ALLOWLISTED identity (no verified uid, but the claimed
+ *     `email` matches the allowlist — a signed-in admin whose token briefly failed to verify, whom
+ *     we must not hard-block: "the app must never break").
+ * A genuinely anonymous caller (no verified uid AND no allowlist email match) is refused — this is
+ * the "bill-or-refuse" rule, and it is FORWARD-SAFE: in the public / empty-allowlist future it stops
+ * any drive-by anonymous caller from running unbounded FREE paid builds on the platform's account,
+ * while today (non-empty allowlist) it changes nothing for real users. PURE + unit-tested.
+ */
+export function buildRequiresSignIn(verifiedUserId: string | null, email: string | null): boolean {
+  if (verifiedUserId) return false;
+  return !matchesIdentityList(agentV3Allowlist(), null, email);
+}

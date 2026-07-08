@@ -12427,3 +12427,34 @@ Open (separate, needs evidence): the clone of the PRIVATE repo failing itself �
 request did not carry a `githubToken` with access to docasheesh-png/navbharatai (clone at agentv3.ts
 ~4116 uses `req.body.githubToken`; unauthenticated → private repo 404s). Honest user guidance: connect
 the account that owns the repo. Not blind-patched.
+
+---
+
+## 2026-07-08 — Mobile app: iOS/App Store support + dual-store publishing runbook
+
+Admin: "navbharatai ka hi app banana hai jo Play Store & App Store par post kar sakun". Investigated:
+Android was already ~80% done (Capacitor hosted mode, committed `android/` project, appId
+com.navbharatai.app), but iOS was absent and there was no publish guide. Admin chose "Dono stores ready +
+full runbook".
+
+- `@capacitor/ios@8.4.1` installed (matches core/android/cli). `capacitor.config.ts` extended with iOS
+  (hosted mode `iosScheme: 'https'`, `ios.contentInset: 'automatic'`). ios/ project is NOT committed — it's
+  generated on a Mac with `npx cap add ios` (an iOS build requires macOS + Xcode, Apple's hard rule).
+- npm scripts: `mobile:sync`, `mobile:android`, `mobile:ios`.
+- `MOBILE_PUBLISHING.md` — full end-to-end runbook: prerequisites/accounts, one-time icon+splash gen
+  (`npx @capacitor/assets`), signed Play AAB (keytool keystore → gradlew bundleRelease → Play Console),
+  iOS on a Mac (cap add ios → Xcode Archive → App Store Connect/TestFlight), the **payments policy**
+  (store billing required for in-app digital credits → v1 keeps purchases web-only, as already decided),
+  the 4.2 "just a website" rejection risk + how push notifications resolve it, and the store-assets
+  checklist. Honest about what only the admin can do (paid accounts, Mac, signing, submission, review).
+- `.gitignore`: android/keystore.properties, *.keystore, *.jks, /ios/, /assets/ (never commit signing
+  secrets / per-machine iOS project).
+- NOT added: `@capacitor/assets` (pulls `sharp` → libvips binary blocked by the sandbox proxy; it's a
+  local icon-gen tool, so the runbook invokes it via `npx` instead of adding a heavy repo dependency).
+
+Honest state: the Android app can be built + uploaded today on any machine with Android Studio; iOS needs a
+Mac. Repo now carries everything on the code side for BOTH stores; the remaining steps are account/signing/
+submission actions only the admin can perform (documented step by step). No AppKnowledgeBase entry — this is
+build/packaging infra, not an in-app user-facing navigation feature.
+
+Gate: server tsc 0, frontend tsc 0, vitest 5432/5432 PASS, build PASS, `npm ci` lock consistent.

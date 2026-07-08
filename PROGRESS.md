@@ -12225,3 +12225,24 @@ remains genuinely viable and proceeds with the honest note. `_npmInstall` alread
 (ci → install → --legacy-peer-deps retry) — the missing piece was honesty, not capability.
 In-browser white on the same session: awaiting the 25s watchdog's named error (open). Gate: frontend
 tsc 0, server tsc 0, vitest 5501/5501, boot PASS.
+
+## 2026-07-07 — SECURITY MASTER PLAN Phase 0 SHIPPED: the two-tier identity law, centralized + test-locked
+
+Admin-approved master plan ("one by one complete karo"), Phase 0 — the foundation, zero behavior
+change. New `src/server/lib/identityPolicy.ts`, THE single module every later phase wires routes to:
+- **TIER 1 (money/quota/billing/cross-user data)**: `verifiedIdentity()` + `moneyGate()` +
+  `requireVerifiedForMoney()` — identity ONLY from the verified Firebase token; a claimed body/query
+  userId is never identity; no token → 401 refuse, never "degrade and spend". VITEST seam: explicit
+  `x-test-verified-uid` header (tests opt in like real callers present tokens; claims still count for
+  nothing even in tests).
+- **TIER 2 (anon capability)**: `anonCapabilityOk()` — anon artifacts reachable ONLY via the exact
+  full unguessable sessionId (Fix 26's anon restore stays sacred); `listableBy()` — anon artifacts
+  are NEVER enumerable, a real user's artifact lists only for its verified owner (the class rule
+  behind Phase 3's enumeration fixes).
+- `SESSION_ID_RE` now has its single definition here (routes/agentv3.ts imports it — pure refactor).
+No route wires to the module yet (that is Phases 1/3) — nothing visible changes.
+**Tests (+12):** the spoofed-userId exploit scenario (claims → null identity → money gate refuses),
+hollow-uid refusal, capability exact-match (wrong/empty/prefix proofs denied), real-user workspaces
+never capability-gated, malformed anon ids rejected, enumeration rules, session-token shape.
+**Gate:** fe tsc 0 · server tsc 0 · full vitest · boot PASS. Safety rail intact: AGENTV3_PAID_PUBLIC
+stays OFF + allowlist ON until the Phase-5 re-audit is clean.

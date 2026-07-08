@@ -455,6 +455,23 @@ export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: str
   return workspaceId.startsWith(`agentv3-${uid}-`);
 }
 
+/**
+ * SECURITY Phase 3.2 — STRICTER ownership for PRIVATE READS (build report, decision trace). Unlike
+ * `workspaceOwnershipOk` (which allows a claimed-uid fallback so a token-blip user's BUILD never
+ * hard-breaks — "app must never break"), a private report READ requires the VERIFIED uid to own a
+ * real workspace. The claimed fallback is spoofable: the uid is embedded in the workspaceId, so a
+ * token-less caller who learned `agentv3-victim-{sid}` could claim `userId=victim` and pass
+ * workspaceOwnershipOk. Reads have no never-break constraint (the client force-refreshes its token
+ * and retries), so we can safely demand a verified match. Anon workspaces stay reachable by their
+ * unguessable sid (capability model — preserves Fix-26 report/trace access for degraded sessions).
+ * PURE + exported + unit-tested.
+ */
+export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId: string): boolean {
+  if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
+  if (workspaceId.startsWith('agentv3-anon-')) return true; // unguessable-sid capability (anon reads)
+  return !!verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid) && workspaceId.startsWith(`agentv3-${verifiedUid}-`);
+}
+
 async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
   const verifiedUid = await verifyFirebaseToken(req);
   // Claimed id may come from the JSON body (POST) or the query string (GET).
@@ -1633,6 +1650,19 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
+    // SECURITY Phase 3.2 (IDOR) — a build report is PRIVATE. Until now this route had NO ownership
+    // check: anyone who learned a workspaceId (e.g. via the now-closed enumeration leak) could
+    // download another user's full report — generated source, prompts, errors. Two guards:
+    //  • workspace-scoped read (history / session / buildId / latest-by-workspace): require ownership
+    //    of the workspaceId. assertWorkspaceOwner grants the anon-capability case too (an
+    //    agentv3-anon-* workspace is reachable by its unguessable id), so Fix-26 report downloads work.
+    //  • per-user fallback (no workspaceId → loadLatestForUser / in-memory): resolve the owner from the
+    //    VERIFIED token below, NEVER the query userId — else `?userId=victim` fetched victim's report.
+    const verifiedReportUid = await verifyFirebaseToken(req);
+    if (workspaceId && !verifiedWorkspaceReadOk(verifiedReportUid, workspaceId)) {
+      res.status(403).json({ error: 'This build report belongs to another account.' });
+      return;
+    }
     // History list (P-REPORT.4): "the report vanished when the next build started" — past builds'
     // reports are kept in a bounded per-workspace history, independent of whichever build most
     // recently overwrote the "latest" doc below. Metadata only (cheap); fetch one in full via buildId.
@@ -1663,7 +1693,7 @@ export function registerAgentV3Routes(app: Express): void {
       // (see below); the session download forgot it and 404'd → the client's blanket "No build report
       // yet". Mirror that per-user fallback so the whole-session download never falsely reports "none".
       if (byStart.size === 0) {
-        const perUser = await loadLatestForUser(userId).catch(() => null);
+        const perUser = await loadLatestForUser(verifiedReportUid).catch(() => null); // verified uid, not query (Phase 3.2)
         if (perUser) byStart.set(perUser.startedAt, perUser);
       }
       const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
@@ -1691,13 +1721,15 @@ export function registerAgentV3Routes(app: Express): void {
       // (the in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview
       // append). Fall back to the in-memory copy only when there is no workspaceId or no durable copy.
       if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
-      if (!report) report = lastDiagnostics.get(userId ?? 'anon');
+      // Per-user fallbacks are keyed to the VERIFIED uid (Phase 3.2) — never the spoofable query
+      // userId — so a caller can only ever reach their OWN latest report, not another account's.
+      if (!report && verifiedReportUid) report = lastDiagnostics.get(verifiedReportUid);
       // Durable per-USER fallback (P-REPORT.5): the workspaceId-keyed doc can be missing (a fresh
       // session mints a NEW workspaceId with no report yet) and the in-memory map is wiped by every
       // cold start. This Firestore doc keyed by userId alone holds the user's LAST settled build
       // report across cold starts / instance rotation / reloads / new sessions — so the "Build report"
       // never vanishes after a real build.
-      if (!report) report = await loadLatestForUser(userId).catch(() => null);
+      if (!report) report = await loadLatestForUser(verifiedReportUid).catch(() => null);
       if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
     }
     // SECURITY Phase 2.1 — redact secrets on the OUTPUT path too. Durable copies are already redacted
@@ -1727,6 +1759,13 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    // SECURITY Phase 3.2 (IDOR) — the decision trace reveals a build's intent/model/outcome and is
+    // owner-private. This route had NO ownership check; add the STRICT verified-owner read gate
+    // (anon-capability preserved — an agentv3-anon-* workspace is reachable by its unguessable id).
+    if (!verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)) {
+      res.status(403).json({ error: 'This decision trace belongs to another account.' });
+      return;
+    }
     const decisions = await getDecisionTrace(workspaceId);
     if (!decisions || decisions.length === 0) { res.status(404).json({ error: 'No decision trace yet — run a build first.' }); return; }
     res.json({ decisions });

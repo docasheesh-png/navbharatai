@@ -12498,3 +12498,32 @@ is unaffected (it lists its own records normally). Regression tests +2: the leak
 enumerate; a real user still lists; get(id) still works for an anon record) + the pure rule.
 Gate: fe tsc 0 · server tsc 0 · vitest 5552/5552 (553 files) · boot PASS. Phase 3 remaining: 3.2
 ownership checks on the diagnostics + decision-trace GET routes.
+
+## 2026-07-07 — SECURITY Phase 3.2 SHIPPED: ownership checks on diagnostics + decision-trace (Phase 3 COMPLETE)
+
+Master Plan Phase 3 (IDOR), final slice. The `/api/agentv3/diagnostics` and `/api/agentv3/decision-trace`
+GET routes had NO ownership check: anyone who learned a workspaceId (e.g. via the now-closed Phase-3.1
+enumeration leak) could download another user's FULL build report (generated source, prompts, errors,
+model I/O) or their decision trace. Two IDORs in diagnostics alone:
+- workspace-scoped read served ANY workspaceId with no owner check;
+- the per-user fallback (`loadLatestForUser`, in-memory `lastDiagnostics`) used the SPOOFABLE query
+  `userId`, so `?userId=victim` (no workspaceId) fetched the victim's latest report.
+
+Fix — new STRICTER pure `verifiedWorkspaceReadOk(verifiedUid, workspaceId)`: a private report/trace read
+requires the VERIFIED uid to own a real workspace. Unlike the shared `workspaceOwnershipOk` (which keeps
+a claimed-uid fallback so a token-blip BUILD never hard-breaks), these reads use NO claimed fallback —
+the uid is embedded in the workspaceId, so a claimed fallback would let a token-less attacker who learned
+`agentv3-victim-{sid}` pass by claiming `userId=victim`. Reads have no never-break constraint (the client
+force-refreshes + retries), so a verified match is safe to demand. Anon workspaces stay reachable by
+their unguessable sid (capability model — Fix-26 report/trace access preserved). Both routes now gate on
+it; the per-user fallbacks use the VERIFIED uid (verifyFirebaseToken), never the query userId — so a
+caller can only reach their OWN latest report. Regression tests +5 (token-less/other-user attacker
+refused, real owner allowed, anon-capability preserved, malformed ids rejected).
+Gate: fe tsc 0 · server tsc 0 · vitest 5556/5556 (553 files) · boot PASS.
+
+### Phase 3 (IDOR) — COMPLETE. Summary of the 2 slices:
+- 3.1 (#1136): the shared-anon bucket is never enumerable (killed the leak that unlocked the rest).
+- 3.2 (this): strict verified-owner gate on the diagnostics + decision-trace private reads.
+Note: exec/write routes already carry assertWorkspaceOwner (verified — audit-confirmed), so the plan's
+"exec/write require real sessionId" is already satisfied there; 3.2 closed the two READ routes that lacked it.
+Safety rail unchanged. Next: Phase 4 (preview isolation — one real admin decision to surface first).

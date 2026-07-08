@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -170,6 +170,32 @@ describe('workspaceOwnershipOk — fixes "Forbidden: this workspace does not bel
   it('rejects a malformed / non-agentv3 workspace id', () => {
     expect(workspaceOwnershipOk('user1', null, '')).toBe(false);
     expect(workspaceOwnershipOk('user1', null, 'not-a-workspace')).toBe(false);
+  });
+
+});
+
+// SECURITY Phase 3.2 (IDOR) — the diagnostics + decision-trace GET routes had NO ownership check;
+// anyone who learned a workspaceId (e.g. via the now-closed enumeration leak) could download another
+// user's full build report / decision trace. These reads now gate on the STRICTER
+// verifiedWorkspaceReadOk — verified-uid ONLY (no spoofable claimed-uid fallback, since the uid is
+// embedded in the workspaceId, so a claimed fallback would let a token-less attacker who learned
+// `agentv3-victim-{sid}` pass by claiming userId=victim). Anon reads stay by unguessable sid.
+describe('verifiedWorkspaceReadOk — Phase 3.2 strict owner gate for private report/trace reads', () => {
+  it('THE IDOR: a token-less attacker who learned the victim\'s workspaceId is REFUSED (no claimed fallback)', () => {
+    expect(verifiedWorkspaceReadOk(null, 'agentv3-victim-sess-9a8b7c')).toBe(false);
+    // even a DIFFERENT verified user cannot read the victim's real workspace
+    expect(verifiedWorkspaceReadOk('attacker', 'agentv3-victim-sess-9a8b7c')).toBe(false);
+  });
+  it('the real owner (verified) reads their own report/trace', () => {
+    expect(verifiedWorkspaceReadOk('victim', 'agentv3-victim-sess-9a8b7c')).toBe(true);
+  });
+  it('anon-capability preserved: an agentv3-anon-* workspace is reachable by its unguessable id (Fix 26)', () => {
+    expect(verifiedWorkspaceReadOk(null, 'agentv3-anon-62e136f0-0f0c')).toBe(true);
+    expect(verifiedWorkspaceReadOk('anyone', 'agentv3-anon-62e136f0-0f0c')).toBe(true);
+  });
+  it('rejects malformed / non-agentv3 ids', () => {
+    expect(verifiedWorkspaceReadOk('victim', '')).toBe(false);
+    expect(verifiedWorkspaceReadOk('victim', 'not-a-workspace')).toBe(false);
   });
 });
 

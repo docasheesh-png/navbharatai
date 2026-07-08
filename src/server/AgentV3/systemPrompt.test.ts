@@ -263,4 +263,20 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('UNTRUSTED_EXTERNAL_DATA');
     expect(p).toContain('exfiltrate');
   });
+
+  // AB-1: the polyglot backends must ship a scaffold hint that tells the agent the REAL run command
+  // (Maven / Go toolchain), not the default npm one — otherwise a Java/Go build is told `npm run dev`.
+  it('gives the Spring Boot scaffold hint the Maven run command + 0.0.0.0:8080 binding', () => {
+    const p = architectSystemPrompt('spring-boot');
+    expect(p).toContain('mvn spring-boot:run');
+    expect(p).toContain('8080');
+    expect(p).not.toContain('Run: `npm run dev` → PORT 5173'); // must NOT fall back to the vite hint
+  });
+
+  it('gives the Go scaffold hint the Go toolchain run command (not npm)', () => {
+    const p = architectSystemPrompt('go');
+    expect(p).toContain('go run main.go');
+    expect(p).toContain('8080');
+    expect(p).toContain('go mod tidy');
+  });
 });

@@ -12527,3 +12527,28 @@ Gate: fe tsc 0 · server tsc 0 · vitest 5556/5556 (553 files) · boot PASS.
 Note: exec/write routes already carry assertWorkspaceOwner (verified — audit-confirmed), so the plan's
 "exec/write require real sessionId" is already satisfied there; 3.2 closed the two READ routes that lacked it.
 Safety rail unchanged. Next: Phase 4 (preview isolation — one real admin decision to surface first).
+
+## 2026-07-07 — SECURITY Phase 4.1 SHIPPED: cross-origin isolation for the in-browser preview (admin chose "separate origin")
+
+Master Plan Phase 4 (preview isolation — the plan's one reserved admin decision; admin chose "separate
+preview origin, safest"). THE VULN: the in-browser preview renders UNTRUSTED generated/imported app
+HTML in an `<iframe srcDoc allow-same-origin>` — and because srcDoc inherits the PLATFORM origin, the
+previewed app could read navbharatai.com's own localStorage (the Firebase auth token) and touch the
+parent DOM. `allow-same-origin` couldn't just be dropped: the preview loads React via a dynamic
+ES-module `import()`, which an opaque origin blocks ("Missing dependency react"). (The live-server
+preview is already isolated — it points at the separate E2B sandbox origin.)
+
+FIX (env-gated, OFF BY DEFAULT): when `VITE_PREVIEW_ORIGIN` is set (a subdomain the admin points at the
+app), the in-browser iframe loads a tiny host page (`public/preview-sandbox.html`) on THAT origin and
+receives the built HTML via postMessage; the host writes it into its own document, so the app runs in
+the isolated origin — its localStorage is empty (no platform token) and the real https origin keeps
+`import()` working. The app's harness posts errors/edits to window.parent (the platform) directly, so
+no relay is needed; the host accepts HTML ONLY from the exact `?parent=` origin. With the env unset
+(today), the preview keeps its EXACT current same-origin srcDoc behaviour — zero change, safe under the
+allowlist. New pure `previewOrigin.ts` (normalizePreviewOrigin / buildPreviewSandboxUrl — never returns
+a same-origin url, so a misconfig can't create a false sense of safety) + `preview-sandbox.html` host +
+PreviewSurface branch (re-posts HTML on every change since a static-src iframe doesn't auto-reload like
+srcDoc). Regression tests +7 (off-by-default, isolated-host URL with pinned parent, the never-same-origin
+invariant, cross-subdomain). Gate: fe tsc 0 · server tsc 0 · vitest 5563/5563 (554 files) · boot PASS.
+ADMIN ACTION to activate: point a subdomain (e.g. preview.navbharatai.com) at the app + set
+VITE_PREVIEW_ORIGIN to it. Phase 4 remaining: 4.2 zip-bomb guard (extractZipProject).

@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NavBharatAI Preview Sandbox</title>
+<!--
+  SECURITY Phase 4 — cross-origin preview host (admin-approved 2026-07-07).
+
+  This page is served from the SEPARATE preview origin (VITE_PREVIEW_ORIGIN, a subdomain the admin
+  points at the app). The platform embeds it in an <iframe> and postMessages the built preview HTML;
+  this page writes that HTML into its OWN document, so the untrusted generated/imported app runs in
+  THIS (isolated) origin — its localStorage is empty, so it cannot read the platform's Firebase auth
+  token, and `allow-same-origin` on the embedding iframe is now safe. The app's own harness posts
+  errors/edits to window.parent (the platform) directly, so no relay is needed.
+
+  It accepts the HTML ONLY from the exact parent origin passed via `?parent=` — a page from any other
+  origin is ignored.
+-->
+<style>html,body{margin:0;height:100%;background:#fff}</style>
+</head>
+<body>
+<script>
+(function () {
+  // The one origin allowed to hand us HTML — passed by the platform when it builds the iframe src.
+  var allowedParent = '';
+  try { allowedParent = new URLSearchParams(location.search).get('parent') || ''; } catch (e) {}
+
+  var rendered = false;
+  window.addEventListener('message', function (e) {
+    // Only the exact embedding platform origin may inject preview HTML.
+    if (!allowedParent || e.origin !== allowedParent) return;
+    var data = e.data || {};
+    var html = data && data.__nbaiPreviewHtml;
+    if (typeof html !== 'string') return;
+    // Re-render on every message (the platform reloads the preview by re-posting the fresh HTML).
+    try {
+      document.open();
+      document.write(html);
+      document.close();
+      rendered = true;
+    } catch (err) {
+      try { window.parent.postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: 'sandbox host failed to render: ' + (err && err.message || err) }, '*'); } catch (e2) {}
+    }
+  }, false);
+
+  // Tell the platform we are ready to receive HTML (it may also just post on iframe load).
+  try { if (window.parent && allowedParent) window.parent.postMessage({ __nbaiPreviewSandboxReady: true }, allowedParent); } catch (e) {}
+})();
+</script>
+</body>
+</html>

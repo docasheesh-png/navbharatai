@@ -714,7 +714,24 @@ export class E2BActuator implements IEngineerActuator {
       if (depsStale) {
         stdout += '\n[health-check] installing dependencies (package.json changed)…';
         const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
-        stdout += dep.success ? ' done.' : ' (install reported errors — starting anyway).';
+        if (dep.success) {
+          stdout += ' done.';
+        } else {
+          // Fix 40 (CoreUI retest 2026-07-07: "sh: 1: vite: not found"): "starting anyway" after a
+          // FAILED install on a tree with NO node_modules is a guaranteed dead boot — the binaries
+          // don't exist, and npm install's OWN error (the real root cause) was never surfaced. On a
+          // first boot: stop honestly with the install log. On a warm tree (a re-install for a
+          // changed package.json), the old binaries still exist, so starting is genuinely viable.
+          const hasModules = await sandbox.commands
+            .run(`test -d ${WORKSPACE_ROOT}/node_modules/.bin && echo HAS_BIN`, { timeoutMs: 5000 })
+            .then((r) => r.stdout.includes('HAS_BIN')).catch(() => false);
+          if (!hasModules) {
+            const installTail = (dep.log || '').split('\n').slice(-25).join('\n');
+            stdout += ` FAILED — and node_modules is empty, so the dev server cannot start.\n[health-check] npm install's own error is the root cause:\n${installTail || '(npm produced no log — it may have been killed: out of memory or a network failure)'}`;
+            return { exitCode: 1, stdout, stderr };
+          }
+          stdout += ' (install reported errors — existing node_modules still present, starting anyway).';
+        }
       }
 
       // Pre-kill any stale dev server still holding this port from a previous

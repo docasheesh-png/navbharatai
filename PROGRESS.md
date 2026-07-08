@@ -12208,3 +12208,20 @@ crash. The Diagnose button now names the exact cause (DevServerRecovery classifi
 stack / port conflict / missing script honestly). NEXT EVIDENCE: admin taps Diagnose on that session and
 sends the detail log — the classifier line IS the root cause. No blind patch shipped (rule 4/6). The
 In-browser preview remains the E2B-independent path for the frontend ("e2b ke bina kaam chal jaye").
+
+## 2026-07-08 — AUTOPSY (CoreUI retest: "vite: not found") → Fix 40: first-boot install fail-open killed
+
+The retest died ONE LAYER DEEPER than last time — convergence, proven in the admin's own screenshots:
+Fix 32 delivered (`npm start` ran — the Missing-script class is dead), Fix 35's green dot + 99+ Files
+badge live, Diagnose named the exact culprit (`sh: 1: vite: not found`). New root: npm install FAILED
+(heavy CoreUI tree) and the health-check said "(install reported errors — starting anyway)" — the same
+fail-open family as Fix 38b. On a tree with NO node_modules, "starting anyway" is a guaranteed dead
+boot, and npm install's own error (the true root cause) was never surfaced.
+
+**Fix 40:** on a first boot (node_modules/.bin absent) a failed install now HARD-STOPS the launch and
+prints npm install's own log tail as the root cause (incl. an honest "npm produced no log — possibly
+OOM-killed / network" when empty). On a warm tree (re-install for a changed package.json) starting
+remains genuinely viable and proceeds with the honest note. `_npmInstall` already had the full ladder
+(ci → install → --legacy-peer-deps retry) — the missing piece was honesty, not capability.
+In-browser white on the same session: awaiting the 25s watchdog's named error (open). Gate: frontend
+tsc 0, server tsc 0, vitest 5501/5501, boot PASS.

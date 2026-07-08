@@ -12190,3 +12190,21 @@ truths, honestly separated:
   fallback) + Fix 26's candidates cover this; the admin's test likely ran on the pre-#1111 binary.
   Retest after deploy — the button now either delivers or names the exact reason.
 Gate: frontend tsc 0, server tsc 0, vitest 5481/5481, boot PASS.
+
+## 2026-07-07 — Field validation + open item: E2B dev-server dies ~2 min into a HEAVY app (own-app import)
+
+Admin imported navbharat-ai.zip (their whole platform — node-express, port 3000). The session report
+PROVES today's fixes live in the field: zip passed the new size guard; import+survey clean (no rebuild);
+**Fix 37 delivering** — `priorFailedBuilds: 0` and a `dataLossEvents[]` entry with the exact observed
+cause ("durable 59, sandbox listed 59, restoring 1 — mode: missing"). The remaining incident: the LIVE
+preview served ~2 minutes, then the dev process died INSIDE a still-running sandbox (E2B "Closed Port
+Error — connection refused on 3000").
+
+**Honest status (open item — evidence needed before any fix):** the death happened AFTER the turn ended,
+so this report cannot contain the killer's log. Likeliest classes for a heavy full-stack app in E2B:
+(1) OOM-kill (tsx + vite + firebase-admin in one sandbox), (2) the app's own boot/runtime crash when its
+real env (Firebase creds etc.) is absent in the sandbox — its APIs die on first touch, (3) a watcher
+crash. The Diagnose button now names the exact cause (DevServerRecovery classifies OOM "Killed" / crash
+stack / port conflict / missing script honestly). NEXT EVIDENCE: admin taps Diagnose on that session and
+sends the detail log — the classifier line IS the root cause. No blind patch shipped (rule 4/6). The
+In-browser preview remains the E2B-independent path for the frontend ("e2b ke bina kaam chal jaye").

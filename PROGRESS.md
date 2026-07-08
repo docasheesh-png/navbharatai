@@ -12403,3 +12403,27 @@ asserts the guard before every command, so no call site can bypass it. Regressio
 refused, dev/test/unset allowed, opt-in + VITEST override, the throw names the sandbox vars).
 Gate: fe tsc 0 · server tsc 0 · vitest 5544/5544 (553 files) · boot PASS. Phase 2 remaining: 2.4
 governance block for bare printenv / cat .env.
+
+## 2026-07-08 — AUTOPSY (GitHub-import report) → Fix 41: after a failed import, the AI must not re-ask for the URL it was given
+
+Report: user asked "Import https://github.com/docasheesh-png/navbharatai and survey it." The clone
+FAILED (private repo / the connected account lacked access), the platform correctly said "I couldn't
+clone <url> — connect the owning GitHub account (⚙ → GitHub)". Then the architect LLM turn ran and
+replied "I don't see a repository URL in your message — please share it" — contradicting the platform
+15 seconds later, looking amnesiac/unprofessional. The report proves it: the llmCall prompt was the
+"REQUIREMENTS: brief/open-ended, no project exists" phase with NO context that a URL was tried and
+failed.
+
+**Root cause:** the failed-import fact was emitted to the USER (narration) but never carried into the
+subsequent architect prompt, so the model had no idea a URL had been provided and failed. **Fix:** a
+`failedImport {url, reason}` flag set in all three failure branches (bad-url / clone-skipped / error),
+hoisted to turn scope, injected into the architect system prompt via new pure `failedImportPromptNote`
+— it names the exact URL + real reason and instructs the model to acknowledge the failure and point to
+⚙ → GitHub, never to re-ask for the URL. Empty string on non-failed turns (zero change to normal
+builds). Tests: +2 (the exact report URL/reason; empty on no-failure). Gate: frontend tsc 0, server
+tsc 0, vitest 5546/5546, boot PASS.
+
+Open (separate, needs evidence): the clone of the PRIVATE repo failing itself — likely the build
+request did not carry a `githubToken` with access to docasheesh-png/navbharatai (clone at agentv3.ts
+~4116 uses `req.body.githubToken`; unauthenticated → private repo 404s). Honest user guidance: connect
+the account that owns the repo. Not blind-patched.

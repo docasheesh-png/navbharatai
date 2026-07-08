@@ -3,7 +3,7 @@ export interface FrameworkMeta {
   name: string;
   description: string;
   category: 'frontend' | 'fullstack' | 'backend' | 'static';
-  language: 'TypeScript' | 'JavaScript' | 'Python';
+  language: 'TypeScript' | 'JavaScript' | 'Python' | 'Java' | 'Go';
   color: string;
   iconChar: string;
   devPort: number;
@@ -194,6 +194,29 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     iconChar: '🌶',
     devPort: 5000,
     startCommand: 'bash dev.sh',
+  },
+  // JVM / Go backends — run on the fullstack E2B template (JDK 17 + Maven, Go 1.23, Mongo, Redis)
+  {
+    id: 'spring-boot',
+    name: 'Spring Boot',
+    description: 'Java 17 + Maven REST backend — enterprise-grade, runs on the fullstack sandbox',
+    category: 'backend',
+    language: 'Java',
+    color: '#6DB33F',
+    iconChar: '🍃',
+    devPort: 8080,
+    startCommand: 'mvn spring-boot:run',
+  },
+  {
+    id: 'go',
+    name: 'Go',
+    description: 'Go 1.23 net/http backend — fast, statically compiled, runs on the fullstack sandbox',
+    category: 'backend',
+    language: 'Go',
+    color: '#00ADD8',
+    iconChar: '🐹',
+    devPort: 8080,
+    startCommand: 'go run main.go',
   },
   // Static
   {

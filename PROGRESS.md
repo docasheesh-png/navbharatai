@@ -12246,3 +12246,31 @@ hollow-uid refusal, capability exact-match (wrong/empty/prefix proofs denied), r
 never capability-gated, malformed anon ids rejected, enumeration rules, session-token shape.
 **Gate:** fe tsc 0 · server tsc 0 · full vitest · boot PASS. Safety rail intact: AGENTV3_PAID_PUBLIC
 stays OFF + allowlist ON until the Phase-5 re-audit is clean.
+---
+
+## 2026-07-08 — E2B fullstack step 4: OFFER spring-boot/go (surface + real run commands) (AB-1)
+
+Completes the E2B fullstack track. The routing (prev PR) put a spring-boot/go build on the right sandbox,
+but the agent's scaffold hint had NO spring-boot/go entry — so `frameworkScaffoldHint('spring-boot')` fell
+back to the vite-react hint and told the agent to run `npm run dev` on a Java app (a real-feature gap: the
+build could not actually run end-to-end). Fixed the whole surface:
+- `systemPrompt.ts` FRAMEWORK_HINTS — added spring-boot (`mvn spring-boot:run` → 8080, @RestController under
+  src/main/java/…, Mongo/Redis pre-installed) and go (`go run main.go` → 8080, `go mod tidy`, Mongo/Redis
+  pre-installed). This is the piece that makes a Java/Go build actually run.
+- `FrameworkRegistry.ts` (backend) — added spring-boot (Java, port 8080, mvn spring-boot:run) + go (Go, port
+  8080, go run main.go); extended the language union to include 'Java' | 'Go'.
+- `FrameworkPicker.tsx` (frontend) — added Spring Boot 🍃 + Go 🐹 to the picker so users can SELECT them.
+- Tests: architectSystemPrompt('spring-boot') asserts the Maven command + 8080 + no vite fallback;
+  architectSystemPrompt('go') asserts the Go toolchain command; new FrameworkRegistry.test.ts asserts both
+  entries' run metadata + id uniqueness.
+
+Now Java (Spring Boot) + Go are fully wired end-to-end: offered in the picker, routed to the fullstack sandbox
+(JDK 17 + Maven, Go 1.23, Mongo, Redis), and the agent is told the correct build/run commands. In prod
+FULLSTACK_E2B_TEMPLATE_ID is set, so this is real (rule 2). AppKnowledgeBase POLYGLOT BACKENDS entry (prev PR)
+already documents it for every AI.
+
+NOTE (honest debt, rule 4 step 2): the frontend FrameworkPicker keeps its OWN duplicated FRAMEWORKS list
+(drift risk vs the backend FrameworkRegistry) — pre-existing, not introduced here. A future PR should centralize
+them into one shared source. Recorded so it isn't forgotten.
+
+Gate: tsc fe+server 0, vitest 5506/5506 (5 new), build PASS, boot:check PASS.

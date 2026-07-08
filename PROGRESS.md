@@ -12114,3 +12114,25 @@ follow-up routing PR reads FULLSTACK_E2B_TEMPLATE_ID.
 
 ADMIN NEXT STEP: GitHub → Actions → "Build E2B Builder Template" → Run workflow → kind=fullstack → publish the
 image → later set Cloud Run FULLSTACK_E2B_TEMPLATE_ID. Then the routing PR (next) activates multi-language builds.
+
+---
+
+## 2026-07-08 — E2B fullstack step 2: Java (Spring Boot) + Go template providers (AB-1)
+
+The navbharat-fullstack-builder E2B image is now PUBLISHED (build run #9 success; admin set Cloud Run
+FULLSTACK_E2B_TEMPLATE_ID). So the multi-language providers are now REAL/verifiable (a JDK/Go runtime
+exists to run them). Added them to the LIVE sandbox TemplateRegistry:
+- SpringBootProvider.ts — minimal runnable Spring Boot (Java 17): pom.xml (spring-boot-starter-web),
+  Application.java (@SpringBootApplication), HelloController.java (@RestController), application.properties
+  binding server.address=0.0.0.0 + server.port=${PORT:8080} (literal — Spring resolves at runtime; E2B
+  preview needs the 0.0.0.0 bind).
+- GoProvider.ts — go.mod (go 1.23) + main.go (net/http server on 0.0.0.0:$PORT, hello handler).
+- Registered 'spring-boot' + 'go' in the sandbox TemplateRegistry. 8 new live-copy tests
+  (tests/templateProviders.test.ts) assert the key files + the 0.0.0.0/$PORT binding + registry resolution.
+
+DEFERRED (next PR, deliberately): the GATING — the actuator route that (a) picks FULLSTACK_E2B_TEMPLATE_ID
+when a build's framework is spring-boot/go (or needs Mongo/Redis), and (b) makes the agent OFFER these
+frameworks ONLY when the fullstack template is configured. Until then these providers exist in the registry
+but the agent won't select them (no behaviour change, safe).
+
+Gate: tsc fe+server 0, vitest 5493/5493 (8 new), build PASS, boot:check PASS. No hot files touched.

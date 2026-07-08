@@ -16,6 +16,7 @@
  *   Returns 429 when over limit. VITEST-skipped.
  */
 import type { Request, Response, NextFunction } from 'express';
+import { consumeDurableRate } from './DurableRateLimit';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -153,12 +154,22 @@ export interface RateLimitOptions {
   anon: number;
   /** Noun shown in the 429 message (e.g. 'builds', 'requests'). Default 'requests'. */
   noun?: string;
+  /**
+   * SECURITY Phase 1.4 — GLOBAL anonymous ceiling: the max anonymous requests per hour across the
+   * WHOLE platform (all IPs, all instances), enforced via one shared durable bucket. Caps abuse a
+   * per-IP limit can't (a botnet rotating IPs). Omit to disable the global ceiling.
+   */
+  anonGlobalPerHour?: number;
 }
 
 /**
- * Generic per-hour rate limiter. Authenticated callers (valid Bearer token) are keyed
- * by uid and get the `authed` limit; anonymous callers are keyed by IP and get the
- * `anon` limit. VITEST-skipped. Returns 429 when over the limit.
+ * Generic per-hour rate limiter. Authenticated callers (valid Bearer token) are keyed by uid and get
+ * the `authed` limit; anonymous callers are keyed by IP and get the `anon` limit.
+ *
+ * SECURITY Phase 1.4 — the count is now DURABLE (Firestore, shared across Cloud Run instances and
+ * surviving cold starts) so the limit actually holds; the in-memory bucket stays as a fast
+ * per-instance pre-filter. Both layers FAIL-OPEN (a Firestore hiccup never blocks a real request).
+ * VITEST-skipped. Returns 429 when over the limit.
  */
 export function rateLimiter(opts: RateLimitOptions) {
   const noun = opts.noun ?? 'requests';
@@ -177,17 +188,43 @@ export function rateLimiter(opts: RateLimitOptions) {
       }
     }
 
+    // Layer 1 — fast in-memory pre-filter (per instance). A local over-limit short-circuits the
+    // durable read entirely (cheap denial for a hammering client already hot on THIS instance).
     const bucket = _rateBuckets.get(key);
-    if (!bucket || now - bucket.windowStart > RATE_WINDOW_MS) {
+    if (bucket && now - bucket.windowStart <= RATE_WINDOW_MS) {
+      if (bucket.count >= limit) {
+        res.status(429).json({ error: `Rate limit exceeded: max ${limit} ${noun} per hour. Try again later.` });
+        return;
+      }
+      bucket.count++;
+    } else {
       _rateBuckets.set(key, { count: 1, windowStart: now });
-      next();
+    }
+
+    // Layer 2 — DURABLE cross-instance enforcement (bounded + fail-open). This is what makes the
+    // limit real on min-instances=0. A global anon ceiling caps total anonymous volume platform-wide.
+    const durable = await Promise.race([
+      (async () => {
+        const per = await consumeDurableRate(opts.name, uid ?? (req.ip || 'anon'), limit, RATE_WINDOW_MS, now);
+        if (!per.allowed) return { ok: false, limit: per.limit };
+        if (!uid && opts.anonGlobalPerHour && opts.anonGlobalPerHour > 0) {
+          const global = await consumeDurableRate(opts.name, 'GLOBAL_ANON', opts.anonGlobalPerHour, RATE_WINDOW_MS, now);
+          if (!global.allowed) return { ok: false, limit: global.limit, global: true };
+        }
+        return { ok: true, limit };
+      })(),
+      new Promise<{ ok: true }>((resolve) => setTimeout(() => resolve({ ok: true }), 2_000)),
+    ]).catch(() => ({ ok: true as const }));
+
+    if (!durable.ok) {
+      const isGlobal = 'global' in durable && durable.global;
+      res.status(429).json({
+        error: isGlobal
+          ? `The platform's hourly limit for anonymous ${noun} has been reached. Sign in or try again later.`
+          : `Rate limit exceeded: max ${'limit' in durable ? durable.limit : limit} ${noun} per hour. Try again later.`,
+      });
       return;
     }
-    if (bucket.count >= limit) {
-      res.status(429).json({ error: `Rate limit exceeded: max ${limit} ${noun} per hour. Try again later.` });
-      return;
-    }
-    bucket.count++;
     next();
   };
 }
@@ -263,9 +300,10 @@ export function requireRole(...allowed: UserRole[]) {
   };
 }
 
-/** Hot build endpoint (`/chat`): 10 builds/hr authed, 5/hr anonymous. */
+/** Hot build endpoint (`/chat`): 10 builds/hr authed, 5/hr per anon IP, and a durable 100/hr GLOBAL
+ *  anon ceiling so a botnet rotating IPs still can't exceed the whole-platform anonymous budget. */
 export function buildRateLimiter() {
-  return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds' });
+  return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds', anonGlobalPerHour: 100 });
 }
 
 /**

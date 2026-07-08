@@ -12326,3 +12326,28 @@ force-refreshes its token on this path, so a real signed-in user's transient bli
 Regression tests +4: verified always allowed, Fix-26 token-blip allowed, the bleed (genuine anon +
 public empty-allowlist) refused. No chat-route handler test exists to break (only isGuardedPath config).
 Gate: fe tsc 0 · server tsc 0 · vitest 5524/5524 (550 files) · boot PASS. Safety rail unchanged.
+
+## 2026-07-07 — SECURITY Phase 1.4 SHIPPED: durable, cross-instance rate limiting + global anon ceiling (Phase 1 COMPLETE)
+
+Master Plan Phase 1, final slice. The rate limiter was IN-MEMORY per-instance (`_rateBuckets` Map),
+so on Cloud Run `min-instances=0` it reset on every cold start and never shared across instances — a
+caller bypassed the limit by landing on a fresh instance or waiting for a recycle. New
+`src/server/lib/DurableRateLimit.ts` (windowed Firestore counter, same pattern as consumeEngineerQuota:
+VITEST-skip, bounded, FAIL-OPEN) makes the limit REAL across instances + restarts. Wired into
+`rateLimiter()` as Layer 2 behind the fast in-memory pre-filter (Layer 1); both fail-open so a
+Firestore hiccup never blocks a legitimate request. Added a GLOBAL anon ceiling
+(`anonGlobalPerHour`): one shared durable bucket caps total anonymous volume platform-wide (build =
+100/hr), so a botnet rotating IPs still can't exceed the whole-platform anon budget — the per-IP limit
+alone couldn't stop that. Regression tests +7: window bucketing (deterministic, rolls over, sanitized
+ids, shared GLOBAL_ANON bucket), decideRate boundary, and the bounded/fail-open consume contract.
+Gate: fe tsc 0 · server tsc 0 · vitest 5531/5531 (551 files) · boot PASS.
+
+### Phase 1 (money bleeding) — COMPLETE. Summary of the 4 slices:
+- 1.1 (#1124): retired unauthenticated Pro v2 chat/build routes (platform-budget spend, no caller).
+- 1.2 (#1126): Engineer AI quota + GitHub-token secret keyed to the VERIFIED uid (killed unlimited-
+  builds AND a cross-user secret-leak IDOR in one root-cause fix).
+- 1.3 (#1127): anon v3.0 build is bill-or-refuse (forward-safe: closes the public-future anon-spend
+  hole; Fix-26 token-blip admin preserved).
+- 1.4 (this): durable cross-instance rate limits + global anon ceiling.
+Safety rail unchanged (AGENTV3_PAID_PUBLIC OFF + allowlist ON until the Phase-5 re-audit is clean).
+Next: Phase 2 (secrets containment).

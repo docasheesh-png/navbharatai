@@ -33,6 +33,9 @@ const FRAMEWORKS: FrameworkOption[] = [
   { id: 'python-fastapi', name: 'FastAPI', description: 'Async Python + OpenAPI', category: 'backend', language: 'Python', color: '#009688', iconChar: '🐍' },
   { id: 'django', name: 'Django', description: 'Batteries-included ORM', category: 'fullstack', language: 'Python', color: '#44B78B', iconChar: '🎸' },
   { id: 'flask', name: 'Flask', description: 'Lightweight micro-framework', category: 'backend', language: 'Python', color: '#ffffff', iconChar: '🌶' },
+  // JVM / Go backends — run on the fullstack sandbox (JDK 17 + Maven, Go 1.23, Mongo, Redis)
+  { id: 'spring-boot', name: 'Spring Boot', description: 'Java 17 + Maven REST API', category: 'backend', language: 'Java', color: '#6DB33F', iconChar: '🍃' },
+  { id: 'go', name: 'Go', description: 'Fast net/http backend', category: 'backend', language: 'Go', color: '#00ADD8', iconChar: '🐹' },
   // Static
   { id: 'static', name: 'Static HTML', description: 'Plain HTML/CSS/JS, no build', category: 'static', language: 'JavaScript', color: '#E34F26', iconChar: '🌐' },
 ];

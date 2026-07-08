@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled } from './featureFlag';
+import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled, buildRequiresSignIn } from './featureFlag';
 
 const save = { ...process.env };
 afterEach(() => {
@@ -52,5 +52,28 @@ describe('agentV3FreeList / isAgentV3FreeUser (paid-public FREE-list)', () => {
     process.env.AGENTV3_FREE_LIST = 'real@admin.com';
     expect(isAgentV3FreeUser(null, null)).toBe(false);
     expect(isAgentV3FreeUser('', '')).toBe(false);
+  });
+});
+
+describe('buildRequiresSignIn — Phase 1.3 bill-or-refuse (anon paid build is refused, Fix 26 preserved)', () => {
+  it('a VERIFIED user is always allowed to build (never refused)', () => {
+    process.env.AGENTV3_ALLOWLIST = 'admin@x.com';
+    expect(buildRequiresSignIn('any-verified-uid', null)).toBe(false);
+    process.env.AGENTV3_ALLOWLIST = ''; // even in the public/empty-allowlist future
+    expect(buildRequiresSignIn('paying-user-uid', 'someone@else.com')).toBe(false);
+  });
+
+  it('FIX 26 preserved: a token-blip of an allowlisted identity (no uid, claimed email matches) is allowed', () => {
+    process.env.AGENTV3_ALLOWLIST = 'aashishcpmt09@gmail.com, doc.asheesh@icloud.com';
+    expect(buildRequiresSignIn(null, 'DOC.ASHEESH@ICLOUD.COM')).toBe(false); // case-insensitive email match
+  });
+
+  it('THE BLEED: a genuinely anonymous caller is REFUSED — including the public empty-allowlist future', () => {
+    process.env.AGENTV3_ALLOWLIST = 'admin@x.com';
+    expect(buildRequiresSignIn(null, null)).toBe(true);              // no uid, no email
+    expect(buildRequiresSignIn(null, 'stranger@nowhere.com')).toBe(true); // email not on the allowlist
+    process.env.AGENTV3_ALLOWLIST = ''; // public: empty allowlist matches nobody → anon refused
+    expect(buildRequiresSignIn(null, 'drive-by@public.com')).toBe(true);
+    expect(buildRequiresSignIn(null, null)).toBe(true);
   });
 });

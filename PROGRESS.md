@@ -12309,3 +12309,20 @@ path. A caller with no verified identity keeps working, bounded by the existing 
 identity → confirm:false, model never touched). Existing engineer route tests unaffected (they return
 at 400/503 before the quota code).
 Gate: fe tsc 0 · server tsc 0 · vitest 5521/5521 (550 files) · boot PASS. Safety rail unchanged.
+
+## 2026-07-07 — SECURITY Phase 1.3 SHIPPED: anon v3.0 build is bill-or-refuse (forward-safe money bleed close)
+
+Master Plan Phase 1, slice 3. A v3.0 build spends NavBharatAI's paid Anthropic budget. While the
+allowlist is non-empty (today), `isAgentV3Enabled` already 404s a genuine anon — but in the PUBLIC /
+empty-allowlist future, `isAgentV3Enabled(null,null)` returns true, so any drive-by anonymous caller
+could run UNBOUNDED FREE paid builds on the platform account. New pure `buildRequiresSignIn(userId,
+email)` in featureFlag.ts + a guard in POST /api/agentv3/chat (after the enable gate, before
+flushHeaders → clean 401 `code:'signin'`, never a broken stream): a build runs ONLY for a VERIFIED
+user, OR the Fix-26 graceful degrade of an ALLOWLISTED identity (no verified uid but the claimed email
+is on the allowlist — a token-blip admin we must not hard-block). A genuinely anonymous caller (no uid,
+no allowlist email match) is refused. Forward-safe: changes NOTHING for real users today (non-empty
+allowlist), and closes the anon-spend hole the moment the app opens up. The client already
+force-refreshes its token on this path, so a real signed-in user's transient blip self-heals on retry.
+Regression tests +4: verified always allowed, Fix-26 token-blip allowed, the bleed (genuine anon +
+public empty-allowlist) refused. No chat-route handler test exists to break (only isGuardedPath config).
+Gate: fe tsc 0 · server tsc 0 · vitest 5524/5524 (550 files) · boot PASS. Safety rail unchanged.

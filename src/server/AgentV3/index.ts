@@ -16,6 +16,7 @@ export {
   agentV3FreeList,
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
+  buildRequiresSignIn,
 } from './featureFlag';
 export { decideAffordability } from './Affordability';
 export type { AffordabilityAction, AffordabilityInput, AffordabilityDecision } from './Affordability';

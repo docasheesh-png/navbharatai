@@ -71,6 +71,7 @@ import {
   classifyIntent,
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
+  buildRequiresSignIn,
   estimateBuildCost,
   readWalletBalanceInr,
   firestoreWalletReader,
@@ -2758,6 +2759,19 @@ export function registerAgentV3Routes(app: Express): void {
     const email = verified ? verified.email : (typeof req.body?.email === 'string' ? req.body.email : null);
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    // SECURITY Phase 1.3 (bill-or-refuse): a build spends NavBharatAI's paid model budget, so a
+    // caller with NO billable identity may not run one. A verified user is fine; the Fix-26 graceful
+    // degrade of an allowlisted identity (token-blip admin whose claimed email is on the allowlist)
+    // is fine; a genuinely anonymous caller is refused with an honest 401. Runs before flushHeaders,
+    // so this is a clean HTTP error, not a broken stream. The client force-refreshes its token on
+    // this path, so a real signed-in user's transient blip self-heals on retry.
+    if (buildRequiresSignIn(userId, email)) {
+      res.status(401).json({
+        error: 'Please sign in to build with NavBharatAI Pro v3.0 — builds run on a real account so usage can be tracked.',
+        code: 'signin',
+      });
       return;
     }
     if (!process.env.ANTHROPIC_API_KEY) {

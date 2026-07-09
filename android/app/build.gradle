@@ -4,7 +4,11 @@ android {
     namespace = "com.navbharatai.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.navbharatai.app"
+        // Play Store package name (PERMANENT once published) — admin-registered the Play Console app
+        // as com.navbharat.ai (2026-07-09), so the .aab's applicationId must match it. The `namespace`
+        // above stays com.navbharatai.app (the internal code package) — applicationId ≠ namespace is a
+        // standard, valid Android setup, so no Java source files move.
+        applicationId "com.navbharat.ai"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Play Store requires a HIGHER versionCode on every upload — the CI passes ANDROID_VERSION_CODE

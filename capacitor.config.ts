@@ -15,7 +15,11 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // payments policy). The iOS native project (ios/) is generated on a Mac with `npx cap add ios` — it
 // is NOT committed here because an iOS build requires macOS + Xcode (Apple's hard requirement).
 const config: CapacitorConfig = {
-  appId: 'com.navbharatai.app',
+  // Store package/bundle id (PERMANENT once published). Admin registered the Play Console app as
+  // com.navbharat.ai (2026-07-09), so this matches it across Android + iOS. The Android `namespace`
+  // (internal code package) remains com.navbharatai.app in android/app/build.gradle — that is fine,
+  // applicationId ≠ namespace is standard.
+  appId: 'com.navbharat.ai',
   appName: 'NavBharatAI',
   webDir: 'dist',
   server: {

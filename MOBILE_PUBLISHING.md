@@ -12,7 +12,7 @@ the web. This is a genuine, store-installable app — not a bookmark.
 
 ## 0. What is already done in this repo ✅
 
-- `capacitor.config.ts` — appId `com.navbharatai.app`, appName `NavBharatAI`, hosted mode, iOS + Android.
+- `capacitor.config.ts` — appId `com.navbharat.ai`, appName `NavBharatAI`, hosted mode, iOS + Android.
 - `@capacitor/core`, `@capacitor/android`, `@capacitor/ios`, `@capacitor/cli` — all installed (v8.4.1).
 - `android/` — the full native Android project is committed and ready to build.
 - `public/manifest.json` + mobile meta tags — PWA basics in place.
@@ -136,11 +136,11 @@ npx cap open ios         # opens ios/App/App.xcworkspace in Xcode
 
 In Xcode:
 1. Select the **App** target → **Signing & Capabilities** → check "Automatically manage signing" → pick
-   your **Team** (your Apple Developer account). Bundle identifier = `com.navbharatai.app`.
+   your **Team** (your Apple Developer account). Bundle identifier = `com.navbharat.ai`.
 2. Set the **App Icon** in `Assets.xcassets` (from §2), a version, and a build number.
 3. **Product → Archive** → when it finishes, **Distribute App → App Store Connect → Upload**.
 4. In https://appstoreconnect.apple.com → **My Apps → +** → create "NavBharatAI" with bundle id
-   `com.navbharatai.app`. Attach the uploaded build.
+   `com.navbharat.ai`. Attach the uploaded build.
 5. Fill listing (screenshots for 6.7" + 6.1" iPhone are mandatory — see §6), privacy details, and submit.
 6. Use **TestFlight** first to test on a real device before submitting for review.
 

@@ -30,9 +30,9 @@ export function registerProfessionalsRoutes(app: Express): void {
       res.status(404).json({ error: `Unknown professional: ${req.params.id}` });
       return;
     }
-    const { message, history, attachments } = req.body || {};
-    const rawAttachments: RawAttachment[] = Array.isArray(attachments)
-      ? attachments
+    const { message, history, fileAttachments } = req.body || {};
+    const rawAttachments: RawAttachment[] = Array.isArray(fileAttachments)
+      ? fileAttachments
           .filter((a: any) => a && typeof a.base64 === 'string' && a.base64 && typeof a.type === 'string')
           .slice(0, MAX_PROFESSIONAL_ATTACHMENTS)
           .map((a: any) => ({ name: String(a.name || 'file'), type: String(a.type), base64: String(a.base64) }))

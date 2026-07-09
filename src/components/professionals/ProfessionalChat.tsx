@@ -20,11 +20,10 @@ export interface ProfessionalChatConfig {
 interface Msg { role: 'user' | 'assistant'; content: string; }
 
 const MAX_FILES = 4;
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file (matches the other chat surfaces)
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
 const ACCEPTED_TYPES = 'image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css';
 
-/** Read a file to { name, type, base64 } (base64 WITHOUT the data: prefix). Large images are
- *  downscaled client-side so uploads stay fast and vision models get a reasonable size. */
+/** Read a file to { name, type, base64 }. Large images are downscaled client-side. */
 async function fileToAttachment(file: File): Promise<{ name: string; type: string; base64: string }> {
   const readRaw = () => new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -83,7 +82,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     setMessages(next);
     setLoading(true);
     try {
-      const attachments = await Promise.all(sendFiles.map(fileToAttachment));
+      const fileAttachments = await Promise.all(sendFiles.map(fileToAttachment));
       const history = next.filter((m) => m.content !== config.welcome).slice(-10);
       const res = await fetch(config.endpoint || `/api/professional/${config.id}/chat`, {
         method: 'POST',
@@ -92,7 +91,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           message: content,
           history,
           userId,
-          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(fileAttachments.length > 0 ? { fileAttachments } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));

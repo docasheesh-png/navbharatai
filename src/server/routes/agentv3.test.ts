@@ -336,7 +336,7 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'glm';
     process.env.GLM_API_KEY = 'glm-test-key';
     const runners = cheapBuildFloorRunners();
-    // default ladder = ['glm-4.7','glm-4.6'] → two runners, both named GLM (clean deliveredVia split)
+    // default ladder = ['glm-5.2','glm-4.7'] → two runners, both named GLM (clean deliveredVia split)
     expect(runners.map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
   it('wires KIMI as a 2-rung ladder by default when flag=kimi AND key present', () => {

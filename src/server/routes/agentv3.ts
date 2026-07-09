@@ -1060,7 +1060,7 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // on paid GLM/KIMI calls. 'glm'/'kimi' still pin to ONE (explicit single-provider testing/rollback);
   // 'both'/'on' enable the "friends" pair.
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
-    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-4.7', 'glm-4.6']));
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-5.2', 'glm-4.7']));
   }
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
     add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));

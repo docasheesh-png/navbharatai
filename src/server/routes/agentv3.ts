@@ -1046,12 +1046,12 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // 2-consecutive-timeout BENCH lives in makeMultiProviderTurnRunner. All env-tunable.
   const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
   const floorMaxPromptChars = Number(process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS) || 45_000;
-  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[]): void => {
+  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}): void => {
     if (!apiKey) return; // no key → a second, independent off-switch
     for (const model of models) {
       try {
         const client = new OpenAI({ apiKey, baseURL, timeout: floorTimeoutMs, maxRetries: 0 });
-        runners.push({ name, runner: sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }), floorMaxPromptChars) });
+        runners.push({ name, runner: sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars) });
       } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
     }
   };
@@ -1060,7 +1060,9 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // on paid GLM/KIMI calls. 'glm'/'kimi' still pin to ONE (explicit single-provider testing/rollback);
   // 'both'/'on' enable the "friends" pair.
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
-    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-5.2', 'glm-4.7']));
+    // thinkingControl: the app-level thinking toggle (same one that drives Claude's adaptive
+    // thinking) is forwarded to GLM's reasoning switch — one setting controls every module.
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-5.2', 'glm-4.7']), { thinkingControl: true });
   }
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
     add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));

@@ -31,6 +31,12 @@ export interface OpenAiChatClient {
         tools?: OpenAiTool[];
         tool_choice?: 'auto' | 'none';
         max_tokens?: number;
+        /**
+         * GLM (Z.AI) reasoning-mode switch — an OpenAI-compatible EXTENSION field.
+         * Only sent when the runner is configured with `thinkingControl` (the GLM
+         * rung), so standard OpenAI providers (Grok, etc.) never receive it.
+         */
+        thinking?: { type: 'enabled' | 'disabled' };
       }): Promise<OpenAiCompletionLike>;
     };
   };
@@ -41,6 +47,14 @@ export interface OpenAiToolRunnerOptions {
   model?: string;
   /** Default max output tokens when a turn does not specify one. */
   defaultMaxTokens?: number;
+  /**
+   * When true, this runner speaks the GLM (Z.AI) `thinking` dialect: the turn's
+   * `thinking` boolean (the SAME user-facing toggle that drives Claude's adaptive
+   * thinking) is translated to GLM's `thinking: { type: 'enabled' | 'disabled' }`
+   * request field. One toggle, every module. Left off for Grok/other OpenAI-style
+   * providers that would reject the extension field.
+   */
+  thinkingControl?: boolean;
 }
 
 /**
@@ -57,6 +71,12 @@ export class OpenAiToolRunner implements TurnRunner {
     const tools = toolDefsToOpenAI(params.tools);
     const messages = transcriptToOpenAI(params.messages, params.system);
 
+    // GLM rung only: forward the user's thinking toggle to GLM's reasoning switch, so
+    // the one app-level thinking setting controls this module too — not just Claude.
+    const thinking = this.opts.thinkingControl && typeof params.thinking === 'boolean'
+      ? { thinking: { type: params.thinking ? 'enabled' as const : 'disabled' as const } }
+      : {};
+
     const completion = await this.client.chat.completions.create({
       // The OpenAI-compatible provider has its own model ids, so an explicit option
       // model wins over the Anthropic model id the loop passes for Claude.
@@ -64,6 +84,7 @@ export class OpenAiToolRunner implements TurnRunner {
       messages,
       ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
       max_tokens: params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
+      ...thinking,
     });
 
     const result = parseOpenAiCompletion(completion);

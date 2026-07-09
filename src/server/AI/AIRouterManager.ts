@@ -2,6 +2,7 @@ import { AnthropicProvider } from './Router/providers/AnthropicProvider';
 import { GeminiProvider } from './Router/providers/GeminiProvider';
 import { VertexProvider } from './Router/providers/VertexProvider';
 import { GrokProvider } from './Router/providers/GrokProvider';
+import { GlmProvider } from './Router/providers/GlmProvider';
 import { AIProvider } from './Router/ProviderTypes';
 import { AIRouter } from './Router/AIRouter';
 
@@ -38,10 +39,21 @@ export class AIRouterManager {
 
   static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; }
 
-  // FREE: Vertex (3 models) → Gemini (2 models) → Grok. Claude NEVER used in free.
+  // FREE: GLM-flash (free leader) → Vertex (3 models) → Gemini (2 models) → Grok.
+  // Claude NEVER used in free.
   private static buildFree(): AIRouter {
     const router = new AIRouter("free");
-    console.log('[ROUTER_MGR] Building FREE chain: Vertex×3 → Gemini×2 → Grok');
+    console.log('[ROUTER_MGR] Building FREE chain: GLM-flash(free) → Vertex×3 → Gemini×2 → Grok');
+
+    // Free, fast leader: GLM-4.7-Flash ($0 in/out on Z.AI). Self-gates on GLM_API_KEY
+    // (healthCheck) so this is inert until the key is set; on failure/rate-limit the
+    // router falls through to the paid providers below, so reliability is unchanged.
+    try {
+      const glm = new GlmProvider();
+      glm.priority = 0;
+      router.registerProvider(glm);
+      console.log('[ROUTER_MGR] FREE: GLM-flash registered as free chain leader');
+    } catch {}
 
     // Current Gemini models only — gemini-2.0-flash / gemini-1.5-* are RETIRED and 404
     // at the provider, making those fallback slots dead weight that only added latency.

@@ -1,7 +1,7 @@
 export interface AIProviderResponse {
   content: string;
   latencyMs: number;
-  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO';
+  provider: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM';
   model: string;
 }
 
@@ -14,7 +14,7 @@ export interface ProviderTelemetry {
 }
 
 export interface AIProvider {
-  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO';
+  name: 'VERTEX' | 'GEMINI' | 'ANTHROPIC' | 'GROK' | 'PRO' | 'GLM';
   priority: number;
   /**
    * When true, this provider is a LAST-RESORT fallback: in a raced router

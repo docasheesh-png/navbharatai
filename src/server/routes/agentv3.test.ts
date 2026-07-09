@@ -314,7 +314,7 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
 });
 
 describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF (instant rollback)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL'];
   let saved: Record<string, string | undefined>;
   beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -343,6 +343,22 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
     process.env.KIMI_API_KEY = 'kimi-test-key';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
+  });
+  // Amazon Bedrock GLM 5 cheap-floor rung (admin 2026-07-08) — reached via Bedrock's OpenAI-compatible
+  // endpoint, same OpenAiToolRunner as GLM/KIMI. Off until BOTH the flag=bedrock AND BEDROCK_API_KEY.
+  it('flag=bedrock with NO BEDROCK_API_KEY → [] (second off-switch, like GLM/KIMI)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'bedrock';
+    expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+  it('flag=bedrock AND BEDROCK_API_KEY → a single BEDROCK-GLM rung (default model zai.glm-5)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'bedrock';
+    process.env.BEDROCK_API_KEY = 'bedrock-test-key';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['BEDROCK-GLM']);
+  });
+  it('bedrock is NOT enabled by the GLM/KIMI "on"/"both" pair (explicit opt-in only)', () => {
+    process.env.BEDROCK_API_KEY = 'bedrock-test-key';
+    process.env.AGENTV3_CHEAP_FLOOR = 'on'; // enables the GLM/KIMI friends, not Bedrock
+    expect(cheapBuildFloorRunners().every((r) => r.name !== 'BEDROCK-GLM')).toBe(true);
   });
   it('a single GLM_MODEL override → one rung (backward-compatible with the run-sheet)', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'glm';

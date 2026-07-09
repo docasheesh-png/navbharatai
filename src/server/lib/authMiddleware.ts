@@ -17,6 +17,7 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { consumeDurableRate } from './DurableRateLimit';
+import { loadFirebaseAdmin } from './firebaseAdminModule';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -32,10 +33,14 @@ export function adminAppOptions(env: NodeJS.ProcessEnv = process.env): { project
 async function getAdminAuth(): Promise<import('firebase-admin/auth').Auth | null> {
   if (process.env.VITEST) return null;
   try {
-    const admin = await import('firebase-admin');
+    const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
     return admin.auth();
-  } catch {
+  } catch (err) {
+    // HONESTY (2026-07-09): this catch used to swallow the error silently, so an
+    // 'admin-unavailable' fallback had detail:null and the real init failure was invisible
+    // for months. Log it so a broken admin SDK can never again hide behind a null.
+    console.error('[AUTH] getAdminAuth failed to initialize firebase-admin:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -250,10 +255,11 @@ export function isRoleAllowed(role: UserRole, allowed: UserRole[]): boolean {
 async function getAdminFirestore(): Promise<import('firebase-admin/firestore').Firestore | null> {
   if (process.env.VITEST) return null;
   try {
-    const admin = await import('firebase-admin');
+    const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
     return admin.firestore();
-  } catch {
+  } catch (err) {
+    console.error('[AUTH] getAdminFirestore failed to initialize firebase-admin:', err instanceof Error ? err.message : err);
     return null;
   }
 }

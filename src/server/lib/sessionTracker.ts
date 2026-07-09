@@ -21,6 +21,7 @@
  * The pure fingerprint + evaluation functions are exported and unit-tested.
  */
 import crypto from 'crypto';
+import { loadFirebaseAdmin } from './firebaseAdminModule';
 
 /** Stable short hash of a value (truncated SHA-256 hex) — we store hashes, never raw IPs (privacy). */
 export function hashValue(value: string): string {
@@ -80,7 +81,7 @@ interface StoredDevice extends DeviceFingerprint { firstSeen: string; lastSeen: 
 async function getAdminFirestore(): Promise<import('firebase-admin/firestore').Firestore | null> {
   if (process.env.VITEST) return null;
   try {
-    const admin = await import('firebase-admin');
+    const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     return admin.firestore();
   } catch {

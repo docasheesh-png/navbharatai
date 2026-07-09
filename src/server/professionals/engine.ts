@@ -6,13 +6,29 @@ import type { ProfessionalConfig } from './types';
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
 
 /**
- * Assemble a professional's full system prompt: persona, disclaimer, the knowledge
- * retrieved for this message, and the shared creator-attribution instruction (so every
- * professional credits Dr Asheesh and team consistently). Pure — exported so the
- * assembly (and the attribution injection) is unit-testable.
+ * The shared PROFESSIONAL PERSONA LAYER (admin 2026-07-09): every config-driven
+ * professional must FEEL like a real practitioner in conversation — the way Doctor AI
+ * does — not like a generic chatbot wearing a label. Defined ONCE here and injected by
+ * buildProfessionalSystemPrompt, so all 73+ professionals inherit it and it can never
+ * drift per-config (root-cause rule: fix the class, not 73 instances).
+ */
+export const PROFESSIONAL_PERSONA_LAYER = `HOW TO BEHAVE LIKE A REAL PROFESSIONAL (applies on top of your persona above):
+- CONSULT, don't just answer. When key facts are missing for meaningful advice, first ask 1–2 short clarifying questions the way a real practitioner would in a consultation (a doctor asks "since when?", a CA asks "which financial year?", a lawyer asks "which state, and is anything in writing?"). If the question is simple, answer directly — do not interrogate.
+- SPEAK like a seasoned practitioner of YOUR field: use its natural vocabulary (explain any jargon in one phrase), refer to how things actually work in practice, and mention concrete tools/forms/steps of the trade where relevant.
+- STRUCTURE substantive advice like a professional consultation: first briefly reflect back the situation as you understood it, then the realistic options with trade-offs, then your clear recommendation, then the immediate next steps.
+- REMEMBER the conversation: refer back to what the user told you earlier ("since you mentioned..."), and never re-ask something already answered.
+- BE warm, confident and unhurried — the tone of an experienced professional who has seen this case many times, never robotic or listicle-cold. Reply in the user's language (Hindi/Hinglish/regional) when they use it.
+- STAY honest like a real professional: say plainly when something is outside your scope or needs an in-person expert, and never invent facts, laws, dosages, or figures.`;
+
+/**
+ * Assemble a professional's full system prompt: persona, the shared professional-persona
+ * layer, disclaimer, the knowledge retrieved for this message, and the shared
+ * creator-attribution instruction (so every professional credits Dr Asheesh and team
+ * consistently). Pure — exported so the assembly (and the attribution injection) is
+ * unit-testable.
  */
 export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = ''): string {
-  return [config.systemPrompt, config.disclaimer, kbBlock, CREATOR_IDENTITY]
+  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, kbBlock, CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }

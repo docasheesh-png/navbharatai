@@ -1,10 +1,10 @@
 /**
- * Tests for CoderAgent (step-focus delegation) and buildEngineerRouter (factory).
+ * Tests for CoderAgent (step-focus delegation). CoderAgent stays live as part of the
+ * ProEngineRunner closure (legacy /api/build pipeline); the retired Engineer AI router
+ * factory and its tests were deleted in the 2026-07-09 Engineer AI cleanup.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { CoderAgent, STEPS_PER_PLAN_STEP } from '../src/server/EngineerAI/CoderAgent';
-import { buildEngineerRouter } from '../src/server/EngineerAI/EngineerRouterFactory';
-import { AIRouter } from '../src/server/AI/Router/AIRouter';
 import type { EngineerTask, SharedLoopState } from '../src/server/EngineerAI/EngineerAITypes';
 import type { PlanStep } from '../src/server/EngineerAI/PlannerAgent';
 
@@ -106,24 +106,5 @@ describe('CoderAgent.runStep', () => {
     expect(capturedInstruction).toBe('specific instruction');
     expect(capturedShared).toBe(shared);
     expect(capturedMaxSteps).toBe(7);
-  });
-});
-
-// ── buildEngineerRouter ───────────────────────────────────────────────────────
-
-describe('buildEngineerRouter', () => {
-  it('returns an AIRouter instance', () => {
-    const router = buildEngineerRouter();
-    expect(router).toBeInstanceOf(AIRouter);
-  });
-
-  it('does not throw even when API keys are missing', () => {
-    expect(() => buildEngineerRouter()).not.toThrow();
-  });
-
-  it('returns a new router on each call', () => {
-    const r1 = buildEngineerRouter();
-    const r2 = buildEngineerRouter();
-    expect(r1).not.toBe(r2);
   });
 });

@@ -55,9 +55,11 @@ import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
 import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
-// RETIRED — Engineer AI routes (/api/engineer-*). Unregistered in the v3.0 cutover so the old
-// Engineer AI engine can NEVER run (no route → no invocation → no file creation). Replaced by Pro v3.0.
-// import { registerEngineerRoutes } from './src/server/routes/engineer';
+// DELETED — Engineer AI routes (/api/engineer-*) were unregistered in the v3.0 cutover and the
+// dead files (routes/engineer.ts, EngineerAIChat.tsx, EngineerRouterFactory, WebAgentLoop, legacy
+// LocalActuator) were removed on 2026-07-09. Replaced by Pro v3.0. NOTE: the rest of
+// src/server/EngineerAI/ (ProEngineRunner + agent loop + actuators) is still LIVE — it powers the
+// legacy /api/build pipeline (routes/build.ts) and must not be deleted with it.
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
 import { registerZipRoutes } from './src/server/routes/zip';
@@ -500,9 +502,8 @@ setInterval(() => {
   registerSdaRoutes(app);
   registerProfessionalsRoutes(app);
   registerRepoAnalystRoutes(app);
-  // RETIRED — Engineer AI (/api/engineer-*) is unregistered in the v3.0 cutover. With no route
-  // the old engine can never be invoked → can never run or create files. Replaced by Pro v3.0.
-  // registerEngineerRoutes(app);
+  // DELETED — Engineer AI (/api/engineer-*) was unregistered in the v3.0 cutover and its dead
+  // files were removed on 2026-07-09 (see the import-block note above). Replaced by Pro v3.0.
 
   // AgentV3 (Vargen 3.0) — v3.0 agent engine, strangler-fig P0 skeleton.
   // Flag-gated (AGENTV3_ENABLED, default OFF); imports nothing from the live

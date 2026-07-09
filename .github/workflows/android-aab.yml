@@ -1,0 +1,110 @@
+# Build the SIGNED NavBharatAI Android App Bundle (.aab) for Google Play upload.
+#
+# WHY A WORKFLOW: building + signing an .aab needs the Android SDK + Gradle (GitHub's ubuntu runners
+# ship them; the Claude web sandbox does not) AND your release keystore — a permanent secret that must
+# live only with you. This workflow reads the keystore from GitHub repo SECRETS (never committed,
+# never seen by anyone), so the .aab is produced without ever exposing the signing key in source.
+#
+# ONE-TIME SETUP (only you can do this — the keystore is your app's cryptographic identity FOREVER):
+#   1. Create an upload keystore on your machine (keep the .jks + passwords safe; if lost you can
+#      never update the app on Play):
+#        keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
+#          -validity 10000 -alias navbharatai
+#   2. Base64-encode it:  base64 -w0 upload-keystore.jks > keystore.b64   (macOS: base64 -i upload-keystore.jks -o keystore.b64)
+#   3. Repo → Settings → Secrets and variables → Actions → add 4 secrets:
+#        ANDROID_KEYSTORE_BASE64     = contents of keystore.b64
+#        ANDROID_KEYSTORE_PASSWORD   = the store password you chose
+#        ANDROID_KEY_ALIAS           = navbharatai   (the -alias above)
+#        ANDROID_KEY_PASSWORD        = the key password (same as store password unless you set one)
+#
+# HOW TO RUN:
+#   Repo → Actions → "Build Android App Bundle (.aab, signed)" → Run workflow (main).
+#   When it finishes, download the `navbharatai-release-aab` artifact → upload app-release.aab to
+#   Play Console (first time: create the app, enroll in Play App Signing — recommended).
+
+name: Build Android App Bundle (.aab, signed)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail EARLY and honestly if the signing secrets are not set — a Play Store .aab MUST be signed,
+      # so we never hand back an unsigned bundle that would be rejected on upload.
+      - name: Pre-flight — require signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$ANDROID_KEYSTORE_BASE64" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -z "$ANDROID_KEYSTORE_PASSWORD" ] && missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -z "$ANDROID_KEY_ALIAS" ] && missing="$missing ANDROID_KEY_ALIAS"
+          [ -z "$ANDROID_KEY_PASSWORD" ] && missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing signing secret(s):$missing — add them in Settings → Secrets and variables → Actions (see the header of this workflow file for the one-time keystore setup)."
+            exit 1
+          fi
+          echo "All signing secrets present."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 21 (Gradle/AGP requirement)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web bundle
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Decode the release keystore from the secret
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+
+      - name: Build the SIGNED release bundle (.aab)
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Play requires a strictly-increasing versionCode per upload — use the run number so every
+          # build is uploadable without editing build.gradle. versionName stays human-readable.
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+          ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Always remove the decoded keystore (never leaves the runner)
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
+
+      - name: Upload the .aab artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: navbharatai-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
+
+      - name: Summary
+        run: |
+          echo "## NavBharatAI signed .aab built ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the **navbharatai-release-aab** artifact above and upload \`app-release.aab\` to Google Play Console." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Hosted mode: the app loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

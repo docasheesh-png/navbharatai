@@ -12586,3 +12586,25 @@ Four merged/shipping changes from this session (all admin-directed):
 Next up (admin plan, in flight): Part B — a shared "professional persona layer" in
 buildProfessionalSystemPrompt so all 73 config professionals feel like real professionals
 (name intro, clarifying-questions-first, structured advice), like Doctor AI does.
+
+## 2026-07-08 — Signed Play Store .aab via GitHub Actions (Android publishing Phase 2)
+
+Admin: "mujhe .aab file chahiye jo Play Store me upload kar saku." The existing android-app.yml only
+built an UNSIGNED debug APK (its own header noted "Phase 2: release signing + .aab" was pending). Built
+Phase 2:
+- `android/app/build.gradle` — a `release` signingConfig + conditional `signingConfig` on the release
+  buildType, both driven ONLY by env (ANDROID_KEYSTORE_FILE/PASSWORD, ANDROID_KEY_ALIAS/PASSWORD). When
+  absent (local / debug workflow) the release build is simply left unsigned — purely additive, no crash.
+  versionCode/versionName are now env-overridable (Play requires a strictly-increasing versionCode).
+- New workflow `.github/workflows/android-aab.yml` (manual dispatch): pre-flight guard FAILS loudly if
+  the 4 signing secrets are missing (never hands back an unsigned .aab that Play would reject), then
+  npm build → cap sync → decode the keystore from ANDROID_KEYSTORE_BASE64 secret → `gradlew
+  bundleRelease` (signed) → upload the `navbharatai-release-aab` artifact → always delete the decoded
+  keystore. versionCode = run number (auto-increments per upload).
+- `MOBILE_PUBLISHING.md` §3.0 — the easy CI path documented (keytool → base64 → 4 GitHub secrets → Run
+  workflow → download .aab), with the manual Android-Studio path kept as §3.1–3.3.
+The signing keystore is the app's permanent identity — it lives ONLY as the admin's GitHub repo secret,
+never committed (already gitignored: *.jks / *.keystore), never in source, never seen by anyone.
+Gate: fe tsc 0 · server tsc 0 · vitest 5571/5571 (556 files) · web build (npm run build) PASS.
+ADMIN ACTION: create an upload keystore (keytool), add ANDROID_KEYSTORE_BASE64 + *_PASSWORD + *_ALIAS
+as repo secrets, then Actions → "Build Android App Bundle (.aab, signed)" → Run → download the .aab.

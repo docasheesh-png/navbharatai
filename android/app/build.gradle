@@ -7,8 +7,10 @@ android {
         applicationId "com.navbharatai.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Play Store requires a HIGHER versionCode on every upload — the CI passes ANDROID_VERSION_CODE
+        // (e.g. the run number) so re-uploads bump automatically; local builds default to 1.
+        versionCode System.getenv("ANDROID_VERSION_CODE") ? System.getenv("ANDROID_VERSION_CODE").toInteger() : 1
+        versionName System.getenv("ANDROID_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +18,29 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // RELEASE SIGNING (Play Store .aab) — the keystore + passwords come ONLY from the CI env, which
+    // reads them from GitHub repo secrets (never committed, never in source). When they are absent
+    // (local build / the debug workflow) the release build is simply left UNSIGNED — no crash — so
+    // this is purely additive. See .github/workflows/android-aab.yml + MOBILE_PUBLISHING.md.
+    signingConfigs {
+        release {
+            def ksFile = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Sign ONLY when a keystore is supplied (the CI release build); otherwise unsigned.
+            if (System.getenv("ANDROID_KEYSTORE_FILE")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

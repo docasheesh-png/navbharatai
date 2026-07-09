@@ -74,6 +74,29 @@ describe('OpenAiToolRunner', () => {
     await expect(runner.runTurn(baseParams())).rejects.toThrow('grok 503');
   });
 
+  it('does NOT send a thinking field by default (standard OpenAI providers like Grok)', async () => {
+    const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
+    const runner = new OpenAiToolRunner(client, { model: 'grok-4' });
+    await runner.runTurn(baseParams({ thinking: true }));
+    expect(create.mock.calls[0][0].thinking).toBeUndefined();
+  });
+
+  it('with thinkingControl, forwards the turn thinking toggle to GLM (enabled/disabled)', async () => {
+    const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
+    const runner = new OpenAiToolRunner(client, { model: 'glm-5.2', thinkingControl: true });
+    await runner.runTurn(baseParams({ thinking: true }));
+    expect(create.mock.calls[0][0].thinking).toEqual({ type: 'enabled' });
+    await runner.runTurn(baseParams({ thinking: false }));
+    expect(create.mock.calls[1][0].thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('with thinkingControl but no thinking flag on the turn, sends no thinking field', async () => {
+    const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
+    const runner = new OpenAiToolRunner(client, { model: 'glm-5.2', thinkingControl: true });
+    await runner.runTurn(baseParams({ thinking: undefined }));
+    expect(create.mock.calls[0][0].thinking).toBeUndefined();
+  });
+
   it('uses the turn maxTokens, else the option default', async () => {
     const { client, create } = clientReturning({ choices: [{ message: { role: 'assistant', content: 'x' }, finish_reason: 'stop' }] });
     const runner = new OpenAiToolRunner(client, { defaultMaxTokens: 4096 });

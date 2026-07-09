@@ -64,6 +64,26 @@ files into `android/app/src/main/res/` and the Xcode asset catalog.)
 
 ## 3. Ship to Google Play (Android)
 
+### ⭐ 3.0 EASIEST — build the signed `.aab` in GitHub Actions (no Android Studio needed)
+A ready workflow **`.github/workflows/android-aab.yml`** builds the **signed** `.aab` on GitHub's
+runners, so you don't need Android Studio / the SDK on your own machine — you only supply your
+keystore ONCE as repo secrets (it is never committed, never seen by anyone). One-time:
+
+1. Create the keystore on any machine with Java (`keytool`), keep the `.jks` + passwords safe:
+   ```bash
+   keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
+     -validity 10000 -alias navbharatai
+   ```
+2. Base64-encode it: `base64 -w0 upload-keystore.jks > keystore.b64` (macOS: `base64 -i upload-keystore.jks -o keystore.b64`).
+3. Repo → **Settings → Secrets and variables → Actions** → add 4 secrets:
+   `ANDROID_KEYSTORE_BASE64` (the keystore.b64 contents), `ANDROID_KEYSTORE_PASSWORD`,
+   `ANDROID_KEY_ALIAS` (=`navbharatai`), `ANDROID_KEY_PASSWORD`.
+4. Repo → **Actions → "Build Android App Bundle (.aab, signed)" → Run workflow** (main).
+5. Download the **navbharatai-release-aab** artifact → that's your `app-release.aab` → jump to §3.4.
+
+`versionCode` auto-increments per run (Play requires it to increase every upload). Sections 3.1–3.3
+below are the equivalent MANUAL path if you prefer building locally in Android Studio instead.
+
 ### 3.1 Create a signing keystore (once — keep it FOREVER; losing it means you can't update the app)
 ```bash
 keytool -genkey -v -keystore navbharatai-release.keystore \

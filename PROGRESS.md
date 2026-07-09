@@ -12552,3 +12552,37 @@ srcDoc). Regression tests +7 (off-by-default, isolated-host URL with pinned pare
 invariant, cross-subdomain). Gate: fe tsc 0 · server tsc 0 · vitest 5563/5563 (554 files) · boot PASS.
 ADMIN ACTION to activate: point a subdomain (e.g. preview.navbharatai.com) at the app + set
 VITE_PREVIEW_ORIGIN to it. Phase 4 remaining: 4.2 zip-bomb guard (extractZipProject).
+
+## 2026-07-09 — GLM day: 5.2 on the v3.0 floor · one Thinking toggle everywhere · free-Flash tiers for Free Chat + Professionals · Engineer AI dead code deleted
+
+Four merged/shipping changes from this session (all admin-directed):
+
+1. **v3.0 cheap-floor → GLM 5.2 (paid, direct Z.AI)** (#1141, merged): the direct Z.AI GLM rung's
+   default ladder is now `glm-5.2 → glm-4.7` (was `glm-4.7 → glm-4.6`). Model id verified against
+   Z.AI's official docs; `GLM_MODEL` env still overrides; Bedrock rung untouched. NOTE (open admin
+   action): the floor only runs when `AGENTV3_CHEAP_FLOOR=glm` (or both/on) + `GLM_API_KEY` are set
+   in Cloud Run.
+2. **The app-level Thinking toggle now controls GLM too** (#1142, merged): `OpenAiToolRunner` gained
+   `thinkingControl` — the per-turn thinking boolean (same toggle that drives Claude's adaptive
+   thinking) maps to GLM's `thinking:{type:enabled|disabled}` field. Only the direct GLM rung opts
+   in; Grok/KIMI/Bedrock never see the extension field. One user setting, every module.
+3. **GLM-4.7-Flash ($0) leads the FREE router** (#1142, merged): new `GlmProvider` at priority 0 in
+   the FREE universe (ahead of Vertex→Gemini→Grok). Simple Free-Chat turns cost nothing; failure or
+   rate-limit falls through to the paid chain unchanged. Text-only (vision turns defer). Inert until
+   `GLM_API_KEY` is set. NOTE: the FREE universe is shared — the v3.0 planner/advisor/opinion/design
+   helpers also lead with Flash now (admin informed; scoping to Free Chat only is a known option).
+4. **Engineer AI dead code DELETED** (#1144): Engineer AI was already retired in the v3.0 cutover;
+   removed the dead remains (routes/engineer.ts, EngineerAIChat.tsx, EngineerRouterFactory,
+   WebAgentLoop, legacy LocalActuator + their tests). AUDITED BOUNDARY (do not cross): the REST of
+   src/server/EngineerAI/ (ProEngineRunner + agent loop + actuators) is LIVE — the registered
+   /api/build pipeline (routes/build.ts) transitively imports it. v3.0 is untouched (it uses its own
+   copies under AgentV3/sandbox/EngineerAI/). server.ts comments record this boundary.
+5. **Professional free/paid two-tier ladder** (this change): new isolated `professional-free`
+   universe holding ONLY GLM-4.7-Flash; `professionals/engine.ts` tries it first — a successful free
+   answer fires ZERO paid calls — and falls back to the UNCHANGED paid universe (RACE Grok × Gemini ×
+   Vertex → Claude Haiku). Doctor AI / SDA stays directly on the paid universe. Regression tests: the
+   ladder (5 cases) + universe shapes (aiRouterManager: free=GLM-only, paid unchanged).
+
+Next up (admin plan, in flight): Part B — a shared "professional persona layer" in
+buildProfessionalSystemPrompt so all 73 config professionals feel like real professionals
+(name intro, clarifying-questions-first, structured advice), like Doctor AI does.

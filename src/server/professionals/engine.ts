@@ -18,13 +18,28 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
 }
 
 /**
- * Resilient model call through the ISOLATED 'professional' universe router
- * (defined once in AIRouterManager). Every professional — Doctor AI, Teacher,
- * Lawyer, CA, Astrologer, Kisan, … — shares this one isolated universe, so it
- * never mixes routing state with FREE or PRO. routeRaced fires Grok × Gemini ×
- * Vertex concurrently and uses Claude Haiku ONLY if all three fail.
+ * Resilient model call for the professional universe — a two-tier ladder (admin 2026-07-09):
+ *
+ *   1. PROFESSIONAL-FREE first — the isolated single-provider universe holding only
+ *      GLM-4.7-Flash ($0 in/out on Z.AI). A successful free answer fires ZERO paid
+ *      provider calls. Inert when GLM_API_KEY is unset (healthCheck false), so behaviour
+ *      then degrades to exactly the paid path below.
+ *   2. PROFESSIONAL (paid) fallback — today's path, byte-for-byte unchanged: routeRaced
+ *      fires Grok × Gemini × Vertex concurrently and uses Claude Haiku ONLY if all fail.
+ *
+ * Every config-driven professional — Teacher, Lawyer, CA, Astrologer, Kisan, … — shares
+ * these isolated universes, never mixing routing state with FREE or PRO. (Doctor AI / SDA
+ * has its own route and stays directly on the paid universe.)
  */
 async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
+  // Tier 1 — free (GLM-flash). Any failure/rate-limit/empty reply falls through silently.
+  try {
+    const freeRouter = AIRouterManager.getRouter('professional-free');
+    const { response, telemetry } = await freeRouter.routeRaced(prompt, systemPrompt);
+    if (telemetry.success && response.content?.trim()) return response.content;
+  } catch { /* fall through to the paid universe */ }
+
+  // Tier 2 — paid (unchanged): RACE(Grok × Gemini × Vertex) → Claude Haiku last resort.
   const router = AIRouterManager.getRouter('professional');
   const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
   if (telemetry.success && response.content?.trim()) return response.content;

@@ -24,7 +24,7 @@ the web. This is a genuine, store-installable app — not a bookmark.
 |------|------|
 | Google Play Console account (~$25 one-time) | Paid account tied to your identity |
 | Apple Developer account ($99/year) | Paid; required for App Store + TestFlight |
-| **A Mac with Xcode** for the iOS build | iOS apps **cannot** be built on Linux/Windows — Apple requirement |
+| An Apple **App Store Connect API key** for the iOS build | Your Apple identity — created on the web (no Mac needed); the build itself runs on GitHub's cloud macOS runner (§4.0). A local Mac is optional (§4.1). |
 | App signing keys (Android keystore, iOS certs) | Secrets that must live only with you |
 | Uploading builds + store listings + review | Done in Play Console / App Store Connect under your account |
 
@@ -122,7 +122,30 @@ cd android && ./gradlew bundleRelease
 
 ---
 
-## 4. Ship to the App Store (iOS — on a Mac)
+## 4. Ship to the App Store (iOS)
+
+### ⭐ 4.0 EASIEST — build the signed `.ipa` in GitHub Actions (NO Mac needed)
+You do **not** need to own a Mac. GitHub's **macOS runners are real Macs in the cloud**, and the ready
+workflow **`.github/workflows/ios-ipa.yml`** does the entire iOS build + sign + upload there. The only
+thing it needs from you is your Apple identity — supplied as an **App Store Connect API key** (a `.p8`
+file you create on the web; no Mac, no Keychain, no manual certificates). With that one key, Xcode on the
+runner auto-creates the distribution certificate + provisioning profile (`-allowProvisioningUpdates`).
+
+One-time (all on the web):
+1. **App Store Connect → Users and Access → Integrations → App Store Connect API** → generate a key with
+   the **App Manager** role. Download `AuthKey_XXXXXX.p8` (downloadable once — keep it safe). Note the
+   **Key ID** and the **Issuer ID** (UUID at the top of the Keys page).
+2. **Apple Developer → Membership** → copy your **Team ID** (10 chars).
+3. **App Store Connect → My Apps → +** → New App → Bundle ID `com.navbharat.ai`, name "NavBharatAI".
+4. Base64-encode the key: `base64 -w0 AuthKey_XXXXXX.p8` (macOS: `base64 -i AuthKey_XXXXXX.p8`).
+5. Repo → **Settings → Secrets and variables → Actions** → add 4 secrets:
+   `IOS_ASC_KEY_ID`, `IOS_ASC_ISSUER_ID`, `IOS_ASC_KEY_BASE64` (step 4 output), `IOS_TEAM_ID`.
+6. Repo → **Actions → "Build iOS App (.ipa, signed)" → Run workflow** (main). Leave **upload** unchecked
+   for a signing dry-run (download the `.ipa` artifact); check **upload** to send it to TestFlight.
+
+Sections 4.1 below are the equivalent MANUAL path if you prefer building locally on your own Mac in Xcode.
+
+### 4.1 Manual path (on a Mac)
 
 The `ios/` native project is **not committed** (it's generated on the Mac where it's built). On your Mac:
 
@@ -222,7 +245,8 @@ npm run build && npx cap add ios && npx cap sync ios && npx cap open ios
 ---
 
 ### Honest bottom line
-The **Android app is essentially ready** — build the signed AAB and upload it; that can happen today on any
-machine with Android Studio. The **iOS app needs a Mac** (Apple's requirement) and both stores need *your*
-paid accounts + review. This repo now carries everything on the code side for both; the remaining steps are
-the account/signing/submission actions only you can perform, listed above step by step.
+**Both apps can be built without owning a Mac** — the signed Android `.aab` (§3.0) and the signed iOS
+`.ipa` (§4.0) are produced by the GitHub Actions workflows on GitHub's own Linux + macOS runners. You only
+supply signing secrets once (Android keystore; Apple App Store Connect API key), plus *your* paid store
+accounts + the store-review submission — the account/signing/submission actions only you can perform, listed
+above step by step. A local Mac (§4.1) remains an optional alternative for iOS, not a requirement.

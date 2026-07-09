@@ -1,0 +1,193 @@
+# Build the SIGNED NavBharatAI iOS app (.ipa) for the Apple App Store / TestFlight — WITHOUT owning a Mac.
+#
+# WHY A WORKFLOW: an iOS build legally requires macOS + Xcode (Apple's hard rule). GitHub's macOS runners
+# ARE real Macs in the cloud, so this workflow does the whole iOS build/sign/upload there — you never need
+# to own a Mac. The one thing only you can provide is your Apple identity; we take it as an **App Store
+# Connect API key** (a .p8 file you create on the web — no Mac, no Keychain, no certificate wrangling).
+# With that one key, Xcode on the runner AUTOMATICALLY creates the distribution certificate + provisioning
+# profile (`-allowProvisioningUpdates`), so there is nothing else to generate by hand.
+#
+# ONE-TIME SETUP (all on the web — no Mac needed):
+#   A. App Store Connect → Users and Access → Integrations → App Store Connect API → generate an API key
+#      with the "App Manager" role. Download the `AuthKey_XXXXXX.p8` (you can download it ONCE — keep it safe).
+#      Note the Key ID (e.g. ABC123DEF4) and the Issuer ID (a UUID shown at the top of the Keys page).
+#   B. Apple Developer → Membership → copy your Team ID (10 chars, e.g. 9ABCD1EFGH).
+#   C. App Store Connect → My Apps → + → New App → Bundle ID `com.navbharat.ai`, name "NavBharatAI"
+#      (create the app record ONCE so uploads have somewhere to land).
+#   D. Base64-encode the .p8:  base64 -w0 AuthKey_XXXXXX.p8   (macOS: base64 -i AuthKey_XXXXXX.p8)
+#   E. Repo → Settings → Secrets and variables → Actions → add 4 secrets:
+#        IOS_ASC_KEY_ID        = the Key ID (e.g. ABC123DEF4)
+#        IOS_ASC_ISSUER_ID     = the Issuer ID (the UUID)
+#        IOS_ASC_KEY_BASE64    = the base64 string from step D
+#        IOS_TEAM_ID           = your Team ID from step B
+#
+# HOW TO RUN:
+#   Repo → Actions → "Build iOS App (.ipa, signed)" → Run workflow (main).
+#   - Leave "upload" unchecked to just BUILD + download the .ipa artifact (a dry run to confirm signing works).
+#   - Check "upload" to send the build straight to TestFlight/App Store Connect after building.
+#
+# HONEST NOTE: iOS code-signing on CI is fussier than Android. If the first run fails on a signing step,
+# it fails LOUDLY (never a fake success) — read the error, and it's almost always a wrong Team ID, an API
+# key without the "App Manager" role, or the app record (step C) not created yet.
+
+name: Build iOS App (.ipa, signed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload the build to App Store Connect / TestFlight after building'
+        type: boolean
+        default: false
+
+jobs:
+  build-ios:
+    # macos-14 = a real Mac in the cloud with Xcode + CocoaPods preinstalled (this is what replaces owning a Mac).
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail EARLY and honestly if the Apple secrets are not set — a store .ipa MUST be signed with your
+      # Apple identity, so we never hand back an unsigned/unusable build.
+      - name: Pre-flight — require Apple signing secrets
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_ASC_KEY_BASE64: ${{ secrets.IOS_ASC_KEY_BASE64 }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          missing=""
+          [ -z "$IOS_ASC_KEY_ID" ] && missing="$missing IOS_ASC_KEY_ID"
+          [ -z "$IOS_ASC_ISSUER_ID" ] && missing="$missing IOS_ASC_ISSUER_ID"
+          [ -z "$IOS_ASC_KEY_BASE64" ] && missing="$missing IOS_ASC_KEY_BASE64"
+          [ -z "$IOS_TEAM_ID" ] && missing="$missing IOS_TEAM_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Apple signing secret(s):$missing — add them in Settings → Secrets and variables → Actions (see the header of this workflow file for the one-time web setup)."
+            exit 1
+          fi
+          echo "All Apple signing secrets present."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web bundle
+        run: npm run build
+
+      # The ios/ native project is NOT committed (it is generated per-machine). Generate it fresh here.
+      # `cap add ios` is a no-op if it already exists, so this is safe either way.
+      - name: Generate & sync the Capacitor iOS project
+        run: |
+          npx cap add ios || echo "ios/ already present — continuing"
+          npx cap sync ios
+
+      # Write the App Store Connect API key (.p8) where xcodebuild AND altool both look for it.
+      - name: Install App Store Connect API key
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_KEY_BASE64: ${{ secrets.IOS_ASC_KEY_BASE64 }}
+        run: |
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$IOS_ASC_KEY_BASE64" | base64 -d > "$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          # Also drop a copy in RUNNER_TEMP for the explicit -authenticationKeyPath below.
+          cp "$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8" "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+
+      # Archive with AUTOMATIC signing — the API key lets Xcode create the distribution certificate and
+      # provisioning profile on the fly (-allowProvisioningUpdates), so nothing is pre-created by hand.
+      - name: Archive the app (.xcarchive)
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/NavBharatAI.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$IOS_ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            archive
+
+      - name: Export the signed .ipa
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/NavBharatAI.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$IOS_ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID"
+
+      - name: Upload the .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: navbharatai-release-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 14
+
+      # Optional: push the build straight to TestFlight / App Store Connect (only when "upload" is checked).
+      - name: Upload to App Store Connect (TestFlight)
+        if: ${{ inputs.upload }}
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
+        run: |
+          IPA_PATH="$(ls "$RUNNER_TEMP"/export/*.ipa | head -n1)"
+          echo "Uploading $IPA_PATH to App Store Connect…"
+          xcrun altool --upload-app -f "$IPA_PATH" -t ios \
+            --apiKey "$IOS_ASC_KEY_ID" \
+            --apiIssuer "$IOS_ASC_ISSUER_ID"
+
+      # The API key is a secret — never let it linger on the runner beyond this job.
+      - name: Always remove the API key (never leaves the runner)
+        if: always()
+        env:
+          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+        run: |
+          rm -f "$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8" || true
+          rm -f "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8" || true
+
+      - name: Summary
+        run: |
+          echo "## NavBharatAI signed .ipa built ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.upload }}" = "true" ]; then
+            echo "Uploaded to **App Store Connect** — it will appear under TestFlight in a few minutes (Apple processes the build)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Download the **navbharatai-release-ipa** artifact above. To publish, re-run with **upload** checked (sends it to TestFlight/App Store Connect)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Bundle id \`com.navbharat.ai\` · hosted mode loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

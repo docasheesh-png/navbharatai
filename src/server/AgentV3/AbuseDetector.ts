@@ -11,6 +11,8 @@
  * the caller can act on (audit, ledger, rate-tier drop). Pure `assessPrompt` is unit-tested.
  */
 
+import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
+
 export type AbuseKind = 'jailbreak' | 'prompt-extraction' | 'repetition-stuffing' | 'excessive-length';
 
 export interface AbuseSignal { kind: AbuseKind; detail: string }
@@ -152,7 +154,7 @@ export async function evaluateAbuse(
 ): Promise<AbuseEvaluation> {
   if (process.env.VITEST) return FAIL_OPEN;
   try {
-    const admin = await import('firebase-admin');
+    const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     const db = admin.firestore();
     const ref = db.collection('abuseLedger').doc(userId);

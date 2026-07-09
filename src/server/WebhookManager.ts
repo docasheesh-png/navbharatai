@@ -11,6 +11,7 @@
  */
 import crypto from 'crypto';
 import { sendBuildWebhook } from './NotificationManager';
+import { loadFirebaseAdmin } from './lib/firebaseAdminModule';
 
 export const WEBHOOK_EVENTS = ['BUILD_COMPLETE', 'BUILD_FAILED', 'DEPLOY_COMPLETE', 'DEPLOY_FAILED'] as const;
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
@@ -45,7 +46,7 @@ export function normalizeEvents(events: unknown): WebhookEvent[] {
 async function getAdminFirestore(): Promise<import('firebase-admin/firestore').Firestore | null> {
   if (process.env.VITEST) return null;
   try {
-    const admin = await import('firebase-admin');
+    const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
     return admin.firestore();
   } catch {

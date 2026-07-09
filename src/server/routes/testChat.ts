@@ -21,12 +21,16 @@ function isEnabled(): boolean {
 export function registerTestChatRoutes(app: Express): void {
   // Lightweight status so the UI can show an honest enabled/not-configured state without a paid call.
   app.get('/api/test-chat/status', (_req: Request, res: Response) => {
+    const bearer = Boolean(process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY);
+    const sigv4 = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
     res.json({
       enabled: isEnabled(),
       region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
       modelConfigured: Boolean(process.env.BEDROCK_GLM_MODEL && process.env.BEDROCK_GLM_MODEL.trim()),
       modelId: process.env.BEDROCK_GLM_MODEL || null,
-      credsConfigured: Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY),
+      // credsConfigured is true when EITHER auth mode is present (bearer token OR access-key pair).
+      credsConfigured: bearer || sigv4,
+      authMode: bearer ? 'bearer' : sigv4 ? 'sigv4' : 'none',
     });
   });
 

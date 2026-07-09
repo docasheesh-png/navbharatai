@@ -138,9 +138,26 @@ export async function runBedrockGlmTest(userMessage: string): Promise<TestChatRe
   const region = readRegion();
   const modelId = readModelId();
 
+  // Two supported auth modes:
+  //  1. Bearer token — the newer "AWS Bedrock API key" (a single token, prefix "ABSK..."). The SDK
+  //     picks it up from the AWS_BEARER_TOKEN_BEDROCK env var. We also accept BEDROCK_API_KEY and copy
+  //     it into AWS_BEARER_TOKEN_BEDROCK so the SDK's bearer auth scheme activates.
+  //  2. SigV4 — the classic AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY pair.
+  // Bearer takes priority when present (it's the simplest and what the Bedrock console hands out now).
+  const bearerToken = process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || '';
+  if (bearerToken && !process.env.AWS_BEARER_TOKEN_BEDROCK) {
+    // Make the SDK's bearer auth scheme find the token regardless of which var the admin set.
+    process.env.AWS_BEARER_TOKEN_BEDROCK = bearerToken;
+  }
+  const hasSigV4 = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+  const authMode: 'bearer' | 'sigv4' | 'none' = bearerToken ? 'bearer' : hasSigV4 ? 'sigv4' : 'none';
+
   log('info', 'AWS Region', region);
   log('info', 'Model ID (from BEDROCK_GLM_MODEL)', modelId);
-  log('info', 'AWS credentials present', {
+  log('info', 'Auth mode', authMode);
+  log('info', 'Auth env present', {
+    AWS_BEARER_TOKEN_BEDROCK: Boolean(process.env.AWS_BEARER_TOKEN_BEDROCK),
+    BEDROCK_API_KEY: Boolean(process.env.BEDROCK_API_KEY),
     AWS_ACCESS_KEY_ID: Boolean(process.env.AWS_ACCESS_KEY_ID),
     AWS_SECRET_ACCESS_KEY: Boolean(process.env.AWS_SECRET_ACCESS_KEY),
     AWS_SESSION_TOKEN: Boolean(process.env.AWS_SESSION_TOKEN),
@@ -171,8 +188,8 @@ export async function runBedrockGlmTest(userMessage: string): Promise<TestChatRe
     };
   }
 
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-    log('error', 'AWS credentials are missing — set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.');
+  if (authMode === 'none') {
+    log('error', 'No AWS auth configured — set AWS_BEARER_TOKEN_BEDROCK (Bedrock API key) OR AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY.');
     return {
       ...base,
       ok: false,
@@ -185,19 +202,25 @@ export async function runBedrockGlmTest(userMessage: string): Promise<TestChatRe
       error: {
         name: 'ConfigError',
         message:
-          'AWS credentials are not set. Provide AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_REGION) so the Bedrock SDK can sign requests.',
+          'No AWS Bedrock auth configured. Provide EITHER a Bedrock API key as AWS_BEARER_TOKEN_BEDROCK (single token, starts with "ABSK…") OR the classic pair AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.',
       },
     };
   }
 
-  const client = new BedrockRuntimeClient({
-    region,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
-    },
-  });
+  // Build the client for the resolved auth mode. In bearer mode we pass NO explicit credentials —
+  // the SDK's httpBearerAuth scheme reads AWS_BEARER_TOKEN_BEDROCK from the environment. In SigV4 mode
+  // we pass the access key/secret pair explicitly.
+  const client =
+    authMode === 'bearer'
+      ? new BedrockRuntimeClient({ region })
+      : new BedrockRuntimeClient({
+          region,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
+            ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
+          },
+        });
 
   // ── Attempt 1: Converse API (modern Bedrock chat) ──────────────────────────────────────────────
   const converseInput = {

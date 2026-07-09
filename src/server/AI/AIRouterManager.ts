@@ -23,8 +23,9 @@ export class AIRouterManager {
   private static instanceFree: AIRouter | null = null;
   private static instancePro: AIRouter | null = null;
   private static instanceProfessional: AIRouter | null = null;
+  private static instanceProfessionalFree: AIRouter | null = null;
 
-  static getRouter(namespace: 'free' | 'pro' | 'professional'): AIRouter {
+  static getRouter(namespace: 'free' | 'pro' | 'professional' | 'professional-free'): AIRouter {
     if (namespace === 'pro') {
       if (!this.instancePro) this.instancePro = this.buildPro();
       return this.instancePro;
@@ -33,11 +34,15 @@ export class AIRouterManager {
       if (!this.instanceProfessional) this.instanceProfessional = this.buildProfessional();
       return this.instanceProfessional;
     }
+    if (namespace === 'professional-free') {
+      if (!this.instanceProfessionalFree) this.instanceProfessionalFree = this.buildProfessionalFree();
+      return this.instanceProfessionalFree;
+    }
     if (!this.instanceFree) this.instanceFree = this.buildFree();
     return this.instanceFree;
   }
 
-  static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; }
+  static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; }
 
   // FREE: GLM-flash (free leader) → Vertex (3 models) → Gemini (2 models) → Grok.
   // Claude NEVER used in free.
@@ -155,6 +160,26 @@ export class AIRouterManager {
       router.registerProvider(claude);
     } catch {}
 
+    return router;
+  }
+
+  // PROFESSIONAL-FREE universe (admin 2026-07-09): the free first-attempt tier for the
+  // config-driven professionals. It contains ONLY GLM-4.7-Flash ($0 in/out on Z.AI) — the
+  // caller (professionals/engine.ts) tries this universe first and, on any failure or
+  // rate-limit, falls back to the full PAID professional universe above, which stays
+  // byte-for-byte unchanged (RACE Grok × Gemini × Vertex → Claude Haiku). Keeping the free
+  // tier as its own single-provider universe (instead of mixing GLM into the paid race)
+  // means a successful free answer fires ZERO paid provider calls, and a missing
+  // GLM_API_KEY makes this universe inert (healthCheck false) so behaviour degrades to
+  // exactly today's paid path.
+  private static buildProfessionalFree(): AIRouter {
+    const router = new AIRouter("professional-free");
+    console.log('[ROUTER_MGR] Building PROFESSIONAL-FREE chain: GLM-flash only (paid universe is the fallback)');
+    try {
+      const glm = new GlmProvider();
+      glm.priority = 0;
+      router.registerProvider(glm);
+    } catch {}
     return router;
   }
 }

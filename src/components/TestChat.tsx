@@ -19,6 +19,7 @@ interface TestChatStatus {
   modelConfigured: boolean;
   modelId: string | null;
   credsConfigured: boolean;
+  authMode?: 'bearer' | 'sigv4' | 'none';
 }
 
 interface TestChatResult {
@@ -140,7 +141,14 @@ export function TestChat(_props: { userId?: string }) {
                 status.credsConfigured ? 'bg-white/5 text-gray-300' : 'bg-red-900/60 text-red-300'
               }`}
             >
-              AWS creds: {status.credsConfigured ? 'configured' : 'NOT SET'}
+              AWS auth:{' '}
+              {status.credsConfigured
+                ? status.authMode === 'bearer'
+                  ? 'bearer token'
+                  : status.authMode === 'sigv4'
+                    ? 'access key'
+                    : 'configured'
+                : 'NOT SET'}
             </span>
           </div>
         )}

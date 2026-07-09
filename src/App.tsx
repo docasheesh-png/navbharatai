@@ -55,6 +55,7 @@ import { ProfessionalsView } from './components/professionals/ProfessionalsView'
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
+import { TestChat } from './components/TestChat';
 // EngineerAIChat retired — replaced by NavBharatAI Pro v3.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
@@ -1869,6 +1870,7 @@ export default function App() {
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
     { id: 'donation',     label: 'Donate',            icon: Heart },
+    { id: 'test_chat',    label: '🧪 Test Chat',      icon: TestTube },
     { id: 'settings',     label: 'Settings',          icon: Settings },
   ], []);
 
@@ -2461,6 +2463,12 @@ export default function App() {
               user={user}
               addLog={addLog}
             />
+          )}
+
+          {activeView === 'test_chat' && (
+            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+              <TestChat userId={user?.uid} />
+            </div>
           )}
 
           {(activeView === 'nbi_chat') && (

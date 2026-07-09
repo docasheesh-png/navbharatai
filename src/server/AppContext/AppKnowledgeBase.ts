@@ -31,6 +31,21 @@ export interface AppFeature {
 }
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
+  // ─── 🧪 TEST CHAT (isolated AWS Bedrock GLM-5 validation) ────────────────
+  {
+    id: 'test_chat',
+    name: '🧪 Test Chat',
+    path: 'Sidebar → "🧪 Test Chat"',
+    description:
+      'An isolated, debug-only chat page for validating AWS Bedrock GLM-5 access independently of the production AI. It sends your message straight to AWS Bedrock (AWS SDK v3, SigV4 auth) — trying the Converse API first and falling back to InvokeModel — and shows the reply plus a full debug panel (API used, HTTP status, AWS request id, exact request/response payloads, and the COMPLETE raw AWS error on failure). It does not use, and cannot affect, the production chat, provider router, or model selector. It is off unless the TEST_CHAT_ENABLED environment variable is set to true, and it needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION and BEDROCK_GLM_MODEL configured on the server.',
+    howToUse:
+      'Open "🧪 Test Chat" from the sidebar. The header shows whether it is enabled and whether the AWS region, model, and credentials are configured. Type a message (e.g. "hi") and press Send — the reply comes directly from AWS Bedrock GLM-5. Expand the debug panel to see the raw request, response, logs, and any raw AWS error.',
+    relatedFeatures: ['nbi_chat'],
+    keywords: [
+      'test chat', 'test', 'bedrock', 'aws', 'glm', 'glm-5', 'glm5', 'aws bedrock',
+      'debug chat', 'converse', 'invokemodel', 'validate bedrock', 'test bedrock',
+    ],
+  },
   // ─── NAVBHARATAI PRO v3.0 (Vargen 3.0) ───────────────────────────────────
   {
     id: 'agentv3_builder',

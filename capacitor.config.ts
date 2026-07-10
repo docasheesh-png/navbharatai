@@ -3,13 +3,12 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // NavBharatAI — Capacitor native-app config (admin decisions 2026-07-02: appId com.navbharatai.app,
 // in-app purchases hidden in v1; 2026-07-08: iOS/App Store added alongside Android/Play Store).
 //
-// HOSTED MODE (both platforms): the native shell loads the live site (server.url) instead of the
-// bundled dist/. WHY: the entire frontend calls the API with relative paths (fetch('/api/…')) —
-// hundreds of call sites. In bundled mode the WebView origin is capacitor://localhost, so every
-// relative API call would break; rewriting all call sites is later work (a single apiUrl() base).
-// Hosted mode ships a WORKING, store-installable app now — native shell + real APK/IPA — with
-// auth/payments flows unchanged. dist/ is still synced as the webDir so `cap sync` has real assets
-// and the switch to bundled mode later is a one-line config change (remove server.url).
+// BUNDLED MODE (both platforms, 2026-07-10): the native shell runs from the local bundle (dist/)
+// instead of loading the live site. WHY: true native polish — splash screen, status bar styling,
+// haptics, back button handling. API calls use the transport interceptor (src/lib/apiBase.ts) to
+// rewrite /api/* URLs to the production origin. Auth uses Firebase JS SDK (web flow) with native
+// Google Sign-In via skipNativeAuth: true. This is the production-ready native shell that users
+// install from Play Store / App Store.
 //
 // See MOBILE_PUBLISHING.md for the end-to-end Play Store + App Store runbook (build, sign, submit,
 // payments policy). The iOS native project (ios/) is generated on a Mac with `npx cap add ios` — it
@@ -22,12 +21,9 @@ const config: CapacitorConfig = {
   appId: 'com.navbharat.ai',
   appName: 'NavBharatAI',
   webDir: 'dist',
-  server: {
-    url: 'https://navbharatai.com',
-    // Keep the https scheme on both platforms so cookies/secure-context features behave like the web.
-    androidScheme: 'https',
-    iosScheme: 'https',
-  },
+  // BUNDLED MODE (2026-07-10): app runs from local bundle, not the live site.
+  // API calls use the transport interceptor (src/lib/apiBase.ts) to rewrite /api/* to production.
+  // No server.url → app loads from dist/ and WebView origin is capacitor://localhost.
   ios: {
     // Respect the safe-area insets (notch / home indicator) instead of drawing the WebView under them.
     contentInset: 'automatic',

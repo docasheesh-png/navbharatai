@@ -248,13 +248,13 @@ export function BillingPanel(props: BillingPanelProps) {
                 </span>
               </div>
               <div>
-                <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Available Credit</p>
+                {/* Billing Phase 2 — token-first: tokens are the wallet's primary unit; ₹ is secondary. */}
+                <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Token Balance</p>
                 <h2 className="text-2xl font-black text-white tracking-tight mt-1.5 font-mono truncate">
-                  ₹{(wallet?.remaining_balance || 10.05).toFixed(2)}
+                  {(wallet?.tokenBalance ?? 0).toLocaleString()} <span className="text-sm font-bold text-[#8b949e]">tokens</span>
                 </h2>
                 <div className="text-[9px] text-amber-400 font-mono font-bold mt-1 uppercase flex items-center gap-1">
-                  <span>👑 VK Balance:</span>
-                  <span>{(wallet?.tokenBalance || 0).toLocaleString()} Tokens</span>
+                  <span>≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)} credit</span>
                 </div>
               </div>
             </div>
@@ -389,21 +389,25 @@ export function BillingPanel(props: BillingPanelProps) {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-2">
                   <div className="space-y-4">
+                    {/* Billing Phase 2 — honest copy: tokens buy real AI work (input + output are both
+                        metered); every finished Pro build deducts its cost from this balance. */}
                     <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                      Your wallet contains unexpired cloud resource balances. Input context models are charged at ₹0.00, meaning you only pay for generated outputs! Every credit matches direct hardware API queries.
+                      Your tokens never expire and pay for real AI build work. Every finished Pro build deducts its actual cost from this balance — you can see each deduction in the usage statement below.
                     </p>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-black/30 border border-white/5 rounded-2xl p-4 font-mono">
                         <div className="text-[9px] text-[#8b949e] font-black uppercase tracking-wider">Estimated Lifespan</div>
                         <div className="text-lg font-black text-white mt-1">Unlimited</div>
-                        <div className="text-[9px] text-[#8b949e] mt-1">SRE credits never expire</div>
+                        <div className="text-[9px] text-[#8b949e] mt-1">Tokens never expire</div>
                       </div>
                       <div className="bg-black/30 border border-white/5 rounded-2xl p-4 font-mono">
-                        <div className="text-[9px] text-[#8b949e] font-black uppercase tracking-wider">Output Pool</div>
+                        <div className="text-[9px] text-[#8b949e] font-black uppercase tracking-wider">Token Balance</div>
                         <div className="text-lg font-black text-white mt-1">
-                          {wallet?.remaining_balance ? Math.round(wallet.remaining_balance * 200).toLocaleString() : '2,000'}
+                          {/* The REAL token balance — not a derived ₹×rate approximation (a stale ×200
+                              hardcode used to live here; the true rate travels as wallet.tokensPerRupee). */}
+                          {(wallet?.tokenBalance ?? 0).toLocaleString()}
                         </div>
-                        <div className="text-[9px] text-[#8b949e] mt-1">Unspent outputs remaining</div>
+                        <div className="text-[9px] text-[#8b949e] mt-1">Tokens remaining</div>
                       </div>
                     </div>
                   </div>

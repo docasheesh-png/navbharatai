@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCreditedWallet, type WalletCreditTx } from '../src/server/lib/payments';
+import { computeCreditedWallet, inrToWalletTokens, TOKENS_PER_RUPEE, type WalletCreditTx } from '../src/server/lib/payments';
 
 const T = '2026-07-05T00:00:00.000Z';
 const EMPTY = { tokenBalance: 0, totalTokensPurchased: 0, totalMoneySpent: 0, remaining_balance: 0, total_balance: 0, walletLedger: [] };
@@ -58,5 +58,30 @@ describe('computeCreditedWallet — credit math', () => {
     const { wallet } = computeCreditedWallet({}, tx, null, T);
     expect(Number.isFinite(wallet.tokenBalance)).toBe(true);
     expect(wallet.remaining_balance).toBe(50);
+  });
+});
+
+describe('inrToWalletTokens — the ONE ₹→token conversion every surface shares (Billing Phase 2)', () => {
+  it('converts at TOKENS_PER_RUPEE with rounding', () => {
+    expect(inrToWalletTokens(1)).toBe(TOKENS_PER_RUPEE);
+    expect(inrToWalletTokens(25)).toBe(2500);
+    expect(inrToWalletTokens(0.104)).toBe(10); // 10.4 → rounds
+    expect(inrToWalletTokens(0.105)).toBe(11); // 10.5 → rounds up
+  });
+
+  it('is SIGNED — an overdraft (negative ₹) shows as negative tokens, never hidden', () => {
+    expect(inrToWalletTokens(-4)).toBe(-400);
+  });
+
+  it('non-finite input converts to 0 (never NaN in a display)', () => {
+    expect(inrToWalletTokens(NaN)).toBe(0);
+    expect(inrToWalletTokens(Infinity)).toBe(0);
+    expect(inrToWalletTokens(-Infinity)).toBe(0);
+  });
+
+  it('matches the credit path: ₹X purchase mints exactly inrToWalletTokens(X) tokens', () => {
+    const tx: WalletCreditTx = { userId: 'u1', amountPaid: 77, balanceAdded: 77, isVishwakarmaOrder: false };
+    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    expect(wallet.tokenBalance).toBe(inrToWalletTokens(77));
   });
 });

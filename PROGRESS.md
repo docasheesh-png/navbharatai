@@ -13033,3 +13033,34 @@ review flagged issues. A "delivered" that reads as "verified" is exactly the sil
 - Reuses the T1-health-card wiring merged this session — the warning now shows on the card automatically.
 
 Gate: tsc fe+server 0, vitest 5764/5764 (4 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Billing Phase 2: token-first wallet display (chip, 402 screen, BillingPanel)
+
+Phase 1 (#1178, merged) made tokens REAL (every build debits the wallet). Phase 2 makes tokens the
+PRIMARY unit the user sees everywhere — the admin's core fix for "Token Purchase display is
+confusing" (₹ vs tokens mixed with different in/out rates → user can't tell what ₹X buys).
+
+- `payments.ts` += `inrToWalletTokens(inr)` — THE one ₹→token conversion every surface shares
+  (credit mint, build debit, 402 payload). Signed (negative ₹ overdraft → negative tokens, honest),
+  non-finite → 0. walletDebit.ts refactored onto it (same behavior, one source of truth). 4 new tests.
+- `wallet.ts` GET /api/wallet now returns `tokensPerRupee` WITH the wallet doc — no client ever
+  hardcodes its own conversion again. ROOT-CAUSE KILL: BillingPanel.tsx:404 had a stale `×200`
+  hardcode ("Output Pool") showing DOUBLE the real token balance; replaced with the real
+  `wallet.tokenBalance`. Sibling class: "₹↔token rate hardcoded per-surface" — now centralized.
+- 402 payload += `balanceTokens`/`estimateTokens` (server-converted via inrToWalletTokens);
+  client BillingBlock type + block screen show tokens first, ₹ fallback for older servers.
+- AgentV3Panel header chip: token balance primary (`N tokens`), ₹ equivalent in the tooltip;
+  falls back to ₹ only when the wallet doc has no tokenBalance.
+- BillingPanel Card 1: "Token Balance — N tokens" big, "≈ ₹X credit" secondary. Also replaced the
+  dishonest marketing copy ("Input context models are charged at ₹0.00" — false) with honest text:
+  tokens pay for real AI work, every finished build deducts its actual cost.
+- AppKnowledgeBase billing entry: tokens-are-the-primary-unit capability added.
+
+Gate: tsc fe+server 0, vitest 5782/5782 (577 files), boot:check PASS.
+
+NEXT (Billing Phase 3): per-provider token buckets in UsageSink + api_call_log (admin-only
+breakdown) + per-tier billing (Sonnet share ×3 instead of whole-build ×1.2) — closes the
+mixed-build under-billing (GLM+Kimi build with Sonnet review currently bills the Sonnet share
+at the cheap multiplier).

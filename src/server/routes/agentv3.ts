@@ -104,6 +104,7 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
@@ -3095,6 +3096,10 @@ export function registerAgentV3Routes(app: Express): void {
           code: 'INSUFFICIENT_CREDITS',
           balanceInr,
           estimateInr: estimate.inr,
+          // Billing Phase 2 — token-first display: the same numbers in the wallet's primary unit,
+          // converted at the SAME rate purchases mint and debits burn (inrToWalletTokens).
+          ...(typeof balanceInr === 'number' ? { balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+          estimateTokens: inrToWalletTokens(estimate.inr),
         });
         return;
       }

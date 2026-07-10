@@ -1,14 +1,16 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled, buildRequiresSignIn } from './featureFlag';
+import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled, isAgentV3CreditGateEnabled, buildRequiresSignIn } from './featureFlag';
 
 const save = { ...process.env };
 afterEach(() => {
   process.env.AGENTV3_FREE_LIST = save.AGENTV3_FREE_LIST;
   process.env.AGENTV3_ALLOWLIST = save.AGENTV3_ALLOWLIST;
   process.env.AGENTV3_PAID_PUBLIC = save.AGENTV3_PAID_PUBLIC;
+  process.env.AGENTV3_CREDIT_GATE = save.AGENTV3_CREDIT_GATE;
   if (save.AGENTV3_FREE_LIST === undefined) delete process.env.AGENTV3_FREE_LIST;
   if (save.AGENTV3_ALLOWLIST === undefined) delete process.env.AGENTV3_ALLOWLIST;
   if (save.AGENTV3_PAID_PUBLIC === undefined) delete process.env.AGENTV3_PAID_PUBLIC;
+  if (save.AGENTV3_CREDIT_GATE === undefined) delete process.env.AGENTV3_CREDIT_GATE;
 });
 
 describe('isAgentV3PaidPublicEnabled — money-path master switch (default OFF)', () => {
@@ -21,6 +23,27 @@ describe('isAgentV3PaidPublicEnabled — money-path master switch (default OFF)'
     expect(isAgentV3PaidPublicEnabled()).toBe(false);
     process.env.AGENTV3_PAID_PUBLIC = 'true';
     expect(isAgentV3PaidPublicEnabled()).toBe(true);
+  });
+});
+
+describe('isAgentV3CreditGateEnabled — decoupled ₹0-balance gate (default OFF)', () => {
+  it('is OFF unless AGENTV3_CREDIT_GATE is exactly "true"', () => {
+    delete process.env.AGENTV3_CREDIT_GATE;
+    expect(isAgentV3CreditGateEnabled()).toBe(false);
+    process.env.AGENTV3_CREDIT_GATE = 'false';
+    expect(isAgentV3CreditGateEnabled()).toBe(false);
+    process.env.AGENTV3_CREDIT_GATE = '1';
+    expect(isAgentV3CreditGateEnabled()).toBe(false);
+    process.env.AGENTV3_CREDIT_GATE = 'true';
+    expect(isAgentV3CreditGateEnabled()).toBe(true);
+  });
+
+  it('is INDEPENDENT of the paid-public switch (either flag can arm the gate)', () => {
+    delete process.env.AGENTV3_PAID_PUBLIC;
+    process.env.AGENTV3_CREDIT_GATE = 'true';
+    // Credit gate on, paid-public off → gate armed without turning on paid-public.
+    expect(isAgentV3CreditGateEnabled()).toBe(true);
+    expect(isAgentV3PaidPublicEnabled()).toBe(false);
   });
 });
 

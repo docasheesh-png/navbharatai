@@ -42,6 +42,16 @@ const config: CapacitorConfig = {
       skipNativeAuth: true,
       providers: ['google.com'],
     },
+    // Splash screen: show app icon while loading, auto-hide once React mounts.
+    SplashScreen: {
+      launchShowDuration: 3000,
+      launchAutoHide: false, // manually hidden after app ready
+    },
+    // Status bar: match app theme (dark text on light background, or vice versa).
+    StatusBar: {
+      style: 'dark',
+      backgroundColor: '#ffffff',
+    },
   },
 };
 

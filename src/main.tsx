@@ -12,6 +12,7 @@ import { SharePortal } from './components/SharePortal';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
+import { installNativeShellPolish } from './lib/nativeShell';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -224,4 +225,14 @@ createRoot(document.getElementById('root')!).render(
 // This is what lets a long-open tab recover on EVERY future deploy (not just the first): the next stale
 // chunk after the next deploy gets a fresh one-time reload. A build that never mounts leaves the flag set,
 // so a genuinely-broken deploy still can't loop.
-requestAnimationFrame(() => { try { localStorage.removeItem('navbharat_chunk_reload_at'); } catch { /* best effort */ } });
+requestAnimationFrame(() => {
+  try { localStorage.removeItem('navbharat_chunk_reload_at'); } catch { /* best effort */ }
+
+  // Bundled native shell polish (Capacitor): hide splash screen, apply status bar theme, install
+  // back button handler. Runs after React mounts so the back button handler can navigate. NO-OP
+  // on web and hosted shell.
+  void installNativeShellPolish(window as any, () => {
+    // Back button handler: delegate to history back (React Router will handle it).
+    window.history.back();
+  });
+});

@@ -13163,3 +13163,30 @@ direction on T1-gate-enforce (the one remaining clean-but-risky Tier 1B item) �
 Tier 1B/1C/version-timeline/mention-inbox is either shipped or billing-fenced.
 
 Gate: docs-only change (ROADMAP.md + PROGRESS.md) — no code touched.
+
+---
+
+## 2026-07-10 — Billing coherence fix: gate the wallet DEBIT with the rest of the paid surface
+
+Root-cause honesty follow-up to Phase 1-3. Verifying the live money path surfaced an inconsistency:
+the real wallet DEBIT ran UNGATED (every signed-in user, every build), while the THREE other paid
+surfaces were all gated on `paid-public OR credit-gate` AND non-free-user:
+  - the pre-flight ESTIMATE gate (agentv3.ts L3099),
+  - the empty-balance BLOCK (402),
+  - the header balance CHIP (status `billed:true` = paid-public on).
+
+Consequence with billing "off" (today's default): a user's wallet drained invisibly on the first
+build (welcome 1000 tokens ≪ a real build's cost) with NO chip and NO block — and a later flag-on
+would strand every existing account at a deep negative balance from spend they never saw.
+
+FIX: gate the debit on the SAME condition (`billingActive = (paidPublic || creditGate) &&
+!freeUser`), so all four move as ONE. Billing off → builds are free & wallets untouched (exactly
+today's behavior); flag on → chip + estimate gate + debit + block activate together, coherently. The
+display-only monthly cost (userCostStore, "This Month's AI Cost") still records always — it is an
+internal estimate surface, not a money movement, so it stays ungated.
+
+Net effect: Phase 1's debit is now DORMANT until the admin turns billing on (paid-public or
+credit-gate), matching how the rest of the paid surface already rolls out. No user is charged or
+blocked until that flag flip — and when it flips, the whole paid experience turns on at once.
+
+Gate: tsc fe+server 0, vitest 5811/5811, boot:check PASS. Pure gating change; no billing math touched.

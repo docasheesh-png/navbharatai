@@ -29,6 +29,7 @@ export type ToolName =
   | 'generate_tests'
   | 'run_tests'
   | 'code_graph'
+  | 'typecheck'
   | 'generate_observability'
   | 'generate_bundle_optimization'
   | 'generate_seed_data'

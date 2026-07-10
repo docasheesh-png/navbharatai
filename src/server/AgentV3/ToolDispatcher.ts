@@ -7,6 +7,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
+import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1483,6 +1484,40 @@ export class ToolDispatcher {
         return impact.length
           ? `Changing ${file} may affect ${impact.length} file(s) that import it directly or transitively — review these before/after the edit:\n` + impact.map(f => `  ${f}`).join('\n')
           : `Changing ${file} affects no other files (nothing imports it).`;
+      }
+
+      case 'typecheck': {
+        // B6 — cross-language compile/typecheck (TS + Python + Java + Go), not just frontend tsc.
+        // "Verified" must mean every language in the workspace compiles. Detection/parsing are pure
+        // (crossLangCheck.ts); this runs each detected check in the sandbox and aggregates honestly.
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plans = detectChecks(files, pkgRaw);
+        if (!plans.length) {
+          const msg = 'typecheck: no compilable sources detected (no tsconfig+TS, Python, Maven/Java, or Go). Nothing to type-check.';
+          this.state?.appendTerminal(msg);
+          return msg;
+        }
+        const mem = getWorkspaceMemory(this.workspaceId);
+        const parts: string[] = [];
+        let allOk = true;
+        for (const plan of plans) {
+          const started = Date.now();
+          const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+          try { this.onCommand?.({ command: plan.command, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
+          const outcome = parseCheckOutcome(plan, exitCode, stdout, stderr);
+          if (!outcome.ok) allOk = false;
+          if (outcome.ok) mem.recordAudit(`typecheck PASS — ${outcome.summary} (${plan.command})`);
+          else mem.recordError(`typecheck FAIL — ${outcome.summary}${outcome.firstErrors.length ? '\n' + outcome.firstErrors.join('\n') : ''}`);
+          parts.push(
+            `${outcome.summary} — ${plan.command}` +
+            (outcome.firstErrors.length ? `\n  ${outcome.firstErrors.join('\n  ')}` : ''),
+          );
+        }
+        const detail = `${allOk ? 'ALL LANGUAGES OK' : 'TYPECHECK FAILED'} (${plans.length} language${plans.length === 1 ? '' : 's'})\n` + parts.join('\n');
+        this.state?.appendTerminal(detail);
+        return detail;
       }
 
       case 'generate_observability': {

@@ -399,6 +399,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'typecheck',
+      description:
+        'Compile/type-check EVERY language in the workspace, not just frontend TypeScript — real proof ' +
+        'the code compiles. Auto-detects and runs the right checker per language present: `tsc --noEmit` ' +
+        '(or the project\'s typecheck script) for TS/TSX, `compileall` for Python, `mvn compile` for ' +
+        'Java, and `go build ./...` for Go — then reports OK/FAIL per language with the first errors. ' +
+        'Takes no arguments. Run it before declaring a polyglot build verified; fix any language that fails.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_observability',
       description:
         'Add real, dependency-free observability to the app you built and write the files to the ' +
@@ -723,6 +733,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tests',
   'run_tests',
   'code_graph',
+  'typecheck',
   'generate_observability',
   'generate_bundle_optimization',
   'generate_seed_data',

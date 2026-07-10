@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "950841184325",
+    "project_id": "gen-lang-client-0866594388",
+    "storage_bucket": "gen-lang-client-0866594388.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:950841184325:android:e5d413c3d78e418f6d132c",
+        "android_client_info": {
+          "package_name": "com.navbharat.ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "950841184325-3hcgktvo06evvdrederfjso2esprnr8s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwXwWvTvQ-8MATUaGohwsu19ssqkp3PRE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "950841184325-3hcgktvo06evvdrederfjso2esprnr8s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

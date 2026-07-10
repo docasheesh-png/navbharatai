@@ -187,6 +187,7 @@ import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
+import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -6087,7 +6088,11 @@ export function registerAgentV3Routes(app: Express): void {
       const projectContinue = projectPlanRef && result.ok && !planComplete(projectPlanRef) && nextBuildableModule(projectPlanRef)
         ? { resumable: true, planRemaining: projectPlanRef.modules.filter((m) => m.status !== 'done').length }
         : {};
-      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}) });
+      // T1-health-card: derive the objective build-health verdict from the diagnostics the build already
+      // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
+      // render it. Additive: the field is optional and the client no-ops when it's absent.
+      const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
+      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

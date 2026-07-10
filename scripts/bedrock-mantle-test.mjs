@@ -71,11 +71,17 @@ async function main() {
     resp.headers.get('x-amzn-requestid') || resp.headers.get('x-amzn-RequestId') || '(none in headers)';
   const rawText = await resp.text();
 
+  // ── Complete raw HTTP response — nothing hidden or simplified ──────────────────────────────────
   console.log('HTTP Status  :', httpStatus, resp.statusText);
-  console.log('Request ID   :', requestId);
+  console.log('x-amzn-requestid :', requestId);
   line();
-  console.log('Raw response body:');
-  console.log(rawText);
+  console.log('Response headers (ALL):');
+  for (const [k, v] of resp.headers.entries()) {
+    console.log(`  ${k}: ${v}`);
+  }
+  line();
+  console.log(`Full response body (${rawText.length} bytes):`);
+  console.log(rawText.length ? rawText : '(empty body)');
   line();
 
   let parsed = null;

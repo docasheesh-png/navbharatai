@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   foldCostTelemetry,
+  buildUsageReport,
   type CostTelemetryEntry,
   type DailyCostTelemetryDoc,
 } from './AgentV3CostTelemetry';
+import { sonnetEquivalentUsd } from './pricing';
 
 const DATE = '2026-06-25';
 
@@ -156,5 +158,68 @@ describe('foldCostTelemetry (pure cost-ladder aggregation)', () => {
     expect(next.byEscalationCohort!.in.builds).toBe(1);
     expect(next.escalatedBuilds).toBe(1);
     expect(next.totalBuilds).toBe(2);
+  });
+
+  // Billing Phase 3 — per-provider token folding + loss accounting.
+  it('folds per-provider token usage across builds (admin usage-report source)', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ providerUsage: { GLM: { inputTokens: 800_000, outputTokens: 140_000 } } }), 1);
+    doc = foldCostTelemetry(doc, DATE, entry({ providerUsage: { GLM: { inputTokens: 200_000, outputTokens: 40_000 }, CLAUDE: { inputTokens: 150_000, outputTokens: 20_000 } } }), 2);
+    expect(doc.byProviderUsage!.GLM).toEqual({ builds: 2, inputTokens: 1_000_000, outputTokens: 180_000 });
+    expect(doc.byProviderUsage!.CLAUDE).toEqual({ builds: 1, inputTokens: 150_000, outputTokens: 20_000 });
+  });
+
+  it('counts loss builds and sums the eaten baseline cost', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ billedUsd: 0.5 }), 1); // normal, not a loss
+    doc = foldCostTelemetry(doc, DATE, entry({ billedUsd: 0, wasLoss: true, lossRealCostUsd: 0.12 }), 2);
+    doc = foldCostTelemetry(doc, DATE, entry({ billedUsd: 0, wasLoss: true, lossRealCostUsd: 0.08 }), 3);
+    expect(doc.lossBuilds).toBe(2);
+    expect(doc.lossRealCostUsd).toBe(0.2);
+  });
+
+  it('tolerates older docs without the Phase-3 fields (self-extends, no throw)', () => {
+    const legacy = foldCostTelemetry(null, DATE, entry(), 1);
+    delete (legacy as Partial<DailyCostTelemetryDoc>).byProviderUsage;
+    delete (legacy as Partial<DailyCostTelemetryDoc>).lossBuilds;
+    delete (legacy as Partial<DailyCostTelemetryDoc>).lossRealCostUsd;
+    const next = foldCostTelemetry(legacy, DATE, entry({ providerUsage: { GLM: { inputTokens: 10, outputTokens: 5 } }, wasLoss: true, lossRealCostUsd: 0.01 }), 2);
+    expect(next.byProviderUsage!.GLM.builds).toBe(1);
+    expect(next.lossBuilds).toBe(1);
+    expect(next.lossRealCostUsd).toBe(0.01);
+  });
+});
+
+describe('buildUsageReport — the admin usage-report shape (per-provider tokens + margin)', () => {
+  it('sums per-provider tokens, prices the baseline, and computes achieved margin', () => {
+    const day1 = foldCostTelemetry(null, '2026-06-24', entry({ billedUsd: 2, providerUsage: { GLM: { inputTokens: 800_000, outputTokens: 140_000 } } }), 1);
+    const day2 = foldCostTelemetry(null, '2026-06-25', entry({ billedUsd: 3, providerUsage: { GLM: { inputTokens: 200_000, outputTokens: 40_000 }, CLAUDE: { inputTokens: 150_000, outputTokens: 20_000 } } }), 1);
+    const report = buildUsageReport([day2, day1], sonnetEquivalentUsd); // newest-first, as the store returns
+    expect(report.fromDate).toBe('2026-06-24');
+    expect(report.toDate).toBe('2026-06-25');
+    expect(report.totalBuilds).toBe(2);
+    expect(report.totalBilledUsd).toBe(5);
+    const glm = report.perProvider.find(r => r.provider === 'GLM')!;
+    expect(glm.builds).toBe(2);
+    expect(glm.inputTokens).toBe(1_000_000);
+    expect(glm.outputTokens).toBe(180_000);
+    expect(glm.baselineCostUsd).toBeCloseTo(sonnetEquivalentUsd({ inputTokens: 1_000_000, outputTokens: 180_000 }), 6);
+    // margin = billed − baseline; ratio = billed / baseline
+    expect(report.marginUsd).toBeCloseTo(5 - report.totalBaselineCostUsd, 6);
+    expect(report.marginRatio).toBeCloseTo(5 / report.totalBaselineCostUsd, 6);
+  });
+
+  it('rolls up losses across the window', () => {
+    const d = foldCostTelemetry(null, '2026-06-25', entry({ billedUsd: 0, wasLoss: true, lossRealCostUsd: 0.15 }), 1);
+    const report = buildUsageReport([d], sonnetEquivalentUsd);
+    expect(report.lossBuilds).toBe(1);
+    expect(report.lossRealCostUsd).toBe(0.15);
+  });
+
+  it('empty history → a zeroed report, no divide-by-zero', () => {
+    const report = buildUsageReport([], sonnetEquivalentUsd);
+    expect(report.totalBuilds).toBe(0);
+    expect(report.marginRatio).toBe(0);
+    expect(report.perProvider).toEqual([]);
   });
 });

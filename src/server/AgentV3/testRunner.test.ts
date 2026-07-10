@@ -45,6 +45,20 @@ describe('detectTestPlan', () => {
     expect(detectTestPlan(['main.go', 'main_test.go'])!.framework).toBe('go');
   });
 
+  it('detects Gradle (build.gradle / .kts) and prefers the gradlew wrapper', () => {
+    const withWrapper = detectTestPlan(['build.gradle', 'gradlew', 'src/test/java/AppTest.java'])!;
+    expect(withWrapper.framework).toBe('gradle');
+    expect(withWrapper.command).toBe('./gradlew test');
+
+    const kts = detectTestPlan(['app/build.gradle.kts', 'settings.gradle.kts'])!;
+    expect(kts.framework).toBe('gradle');
+    expect(kts.command).toBe('gradle test'); // no wrapper committed → system gradle
+  });
+
+  it('Maven wins over Gradle when both build files are present (Surefire path)', () => {
+    expect(detectTestPlan(['pom.xml', 'build.gradle'])!.framework).toBe('maven');
+  });
+
   it('returns null when no test suite is present (honest — never a fake pass)', () => {
     expect(detectTestPlan(['index.html', 'style.css'])).toBeNull();
     expect(detectTestPlan(['package.json'], JSON.stringify({ scripts: { build: 'vite build' } }))).toBeNull();
@@ -102,6 +116,34 @@ describe('parseTestOutcome', () => {
     expect(o.failed).toBe(1);
     expect(o.failingTests).toContain('TestB');
     expect(o.ok).toBe(false);
+  });
+
+  it('gradle — BUILD SUCCESSFUL with no FAILED lines → ok, counts stay null (honest)', () => {
+    const o = parseTestOutcome(planFor('gradle'), 0, '> Task :test\n\nBUILD SUCCESSFUL in 12s\n', '');
+    expect(o.ok).toBe(true);
+    expect(o.failed).toBeNull();
+    expect(o.total).toBeNull();
+    expect(o.failingTests).toEqual([]);
+  });
+
+  it('gradle — BUILD FAILED names failing tests; exit code drives ok', () => {
+    const out = [
+      '> Task :test FAILED',
+      'com.example.CalcTest > divideByZeroThrows FAILED',
+      'com.example.CalcTest > addsTwoNumbers FAILED',
+      'BUILD FAILED in 9s',
+    ].join('\n');
+    const o = parseTestOutcome(planFor('gradle'), 1, out, '');
+    expect(o.ok).toBe(false);
+    expect(o.failed).toBe(2);
+    expect(o.failingTests).toContain('com.example.CalcTest > divideByZeroThrows');
+    expect(o.failingTests).toContain('com.example.CalcTest > addsTwoNumbers');
+  });
+
+  it('gradle — a non-zero exit with no parseable FAILED lines is still an honest failure', () => {
+    const o = parseTestOutcome(planFor('gradle'), 1, 'FAILURE: Build failed with an exception.\n', '');
+    expect(o.ok).toBe(false);
+    expect(o.failed).toBeNull(); // could not attribute to specific tests — honest
   });
 
   it('playwright — passed with a flaky counted into total', () => {

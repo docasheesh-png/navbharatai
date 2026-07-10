@@ -12,6 +12,7 @@ export type TestFramework =
   | 'playwright'
   | 'pytest'
   | 'maven'
+  | 'gradle'
   | 'go'
   | 'npm-script';
 
@@ -113,6 +114,19 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
     return { framework: 'maven', command: 'mvn -q -B test', reason: 'Maven pom.xml detected — running Surefire tests.' };
   }
 
+  // 4b. JVM (Gradle) — build.gradle / build.gradle.kts (Java/Kotlin/Android). Prefer the committed
+  // `gradlew` wrapper (pins the exact Gradle version); fall back to a system `gradle` when there is none.
+  if (has(/(^|\/)build\.gradle(\.kts)?$/)) {
+    const wrapper = has(/(^|\/)gradlew$/);
+    return {
+      framework: 'gradle',
+      command: wrapper ? './gradlew test' : 'gradle test',
+      reason: wrapper
+        ? 'Gradle build file + gradlew wrapper detected — running ./gradlew test.'
+        : 'Gradle build file detected (no wrapper) — running gradle test.',
+    };
+  }
+
   // 5. Go — `*_test.go` files.
   if (has(/(^|\/)[^/]+_test\.go$/)) {
     return { framework: 'go', command: 'go test ./...', reason: 'Go *_test.go files detected.' };
@@ -204,6 +218,16 @@ export function parseTestOutcome(
         failed = fail;
         passed = run - fail;
       }
+      break;
+    }
+    case 'gradle': {
+      // Gradle's default `test` task does NOT print pass/fail counts to stdout (they live in the HTML
+      // report), so counts stay null (honest) and the exit code drives ok. Failing tests surface as
+      // "com.example.FooTest > doesThing FAILED"; collect those names for an honest failure list.
+      for (const fm of out.matchAll(/^(\S+)\s+>\s+(.+?)\s+FAILED\s*$/gm)) {
+        if (fm[1] && fm[2]) failingTests.push(`${fm[1]} > ${fm[2].trim()}`);
+      }
+      if (failingTests.length) failed = failingTests.length;
       break;
     }
     case 'go': {

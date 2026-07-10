@@ -403,7 +403,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       description:
         "Detect and RUN the project's OWN test suite and report honest pass/fail — stronger proof the build " +
         'works than a typecheck. Auto-detects the runner from the workspace (a real npm "test" script, or ' +
-        'vitest/jest/playwright config, or Python pytest, or Java Maven/JUnit, or Go tests) and runs it in ' +
+        'vitest/jest/playwright config, or Python pytest, or Java/Kotlin Maven or Gradle, or Go tests) and runs it in ' +
         'the sandbox, then returns parsed counts (passed/failed/total) and the names of failing tests. Takes ' +
         'no arguments. If it reports failures, fix them and run it again; if it reports no suite, seed real ' +
         'tests with generate_tests first — never claim the build is verified without running its tests.',

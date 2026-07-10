@@ -11,6 +11,7 @@ import { InviteAcceptGate } from './components/InviteAcceptGate';
 import { SharePortal } from './components/SharePortal';
 import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
+import { installNativeApiRewrite } from './lib/apiBase';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -81,6 +82,12 @@ window.addEventListener('unhandledrejection', (e) => {
 // Vite's dedicated event for a failed dynamic import preload — fires even when the rejection is handled,
 // so the unhandledrejection listener above would otherwise miss it.
 window.addEventListener('vite:preloadError', () => recoverFromStaleChunk());
+
+// Bundled native shell transport layer (Capacitor): install the fetch/XHR rewriter to redirect
+// site-relative `/api/*` URLs to the production origin when running in bundled mode. NO-OP on the web
+// and in today's hosted shell (origin already correct). Must run early, before any component/library
+// makes its first API call.
+installNativeApiRewrite(window);
 
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
 // service worker takes control, reload once so the user is never stuck on stale

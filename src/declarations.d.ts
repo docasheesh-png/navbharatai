@@ -553,6 +553,7 @@ declare module 'firebase/auth' {
   export const GithubAuthProvider: any;
   export function signInWithPopup(auth: any, provider: any): Promise<any>;
   export function signInWithRedirect(auth: any, provider: any): Promise<any>;
+  export function signInWithCredential(auth: any, credential: any): Promise<any>;
   export function getRedirectResult(auth: any): Promise<any>;
   export function fetchSignInMethodsForEmail(auth: any, email: string): Promise<string[]>;
   export function linkWithCredential(user: any, credential: any): Promise<any>;

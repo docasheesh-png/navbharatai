@@ -13,4 +13,13 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+
+    // @capacitor-firebase/authentication — enable the NATIVE Google Sign-In dependencies
+    // (play-services-auth + Credential Manager). Without rgcfaIncludeGoogle=true the plugin
+    // compiles those as compileOnly and native Google sign-in fails at runtime. The other version
+    // vars the plugin needs (firebaseAuthVersion, playServicesAuthVersion, googleid, …) all have
+    // sane defaults inside the plugin; we only pin the Credential Manager to its stable release.
+    rgcfaIncludeGoogle = true
+    androidxCredentialsVersion = '1.3.0'
+    androidxCredentialsPlayServicesAuthVersion = '1.3.0'
 }

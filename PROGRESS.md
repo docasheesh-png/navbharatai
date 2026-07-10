@@ -12712,3 +12712,32 @@ Pairs with B4 (run_tests) and leverages the earlier polyglot fullstack work — 
 can now build also get compiled-verified, not assumed.
 
 Gate: tsc fe+server 0, vitest 5653/5653 (10 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2A / C7: AST codemods for surgical multi-file edits (+ root-cause fix)
+
+Fourth item off ROADMAP.md. Redundancy-check (safeguard #6) surfaced a genuine ROOT CAUSE behind the
+roadmap's "whole-file rewrite still dominates" note: `codemod_rename` and `codemod_add_prop` were built,
+tested (CodemodeExecutor, ts-morph) and catalogued in ToolCatalog — but were **never granted to any role**.
+`catalogForTools()` filters the catalog by each role's tool list, and the codemods were in NO role's tools
+(not in BUILD_TOOLS/EDIT_TOOLS), so the model was never offered them → they were DEAD tools (a rule-2
+"looks done but does nothing" gap). That's why the agent fell back to whole-file rewrites.
+
+Fixed the class, not just the instance (rules 3–5):
+- NEW `codemodMoveFile.ts` (pure, 8 unit tests): `computeMove(files, from, to)` — move/rename a file and
+  rewrite EVERY importer's specifier (relative or @/~ alias, style preserved), recompute the moved file's
+  own relative imports from the new location, leave npm/alias-root specifiers untouched; honest `unresolved`
+  list + errors (missing source / identical / occupied target). Reuses `resolveLocalImport` (same resolver
+  as the A1 code graph — no drift). `relativeSpecifier`/`aliasSpecifier` helpers exported + tested.
+- `codemod_move_file` tool in ToolDispatcher — uses the A1 code graph (`whoImports` + `dependenciesOf`) to
+  read ONLY the affected files (moved + importers + its deps; falls back to a workspace scan if the graph
+  didn't know the file), applies `computeMove`, writes the moved file + rewritten importers, removes the old
+  path (guarded against shell metacharacters + `..` traversal; honest note if the delete fails).
+- ROOT-CAUSE FIX: added `codemod_rename`, `codemod_add_prop`, `codemod_move_file` to `ToolName` + `BUILD_TOOLS`
+  so the architect + all development/repair roles (frontend/backend/…/refactor/optimizer) can actually use
+  them — resurrecting the two dead tools and enabling the new one.
+- systemPrompt: teach the codemods as the preferred path for repo-wide renames/moves over whole-file rewrites.
+- AppKnowledgeBase: new "AST CODEMODS (C7 — Surgical multi-file edits)" capability on v3.0.
+
+Gate: tsc fe+server 0, vitest 5661/5661 (8 new), build PASS, boot:check PASS.

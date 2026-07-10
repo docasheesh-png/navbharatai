@@ -13,6 +13,15 @@ import { getSecretValue } from './secrets';
 export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
 export const TOKENS_PER_RUPEE = 100;
 
+/**
+ * The ₹→wallet-token unit conversion, used EVERYWHERE money meets tokens (credit mint, build debit,
+ * pre-flight estimate display, 402 payload) so the rate can never drift between surfaces. Signed on
+ * purpose: a negative ₹ (overdraft balance) converts to negative tokens for honest display. Non-finite → 0.
+ */
+export function inrToWalletTokens(inr: number): number {
+  return Number.isFinite(inr) ? Math.round(inr * TOKENS_PER_RUPEE) : 0;
+}
+
 /** Tokens a vishwakarma order may credit, derived ONLY from the amount actually paid. Pure + tested. */
 export function creditableVishwakarmaTokens(amountPaidRupees: unknown, buyPass: boolean): number {
   const paid = Number(amountPaidRupees);

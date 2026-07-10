@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { requireUserMatch } from '../lib/authMiddleware';
+import { TOKENS_PER_RUPEE } from '../lib/payments';
 
 /**
  * Wallet / token-balance read routes extracted from the server.ts monolith
@@ -38,7 +39,9 @@ export function registerWalletRoutes(app: Express): void {
         if (updated) {
           await setDoc(walletRef, data, { merge: true });
         }
-        return res.json(data);
+        // Billing Phase 2 — the ₹↔token rate travels WITH the wallet (single source of truth:
+        // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
+        return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
       } else {
         const welcomeBalance = 10.00;
         const welcomeTokens = 1000; // ₹10 = 1000 tokens

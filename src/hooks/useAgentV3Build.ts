@@ -109,6 +109,9 @@ export interface BillingBlock {
   balanceInr?: number;
   /** The estimated cost of the refused build, if the server reported it. */
   estimateInr?: number;
+  /** Billing Phase 2 — the same figures in the wallet's primary unit (tokens), server-converted. */
+  balanceTokens?: number;
+  estimateTokens?: number;
 }
 
 /** One command in the per-app queue, as the queue UI renders it (matches the server's QueueItem). */
@@ -990,6 +993,8 @@ export function useAgentV3Build(): UseAgentV3Build {
               notice: msg,
               balanceInr: typeof body.balanceInr === 'number' ? body.balanceInr : undefined,
               estimateInr: typeof body.estimateInr === 'number' ? body.estimateInr : undefined,
+              balanceTokens: typeof body.balanceTokens === 'number' ? body.balanceTokens : undefined,
+              estimateTokens: typeof body.estimateTokens === 'number' ? body.estimateTokens : undefined,
             });
             setRunning(false);
             return;

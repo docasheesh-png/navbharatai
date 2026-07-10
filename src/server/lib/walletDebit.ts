@@ -1,5 +1,5 @@
 import { doc, runTransaction } from 'firebase/firestore';
-import { TOKENS_PER_RUPEE } from './payments';
+import { inrToWalletTokens } from './payments';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
@@ -72,7 +72,7 @@ export function computeDebitedWallet(
   }
 
   const billedInr = Math.round(tx.billedInr * 100) / 100; // ₹ to the paisa — no float drift
-  const tokens = Math.round(tx.billedInr * TOKENS_PER_RUPEE);
+  const tokens = inrToWalletTokens(tx.billedInr);
 
   const ledgerEntry = {
     type: 'usage',

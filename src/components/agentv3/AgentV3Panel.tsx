@@ -84,6 +84,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
   const [billed, setBilled] = useState(false);
   const [walletBalanceInr, setWalletBalanceInr] = useState<number | null>(null);
+  // Billing Phase 2 — token-first display: tokens are the wallet's primary unit (₹ is secondary).
+  const [walletTokens, setWalletTokens] = useState<number | null>(null);
   // ── 3-role model UI (FIX #6): composer mode + the per-app command queue ─────────────────────────
   // 'build' = the normal builder (Chat 1). 'planner'/'advisor' = the read-only role lanes (FIX #5)
   // that analyze the project and PROPOSE steps; the user approves them into the queue below.
@@ -155,7 +157,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
   // Refetches when the user changes, after a build finishes (balance was just spent), and after a 402.
   useEffect(() => {
-    if (!userId) { setBilled(false); setWalletBalanceInr(null); return; }
+    if (!userId) { setBilled(false); setWalletBalanceInr(null); setWalletTokens(null); return; }
     let cancelled = false;
     void (async () => {
       try {
@@ -166,12 +168,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const isBilled = sres.ok && (sj as { billed?: unknown }).billed === true;
         if (cancelled) return;
         setBilled(isBilled);
-        if (!isBilled) { setWalletBalanceInr(null); return; }
+        if (!isBilled) { setWalletBalanceInr(null); setWalletTokens(null); return; }
         const wres = await fetch(`/api/wallet/${encodeURIComponent(userId)}${email ? `?email=${encodeURIComponent(email)}` : ''}`, { headers });
         const wj = await wres.json().catch(() => ({} as Record<string, unknown>));
         const bal = (wj as { remaining_balance?: unknown }).remaining_balance;
-        if (!cancelled) setWalletBalanceInr(typeof bal === 'number' && Number.isFinite(bal) ? bal : null);
-      } catch { if (!cancelled) { setBilled(false); setWalletBalanceInr(null); } }
+        const tok = (wj as { tokenBalance?: unknown }).tokenBalance;
+        if (!cancelled) {
+          setWalletBalanceInr(typeof bal === 'number' && Number.isFinite(bal) ? bal : null);
+          setWalletTokens(typeof tok === 'number' && Number.isFinite(tok) ? tok : null);
+        }
+      } catch { if (!cancelled) { setBilled(false); setWalletBalanceInr(null); setWalletTokens(null); } }
     })();
     return () => { cancelled = true; };
   }, [userId, email, state.done, billingBlock]);
@@ -1916,13 +1922,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
               actually on paid billing (server `billed:true`), so admin/free-list users and the
               flag-off state never see it. Tapping it opens Wallet & Billing to top up. */}
-          {billed && walletBalanceInr !== null && (
+          {billed && (walletTokens !== null || walletBalanceInr !== null) && (
+            // Billing Phase 2 — token-first: the chip shows the wallet's PRIMARY unit (tokens); the ₹
+            // equivalent lives in the tooltip. Falls back to ₹ only when the doc has no token balance.
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'billing' } }))}
-              title="Your NavBharatAI Pro credits — tap to add more"
-              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-all ${walletBalanceInr <= 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'}`}
+              title={`Your NavBharatAI Pro token balance${walletBalanceInr !== null ? ` (≈ ₹${walletBalanceInr.toFixed(2)})` : ''} — tap to add more`}
+              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-all ${(walletTokens ?? walletBalanceInr ?? 0) <= 0 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20'}`}
             >
-              <Wallet className="w-3 h-3" /> ₹{walletBalanceInr.toFixed(2)}
+              <Wallet className="w-3 h-3" />
+              {walletTokens !== null
+                ? `${walletTokens.toLocaleString()} tokens`
+                : `₹${(walletBalanceInr as number).toFixed(2)}`}
             </button>
           )}
           <button
@@ -2159,7 +2170,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <div className="min-w-0">
                     <div className="font-semibold text-amber-200">Add credits to build</div>
                     <div className="mt-0.5 whitespace-pre-wrap break-words">{billingBlock.notice}</div>
-                    {(typeof billingBlock.balanceInr === 'number' || typeof billingBlock.estimateInr === 'number') && (
+                    {/* Billing Phase 2 — token-first: balance and estimate in the wallet's primary unit
+                        (server-converted tokens); older servers without token fields fall back to ₹. */}
+                    {(typeof billingBlock.balanceTokens === 'number' || typeof billingBlock.estimateTokens === 'number') ? (
+                      <div className="mt-1 text-[11px] text-amber-300/80">
+                        {typeof billingBlock.balanceTokens === 'number' && <span>Balance: {billingBlock.balanceTokens.toLocaleString()} tokens</span>}
+                        {typeof billingBlock.balanceTokens === 'number' && typeof billingBlock.estimateTokens === 'number' && <span> · </span>}
+                        {typeof billingBlock.estimateTokens === 'number' && <span>This build ≈ {billingBlock.estimateTokens.toLocaleString()} tokens</span>}
+                      </div>
+                    ) : (typeof billingBlock.balanceInr === 'number' || typeof billingBlock.estimateInr === 'number') && (
                       <div className="mt-1 text-[11px] text-amber-300/80">
                         {typeof billingBlock.balanceInr === 'number' && <span>Balance: ₹{billingBlock.balanceInr.toFixed(2)}</span>}
                         {typeof billingBlock.balanceInr === 'number' && typeof billingBlock.estimateInr === 'number' && <span> · </span>}

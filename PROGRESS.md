@@ -12851,3 +12851,25 @@ devDependencies. Genuine gap, high precision.
 Also this session: triggered the GA-5/GA-12/U-2 cluster checkpoint .aab (android-aab.yml on main).
 
 Gate: tsc fe+server 0, vitest 5696/5696 (7 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / D11: toolchain version pinning check
+
+Tenth roadmap item this session (after B4, A1, B6, C7, A2, GA-5, GA-12, U-2, GA-3). Redundancy-check
+(safeguard #6): no toolchain-pin detector existed. Genuine gap — a silent cause of "works for the author,
+breaks here" on imported repos.
+
+- NEW `toolchainPins.ts` (pure, 6 unit tests): `analyzeToolchain(files)` extracts the declared toolchain —
+  Node (.nvmrc / .node-version / engines.node / volta), Python (.python-version / runtime.txt /
+  pyproject requires-python), Java (pom.xml java.version or maven.compiler), Go (go.mod) — normalizes to
+  comparable keys (major, or major.minor for Python/Go) and flags INTERNAL inconsistency when two sources
+  disagree. Honest: reports what's declared, never claims the sandbox matches.
+- `check_toolchain` tool in ToolDispatcher (reads the relevant config files, reports declared toolchain +
+  inconsistencies, records a memory error on conflict), declared in ToolCatalog (+ CATALOG_TOOL_NAMES),
+  added to ToolName + BUILD_TOOLS, taught in systemPrompt (call on an imported/cloned repo).
+- AppKnowledgeBase: new "TOOLCHAIN CHECK (D11)" capability on v3.0.
+
+Also this session: the GA-5/GA-12/U-2 cluster checkpoint .aab (run #7) went green.
+
+Gate: tsc fe+server 0, vitest 5702/5702 (6 new), build PASS, boot:check PASS.

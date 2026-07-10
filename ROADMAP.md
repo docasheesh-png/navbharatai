@@ -112,8 +112,10 @@ build order after Tier 0.
   `console_errors`; add a bounded fix→re-run→re-verify pass, honest WARN if it can't).
 - **T1-session-rehydrate** 🟢⚠️ — rehydrate in-process state (GitManager/WorkspaceMemory) on
   server restart so a mid-build restart continues seamlessly (transcript survives; in-proc doesn't).
-- **T1-structured-logs** 🟢❌ — promote the event stream to structured JSON logs (per-build
-  trace ID, tool latencies).
+- **T1-structured-logs** 🟢✅ — SUBSTANTIALLY COVERED: P-BRE.1 `TracingManager` already gives
+  every build a `traceId` + timing spans with OTLP/Cloud Trace export, and `DecisionTraceManager`
+  records the semantic decision trace. A further "promote the whole event stream to JSON" pass is a
+  hot-path refactor for marginal gain — not scheduled unless a concrete observability gap appears.
 - **T1-admin-dashboard** 🟢❌ — aggregate logs + audit episodes into an admin build/cost/failure
   dashboard + alerting on failure-rate spikes.
 - **T1-watchdog** 🟢❌ — `WatchdogService` for zombie sandbox processes (poll, force-kill + rebuild).
@@ -124,10 +126,15 @@ build order after Tier 0.
 - **T1-db-provision-ui** 🟢❌ — one-click Supabase/Firebase/Neon for the user's app, env written
   back (BYO Provisioning Broker — old U-3 / Cap-1).
 - **T1-auth-scaffold** 🟢❌ — built-in login/signup wired into the generated app.
-- **T1-version-timeline** 🟢❌ — friendly UI over the existing git-native branch/checkpoint/rollback plumbing.
+- **T1-version-timeline** 🟢✅ — SHIPPED: the AgentV3 `history` tab renders the deduped checkpoint
+  timeline across turns (`allCheckpoints`) with a per-checkpoint restore wired to the real
+  `/api/agentv3/restore`, and honest "sandbox recycled" feedback when a SHA isn't live this session.
 - **T1-budget-ux** 🟢❌ — honest "budget reached" state + one-click "continue with higher budget."
-- **T1-mention-inbox** 🟢⚠️ — @mention resolution is done; build the per-user in-app
-  notification inbox store to actually DELIVER it (+ optional email + picker UI).
+- **T1-mention-inbox** 🟢✅ — SHIPPED (#1179): `MentionNotificationStore` (per-user Firestore store
+  + pure `deliverMentions`) delivers each @mention to the tagged member's inbox; `MentionInbox`
+  bell/dropdown in the collab header polls `/api/notifications`, shows an unread badge, and marks
+  read. Optional email delivery stays a future piece (needs an external provider key) — honestly
+  noted, not stubbed.
 
 ---
 

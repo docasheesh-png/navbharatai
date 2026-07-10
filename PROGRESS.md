@@ -13130,3 +13130,36 @@ so nothing is silently dropped.
 
 Gate: tsc fe+server 0, vitest 5811/5811 (579 files, ~30 new), boot:check PASS. Flag OFF → billing
 byte-identical to today; the whole phase is measurement + an off-by-default switch.
+
+---
+
+## 2026-07-10 — Tier 1 stock-take + doc-truth correction (end-of-run status)
+
+After shipping this session's Tier 1 cluster — Option A escalation canary (percentage rollout +
+canary telemetry, #1172/#1175), Tier 1B trust cluster (build-health card #1176, backstop-honesty
+#1177), and T1-mention-inbox full-stack delivery (#1179) — I did a redundancy stock-take
+(safeguard #6/#1) of the remaining non-billing Tier 1 items before building anything new. The
+admin's standing instruction this session was to SKIP all billing/cost items.
+
+Findings (verified against real code, not the doc):
+- **T1-version-timeline** — already SHIPPED. `AgentV3Panel.tsx` has a live `history` surface tab
+  rendering the deduped checkpoint timeline (`allCheckpoints`) with `handleRestoreCheckpoint` wired
+  to the real `/api/agentv3/restore`, plus honest "sandbox recycled" feedback (`restoreNote`). The
+  roadmap's ❌ was stale — corrected to ✅ so no future session rebuilds it (this stale-doc class is
+  exactly what caused redundant PRs #1/#4).
+- **T1-structured-logs** — substantially COVERED by P-BRE.1 `TracingManager` (per-build `traceId` +
+  timing spans + OTLP/Cloud Trace export) and `DecisionTraceManager`. No clean incremental slice;
+  the remainder is a hot-path event-stream refactor for marginal gain. Corrected to ✅ (covered).
+- **T1-gate-enforce** — genuinely open and high-value, but core/RISKY: the honest implementation
+  auto-runs the full 22-dim gate at build end and downgrades `ok:true` on a FAIL verdict, which
+  ripples into the success/billing verdict — the exact area fenced off this session. Per its own
+  roadmap note ("only with a careful feature flag + heavy tests, else skip") and safeguard #3, this
+  is left for an explicit admin go-ahead rather than shipped unilaterally.
+
+Decision (honesty rule + real-features-only): rather than rebuild redundant work or ship a risky
+core change against the billing fence, this change corrects the stale roadmap markers only (docs,
+zero runtime risk) and records the honest end-of-run status. The conveyor PAUSES here for admin
+direction on T1-gate-enforce (the one remaining clean-but-risky Tier 1B item) — everything else in
+Tier 1B/1C/version-timeline/mention-inbox is either shipped or billing-fenced.
+
+Gate: docs-only change (ROADMAP.md + PROGRESS.md) — no code touched.

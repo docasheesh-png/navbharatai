@@ -395,6 +395,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'architecture_map',
+      description:
+        'Get a quick "how is this app structured / where do I start" orientation before editing an ' +
+        'unfamiliar or imported codebase. Returns the entry points, the most-imported core modules, the ' +
+        'structural areas (by directory), the key external dependencies, and a suggested reading order — ' +
+        'derived from the real import graph, not guessed. Read-only, takes no arguments. Call it first ' +
+        'when onboarding to a project you did not just build, so your edits are deliberate.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'code_graph',
       description:
         "Query the project's structure from the indexed code graph instead of guessing or grepping. " +
@@ -751,6 +761,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_api_docs',
   'generate_tests',
   'run_tests',
+  'architecture_map',
   'code_graph',
   'typecheck',
   'generate_observability',

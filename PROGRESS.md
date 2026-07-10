@@ -12741,3 +12741,28 @@ Fixed the class, not just the instance (rules 3–5):
 - AppKnowledgeBase: new "AST CODEMODS (C7 — Surgical multi-file edits)" capability on v3.0.
 
 Gate: tsc fe+server 0, vitest 5661/5661 (8 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2A / A2: architecture-onboarding map (understand before editing)
+
+Fifth item off ROADMAP.md (after B4, A1, B6, C7). The agent could QUERY the graph (A1 code_graph) but had
+no "where do I start" ORIENTATION for onboarding to an unfamiliar/imported app. Redundancy-check
+(safeguard #6): generate_architecture_docs writes an ARCHITECTURE.md DEFECT report (orphans, layering
+violations) — distinct from a cheap read-only orientation. Genuine gap.
+
+- NEW `architectureMap.ts` (pure, 7 unit tests): `buildArchitectureMap(graph)` derives, from the A1
+  import edges — entry points (roots nothing imports; entry-named files first), hubs (most-imported core
+  modules by in-degree), structural areas (file counts by directory), key external deps + counts.
+  `renderArchitectureMap()` renders a concise orientation with a suggested reading order. Reuses
+  buildImportEdges (same resolver as A1 — no drift).
+- `architecture_map` tool in ToolDispatcher (read-only, no args, reads the live WorkspaceMemory graph),
+  declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName + BUILD_TOOLS, taught in systemPrompt
+  (onboard FIRST when opening an app you did not just build).
+- AppKnowledgeBase: new "ARCHITECTURE ONBOARDING (A2)" capability on v3.0.
+
+This completes the roadmap's Tier 2A cluster: A1 (query graph) + A2 (orient) + B4 (run tests) + B6
+(cross-language typecheck) + C7 (surgical codemods) — v3.0 can now understand, verify, and safely edit
+a big/unfamiliar app, not just build a fresh one.
+
+Gate: tsc fe+server 0, vitest 5668/5668 (7 new), build PASS, boot:check PASS.

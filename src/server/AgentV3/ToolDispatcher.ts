@@ -9,6 +9,7 @@ import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { computeMove, type MoveFile } from './codemodMoveFile';
+import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1485,6 +1486,14 @@ export class ToolDispatcher {
         return impact.length
           ? `Changing ${file} may affect ${impact.length} file(s) that import it directly or transitively — review these before/after the edit:\n` + impact.map(f => `  ${f}`).join('\n')
           : `Changing ${file} affects no other files (nothing imports it).`;
+      }
+
+      case 'architecture_map': {
+        // A2 — a cheap "how is this app structured / where do I start" orientation from the A1 import
+        // graph: entry points, the most-imported core modules, structural areas, key deps + a reading
+        // order. Read-only; use it to onboard to an unfamiliar/imported app before editing.
+        const map = buildArchitectureMap(getWorkspaceMemory(this.workspaceId).graph());
+        return renderArchitectureMap(map);
       }
 
       case 'typecheck': {

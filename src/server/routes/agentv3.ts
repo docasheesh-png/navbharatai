@@ -6018,9 +6018,21 @@ export function registerAgentV3Routes(app: Express): void {
       // Tokens leave at the SAME rate purchases mint them (TOKENS_PER_RUPEE); the debit is
       // idempotent per buildRef and awaited so the result event can show the real deduction.
       // A debit failure never blocks the result, but is loudly logged — money, not noise.
+      // COHERENCE FIX (2026-07-10): the real wallet DEBIT must activate together with the rest of the
+      // paid surface — the pre-flight estimate gate (L3099), the empty-balance BLOCK, and the header
+      // balance chip are all gated on `paid-public OR credit-gate` AND non-free-user. The debit was
+      // the one piece running UNGATED, so with billing "off" a user's wallet drained invisibly (no
+      // chip, no block) and a later flag-on would strand every account at a negative balance from
+      // spend they never saw. Now all four move as one: billing off → builds are free & wallets are
+      // untouched (today's behavior); flag on → chip + estimate gate + debit + block all activate.
+      // The display-only monthly cost (userCostStore) still records always — it is an internal
+      // estimate surface, not a money movement.
+      const billingActive = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
       let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
+      }
+      if (userId && effectiveBilledUsd > 0 && billingActive) {
         try {
           const debitRes = await debitWalletForBuild(getDb() as any, userId, {
             billedInr: effectiveBilledUsd * usdInrRate(),

@@ -12895,3 +12895,33 @@ gap — catches the common AI-codegen bug "created a component/hook/util and for
 This is the 3rd item since .aab run #7 (GA-3 + D11 + this) → a checkpoint .aab is due after merge.
 
 Gate: tsc fe+server 0, vitest 5707/5707 (5 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Option A / T1-escalation-on (slice 1): percentage canary for the escalation orchestrator
+
+Admin chose Option A (activate the built-but-dormant EscalationOrchestrator). Investigation first
+(safeguard #3): the orchestrator is fully built + tested + WIRED into the build route — it is gated only
+by AGENTV3_ESCALATION=on (env). Flipping straight to 100% of live builds is the risky part (changes cost +
+behaviour for every user), and the roadmap itself mandates "measure before default-on". So slice 1 makes a
+SAFE GRADUAL rollout possible:
+
+- NEW `escalationRollout.ts` (pure, 9 unit tests): `escalationRolloutPercent(env)` — flag off → 0%; on with
+  no AGENTV3_ESCALATION_PCT → 100% (identical to the old "on" semantics); on + PCT=N → clamp(N, 0..100).
+  `rolloutBucket(key)` — deterministic FNV-1a bucket 0..99 (a workspace is consistently in or out — clean
+  measurement, no flip-flop). `inEscalationRollout(key, pct)` — monotonic (raising PCT never drops a key).
+- `escalationActiveFor(rolloutKey)` in agentv3.ts = flag AND canary. CRITICAL SIBLING FIXED: the smart
+  cheap-first rule (`cheapFloorAllowedForTier`) previously keyed off `escalationEnabled()` alone — under a
+  partial rollout, a complex build OUTSIDE the canary would have led with a cheap build while
+  `shouldEscalateBuild` denied it the Sonnet retry = weak build with NO safety net. Both gates now share
+  `escalationActiveFor` with the SAME workspaceId key, so they can never disagree; with a partial PCT and
+  no key the default is conservative (no cheap lead, no escalation).
+- 4 new regression tests in agentv3.test.ts encode exactly that invariant (for any key, cheap-floor lead on
+  a complex tier === escalation retry) + the backward-compat cases. All pre-existing gate tests pass
+  UNCHANGED (on + no PCT is byte-identical to the old behaviour; flag off is byte-identical to today).
+
+HONEST BOUNDARY (rule 6): the actual switch is a Cloud Run env change only the admin can make. Recommended
+first step: set AGENTV3_ESCALATION=on + AGENTV3_ESCALATION_PCT=10 (10% canary), watch deliveredVia/cost
+telemetry, then raise PCT → 100. No env change → production behaviour is byte-identical to today.
+
+Gate: tsc fe+server 0, vitest 5720/5720 (13 new), build PASS, boot:check PASS.

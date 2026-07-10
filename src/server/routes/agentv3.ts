@@ -185,6 +185,7 @@ import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
+import { escalationRolloutPercent, inEscalationRollout } from '../AgentV3/escalationRollout';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -1122,7 +1123,7 @@ function selectReviewJudge(): { runTurn: JudgeRunTurn; modelId: string; kind: 'g
  * Claude still backstops). AGENTV3_CHEAP_FLOOR_ALL_TIERS=1 overrides → apply the floor to every tier.
  * Pure + exported for testing.
  */
-export function cheapFloorAllowedForTier(startTier?: string): boolean {
+export function cheapFloorAllowedForTier(startTier?: string, rolloutKey?: string): boolean {
   if (process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS === '1') return true;
   // SMART CHEAP-FIRST (admin 2026-07-03): when ESCALATION is on, EVERY app — simple OR complex —
   // tries the cheap floor (GLM/Kimi) FIRST, because a weak cheap build is caught by the mandatory
@@ -1131,7 +1132,10 @@ export function cheapFloorAllowedForTier(startTier?: string): boolean {
   // the conservative split (complex → strong directly) — a complex app must never ship a weak cheap
   // build with no way to escalate. This makes "all apps cheap-first → gate → Sonnet-on-fail" the
   // behaviour precisely when it is safe.
-  if (escalationEnabled()) return true;
+  // T1-escalation-on: this must be the CANARY-AWARE check (escalationActiveFor, same rollout key as
+  // shouldEscalateBuild) — a build OUTSIDE a partial rollout has no Sonnet retry, so it must keep the
+  // conservative split below, not lead cheap on a complex app.
+  if (escalationActiveFor(rolloutKey)) return true;
   const tier = (startTier || '').toLowerCase();
   return tier === 'gemini' || tier === 'haiku' || tier === '';
 }
@@ -1301,13 +1305,25 @@ export function escalationEnabled(): boolean {
 }
 
 /**
+ * Whether escalation is ACTIVE for a specific build — the flag AND the percentage canary
+ * (T1-escalation-on). With AGENTV3_ESCALATION=on and no AGENTV3_ESCALATION_PCT this is 100%
+ * (identical to the old "on" semantics); with PCT=N only ~N% of workspaces (stable hash
+ * bucket, so a project is consistently in or out) get the ladder. CRITICAL INVARIANT: the
+ * SAME rollout key must gate BOTH the cheap floor and the escalation retry — a build outside
+ * the canary must never lead with a cheap build that has no Sonnet safety net behind it.
+ */
+export function escalationActiveFor(rolloutKey?: string): boolean {
+  return escalationEnabled() && inEscalationRollout(rolloutKey, escalationRolloutPercent());
+}
+
+/**
  * Whether THIS build should run through the escalation orchestrator. Only when: the flag is
  * on, we have an analyser verdict, it is NOT power/Only-Opus mode (power bypasses the ladder),
  * and the escalation path actually has a higher tier to climb to. Otherwise the single-build
  * fast path is used (and stays identical to today).
  */
-export function shouldEscalateBuild(analysis: AnalysisResult | undefined, onlyOpus: boolean): boolean {
-  if (!escalationEnabled()) return false;
+export function shouldEscalateBuild(analysis: AnalysisResult | undefined, onlyOpus: boolean, rolloutKey?: string): boolean {
+  if (!escalationActiveFor(rolloutKey)) return false;
   if (!analysis || onlyOpus) return false;
   return (analysis.escalationPath?.length ?? 0) > 1;
 }
@@ -4003,7 +4019,7 @@ export function registerAgentV3Routes(app: Express): void {
         // NEVER for a large existing project (admin 2026-07-05): the floor timed out 8× on a 233KB
         // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
         // Escalation builds below never pass this, so they stay Claude.
-        allowCheapFloor: !routeStrong && cheapFloorAllowedForTier(analysis?.startTier) && cheapFloorAllowedForUser(userId, email),
+        allowCheapFloor: !routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email),
         onProviderUsed: captureProvider,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
@@ -5192,7 +5208,7 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
-      if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus)) {
+      if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus, workspaceId)) {
         // STRONG JUDGE (admin 2026-07-03): the cheap floor (GLM/Kimi) builds attempt 1; a SONNET judge
         // reviews it — a cheap model can't reliably catch its own gaps (a cosmetic feature, a subtle
         // bug). Only on a judge FAIL do we spend Sonnet, and then to REPAIR the judge's specific

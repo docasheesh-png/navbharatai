@@ -63,4 +63,9 @@ export class AgentEventStream {
   get listenerCount(): number {
     return this.listeners.size;
   }
+
+  /** Get a snapshot of all buffered events (for health checks / early validation). */
+  snapshot(): AgentEvent[] {
+    return [...this.buffer];
+  }
 }

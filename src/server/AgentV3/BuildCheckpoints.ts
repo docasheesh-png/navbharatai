@@ -1,7 +1,7 @@
 // Build Checkpoints (Phase B) — Early validation every N tool calls
 // Detects broken builds early, suggests graceful degradation if token budget runs low
 
-import type { WorkspaceState, AgentEventStream } from './index';
+import type { WorkspaceState, AgentEventStream, AgentEvent } from './index';
 import type { FeatureRanking } from './RequestAnalyser';
 
 export interface CheckpointState {
@@ -65,12 +65,12 @@ export class BuildCheckpoint {
 
     // Check 1: Any errors in recent events?
     const hasErrors = recentEvents.some(
-      (e) => e.type === 'tool_result' && (e.error || e.status === 'error')
+      (e: AgentEvent) => e.type === 'tool_result' && (e as any).error
     );
 
     // Check 2: Any tool_calls without results (stuck)?
-    const pendingCalls = recentEvents.filter((e) => e.type === 'tool_call').length;
-    const completedCalls = recentEvents.filter((e) => e.type === 'tool_result').length;
+    const pendingCalls = recentEvents.filter((e: AgentEvent) => e.type === 'tool_call').length;
+    const completedCalls = recentEvents.filter((e: AgentEvent) => e.type === 'tool_result').length;
     const stuckRatio = pendingCalls > completedCalls ? pendingCalls / (completedCalls + 1) : 0;
 
     // Verdict: broken when there are errors OR stuck (pending >> completed)

@@ -17,6 +17,7 @@ import {
   makeConsensus,
   makeWebSearch,
   type OpinionRouter,
+  type AgentEvent,
   resolveModel,
   toPowerLevel,
   powerSpec,
@@ -180,6 +181,7 @@ import { CREATOR_IDENTITY } from '../lib/prompts';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
+import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
@@ -4654,6 +4656,47 @@ export function registerAgentV3Routes(app: Express): void {
           title: deriveTitle(prompt),
         },
       });
+
+      // Phase B — Checkpoint Loop: early validation + graceful degradation
+      // (intelligent scoping): create a checkpoint monitor with feature priorities
+      // from the request analyser. Monitors build health every N tool calls.
+      const checkpoint = new BuildCheckpoint(state, analysis?.features);
+      let lastCheckpointHintEmitted = false;
+      const checkpointListener = (event: AgentEvent) => {
+        try {
+          if (event.type === 'tool_call') {
+            // After each tool call, check if it's time for a checkpoint
+            if (checkpoint.recordToolCall()) {
+              // Checkpoint triggered — run the health check
+              const health = checkpoint.quickCheck(events);
+              if (!health.ok && health.broken) {
+                events.emit({
+                  type: 'narration', agent: 'architect',
+                  text: '⚠️ Build health check detected issues — preparing recovery…',
+                  ts: Date.now(),
+                });
+              }
+              // If degradation is suggested and we haven't emitted the hint yet, do it now
+              if (health.suggestion && !lastCheckpointHintEmitted) {
+                lastCheckpointHintEmitted = true;
+                const hint = checkpoint.degradationHint();
+                if (hint) {
+                  events.emit({
+                    type: 'narration', agent: 'architect',
+                    text: hint,
+                    ts: Date.now(),
+                  });
+                }
+              }
+            }
+          }
+        } catch { /* checkpoint monitoring is best-effort — never blocks */ }
+      };
+      // Wire the checkpoint listener into the event stream (best-effort).
+      // Subscribe with replay=false since we only care about future events in the build.
+      try {
+        events.subscribe(checkpointListener, false);
+      } catch { /* checkpoint listener is best-effort — never blocks a build */ }
 
       let buildPrompt = prompt;
 

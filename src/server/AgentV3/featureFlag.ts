@@ -74,6 +74,19 @@ export function isAgentV3PaidPublicEnabled(): boolean {
 }
 
 /**
+ * CREDIT GATE (admin decision 2026-07-10) — the wallet-balance affordability gate DECOUPLED from the
+ * full paid-public switch. When ON, a verified non-free-list user whose balance is at/below the
+ * overdraft floor is refused a NEW build (HTTP 402), exactly like paid-public's gate — but WITHOUT
+ * turning on the rest of the paid-public behavior (anon handling, `billed` display flag, etc.). This
+ * exists because the security migration keeps AGENTV3_PAID_PUBLIC OFF, yet ₹0-balance accounts must
+ * still be stopped from spending NavBharatAI's model budget indefinitely. Default OFF (today's
+ * behavior). Turn on with AGENTV3_CREDIT_GATE=true.
+ */
+export function isAgentV3CreditGateEnabled(): boolean {
+  return process.env.AGENTV3_CREDIT_GATE === 'true';
+}
+
+/**
  * SECURITY Phase 1.3 (admin-approved 2026-07-07) — must a v3.0 build be REFUSED for lack of a
  * billable identity? A build spends NavBharatAI's paid model budget, so it may run ONLY for:
  *   • a VERIFIED user (`verifiedUserId` present — billable / free-list-checkable), or

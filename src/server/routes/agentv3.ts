@@ -71,6 +71,7 @@ import {
   classifyIntent,
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
+  isAgentV3CreditGateEnabled,
   buildRequiresSignIn,
   estimateBuildCost,
   readWalletBalanceInr,
@@ -3046,11 +3047,18 @@ export function registerAgentV3Routes(app: Express): void {
     // overdraft in Affordability absorbs any estimate miss). `paidEconomyNotice` is emitted once the
     // stream opens (below) so a low-balance user is told honestly, without blocking their work.
     let paidEconomyNotice: string | null = null;
-    if (isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(userId, email)) {
+    // The affordability gate runs when EITHER the full paid-public switch OR the decoupled credit gate
+    // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
+    // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
+    // security migration). Free-list users (admin/testers) always bypass it.
+    if ((isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)) {
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
       const balanceInr = userId ? await readWalletBalanceInr(firestoreWalletReader(getDb()), userId) : null;
       const estimate = estimateBuildCost(prompt, powerLevelReq, usdInrRate());
       const gate = decidePaidGate({
+        // The gate itself is active here (outer condition already gated on the two flags); decidePaidGate
+        // keys its block/economy/proceed decision on this being true, so pass true regardless of which
+        // flag enabled it.
         paidPublicEnabled: true,
         isFreeUser: false,
         balanceInr,

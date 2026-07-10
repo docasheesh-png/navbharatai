@@ -2,24 +2,27 @@
  * 🧪 Test Chat — dedicated AWS Bedrock GLM-5 provider (ISOLATED, debug-only).
  *
  * PURPOSE: validate AWS Bedrock GLM-5 access independently of NavBharatAI's production AI
- * providers/router. This file talks ONLY to AWS Bedrock via AWS SDK v3 (SigV4 auth) — the same
- * approach the new Amazon Bedrock Workbench uses. It deliberately does NOT import or reuse the
- * production provider router, the AI abstraction, model selector, OpenRouter, OpenAI, Gemini, or
- * Claude. Nothing here is wired into any production path.
+ * providers/router.
  *
- * It tries the Converse API first (the modern Bedrock chat API); if GLM-5 does not support Converse
- * on this account, it automatically falls back to InvokeModel. Every step is logged and the COMPLETE
- * raw AWS error/response is surfaced to the caller — no generic "something went wrong" masking.
+ * WHY THE bedrock-mantle ENDPOINT (verified 2026-07-10 against official AWS docs): GLM-5 (and other
+ * third-party models like Qwen) are served through Amazon Bedrock's **Mantle** endpoint — an
+ * OpenAI-compatible HTTP API — NOT through the classic bedrock-runtime InvokeModel/Converse APIs.
+ * That is why the model works in the new Bedrock console ("Workbench") but returns
+ * "ValidationException: Operation not allowed" through @aws-sdk/client-bedrock-runtime:
+ *   • bedrock-runtime  (BedrockRuntimeClient, Converse/InvokeModel)  → zai.glm-5 not invocable here.
+ *   • bedrock-mantle   (https://bedrock-mantle.<region>.api.aws/v1)  → OpenAI Chat Completions; GLM works.
+ * Refs: docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html and the AWS "new console
+ * experience optimized for Anthropic/OpenAI-compatible APIs" announcement.
+ *
+ * So this client calls the Mantle Chat Completions endpoint over plain HTTPS with the Amazon Bedrock
+ * API key as a bearer token (Authorization: Bearer <AWS_BEARER_TOKEN_BEDROCK>). No AWS SDK is used;
+ * it does NOT touch NavBharatAI's production provider router, model selector, or live chat path.
+ * Every step is logged and the COMPLETE raw response/error is surfaced — no generic masking.
  */
-import {
-  BedrockRuntimeClient,
-  ConverseCommand,
-  InvokeModelCommand,
-} from '@aws-sdk/client-bedrock-runtime';
 
 /** A single structured log line returned to the UI so debugging needs no server access. */
 export interface TestChatLog {
-  at: string; // ISO-ish label (step order), not a wall clock — kept simple for the debug panel
+  at: string; // step order label, not a wall clock — kept simple for the debug panel
   level: 'info' | 'error';
   message: string;
   data?: unknown;
@@ -29,19 +32,21 @@ export interface TestChatResult {
   ok: boolean;
   /** The assistant text, when a call succeeded. */
   text: string | null;
-  /** Which Bedrock API actually produced the answer (or was last attempted). */
-  apiUsed: 'converse' | 'invoke_model' | 'none';
+  /** Which API actually produced the answer (or was attempted). */
+  apiUsed: 'mantle' | 'none';
   region: string;
   modelId: string | null;
-  /** Exact request payload sent to Bedrock (for the deliverables / debug panel). */
+  /** The exact endpoint URL called. */
+  endpoint: string | null;
+  /** Exact request payload sent. */
   requestPayload: unknown;
-  /** Exact response payload received from Bedrock (parsed where possible). */
+  /** Exact response payload received (parsed where possible). */
   responsePayload: unknown;
-  /** AWS request id from $metadata, when present. */
+  /** AWS request id from the response header, when present. */
   requestId: string | null;
-  /** HTTP status code from $metadata, when present. */
+  /** HTTP status code, when present. */
   httpStatus: number | null;
-  /** The COMPLETE raw AWS error, never a generic message. Null when ok. */
+  /** The COMPLETE raw error, never a generic message. Null when ok. */
   error: unknown;
   /** Full ordered debug log of the whole attempt. */
   logs: TestChatLog[];
@@ -55,119 +60,46 @@ function readModelId(): string | null {
 
 /** Region: BEDROCK region envs → AWS_REGION → a documented default. */
 function readRegion(): string {
-  return (
-    process.env.AWS_REGION ||
-    process.env.AWS_DEFAULT_REGION ||
-    'us-east-1'
-  );
+  return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+}
+
+/** The Amazon Bedrock API key (bearer token, prefix "ABSK…"). Accept either env var name. */
+function readBearerToken(): string {
+  return process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || '';
+}
+
+/** The official Mantle OpenAI-compatible Chat Completions endpoint for a region. */
+function mantleEndpoint(region: string): string {
+  return `https://bedrock-mantle.${region}.api.aws/v1/chat/completions`;
 }
 
 /**
- * Serialize an AWS SDK error COMPLETELY (name, message, fault, metadata, and any extra fields the
- * SDK attaches) so the UI can show the exact AWS response. Errors are not plain objects, so we copy
- * own-enumerable props plus the well-known SDK fields explicitly.
- */
-function serializeAwsError(err: unknown): Record<string, unknown> {
-  if (!err || typeof err !== 'object') {
-    return { raw: String(err) };
-  }
-  const e = err as Record<string, unknown> & {
-    name?: string;
-    message?: string;
-    $fault?: string;
-    $metadata?: Record<string, unknown>;
-    $response?: unknown;
-  };
-  const out: Record<string, unknown> = {
-    name: e.name,
-    message: e.message,
-    $fault: e.$fault,
-    $metadata: e.$metadata,
-  };
-  // Copy any additional own-enumerable properties the SDK attached (e.g. Code, Type, reason).
-  for (const key of Object.keys(e)) {
-    if (!(key in out)) out[key] = e[key];
-  }
-  return out;
-}
-
-function metaOf(obj: unknown): { requestId: string | null; httpStatus: number | null } {
-  const meta = (obj as { $metadata?: { requestId?: string; httpStatusCode?: number } } | undefined)
-    ?.$metadata;
-  return {
-    requestId: meta?.requestId ?? null,
-    httpStatus: meta?.httpStatusCode ?? null,
-  };
-}
-
-/** Heuristic: does this Converse failure mean "this model doesn't do Converse" → try InvokeModel. */
-function shouldFallbackToInvoke(err: unknown): boolean {
-  const e = err as { name?: string; message?: string } | undefined;
-  const name = (e?.name || '').toLowerCase();
-  const msg = (e?.message || '').toLowerCase();
-  // ValidationException is what Bedrock returns when a model isn't wired for Converse; also catch
-  // explicit "not support"/"converse" wording. We do NOT fall back on auth/access errors — those
-  // are real and must be shown as-is.
-  if (name.includes('accessdenied') || name.includes('unrecognizedclient') || msg.includes('security token')) {
-    return false;
-  }
-  return (
-    name.includes('validation') ||
-    msg.includes('converse') ||
-    msg.includes('not support') ||
-    msg.includes("isn't supported") ||
-    msg.includes('unsupported')
-  );
-}
-
-/**
- * Run one Test Chat turn against AWS Bedrock GLM-5. Single user message in, full debug result out.
- * Never throws — every failure is captured into the returned TestChatResult.
+ * Run one Test Chat turn against Amazon Bedrock (Mantle / OpenAI Chat Completions).
+ * Single user message in, full debug result out. Never throws — every failure is captured.
  */
 export async function runBedrockGlmTest(userMessage: string): Promise<TestChatResult> {
   const logs: TestChatLog[] = [];
   const log = (level: TestChatLog['level'], message: string, data?: unknown) => {
-    const entry: TestChatLog = { at: `step-${logs.length + 1}`, level, message, data };
-    logs.push(entry);
-    // Also print to the server console with a clear, greppable prefix for full debug visibility.
-    const line = `[TestChat/Bedrock] ${message}`;
+    logs.push({ at: `step-${logs.length + 1}`, level, message, data });
+    const line = `[TestChat/BedrockMantle] ${message}`;
     if (level === 'error') console.error(line, data ?? '');
     else console.log(line, data ?? '');
   };
 
   const region = readRegion();
   const modelId = readModelId();
-
-  // Two supported auth modes:
-  //  1. Bearer token — the newer "AWS Bedrock API key" (a single token, prefix "ABSK..."). The SDK
-  //     picks it up from the AWS_BEARER_TOKEN_BEDROCK env var. We also accept BEDROCK_API_KEY and copy
-  //     it into AWS_BEARER_TOKEN_BEDROCK so the SDK's bearer auth scheme activates.
-  //  2. SigV4 — the classic AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY pair.
-  // Bearer takes priority when present (it's the simplest and what the Bedrock console hands out now).
-  const bearerToken = process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || '';
-  if (bearerToken && !process.env.AWS_BEARER_TOKEN_BEDROCK) {
-    // Make the SDK's bearer auth scheme find the token regardless of which var the admin set.
-    process.env.AWS_BEARER_TOKEN_BEDROCK = bearerToken;
-  }
-  const hasSigV4 = Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
-  const authMode: 'bearer' | 'sigv4' | 'none' = bearerToken ? 'bearer' : hasSigV4 ? 'sigv4' : 'none';
+  const bearerToken = readBearerToken();
+  const endpoint = mantleEndpoint(region);
 
   log('info', 'AWS Region', region);
+  log('info', 'Endpoint (bedrock-mantle, OpenAI Chat Completions)', endpoint);
   log('info', 'Model ID (from BEDROCK_GLM_MODEL)', modelId);
-  log('info', 'Auth mode', authMode);
-  log('info', 'Auth env present', {
+  log('info', 'Bearer token present', {
     AWS_BEARER_TOKEN_BEDROCK: Boolean(process.env.AWS_BEARER_TOKEN_BEDROCK),
     BEDROCK_API_KEY: Boolean(process.env.BEDROCK_API_KEY),
-    AWS_ACCESS_KEY_ID: Boolean(process.env.AWS_ACCESS_KEY_ID),
-    AWS_SECRET_ACCESS_KEY: Boolean(process.env.AWS_SECRET_ACCESS_KEY),
-    AWS_SESSION_TOKEN: Boolean(process.env.AWS_SESSION_TOKEN),
   });
 
-  const base: Omit<TestChatResult, 'ok' | 'text' | 'apiUsed' | 'requestPayload' | 'responsePayload' | 'requestId' | 'httpStatus' | 'error'> = {
-    region,
-    modelId,
-    logs,
-  };
+  const base = { region, modelId, endpoint, logs };
 
   if (!modelId) {
     log('error', 'BEDROCK_GLM_MODEL is not set — cannot pick a model without it (never hardcoded).');
@@ -183,13 +115,13 @@ export async function runBedrockGlmTest(userMessage: string): Promise<TestChatRe
       error: {
         name: 'ConfigError',
         message:
-          'BEDROCK_GLM_MODEL environment variable is not set. Set it to the exact GLM-5 model id / inference-profile id from your AWS Bedrock account.',
+          'BEDROCK_GLM_MODEL environment variable is not set. Set it to the exact Mantle model id from your AWS Bedrock account (e.g. zai.glm-5).',
       },
     };
   }
 
-  if (authMode === 'none') {
-    log('error', 'No AWS auth configured — set AWS_BEARER_TOKEN_BEDROCK (Bedrock API key) OR AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY.');
+  if (!bearerToken) {
+    log('error', 'No Bedrock API key — set AWS_BEARER_TOKEN_BEDROCK (the "ABSK…" key).');
     return {
       ...base,
       ok: false,
@@ -202,139 +134,92 @@ export async function runBedrockGlmTest(userMessage: string): Promise<TestChatRe
       error: {
         name: 'ConfigError',
         message:
-          'No AWS Bedrock auth configured. Provide EITHER a Bedrock API key as AWS_BEARER_TOKEN_BEDROCK (single token, starts with "ABSK…") OR the classic pair AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. Also set AWS_REGION.',
+          'No Amazon Bedrock API key configured. Set AWS_BEARER_TOKEN_BEDROCK to your Bedrock API key (single token, starts with "ABSK…"). Also set AWS_REGION and BEDROCK_GLM_MODEL.',
       },
     };
   }
 
-  // Build the client for the resolved auth mode. In bearer mode we pass NO explicit credentials —
-  // the SDK's httpBearerAuth scheme reads AWS_BEARER_TOKEN_BEDROCK from the environment. In SigV4 mode
-  // we pass the access key/secret pair explicitly.
-  const client =
-    authMode === 'bearer'
-      ? new BedrockRuntimeClient({ region })
-      : new BedrockRuntimeClient({
-          region,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
-            ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
-          },
-        });
-
-  // ── Attempt 1: Converse API (modern Bedrock chat) ──────────────────────────────────────────────
-  const converseInput = {
-    modelId,
-    messages: [{ role: 'user' as const, content: [{ text: userMessage }] }],
-    inferenceConfig: { maxTokens: 1024, temperature: 0.7 },
+  // OpenAI-compatible Chat Completions request body.
+  const requestBody = {
+    model: modelId,
+    messages: [{ role: 'user', content: userMessage }],
+    max_tokens: 1024,
+    temperature: 0.7,
   };
-  log('info', 'Converse request payload', converseInput);
+  log('info', 'Request payload', requestBody);
 
   try {
-    const resp = await client.send(new ConverseCommand(converseInput));
-    const meta = metaOf(resp);
-    log('info', 'Converse response payload', resp);
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${bearerToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const httpStatus = resp.status;
+    const requestId =
+      resp.headers.get('x-amzn-requestid') || resp.headers.get('x-amzn-RequestId') || null;
+    const rawText = await resp.text();
+    let parsed: unknown = rawText;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      /* keep raw text if not JSON */
+    }
+    log('info', 'Response payload', parsed);
+    log('info', 'HTTP status + request id', { httpStatus, requestId });
+
+    if (!resp.ok) {
+      // Surface the COMPLETE raw error body verbatim — no generic masking.
+      log('error', 'Mantle call returned a non-2xx status', { httpStatus, body: parsed });
+      return {
+        ...base,
+        ok: false,
+        text: null,
+        apiUsed: 'mantle',
+        requestPayload: requestBody,
+        responsePayload: parsed,
+        requestId,
+        httpStatus,
+        error: parsed,
+      };
+    }
+
+    const p = parsed as Record<string, any>;
     const text =
-      resp.output?.message?.content?.map((c) => ('text' in c ? c.text : '')).join('') ?? null;
-    log('info', 'Converse succeeded', { requestId: meta.requestId, httpStatus: meta.httpStatus });
+      p?.choices?.[0]?.message?.content ??
+      p?.choices?.[0]?.text ??
+      (typeof parsed === 'string' ? parsed : null);
+
+    log('info', 'Mantle call succeeded');
     return {
       ...base,
       ok: true,
-      text: text || '(empty response text)',
-      apiUsed: 'converse',
-      requestPayload: converseInput,
-      responsePayload: resp,
-      requestId: meta.requestId,
-      httpStatus: meta.httpStatus,
+      text: (text as string) || '(could not locate text in response — see raw payload below)',
+      apiUsed: 'mantle',
+      requestPayload: requestBody,
+      responsePayload: parsed,
+      requestId,
+      httpStatus,
       error: null,
     };
-  } catch (converseErr) {
-    const meta = metaOf(converseErr);
-    log('error', 'Converse failed', serializeAwsError(converseErr));
-
-    if (!shouldFallbackToInvoke(converseErr)) {
-      // Auth/access-type failure — real and must be shown as-is, no InvokeModel retry.
-      return {
-        ...base,
-        ok: false,
-        text: null,
-        apiUsed: 'converse',
-        requestPayload: converseInput,
-        responsePayload: null,
-        requestId: meta.requestId,
-        httpStatus: meta.httpStatus,
-        error: serializeAwsError(converseErr),
-      };
-    }
-
-    // ── Attempt 2: InvokeModel (GLM native / OpenAI-style chat body) ─────────────────────────────
-    log('info', 'Converse not supported for this model — falling back to InvokeModel.');
-    const invokeBody = {
-      messages: [{ role: 'user', content: userMessage }],
-      max_tokens: 1024,
-      temperature: 0.7,
+  } catch (err) {
+    // Network / DNS / TLS failure (e.g. Mantle not available in this region) — surface it raw.
+    const serialized =
+      err instanceof Error ? { name: err.name, message: err.message } : { raw: String(err) };
+    log('error', 'Fetch to Mantle endpoint threw', serialized);
+    return {
+      ...base,
+      ok: false,
+      text: null,
+      apiUsed: 'mantle',
+      requestPayload: requestBody,
+      responsePayload: null,
+      requestId: null,
+      httpStatus: null,
+      error: serialized,
     };
-    const invokeInput = {
-      modelId,
-      contentType: 'application/json',
-      accept: 'application/json',
-      body: JSON.stringify(invokeBody),
-    };
-    log('info', 'InvokeModel request payload', { ...invokeInput, body: invokeBody });
-
-    try {
-      const resp = await client.send(new InvokeModelCommand(invokeInput));
-      const meta = metaOf(resp);
-      // Body is a Uint8Array; decode + try to JSON-parse for the debug panel.
-      const rawText = new TextDecoder().decode(resp.body as Uint8Array);
-      let parsed: unknown = rawText;
-      try {
-        parsed = JSON.parse(rawText);
-      } catch {
-        /* keep rawText if not JSON */
-      }
-      log('info', 'InvokeModel response payload', parsed);
-
-      // Extract assistant text across the common GLM/OpenAI-style shapes.
-      const p = parsed as Record<string, any>;
-      const text =
-        p?.choices?.[0]?.message?.content ??
-        p?.choices?.[0]?.text ??
-        p?.output?.text ??
-        p?.content?.[0]?.text ??
-        p?.generation ??
-        (typeof parsed === 'string' ? parsed : null);
-
-      log('info', 'InvokeModel succeeded', { requestId: meta.requestId, httpStatus: meta.httpStatus });
-      return {
-        ...base,
-        ok: true,
-        text: (text as string) || '(could not locate text in response — see raw payload below)',
-        apiUsed: 'invoke_model',
-        requestPayload: { ...invokeInput, body: invokeBody },
-        responsePayload: parsed,
-        requestId: meta.requestId,
-        httpStatus: meta.httpStatus,
-        error: null,
-      };
-    } catch (invokeErr) {
-      const im = metaOf(invokeErr);
-      log('error', 'InvokeModel failed', serializeAwsError(invokeErr));
-      return {
-        ...base,
-        ok: false,
-        text: null,
-        apiUsed: 'invoke_model',
-        requestPayload: { ...invokeInput, body: invokeBody },
-        responsePayload: null,
-        requestId: im.requestId,
-        httpStatus: im.httpStatus,
-        // Show BOTH failures so debugging sees the full picture.
-        error: {
-          converseError: serializeAwsError(converseErr),
-          invokeModelError: serializeAwsError(invokeErr),
-        },
-      };
-    }
   }
 }

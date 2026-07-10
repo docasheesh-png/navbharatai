@@ -25,9 +25,10 @@ interface TestChatStatus {
 interface TestChatResult {
   ok: boolean;
   text: string | null;
-  apiUsed: 'converse' | 'invoke_model' | 'none';
+  apiUsed: 'mantle' | 'none';
   region?: string;
   modelId?: string | null;
+  endpoint?: string | null;
   requestPayload?: unknown;
   responsePayload?: unknown;
   requestId?: string | null;
@@ -212,6 +213,9 @@ export function TestChat(_props: { userId?: string }) {
             {last.httpStatus != null && <span>HTTP: {last.httpStatus}</span>}
             {last.requestId && <span>requestId: {last.requestId}</span>}
           </div>
+          {last.endpoint && (
+            <div className="text-[11px] text-gray-400 break-all">endpoint: {last.endpoint}</div>
+          )}
           <details open={!last.ok}>
             <summary className="text-xs text-gray-400 cursor-pointer">Raw error</summary>
             <Json value={last.error} />

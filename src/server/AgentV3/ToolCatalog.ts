@@ -410,6 +410,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'find_dead_code',
+      description:
+        'Find built-but-unwired modules — files that NOTHING imports and that are not entry points, tests, ' +
+        'configs or file-based routes. Catches the common "created a component/hook/util and forgot to wire ' +
+        'it in" bug (it compiles, but the feature never appears). Read-only, no arguments. Results are ' +
+        'candidates — verify each is truly unused (dynamic imports / string references are not visible) ' +
+        'before removing or wiring it in.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'architecture_map',
       description:
         'Get a quick "how is this app structured / where do I start" orientation before editing an ' +
@@ -818,6 +828,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_api_docs',
   'generate_tests',
   'run_tests',
+  'find_dead_code',
   'architecture_map',
   'api_graph',
   'code_graph',

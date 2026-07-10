@@ -14,6 +14,7 @@ import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
+import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
 import { buildApiGraph } from './apiGraph';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
@@ -1532,6 +1533,16 @@ export class ToolDispatcher {
         // order. Read-only; use it to onboard to an unfamiliar/imported app before editing.
         const map = buildArchitectureMap(getWorkspaceMemory(this.workspaceId).graph());
         return renderArchitectureMap(map);
+      }
+
+      case 'find_dead_code': {
+        // Surface built-but-unwired modules (nothing imports them, and they aren't entries/tests/configs/
+        // routes) — a common "created it, forgot to wire it in" bug. Reuses the A1 import graph. Advisory.
+        const files = findUnwiredFiles(getWorkspaceMemory(this.workspaceId).graph());
+        if (files.length) getWorkspaceMemory(this.workspaceId).recordAudit(`find_dead_code: ${files.length} unwired file(s) (e.g. ${files[0]}).`);
+        const summary = unwiredFilesSummary(files);
+        this.state?.appendTerminal(summary);
+        return summary;
       }
 
       case 'api_graph': {

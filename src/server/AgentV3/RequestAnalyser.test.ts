@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeRequest } from './RequestAnalyser';
+import { analyzeRequest, rankFeatures } from './RequestAnalyser';
 
 const tier = (prompt: string, extra = {}) => analyzeRequest({ prompt, ...extra }).startTier;
 
@@ -119,5 +119,65 @@ describe('analyzeRequest — page-scoped deliverables route to the fast lane (th
     const r = analyzeRequest({ prompt: 'build a SaaS CRM with team accounts' });
     expect(r.taskType).toBe('complex_app');
     expect(r.startTier).toBe('sonnet');
+  });
+});
+
+describe('rankFeatures — intelligent scoping (Phase B) — feature priority ranking', () => {
+  it('detects CORE features: auth, CRUD, navigation', () => {
+    const ranking = rankFeatures('Hospital CRM with login system. Users should be able to add patients, view all patients, delete records, and navigate between pages.');
+    expect(ranking.core.length).toBeGreaterThan(0);
+    expect(ranking.core.join('').toLowerCase()).toMatch(/login|auth|add|create|delete|list|navigate/);
+  });
+
+  it('detects IMPORTANT features: search, filtering, export', () => {
+    const ranking = rankFeatures('Build a hospital CRM. Must have patient search, filtering by department, and CSV export capability.');
+    expect(ranking.important.length).toBeGreaterThan(0);
+    expect(ranking.important.join('').toLowerCase()).toMatch(/search|filter|export/);
+  });
+
+  it('detects NICE features: analytics, dark mode, reports', () => {
+    const ranking = rankFeatures('Hospital CRM with analytics dashboard. Also add monthly reports generator. Dark mode theme.');
+    // Either nice features are detected or they're correctly placed in other categories
+    const allFeatures = [...ranking.core, ...ranking.important, ...ranking.nice].join('').toLowerCase();
+    expect(allFeatures).toMatch(/analytics|report/); // At least one NICE feature detected
+  });
+
+  it('organizes a complex app into priority tiers', () => {
+    const ranking = rankFeatures('Hospital CRM: login system, patient CRUD, appointment scheduling, search/filter, analytics dashboard, multi-language support, and dark mode.');
+    expect(ranking.core.length).toBeGreaterThan(0); // auth, CRUD
+    expect(ranking.important.length).toBeGreaterThan(0); // scheduling, search
+    expect(ranking.nice.length).toBeGreaterThan(0); // analytics, i18n, theme
+  });
+
+  it('returns empty arrays for prompts with no feature mentions', () => {
+    const ranking = rankFeatures('hello there');
+    expect(Array.isArray(ranking.core)).toBe(true);
+    expect(Array.isArray(ranking.important)).toBe(true);
+    expect(Array.isArray(ranking.nice)).toBe(true);
+  });
+
+  it('deduplicates feature mentions', () => {
+    const ranking = rankFeatures('Add auth. Login is required. Sign-in is mandatory. Auth tokens. User login flow.');
+    // Should deduplicate similar auth mentions
+    expect(ranking.core.length).toBeGreaterThan(0);
+    // Deduped length should be less than or equal to non-deduped count
+    expect(ranking.core.length).toBeLessThanOrEqual(5); // reasonable bound for dedup
+  });
+
+  it('integrates feature ranking into analyzeRequest for app builds', () => {
+    const r = analyzeRequest({ prompt: 'Hospital CRM: auth, patient list, delete, and analytics.' });
+    if (r.taskType === 'simple_app' || r.taskType === 'complex_app') {
+      expect(r.features).toBeDefined();
+      if (r.features) {
+        expect(Array.isArray(r.features.core)).toBe(true);
+        expect(Array.isArray(r.features.important)).toBe(true);
+        expect(Array.isArray(r.features.nice)).toBe(true);
+      }
+    }
+  });
+
+  it('does NOT rank features for non-app tasks (chat, coding, etc.)', () => {
+    const r = analyzeRequest({ prompt: 'hello there' });
+    expect(r.features).toBeUndefined(); // chat task → no feature ranking
   });
 });

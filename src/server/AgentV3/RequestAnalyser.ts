@@ -44,6 +44,17 @@ export interface AnalyserInput {
   powerMode?: boolean;
 }
 
+export type FeaturePriority = 'CORE' | 'IMPORTANT' | 'NICE';
+
+export interface FeatureRanking {
+  /** CORE: auth, core CRUD, navigation (must-have for MVP) */
+  core: string[];
+  /** IMPORTANT: primary feature set (should-have, high-value) */
+  important: string[];
+  /** NICE: analytics, reports, advanced filters (nice-to-have, drop if token budget tight) */
+  nice: string[];
+}
+
 export interface AnalysisResult {
   complexityScore: number; // 0-100
   taskType: TaskType;
@@ -51,6 +62,7 @@ export interface AnalysisResult {
   escalationPath: StartTier[]; // startTier → … → opus
   ambiguous: boolean; // near a tier boundary → a caller may LLM-refine
   reasoning: string;
+  features?: FeatureRanking; // intelligent scoping: prioritized feature list (Phase B)
 }
 
 // NORMAL-mode ladder tops out at Sonnet — Opus is POWER-only (admin decision, 2026-06-24):
@@ -109,6 +121,92 @@ function scoreToTier(score: number): StartTier {
 /** True when the score sits within `margin` of a normal-mode tier boundary (20/40). */
 function isNearBoundary(score: number, margin = 3): boolean {
   return [20, 40].some((b) => Math.abs(score - b) <= margin);
+}
+
+/**
+ * Intelligent Scoping (Phase B): rank features by priority (CORE/IMPORTANT/NICE).
+ * CORE features (auth, core CRUD, nav) are non-negotiable for MVP. NICE features
+ * (analytics, reports, advanced filtering) are gracefully dropped if token budget runs low.
+ * Pure — no I/O, deterministic keyword analysis only.
+ */
+export function rankFeatures(prompt: string): FeatureRanking {
+  const p = prompt.toLowerCase();
+
+  // Core patterns: auth, basic CRUD, navigation, core flow
+  const corePatterns = [
+    /auth|login|sign\s?in|sign\s?up|register|password|user account/i,
+    /dashboard|home|main page|landing/i,
+    /create|add|new|form submission/i,
+    /delete|remove|trash/i,
+    /list|table|view all/i,
+    /navigation|sidebar|menu|routing/i,
+    /error handling|validation|required field/i,
+  ];
+
+  // Important patterns: primary features, business logic
+  const importantPatterns = [
+    /search|filter|sort/i,
+    /export|download|csv|pdf/i,
+    /notification|alert|message/i,
+    /profile|user settings|preference/i,
+    /api|backend|server|database/i,
+    /real-time|live update|sync/i,
+    /appointment|scheduling|booking/i,
+  ];
+
+  // Nice patterns: analytics, advanced, polish
+  const nicePatterns = [
+    /analytic|metric|chart|graph|dashboard stat|kpi|report/i,
+    /dark mode|theme|customiz|styling|animation/i,
+    /advanced filter|complex query|aggregat/i,
+    /schedule|cron|background job|async/i,
+    /multi-language|i18n|locali[sz]ation/i,
+    /performance optim|cache|lazy load/i,
+  ];
+
+  const core: string[] = [];
+  const important: string[] = [];
+  const nice: string[] = [];
+
+  // Split on sentence boundaries and commas (more flexible for comma-separated feature lists)
+  let phrases = prompt.split(/[.!?]/).flatMap(s => s.split(/,/)).map(s => s.trim()).filter(s => s.length > 0);
+
+  for (const phrase of phrases) {
+    // Categorize by pattern matching — highest-priority pattern wins
+    let categorized = false;
+
+    for (const pattern of corePatterns) {
+      if (pattern.test(phrase)) {
+        core.push(phrase.slice(0, 80));
+        categorized = true;
+        break;
+      }
+    }
+    if (categorized) continue;
+
+    for (const pattern of importantPatterns) {
+      if (pattern.test(phrase)) {
+        important.push(phrase.slice(0, 80));
+        categorized = true;
+        break;
+      }
+    }
+    if (categorized) continue;
+
+    for (const pattern of nicePatterns) {
+      if (pattern.test(phrase)) {
+        nice.push(phrase.slice(0, 80));
+        break;
+      }
+    }
+  }
+
+  // Deduplicate
+  return {
+    core: [...new Set(core)],
+    important: [...new Set(important)],
+    nice: [...new Set(nice)],
+  };
 }
 
 /**
@@ -176,6 +274,12 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   const escalationPath = NORMAL_LADDER.slice(NORMAL_LADDER.indexOf(startTier));
   const ambiguous = isNearBoundary(score);
 
+  // Intelligent Scoping (Phase B): rank features by priority for checkpoint loop.
+  // Only rank for app builds (not chat/coding) to avoid noise.
+  const features = (taskType === 'simple_app' || taskType === 'complex_app')
+    ? rankFeatures(prompt)
+    : undefined;
+
   return {
     complexityScore: score,
     taskType,
@@ -183,5 +287,6 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
     escalationPath,
     ambiguous,
     reasoning: `${reasons.join('; ')} → score ${score} → ${startTier}${ambiguous ? ' (borderline)' : ''}`,
+    features,
   };
 }

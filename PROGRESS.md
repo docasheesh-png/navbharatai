@@ -12925,3 +12925,29 @@ first step: set AGENTV3_ESCALATION=on + AGENTV3_ESCALATION_PCT=10 (10% canary), 
 telemetry, then raise PCT → 100. No env change → production behaviour is byte-identical to today.
 
 Gate: tsc fe+server 0, vitest 5720/5720 (13 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Option A / T1-escalation-on (slice 2): canary measurement telemetry
+
+Slice 1 (merged #1172) made a partial rollout POSSIBLE; slice 2 makes it MEASURABLE — without cohort
+labels the admin cannot compare in-canary vs control quality/cost, which is the whole point of a canary.
+Redundancy-check (safeguard #6): AgentV3CostTelemetry already records deliveredVia/startTier/ok per build,
+but had NO cohort dimension, and `esc.escalations` went to console.log only (lost).
+
+- `escalationRollout.ts` += `escalationCohort(key, env)` (pure): 'off' (flag off) | 'in' (inside the PCT
+  rollout) | 'out' (flag on, outside = the control group). Same key semantics as the gates, so the
+  telemetry label always matches the behaviour. 3 new tests, incl. label === gate for any key.
+- `AgentV3CostTelemetry.ts`: CostTelemetryEntry += escalationCohort + escalations; DailyCostTelemetryDoc +=
+  byEscalationCohort breakdown + escalatedBuilds counter; foldCostTelemetry folds both, tolerating older
+  day docs that predate the fields (`?? {}` / `?? 0`, same pattern as the PR4 byDeliveredVia migration).
+  3 new fold tests (A/B split, escalated-only counting, legacy-doc tolerance).
+- Route: hoisted `escalationsCount` beside deliveredTier, set from `esc.escalations` in the escalation
+  lane, and the telemetry record now carries `escalationCohort: escalationCohort(workspaceId)` +
+  `escalations`. The admin endpoint GET /api/admin/agentv3/cost-telemetry returns the new fields as-is.
+
+With this, the rollout playbook is complete: set AGENTV3_ESCALATION=on + AGENTV3_ESCALATION_PCT=10 →
+read byEscalationCohort.in vs .out (okBuilds/builds + billedUsd) + escalatedBuilds for a few days →
+raise PCT. No env change → behaviour and telemetry shape stay byte-identical (new fields absent/empty).
+
+Gate: tsc fe+server 0, vitest 5747/5747 (6 new + 21 carried), build PASS, boot:check PASS.

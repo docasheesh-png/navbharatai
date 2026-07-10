@@ -44,6 +44,15 @@ export interface CostTelemetryEntry {
    * that don't drive the agentic loop (SimpleBuild/OneShot) → folded under 'unknown'.
    */
   deliveredVia?: string;
+  /**
+   * T1-escalation-on — the canary cohort this build belonged to: 'off' (flag off), 'in' (inside the
+   * AGENTV3_ESCALATION_PCT rollout — the ladder applies), or 'out' (flag on but outside the partial
+   * rollout — the control group). Comparing 'in' vs 'out' success/cost on the same days is the
+   * measurement that justifies (or vetoes) raising the rollout percentage.
+   */
+  escalationCohort?: 'in' | 'out' | 'off';
+  /** How many tier escalations this build actually performed (0 = the first tier delivered). */
+  escalations?: number;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -69,6 +78,10 @@ export interface DailyCostTelemetryDoc {
   byStartTier: Record<string, TelemetryBreakdown>;
   /** PR4 — per delivering provider (GLM/KIMI/CLAUDE/…): the cheap-floor-vs-Claude split. */
   byDeliveredVia: Record<string, TelemetryBreakdown>;
+  /** T1-escalation-on — per canary cohort ('in'/'out'/'off'): the A/B split for the rollout decision. */
+  byEscalationCohort?: Record<string, TelemetryBreakdown>;
+  /** T1-escalation-on — builds where the ladder actually climbed at least one tier. */
+  escalatedBuilds?: number;
   /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
   lastPromptVersion?: string;
   updatedAt: number;
@@ -91,6 +104,8 @@ function emptyDoc(date: string): DailyCostTelemetryDoc {
     byTaskType: {},
     byStartTier: {},
     byDeliveredVia: {},
+    byEscalationCohort: {},
+    escalatedBuilds: 0,
     updatedAt: 0,
   };
 }
@@ -137,6 +152,11 @@ export function foldCostTelemetry(
   const byDeliveredVia = { ...(doc.byDeliveredVia ?? {}) };
   byDeliveredVia[viaKey] = addToBreakdown(byDeliveredVia[viaKey] ?? emptyBreakdown(), entry);
 
+  // T1-escalation-on — fold the canary cohort ('in'/'out'/'off'; 'unknown' for lanes that don't label).
+  const cohortKey = entry.escalationCohort || 'unknown';
+  const byEscalationCohort = { ...(doc.byEscalationCohort ?? {}) };
+  byEscalationCohort[cohortKey] = addToBreakdown(byEscalationCohort[cohortKey] ?? emptyBreakdown(), entry);
+
   return {
     date,
     totalBuilds: doc.totalBuilds + 1,
@@ -149,6 +169,8 @@ export function foldCostTelemetry(
     byTaskType,
     byStartTier,
     byDeliveredVia,
+    byEscalationCohort,
+    escalatedBuilds: (doc.escalatedBuilds ?? 0) + ((entry.escalations ?? 0) > 0 ? 1 : 0),
     // Carry the latest prompt version when present; otherwise keep the prior value.
     lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,

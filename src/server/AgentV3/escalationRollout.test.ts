@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escalationRolloutPercent, rolloutBucket, inEscalationRollout } from './escalationRollout';
+import { escalationRolloutPercent, rolloutBucket, inEscalationRollout, escalationCohort } from './escalationRollout';
 
 // T1-escalation-on: the safe percentage canary. Pure — assert backward-compat + deterministic bucketing.
 
@@ -58,5 +58,27 @@ describe('inEscalationRollout', () => {
     const at = (p: number) => inEscalationRollout(key, p);
     if (at(20)) expect(at(60)).toBe(true);
     if (at(60)) expect(at(90)).toBe(true);
+  });
+});
+
+describe('escalationCohort — the telemetry A/B label', () => {
+  it('is "off" when the flag is not on, regardless of PCT', () => {
+    expect(escalationCohort('ws-1', {} as NodeJS.ProcessEnv)).toBe('off');
+    expect(escalationCohort('ws-1', { AGENTV3_ESCALATION_PCT: '50' } as NodeJS.ProcessEnv)).toBe('off');
+  });
+
+  it('is "in" for everyone at full rollout (on, no PCT)', () => {
+    const env = { AGENTV3_ESCALATION: 'on' } as NodeJS.ProcessEnv;
+    expect(escalationCohort('ws-1', env)).toBe('in');
+    expect(escalationCohort(undefined, env)).toBe('in');
+  });
+
+  it('splits "in" vs "out" deterministically at a partial PCT — and matches inEscalationRollout exactly', () => {
+    const env = { AGENTV3_ESCALATION: 'on', AGENTV3_ESCALATION_PCT: '50' } as NodeJS.ProcessEnv;
+    for (const key of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      const expected = inEscalationRollout(key, 50) ? 'in' : 'out';
+      expect(escalationCohort(key, env)).toBe(expected); // labels must match gate behaviour
+    }
+    expect(escalationCohort(undefined, env)).toBe('out'); // no key at partial PCT → out (conservative)
   });
 });

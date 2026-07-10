@@ -10,12 +10,14 @@ import {
   GithubAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCredential,
   fetchSignInMethodsForEmail,
   sendPasswordResetEmail,
   linkWithCredential,
   AuthProvider,
   UserCredential,
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -346,6 +348,35 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
   // "login is not smooth" jolt the admin reported.)
   const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
+    // NATIVE app + Google → use native Google Sign-In (Play Services), NOT the web popup/redirect.
+    // Google disallows OAuth inside embedded WebViews, so the web flow opens an external browser and
+    // breaks on return ("missing initial state"). The native plugin signs in with the device's Google
+    // account and returns a credential we exchange into the Firebase JS SDK — no browser, in-app.
+    const isGoogle = (provider as { providerId?: string })?.providerId === GoogleAuthProvider.PROVIDER_ID;
+    if (isGoogle && Capacitor.isNativePlatform()) {
+      try {
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+        const idToken = nativeResult.credential?.idToken;
+        if (!idToken) {
+          throw new Error(
+            'Native Google sign-in returned no ID token — check the Android google-services.json / SHA-1 setup.',
+          );
+        }
+        const credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
+        const result = await signInWithCredential(auth, credential);
+        onCredential?.(result);
+        onClose();
+        return 'ok';
+      } catch (nativeErr: any) {
+        // The user dismissing the native account sheet must mean CANCEL — never an error banner.
+        const msg = String(nativeErr?.message || nativeErr?.code || '').toLowerCase();
+        if (msg.includes('cancel') || msg.includes('canceled') || msg.includes('cancelled') || msg.includes('12501')) {
+          return 'cancelled';
+        }
+        throw nativeErr;
+      }
+    }
     try {
       const result = await signInWithPopup(auth, provider);
       onCredential?.(result);

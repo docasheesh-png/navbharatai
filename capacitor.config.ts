@@ -32,6 +32,17 @@ const config: CapacitorConfig = {
     // Respect the safe-area insets (notch / home indicator) instead of drawing the WebView under them.
     contentInset: 'automatic',
   },
+  plugins: {
+    // Native Google Sign-In. Google BLOCKS OAuth inside embedded WebViews (their policy), which is
+    // why the web signInWithRedirect flow opens an external browser and then fails with "missing
+    // initial state" on return. On native we instead use the device's Google account via Play
+    // Services and hand the resulting credential to the Firebase JS SDK (skipNativeAuth: true), so
+    // the web SDK stays the single source of truth for the session — the web login path is untouched.
+    FirebaseAuthentication: {
+      skipNativeAuth: true,
+      providers: ['google.com'],
+    },
+  },
 };
 
 export default config;

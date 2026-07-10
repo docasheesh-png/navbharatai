@@ -103,6 +103,7 @@ import { LocalActuator } from '../AgentV3/sandbox/EngineerAI/actuators/LocalActu
 import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator';
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
+import { debitWalletForBuild } from '../lib/walletDebit';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
 import { makeResilientTurnRunner } from './agentv3Resilient';
@@ -5965,8 +5966,30 @@ export function registerAgentV3Routes(app: Express): void {
       // platform records every build's cost. Best-effort — never blocks the run.
       // Internal accounting stays in USD (currency-stable); the customer-facing amount
       // is shown in INR (billedInr = billedUsd × the real-time USD→INR rate).
+      // BILLING PHASE 1 — the charge is also actually DEBITED from the wallet. Before this,
+      // the wallet was only ever credited: builds recorded a display-only monthly cost but
+      // never decremented tokenBalance/remaining_balance, so the pre-flight gate compared
+      // estimates against a balance that never went down (one recharge = unlimited builds).
+      // Tokens leave at the SAME rate purchases mint them (TOKENS_PER_RUPEE); the debit is
+      // idempotent per buildRef and awaited so the result event can show the real deduction.
+      // A debit failure never blocks the result, but is loudly logged — money, not noise.
+      let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
+        try {
+          const debitRes = await debitWalletForBuild(getDb() as any, userId, {
+            billedInr: effectiveBilledUsd * usdInrRate(),
+            buildRef: `${workspaceId}_${buildStartedAt}`,
+            description: 'NavBharatAI Pro v3.0 build',
+          });
+          if (debitRes.ok) {
+            walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
+          } else {
+            console.error(`[AGENTV3 BILLING] Wallet debit FAILED for user ${userId} (build ${workspaceId}): ${debitRes.error} — cost was recorded but the balance was not decremented.`);
+          }
+        } catch (err: any) {
+          console.error(`[AGENTV3 BILLING] Wallet debit threw for user ${userId}: ${err?.message || err}`);
+        }
       }
 
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
@@ -6102,7 +6125,7 @@ export function registerAgentV3Routes(app: Express): void {
       // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
       // render it. Additive: the field is optional and the client no-ops when it's absent.
       const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
-      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
+      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

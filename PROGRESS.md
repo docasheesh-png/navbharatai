@@ -12988,3 +12988,48 @@ Gate: tsc fe+server 0, vitest 5765/5765 (575 files), boot:check PASS.
 NEXT (Billing Phase 2+, per admin's simplified plan): token-first wallet display (show tokens as
 the primary unit everywhere, ₹ secondary), per-provider api_call_log (admin-only breakdown), and
 the pre-flight estimate shown in TOKENS before the build starts.
+
+---
+
+## 2026-07-10 — Option A cont. / T1-health-card: surface the build-health card (activate dormant value)
+
+The BuildHealth spine was fully built but DORMANT: the type, the done/result event field, the reducer that
+stores it, and <BuildHealthCard/> (AgentV3Panel.tsx:3338) all existed — but the SERVER only emitted
+readiness on the FAILURE `done` path, never on a successful build (which terminates with `result`). So the
+card only ever showed on failure. One-wire fix:
+
+- NEW `buildHealthCard.ts` (pure, 7 unit tests): `buildHealthFromDiagnostics(report, ok)` derives an honest
+  BuildHealth from the diagnostics the build ALREADY computed (zero extra cost) — blockers = still-unresolved
+  errors, warnings = still-unresolved warnings, ready = ok && no blockers, score = clamp((ok?100:45) −
+  25×blockers − 6×warnings). Tolerates a missing report.
+- Route: attach `readiness: buildHealthFromDiagnostics(diagnostics, result.ok)` to the terminal `result`
+  emit (additive; the field is optional).
+- Client: `result` event type += `readiness?: BuildHealth`; reducer `case 'result'` sets `buildHealth` from
+  it (the success path, which was the missing case). 2 new reducer tests (result carries readiness; backward
+  compat when absent).
+- AppKnowledgeBase: new "BUILD-HEALTH CARD (R2)" capability on the v3.0 entry.
+
+Redundancy-checked (safeguard #6): the readiness data is reused from the existing diagnostics — no new
+analysis. Backward-compatible: the field is optional, the client no-ops when absent.
+
+Gate: tsc fe+server 0, vitest 5760/5760 (9 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Option A cont. / T1-backstop-honesty: no silent fake pass from the escalation backstop
+
+Rule-5 honesty fix, composes with T1-health-card. When cost-ladder escalation exhausts every tier and the
+STRONGEST tier's build still FAILS the objective gate, the orchestrator delivers it anyway as a best-effort
+backstop (correct — a build must never "break", the one absolute rule). BUG: `esc.gatePassed=false` was
+only console.log'd (agentv3.ts:5315) — the delivered result showed ok with NO honest signal that the final
+review flagged issues. A "delivered" that reads as "verified" is exactly the silent-fake-pass the rules forbid.
+
+- NEW `backstopHonesty.ts` (pure, 4 unit tests): `backstopHonestyNote(gatePassed, gateReason)` → null when
+  the gate passed, else an honest note carrying the gate's reason (with a safe default); `backstopNarration`
+  → a short live "delivered but review flagged issues — check the build-health card" line.
+- Route: when `esc.gatePassed === false`, record a `readiness`/`BACKSTOP_GATE_FAIL` warning into the build
+  diagnostics (recorded BEFORE buildDiag.finish, so buildHealthFromDiagnostics folds it into the health
+  card's warnings + the downloadable report) and emit the honest narration. Additive; no billing/flow change.
+- Reuses the T1-health-card wiring merged this session — the warning now shows on the card automatically.
+
+Gate: tsc fe+server 0, vitest 5764/5764 (4 new), build PASS, boot:check PASS.

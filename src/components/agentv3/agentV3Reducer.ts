@@ -213,7 +213,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, done: true, ok: event.ok, summary: event.summary, pendingPermission: undefined, ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'result':
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
+      // T1-health-card: the successful build terminates with `result` (not `done`), so surface the
+      // build-health verdict from here too — otherwise <BuildHealthCard/> only ever showed on failure.
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'error':
       return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };

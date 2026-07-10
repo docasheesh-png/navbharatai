@@ -188,6 +188,8 @@ import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
+import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
+import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -5314,6 +5316,15 @@ export function registerAgentV3Routes(app: Express): void {
         if (esc.escalations > 0) {
           console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
         }
+        // T1-backstop-honesty: the strongest tier was DELIVERED as a best-effort backstop but did NOT pass
+        // the objective gate. Never ship that as a silent clean pass — record it so the build-health card +
+        // report show it (buildHealthFromDiagnostics folds unresolved warnings in), and narrate it honestly.
+        const backstopNote = backstopHonestyNote(esc.gatePassed, esc.gate?.reason);
+        if (backstopNote) {
+          try { buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'BACKSTOP_GATE_FAIL', message: backstopNote, autoResolved: false }); } catch { /* diagnostics best-effort */ }
+          const narr = backstopNarration(esc.gatePassed);
+          if (narr) events.emit({ type: 'narration', agent: 'architect', text: narr, ts: Date.now() });
+        }
       } else if (!result) {
         // OneShot did not run or fell back → the full agentic loop (today's behavior).
         result = await runner.run(buildPrompt);
@@ -6110,7 +6121,11 @@ export function registerAgentV3Routes(app: Express): void {
       const projectContinue = projectPlanRef && result.ok && !planComplete(projectPlanRef) && nextBuildableModule(projectPlanRef)
         ? { resumable: true, planRemaining: projectPlanRef.modules.filter((m) => m.status !== 'done').length }
         : {};
-      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}) });
+      // T1-health-card: derive the objective build-health verdict from the diagnostics the build already
+      // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
+      // render it. Additive: the field is optional and the client no-ops when it's absent.
+      const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
+      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

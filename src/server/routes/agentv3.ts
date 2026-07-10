@@ -104,6 +104,7 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
+import { freeTierCheapEnabled, isFreeTierBuild, freeTierUpsellMessage } from '../AgentV3/FreeTierBuildRouting';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -1200,7 +1201,7 @@ export function dominantProvider(turns: Map<string, number>): string | undefined
   return best;
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -1264,9 +1265,16 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // branch is a DIFFERENT, separately-opted-into cost strategy (try the cheap model before Claude) —
   // left unchanged; the admin's chain applies to the default (claudeFirst===true) path.
   const baseChain = claudeFirst ? [claude, ...withBackstop, ...fallback] : [...fallback, claude, ...withBackstop];
+  // FREE-TIER cheap-only (admin 2026-07-10): a not-yet-paying user's build runs on the cheap floor
+  // ALONE — no Claude, no Haiku backstop, no Vertex/Gemini last resort — so NavBharatAI never spends
+  // its Claude budget on a free build. Guarded so it can only take effect when a floor actually exists
+  // (floorRunners non-empty); if the caller asks for cheapOnly with no floor configured we fall back
+  // to the normal chain rather than build an empty (always-failing) chain. When the cheap build can't
+  // deliver, the route converts the user to paid (upsell) instead of rescuing on Claude.
+  const cheapOnly = opts?.cheapOnly === true && floorRunners.length > 0;
   // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
   // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
-  const chain = [...floorRunners, ...baseChain];
+  const chain = cheapOnly ? [...floorRunners] : [...floorRunners, ...baseChain];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
@@ -3135,6 +3143,33 @@ export function registerAgentV3Routes(app: Express): void {
       }
     }
 
+    // FREE-TIER cheap-only routing (admin 2026-07-10) — DORMANT unless AGENTV3_FREE_TIER_CHEAP=true.
+    // A not-yet-paying public user's build runs on the cheap floor (GLM/Kimi) ALONE — never Claude —
+    // so NavBharatAI's Claude budget is spent only on paying users. Reads the wallet ONLY when the
+    // feature is on (zero added Firestore work on today's default path), and only when a cheap floor is
+    // actually configured (else there is nothing to route to → normal path). A paying user, an anon
+    // caller, or a free-list admin is never free-tier. If the cheap build fails, the route converts the
+    // user to paid (upsell) rather than rescuing on Claude — see the build-failed handling below.
+    let freeTierBuildActive = false;
+    if (
+      freeTierCheapEnabled() &&
+      userId &&
+      (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) &&
+      !isAgentV3FreeUser(userId, email) &&
+      cheapBuildFloorRunners().length > 0
+    ) {
+      const walletDoc = await firestoreWalletReader(getDb())(userId).catch(() => null);
+      freeTierBuildActive = isFreeTierBuild({
+        enabled: true,
+        billingActive: true,
+        cheapFloorConfigured: true,
+        wallet: walletDoc,
+      });
+      if (freeTierBuildActive) {
+        audit('AGENTV3_FREE_TIER_CHEAP_BUILD', { userId }, 'info');
+      }
+    }
+
     // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
     // 2-3 min. planFirst=false from the client always wins (explicit user skip).
     // planFirst=true (or absent) defers to the complexity classifier — a simple
@@ -4068,7 +4103,9 @@ export function registerAgentV3Routes(app: Express): void {
         // NEVER for a large existing project (admin 2026-07-05): the floor timed out 8× on a 233KB
         // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
         // Escalation builds below never pass this, so they stay Claude.
-        allowCheapFloor: !routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email),
+        // FREE-TIER: force the cheap floor ON and cheap-ONLY (no Claude) for a not-yet-paying user.
+        allowCheapFloor: freeTierBuildActive || (!routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email)),
+        cheapOnly: freeTierBuildActive,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: (name, err) => buildDiag.record({
@@ -5274,7 +5311,9 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
-      if (!result && analysis && shouldEscalateBuild(analysis, onlyOpus, workspaceId)) {
+      // FREE-TIER: never escalate a free build — escalation climbs to Sonnet/Claude, and a not-yet-
+      // paying user's build must never spend that budget. A failed free build converts to paid (upsell).
+      if (!result && analysis && !freeTierBuildActive && shouldEscalateBuild(analysis, onlyOpus, workspaceId)) {
         // STRONG JUDGE (admin 2026-07-03): the cheap floor (GLM/Kimi) builds attempt 1; a SONNET judge
         // reviews it — a cheap model can't reliably catch its own gaps (a cosmetic feature, a subtle
         // bug). Only on a judge FAIL do we spend Sonnet, and then to REPAIR the judge's specific
@@ -5989,6 +6028,12 @@ export function registerAgentV3Routes(app: Express): void {
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
       if (expectsArtifacts && writtenFiles.size === 0) {
         effectiveBilledUsd = 0;
+        // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
+        // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
+        // and finish on the strongest engine — converting the user to paid without shipping a broken app.
+        if (freeTierBuildActive) {
+          events.emit({ type: 'narration', agent: 'architect', text: freeTierUpsellMessage(), ts: Date.now() });
+        }
       }
       // Admin rule (2026-07-07): the server's own eyes saw the preview NOT render after the heal
       // budget — the app was not delivered, so the build is free. Same "preview is EARNED" law,

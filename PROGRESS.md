@@ -13190,6 +13190,44 @@ credit-gate), matching how the rest of the paid surface already rolls out. No us
 blocked until that flag flip — and when it flips, the whole paid experience turns on at once.
 
 Gate: tsc fe+server 0, vitest 5811/5811, boot:check PASS. Pure gating change; no billing math touched.
+
+---
+
+## 2026-07-10 — Free-tier build routing: new users build on the cheap floor, never Claude (flag OFF)
+
+Admin design (2026-07-10): a NEW public user still on their welcome bonus (never purchased) must build
+on the CHEAP floor (GLM/Kimi) — NEVER Claude — so NavBharatAI's Claude budget is spent only on paying
+users. The moment they recharge (become paying) they graduate to today's Claude-first path. Admin
+approved two design points explicitly: (a) do NOT use Vertex/Gemini as the free-build BUILDER (they
+hallucinate the tool loop → 0 files → a broken FIRST impression; kept as vision/last-resort only), and
+(b) if the cheap free build can't deliver, do NOT ship broken and do NOT rescue on Claude — invite the
+user to add credits and finish on the strongest engine (protects the first impression AND converts to
+paid). STRICTLY DORMANT until the bake-off proves a cheap floor.
+
+- NEW `FreeTierBuildRouting.ts` (pure, 10 tests): `freeTierCheapEnabled()` (AGENTV3_FREE_TIER_CHEAP,
+  default off), `isFreeTierUser(wallet)` (never purchased = totalMoneySpent 0 ⇒ free tier; conservative
+  on non-finite so we never spend Claude on an unconfirmed user), `isFreeTierBuild(inputs)` (the AND of
+  switch + billing-active + cheap-floor-configured + never-paid), `freeTierUpsellMessage()`.
+- `buildTurnRunner` += `cheapOnly` — the chain becomes `[...floorRunners]` ALONE (no Claude, no Haiku
+  backstop, no Vertex/Gemini), guarded so cheapOnly with no floor falls back to the normal chain (never
+  an empty always-failing chain).
+- Route wiring (all reached ONLY when freeTierBuildActive, which needs the flag ON + a configured
+  floor + a never-paid user + the paid surface active — so today's default path is byte-identical):
+  reads the wallet ONLY when the flag is on (zero added Firestore work off); forces cheap-only model
+  selection; disables escalation (escalation climbs to Sonnet/Claude); on a no-artifacts free build,
+  emits the honest upsell instead of rescuing on Claude.
+- `WalletBalance.WalletDocData` += `totalMoneySpent`; AppKnowledgeBase billing entry notes the new-user
+  economy-engine + add-credits-to-finish behavior so every AI answers "free build ne credits kyun maange".
+
+DEPENDENCY (honest): this activates only AFTER the bake-off configures a proven cheap floor
+(AGENTV3_CHEAP_FLOOR + key) AND AGENTV3_FREE_TIER_CHEAP=true. Until then it is fully dormant — code is
+model-agnostic (routes to "whatever floor is configured"), so building it now does not pre-empt the
+bake-off. Vertex/Gemini deliberately NOT used as the builder (the 0-files trap on a first impression).
+
+Gate: tsc fe+server 0, vitest 5821/5821 (10 new), boot:check PASS. Flag OFF → byte-identical to today.
+
+---
+
 ## 2026-07-10 — Tier 1B verified COMPLETE (redundancy catch: gate-enforce was already live)
 
 Follow-up to the end-of-run stock-take: before touching T1-gate-enforce (the item flagged as the one

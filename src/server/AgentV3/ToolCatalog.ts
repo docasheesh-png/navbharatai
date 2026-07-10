@@ -265,6 +265,24 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'codemod_move_file',
+      description:
+        'Move or rename a file AND rewrite every import that points to it, in one surgical step — the ' +
+        'safe way to relocate a module (e.g. src/components/Button.tsx → src/ui/Button.tsx). It rewrites ' +
+        "each importer's specifier (relative or @/~ alias, keeping the style), recomputes the moved " +
+        "file's own relative imports from its new location, writes the file at the new path, and removes " +
+        'the old one. Use this instead of manually editing every caller after a move (which misses some ' +
+        'and breaks the build).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Current workspace path (e.g. src/components/Button.tsx).' },
+          to: { type: 'string', description: 'New workspace path (e.g. src/ui/Button.tsx).' },
+        },
+        required: ['from', 'to'],
+      },
+    },
+    {
       name: 'generate_gitignore',
       description:
         'Generate a correct, stack-aware .gitignore so node_modules, build output and ' +
@@ -724,6 +742,7 @@ export const CATALOG_TOOL_NAMES = [
   'evaluate',
   'codemod_rename',
   'codemod_add_prop',
+  'codemod_move_file',
   'generate_readme',
   'generate_architecture_docs',
   'generate_env_example',

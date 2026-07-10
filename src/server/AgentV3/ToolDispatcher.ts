@@ -8,6 +8,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
+import { computeMove, type MoveFile } from './codemodMoveFile';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -2072,6 +2073,56 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
         return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+      }
+
+      case 'codemod_move_file': {
+        // C7 — move/rename a file and rewrite EVERY importer's specifier in one surgical step, instead
+        // of hand-editing each caller. Uses the A1 code graph to read only the affected files (the
+        // moved file, its importers, and its own import targets), then applies the pure computeMove plan.
+        // Paths are workspace-relative; the actuator sanitizes on write, computeMove refuses any
+        // `from` that isn't a real indexed file (so the rm below only ever targets a legit file),
+        // and the rm itself is additionally guarded against shell metacharacters + traversal.
+        const from = reqStr(input, 'from').trim().replace(/^\.?\//, '');
+        const to = reqStr(input, 'to').trim().replace(/^\.?\//, '');
+        if (!from || !to) return 'codemod_move_file: both "from" and "to" workspace paths are required.';
+        const graph = getWorkspaceMemory(this.workspaceId).graph();
+        // Affected set: the moved file + who imports it + what it imports (all from the indexed graph).
+        const needed = new Set<string>([from, ...whoImports(graph, from), ...dependenciesOf(graph, from)]);
+        // Fallback: if the graph didn't know this file yet, scan the workspace so importers aren't missed.
+        if (needed.size <= 1) {
+          try {
+            const CODE = /\.(t|j)sx?$/;
+            const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+            for (const f of await this.actuator.listFiles(this.workspaceId)) {
+              if (CODE.test(f) && !SKIP.test(f)) needed.add(f);
+            }
+          } catch { /* fall through with what we have */ }
+        }
+        const contents: MoveFile[] = [];
+        for (const f of needed) {
+          try { contents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); }
+          catch { /* skip unreadable/nonexistent */ }
+        }
+        const result = computeMove(contents, from, to);
+        if (!result.ok) return `codemod_move_file failed: ${result.error}`;
+        for (const { path, after } of result.changes) {
+          try {
+            await this.actuator.writeFile(this.workspaceId, path, after);
+            getWorkspaceMemory(this.workspaceId).indexFile(path, after);
+          } catch { /* best-effort per file */ }
+        }
+        this.state?.recordFileChange({ path: to, kind: 'create' }, agent);
+        // Complete the move: remove the old path. Guard against shell metacharacters; report honestly on failure.
+        let removed = false;
+        if (/^[A-Za-z0-9._/-]+$/.test(from) && !from.split('/').includes('..')) {
+          const rm = await this.actuator
+            .runCommand(this.workspaceId, `rm -f '${from}'`)
+            .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
+          removed = rm.exitCode === 0;
+          if (removed) this.state?.recordFileChange({ path: from, kind: 'delete' }, agent);
+        }
+        this.scheduleCheckpoint(`codemod move ${from} → ${to}`);
+        return result.summary + (removed ? '' : `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`);
       }
 
       default:

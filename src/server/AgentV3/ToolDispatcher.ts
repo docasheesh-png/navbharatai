@@ -8,6 +8,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
+import { detectLinters, parseLintOutcome } from './lintRunner';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { buildApiGraph } from './apiGraph';
@@ -1560,6 +1561,36 @@ export class ToolDispatcher {
           );
         }
         const detail = `${allOk ? 'ALL LANGUAGES OK' : 'TYPECHECK FAILED'} (${plans.length} language${plans.length === 1 ? '' : 's'})\n` + parts.join('\n');
+        this.state?.appendTerminal(detail);
+        return detail;
+      }
+
+      case 'lint': {
+        // GA-12 — run the project's OWN ESLint + Prettier (real bug/style class tsc doesn't cover).
+        // Detection/parsing are pure (lintRunner.ts); this runs each configured linter in the sandbox.
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plans = detectLinters(files, pkgRaw);
+        if (!plans.length) {
+          const msg = 'lint: no ESLint or Prettier config detected — nothing to lint. (typecheck still covers type errors.)';
+          this.state?.appendTerminal(msg);
+          return msg;
+        }
+        const mem = getWorkspaceMemory(this.workspaceId);
+        const parts: string[] = [];
+        let allOk = true;
+        for (const plan of plans) {
+          const started = Date.now();
+          const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+          try { this.onCommand?.({ command: plan.command, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* best-effort */ }
+          const outcome = parseLintOutcome(plan, exitCode, stdout, stderr);
+          if (!outcome.ok) allOk = false;
+          if (outcome.ok) mem.recordAudit(`lint PASS — ${outcome.summary}`);
+          else mem.recordError(`lint FAIL — ${outcome.summary}${outcome.firstIssues.length ? '\n' + outcome.firstIssues.join('\n') : ''}`);
+          parts.push(`${outcome.summary}${outcome.firstIssues.length ? '\n  ' + outcome.firstIssues.join('\n  ') : ''}`);
+        }
+        const detail = `${allOk ? 'LINT OK' : 'LINT FAILED'} (${plans.length} linter${plans.length === 1 ? '' : 's'})\n` + parts.join('\n');
         this.state?.appendTerminal(detail);
         return detail;
       }

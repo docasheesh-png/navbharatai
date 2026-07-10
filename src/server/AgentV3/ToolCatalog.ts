@@ -448,6 +448,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'lint',
+      description:
+        "Run the project's OWN ESLint and Prettier and report real issues — catches a class of bugs a " +
+        'typecheck does NOT (unused variables, react-hooks exhaustive-deps, no-undef, promise misuse) plus ' +
+        'formatting drift. Auto-detects the config; ESLint errors fail the check (warnings are reported ' +
+        'but do not), Prettier lists files that need formatting. Takes no arguments. Run it alongside ' +
+        'typecheck and run_tests before declaring a build done; fix ESLint errors and run prettier --write.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_observability',
       description:
         'Add real, dependency-free observability to the app you built and write the files to the ' +
@@ -776,6 +786,7 @@ export const CATALOG_TOOL_NAMES = [
   'api_graph',
   'code_graph',
   'typecheck',
+  'lint',
   'generate_observability',
   'generate_bundle_optimization',
   'generate_seed_data',

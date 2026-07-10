@@ -10,6 +10,7 @@ import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile }
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
+import { buildApiGraph } from './apiGraph';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1494,6 +1495,39 @@ export class ToolDispatcher {
         // order. Read-only; use it to onboard to an unfamiliar/imported app before editing.
         const map = buildArchitectureMap(getWorkspaceMemory(this.workspaceId).graph());
         return renderArchitectureMap(map);
+      }
+
+      case 'api_graph': {
+        // GA-5 — map backend routes vs frontend API calls and flag calls with NO matching route (the
+        // classic silent full-stack bug: compiles + preview loads, feature broken at runtime). Best-effort
+        // (reads call sites, not a running server); pure logic in apiGraph.ts.
+        let files: string[];
+        try { files = await this.actuator.listFiles(this.workspaceId); }
+        catch { return 'api_graph: failed to list workspace files.'; }
+        const CODE = /\.(t|j)sx?$|\.py$|\.java$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const codeFiles = files.filter(f => CODE.test(f) && !SKIP.test(f)).slice(0, 300);
+        const contents: { path: string; content: string }[] = [];
+        for (const f of codeFiles) {
+          try { contents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); }
+          catch { /* skip unreadable */ }
+        }
+        const g = buildApiGraph(contents);
+        if (!g.defined.length && !g.called.length) return 'api_graph: no HTTP routes or API calls detected in the workspace.';
+        const lines: string[] = [`API graph — ${g.defined.length} route(s) defined, ${g.called.length} frontend call site(s).`];
+        if (g.missing.length) {
+          lines.push(`\nMISSING — ${g.missing.length} frontend call(s) with NO matching backend route (likely broken; add the route or fix the path/method):`);
+          for (const m of g.missing.slice(0, 20)) lines.push(`  ${m.method} ${m.path}  (${m.file})`);
+          getWorkspaceMemory(this.workspaceId).recordError(`api_graph: ${g.missing.length} frontend call(s) with no backend route (e.g. ${g.missing[0].method} ${g.missing[0].path}).`);
+        } else if (g.defined.length) {
+          lines.push('\nOK — every detected frontend call matches a defined backend route.');
+        }
+        if (g.unused.length) {
+          lines.push(`\n${g.unused.length} defined route(s) with no detected caller (dead, or called from outside this repo):`);
+          for (const u of g.unused.slice(0, 15)) lines.push(`  ${u.method} ${u.path}  (${u.file})`);
+        }
+        this.state?.appendTerminal(lines.join('\n'));
+        return lines.join('\n');
       }
 
       case 'typecheck': {

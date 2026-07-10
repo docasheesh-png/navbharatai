@@ -405,6 +405,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'api_graph',
+      description:
+        'Cross-check the backend routes the project DEFINES against the API calls its frontend MAKES, and ' +
+        'flag every frontend call that has NO matching backend route (the classic silent full-stack bug: ' +
+        'it compiles and the preview loads, but the feature is broken at runtime). Also lists routes with ' +
+        'no caller. Detects Express/Fastify, FastAPI/Flask and Spring routes, and fetch/axios calls. ' +
+        'Read-only, no arguments. Run it on a full-stack app before declaring it done, then fix any ' +
+        'MISSING call by adding the route or correcting the path/method.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'code_graph',
       description:
         "Query the project's structure from the indexed code graph instead of guessing or grepping. " +
@@ -762,6 +773,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tests',
   'run_tests',
   'architecture_map',
+  'api_graph',
   'code_graph',
   'typecheck',
   'generate_observability',

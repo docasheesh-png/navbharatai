@@ -12951,3 +12951,40 @@ read byEscalationCohort.in vs .out (okBuilds/builds + billedUsd) + escalatedBuil
 raise PCT. No env change → behaviour and telemetry shape stay byte-identical (new fields absent/empty).
 
 Gate: tsc fe+server 0, vitest 5747/5747 (6 new + 21 carried), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Billing Phase 1: real wallet DEBIT for v3.0 builds (PR #1178)
+
+ROOT CAUSE (found by tracing every `tokenBalance`/`remaining_balance` write across the server):
+`user_token_wallets` was only ever CREDITED — purchase (payments.ts), welcome bonus (wallet.ts),
+promo, admin adjust (admin.ts). A v3.0 build recorded its cost to the display-only monthly total
+(UserCostStore → `user_costs`) and to AgentV3CostTelemetry, but NEVER decremented the wallet. So
+the pre-flight affordability gate (WalletBalance.ts) compared estimates against a balance that
+never went down: one recharge = effectively unlimited builds. This was the missing HALF of the
+money path that PR 3/4/5 (estimate → gate → client UX) built the first half of.
+
+FIX — `src/server/lib/walletDebit.ts`, the debit mirror of `computeCreditedWallet` (same wallet
+doc, same token unit at TOKENS_PER_RUPEE=100, same pure-compute + Firestore-transaction split,
+same accumulate-on-retry contract):
+- Overdraft allowed: the fail-open gate lets a running build finish; negative balance records the
+  debt honestly and the NEXT pre-flight gate blocks until recharge.
+- Idempotent per buildRef (`${workspaceId}_${buildStartedAt}`) — double calls can never double-charge.
+- walletLedger bounded at 500 entries (Firestore 1MiB doc protection; totals never trimmed).
+- A debit failure never blocks the build result but is loudly console.error'd (money, not noise).
+- Wired at the SINGLE settle point in agentv3.ts (beside userCostStore.record, AFTER all zeroing
+  rules — free onboarding / empty build / unrendered preview debit nothing).
+
+User-visible: result footer shows `−N wallet tokens · M left`; deduction persists in session
+history via SessionTimeline finalState (live balance deliberately NOT persisted — goes stale);
+AppKnowledgeBase billing entry updated (keywords incl. "balance kata", "kitne token bache").
+
+Tests: 14 new in tests/walletDebit.test.ts (debit math, overdraft, idempotency, tx-retry
+accumulation, credit↔debit round-trip mirror, NaN guards, paisa rounding, ledger bound, guard
+rails) + SessionTimeline full-population contract extended.
+
+Gate: tsc fe+server 0, vitest 5765/5765 (575 files), boot:check PASS.
+
+NEXT (Billing Phase 2+, per admin's simplified plan): token-first wallet display (show tokens as
+the primary unit everywhere, ₹ secondary), per-provider api_call_log (admin-only breakdown), and
+the pre-flight estimate shown in TOKENS before the build starts.

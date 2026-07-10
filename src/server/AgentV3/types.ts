@@ -33,6 +33,7 @@ export type ToolName =
   | 'api_graph'
   | 'code_graph'
   | 'typecheck'
+  | 'check_package'
   | 'lint'
   | 'generate_observability'
   | 'generate_bundle_optimization'

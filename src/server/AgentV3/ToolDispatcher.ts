@@ -9,6 +9,7 @@ import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome } from './lintRunner';
+import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
@@ -1627,6 +1628,21 @@ export class ToolDispatcher {
         const detail = `${allOk ? 'LINT OK' : 'LINT FAILED'} (${plans.length} linter${plans.length === 1 ? '' : 's'})\n` + parts.join('\n');
         this.state?.appendTerminal(detail);
         return detail;
+      }
+
+      case 'check_package': {
+        // GA-3 — catch package.json foot-guns other tools miss: an npm script that runs a build tool the
+        // project never installed (fails with "command not found"), and a dep declared twice. Pure logic.
+        let pkgRaw: string;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); }
+        catch { return 'check_package: no package.json in the workspace.'; }
+        const result = analyzePackageHealth(pkgRaw);
+        if (!result.ok) {
+          getWorkspaceMemory(this.workspaceId).recordError(`check_package: ${result.issues.map(i => i.detail).join(' | ')}`);
+        }
+        const summary = packageHealthSummary(result);
+        this.state?.appendTerminal(summary);
+        return summary;
       }
 
       case 'generate_observability': {

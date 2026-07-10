@@ -12829,3 +12829,25 @@ Genuine gap.
 - AppKnowledgeBase: new "QUALITY DEFAULTS (U-2)" capability on v3.0.
 
 Gate: tsc fe+server 0, vitest 5689/5689 (5 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / GA-3: package.json health check (scripts that actually run)
+
+Ninth roadmap item this session (after B4, A1, B6, C7, A2, GA-5, GA-12, U-2). Redundancy-check
+(safeguard #6): DependencyReconciler covers source imports vs package.json; DependencyAnalysis covers
+unused + floating versions. Neither catches a broken npm SCRIPT (a build tool the script runs but the
+project never installed → "command not found") or a dep declared in both dependencies AND
+devDependencies. Genuine gap, high precision.
+
+- NEW `packageHealth.ts` (pure, 7 unit tests): `analyzePackageHealth(pkgRaw)` — flags script-tool-missing
+  (maps a known CLI to its package: tsc→typescript, vitest→vitest, eslint→eslint, vite→vite, next→next,
+  playwright→@playwright/test, etc.; sees through wrappers like npx/cross-env; conservative — only flags a
+  KNOWN tool whose package is absent, never a custom/shell command) and dup-dep. `packageHealthSummary()`.
+- `check_package` tool in ToolDispatcher (reads package.json, reports issues, records a memory error),
+  declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName + BUILD_TOOLS, taught in systemPrompt.
+- AppKnowledgeBase: new "PACKAGE HEALTH CHECK (GA-3)" capability on v3.0.
+
+Also this session: triggered the GA-5/GA-12/U-2 cluster checkpoint .aab (android-aab.yml on main).
+
+Gate: tsc fe+server 0, vitest 5696/5696 (7 new), build PASS, boot:check PASS.

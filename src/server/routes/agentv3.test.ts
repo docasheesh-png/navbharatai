@@ -497,6 +497,60 @@ describe('cheapFloorAllowedForTier — cheap floor leads only simple/medium (com
   });
 });
 
+// T1-escalation-on — the percentage canary (AGENTV3_ESCALATION_PCT). The exact failure class this
+// locks out: a build OUTSIDE a partial rollout leading with the cheap floor on a complex app while
+// shouldEscalateBuild denies it the Sonnet retry — a weak cheap build with NO safety net. The two
+// gates must always AGREE for the same rollout key.
+describe('escalation percentage canary — cheap floor and escalation retry always agree', () => {
+  const savedAll = process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+  const savedEsc = process.env.AGENTV3_ESCALATION;
+  const savedPct = process.env.AGENTV3_ESCALATION_PCT;
+  afterEach(() => {
+    if (savedAll === undefined) delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS; else process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS = savedAll;
+    if (savedEsc === undefined) delete process.env.AGENTV3_ESCALATION; else process.env.AGENTV3_ESCALATION = savedEsc;
+    if (savedPct === undefined) delete process.env.AGENTV3_ESCALATION_PCT; else process.env.AGENTV3_ESCALATION_PCT = savedPct;
+  });
+
+  it('on + no PCT = 100% — identical to the old "on" semantics (with or without a key)', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    process.env.AGENTV3_ESCALATION = 'on';
+    delete process.env.AGENTV3_ESCALATION_PCT;
+    expect(cheapFloorAllowedForTier('sonnet')).toBe(true);
+    expect(cheapFloorAllowedForTier('sonnet', 'ws-abc')).toBe(true);
+    const simple = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(shouldEscalateBuild(simple, false, 'ws-abc')).toBe(true);
+  });
+
+  it('on + PCT=0 — a complex build must NOT lead cheap (no safety net) and must not escalate', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    process.env.AGENTV3_ESCALATION = 'on';
+    process.env.AGENTV3_ESCALATION_PCT = '0';
+    expect(cheapFloorAllowedForTier('sonnet', 'ws-abc')).toBe(false); // conservative split holds
+    expect(cheapFloorAllowedForTier('gemini', 'ws-abc')).toBe(true); // simple tiers keep the floor as before
+    const simple = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(shouldEscalateBuild(simple, false, 'ws-abc')).toBe(false);
+  });
+
+  it('partial PCT — for ANY key, the cheap-floor lead on a complex tier and the escalation retry AGREE', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    process.env.AGENTV3_ESCALATION = 'on';
+    process.env.AGENTV3_ESCALATION_PCT = '50';
+    const simple = analyzeRequest({ prompt: 'build me a calculator' });
+    for (const key of ['ws-1', 'ws-2', 'ws-3', 'ws-4', 'ws-5', 'ws-6', 'ws-7', 'ws-8']) {
+      expect(cheapFloorAllowedForTier('sonnet', key)).toBe(shouldEscalateBuild(simple, false, key));
+    }
+  });
+
+  it('partial PCT with NO key — conservative: no complex cheap lead, no escalation', () => {
+    delete process.env.AGENTV3_CHEAP_FLOOR_ALL_TIERS;
+    process.env.AGENTV3_ESCALATION = 'on';
+    process.env.AGENTV3_ESCALATION_PCT = '50';
+    expect(cheapFloorAllowedForTier('sonnet')).toBe(false);
+    const simple = analyzeRequest({ prompt: 'build me a calculator' });
+    expect(shouldEscalateBuild(simple, false)).toBe(false);
+  });
+});
+
 describe('dominantProvider — PR4 deliveredVia (which model drove most build turns)', () => {
   it('returns the provider with the most turns (the dominant builder)', () => {
     const turns = new Map<string, number>([['GLM', 18], ['CLAUDE', 2]]);

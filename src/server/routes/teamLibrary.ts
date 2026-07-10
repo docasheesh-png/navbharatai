@@ -4,6 +4,7 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { listMembers } from '../lib/TeamStore';
 import { teamLibraryStore, buildLibraryItem, normalizeKind, type LibraryKind } from '../lib/TeamLibraryStore';
 import { resolveMentions } from '../lib/MentionRouter';
+import { mentionNotificationStore, deliverMentions } from '../lib/MentionNotificationStore';
 
 /**
  * P-COLLAB.4 — team-scoped shared library (prompts / templates / components).
@@ -11,6 +12,11 @@ import { resolveMentions } from '../lib/MentionRouter';
  *   GET    /api/team/:teamId/library[?kind=prompt|template|component]  — list (active members)
  *   POST   /api/team/:teamId/library    { kind, title, content }       — add  (active members)
  *   DELETE /api/team/:teamId/library/:itemId                           — remove (active members)
+ *
+ * P-COLLAB.5 (delivery) / T1-mention-inbox — @mentions are now DELIVERED, not just resolved:
+ *   POST   /api/team/:teamId/mentions/notify  { text }  — store a mention notification for each tagged member
+ *   GET    /api/notifications                            — the caller's own inbox (per-user)
+ *   POST   /api/notifications/read  { ids }              — mark the caller's notifications read
  *
  * Access is fail-closed: only the team owner (teamId === uid) or an ACTIVE member may read/contribute.
  */
@@ -35,6 +41,41 @@ export function registerTeamLibraryRoutes(app: Express): void {
     // The owner is an implicit active member (teamId === owner uid) — include them so @owner resolves.
     const resolvable = [...members.map((m) => ({ uid: m.uid, email: m.email, status: m.status }))];
     res.json(resolveMentions(text, resolvable));
+  });
+
+  // P-COLLAB.5 (delivery) — DELIVER an @mention: store a notification in each tagged member's inbox.
+  // Called when a message with mentions is actually sent (not on every keystroke preview).
+  app.post('/api/team/:teamId/mentions/notify', async (req: Request, res: Response) => {
+    const teamId = String(req.params.teamId || '');
+    const uid = await activeMemberUid(req, teamId);
+    if (!uid) return res.status(403).json({ error: 'Active team membership required.' });
+    const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 4000) : '';
+    if (!text.trim()) return res.status(400).json({ error: 'text is required.' });
+    const members = await listMembers(teamId).catch(() => []);
+    const resolvable = members.map((m) => ({ uid: m.uid, email: m.email, status: m.status }));
+    const fromEmail = members.find((m) => m.uid === uid)?.email ?? '';
+    const notifications = deliverMentions(text, resolvable, {
+      fromUid: uid, fromEmail, teamId, now: Date.now(),
+      idFor: () => crypto.randomBytes(9).toString('base64url'),
+    });
+    const delivered = await mentionNotificationStore.addMany(notifications);
+    res.json({ delivered, mentioned: notifications.length });
+  });
+
+  // Per-user inbox (NOT team-scoped — the caller reads only their OWN notifications).
+  app.get('/api/notifications', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) return res.status(401).json({ error: 'Sign-in required.' });
+    const items = await mentionNotificationStore.listForUser(uid);
+    res.json({ items, unread: items.filter((n) => !n.read).length });
+  });
+
+  app.post('/api/notifications/read', async (req: Request, res: Response) => {
+    const uid = await verifyFirebaseToken(req);
+    if (!uid) return res.status(401).json({ error: 'Sign-in required.' });
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string') : [];
+    const ok = await mentionNotificationStore.markRead(uid, ids);
+    res.json({ ok });
   });
 
   app.get('/api/team/:teamId/library', async (req: Request, res: Response) => {

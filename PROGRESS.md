@@ -13033,3 +13033,29 @@ review flagged issues. A "delivered" that reads as "verified" is exactly the sil
 - Reuses the T1-health-card wiring merged this session — the warning now shows on the card automatically.
 
 Gate: tsc fe+server 0, vitest 5764/5764 (4 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Tier 1E / T1-mention-inbox: @mentions are now DELIVERED (full-stack)
+
+Completes the P-COLLAB.5 open item (constitution rule 6): MentionRouter RESOLVED who was tagged, but there
+was no per-user store to actually NOTIFY them. Built the whole delivery path end-to-end.
+
+- NEW `MentionNotificationStore.ts` (Firestore, VITEST-skip, best-effort; 6 pure unit tests): per-user
+  collection `users/{uid}/notifications/{id}` (path-scoped — a user can only read/mark their OWN).
+  `buildMentionNotification` + `deliverMentions(text, members, {fromUid,…})` (pure: resolves mentions →
+  one notification per DISTINCT active mentioned member, EXCLUDING the sender). Store: addMany, listForUser
+  (newest-first, bounded 50), markRead.
+- NEW endpoints in teamLibrary.ts: `POST /api/team/:teamId/mentions/notify {text}` (active member →
+  delivers to each tagged member), `GET /api/notifications` (caller's own inbox + unread count),
+  `POST /api/notifications/read {ids}` (caller-scoped mark-read).
+- NEW client `MentionInbox.tsx` — a bell with an unread badge + dropdown list (who mentioned you, the
+  excerpt, time-ago, mark-all-read), rendered in the TeamCollaboration header. Polls every 60s; best-effort.
+- Extracted `teamAuthHeader` into shared `teamAuth.ts` (one auth path for TeamCollaboration + MentionInbox;
+  breaks the circular import cleanly — rule 4, no drift).
+- AppKnowledgeBase: the @mention entry updated from "delivery not yet built" → the real delivered-inbox flow.
+
+Real end-to-end (rule 2): store → deliver → inbox UI → mark-read all wired. Email delivery stays a future
+piece (needs an external provider key) — honestly noted, not stubbed.
+
+Gate: tsc fe+server 0, vitest 5770/5770 (6 new), build PASS, boot:check PASS.

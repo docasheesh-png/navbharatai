@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { MentionInbox } from './MentionInbox';
+import { teamAuthHeader } from './teamAuth';
 import {
   Users,
   Mail,
@@ -133,23 +135,7 @@ const generateProjectId = () =>
 
 const localKey = (uid?: string) => `navbharatai_team_${uid ?? 'anon'}`;
 
-/**
- * Build an Authorization header carrying the signed-in user's Firebase ID token, for the RBAC-gated
- * team routes. Best-effort: returns `{}` when unauthenticated or Firebase isn't ready, so the caller
- * can surface an honest "sign in" message rather than silently failing.
- */
-async function teamAuthHeader(): Promise<Record<string, string>> {
-  try {
-    const { getAuth } = await import('firebase/auth');
-    const { getApp } = await import('firebase/app');
-    const user = getAuth(getApp()).currentUser;
-    if (!user) return {};
-    const token = await user.getIdToken();
-    return { Authorization: `Bearer ${token}` };
-  } catch {
-    return {};
-  }
-}
+// teamAuthHeader now lives in ./teamAuth (shared by MentionInbox too — one auth path, no circular import).
 
 // ─── Simple ASCII QR placeholder ─────────────────────────────────────────────
 
@@ -450,13 +436,17 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
 
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Users size={20} className="text-blue-400" />
-            Team Collaboration
-            {projectName && <span className="text-sm font-normal text-gray-400 ml-1">— {projectName}</span>}
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">Manage your team, send invites, and share the project</p>
+        <div className="mb-6 flex items-start justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <Users size={20} className="text-blue-400" />
+              Team Collaboration
+              {projectName && <span className="text-sm font-normal text-gray-400 ml-1">— {projectName}</span>}
+            </h1>
+            <p className="text-gray-500 text-sm mt-1">Manage your team, send invites, and share the project</p>
+          </div>
+          {/* T1-mention-inbox — @mentions delivered to your inbox */}
+          <MentionInbox />
         </div>
 
         <div className="flex gap-4 flex-col lg:flex-row">

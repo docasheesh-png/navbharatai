@@ -1765,12 +1765,12 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   },
   {
     id: 'team-mentions',
-    name: 'Team @Mentions (resolution)',
-    path: 'API — POST /api/team/:teamId/mentions/resolve',
-    description: `Resolves @mentions in a piece of text to the ACTIVE members of a team. Given text like "please review @alice and @bob", it returns exactly which team members were mentioned (matched by their email local-part or full email, deduped) plus any handles that matched nobody. Any collaboration surface (comments, chat, the team library) can use it to know precisely who was tagged. Active-member-gated. Note: this is the resolution layer — delivering an actual notification to a mentioned user (in-app inbox + email) is a separate, not-yet-built piece.`,
-    howToUse: 'A collaboration surface POSTs { "text": "…@handle…" } to /api/team/:teamId/mentions/resolve (as an active team member) and receives the list of mentioned members to act on.',
+    name: 'Team @Mentions (delivered to an inbox)',
+    path: 'Team Collaboration → the bell icon (top-right) shows your mentions',
+    description: `@mentions are now DELIVERED, not just resolved. When a teammate writes "@alice please review" in a team surface, v3.0 resolves the mention to the active member and stores a notification in that person's own in-app inbox. Each user sees a bell with an unread count in Team Collaboration; opening it lists who mentioned them, in which message, and when, with a "mark all read". You are never notified for tagging yourself. Resolution still matches by email local-part or full email; delivery is per-user and path-scoped so you only ever see your own notifications. (Email delivery remains a separate future piece — it needs an external email provider key.)`,
+    howToUse: 'Open Team Collaboration and check the bell icon (top-right) for mentions. Under the hood a collaboration surface POSTs { "text": "…@handle…" } to /api/team/:teamId/mentions/notify to deliver, and each user reads their inbox from GET /api/notifications and marks read via POST /api/notifications/read.',
     relatedFeatures: ['team-library', 'team-collaboration'],
-    keywords: ['mention', 'at mention', '@mention', 'tag teammate', 'notify member', 'mention resolution', 'team tagging', 'ping teammate'],
+    keywords: ['mention', 'at mention', '@mention', 'tag teammate', 'notify member', 'mention resolution', 'team tagging', 'ping teammate', 'notification', 'inbox', 'bell', 'unread', 'notifications'],
   },
   {
     id: 'team-library',

@@ -12687,3 +12687,28 @@ Deliberately scoped v1 to the import/impact graph (the concrete "query the repo,
 win grep/recall don't cover). Deeper who-CALLS/where-USED reference tracking is a natural follow-up.
 
 Gate: tsc fe+server 0, vitest 5595/5595 (8 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2A / B6: cross-language typecheck (every language compiles)
+
+Third item off ROADMAP.md (after B4, A1). v3.0 now builds polyglot apps (TS + Python + Java + Go),
+but "verified" only ever meant frontend `tsc` — a Java/Python/Go compile error slipped through.
+Redundancy-checked (safeguard #6): no cross-language typecheck existed (only frontend tsc + the
+BuildOutcome.typecheckOk flag). Genuine gap.
+
+- NEW `crossLangCheck.ts` (pure, 10 unit tests): `detectChecks(files, packageJson)` returns one plan
+  per language present — TS (`npm run typecheck` if scripted, else `npx tsc --noEmit` when a tsconfig
+  exists), Python (`python -m compileall -q .`), Java (`mvn -q -B compile`), Go (`go build ./...`);
+  `[]` when nothing checkable. `parseCheckOutcome()` reads per-language error counts + first errors,
+  exit code authoritative for ok.
+- `typecheck` tool in ToolDispatcher (runs EVERY detected check, aggregates ALL LANGUAGES OK / FAILED,
+  records PASS audit / FAIL error to workspace memory), declared in ToolCatalog (+ CATALOG_TOOL_NAMES),
+  added to ToolName + BUILD_TOOLS, taught in systemPrompt (polyglot: compile every language, not just
+  the frontend — fix any that fails).
+- AppKnowledgeBase: new "CROSS-LANGUAGE TYPECHECK (B6)" capability bullet on v3.0.
+
+Pairs with B4 (run_tests) and leverages the earlier polyglot fullstack work — the Java/Go apps v3.0
+can now build also get compiled-verified, not assumed.
+
+Gate: tsc fe+server 0, vitest 5653/5653 (10 new), build PASS, boot:check PASS.

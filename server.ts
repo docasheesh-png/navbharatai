@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY, isPlaceholder, resolveApiKey, hasKey, getGemini, getGroq, getDeepSeek, getOpenAI, getOpenRouter, getClaude } from './src/server/lib/aiClients';
+import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
@@ -283,6 +284,13 @@ setInterval(() => {
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
   app.use(traceMiddleware);
+
+  // Bundled native shell CORS + OPTIONS preflight (Capacitor): for native shells (Android/iOS app)
+  // whose WebView runs locally (https://localhost, capacitor://localhost), every API call is cross-origin.
+  // This middleware sets CORS headers for allowlisted native origins and short-circuits OPTIONS
+  // preflights with 204 + reflected request headers. For same-origin web traffic (no Origin header),
+  // it is a pure no-op.
+  app.use(corsMiddleware());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
   const chatLimiter = rateLimit({

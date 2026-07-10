@@ -17,6 +17,8 @@ import { doc, getDoc, type Firestore } from 'firebase/firestore';
 /** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; anything else is ignored here. */
 export interface WalletDocData {
   remaining_balance?: unknown;
+  /** Total ₹ ever spent buying tokens — used by free-tier routing to tell a paying user from a new one. */
+  totalMoneySpent?: unknown;
 }
 
 /** Fetch the raw wallet doc for a user, or null if it doesn't exist / can't be fetched. Injected → testable. */

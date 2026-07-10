@@ -6,6 +6,7 @@ import type { AgentRole } from './types';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
 import { compactMessagesForPersist, compactTranscriptForModel } from './SessionTimeline';
 import { billedAmountUsd } from './pricing';
+import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 
 /**
@@ -129,6 +130,13 @@ export interface AgentRunnerOptions {
     ok: boolean;
     error?: string;
   }) => void;
+  /**
+   * Build-level token accumulator (billing accounting fix). When provided, EVERY turn's tokens are
+   * added here as well as to this runner's own `usage`. The SAME sink is shared across the main
+   * runner, every sub-agent, and every heal/fix/escalation runner so the final charge reflects the
+   * whole build's real spend — not just one runner's turns. Best-effort; never affects the run.
+   */
+  usageSink?: UsageSink;
 }
 
 // ── Parallel tool execution (capped) ───────────────────────────────────────────
@@ -438,6 +446,9 @@ export class AgentRunner {
         usage.outputTokens += turn.usage.outputTokens;
         usage.cacheCreationInputTokens += turn.usage.cacheCreationInputTokens;
         usage.cacheReadInputTokens += turn.usage.cacheReadInputTokens;
+        // Billing accounting fix: feed the shared build-level sink so this turn's tokens are billed
+        // even when this runner is a sub-agent or a heal/fix run whose `result` is later discarded.
+        this.opts.usageSink?.add({ inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens });
 
         if (turn.text.trim()) {
           events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });

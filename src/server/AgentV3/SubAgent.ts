@@ -41,6 +41,12 @@ export interface SubAgentDeps {
   maxTokensPerTurn?: number;
   /** Real git checkpointer, so sub-agent writes are committed too. */
   checkpointer?: Checkpointer;
+  /**
+   * Build-level token accumulator (billing accounting fix). The Architect delegates ALL app code to
+   * sub-agents, so the bulk of a build's tokens are spent HERE. Passing the parent build's sink makes
+   * every sub-agent's turns count toward the user's charge — previously they were dropped entirely.
+   */
+  usageSink?: import('./UsageSink').UsageSink;
 }
 
 export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
@@ -79,6 +85,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       maxBudgetUsd: deps.maxBudgetUsd,
       maxTokensPerTurn: deps.maxTokensPerTurn,
       agentRole: role,
+      // Billing accounting fix: feed the SAME build-level sink so this sub-agent's tokens are billed.
+      usageSink: deps.usageSink,
     });
     // Give the specialist the live project map (Phase 2) so it knows the codebase
     // the Architect has built so far — what files/components/routes exist and what

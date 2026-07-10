@@ -127,6 +127,7 @@ import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { billedAmountUsd } from '../AgentV3/pricing';
+import { createUsageSink } from '../AgentV3/UsageSink';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
@@ -3782,6 +3783,13 @@ export function registerAgentV3Routes(app: Express): void {
     // final billing hook can fold them into the user's charge with the same markup as every other
     // v3.0 call (NavBharatAI-Anthropic-billed). Stays {0,0} unless the blueprint step actually runs.
     const blueprintUsage = { inputTokens: 0, outputTokens: 0 };
+    // BILLING ACCOUNTING (2026-07-10) — ONE build-level token sink. Every token-spending unit of this
+    // build feeds it: the fast lane, the main agentic runner, EVERY sub-agent, and every
+    // escalation/heal/fix/retry runner. The final charge is computed from this sink's TOTAL (below),
+    // so tokens spent inside sub-agents (previously dropped) and inside heal/fix runs whose `result`
+    // replaced the main build's (previously discarded) are now billed. Root-cause fix for the
+    // ₹14k-real-vs-₹1,524-billed leak: bill the whole build, not one runner's turns.
+    const buildUsage = createUsageSink();
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -3829,7 +3837,10 @@ export function registerAgentV3Routes(app: Express): void {
         }
       } catch { /* diagnostics are best-effort */ }
       if (ok && buildResultRef) {
-        const billedUsd = typeof buildResultRef.billedUsd === 'number' ? buildResultRef.billedUsd : 0;
+        // Billing accounting fix: show the REAL spend so far from the build-level sink (not one
+        // runner's snapshot), so a wall-clock-finalized build's displayed amount matches the actual
+        // charge settled later at the sink total.
+        const billedUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd, billedInr: Math.round(billedUsd * usdInrRate() * 100) / 100, ...(dl ? { diagnostics: dl } : {}) });
       } else {
         // RC-4 (admin 2026-07-06): HONEST pause wording. The old line claimed "It was likely almost
@@ -4336,6 +4347,9 @@ export function registerAgentV3Routes(app: Express): void {
         // Pass the SAME 32000-token per-turn cap the top-level runner uses (below). Without it a
         // sub-agent falls back to 8192 and truncates large files — the top cause of incomplete apps.
         maxTokensPerTurn: buildMaxTokensPerTurn(),
+        // Billing accounting fix (THE big leak): the Architect delegates all app code to sub-agents,
+        // so most of a build's tokens are spent here. Feed the build-level sink so they are billed.
+        usageSink: buildUsage,
       });
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
       // get an independent cross-model review from the NON-Claude free router
@@ -4533,6 +4547,7 @@ export function registerAgentV3Routes(app: Express): void {
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -4632,6 +4647,10 @@ export function registerAgentV3Routes(app: Express): void {
         dispatcher,
         state,
         events,
+        // Billing accounting fix: the ONE build-level sink, shared by the main runner and every
+        // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
+        // are billed even when their `result` is later discarded.
+        usageSink: buildUsage,
         system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
@@ -4832,6 +4851,7 @@ export function registerAgentV3Routes(app: Express): void {
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
           state,
           events,
+          usageSink: buildUsage, // billing accounting fix — the plan step's tokens are billed too
           model: planGrok ? haikuModel() : model,
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
@@ -4919,6 +4939,7 @@ export function registerAgentV3Routes(app: Express): void {
               } catch { /* diagnostics best-effort */ }
               blueprintUsage.inputTokens += t.usage.inputTokens;
               blueprintUsage.outputTokens += t.usage.outputTokens;
+              buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
               return t.text;
             };
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -5032,6 +5053,9 @@ export function registerAgentV3Routes(app: Express): void {
           osUsage.outputTokens += t.usage.outputTokens;
           osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
           osUsage.cacheReadInputTokens += t.usage.cacheReadInputTokens ?? 0;
+          // Billing accounting fix: the fast lane does not use AgentRunner, so feed the build-level
+          // sink directly here (mirrors AgentRunner's own sink write).
+          buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
           return t.text;
         };
         const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
@@ -5894,12 +5918,15 @@ export function registerAgentV3Routes(app: Express): void {
       // the user sees ₹0. Only consumed on result.ok (a failed build never burns a free credit),
       // and fail-safe — any error leaves the user billed normally. effectiveBilledUsd flows into
       // both the cost record AND the result event so the customer-facing amount matches.
-      // P-ARCH+.3 — fold the optional blueprint step's tokens into the charge with the SAME markup as
-      // every other v3.0 call, so NavBharatAI never eats that cost when the build succeeds. It's added
-      // BEFORE the zeroing below, so a failed/free build (which bills ₹0) correctly doesn't charge for
-      // the blueprint either — consistent with the rest of the build's billing policy.
-      let effectiveBilledUsd = result.billedUsd
-        + billedAmountUsd({ inputTokens: blueprintUsage.inputTokens, outputTokens: blueprintUsage.outputTokens }, powerLevelReq);
+      // BILLING ACCOUNTING FIX (2026-07-10) — charge the WHOLE build's real token spend, not one
+      // runner's turns. `buildUsage` has accumulated every token-spending unit: the fast lane, the
+      // blueprint/plan step, the main agentic runner, EVERY sub-agent (where the Architect delegates
+      // all app code — the biggest previously-dropped leak), and every escalation/heal/fix/retry
+      // runner (whose `result` used to REPLACE the main build's, discarding its billing). Billed at
+      // the build's power tier, exactly as before. This supersedes the old `result.billedUsd +
+      // blueprintUsage` sum (both are subsets of the sink now, so there is no double-count). The
+      // zeroing rules below (empty build / unrendered preview / free onboarding) still apply.
+      let effectiveBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
       // zero files were created (even after the Claude retry), the build failed — bill ₹0.
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
@@ -5941,9 +5968,11 @@ export function registerAgentV3Routes(app: Express): void {
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: deliveredTier,
-          billedUsd: result.billedUsd,
-          inputTokens: result.usage?.inputTokens ?? 0,
-          outputTokens: result.usage?.outputTokens ?? 0,
+          // Billing accounting fix: record the ACTUAL charged amount + the WHOLE build's tokens
+          // (from the sink), so the cost-ladder measurement reflects real spend, not one runner's turns.
+          billedUsd: effectiveBilledUsd,
+          inputTokens: buildUsage.total().inputTokens,
+          outputTokens: buildUsage.total().outputTokens,
           ok: result.ok,
           powerMode: onlyOpus,
           durationMs: Math.max(0, Date.now() - buildStartedAt),

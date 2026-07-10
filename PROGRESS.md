@@ -12661,3 +12661,29 @@ read honest results — so "verified" leaned on tsc, and an imported repo's own 
 - AppKnowledgeBase: new "RUNS THE PROJECT'S OWN TESTS" capability bullet on the v3.0 entry.
 
 Gate: tsc fe+server 0, vitest 5561/5561 (15 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2A / A1: code-graph queries (safe editing at scale)
+
+Second item off ROADMAP.md after B4. The agent could find where a symbol is DEFINED (recall) and
+text-search (grep), but had no STRUCTURED reverse view — "who imports this file?" and "if I change
+X, what ripples?" — so edits to shared files in a big/unfamiliar app were blind. Redundancy-checked
+first (safeguard #6): WorkspaceMemory already indexes forward imports (file → specifiers) + symbol
+definitions; the genuine gap was the resolved reverse/impact graph, which grep can't give.
+
+- NEW `codeGraph.ts` (pure, 8 unit tests): `buildImportEdges(graph)` resolves every local import into
+  concrete file→file edges (reusing ArchitectureAnalysis.resolveLocalImport, dropping npm/bare specs);
+  `whoImports` (direct importers), `dependenciesOf` (direct local deps), `impactOf` (transitive reverse
+  closure — cycle-safe BFS), `definitionsOf` (symbol → defining file), `resolveGraphFile` (exact or
+  unique-suffix path match).
+- `code_graph` tool in ToolDispatcher (query = impact | who_imports | depends_on | defines; reads the
+  live WorkspaceMemory graph), declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName +
+  BUILD_TOOLS, and taught in systemPrompt (before editing a shared file, query impact + who_imports so
+  you edit with the blast radius in view, not blind).
+- AppKnowledgeBase: new "CODE-GRAPH QUERIES (A1 — Safe editing at scale)" capability bullet on v3.0.
+
+Deliberately scoped v1 to the import/impact graph (the concrete "query the repo, don't prompt-stuff"
+win grep/recall don't cover). Deeper who-CALLS/where-USED reference tracking is a natural follow-up.
+
+Gate: tsc fe+server 0, vitest 5595/5595 (8 new), build PASS, boot:check PASS.

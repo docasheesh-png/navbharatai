@@ -377,6 +377,28 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'code_graph',
+      description:
+        "Query the project's structure from the indexed code graph instead of guessing or grepping. " +
+        'Answers, for a file: who imports it ("who_imports"), what it imports locally ("depends_on"), and ' +
+        'the full set of files a change to it would affect directly or transitively ("impact"); and for a ' +
+        'symbol name: where it is defined ("defines"). Use "impact" BEFORE editing a shared file to see ' +
+        'the blast radius, and "who_imports" to find every call site to update — safer than editing blind. ' +
+        'Deterministic and read-only.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            enum: ['impact', 'who_imports', 'depends_on', 'defines'],
+            description: 'impact/who_imports/depends_on take a FILE target; defines takes a SYMBOL name. Default: impact.',
+          },
+          target: { type: 'string', description: 'A workspace file path (e.g. src/App.tsx) or, for "defines", an exported symbol name.' },
+        },
+        required: ['target'],
+      },
+    },
+    {
       name: 'generate_observability',
       description:
         'Add real, dependency-free observability to the app you built and write the files to the ' +
@@ -700,6 +722,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_api_docs',
   'generate_tests',
   'run_tests',
+  'code_graph',
   'generate_observability',
   'generate_bundle_optimization',
   'generate_seed_data',

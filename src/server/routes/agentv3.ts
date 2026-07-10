@@ -185,7 +185,7 @@ import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
-import { escalationRolloutPercent, inEscalationRollout } from '../AgentV3/escalationRollout';
+import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -4969,6 +4969,9 @@ export function registerAgentV3Routes(app: Express): void {
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
       let result: Awaited<ReturnType<typeof runner.run>> | undefined;
       let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
+      // T1-escalation-on — how many ladder escalations this build actually performed (0 = first tier
+      // delivered). Set by the escalation lane below; feeds the canary-measurement telemetry.
+      let escalationsCount = 0;
       // True once the fast lane (SimpleBuilder / OneShot) produced the result — that path already runs
       // its own tsc verify-gate + repair, so the post-agentic tsc gate below skips it (no redundant run).
       let fastLaneGated = false;
@@ -5282,6 +5285,7 @@ export function registerAgentV3Routes(app: Express): void {
         });
         result = esc.build;
         deliveredTier = esc.tier;
+        escalationsCount = esc.escalations;
         if (esc.escalations > 0) {
           console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
         }
@@ -5947,6 +5951,10 @@ export function registerAgentV3Routes(app: Express): void {
           promptVersion: architectPromptVersion || undefined,
           // PR4 — the provider that drove most build turns (cheap-floor-vs-Claude tripwire).
           deliveredVia: dominantProvider(providerTurns),
+          // T1-escalation-on — the canary A/B labels: which cohort this build was in ('in'/'out'/'off',
+          // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
+          escalationCohort: escalationCohort(workspaceId),
+          escalations: escalationsCount,
         })
         .catch(() => {});
 

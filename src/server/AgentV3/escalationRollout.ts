@@ -38,3 +38,18 @@ export function inEscalationRollout(key: string | undefined, pct: number): boole
   if (!key) return false; // no stable key → stay OUT of a partial rollout (conservative; full rollout still includes it)
   return rolloutBucket(key) < pct;
 }
+
+/** The measurement cohort this build belongs to. Pure. */
+export type EscalationCohort = 'off' | 'in' | 'out';
+
+/**
+ * Label a build's escalation cohort for telemetry — the A/B dimension the canary measurement needs:
+ *   'off' → the flag is not on (escalation impossible for anyone);
+ *   'in'  → flag on AND inside the percentage rollout (the ladder applies);
+ *   'out' → flag on but OUTSIDE the partial rollout (the control group).
+ * Comparing 'in' vs 'out' success/cost on the same days is what justifies (or vetoes) raising PCT. Pure.
+ */
+export function escalationCohort(key: string | undefined, env: NodeJS.ProcessEnv = process.env): EscalationCohort {
+  if (env.AGENTV3_ESCALATION !== 'on') return 'off';
+  return inEscalationRollout(key, escalationRolloutPercent(env)) ? 'in' : 'out';
+}

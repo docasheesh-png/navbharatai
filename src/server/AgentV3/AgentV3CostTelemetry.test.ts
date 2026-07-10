@@ -125,4 +125,36 @@ describe('foldCostTelemetry (pure cost-ladder aggregation)', () => {
     expect(next.byDeliveredVia.CLAUDE.builds).toBe(1);
     expect(next.totalBuilds).toBe(2);
   });
+
+  // T1-escalation-on — the canary A/B split ('in' vs 'out' vs 'off') + the escalated-builds counter.
+  it('breaks down by escalation cohort — the in-vs-out A/B split the rollout decision needs', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'in', ok: true }), 1);
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'in', ok: false }), 2);
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'out', ok: true }), 3);
+    expect(doc.byEscalationCohort!.in.builds).toBe(2);
+    expect(doc.byEscalationCohort!.in.okBuilds).toBe(1); // in-canary success rate measurable
+    expect(doc.byEscalationCohort!.out.builds).toBe(1);
+    expect(doc.byEscalationCohort!.out.okBuilds).toBe(1); // control-group success rate measurable
+  });
+
+  it('counts escalatedBuilds only when the ladder actually climbed (escalations > 0)', () => {
+    let doc: DailyCostTelemetryDoc | null = null;
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'in', escalations: 0 }), 1); // first tier delivered
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'in', escalations: 1 }), 2); // climbed once
+    doc = foldCostTelemetry(doc, DATE, entry({ escalationCohort: 'off' }), 3); // escalations absent
+    expect(doc.escalatedBuilds).toBe(1);
+    expect(doc.totalBuilds).toBe(3);
+  });
+
+  it('folds a missing cohort under "unknown" and tolerates older docs without the fields', () => {
+    const legacy = foldCostTelemetry(null, DATE, entry(), 1); // no cohort → 'unknown'
+    expect(legacy.byEscalationCohort!.unknown.builds).toBe(1);
+    delete (legacy as Partial<DailyCostTelemetryDoc>).byEscalationCohort;
+    delete (legacy as Partial<DailyCostTelemetryDoc>).escalatedBuilds;
+    const next = foldCostTelemetry(legacy, DATE, entry({ escalationCohort: 'in', escalations: 2 }), 2);
+    expect(next.byEscalationCohort!.in.builds).toBe(1);
+    expect(next.escalatedBuilds).toBe(1);
+    expect(next.totalBuilds).toBe(2);
+  });
 });

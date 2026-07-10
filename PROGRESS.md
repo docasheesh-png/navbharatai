@@ -12873,3 +12873,25 @@ breaks here" on imported repos.
 Also this session: the GA-5/GA-12/U-2 cluster checkpoint .aab (run #7) went green.
 
 Gate: tsc fe+server 0, vitest 5702/5702 (6 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / code hygiene: find_dead_code (built-but-unwired modules)
+
+Eleventh roadmap item this session (after B4, A1, B6, C7, A2, GA-5, GA-12, U-2, GA-3, D11).
+Redundancy-check (safeguard #6): no dead-file/unwired detector as a tool (ArchitectureAnalysis finds
+orphan COMPONENTS only; architectureMap lists in-degree-0 files as positive "entry points"). Genuine
+gap — catches the common AI-codegen bug "created a component/hook/util and forgot to wire it in".
+
+- NEW `deadCode.ts` (pure, 5 unit tests): `findUnwiredFiles(graph)` reuses the A1 import edges — a code
+  file with in-degree 0 that ISN'T an entry / test / config / type-decl / story / file-based route /
+  setup file is a candidate unwired module. Conservative (high precision); advisory ("verify — dynamic
+  imports / string refs aren't visible"). `unwiredFilesSummary()`.
+- `find_dead_code` tool in ToolDispatcher (reads the graph, reports candidates, records a memory audit),
+  declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName + BUILD_TOOLS, taught in systemPrompt
+  (after a build, catch anything you built but never wired in).
+- AppKnowledgeBase: new "DEAD-CODE / UNWIRED FILE CHECK" capability on v3.0.
+
+This is the 3rd item since .aab run #7 (GA-3 + D11 + this) → a checkpoint .aab is due after merge.
+
+Gate: tsc fe+server 0, vitest 5707/5707 (5 new), build PASS, boot:check PASS.

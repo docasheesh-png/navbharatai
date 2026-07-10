@@ -29,6 +29,7 @@ export type ToolName =
   | 'generate_api_docs'
   | 'generate_tests'
   | 'run_tests'
+  | 'find_dead_code'
   | 'architecture_map'
   | 'api_graph'
   | 'code_graph'

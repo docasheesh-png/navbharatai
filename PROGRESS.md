@@ -12951,3 +12951,28 @@ read byEscalationCohort.in vs .out (okBuilds/builds + billedUsd) + escalatedBuil
 raise PCT. No env change → behaviour and telemetry shape stay byte-identical (new fields absent/empty).
 
 Gate: tsc fe+server 0, vitest 5747/5747 (6 new + 21 carried), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Option A cont. / T1-health-card: surface the build-health card (activate dormant value)
+
+The BuildHealth spine was fully built but DORMANT: the type, the done/result event field, the reducer that
+stores it, and <BuildHealthCard/> (AgentV3Panel.tsx:3338) all existed — but the SERVER only emitted
+readiness on the FAILURE `done` path, never on a successful build (which terminates with `result`). So the
+card only ever showed on failure. One-wire fix:
+
+- NEW `buildHealthCard.ts` (pure, 7 unit tests): `buildHealthFromDiagnostics(report, ok)` derives an honest
+  BuildHealth from the diagnostics the build ALREADY computed (zero extra cost) — blockers = still-unresolved
+  errors, warnings = still-unresolved warnings, ready = ok && no blockers, score = clamp((ok?100:45) −
+  25×blockers − 6×warnings). Tolerates a missing report.
+- Route: attach `readiness: buildHealthFromDiagnostics(diagnostics, result.ok)` to the terminal `result`
+  emit (additive; the field is optional).
+- Client: `result` event type += `readiness?: BuildHealth`; reducer `case 'result'` sets `buildHealth` from
+  it (the success path, which was the missing case). 2 new reducer tests (result carries readiness; backward
+  compat when absent).
+- AppKnowledgeBase: new "BUILD-HEALTH CARD (R2)" capability on the v3.0 entry.
+
+Redundancy-checked (safeguard #6): the readiness data is reused from the existing diagnostics — no new
+analysis. Backward-compatible: the field is optional, the client no-ops when absent.
+
+Gate: tsc fe+server 0, vitest 5760/5760 (9 new), build PASS, boot:check PASS.

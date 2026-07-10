@@ -142,6 +142,18 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.buildHealth).toBeUndefined();
   });
 
+  it('captures build-health readiness from a result event too (T1-health-card — success terminates with result)', () => {
+    const health = { score: 88, ready: true, blockers: [], warnings: ['no error boundary'] };
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 4, billedUsd: 0.2, readiness: health });
+    expect(s.done).toBe(true);
+    expect(s.buildHealth).toEqual(health);
+  });
+
+  it('leaves buildHealth undefined when a result event carries no readiness (backward compat)', () => {
+    const s = agentV3Reducer(initialAgentV3State(), { type: 'result', ok: true, summary: 'built', steps: 1, billedUsd: 0 });
+    expect(s.buildHealth).toBeUndefined();
+  });
+
   it('stores the live preview URL', () => {
     const s = agentV3Reducer(initialAgentV3State(), { type: 'preview', url: 'https://app.sandbox.dev', ts: 1 });
     expect(s.previewUrl).toBe('https://app.sandbox.dev');

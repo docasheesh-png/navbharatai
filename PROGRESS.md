@@ -12788,3 +12788,24 @@ direction: the #1 silent full-stack bug is a frontend calling an endpoint the ba
 - AppKnowledgeBase: new "API CONTRACT CHECK (GA-5)" capability on v3.0.
 
 Gate: tsc fe+server 0, vitest 5676/5676 (8 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / GA-12: ESLint + Prettier lint engine (completes the verify quartet)
+
+Seventh roadmap item this session (after B4, A1, B6, C7, A2, GA-5). Redundancy-check (safeguard #6):
+check_conventions is a custom naming/import-order checker — NOT a real ESLint/Prettier runner; nothing
+ran the project's own linters. Genuine gap. Completes the verification quartet: run_tests (B4) +
+typecheck (B6) + lint (this), all following the same pure detect→run→parse pattern.
+
+- NEW `lintRunner.ts` (pure, 8 unit tests): `detectLinters(files, packageJson)` finds ESLint (config file
+  or dep → `npx eslint . -f json`) and Prettier (config or dep → `npx prettier --check .`); `[]` when none.
+  `parseLintOutcome()` parses the ESLint JSON report (errors fail ok, warnings reported not failing) and
+  Prettier's unformatted-file list; falls back to exit code when output is unparseable (eslint not
+  installed) — never invents a pass.
+- `lint` tool in ToolDispatcher (runs each configured linter, aggregates LINT OK/FAILED, records PASS
+  audit / FAIL error to memory), declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName +
+  BUILD_TOOLS, taught in systemPrompt (run alongside typecheck + run_tests; fix ESLint errors, prettier --write).
+- AppKnowledgeBase: new "LINT ENGINE (GA-12)" capability on v3.0.
+
+Gate: tsc fe+server 0, vitest 5684/5684 (8 new), build PASS, boot:check PASS.

@@ -463,6 +463,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'check_toolchain',
+      description:
+        'Report the toolchain the project DECLARES it needs (Node from .nvmrc/engines, Python from ' +
+        '.python-version/pyproject, Java from pom.xml, Go from go.mod) and flag any INTERNAL contradiction ' +
+        '(two files pinning different versions) — a silent cause of "works for them, breaks here" build ' +
+        'drift on imported repos. Read-only, no arguments. Fix a flagged inconsistency by pinning one ' +
+        'version across the files.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'check_package',
       description:
         'Health-check package.json for two common ship-blockers other checks miss: an npm SCRIPT that ' +
@@ -812,6 +822,7 @@ export const CATALOG_TOOL_NAMES = [
   'api_graph',
   'code_graph',
   'typecheck',
+  'check_toolchain',
   'check_package',
   'lint',
   'generate_observability',

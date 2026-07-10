@@ -10,6 +10,7 @@ import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile }
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome } from './lintRunner';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
+import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
@@ -1643,6 +1644,21 @@ export class ToolDispatcher {
         const summary = packageHealthSummary(result);
         this.state?.appendTerminal(summary);
         return summary;
+      }
+
+      case 'check_toolchain': {
+        // D11 — surface the toolchain the project DECLARES (.nvmrc/engines/.python-version/go.mod/pom.xml)
+        // and flag internal contradictions (two files disagreeing) — a silent cause of build drift. Pure logic.
+        const wanted = ['.nvmrc', '.node-version', 'package.json', '.python-version', 'runtime.txt', 'pyproject.toml', '.java-version', 'pom.xml', 'go.mod'];
+        const map: Record<string, string> = {};
+        for (const f of wanted) {
+          try { map[f] = await this.actuator.readFile(this.workspaceId, f); } catch { /* file not present */ }
+        }
+        const r = analyzeToolchain(map);
+        if (r.inconsistencies.length) getWorkspaceMemory(this.workspaceId).recordError(`check_toolchain: ${r.inconsistencies.join(' | ')}`);
+        const detail = r.summary + (r.inconsistencies.length ? '\n' + r.inconsistencies.map(i => '  • ' + i).join('\n') : '');
+        this.state?.appendTerminal(detail);
+        return detail;
       }
 
       case 'generate_observability': {

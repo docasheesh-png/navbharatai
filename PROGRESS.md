@@ -12766,3 +12766,25 @@ This completes the roadmap's Tier 2A cluster: A1 (query graph) + A2 (orient) + B
 a big/unfamiliar app, not just build a fresh one.
 
 Gate: tsc fe+server 0, vitest 5668/5668 (7 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / GA-5: API-endpoint graph (frontend↔backend contract check)
+
+Sixth roadmap item this session (after B4, A1, B6, C7, A2). Redundancy-check (safeguard #6): no
+API-endpoint/contract analyzer existed. Genuine gap — and a high-value one for the polyglot/full-stack
+direction: the #1 silent full-stack bug is a frontend calling an endpoint the backend never implemented
+(compiles, preview loads, feature broken at runtime).
+
+- NEW `apiGraph.ts` (pure, 8 unit tests): `extractEndpoints()` finds backend route definitions
+  (Express/Fastify `app.get(...)`, FastAPI/Flask decorators + `@app.route(methods=[...])`, Spring
+  `@GetMapping`), `extractApiCalls()` finds frontend fetch/axios calls to same-origin paths (method read
+  from options; external/protocol-relative URLs ignored), `buildApiGraph()` diffs them with param-aware
+  path matching (`/users/:id` matches `/users/42`) → `missing` (calls with no route — the actionable bug
+  list, computed ONLY when the repo defines routes to avoid external-backend false positives) + `unused`.
+- `api_graph` tool in ToolDispatcher (reads code files, builds the graph, reports MISSING/unused, records
+  a memory error when calls are unmatched), declared in ToolCatalog (+ CATALOG_TOOL_NAMES), added to
+  ToolName + BUILD_TOOLS, taught in systemPrompt (run it on a full-stack app before declaring done).
+- AppKnowledgeBase: new "API CONTRACT CHECK (GA-5)" capability on v3.0.
+
+Gate: tsc fe+server 0, vitest 5676/5676 (8 new), build PASS, boot:check PASS.

@@ -29,6 +29,7 @@ export type ToolName =
   | 'generate_tests'
   | 'run_tests'
   | 'architecture_map'
+  | 'api_graph'
   | 'code_graph'
   | 'typecheck'
   | 'generate_observability'

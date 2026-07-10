@@ -12809,3 +12809,23 @@ typecheck (B6) + lint (this), all following the same pure detect→run→parse p
 - AppKnowledgeBase: new "LINT ENGINE (GA-12)" capability on v3.0.
 
 Gate: tsc fe+server 0, vitest 5684/5684 (8 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-10 — Roadmap Tier 2 / U-2: app-scaffold quality defaults (production basics by default)
+
+Eighth roadmap item this session (after B4, A1, B6, C7, A2, GA-5, GA-12). Redundancy-check (safeguard #6):
+SeoAnalysis + PwaAnalysis are DETECTORS only (analyze/report) — nothing GENERATES/applies the defaults.
+Genuine gap.
+
+- NEW `appDefaults.ts` (pure, 5 unit tests, idempotent): `planAppDefaults(indexHtml, appName)` adds ONLY the
+  missing head basics — charset, viewport, title, meta description, og:title/description, twitter:card,
+  manifest link, and an html lang — plus standalone manifest.webmanifest + robots.txt. Running it on its
+  own output changes nothing; a fully-configured head is left byte-identical.
+- `generate_app_defaults` tool in ToolDispatcher — finds a standard index.html (index.html / public/index.html),
+  patches it only if changed, writes manifest/robots ONLY when absent (never clobbers an existing manifest),
+  reports what was added; honest note when there's no index.html (Next.js → use metadata API). Declared in
+  ToolCatalog (+ CATALOG_TOOL_NAMES), added to ToolName + BUILD_TOOLS, taught in systemPrompt.
+- AppKnowledgeBase: new "QUALITY DEFAULTS (U-2)" capability on v3.0.
+
+Gate: tsc fe+server 0, vitest 5689/5689 (5 new), build PASS, boot:check PASS.

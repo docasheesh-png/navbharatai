@@ -9,6 +9,7 @@ import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome } from './lintRunner';
+import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { buildApiGraph } from './apiGraph';
@@ -1330,6 +1331,39 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} (stack-aware).`;
+      }
+
+      case 'generate_app_defaults': {
+        // U-2 — apply the quality basics BY DEFAULT (SEO/OG meta, viewport, html lang, web manifest,
+        // robots.txt), adding only what's missing. Idempotent planning lives in appDefaults.ts.
+        const appName = (optStr(input, 'app_name') || 'App').trim() || 'App';
+        // Find a standard index.html to patch (Vite/CRA/static). If none, only the standalone files apply.
+        let htmlPath: string | null = null;
+        let indexHtml: string | null = null;
+        for (const p of ['index.html', 'public/index.html']) {
+          try { indexHtml = await this.actuator.readFile(this.workspaceId, p); htmlPath = p; break; } catch { /* try next */ }
+        }
+        const plan = planAppDefaults(indexHtml, appName);
+        const written: string[] = [];
+        // Patch index.html only if the planner actually changed it.
+        if (htmlPath && plan.indexHtml && plan.indexHtml !== indexHtml) {
+          await this.actuator.writeFile(this.workspaceId, htmlPath, plan.indexHtml);
+          this.state?.recordFileChange({ path: htmlPath, kind: 'modify' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(htmlPath, plan.indexHtml);
+          written.push(htmlPath);
+        }
+        // Write standalone files only when absent (never clobber a real manifest/robots the app already has).
+        for (const [rel, content] of Object.entries(plan.files)) {
+          const exists = await this.actuator.readFile(this.workspaceId, rel).then(() => true).catch(() => false);
+          if (exists) continue;
+          await this.actuator.writeFile(this.workspaceId, rel, content);
+          this.state?.recordFileChange({ path: rel, kind: 'create' }, agent);
+          written.push(rel);
+        }
+        if (!written.length) return 'generate_app_defaults: the app already has SEO meta, lang, manifest and robots — nothing to add.';
+        this.scheduleCheckpoint('generate app defaults');
+        const noHtml = !htmlPath ? ' (no index.html found — wrote standalone files only; for Next.js set metadata in the App Router instead.)' : '';
+        return `Applied app defaults — wrote ${written.join(', ')}.${plan.added.length ? ' Added to head: ' + plan.added.join(', ') + '.' : ''}${noHtml}`;
       }
 
       case 'generate_openapi': {

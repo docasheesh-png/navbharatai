@@ -188,6 +188,7 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
+import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
@@ -5313,6 +5314,15 @@ export function registerAgentV3Routes(app: Express): void {
         escalationsCount = esc.escalations;
         if (esc.escalations > 0) {
           console.log(`[AGENTV3] delivered tier=${esc.tier} after ${esc.escalations} escalation(s), gatePassed=${esc.gatePassed}`);
+        }
+        // T1-backstop-honesty: the strongest tier was DELIVERED as a best-effort backstop but did NOT pass
+        // the objective gate. Never ship that as a silent clean pass — record it so the build-health card +
+        // report show it (buildHealthFromDiagnostics folds unresolved warnings in), and narrate it honestly.
+        const backstopNote = backstopHonestyNote(esc.gatePassed, esc.gate?.reason);
+        if (backstopNote) {
+          try { buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'BACKSTOP_GATE_FAIL', message: backstopNote, autoResolved: false }); } catch { /* diagnostics best-effort */ }
+          const narr = backstopNarration(esc.gatePassed);
+          if (narr) events.emit({ type: 'narration', agent: 'architect', text: narr, ts: Date.now() });
         }
       } else if (!result) {
         // OneShot did not run or fell back → the full agentic loop (today's behavior).

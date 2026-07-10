@@ -85,14 +85,19 @@ build order after Tier 0.
 - **T1-injection-defense** 🟢❌ — fence imported repos / external content as untrusted;
   block tool-redirect + secret-exfil attempts in that content.
 
-### 1B · Trust the build (verification-is-earned)
-- **T1-gate-enforce** 🟢⚠️ — auto-run the 22-dimension `evaluate` before any build reports
-  done; block `ok:true` on a FAIL verdict (gate exists but is agent-invoked, not enforced).
-- **T1-backstop-honesty** 🟢⚠️ — confirm the last-tier "deliver even on gate fail" always
-  surfaces an honest WARN, never a silent fake pass.
-- **T1-health-card** 🟢❌ — render the `evaluate` verdict to the user as a readable
-  pre-deploy build-health card.
-- **T1-gate-tests** 🟢❌ — CI tests for the enforced-gate path + the newly rate-limited endpoints.
+### 1B · Trust the build (verification-is-earned) — ✅ COMPLETE
+- **T1-gate-enforce** 🟢✅ — DONE and ON by default (R2 §1.1, `readinessGateEnabled()` — off only via
+  `AGENTV3_READINESS_GATE=off`). `AgentRunner` auto-runs the objective 22-dim `evaluate`
+  (`assessBuildReadiness`) at both the normal finish and the step-cap, and DOWNGRADES `ok:true` →
+  `ok:false` on a NOT-READY verdict (unresolved import / secret leak / fake code / can't-run). The
+  earlier "agent-invoked, not enforced" note was stale.
+- **T1-backstop-honesty** 🟢✅ — SHIPPED (#1177): the last-tier "deliver even on gate fail" always
+  records a BACKSTOP_GATE_FAIL diagnostic + emits an honest WARN narration — never a silent fake pass.
+- **T1-health-card** 🟢✅ — SHIPPED (#1176): `buildHealthFromDiagnostics` renders the verdict as a
+  readable pre-deploy build-health card, surfaced in the `result`/`done` event and the reducer.
+- **T1-gate-tests** 🟢✅ — COVERED: `AgentRunner.test.ts` ("mandatory readiness gate (R2 §1.1)":
+  downgrades NOT-READY → ok:false, ready → ok:true, gate-off default, health-card emission) +
+  `Readiness.test.ts` (pure scorer) + `ToolDispatcher.test.ts` block-readiness cases.
 
 ### 1C · Activate dormant value (already-built, just wire it ON)
 - **T1-escalation-on** 🟢⚠️ — put the built+tested EscalationOrchestrator in the real build

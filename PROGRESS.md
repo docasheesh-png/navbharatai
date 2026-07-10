@@ -13225,3 +13225,38 @@ model-agnostic (routes to "whatever floor is configured"), so building it now do
 bake-off. Vertex/Gemini deliberately NOT used as the builder (the 0-files trap on a first impression).
 
 Gate: tsc fe+server 0, vitest 5821/5821 (10 new), boot:check PASS. Flag OFF → byte-identical to today.
+
+---
+
+## 2026-07-10 — Tier 1B verified COMPLETE (redundancy catch: gate-enforce was already live)
+
+Follow-up to the end-of-run stock-take: before touching T1-gate-enforce (the item flagged as the one
+remaining "clean but risky" Tier 1 piece, held for admin go-ahead), I traced the actual build-verdict
+path (safeguard #6/#1 — verify against code, not the doc). Finding: T1-gate-enforce is ALREADY
+implemented, enforced, and ON by default — building it would have been redundant work.
+
+Evidence:
+- `readinessGateEnabled()` (routes/agentv3.ts) returns true unless `AGENTV3_READINESS_GATE=off` — the
+  mandatory readiness gate (R2 §1.1) is ON by default, with a safe admin escape hatch.
+- `AgentRunner` runs `dispatcher.assessBuildReadiness()` (the objective 22-dim `evaluate` scan) at BOTH
+  the normal build finish AND the step-cap, and when `!readiness.ready` it sets `ok = false` with an
+  honest "NOT READY (score N/100)" summary + blockers. It does NOT fake a pass.
+- `assessBuildReadiness()` (ToolDispatcher) reuses the EXACT same `evaluate` engine the agent uses
+  (never a divergent second implementation), pre-seeds the graph from the real workspace, is
+  timeout-bounded (45s), and fails PERMISSIVE on internal error so it never wrongly fails a real build.
+- This composes with the two Tier 1B pieces shipped THIS session: the build-health card (#1176) renders
+  the same verdict, and backstop-honesty (#1177) guarantees the last-tier backstop surfaces an honest
+  WARN on gate-fail.
+- T1-gate-tests is likewise covered: `AgentRunner.test.ts` has `describe('AgentRunner — mandatory
+  readiness gate (R2 §1.1)')` encoding the NOT-READY → ok:false downgrade, the ready → ok:true case, the
+  gate-off default, and the health-card emission; plus `Readiness.test.ts` (pure scorer) and the
+  `ToolDispatcher.test.ts` block-readiness cases (secret leak, fake code, compliance, security-config).
+
+Correction: ROADMAP.md Tier 1B markers (gate-enforce, backstop-honesty, health-card, gate-tests) were
+stale — updated to ✅ with the code/test evidence. Section 1B is now verifiably COMPLETE.
+
+Net: the entire clean, non-billing Tier 1 surface is shipped or verified-already-done. There is NO
+remaining clean+non-risky+non-billing Tier 1 item to build — the earlier "pause for admin go-ahead on
+gate-enforce" turned out to be moot because the gate is already live. Honest end-of-run stands.
+
+Gate: docs-only change (ROADMAP.md + PROGRESS.md) — no code touched.

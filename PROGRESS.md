@@ -12608,3 +12608,56 @@ never committed (already gitignored: *.jks / *.keystore), never in source, never
 Gate: fe tsc 0 · server tsc 0 · vitest 5571/5571 (556 files) · web build (npm run build) PASS.
 ADMIN ACTION: create an upload keystore (keytool), add ANDROID_KEYSTORE_BASE64 + *_PASSWORD + *_ALIAS
 as repo secrets, then Actions → "Build Android App Bundle (.aab, signed)" → Run → download the .aab.
+---
+
+## 2026-07-08 — Roadmap consolidation: 9 scattered docs → one master ROADMAP.md
+
+Admin asked to gather ALL remaining roadmap work into ONE executable place ("sabhi roadmap
+ka remain work ek jagah... jisse use pura kiya ja sake"). Ran a 6-way parallel extraction
+across every roadmap/gap doc (UPGRADE_v3.0, V3_ROADMAP, NAVBHARATAI_PRO_V3_ROADMAP,
+NAVBHARATAI_PRO_UPGRADE_ROADMAP, ENGINEER_AI_ROADMAP, ROADMAP_TO_LEAD_35, GAPS,
+UCUE_V2_GAP_AUDIT, CLAUDE_CODE_PARITY, VAJRA_V4_DESIGN + the open-items tail of PROGRESS).
+
+Rewrote ROADMAP.md as the single master, deduped and honestly tiered:
+- Tier 0 live defects & open root causes (9 real current bugs from build reports)
+- Tier 1 near-term hardening (security floor, trust-the-build gate enforcement, activate the
+  built-but-dormant escalation orchestrator, ship-it-live UX)
+- Tier 2 engine/verification tracks (A1/B4/B5/C7 highest-leverage; GA-1..18; quality-by-default)
+- Tier 3 breadth/targets (mobile/desktop/extensions, more languages, integrations)
+- Tier 4 infra/license/admin-gated open root causes (rule 6 — parked honestly, not patched)
+- Tier 5 north-star/frontier (Layers 49-86, Phases 11-15) labeled VISION, not a checklist
+- Polish backlog (GAPS long-tail bucketed) + explicit non-goals + "start here" order
+
+Deleted the 9 now-redundant roadmap/gap docs (content fully folded in; full per-item history
+stays in git). Confirmed no code/CI/test reads them (only doc-comment cross-references, which
+don't break the build). KEPT the load-bearing/design/ops files: CLAUDE.md (constitution),
+PROGRESS.md + PROGRESS_ARCHIVE.md (audit trail — constitution says never delete), README.md,
+NAVBHARATAI_PRO_V3_DESIGN.md (constitution §0 references it), VAJRA_V4_DESIGN.md (v4 design
+blueprint), RUNBOOK.md, security_spec.md, AGENTS.md.
+
+Also recorded in ROADMAP: the old P1-P100 upgrade plan's status table was never reconciled
+with AgentV3 (read "0/1000 closed" while most phases had shipped) → mandatory redundancy-check
+(safeguard #6) before building any item from it. Docs-only change; no source touched.
+
+---
+
+## 2026-07-08 — Roadmap Tier 2A / B4: run the project's OWN test suite (Earned Verification)
+
+First item off the newly-consolidated ROADMAP.md. The agent could typecheck (`tsc`) and seed
+test skeletons (`generate_tests`) but had NO way to DETECT + RUN a project's real test suite and
+read honest results — so "verified" leaned on tsc, and an imported repo's own tests never ran.
+
+- NEW `testRunner.ts` (pure, 15 unit tests): `detectTestPlan(files, packageJson)` picks the
+  project's own suite — a real npm "test" script (skips the npm-init placeholder), else vitest/
+  jest/playwright config or dep, else Python pytest, else Java Maven, else Go `*_test.go`; honest
+  `null` when none. `parseTestOutcome(plan, exit, stdout, stderr)` reads real passed/failed/total +
+  failing-test names per framework, and falls back to the exit code when counts can't be parsed —
+  never invents a pass.
+- `run_tests` tool wired in ToolDispatcher (detect → actuator.runCommand → parse → record to
+  workspace memory as PASS audit / FAIL error), declared in ToolCatalog (+ CATALOG_TOOL_NAMES),
+  added to `ToolName` + `BUILD_TOOLS` grant, and taught in systemPrompt ("EARNED verification;
+  never claim verified without running tests" — while still not BLOCKING a working preview on a
+  fully-green suite, per the existing rule).
+- AppKnowledgeBase: new "RUNS THE PROJECT'S OWN TESTS" capability bullet on the v3.0 entry.
+
+Gate: tsc fe+server 0, vitest 5561/5561 (15 new), build PASS, boot:check PASS.

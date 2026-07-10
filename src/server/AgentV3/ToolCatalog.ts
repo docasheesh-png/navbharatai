@@ -463,6 +463,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'check_package',
+      description:
+        'Health-check package.json for two common ship-blockers other checks miss: an npm SCRIPT that ' +
+        'runs a build tool the project never installed (e.g. a "lint" script calling eslint with no ' +
+        'eslint dependency — it dies with "command not found"), and a package declared in both ' +
+        'dependencies and devDependencies. Read-only, no arguments. Run it before declaring the build ' +
+        'done; fix any missing tool by adding its package.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'lint',
       description:
         "Run the project's OWN ESLint and Prettier and report real issues — catches a class of bugs a " +
@@ -802,6 +812,7 @@ export const CATALOG_TOOL_NAMES = [
   'api_graph',
   'code_graph',
   'typecheck',
+  'check_package',
   'lint',
   'generate_observability',
   'generate_bundle_optimization',

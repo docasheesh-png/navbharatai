@@ -252,6 +252,45 @@ The trigger handles the deploy. No `gcloud` access from the Claude session.
 - A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
   `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).
 
+## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
+
+**NavBharatAI is now LIVE on the Google Play Store** (Android app package `com.navbharat.ai`,
+a Capacitor wrapper that loads the hosted web app). Because of that, the store build must track
+our progress: **whenever a roadmap phase completes, or any big checkpoint/milestone ships to
+`main`, Claude MUST build a fresh signed Android App Bundle (`.aab`) so a current, uploadable
+release is always ready for Play Console.** This is part of "done" for a phase/checkpoint, the
+same way a green Cloud Run deploy is — it is not optional cleanup.
+
+**What counts as a trigger (use judgement — do NOT over-build):**
+- ✅ A roadmap **phase/Tier** completes, or a named milestone (a cluster of merged PRs that forms
+  one shippable increment), or the admin explicitly asks for a build.
+- ❌ NOT every individual small PR. Each `.aab` run consumes CI and burns a Play `versionCode`
+  (it auto-increments per run), so batch to phase/checkpoint boundaries, not micro-commits.
+
+**How to build it (the pipeline is real and already working — last green run: #4 on `main`):**
+- The signed bundle is produced by **`.github/workflows/android-aab.yml`** (`workflow_dispatch`).
+  It runs `npm ci` → `npm run build` → `npx cap sync android` → `./gradlew bundleRelease`, signs
+  with the release keystore from repo secrets, auto-increments `versionCode` (= run number), and
+  uploads the **`navbharatai-release-aab`** artifact (`app-release.aab`).
+- **Trigger it after the checkpoint merges to `main`:** GitHub → Actions → "Build Android App
+  Bundle (.aab, signed)" → Run workflow (branch `main`); or from a Claude session via the GitHub
+  MCP `actions_run_trigger` on `android-aab.yml`, ref `main`. Then poll the run to green (same
+  discipline as CI) and report the run URL to the admin.
+
+**Honest boundaries (rule 6 — what Claude CAN and CANNOT do here):**
+- Claude CAN trigger the workflow and confirm it goes green.
+- Claude CANNOT set/rotate the signing keystore secrets (`ANDROID_KEYSTORE_BASE64`,
+  `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) — that is a one-time
+  admin setup (documented in the workflow header); the keystore is the app's permanent identity
+  and must live only with the admin. If a secret is missing the workflow FAILS EARLY with an
+  honest message — **never** hand back or fake an unsigned bundle (Play would reject it anyway).
+- Claude CANNOT download the artifact or upload to Play Console. After the run is green, the
+  **admin** downloads `app-release.aab` and uploads it to Play Console (Play App Signing handles
+  the final signing). Automating the Play upload (a Play service-account + `r0adz0/upload-google-play`
+  step) is a future infra item — until it exists, the upload is the admin's manual step.
+- The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa`); the same
+  discipline applies when an Apple release channel is set up.
+
 ## The autonomous phase cycle (mandatory — how every roadmap phase ships)
 
 **Claude owns the ENTIRE ship cycle for each phase/batch, end to end — including the

@@ -128,8 +128,14 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
-import { billedAmountUsd } from '../AgentV3/pricing';
+import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
+import {
+  createProviderUsageLedger,
+  reconcileWithSink,
+  perTierBilledUsd,
+  providerBaselineCostUsd,
+} from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { AIRouterManager } from '../AI/AIRouterManager';
@@ -633,6 +639,20 @@ export function userMonthlyCapUsd(): number {
  */
 export function readinessGateEnabled(): boolean {
   return process.env.AGENTV3_READINESS_GATE !== 'off';
+}
+
+/**
+ * Billing Phase 3 — PER-TIER billing switch. Default OFF: the whole build is billed at the single
+ * power-derived tier (billedAmountUsd), byte-identical to today. ON (AGENTV3_PER_TIER_BILLING=1|true):
+ * the build is billed per the reconciled per-provider ledger, so a mixed build (cheap floor builds +
+ * Sonnet reviews/edits) charges the Sonnet share at ×3, not the whole build at the cheap ×1.2. Kept
+ * OFF until the cheap floor actually carries daily builds — flipping it while every build still runs
+ * on Claude would raise normal-build prices ~2.5×. The admin usage-report shows both amounts so the
+ * flip is a measured decision.
+ */
+export function perTierBillingEnabled(): boolean {
+  const v = process.env.AGENTV3_PER_TIER_BILLING;
+  return v === '1' || v === 'true';
 }
 
 /**
@@ -1180,7 +1200,7 @@ export function dominantProvider(turns: Map<string, number>): string | undefined
   return best;
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -1258,6 +1278,8 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
       console.log(`[AGENTV3] build ${name} failed: ${err instanceof Error ? err.message : String(err)}`);
       opts?.onProviderError?.(name, err);
     },
+    // Billing Phase 3 — forward per-turn (provider, tokens) to the caller's ProviderUsageLedger.
+    ...(opts?.onTurnComplete ? { onTurnComplete: opts.onTurnComplete } : {}),
   });
 }
 
@@ -4031,6 +4053,14 @@ export function registerAgentV3Routes(app: Express): void {
         // so the admin can see which provider actually answered each turn. Best-effort.
         try { buildDiag.recordProviderTurn(used); } catch { /* diagnostics are best-effort */ }
       };
+      // Billing Phase 3 — per-provider TOKEN attribution (admin usage-report + optional per-tier
+      // billing). Fed by MultiProviderTurnRunner.onTurnComplete for the architect + its sub-agents
+      // (they share this client) + the escalation runner. Observational: it never changes billing
+      // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
+      const providerLedger = createProviderUsageLedger();
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }): void => {
+        providerLedger.add(used, usage);
+      };
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
@@ -4040,6 +4070,7 @@ export function registerAgentV3Routes(app: Express): void {
         // Escalation builds below never pass this, so they stay Claude.
         allowCheapFloor: !routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email),
         onProviderUsed: captureProvider,
+        onTurnComplete: captureTurnUsage,
         onProviderError: (name, err) => buildDiag.record({
           phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
           message: `Provider ${name} failed — falling back to the next provider`,
@@ -5262,7 +5293,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Escalating to Sonnet to fix the issues found in review…' : 'Escalating to a stronger model to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider }),
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -5943,7 +5974,16 @@ export function registerAgentV3Routes(app: Express): void {
       // the build's power tier, exactly as before. This supersedes the old `result.billedUsd +
       // blueprintUsage` sum (both are subsets of the sink now, so there is no double-count). The
       // zeroing rules below (empty build / unrendered preview / free onboarding) still apply.
-      let effectiveBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
+      // Billing Phase 3 — reconcile the per-provider ledger against the billing sink's grand total so
+      // the per-provider view (admin usage-report) always sums to exactly what was billed; the aux-call
+      // remainder lands in the 'other' bucket. Cost is unchanged unless per-tier billing is flipped ON.
+      const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), buildUsage.total());
+      const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
+      // With the flag OFF this is exactly flatBilledUsd (today's behavior). ON, it prices each tier's
+      // share separately (Sonnet work at ×3). Both are recorded to telemetry so the flip is measured.
+      let effectiveBilledUsd = perTierBillingEnabled()
+        ? perTierBilledUsd(reconciledProviderUsage, powerLevelReq)
+        : flatBilledUsd;
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
       // zero files were created (even after the Claude retry), the build failed — bill ₹0.
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
@@ -6023,6 +6063,12 @@ export function registerAgentV3Routes(app: Express): void {
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
           escalations: escalationsCount,
+          // Billing Phase 3 — per-provider token attribution (reconciled to the billed total) + loss
+          // accounting. A LOSS = real tokens spent (buildUsage>0) but the build was zeroed (empty /
+          // unrendered preview / free onboarding) → NavBharatAI ate the Sonnet-equivalent cost.
+          providerUsage: reconciledProviderUsage,
+          wasLoss: effectiveBilledUsd === 0 && buildUsage.total().outputTokens > 0,
+          lossRealCostUsd: effectiveBilledUsd === 0 ? sonnetEquivalentUsd(buildUsage.total()) : 0,
         })
         .catch(() => {});
 

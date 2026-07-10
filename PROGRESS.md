@@ -13091,6 +13091,48 @@ piece (needs an external provider key) — honestly noted, not stubbed.
 
 Gate: tsc fe+server 0, vitest 5770/5770 (6 new), build PASS, boot:check PASS.
 
+---
+
+## 2026-07-10 — Billing Phase 3: per-provider usage buckets + admin visibility + per-tier billing (flag OFF)
+
+Adopts the VALUABLE half of the admin's multi-provider billing spec (the admin-visibility layer) at
+the honest granularity the nested v3.0 architecture can actually attribute, WITHOUT the spec's
+weaker cost-plus pricing (kept our value-based Sonnet-equiv × multiplier model). Answers the admin's
+"GLM+Kimi built, Sonnet reviewed — how do you count each?" — every provider's real tokens are now
+attributed and visible; per-tier billing exists behind a flag but stays OFF (flipping it while every
+build still runs on Claude would re-tier normal builds ×1.2→×3, a ~2.5× price jump).
+
+- `MultiProviderTurnRunner`: new `onTurnComplete(provider, usage)` — fires on every successful turn
+  with the provider that answered + its real tokens. Observational; a throw there never breaks a turn.
+- NEW `ProviderUsageLedger.ts` (pure, 13 tests): per-provider token buckets; `providerToTier`
+  (only plain CLAUDE → sonnet, everything else → cheap); `reconcileWithSink` (aux-call remainder →
+  'other' so the split sums EXACTLY to the billed total); `perTierBilledUsd` (the flag-on math:
+  cheap share ×1.2 + Sonnet share ×3, power → whole build Opus); `providerBaselineCostUsd`.
+- `agentv3.ts`: build the ledger; wire onTurnComplete into the main client (covers architect + its
+  sub-agents — they share one client — the #1174 leak site) AND the escalation runner. At settle,
+  reconcile vs the billing sink; `perTierBillingEnabled()` (AGENTV3_PER_TIER_BILLING, default OFF)
+  chooses per-tier vs today's flat billedAmountUsd — flag off is byte-identical. Feed provider usage
+  + loss flag into telemetry.
+- `AgentV3CostTelemetry`: daily doc += byProviderUsage (per-provider tokens) + lossBuilds/
+  lossRealCostUsd; foldCostTelemetry folds them (tolerates older docs); NEW pure `buildUsageReport`
+  (per-provider tokens + Sonnet-equiv baseline cost + billed revenue + achieved margin). 7 new tests.
+- `walletDebit`: debit now rounds UP (`inrToDebitTokens`, ceil, float-noise-scrubbed) — the spec's
+  margin-protection rule; ≤1 token/build vs the old round. 5 new tests incl. the 0.3×100 IEEE-754 trap.
+- NEW admin endpoints (verifyAdminToken): GET /api/admin/agentv3/usage-report (per-provider tokens,
+  baseline cost, revenue, margin) + /losses (zeroed-but-costly builds). Never expose provider/₹ to users.
+- NEW docs/BILLING_ADMIN.md: the honest money-path reference (tiers, wallet, metering, how to read
+  each report, how to add a provider, WHEN to flip the per-tier flag).
+
+HONESTY (rule 5/6): the baseline cost prices every provider at Sonnet rates — an UPPER BOUND, so
+real margin is AT LEAST what the report shows; exact GLM/Kimi rate cards are a recorded future item.
+The ledger only sees turns through a wired MultiProviderTurnRunner; aux calls reconcile into 'other'
+so nothing is silently dropped.
+
+Gate: tsc fe+server 0, vitest 5811/5811 (579 files, ~30 new), boot:check PASS. Flag OFF → billing
+byte-identical to today; the whole phase is measurement + an off-by-default switch.
+
+---
+
 ## 2026-07-10 — Tier 1 stock-take + doc-truth correction (end-of-run status)
 
 After shipping this session's Tier 1 cluster — Option A escalation canary (percentage rollout +

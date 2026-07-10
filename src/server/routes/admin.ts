@@ -8,7 +8,8 @@ import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
-import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
+import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
 import { analyzeFinOps } from '../lib/FinOpsAdvisor';
@@ -391,6 +392,35 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json({ history });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 cost telemetry.' });
+    }
+  });
+
+  // Billing Phase 3 — per-provider usage report: tokens per provider, Sonnet-equivalent real-cost
+  // baseline, revenue billed, and the achieved margin. Admin-only (never exposes per-provider costs to
+  // users). The baseline OVER-states cheap-provider cost, so real margin is at least what's shown.
+  app.get('/api/admin/agentv3/usage-report', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
+      const history = await agentV3CostTelemetry.list(days);
+      res.json(buildUsageReport(history, sonnetEquivalentUsd));
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to build AgentV3 usage report.' });
+    }
+  });
+
+  // Billing Phase 3 — losses: builds that spent real provider tokens but were zeroed (empty build /
+  // unrendered preview / free onboarding), so NavBharatAI absorbed the cost. Per-day loss count +
+  // Sonnet-equivalent cost eaten, so the admin can see the price of the "preview is EARNED" policy.
+  app.get('/api/admin/agentv3/losses', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
+      const history = await agentV3CostTelemetry.list(days);
+      const perDay = history.map(d => ({ date: d.date, lossBuilds: d.lossBuilds ?? 0, lossRealCostUsd: d.lossRealCostUsd ?? 0 }));
+      const totalLossBuilds = perDay.reduce((s, d) => s + d.lossBuilds, 0);
+      const totalLossRealCostUsd = Math.round(perDay.reduce((s, d) => s + d.lossRealCostUsd, 0) * 1_000_000) / 1_000_000;
+      res.json({ totalLossBuilds, totalLossRealCostUsd, perDay });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to read AgentV3 losses.' });
     }
   });
 

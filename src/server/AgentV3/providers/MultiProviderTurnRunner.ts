@@ -30,6 +30,12 @@ export interface MultiProviderOptions {
   onProviderUsed?: (used: string, fellBackFrom: string[]) => void;
   /** Called when a provider throws before the next is tried (greppable diagnostics). */
   onProviderError?: (name: string, error: unknown) => void;
+  /**
+   * Billing Phase 3 — called when a turn succeeds, with the provider that answered AND its measured
+   * token usage. Feeds the per-provider ProviderUsageLedger (admin usage-report + optional per-tier
+   * billing). Purely observational: it never changes which provider runs or how the turn is billed.
+   */
+  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void;
 }
 
 /**
@@ -219,6 +225,14 @@ export function makeMultiProviderTurnRunner(
           const result = await runner.runTurn(params);
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
           opts.onProviderUsed?.(name, [...fellBackFrom]);
+          // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
+          // Best-effort + observational: a throw here must never break a delivered turn.
+          try {
+            opts.onTurnComplete?.(name, {
+              inputTokens: result.usage?.inputTokens ?? 0,
+              outputTokens: result.usage?.outputTokens ?? 0,
+            });
+          } catch { /* telemetry attribution must never disturb the build */ }
           return result;
         } catch (err) {
           lastError = err;

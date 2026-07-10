@@ -53,6 +53,19 @@ export interface CostTelemetryEntry {
   escalationCohort?: 'in' | 'out' | 'off';
   /** How many tier escalations this build actually performed (0 = the first tier delivered). */
   escalations?: number;
+  /**
+   * Billing Phase 3 — per-provider TOKEN attribution for this build (reconciled to the billed total,
+   * so the aux-call remainder is under 'other'). Powers the admin usage-report's per-provider tokens,
+   * real-cost baseline, and achieved-margin columns. Absent on lanes that don't attribute.
+   */
+  providerUsage?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /**
+   * Billing Phase 3 — a LOSS: real tokens were spent but the build was zeroed (empty / unrendered
+   * preview / free onboarding), so NavBharatAI ate the provider cost. `lossRealCostUsd` is the
+   * Sonnet-equivalent baseline of that eaten cost. Only set when billedUsd === 0 AND tokens were spent.
+   */
+  wasLoss?: boolean;
+  lossRealCostUsd?: number;
 }
 
 /** Rolled-up counters for one slice (a task type or a start tier). */
@@ -63,6 +76,14 @@ export interface TelemetryBreakdown {
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
+}
+
+/** Billing Phase 3 — rolled-up per-provider usage for the admin usage-report. */
+export interface ProviderUsageBreakdown {
+  /** How many builds this provider contributed tokens to. */
+  builds: number;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface DailyCostTelemetryDoc {
@@ -82,6 +103,12 @@ export interface DailyCostTelemetryDoc {
   byEscalationCohort?: Record<string, TelemetryBreakdown>;
   /** T1-escalation-on — builds where the ladder actually climbed at least one tier. */
   escalatedBuilds?: number;
+  /** Billing Phase 3 — per-provider token totals across the day (admin usage-report source). */
+  byProviderUsage?: Record<string, ProviderUsageBreakdown>;
+  /** Billing Phase 3 — builds zeroed after spending real tokens (a loss NavBharatAI absorbed). */
+  lossBuilds?: number;
+  /** Billing Phase 3 — Sonnet-equivalent baseline cost (USD) of all today's loss builds. */
+  lossRealCostUsd?: number;
   /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
   lastPromptVersion?: string;
   updatedAt: number;
@@ -106,6 +133,9 @@ function emptyDoc(date: string): DailyCostTelemetryDoc {
     byDeliveredVia: {},
     byEscalationCohort: {},
     escalatedBuilds: 0,
+    byProviderUsage: {},
+    lossBuilds: 0,
+    lossRealCostUsd: 0,
     updatedAt: 0,
   };
 }
@@ -157,6 +187,18 @@ export function foldCostTelemetry(
   const byEscalationCohort = { ...(doc.byEscalationCohort ?? {}) };
   byEscalationCohort[cohortKey] = addToBreakdown(byEscalationCohort[cohortKey] ?? emptyBreakdown(), entry);
 
+  // Billing Phase 3 — fold this build's per-provider token attribution into the day's totals.
+  // `?? {}` tolerates day docs written before this field existed (same migration pattern as above).
+  const byProviderUsage = { ...(doc.byProviderUsage ?? {}) };
+  for (const [provider, u] of Object.entries(entry.providerUsage ?? {})) {
+    const slot = byProviderUsage[provider] ?? { builds: 0, inputTokens: 0, outputTokens: 0 };
+    byProviderUsage[provider] = {
+      builds: slot.builds + 1,
+      inputTokens: slot.inputTokens + (Number.isFinite(u.inputTokens) ? u.inputTokens : 0),
+      outputTokens: slot.outputTokens + (Number.isFinite(u.outputTokens) ? u.outputTokens : 0),
+    };
+  }
+
   return {
     date,
     totalBuilds: doc.totalBuilds + 1,
@@ -171,9 +213,95 @@ export function foldCostTelemetry(
     byDeliveredVia,
     byEscalationCohort,
     escalatedBuilds: (doc.escalatedBuilds ?? 0) + ((entry.escalations ?? 0) > 0 ? 1 : 0),
+    byProviderUsage,
+    lossBuilds: (doc.lossBuilds ?? 0) + (entry.wasLoss ? 1 : 0),
+    lossRealCostUsd: round6((doc.lossRealCostUsd ?? 0) + (entry.wasLoss ? (entry.lossRealCostUsd ?? 0) : 0)),
     // Carry the latest prompt version when present; otherwise keep the prior value.
     lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,
+  };
+}
+
+/** One provider's line in the admin usage-report: tokens, real-cost baseline, and revenue share. */
+export interface UsageReportRow {
+  provider: string;
+  builds: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Sonnet-equivalent baseline cost (USD) — an HONEST UPPER BOUND (cheap providers cost less). */
+  baselineCostUsd: number;
+}
+
+export interface UsageReport {
+  fromDate: string;
+  toDate: string;
+  totalBuilds: number;
+  /** Total marked-up amount billed to users (USD) across the window. */
+  totalBilledUsd: number;
+  /** Sum of every provider's Sonnet-equivalent baseline cost (USD). */
+  totalBaselineCostUsd: number;
+  /**
+   * Achieved margin against the baseline = billed − baselineCost. Because the baseline OVER-states the
+   * true cost of cheap providers, REAL margin is at least this. Ratio is billed / baselineCost.
+   */
+  marginUsd: number;
+  marginRatio: number;
+  /** Builds zeroed after spending real tokens, and the baseline cost NavBharatAI absorbed. */
+  lossBuilds: number;
+  lossRealCostUsd: number;
+  perProvider: UsageReportRow[];
+}
+
+/**
+ * PURE — fold a window of daily telemetry docs into the admin usage-report. Given the day docs and a
+ * cost-baseline function (injected so the module stays decoupled from pricing), sum per-provider
+ * tokens, price each provider's tokens at the baseline, and compute the achieved margin vs the total
+ * billed. No I/O; the route reads the docs, this shapes them; tests exercise it directly.
+ */
+export function buildUsageReport(
+  docs: DailyCostTelemetryDoc[],
+  baselineCostUsd: (u: { inputTokens: number; outputTokens: number }) => number,
+): UsageReport {
+  const perProviderTokens = new Map<string, { builds: number; inputTokens: number; outputTokens: number }>();
+  let totalBuilds = 0;
+  let totalBilledUsd = 0;
+  let lossBuilds = 0;
+  let lossRealCostUsd = 0;
+  const dates = docs.map(d => d.date).filter(Boolean).sort();
+  for (const doc of docs) {
+    totalBuilds += doc.totalBuilds || 0;
+    totalBilledUsd += doc.totalBilledUsd || 0;
+    lossBuilds += doc.lossBuilds ?? 0;
+    lossRealCostUsd += doc.lossRealCostUsd ?? 0;
+    for (const [provider, u] of Object.entries(doc.byProviderUsage ?? {})) {
+      const slot = perProviderTokens.get(provider) ?? { builds: 0, inputTokens: 0, outputTokens: 0 };
+      slot.builds += u.builds || 0;
+      slot.inputTokens += u.inputTokens || 0;
+      slot.outputTokens += u.outputTokens || 0;
+      perProviderTokens.set(provider, slot);
+    }
+  }
+  const perProvider: UsageReportRow[] = [...perProviderTokens.entries()]
+    .map(([provider, u]) => ({
+      provider,
+      builds: u.builds,
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      baselineCostUsd: round6(baselineCostUsd({ inputTokens: u.inputTokens, outputTokens: u.outputTokens })),
+    }))
+    .sort((a, b) => b.baselineCostUsd - a.baselineCostUsd);
+  const totalBaselineCostUsd = round6(perProvider.reduce((s, r) => s + r.baselineCostUsd, 0));
+  return {
+    fromDate: dates[0] ?? '',
+    toDate: dates[dates.length - 1] ?? '',
+    totalBuilds,
+    totalBilledUsd: round6(totalBilledUsd),
+    totalBaselineCostUsd,
+    marginUsd: round6(totalBilledUsd - totalBaselineCostUsd),
+    marginRatio: totalBaselineCostUsd > 0 ? round6(totalBilledUsd / totalBaselineCostUsd) : 0,
+    lossBuilds,
+    lossRealCostUsd: round6(lossRealCostUsd),
+    perProvider,
   };
 }
 

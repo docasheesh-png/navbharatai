@@ -1,5 +1,5 @@
 import { doc, runTransaction } from 'firebase/firestore';
-import { inrToWalletTokens } from './payments';
+import { inrToDebitTokens } from './payments';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
@@ -41,7 +41,7 @@ export interface WalletDebitTx {
 
 export interface DebitedWallet {
   wallet: Record<string, any>;
-  /** Whole tokens removed from the balance (billedInr × TOKENS_PER_RUPEE, rounded). */
+  /** Whole tokens removed from the balance (billedInr × TOKENS_PER_RUPEE, rounded UP — see inrToDebitTokens). */
   tokensDebited: number;
 }
 
@@ -72,7 +72,8 @@ export function computeDebitedWallet(
   }
 
   const billedInr = Math.round(tx.billedInr * 100) / 100; // ₹ to the paisa — no float drift
-  const tokens = inrToWalletTokens(tx.billedInr);
+  // Debit rounds UP (margin protection): a fractional token of build cost is charged as a whole token.
+  const tokens = inrToDebitTokens(tx.billedInr);
 
   const ledgerEntry = {
     type: 'usage',

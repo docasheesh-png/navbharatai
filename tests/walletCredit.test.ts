@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCreditedWallet, inrToWalletTokens, TOKENS_PER_RUPEE, type WalletCreditTx } from '../src/server/lib/payments';
+import { computeCreditedWallet, inrToWalletTokens, inrToDebitTokens, TOKENS_PER_RUPEE, type WalletCreditTx } from '../src/server/lib/payments';
 
 const T = '2026-07-05T00:00:00.000Z';
 const EMPTY = { tokenBalance: 0, totalTokensPurchased: 0, totalMoneySpent: 0, remaining_balance: 0, total_balance: 0, walletLedger: [] };
@@ -83,5 +83,32 @@ describe('inrToWalletTokens — the ONE ₹→token conversion every surface sha
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 77, balanceAdded: 77, isVishwakarmaOrder: false };
     const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
     expect(wallet.tokenBalance).toBe(inrToWalletTokens(77));
+  });
+});
+
+describe('inrToDebitTokens — the DEBIT conversion rounds UP (margin protection, Phase 3)', () => {
+  it('a whole-token amount is unchanged (ceil == value)', () => {
+    expect(inrToDebitTokens(25)).toBe(2500);
+    expect(inrToDebitTokens(1)).toBe(TOKENS_PER_RUPEE);
+  });
+
+  it('a FRACTIONAL token always rounds UP, never down (unlike round)', () => {
+    expect(inrToDebitTokens(0.301)).toBe(31);   // 30.1 → 31 (round would give 30)
+    expect(inrToDebitTokens(0.304)).toBe(31);   // 30.4 → 31 (round would give 30)
+    expect(inrToDebitTokens(0.305)).toBe(31);   // 30.5 → 31 (round also 31, but ceil is unconditional)
+    expect(inrToDebitTokens(0.0001)).toBe(1);   // any positive fraction costs at least 1 token
+  });
+
+  it('scrubs IEEE-754 float noise BEFORE the ceil so a clean ₹ never inflates a whole token', () => {
+    // 0.3 * 100 === 30.000000000000004 in IEEE-754 — a naive ceil would return 31.
+    expect(inrToDebitTokens(0.1 + 0.2)).toBe(30);
+    expect(inrToDebitTokens(0.3)).toBe(30);
+  });
+
+  it('non-finite / non-positive → 0', () => {
+    expect(inrToDebitTokens(0)).toBe(0);
+    expect(inrToDebitTokens(-5)).toBe(0);
+    expect(inrToDebitTokens(NaN)).toBe(0);
+    expect(inrToDebitTokens(Infinity)).toBe(0);
   });
 });

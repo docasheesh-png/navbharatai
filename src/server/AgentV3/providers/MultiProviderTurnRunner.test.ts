@@ -30,6 +30,26 @@ describe('makeMultiProviderTurnRunner', () => {
     expect(claude.runTurn).not.toHaveBeenCalled();
   });
 
+  it('Billing Phase 3 — onTurnComplete reports the winning provider AND its real token usage', async () => {
+    const glm = { runTurn: vi.fn().mockResolvedValue({ ...ok('built'), usage: { inputTokens: 800, outputTokens: 140, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 } }) };
+    const seen: Array<{ p: string; usage: { inputTokens: number; outputTokens: number } }> = [];
+    const chain: NamedRunner[] = [{ name: 'GLM', runner: glm }];
+    const runner = makeMultiProviderTurnRunner(chain, { onTurnComplete: (p, usage) => seen.push({ p, usage }) });
+    await runner.runTurn(PARAMS);
+    expect(seen).toEqual([{ p: 'GLM', usage: { inputTokens: 800, outputTokens: 140 } }]);
+  });
+
+  it('Billing Phase 3 — onTurnComplete fires for the provider that ACTUALLY answered after a fallback', async () => {
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: runnerFail('overloaded') },
+      { name: 'CLAUDE', runner: runnerOk('from claude') },
+    ];
+    const seen: string[] = [];
+    const runner = makeMultiProviderTurnRunner(chain, { onTurnComplete: (p) => seen.push(p) });
+    await runner.runTurn(PARAMS);
+    expect(seen).toEqual(['CLAUDE']); // never GLM (it threw)
+  });
+
   it('falls through to the Claude backstop when cheaper providers throw', async () => {
     const vertex = runnerFail('vertex 500');
     const grok = runnerFail('grok 429');

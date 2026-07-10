@@ -296,6 +296,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_app_defaults',
+      description:
+        'Give the app the production quality basics BY DEFAULT — SEO/OpenGraph meta tags, a mobile ' +
+        'viewport, an html lang attribute, a web app manifest and robots.txt — adding ONLY what is ' +
+        'missing (idempotent, never clobbers an existing manifest/robots). Patches a standard index.html ' +
+        '(Vite/CRA/static); if there is none (e.g. Next.js) it writes the standalone files and says so. ' +
+        'Run it once the app has an entry HTML so it ships search-friendly, shareable and installable.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          app_name: { type: 'string', description: 'The app name for the title / manifest / OG tags (defaults to "App").' },
+        },
+      },
+    },
+    {
       name: 'generate_openapi',
       description:
         'Generate a real OpenAPI 3.0.3 contract for the backend API you built and write it to the ' +
@@ -778,6 +793,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_architecture_docs',
   'generate_env_example',
   'generate_gitignore',
+  'generate_app_defaults',
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',

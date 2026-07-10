@@ -24,6 +24,7 @@ export type ToolName =
   | 'generate_architecture_docs'
   | 'generate_env_example'
   | 'generate_gitignore'
+  | 'generate_app_defaults'
   | 'generate_openapi'
   | 'generate_api_docs'
   | 'generate_tests'

@@ -6,6 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
+import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1446,6 +1447,42 @@ export class ToolDispatcher {
           (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
         this.state?.appendTerminal(detail);
         return detail;
+      }
+
+      case 'code_graph': {
+        // A1 — QUERY the repo's structure (who-imports / change-impact / local deps / where-defined)
+        // from the indexed project graph, instead of prompt-stuffing or grepping. Pure logic lives in
+        // codeGraph.ts; this reads the live WorkspaceMemory graph. Cheap, deterministic, read-only.
+        const q = optStr(input, 'query') || 'impact';
+        const target = reqStr(input, 'target');
+        const graph = getWorkspaceMemory(this.workspaceId).graph();
+        if (q === 'defines') {
+          const defs = definitionsOf(graph, target);
+          return defs.length
+            ? `"${target}" is defined in:\n` + defs.map(d => `  ${d.file} (${d.kind})`).join('\n')
+            : `No exported symbol named "${target}" in the index. Use grep for a non-exported/local name.`;
+        }
+        const file = resolveGraphFile(graph, target);
+        if (!file) {
+          return `code_graph: "${target}" did not resolve to a single indexed file. Pass an exact workspace path (e.g. src/App.tsx), or use query="defines" for a symbol.`;
+        }
+        if (q === 'who_imports') {
+          const who = whoImports(graph, file);
+          return who.length
+            ? `${file} is imported by ${who.length} file(s):\n` + who.map(f => `  ${f}`).join('\n')
+            : `Nothing imports ${file} (an entry point, or possibly dead code).`;
+        }
+        if (q === 'depends_on') {
+          const deps = dependenciesOf(graph, file);
+          return deps.length
+            ? `${file} imports (local) ${deps.length} file(s):\n` + deps.map(f => `  ${f}`).join('\n')
+            : `${file} has no local imports.`;
+        }
+        // default: impact
+        const impact = impactOf(graph, file);
+        return impact.length
+          ? `Changing ${file} may affect ${impact.length} file(s) that import it directly or transitively — review these before/after the edit:\n` + impact.map(f => `  ${f}`).join('\n')
+          : `Changing ${file} affects no other files (nothing imports it).`;
       }
 
       case 'generate_observability': {

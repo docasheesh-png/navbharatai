@@ -63,7 +63,7 @@ export type AgentV3WireEvent =
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -164,6 +164,10 @@ export interface AgentV3ClientState {
   planRemaining?: number;
   /** P-UX.7 — total tokens (in + out) the finished build used, for the usage badge. */
   tokens?: number;
+  /** Billing Phase 1 — tokens actually deducted from the user's wallet for this build. */
+  walletTokensDebited?: number;
+  /** Billing Phase 1 — the wallet's token balance right after the deduction (live at build end). */
+  walletTokenBalance?: number;
   error?: string;
 }
 

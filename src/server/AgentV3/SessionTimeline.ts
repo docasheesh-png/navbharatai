@@ -40,6 +40,8 @@ export type TimelineFinalState = {
   billedUsd?: number;
   billedInr?: number;
   tokens?: number;
+  /** Billing Phase 1 — tokens actually deducted from the user's wallet for this build. */
+  walletTokensDebited?: number;
   buildHealth?: unknown;
   /** Honesty marker: how many recorded events were dropped to fit the storage budget. */
   timelineDropped?: number;
@@ -151,6 +153,7 @@ export function createTimelineRecorder(): TimelineRecorder {
               ...(typeof e.billedUsd === 'number' ? { billedUsd: e.billedUsd } : {}),
               ...(typeof e.billedInr === 'number' ? { billedInr: e.billedInr } : {}),
               ...(typeof e.tokens === 'number' ? { tokens: e.tokens } : {}),
+              ...(typeof e.walletTokensDebited === 'number' ? { walletTokensDebited: e.walletTokensDebited } : {}),
             };
             return;
           default:
@@ -198,6 +201,7 @@ export function createTimelineRecorder(): TimelineRecorder {
         billedUsd: f.billedUsd ?? 0,
         billedInr: f.billedInr ?? 0,
         tokens: f.tokens ?? 0,
+        walletTokensDebited: f.walletTokensDebited ?? 0,
         buildHealth: f.buildHealth ?? null,
         timelineDropped: dropped,
       };

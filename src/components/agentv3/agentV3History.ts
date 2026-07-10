@@ -23,7 +23,7 @@ export interface PersistedConversation {
   /** Terminal facts of the last finished build turn (billedInr/tokens/buildHealth), plus the compact
    *  build report embedded WITH the chat so the "Build report" always returns on reopen (never a
    *  separate doc that can 404 after a long build). */
-  finalState?: { ok?: boolean; billedUsd?: number; billedInr?: number; tokens?: number; buildHealth?: unknown; report?: unknown };
+  finalState?: { ok?: boolean; billedUsd?: number; billedInr?: number; tokens?: number; walletTokensDebited?: number; buildHealth?: unknown; report?: unknown };
   /** The framework this session builds with (restored so follow-up builds stay correct). */
   framework?: string;
   /** Cumulative token usage (older field, still returned by the server). */
@@ -149,11 +149,15 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
     // download/copy works offline (no separate fetch that can 404). Fire the result whenever a report
     // exists, even for a zero-billing turn, so the report never gets dropped for a cheap build.
     const report = final.report;
+    // Billing Phase 1 — the wallet deduction is a durable fact of the turn; the live BALANCE is
+    // deliberately NOT restored (it would be stale the moment another build or recharge happens).
+    const walletTokensDebited = typeof final.walletTokensDebited === 'number' ? final.walletTokensDebited : 0;
     if (billedUsd > 0 || (billedInr ?? 0) > 0 || tokens > 0 || report) {
       events.push({
         type: 'result', ok, summary, steps: 0, billedUsd,
         ...(billedInr !== undefined ? { billedInr } : {}),
         ...(tokens > 0 ? { tokens } : {}),
+        ...(walletTokensDebited > 0 ? { walletTokensDebited } : {}),
         ...(report ? { diagnostics: report } : {}),
       });
     }

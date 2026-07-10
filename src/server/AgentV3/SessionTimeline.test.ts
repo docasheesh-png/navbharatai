@@ -34,12 +34,13 @@ describe('createTimelineRecorder', () => {
     const rec = createTimelineRecorder();
     expect(rec.final()).toBeNull();
     rec.record({ type: 'done', ok: true, summary: 's', ts: 1, readiness: { score: 90, ready: true, blockers: [], warnings: [] } });
-    rec.record({ type: 'result', ok: true, summary: 's', steps: 5, billedUsd: 0.5, billedInr: 42, tokens: 12345 });
+    rec.record({ type: 'result', ok: true, summary: 's', steps: 5, billedUsd: 0.5, billedInr: 42, tokens: 12345, walletTokensDebited: 4200 });
     expect(rec.final()).toMatchObject({
       ok: true,
       billedUsd: 0.5,
       billedInr: 42,
       tokens: 12345,
+      walletTokensDebited: 4200,
       buildHealth: { score: 90, ready: true },
     });
   });
@@ -75,6 +76,7 @@ describe('createTimelineRecorder', () => {
       billedUsd: 0,
       billedInr: 0,
       tokens: 0,
+      walletTokensDebited: 0,
       buildHealth: null,
       timelineDropped: 0,
     });

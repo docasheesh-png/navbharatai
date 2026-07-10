@@ -2266,6 +2266,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 {state.tokens >= 1000 ? `${(state.tokens / 1000).toFixed(1)}k` : state.tokens} tokens
               </div>
             )}
+            {/* Billing Phase 1 — the REAL wallet deduction for this build (tokens out + balance left). */}
+            {state.done && typeof state.walletTokensDebited === 'number' && state.walletTokensDebited > 0 && (
+              <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Tokens deducted from your wallet for this build">
+                <Wallet className="w-3 h-3" />
+                −{state.walletTokensDebited.toLocaleString()} wallet tokens
+                {typeof state.walletTokenBalance === 'number' ? ` · ${state.walletTokenBalance.toLocaleString()} left` : ''}
+              </div>
+            )}
             {state.done && state.buildHealth && <BuildHealthCard health={state.buildHealth} />}
             {/* P-UX.6 — lightweight CSAT: thumbs feedback on a finished build (once per workspace). */}
             {state.done && state.ok && state.workspaceId && <BuildFeedback workspaceId={state.workspaceId} />}

@@ -51,6 +51,10 @@ describe('P-TQA.10 — production security headers', () => {
     // Tailwind apps load the Play CDN (cdn.tailwindcss.com) inside the preview iframe so the no-build
     // preview is STYLED — without this in script-src the preview renders unstyled. Guard it stays.
     expect(csp).toContain('https://cdn.tailwindcss.com');
+    // The Cashfree v3 checkout SDK (sdk.cashfree.com/js/v3/cashfree.js) is injected as a <script> when
+    // the user pays — without this host in script-src, CSP blocks the load and the "Purchase" button
+    // silently does nothing. Guard it so a CSP tighten can't re-break payments.
+    expect(csp).toContain('https://sdk.cashfree.com');
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

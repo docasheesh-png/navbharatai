@@ -16,12 +16,16 @@ import type { HelmetOptions } from 'helmet';
  *    React fails to load and the preview dies with `Missing dependency "react"`.
  *  - `crossOriginOpenerPolicy: 'same-origin-allow-popups'` keeps `window.opener` alive so
  *    `signInWithPopup` can deliver the OAuth credential back to the app.
+ *  - `scriptSrc` allows `https://sdk.cashfree.com` — the Cashfree v3 checkout SDK (`cashfree.js`) is
+ *    injected as a <script> at pay time; without this host CSP blocks the load and the "Purchase"
+ *    button silently does nothing (the payment never boots). The checkout itself opens in an https
+ *    frame (covered by `frameSrc`) and talks to the API over https (`connectSrc`).
  */
 export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn.tailwindcss.com"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://apis.google.com", "https://www.gstatic.com", "https://www.google.com", "https://esm.sh", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://cdn.tailwindcss.com", "https://sdk.cashfree.com"],
       styleSrc:   ["'self'", "'unsafe-inline'"],
       imgSrc:     ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'", "https:", "wss:"],

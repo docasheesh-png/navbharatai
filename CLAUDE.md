@@ -278,7 +278,9 @@ the code (it is actually read somewhere) on 2026-07-11.
 - **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`
 - **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
-  `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free)
+  `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
+  `AGENTV3_LINT_GATE` (set `on` by the admin 2026-07-11 — a build fails on real ESLint **errors**;
+  warnings/formatting never block. Set to `off`/unset to disable if it ever over-blocks a working app.)
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
@@ -286,7 +288,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   `on` and `glm` are NOT both allowed at once — pick one.
 - `GLM_MODEL` → `glm-4.7` (the cheap coder; leave the flagship `glm-5.2` OUT of the cost floor).
   `KIMI_MODEL` → `kimi-k2.6`. Both accept a comma newest→older list (e.g. `glm-4.7,glm-4.6`).
-- `AGENTV3_ENABLED` → `true`. `AGENTV3_PAID_PUBLIC` → keep `false`/unset until recharge is verified live.
+- `AGENTV3_ENABLED` → `true`. `AGENTV3_PAID_PUBLIC` → set to `true` by the admin 2026-07-11 (billing LIVE:
+  real wallet debit + affordability gate + ₹0-balance block now active for every non-free-list user).
+  `AGENTV3_CREDIT_GATE` → also `true` (redundant once paid-public is on — paid-public is the superset — but
+  harmless). ⚠️ With these ON, a ₹0/negative-balance user is REFUSED new builds, so the recharge flow
+  (Cashfree) MUST work end-to-end or such users get stranded; keep the 3 test/admin emails in
+  `AGENTV3_FREE_LIST` so admin testing stays free.
 
 **REMOVE from Cloud Run (retired — Bedrock never worked + test-chat deleted; code degrades cleanly
 when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODEL`, `AWS_REGION`,
@@ -300,9 +307,6 @@ Bedrock test-chat page — neither is in use.)
   canary — set to the 3 test accounts first, clear to widen to everyone.
 - Legacy per-feature overrides (normally NOT needed — the master covers both): `AGENTV3_FREE_TIER_CHEAP`,
   `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` (default 50000) tunes the new-wallet bonus.
-- **`AGENTV3_LINT_GATE`** (= `on`) — U-1 opt-in LintGate: after a successful build, block `ok:true` on real
-  ESLint **errors** (warnings/formatting never block). Default OFF = builds unchanged. Turn on once you want
-  ESLint enforced as a hard gate (a few canary builds first, like the readiness gate's escape hatch in reverse).
 - **`AGENTV3_INTEGRITY_GATE`** (= `on`) — **SET to `on` by the admin 2026-07-11 (canary).** After a build,
   auto-fix two deterministic defect classes the analyzer suite missed: multiple mount-focus owners (broke
   "auto-focus") and a stylesheet imported by 2+ modules. Default OFF only RECORDS the findings honestly;
@@ -313,6 +317,9 @@ Bedrock test-chat page — neither is in use.)
   just `[CRITICAL]`. Cosmetic/a11y/style warnings are always excluded (`selectAutoFixableWarnings`). Rides the
   SAME single bounded C9 repair pass — no new cost path. Default OFF; flip on after a canary proves it clean.
   (The C9 critical auto-fix itself stays default-ON; kill switch `AGENTV3_REVIEWER_AUTOFIX=off`.)
+- **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
+  controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
+  never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
 
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 

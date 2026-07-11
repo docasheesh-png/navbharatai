@@ -137,7 +137,7 @@ export function BillingPanel(props: BillingPanelProps) {
               <p className="text-xl font-black text-indigo-400 font-mono">{myReferralCode}</p>
               <button
                 onClick={() => {
-                  navigator.clipboard?.writeText(`Join NavBharatAI — भारत का अपना AI App Maker! Use my code ${myReferralCode} for bonus credits: https://navbharatai.com`);
+                  navigator.clipboard?.writeText(`Join NavBharatAI — भारत का अपना AI App Maker! Use my code ${myReferralCode} for bonus tokens: https://navbharatai.com`);
                   onToast('Referral link copied! ✓', 'success');
                 }}
                 className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors"
@@ -178,7 +178,7 @@ export function BillingPanel(props: BillingPanelProps) {
                 </div>
 
                 <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                  Warning! You have reached your reminder limit set at <span className="text-white font-mono font-black">₹{reminderLimit.toFixed(2)}</span>. Your active credit wallet balance is now <span className="text-red-400 font-mono font-black animate-pulse">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>.
+                  Warning! You have reached your reminder limit set at <span className="text-white font-mono font-black">₹{reminderLimit.toFixed(2)}</span>. Your active token wallet balance is now <span className="text-red-400 font-mono font-black animate-pulse">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>.
                 </p>
 
                 <div className="space-y-4 bg-black/30 border border-white/5 p-5 rounded-2xl">
@@ -244,7 +244,7 @@ export function BillingPanel(props: BillingPanelProps) {
                   <Wallet className="w-5 h-5" />
                 </div>
                 <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20">
-                  ACTIVE COINS
+                  ACTIVE TOKENS
                 </span>
               </div>
               <div>
@@ -254,7 +254,7 @@ export function BillingPanel(props: BillingPanelProps) {
                   {(wallet?.tokenBalance ?? 0).toLocaleString()} <span className="text-sm font-bold text-[#8b949e]">tokens</span>
                 </h2>
                 <div className="text-[9px] text-amber-400 font-mono font-bold mt-1 uppercase flex items-center gap-1">
-                  <span>≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)} credit</span>
+                  <span>≈ ₹{(wallet?.remaining_balance ?? 0).toFixed(2)} value</span>
                 </div>
               </div>
             </div>
@@ -291,32 +291,30 @@ export function BillingPanel(props: BillingPanelProps) {
               </div>
             </div>
 
-            {/* CARD 3: BUY CREDIT */}
+            {/* CARD 3: BUY TOKENS — promoted to first position (order-first) and always emerald-highlighted
+                so the primary recharge CTA visibly stands out from the muted cards (admin request). */}
             <div
               onClick={() => onSetActiveBillingDetailTab('purchase')}
               className={cn(
-                "relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border group select-none",
-                activeBillingDetailTab === 'purchase' ? "bg-gradient-to-br from-emerald-950/40 to-[#161b22] border-emerald-500 shadow-[0_0_25px_rgba(16,185,129,0.15)] ring-2 ring-emerald-500" : "bg-[#161b22]/90 border-white/5 hover:border-emerald-500/40 hover:bg-[#1a212b]"
+                "order-first relative rounded-[2.2rem] p-6 h-44 flex flex-col justify-between transition-all duration-300 cursor-pointer overflow-hidden border-2 group select-none shadow-[0_0_30px_rgba(16,185,129,0.28)]",
+                activeBillingDetailTab === 'purchase'
+                  ? "bg-gradient-to-br from-emerald-900/60 to-[#161b22] border-emerald-400 ring-2 ring-emerald-500"
+                  : "bg-gradient-to-br from-emerald-950/50 to-[#161b22] border-emerald-500/70 hover:border-emerald-400 hover:shadow-[0_0_42px_rgba(16,185,129,0.42)]"
               )}
             >
               <div className="absolute -top-12 -right-12 w-28 h-28 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-300"></div>
               <div className="flex justify-between items-start">
-                <div className={cn(
-                  "p-3 rounded-2xl border transition-all duration-300",
-                  activeBillingDetailTab === 'purchase'
-                    ? "bg-emerald-500/20 border-emerald-400/30 text-emerald-400"
-                    : "bg-white/5 border-white/10 text-[#8b949e] group-hover:text-emerald-400 group-hover:bg-emerald-500/10"
-                )}>
+                <div className="p-3 rounded-2xl border transition-all duration-300 bg-emerald-500/20 border-emerald-400/30 text-emerald-400">
                   <CreditCard className="w-5 h-5" />
                 </div>
-                <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-emerald-500/10 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/20">
-                  100x VALUE
+                <span className="text-[8px] font-black font-mono tracking-widest uppercase bg-emerald-500/20 text-emerald-200 px-2 py-0.5 rounded border border-emerald-400/40">
+                  ⚡ RECHARGE
                 </span>
               </div>
               <div>
-                <p className="text-[10px] text-[#8b949e] font-extrabold uppercase tracking-widest text-[#8b949e]">Buy Credit</p>
+                <p className="text-[10px] text-emerald-300 font-extrabold uppercase tracking-widest">Buy Tokens</p>
                 <h2 className="text-lg font-black text-white tracking-tight mt-1.5 font-mono">
-                  100 Credit/₹
+                  100 Tokens/₹
                 </h2>
               </div>
             </div>
@@ -370,7 +368,7 @@ export function BillingPanel(props: BillingPanelProps) {
                 <div className="flex flex-wrap items-center justify-between border-b border-white/5 pb-4 gap-4">
                   <div>
                     <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest font-mono">
-                      <Sparkles className="w-3.5 h-3.5" /> Core Credit Audit
+                      <Sparkles className="w-3.5 h-3.5" /> Core Token Audit
                     </div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tight mt-2">Active Multi-Model Resource Pool</h3>
                   </div>
@@ -423,7 +421,7 @@ export function BillingPanel(props: BillingPanelProps) {
                       <span className="text-orange-400 font-bold">₹{((wallet?.total_balance || 10.00) - (wallet?.remaining_balance || 10.00)).toFixed(4)}</span>
                     </div>
                     <div className="border-t border-white/5 pt-3.5 flex justify-between items-center text-sm font-black">
-                      <span className="text-[#8b949e] tracking-tight font-sans">Active Liquidity Credit:</span>
+                      <span className="text-[#8b949e] tracking-tight font-sans">Active Token Balance:</span>
                       <span className="text-emerald-400">₹{(wallet?.remaining_balance || 10.00).toFixed(4)}</span>
                     </div>
                   </div>
@@ -545,7 +543,7 @@ export function BillingPanel(props: BillingPanelProps) {
                         </button>
                       </div>
                       <p className="text-xs text-amber-200/70 leading-relaxed font-semibold mt-4">
-                        🤝 Earn <span className="text-white font-black">10% Free Credits</span> for every referral — when your referred user purchases credits, 10% gets added to your account for free!
+                        🤝 Earn <span className="text-white font-black">10% Free Tokens</span> for every referral — when your referred user purchases tokens, 10% gets added to your account for free!
                       </p>
                     </div>
 
@@ -590,7 +588,7 @@ export function BillingPanel(props: BillingPanelProps) {
 
                   {/* Refer history */}
                   <div className="space-y-4">
-                    <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Referred Accounts & Credits Earned</h4>
+                    <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Referred Accounts & Tokens Earned</h4>
                     <div className="border border-white/5 rounded-2xl overflow-hidden font-mono text-xs bg-black/10">
                       <table className="w-full text-left">
                         <thead>
@@ -630,7 +628,7 @@ export function BillingPanel(props: BillingPanelProps) {
                     <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl font-black uppercase tracking-wider font-mono">
                       Balance Store & Gateway simulation
                     </span>
-                    <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Buy Token Credits Instant Gateway</h3>
+                    <h3 className="text-xl font-black text-white uppercase tracking-tight mt-3">Buy Tokens Instant Gateway</h3>
                   </div>
                 </div>
 
@@ -658,14 +656,14 @@ export function BillingPanel(props: BillingPanelProps) {
                       {/* Live tokens calculations outputs */}
                       <div className="grid grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-center">
                         <div>
-                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Credits</span>
+                          <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Wallet Tokens</span>
                           <span className="text-base text-emerald-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100}</span>
-                          <span className="text-[8px] text-[#8b949e]">at ₹1 = 100 credits</span>
+                          <span className="text-[8px] text-[#8b949e]">at ₹1 = 100 tokens</span>
                         </div>
                         <div>
                           <span className="text-[9px] text-[#8b949e] font-black uppercase tracking-widest block">Equivalent AI Outputs</span>
                           <span className="text-base text-indigo-400 font-extrabold block mt-1">{(parseFloat(buyAmountInput) || 0) * 100 * 200}</span>
-                          <span className="text-[8px] text-[#8b949e]">At 1 Credit = 200 outputs</span>
+                          <span className="text-[8px] text-[#8b949e]">At 1 token = 200 outputs</span>
                         </div>
                       </div>
 
@@ -681,14 +679,14 @@ export function BillingPanel(props: BillingPanelProps) {
                         disabled={isRecharging}
                         className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
                       >
-                        Purchase Wallet Credit (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
+                        Purchase Wallet Tokens (₹{(parseFloat(buyAmountInput) || 0).toLocaleString('en-IN')})
                       </button>
                     </div>
                   </div>
 
                   <div className="space-y-4">
                     <p className="text-xs text-[#8b949e] leading-relaxed font-semibold">
-                      Credits are immediately funded into your multi-model ledger on successful bank sync. Checkout parameters are fully encrypted.
+                      Tokens are immediately funded into your multi-model ledger on successful bank sync. Checkout parameters are fully encrypted.
                     </p>
 
                     <h4 className="text-xs font-black text-white uppercase tracking-wider font-mono">Invoice Records Summary</h4>

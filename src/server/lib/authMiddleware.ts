@@ -165,6 +165,14 @@ export interface RateLimitOptions {
    * per-IP limit can't (a botnet rotating IPs). Omit to disable the global ceiling.
    */
   anonGlobalPerHour?: number;
+  /**
+   * FIRESTORE-WRITE FIX (2026-07-11): when false, the limiter uses ONLY the in-memory per-instance
+   * bucket (Layer 1) and skips the durable Firestore read+write (Layer 2). Set this for HIGH-FREQUENCY,
+   * NO-COST endpoints (e.g. the in-browser preview render, hit up to 1200×/hr on every poll/edit) where
+   * a per-request Firestore write was the dominant source of daily write-quota exhaustion — and where
+   * per-instance limiting is enough because the endpoint has no spend to protect. Default true (durable).
+   */
+  durable?: boolean;
 }
 
 /**
@@ -205,6 +213,11 @@ export function rateLimiter(opts: RateLimitOptions) {
     } else {
       _rateBuckets.set(key, { count: 1, windowStart: now });
     }
+
+    // In-memory-only limiters (opts.durable === false) stop here: no per-request Firestore write. Used
+    // for high-frequency no-cost endpoints (in-browser preview) where the durable write was the #1
+    // source of daily write-quota exhaustion and per-instance limiting is sufficient (nothing to spend).
+    if (opts.durable === false) { next(); return; }
 
     // Layer 2 — DURABLE cross-instance enforcement (bounded + fail-open). This is what makes the
     // limit real on min-instances=0. A global anon ceiling caps total anonymous volume platform-wide.
@@ -332,7 +345,7 @@ export function workspaceRateLimiter() {
  * signed-in user and would otherwise apply the ANON limit — hence both tiers are generous. Still
  * bounded (the render is CPU work) so a runaway client can't hammer the bundler unboundedly.
  */
-export const INBROWSER_PREVIEW_RATE: RateLimitOptions = { name: 'inbrowser-preview', authed: 1200, anon: 600, noun: 'preview renders' };
+export const INBROWSER_PREVIEW_RATE: RateLimitOptions = { name: 'inbrowser-preview', authed: 1200, anon: 600, noun: 'preview renders', durable: false };
 export function inbrowserPreviewRateLimiter() {
   return rateLimiter(INBROWSER_PREVIEW_RATE);
 }

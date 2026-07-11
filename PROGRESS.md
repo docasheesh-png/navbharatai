@@ -13969,3 +13969,29 @@ Regression tests +8 (`tabClose`: leaf close + active-switch, non-active close le
 fallback, Settings closes its children only, Professionals closes its AIs + their companions, cross-parent
 isolation, Pro-chat→preview companion, no self-loop).
 Gate: frontend tsc 0, vitest 5960/5960 (+8), `npm run build` PASS. Client-only change (no server touched).
+## 2026-07-11 — ROOT-CAUSE: Firestore write-quota exhaustion broke payments (rate-limiter per-request write)
+
+Admin reported payment stuck. Traced end-to-end (rule 4). NOT a code bug in payment nor a cost issue
+(Firestore cost = ₹8.25). Real cause: the Firestore "(default) free-tier database" has a NON-ADJUSTABLE
+system limit of 40,000 writes/day, and the app was hitting 42,502/day (100%+) — so every Firestore WRITE
+started failing with `resource-exhausted`, which broke the payment order-write AND the post-payment wallet
+credit (hence "payment band ho gaya" + the negative -3,253-token display).
+
+The runaway write source: the generic `rateLimiter` does a Firestore READ+WRITE per request (Layer 2
+durable enforcement). The `inbrowser-preview` limiter (authed 1200/hr, anon 600/hr) is hit on EVERY
+preview poll/edit/tab-open — up to ~28,000 Firestore writes/day from one active session — the dominant
+share of the 42k.
+
+Fix: added a `durable?: boolean` option to RateLimitOptions; when false the limiter uses ONLY the
+in-memory per-instance bucket (Layer 1) and skips the per-request Firestore write. Set
+INBROWSER_PREVIEW_RATE.durable = false — safe because that endpoint is no-cost + server-cached and
+per-instance limiting is sufficient (nothing to spend to protect). Build/workspace limiters stay durable
+(low frequency, real abuse cost). Regression test guards durable:false so the per-render write can't return.
+
+Impact: ~28k writes/day removed → daily total drops under the 40k cap → Firestore writes stop failing →
+payments + wallet credit work again. Honest open item (rule 6): the 40k/day free-tier cap is a
+NON-ADJUSTABLE Google system limit on the (default) database — if write volume grows past 40k again, the
+durable long-term fix is a NEW (non-free-tier) Firestore database; recorded for later, not needed now.
+Also earlier this session: Cashfree SDK was CSP-blocked (fixed #1205) — a separate payment issue now cleared.
+
+Gate: tsc fe+server 0, vitest 5953/5953 (1 new), build PASS, boot:check PASS.

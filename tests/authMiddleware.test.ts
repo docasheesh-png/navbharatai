@@ -183,6 +183,14 @@ describe('inbrowserPreviewRateLimiter — the always-available preview must not 
     expect(INBROWSER_PREVIEW_RATE.anon).toBeGreaterThan(30); // strictly beats the old broken cap
     expect(INBROWSER_PREVIEW_RATE.name).toBe('inbrowser-preview'); // its OWN bucket, not shared with 'workspace'
   });
+
+  it('is IN-MEMORY-ONLY (durable:false) so a preview poll/render never writes to Firestore', () => {
+    // Firestore-write-quota fix (2026-07-11): the preview render is hit up to 1200×/hr on every
+    // poll/edit, and the durable limiter did a Firestore READ+WRITE per request — the dominant source
+    // of daily write-quota exhaustion (payments/wallet-writes then failed once the free-tier cap hit).
+    // This no-cost, cached, per-instance-limited endpoint must stay durable:false so writes can't return.
+    expect(INBROWSER_PREVIEW_RATE.durable).toBe(false);
+  });
 });
 
 describe('rateLimiter (generic factory)', () => {

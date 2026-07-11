@@ -13457,3 +13457,19 @@ Default OFF → every build path is unchanged until the admin opts in; backend e
 AppKnowledgeBase entry. This is the safe, measurable way to enforce ESLint as a hard gate.
 
 Gate: tsc fe+server 0, vitest 5869/5869 (9 new), build PASS, boot:check PASS.
+
+## 2026-07-11 — GA-18: expand the requirement-coverage catalog (catch more silently-skipped features)
+
+RequirementCoverage.ts (the PRESENT/ABSENT feature-coverage analyzer inside evaluate) had 14 curated
+high-signal surfaces. It directly serves absolute rule #2 (a build can pass every technical gate and
+still have silently skipped a feature the user asked for). Expanded the catalog with 10 more commonly
+-requested, commonly-skipped surfaces — each with a BROAD artifact regex (synonyms + real component
+names) so a feature built under an alternate name still counts (high-precision, never nags):
+file/image upload, calendar/booking/appointment, reviews/ratings, comments, wishlist/favorites,
+map/location, blog/articles, analytics/reports/charts, gallery/portfolio, password reset.
+
+2 new tests (requested-but-missing flags all three of upload/booking/reviews; covered-when-a-broad
+-synonym-artifact-exists for upload/booking/analytics/password-reset). Pure, no infra, no runtime-behavior
+change beyond the analyzer catching more real gaps. Backend engine capability → no AppKnowledgeBase entry.
+
+Gate: tsc fe+server 0, vitest 5871/5871 (2 new), build PASS, boot:check PASS.

@@ -23,7 +23,7 @@ import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
-import { popupFailureAction } from './socialSignInPolicy';
+import { popupFailureAction, waitForSignedInUser } from './socialSignInPolicy';
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -389,7 +389,19 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         await signInWithRedirect(auth, provider);
         return 'redirecting';
       }
-      if (action === 'cancel') return 'cancelled';
+      if (action === 'cancel') {
+        // ROOT-CAUSE FIX (admin 2026-07-11 — first Google login silently stayed logged out):
+        // `popup-closed-by-user` can fire even though the sign-in COMPLETED (the SDK's closed-poller
+        // races the auth event, slowest on a cold first attempt). A cancel is only final after a
+        // short grace window watching for the sign-in to actually land — signed in ⇒ success.
+        const landed = await waitForSignedInUser(auth);
+        if (landed) {
+          console.log('[SOCIAL SIGN-IN] popup reported cancel but the sign-in landed — treating as success');
+          onClose();
+          return 'ok';
+        }
+        return 'cancelled';
+      }
       throw err;
     }
   };

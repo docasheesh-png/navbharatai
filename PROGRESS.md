@@ -13556,3 +13556,36 @@ negative; a 4MB over-inflating entry dropped without landing; a normal small zip
 Gate: frontend tsc 0, server tsc 0, vitest 5886/5886, boot PASS. Remaining Phase-5 low items
 (admin-token TTL, extract-zip source-traversal) left for the parallel session or a follow-up — noted,
 not duplicated.
+
+## 2026-07-11 — Fix 43: Google login "1st time me logout hi rahta hai, 2nd time chalta hai" (two root causes)
+
+Admin report: Google login fails the FIRST time (user stays logged out), works the SECOND. Went deep —
+found TWO independent root causes, both fixed at the source (rule 4), not patched at the symptom.
+
+**Root cause A — dual Firebase init with divergent authDomain (`src/lib/firebase.ts` + `src/App.tsx`).**
+The client called `initializeApp()` in TWO modules with DIFFERENT options: `App.tsx` used the real config
+(custom same-origin authDomain `navbharatai.com` — the domain the whole popup/redirect flow depends on),
+while `lib/firebase.ts` re-initialised from a STALE `firebase-applet-config.json` carrying the old
+cross-origin `*.firebaseapp.com` authDomain. The SDK throws `app/duplicate-app` when the second init's
+options differ, so whichever module loaded second crashed — and if `lib/firebase.ts` won the race, the
+default app carried the WRONG authDomain and Google sign-in state got cross-origin-partitioned: the exact
+silent first-login failure the custom domain exists to prevent. Fix: ONE init, in `lib/firebase.ts`, built
+from the ONE config (`src/config/firebase.ts`); `App.tsx` now re-exports `auth`/`db` from there so every
+existing `import { auth, db } from './App'` (~10 call sites) keeps working unchanged.
+
+**Root cause B — popup-cancel raced a completed sign-in (`socialSignInPolicy.ts` + `AuthComponent.tsx`).**
+`signInWithPopup` can reject with `auth/popup-closed-by-user` even when the sign-in actually COMPLETED — a
+real firebase-js-sdk race where the popup's closed-poller fires while the auth event is still being
+delivered through the authDomain iframe (slowest on the FIRST attempt when the iframe is cold; also lags
+under COOP/storage partitioning). Our cancel handling then stopped QUIETLY — user picked their account,
+everything succeeded server-side, UI still said logged-out; the 2nd attempt worked because the iframe was
+warm. Fix: new pure `waitForSignedInUser(auth, graceMs=2500)` — a "cancel" is only final AFTER a short
+grace window watching `currentUser`/`onAuthStateChanged`. Signed in during the window ⇒ the "cancel" was
+the race → treat as success (close modal, return 'ok'). Still null after the window ⇒ a genuine user
+cancel → stop quietly exactly as before. Wired into `AuthComponent`'s popup catch cancel branch.
+
+Regression tests (+4): user already signed in → immediate resolve; the race (sign-in lands during the
+window) → resolved as signed-in, not cancel; genuine cancel → null after the window; null auth events
+during the window don't resolve early. Existing `popupFailureAction` tests unchanged.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5887/5887 (~4 new), npm run build PASS, boot:check PASS.

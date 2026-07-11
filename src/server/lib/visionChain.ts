@@ -17,7 +17,7 @@
 // non-empty reply, or null when every allowed provider failed (caller shows an
 // honest message — never a fake result).
 
-import { claudeVisionAnswerModel, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
+import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
 
 export interface VisionAttachment {
   name: string;
@@ -27,7 +27,7 @@ export interface VisionAttachment {
 
 export interface VisionResult {
   text: string;
-  provider: 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
+  provider: 'GLM' | 'VERTEX' | 'GEMINI' | 'GROK' | 'CLAUDE';
 }
 
 export interface VisionOptions {
@@ -56,6 +56,43 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * GLM (Z.AI) vision — the FREE leader (Slice C, NAVBHARATAI_ROUTING_PLAN.md §1 row 3). Images only
+ * (PDFs fall through to Vertex/Gemini, which read both). `glm-4.6v-flash` is $0 in/out on Z.AI, so a
+ * free-tier image turn costs nothing; on any failure/rate-limit the chain continues exactly as before.
+ * Z.AI is OpenAI-compatible, so this mirrors tryGrok's shape (data-URL image parts).
+ */
+async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
+  const key = process.env.GLM_API_KEY;
+  const images = atts.filter((f) => f.type.startsWith('image/'));
+  if (!key || images.length === 0) return null;
+  if (images.length !== atts.length) return null; // a PDF in the batch → defer to Vertex/Gemini (they read both)
+  const OpenAI = (await import('openai')).default;
+  const glm = new OpenAI({ apiKey: key, baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', maxRetries: 0 });
+  const content: any[] = [
+    ...images.map((f) => ({ type: 'image_url', image_url: { url: `data:${f.type};base64,${f.base64}` } })),
+    { type: 'text', text: o.prompt },
+  ];
+  const messages: any[] = [
+    ...(o.systemPrompt ? [{ role: 'system', content: o.systemPrompt }] : []),
+    { role: 'user', content },
+  ];
+  for (const model of glmVisionModels()) {
+    try {
+      const r: any = await withTimeout(
+        glm.chat.completions.create({ model, messages, max_tokens: 1500 }),
+        o.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        `GLM vision (${model})`,
+      );
+      const text = r?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[VISION_CHAIN] GLM ${model} failed: ${err?.message || err}`);
+    }
+  }
+  return null;
 }
 
 /** Vertex vision via @google-cloud/vertexai (service-account auth) — the Free universe's primary. */
@@ -170,12 +207,12 @@ async function tryClaude(atts: VisionAttachment[], o: VisionOptions): Promise<st
 }
 
 /**
- * The ordered list of vision providers for a universe. Free (allowClaude=false) is
- * Vertex → Gemini(key) → Grok. Non-Free adds Claude last. Vertex leads because it
- * is the Free universe's primary Google auth and reads BOTH images and PDFs.
+ * The ordered list of vision providers for a universe. GLM leads (free image turns cost ₹0 —
+ * Slice C); Vertex next because it is the primary Google auth and reads BOTH images and PDFs
+ * (an image+PDF batch skips GLM and lands here); then Gemini(key) → Grok. Non-Free adds Claude last.
  */
 export function visionProviderOrder(allowClaude: boolean): VisionResult['provider'][] {
-  const base: VisionResult['provider'][] = ['VERTEX', 'GEMINI', 'GROK'];
+  const base: VisionResult['provider'][] = ['GLM', 'VERTEX', 'GEMINI', 'GROK'];
   return allowClaude ? [...base, 'CLAUDE'] : base;
 }
 
@@ -187,6 +224,7 @@ export function visionProviderOrder(allowClaude: boolean): VisionResult['provide
 export async function runVisionChain(atts: VisionAttachment[], o: VisionOptions): Promise<VisionResult | null> {
   if (!atts || atts.length === 0) return null;
   const runners: Record<VisionResult['provider'], (a: VisionAttachment[], opt: VisionOptions) => Promise<string | null>> = {
+    GLM: tryGlm,
     VERTEX: tryVertex,
     GEMINI: tryGeminiKey,
     GROK: tryGrok,

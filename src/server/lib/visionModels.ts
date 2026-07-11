@@ -35,6 +35,16 @@ export function claudeVisionAnswerModel(): string {
   return process.env.VISION_CLAUDE_ANSWER_MODEL || 'claude-sonnet-4-6';
 }
 
+/**
+ * GLM (Z.AI) vision models, tried in order. Images only. Leader: `glm-4.6v-flash` — served at
+ * $0 in / $0 out on Z.AI (verified against the official pricing page, 2026-07-11), so free-tier
+ * image turns cost NavBharatAI nothing (NAVBHARATAI_ROUTING_PLAN.md §1 row 3). Self-gates on
+ * GLM_API_KEY at the call site; on failure/rate-limit the chain falls to Vertex/Gemini as before.
+ */
+export function glmVisionModels(): string[] {
+  return fromEnvList(process.env.VISION_GLM_MODELS, ['glm-4.6v-flash']);
+}
+
 /** Grok vision-capable models, tried in order. Images only — Grok does not read PDFs. */
 export function grokVisionModels(): string[] {
   return fromEnvList(process.env.VISION_GROK_MODELS, ['grok-4']);

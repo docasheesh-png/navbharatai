@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -405,5 +405,15 @@ describe('shouldSkipDevServerLaunch (E6 — reuse an already-healthy dev server)
   });
   it('does NOT skip when both are bad', () => {
     expect(shouldSkipDevServerLaunch(false, true)).toBe(false);
+  });
+});
+
+describe('buildHttpLivenessCommand (Fix 42) — a REAL HTTP check, not just TCP-open', () => {
+  it('curls the port and emits HTTP_OK / HTTP_DOWN', () => {
+    const cmd = buildHttpLivenessCommand(5173);
+    expect(cmd).toContain('curl');
+    expect(cmd).toContain('http://127.0.0.1:5173');
+    expect(cmd).toContain('HTTP_OK');
+    expect(cmd).toContain('HTTP_DOWN');
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand } from './DevServerRecovery';
+import { classifyDevServerFailure, planDevServerRecovery, devServerHealthLine, validateProjectForPreview, devScriptPort, parseDevServerHealthLine, missingPreviewReason, resolveDevRunCommand , devServerRunnerMissing } from './DevServerRecovery';
 
 describe('validateProjectForPreview — catch a non-runnable project before the mystery dead port', () => {
   it('accepts a project with a dev script and reports which script to run', () => {
@@ -231,5 +231,22 @@ describe('classifyDevServerFailure — CRA port phrasing (Fix 34a, Conduit repor
     expect(d.cause).toBe('port_in_use');
     expect(d.recovery).toBe('kill_port_retry');
     expect(d.detail).toContain('4100');
+  });
+});
+
+describe('devServerRunnerMissing (Fix 42) — a TCP-open port must NOT be trusted when the runner binary was not found', () => {
+  it('detects the exact report log: "sh: 1: vite: not found"', () => {
+    const log = '> counter-app@0.0.0 dev\n> vite --host 0.0.0.0 --port 5173 --strictPort\n\nsh: 1: vite: not found\n\n[health-check] dev server is UP on port 5173.';
+    expect(devServerRunnerMissing(log)).toBe(true);
+  });
+  it('detects other framework CLIs not found', () => {
+    expect(devServerRunnerMissing('next: command not found')).toBe(true);
+    expect(devServerRunnerMissing('sh: 1: react-scripts: not found')).toBe(true);
+  });
+  it('is FALSE for a healthy log (never downgrades a genuinely-serving build)', () => {
+    expect(devServerRunnerMissing('VITE v5.0 ready in 320 ms\n➜ Local: http://localhost:5173/')).toBe(false);
+    expect(devServerRunnerMissing('')).toBe(false);
+    // a missing npm MODULE (not the runner) is handled by reinstall, not this guard:
+    expect(devServerRunnerMissing("Cannot find module 'react'")).toBe(false);
   });
 });

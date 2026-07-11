@@ -408,6 +408,16 @@ export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boo
  * sane floor so a bad caller can never produce a zero-iteration (instant-DOWN)
  * loop. PURE string builder — unit-testable without the E2B SDK.
  */
+/**
+ * Fix 42 — a STRICT HTTP liveness check (a real HTTP response, not just a TCP-open port). Used only
+ * to corroborate a "PORT_UP" when the dev log showed the runner binary was not found: a stale process
+ * or the sandbox proxy answers a TCP connect but not real HTTP, so this tells a genuinely-serving
+ * prior attempt apart from a false positive. Emits HTTP_OK / HTTP_DOWN. Pure (returns a command).
+ */
+export function buildHttpLivenessCommand(port: number): string {
+  return `if curl -s -o /dev/null --max-time 3 http://127.0.0.1:${port} 2>/dev/null; then echo HTTP_OK; else echo HTTP_DOWN; fi`;
+}
+
 export function buildPortWaitCommand(port: number, maxSeconds: number): string {
   const iterations = Math.max(1, Math.floor(maxSeconds));
   // Tool-agnostic, IPv4-forced liveness check. The old `nc -z localhost` check read a HEALTHY dev

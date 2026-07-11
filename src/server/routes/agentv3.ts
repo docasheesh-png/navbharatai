@@ -104,7 +104,7 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { freeTierCheapEnabled, isFreeTierBuild, freeTierUpsellMessage } from '../AgentV3/FreeTierBuildRouting';
+import { freeTierCheapEnabled, isFreeTierBuild, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage } from '../AgentV3/FreeTierBuildRouting';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -3105,8 +3105,26 @@ export function registerAgentV3Routes(app: Express): void {
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
     // security migration). Free-list users (admin/testers) always bypass it.
     if ((isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)) {
+      // ONE wallet read serves the whole paid-surface gate: the power-mode paid-only check (doc's
+      // totalMoneySpent) AND the balance math below (doc's remaining_balance via the same pure reader).
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
-      const balanceInr = userId ? await readWalletBalanceInr(firestoreWalletReader(getDb()), userId) : null;
+      const walletDoc = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
+      const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId) : null;
+      // Slice F (admin routing plan §1 row 6): POWER MODE (Only Opus) is for PAYING accounts only —
+      // a user who has never purchased cannot spend the most expensive engine. Refused pre-stream,
+      // BEFORE the balance math, with the specific actionable reason (not a generic credits message).
+      // Free-list admins/testers never reach here (outer condition), and with billing off this whole
+      // block is inert — exactly today's behavior.
+      if (powerModeBlockedForFreeUser(onlyOpus, walletDoc)) {
+        activeBuilds.delete(buildKey); // release the lock; the build never starts.
+        audit('AGENTV3_POWER_MODE_BLOCKED_FREE_USER', { userId }, 'info');
+        res.status(402).json({
+          error: powerModePaidOnlyMessage(),
+          code: 'POWER_MODE_PAID_ONLY',
+          ...(typeof balanceInr === 'number' ? { balanceInr, balanceTokens: inrToWalletTokens(balanceInr) } : {}),
+        });
+        return;
+      }
       const estimate = estimateBuildCost(prompt, powerLevelReq, usdInrRate());
       const gate = decidePaidGate({
         // The gate itself is active here (outer condition already gated on the two flags); decidePaidGate

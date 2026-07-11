@@ -988,7 +988,9 @@ export function useAgentV3Build(): UseAgentV3Build {
           // clean 402 (no build was started). Render a dedicated "Add credits" screen from the structured
           // body instead of a bare error banner, so the user sees their balance, the estimate, and a way
           // to top up. Only reachable when AGENTV3_PAID_PUBLIC is on and the user is a paying (non-free) one.
-          if (res.status === 402 && body.code === 'INSUFFICIENT_CREDITS') {
+          // POWER_MODE_PAID_ONLY (Slice F): power mode requested by a not-yet-paying account — same
+          // actionable add-credits card, with the server's specific power-mode message as the notice.
+          if (res.status === 402 && (body.code === 'INSUFFICIENT_CREDITS' || body.code === 'POWER_MODE_PAID_ONLY')) {
             setBillingBlock({
               notice: msg,
               balanceInr: typeof body.balanceInr === 'number' ? body.balanceInr : undefined,

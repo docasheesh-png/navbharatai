@@ -73,3 +73,24 @@ export function freeTierUpsellMessage(): string {
     'Add credits and I will complete it on the best engine — nothing you have done so far is lost.'
   );
 }
+
+/**
+ * Slice F (NAVBHARATAI_ROUTING_PLAN.md §1 row 6): POWER MODE (Only Opus) is for PAYING accounts only —
+ * Opus is the most expensive engine, and a user who has never purchased must not be able to spend it.
+ * True ⇒ the route refuses the power build pre-stream (an honest 402), BEFORE any wallet-balance math.
+ * Normal (non-power) builds are unaffected. Pure.
+ */
+export function powerModeBlockedForFreeUser(
+  powerRequested: boolean,
+  wallet: FreeTierWallet | null | undefined,
+): boolean {
+  return powerRequested && isFreeTierUser(wallet);
+}
+
+/** The honest, provider-agnostic refusal shown for that block (client renders the add-credits card). */
+export function powerModePaidOnlyMessage(): string {
+  return (
+    '⚡ Power mode is available for paid accounts. Add credits to unlock it — ' +
+    'your build can still run in normal mode right now.'
+  );
+}

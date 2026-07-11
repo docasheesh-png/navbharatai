@@ -110,31 +110,13 @@ export function registerProRoutes(app: Express): void {
   });
 
   // ══ CODE REVIEW ENDPOINT — OWASP security + quality + tech debt analysis ══
-  app.post('/api/pro/code-review', async (req: Request, res: Response) => {
-    try {
-      const { files } = req.body as { files?: Record<string, string> };
-      if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
-        return res.status(400).json({ error: 'No files provided for review.' });
-      }
-
-      // Build a VFS from the caller's file map
-      const vfs = new VirtualFileSystem();
-      for (const [path, content] of Object.entries(files)) {
-        if (typeof content === 'string') vfs.write(path, content);
-      }
-
-      // Use aiRouter as the ModelCall — works with any available provider
-      const callModel = (system: string, user: string) =>
-        aiRouter.route(user, [], 'navbharat' as any, undefined, system);
-
-      const result = await reviewCode(vfs, callModel);
-      const report = formatReviewReport(result);
-
-      res.json({ report, score: result.score, findings: result.findings, techDebt: result.techDebt });
-    } catch (err: any) {
-      console.error('[PRO/code-review] Error:', err?.message || err);
-      res.status(500).json({ error: err?.message || 'Code review failed.' });
-    }
+  app.post('/api/pro/code-review', async (_req: Request, res: Response) => {
+    // RETIRED (SEC Phase 5 re-audit) — this was UNAUTHENTICATED and spent NavBharatAI's OWN paid
+    // model budget (`aiRouter.route(..., 'navbharat', ...)`) on every call: the exact money-bleed
+    // the sibling /api/pro-chat + /api/pro-build routes were retired for, missed in Phase 1.1. No
+    // client calls it (the `/code-review` chat command routes through the v3.0 chat pipeline, not
+    // this endpoint). Honest 410 Gone, no model touched.
+    return res.status(410).json(PRO_V2_RETIRED);
   });
 
   // ══ DEPLOY ENDPOINT — Vercel / Netlify / GitHub Pages / Cloudflare Pages ══

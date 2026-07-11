@@ -13611,3 +13611,29 @@ lives in sessionStorage, already ephemeral; the password + MFA are unchanged). T
 wrong pass/user/sig, expiry boundary, legacy/future reject, TTL clamp). The consistency regression test
 now exercises the REAL mint/verify. Gate: frontend tsc 0, server tsc 0, vitest 5893/5893, boot PASS.
 Both Phase-5 hardening items done; next is the final 4-agent re-audit.
+
+## 2026-07-11 — SEC re-audit follow-up: 3 missed unauthenticated owner-paid LLM endpoints closed
+
+The final 4-agent re-audit verified Phases 0-4 + 5 CLOSED, but caught 3 endpoints the parallel
+session's Phase 1 retirement MISSED (no client caller — orphaned v2 surfaces that spent the platform's
+model budget on any anonymous call):
+- **/api/pro/code-review** (pro.ts) — UNAUTHENTICATED, `aiRouter.route(..., 'navbharat', ...)` = the
+  platform's PAID budget (the direct sibling of the retired /api/pro-chat + /api/pro-build). RETIRED →
+  410 Gone (the `/code-review` chat command routes through the v3.0 pipeline, not this endpoint, so
+  nothing breaks). Handler body fully removed (dead code) so no stale model path remains.
+- **/api/guider/plan** + **/api/guider/grade** (build.ts) — unauthenticated; on `agentic:true` they ran
+  an LLM call on the owner's budget. No client caller. Made permanent SECURITY NO-OPS: return their
+  existing "disabled" response (confirm:false / grade:null) WITHOUT touching a model — a 200 no-op so
+  any stale client degrades into a normal build instead of erroring.
+Tests: routesBuildPro.test.ts updated (guider/plan now the no-op; code-review now 410; +assertions).
+Gate: frontend tsc 0, server tsc 0, vitest 5896/5896, boot PASS.
+
+RE-AUDIT SUMMARY: every original finding CLOSED except the CRITICAL preview same-origin token-theft,
+which is PARTIAL: the cross-origin isolation code exists (previewOrigin.ts) but is ENV-GATED OFF by
+default (needs VITE_PREVIEW_ORIGIN + a preview subdomain — admin infra) AND only PreviewSurface is
+wired to it (PreviewPanel.tsx:616 + VisualEditor.tsx:390 still combine allow-scripts+allow-same-origin
+on the main origin). This is the Phase-4 item the plan flagged as highest-breakage-risk and chose the
+subdomain approach for — it needs the admin to provision the preview subdomain, then careful wiring of
+all three iframes. Recorded as the one OPEN root cause (rule 6). Not blind-patched (removing
+allow-same-origin breaks the in-browser preview's CDN dynamic-import — the exact reason a separate
+origin is required).

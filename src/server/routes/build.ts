@@ -218,6 +218,13 @@ export function registerBuildRoutes(app: Express): void {
   //    proposal (in the user's language) and only builds after approval. Never
   //    blocks: any failure returns `confirm:false` so the normal build proceeds.
   app.post('/api/guider/plan', async (req: Request, res: Response) => {
+    // SECURITY (SEC Phase 5 re-audit) — this endpoint was UNAUTHENTICATED and, when a caller set
+    // `agentic:true`, ran an LLM call on NavBharatAI's OWN provider budget (a money-bleed surface,
+    // the sibling of the retired /api/pro-* routes). It has NO client caller (superseded by v3.0), so
+    // it is now a permanent no-op: the same "no confirmation" response it already returns when
+    // disabled — never touching a model. Kept as a 200 no-op (not 410) so any stale client degrades
+    // gracefully into a normal build instead of erroring.
+    return res.json({ confirm: false });
     try {
       const { prompt, files, userKey, isEdit, agentic } = req.body || {};
       if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt (string) is required' });
@@ -241,6 +248,10 @@ export function registerBuildRoutes(app: Express): void {
   //    The frontend uses this AFTER a build fully completes to decide whether to
   //    auto-refine. Never throws — failure returns grade:null (no refine).
   app.post('/api/guider/grade', async (req: Request, res: Response) => {
+    // SECURITY (SEC Phase 5 re-audit) — same as /api/guider/plan: an unauthenticated owner-paid LLM
+    // surface with no client caller. Permanent no-op (the "disabled" grade:null it already returns),
+    // never touching a model. 200 no-op so a stale client degrades gracefully.
+    return res.json({ grade: null });
     try {
       const { spec, prompt, files, userKey, agentic } = req.body || {};
       const enabled = process.env.PRO_AGENTIC_ENGINE === '1' || agentic === true;

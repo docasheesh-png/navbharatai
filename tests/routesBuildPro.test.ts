@@ -37,7 +37,7 @@ describe('Build routes — /api/capabilities', () => {
 });
 
 describe('Build routes — /api/guider/plan', () => {
-  it('returns 400 when prompt is missing', async () => {
+  it('is a security no-op — returns confirm:false without touching a model (SEC Phase 5 retirement)', async () => {
     const register = await importBuildRoutes();
     const routes = captureRoutes(register);
     const handler = routes.get('POST /api/guider/plan');
@@ -46,8 +46,8 @@ describe('Build routes — /api/guider/plan', () => {
     const req = mockReq({ body: {} });
     const res = mockRes();
     await handler!(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.error).toMatch(/prompt/i);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.confirm).toBe(false);
   });
 
   it('returns confirm:false when guider flag is disabled', async () => {
@@ -161,30 +161,23 @@ describe('Pro routes — legacy /api/pro-chat + /api/pro-build are RETIRED (Phas
   });
 });
 
-describe('Pro routes — /api/pro/code-review', () => {
-  it('returns 400 when files are missing', async () => {
+describe('Pro routes — /api/pro/code-review (RETIRED — SEC Phase 5 re-audit)', () => {
+  // Was unauthenticated and spent the platform's OWN paid model budget on every call. Now 410 Gone,
+  // no model touched, regardless of input.
+  it('returns 410 Gone and never touches a model', async () => {
     const register = await importProRoutes();
     const routes = captureRoutes(register);
     const handler = routes.get('POST /api/pro/code-review');
     expect(handler).toBeDefined();
 
-    const req = mockReq({ body: {} });
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.error).toMatch(/files/i);
-  });
+    const res1 = mockRes();
+    await handler!(mockReq({ body: {} }), res1);
+    expect(res1.statusCode).toBe(410);
 
-  it('returns 400 when files object is empty', async () => {
-    const register = await importProRoutes();
-    const routes = captureRoutes(register);
-    const handler = routes.get('POST /api/pro/code-review');
-
-    const req = mockReq({ body: { files: {} } });
-    const res = mockRes();
-    await handler!(req, res);
-    expect(res.statusCode).toBe(400);
-    expect(res.body?.error).toMatch(/files/i);
+    const res2 = mockRes();
+    await handler!(mockReq({ body: { files: { 'a.ts': 'x' } } }), res2);
+    expect(res2.statusCode).toBe(410);
+    expect(res2.body?.code).toBe('gone');
   });
 });
 

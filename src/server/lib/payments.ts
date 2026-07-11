@@ -14,6 +14,18 @@ export const VISHWAKARMA_PASS_PRICE_RUPEES = 100;
 export const TOKENS_PER_RUPEE = 100;
 
 /**
+ * WELCOME BONUS tokens minted for a brand-new wallet (admin routing plan 2026-07-11: raised
+ * 1,000 → 50,000 = ₹500 equivalent, so a new user's FIRST real app build fits inside the bonus —
+ * it runs on the free-tier cheap engines, never Claude, per NAVBHARATAI_ROUTING_PLAN.md §1).
+ * Env-overridable (WELCOME_BONUS_TOKENS) so the admin can tune it from Cloud Run without a deploy;
+ * non-finite/negative overrides fall back to the default.
+ */
+export function welcomeBonusTokens(): number {
+  const n = Number(process.env.WELCOME_BONUS_TOKENS);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 50_000;
+}
+
+/**
  * The ₹→wallet-token unit conversion, used EVERYWHERE money meets tokens (credit mint, build debit,
  * pre-flight estimate display, 402 payload) so the rate can never drift between surfaces. Signed on
  * purpose: a negative ₹ (overdraft balance) converts to negative tokens for honest display. Non-finite → 0.

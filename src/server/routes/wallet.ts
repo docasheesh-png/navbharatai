@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { getDb } from '../lib/db';
 import { requireUserMatch } from '../lib/authMiddleware';
-import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 
 /**
  * Wallet / token-balance read routes extracted from the server.ts monolith
@@ -43,8 +43,12 @@ export function registerWalletRoutes(app: Express): void {
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
         return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
       } else {
-        const welcomeBalance = 10.00;
-        const welcomeTokens = 1000; // ₹10 = 1000 tokens
+        // Welcome bonus (admin routing plan 2026-07-11): 50,000 tokens (= ₹500 equivalent) so a new
+        // user's FIRST real build fits inside the bonus. Single source of truth: payments.ts
+        // welcomeBonusTokens() (env-overridable); the ₹ mirror is derived at the shared rate so the
+        // token and ₹ columns can never drift apart.
+        const welcomeTokens = welcomeBonusTokens();
+        const welcomeBalance = welcomeTokens / TOKENS_PER_RUPEE;
         const initialWallet = {
           userId,
           userEmail: email,
@@ -65,7 +69,7 @@ export function registerWalletRoutes(app: Express): void {
               amountCoinsOrTokens: welcomeTokens,
               moneySpent: 0,
               timestamp: new Date().toISOString(),
-              description: 'Welcome Bonus: 1,000 AI Tokens Credited!'
+              description: `Welcome Bonus: ${welcomeTokens.toLocaleString()} AI Tokens Credited!`
             }
           ],
           updatedAt: new Date().toISOString()
@@ -85,7 +89,8 @@ export function registerWalletRoutes(app: Express): void {
           createdAt: new Date().toISOString()
         });
 
-        return res.json(initialWallet);
+        // The rate travels WITH the wallet on the new-wallet path too (same as the existing-doc path).
+        return res.json({ ...initialWallet, tokensPerRupee: TOKENS_PER_RUPEE });
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);

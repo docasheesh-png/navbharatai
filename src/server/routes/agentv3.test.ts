@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -566,6 +566,33 @@ describe('dominantProvider — PR4 deliveredVia (which model drove most build tu
   });
   it('returns undefined for an empty map (non-agentic lanes record nothing)', () => {
     expect(dominantProvider(new Map())).toBeUndefined();
+  });
+});
+
+describe('fastLaneProviderLabel — honest provider label for the fast lane (no fixed "anthropic")', () => {
+  it('maps cheap-floor providers to their real label so a GLM/Kimi build is never mislabeled', () => {
+    expect(fastLaneProviderLabel('GLM')).toBe('glm');
+    expect(fastLaneProviderLabel('KIMI')).toBe('kimi');
+    expect(fastLaneProviderLabel('BEDROCK-GLM')).toBe('bedrock');
+  });
+  it('maps every Claude tier (incl. the forced-Haiku backstop) to anthropic', () => {
+    expect(fastLaneProviderLabel('CLAUDE')).toBe('anthropic');
+    expect(fastLaneProviderLabel('CLAUDE_HAIKU')).toBe('anthropic');
+  });
+  it('maps the Vertex/Gemini last resort to google', () => {
+    expect(fastLaneProviderLabel('VERTEX')).toBe('google');
+    expect(fastLaneProviderLabel('GEMINI')).toBe('google');
+  });
+  it('is case-insensitive on the provider name', () => {
+    expect(fastLaneProviderLabel('glm')).toBe('glm');
+    expect(fastLaneProviderLabel('Claude')).toBe('anthropic');
+  });
+  it('falls back to the lower-cased name for an unknown provider (never silently hidden)', () => {
+    expect(fastLaneProviderLabel('SOMENEW')).toBe('somenew');
+  });
+  it('defaults to anthropic for an empty/undefined provider', () => {
+    expect(fastLaneProviderLabel(undefined)).toBe('anthropic');
+    expect(fastLaneProviderLabel('')).toBe('anthropic');
   });
 });
 

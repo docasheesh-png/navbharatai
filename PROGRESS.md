@@ -13792,3 +13792,42 @@ so we never re-introduce the "~28 min" over-shoot). PipelineDepth thresholds (mo
 untouched — only the time constants changed, so lane selection is identical.
 
 Gate: server tsc 0, vitest (estimator 14 + preflight 8 pass).
+
+## 2026-07-11 — Fix 48: fast lane no longer hardcodes "direct Sonnet" — GLM/Kimi lead it like everywhere else (admin: "direct sonnet kahi nahi chahiye")
+
+Admin saw a build report where the primary builder was Sonnet and asked why GLM/Kimi (our cheap floor)
+weren't used — "jaisa sabke liye hai vaisa rakho, GLM/Kimi jaise normally hai vaisa hi yahan karo, direct
+sonnet kahi nahi chahiye."
+
+**Root cause (❌, DNA-level).** The DEFAULT complete-app path is the FAST lane (SimpleBuilder / OneShot).
+Its generator (`fastGenerate`) — plus the up-front blueprint (`bpGenerate`), mega-project planner
+(`ppGenerate`), and the agentic tsc-gate repair — each constructed a HARDCODED `new ClaudeClient(...)` at
+`fastBuildModel()` (Sonnet), completely bypassing the unified `buildTurnRunner` chain that leads with the
+cheap floor (GLM/Kimi → Claude → Haiku backstop → Vertex/Gemini). So the cheap floor could NEVER lead the
+fast lane no matter what `AGENTV3_CHEAP_FLOOR` said — a divergent "direct Sonnet" path. (It was originally
+Sonnet-not-Haiku for cross-file contract consistency — but that concern was about *Haiku*; GLM-4.7/Kimi are
+strong coders, and the verify+repair+readiness gate already backstops.)
+
+**Fix (rule 2 — fix the class, centralize; rule 3 — hunt siblings).** One request-scoped `makeFastTextRunner`
+helper builds the SAME floor-leading chain as the agentic architect (reuses `buildTurnRunner`, same
+`allowCheapFloor` gate computed ONCE and shared by both the agentic `client` and the fast lane, same
+`cheapOnly` free-tier rule). All four hardcoded sites now route through it. **Safe-by-default:** with
+`AGENTV3_CHEAP_FLOOR` off/unset the chain is byte-for-byte today's Claude-only path; Claude is ALWAYS the
+backstop inside the chain, so a floor outage/timeout falls straight back to Sonnet — the app never breaks
+(rule 1). The change simply lets GLM/Kimi lead the fast lane too, exactly like the agentic lane already does.
+
+**Honesty (rule 5).** The fast lane recorded a FIXED `provider: 'anthropic'` on every per-file LLM call — so
+a GLM-delivered build would have been reported as Sonnet (a lie). New pure `fastLaneProviderLabel()` maps the
+ACTUAL delivering provider (GLM/KIMI/BEDROCK/CLAUDE/CLAUDE_HAIKU/VERTEX/GEMINI) to the honest report label,
+captured per-call via the runner's `onProviderUsed`; the report now shows the truth. The build report's
+"Built by …" tally also lights up for the fast lane now (previously blank for non-agentic lanes).
+
+Regression tests +6 (`fastLaneProviderLabel`: cheap-floor → real label, every Claude tier → anthropic,
+Vertex/Gemini → google, case-insensitive, unknown → lower-cased name never hidden, empty → anthropic).
+Gate: frontend tsc 0, server tsc 0, vitest 5920/5920 (+6), boot:check PASS.
+
+NOTE for the admin: this only CHANGES behaviour when a cheap floor is actually configured
+(`AGENTV3_CHEAP_FLOOR=glm`/`kimi`/`on`/`bedrock` with the key present) AND the user is allowlisted
+(`AGENTV3_CHEAP_FLOOR_USERS` — empty = everyone). Your own admin/test account is on `AGENTV3_FREE_LIST`, so
+free-TIER cheap-only routing still won't apply to you — but with the floor configured, GLM/Kimi will now LEAD
+your fast-lane builds (Claude backstops), which is exactly what you asked for.

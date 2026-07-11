@@ -1212,6 +1212,27 @@ export function dominantProvider(turns: Map<string, number>): string | undefined
   return best;
 }
 
+/**
+ * Map a MultiProviderTurnRunner provider NAME (GLM / KIMI / BEDROCK-GLM / CLAUDE / CLAUDE_HAIKU /
+ * VERTEX / GEMINI) to the honest `provider` label recorded in the build report's per-LLM-call log.
+ * The FAST lane (Simple Builder / OneShot) now leads with the cheap floor exactly like the agentic
+ * chain, so its calls can be delivered by GLM/Kimi — recording a fixed 'anthropic' would be a rule-5
+ * honesty bug. Unknown names fall back to the name itself (lower-cased) so nothing is silently hidden.
+ * Pure + exported for testing.
+ */
+export function fastLaneProviderLabel(used: string | undefined): string {
+  switch ((used || '').toUpperCase()) {
+    case 'GLM': return 'glm';
+    case 'KIMI': return 'kimi';
+    case 'BEDROCK-GLM': return 'bedrock';
+    case 'CLAUDE':
+    case 'CLAUDE_HAIKU': return 'anthropic';
+    case 'VERTEX':
+    case 'GEMINI': return 'google';
+    default: return (used || 'anthropic').toLowerCase();
+  }
+}
+
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
@@ -4127,6 +4148,36 @@ export function registerAgentV3Routes(app: Express): void {
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }): void => {
         providerLedger.add(used, usage);
       };
+      // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
+      // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
+      // reused by BOTH the agentic architect chain AND the fast lane (Simple Builder / OneShot), so the
+      // fast lane is governed by the SAME policy as everything else — no divergent "direct Sonnet" path.
+      const allowCheapFloor = freeTierBuildActive || (!routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email));
+      const recordProviderFallback = (name: string, err: unknown): void => {
+        // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
+        // kitni baar") + the existing per-event timeline entry (carries the message).
+        try { buildDiag.recordProviderFailure(name); } catch { /* diagnostics are best-effort */ }
+        buildDiag.record({
+          phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+          message: `Provider ${name} failed — falling back to the next provider`,
+          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+        });
+      };
+      // Unified TEXT-generation runner for the FAST lane + up-front aux steps (blueprint / project
+      // planner / tsc-gate repair). Leads with the cheap floor exactly like the agentic chain and
+      // ALWAYS keeps Claude as the backstop inside the chain — so GLM/Kimi build cleanly when configured,
+      // and a floor outage/timeout falls straight back to Sonnet (the app never breaks). With
+      // AGENTV3_CHEAP_FLOOR off/unset this is byte-for-byte today's Claude-only behaviour. `onUsed` gives
+      // the caller the ACTUAL delivering provider so the build report records the truth (rule 5), never a
+      // fixed 'anthropic'. Token/billing accounting stays in each caller's existing sink (no onTurnComplete
+      // here — avoids double-counting the fast lane's own buildUsage.add).
+      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+        ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
+        allowCheapFloor,
+        cheapOnly: freeTierBuildActive,
+        onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        onProviderError: recordProviderFallback,
+      });
       const client = buildTurnRunner({
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         // First attempt only opts the cheap floor in — and only for simple/medium apps (complex →
@@ -4135,20 +4186,11 @@ export function registerAgentV3Routes(app: Express): void {
         // Mitrify-scale prompt and every turn fell to Claude anyway — pure wasted minutes.
         // Escalation builds below never pass this, so they stay Claude.
         // FREE-TIER: force the cheap floor ON and cheap-ONLY (no Claude) for a not-yet-paying user.
-        allowCheapFloor: freeTierBuildActive || (!routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email)),
+        allowCheapFloor,
         cheapOnly: freeTierBuildActive,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
-        onProviderError: (name, err) => {
-          // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
-          // kitni baar") + the existing per-event timeline entry (carries the message).
-          try { buildDiag.recordProviderFailure(name); } catch { /* diagnostics are best-effort */ }
-          buildDiag.record({
-            phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-            message: `Provider ${name} failed — falling back to the next provider`,
-            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
-          });
-        },
+        onProviderError: recordProviderFallback,
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
@@ -4648,14 +4690,17 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const bpGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
-            const call = new ClaudeClient(undefined, { maxRetries: 1 }).runTurn({
+            // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
+            let bpProvider = 'CLAUDE';
+            const call = makeFastTextRunner((used) => { bpProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
             });
             // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
             const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('blueprint step timed out')), 30_000));
             const t = await Promise.race([call, timeout]);
             try {
-              buildDiag.recordLlmCall({ model: fastBuildModel(), provider: 'anthropic', promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+              const lbl = fastLaneProviderLabel(bpProvider);
+              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : bpProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += t.usage.inputTokens;
             blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -5045,14 +5090,17 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppGenerate = async (system: string, user: string): Promise<string> => {
               const startedAt = Date.now();
-              const call = new ClaudeClient(undefined, { maxRetries: 1 }).runTurn({
+              // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
+              let ppProvider = 'CLAUDE';
+              const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
                 model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
               });
               // Hard timeout so the up-front planner can NEVER hang the build (the losing call is ignored).
               const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('project planner timed out')), 60_000));
               const t = await Promise.race([call, timeout]);
               try {
-                buildDiag.recordLlmCall({ model: fastBuildModel(), provider: 'anthropic', promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+                const lbl = fastLaneProviderLabel(ppProvider);
+                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
               } catch { /* diagnostics best-effort */ }
               blueprintUsage.inputTokens += t.usage.inputTokens;
               blueprintUsage.outputTokens += t.usage.outputTokens;
@@ -5140,32 +5188,38 @@ export function registerAgentV3Routes(app: Express): void {
           const fbModel = fastBuildModel();
           const promptPreview = `${system}\n---\n${user}`;
           const startedAt = Date.now();
+          // The FAST lane now leads with the cheap floor (GLM/Kimi) exactly like the agentic chain —
+          // no hardcoded "direct Sonnet" path (admin 2026-07-11). `usedProvider` captures who ACTUALLY
+          // delivered this per-file call so the build report records the truth, not a fixed 'anthropic'.
+          // Claude is always the backstop inside the chain, so a floor miss falls back to Sonnet.
+          let usedProvider = 'CLAUDE';
+          const runner = makeFastTextRunner((used) => { usedProvider = used; });
           let t;
           try {
             // RESILIENT (admin 2026-07-07, "jab sab fail ho jaye to last me gemini/vertex"): the lane's
-            // calls are TEXT-ONLY (tools: []), so the multi-provider text fallback (Vertex → Gemini →
-            // Grok) is safe here — no tool-use hallucination risk — and it keeps the complete-app lane
-            // alive when the Anthropic account is down/out of credits (the real outage where the lane
-            // died on its very first call and every build fell to the grinding agentic ladder).
+            // calls are TEXT-ONLY (tools: []), so the multi-provider fallback (cheap floor → Claude →
+            // Vertex → Gemini) is safe here — no tool-use hallucination risk — and it keeps the complete-
+            // app lane alive when a provider is down/out of credits.
             // Fix 31 (admin: "Thinking button nonfunctional"): the fast lane is the DEFAULT complete-app
             // path, and it silently DROPPED the user's Thinking toggle — thinking worked only on the
             // agentic/edit lanes. Pass it through (ClaudeClient gates by model capability, so a Haiku/
             // fallback tier degrades gracefully) and stream the live reasoning summary into the build
             // feed so the toggle has a real, visible effect on every lane.
             const fastTurnId = randomUUID();
-            t = await makeResilientTurnRunner(new ClaudeClient(undefined, { maxRetries: 2 })).runTurn({
-              // D — Sonnet (not Haiku) for the fast lane: per-file isolated generation needs cross-file
-              // contract consistency; Haiku disagreed across calls → code didn't compile. Env-overridable.
+            t = await runner.runTurn({
+              // The requested model is the CLAUDE-tier model (fbModel = Sonnet); GLM/Kimi ignore it and
+              // force their own ladder, so this is the model billed/recorded only when Claude delivers.
               model: fbModel, system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
               thinking,
               onThinking: (delta: string) =>
                 events.emit({ type: 'stream_delta', agent: 'architect', id: fastTurnId, kind: 'thinking', delta, ts: Date.now() }),
             });
           } catch (err) {
-            try { buildDiag.recordLlmCall({ model: fbModel, provider: 'anthropic', promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
+            try { buildDiag.recordLlmCall({ model: fbModel, provider: fastLaneProviderLabel(usedProvider), promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
           }
-          try { buildDiag.recordLlmCall({ model: fbModel, provider: 'anthropic', promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
+          const provLabel = fastLaneProviderLabel(usedProvider);
+          try { buildDiag.recordLlmCall({ model: provLabel === 'anthropic' ? fbModel : usedProvider.toLowerCase(), provider: provLabel, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           osUsage.inputTokens += t.usage.inputTokens;
           osUsage.outputTokens += t.usage.outputTokens;
           osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
@@ -5543,7 +5597,9 @@ export function registerAgentV3Routes(app: Express): void {
           events.emit({ type: 'narration', agent: 'architect', text: '🔍 Type-checking the finished build — found type errors, fixing them…', ts: Date.now() });
           try {
             const currentFiles = Array.from(writtenFiles.entries()).map(([path, content]) => ({ path, content }));
-            const t = await new ClaudeClient(undefined, { maxRetries: 2 }).runTurn({
+            // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path);
+            // Claude still backstops the chain so the repair never fails for lack of a provider.
+            const t = await makeFastTextRunner().runTurn({
               model: fastBuildModel(), system: repairSystemPrompt(framework),
               messages: [{ role: 'user', content: repairUserPrompt(prompt, check.errors, currentFiles) }],
               tools: [], maxTokens: 8000,

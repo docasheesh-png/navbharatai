@@ -294,7 +294,12 @@ when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODE
 Bedrock test-chat page — neither is in use.)
 
 **Available AgentV3 flags NOT yet set (leave unset = today's behavior; set only when ready):**
-`AGENTV3_FREE_TIER_CHEAP` (new-user cheap-only routing), `AGENTV3_PER_TIER_BILLING` (Sonnet-share ×3 billing).
+- **`AGENTV3_COST_ROUTING`** (= `on`) — the ONE master switch for the whole cheap-routing regime
+  (free-tier cheap-only builds + per-tier billing). **This is the only one the admin needs**; flip it
+  AFTER the bake-off proves GLM/Kimi. Optional **`AGENTV3_COST_ROUTING_USERS`** (comma uid/email) =
+  canary — set to the 3 test accounts first, clear to widen to everyone.
+- Legacy per-feature overrides (normally NOT needed — the master covers both): `AGENTV3_FREE_TIER_CHEAP`,
+  `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` (default 50000) tunes the new-wallet bonus.
 
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 

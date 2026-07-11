@@ -13336,3 +13336,26 @@ Gate: tsc fe+server 0, vitest 5834/5834 (10 new), boot:check PASS.
   chat surface stays.
 
 Gate: tsc fe+server 0, vitest 5838/5838 (4 new), boot:check PASS.
+
+---
+
+## 2026-07-11 — Routing Slice G: AGENTV3_COST_ROUTING — the ONE master switch (+ per-user canary)
+
+Admin decision (#2 improvement, "kam flags = kam galti"): instead of juggling scattered per-feature
+flags (a real AGENTV3_CHEAP_FLOOR=glm-vs-on conflict already happened), ONE master turns the whole
+cheap-routing regime on.
+
+- `featureFlag.ts` += `costRoutingEnabled()` (AGENTV3_COST_ROUTING = 'on'|'true'; any stray value is
+  a safe no-op) + `costRoutingActiveFor(userId, email)` (optional AGENTV3_COST_ROUTING_USERS canary —
+  comma uid/email, case-insensitive email; empty = everyone; master off = nobody). 4 new tests.
+- Route wiring: free-tier cheap-only builds now activate on (legacy AGENTV3_FREE_TIER_CHEAP OR the
+  master); per-tier billing activates on (legacy AGENTV3_PER_TIER_BILLING OR the master) — the SAME
+  per-user canary drives routing AND billing, so a canary user's cheap-led build is billed on the
+  regime it actually ran on. Legacy flags stay honored as surgical single-behavior overrides.
+- CLAUDE.md env-key registry updated: the master (+canary) is now "the only flag the admin needs",
+  flip AFTER the bake-off; legacy flags noted as normally-not-needed.
+
+Rollout playbook (plan §4): AGENTV3_COST_ROUTING=on + _USERS=<3 test emails> → watch
+usage-report/telemetry (the live bake-off) → clear _USERS to widen. Default OFF = byte-identical today.
+
+Gate: tsc fe+server 0, vitest 5842/5842 (4 new), boot:check PASS.

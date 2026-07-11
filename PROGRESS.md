@@ -13637,3 +13637,45 @@ subdomain approach for — it needs the admin to provision the preview subdomain
 all three iframes. Recorded as the one OPEN root cause (rule 6). Not blind-patched (removing
 allow-same-origin breaks the in-browser preview's CDN dynamic-import — the exact reason a separate
 origin is required).
+
+## 2026-07-11 — Fix 44: "desktop — recent logout ke baad wapas login hota hi nahi" (root cause: logout nuked Firebase's IndexedDB mid-delete)
+
+Admin report right after Fix 43: on desktop, a logged-in user who recently logged out then tries to log
+back in — login "hota hi nahi" (doesn't happen at all); earlier it worked on the 2nd try, now even the
+2nd fails. Investigated from the actual code (rule 4), and this is a DIFFERENT root cause than Fix 43 —
+it lives in the LOGOUT path, not the login path.
+
+**Root cause — logout deleted Firebase's own IndexedDB out from under the live SDK, then reloaded
+mid-delete.** Three drifted copies of the logout handler (App.tsx ProfilePage, Header.tsx, TopNav.tsx —
+same block copy-pasted 3×) each did, verbatim: `indexedDB.deleteDatabase('firebaseLocalStorageDb')`
+(fire-and-forget, NOT awaited) → `window.location.reload()` immediately. `deleteDatabase` is async and,
+while the SDK still holds the connection open, fires `onblocked` and DEFERS the deletion; the immediate
+reload then races that pending delete. On the NEXT load Firebase's persistence layer re-opens
+`firebaseLocalStorageDb` while the old delete is still resolving, leaving persistence broken — so a
+subsequent Google sign-in completed at Google but could never be written back, `onAuthStateChanged` never
+delivered the user, and the UI stayed logged out. It bit ONLY the logout→login path (a fresh visit never
+deletes the DB), which is exactly the reported desktop-and-logout symptom.
+
+**Fix (root cause + de-duplication):** new centralized, tested `src/lib/signOutFlow.ts` used by all three
+logout sites (rules 2+3 — fix the class, hunt the siblings): (1) `await signOut()` behind a bounded
+timeout and TRACK whether it completed — a clean signOut already clears Firebase's persisted current-user,
+so a reload comes back signed-out with NO manual DB deletion needed; (2) delete the IndexedDB ONLY in the
+hang case (signOut timed out/threw — the one scenario the manual delete was ever for) and AWAIT it via a
+blocked-safe, bounded `deleteFirebaseAuthDb()` so no pending delete survives the reload; (3) reload LAST.
+Net: the common logout→login path never deletes the DB → next login's persistence stays intact → login
+works the first time. `defaultClearAuthStorage()` centralizes the shared localStorage/admin-key teardown
+so the three sites can never drift again.
+
+Regression tests (+12): performSignOut — clean signOut never deletes the DB (the fix), reload is always
+last, signOut-rejects → awaited delete then reload, signOut-hangs-past-timeout → still tears down (fake
+timers), throwing cleanup never blocks reload, extraCleanup runs; deleteFirebaseAuthDb — resolves on
+success/blocked/error, hard-caps on timeout, swallows a throwing/absent indexedDB.
+
+HONEST boundary (rule 6): if the failure's Console error is `auth/unauthorized-domain`, that is a Firebase
+Console authorized-domains config issue (serving domain not listed) — NOT fixable in code; the admin must
+add the domain in the Firebase Console. Asked the admin for the Console error text to confirm this fix is
+the cause vs. that config path. Also: Fix 43 may not have been live yet when this was reported (Cloud Run
+deploy lag) — advised a hard-refresh / incognito test.
+
+Gate: frontend tsc 0, vitest 5902/5902 (~12 new), npm run build PASS. Client-only change (no server code
+touched → server tsc / boot:check N/A).

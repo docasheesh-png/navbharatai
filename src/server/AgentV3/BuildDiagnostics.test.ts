@@ -480,7 +480,8 @@ describe('provider delivery — "kaun sa reply kis provider se aaya" in the buil
     d.recordProviderTurn('CLAUDE');
     const r = d.report();
     expect(r.providerDelivery).toEqual({ GLM: 2, CLAUDE: 1 });
-    expect(renderDiagnosticsText(r)).toContain('Built by : GLM (2 turns), CLAUDE (1 turn)');
+    // 2026-07-11: the headline now leads with the DOMINANT builder + keeps the full split after it.
+    expect(renderDiagnosticsText(r)).toContain('Built by : GLM — full split: GLM (2 turns), CLAUDE (1 turn)');
   });
   it('omits the "Built by" line when no provider turns were recorded', () => {
     const d = new BuildDiagnostics({ now: () => clock });
@@ -635,5 +636,53 @@ describe('Fix 37 — failure memory + data-loss forensics live IN the report', (
     const d = new BuildDiagnostics({ now: () => 1 });
     expect(d.report().priorFailedBuilds).toBeUndefined();
     expect(d.report().dataLossEvents).toBeUndefined();
+  });
+});
+
+// ── Admin 2026-07-11: billing & provider facts INSIDE the report ────────────────────────────────
+describe('billing & provider facts in the report (free/paid, builtBy, failures, tokens)', () => {
+  it('tallies per-provider FAILURES and reports the dominant builtBy', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.recordProviderTurn('GLM'); d.recordProviderTurn('GLM'); d.recordProviderTurn('CLAUDE');
+    d.recordProviderFailure('GLM'); d.recordProviderFailure('GLM'); d.recordProviderFailure('VERTEX');
+    const r = d.report();
+    expect(r.builtBy).toBe('GLM'); // most delivered turns = "app kisne banaya"
+    expect(r.providerFailures).toEqual({ GLM: 2, VERTEX: 1 }); // "kaun fail hua, kitni baar"
+    expect(r.providerDelivery).toEqual({ GLM: 2, CLAUDE: 1 });
+  });
+
+  it('carries the settled billing facts (tier, charge, wallet debit, why-free, power)', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.setBilling({ userTier: 'free (welcome bonus — cheap engines)', billedUsd: 0, billedInr: 0, zeroBillReason: 'empty build (0 files produced) — never charged', powerMode: false });
+    d.setProviderTokens({ GLM: { inputTokens: 800_000, outputTokens: 140_000 }, other: { inputTokens: 20_000, outputTokens: 5_000 } });
+    const r = d.report();
+    expect(r.billing?.userTier).toMatch(/welcome bonus/);
+    expect(r.billing?.zeroBillReason).toMatch(/empty build/);
+    expect(r.providerTokens?.GLM.inputTokens).toBe(800_000);
+  });
+
+  it('renders the new facts in the TEXT report (tier, billed, failures, tokens lines)', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    d.recordProviderTurn('GLM');
+    d.recordProviderFailure('VERTEX');
+    d.setBilling({ userTier: 'paid', billedUsd: 1.5, billedInr: 128.25, walletTokensDebited: 12_825, powerMode: false });
+    d.setProviderTokens({ GLM: { inputTokens: 500_000, outputTokens: 100_000 } });
+    d.finish(true, 'built');
+    const text = renderDiagnosticsText(d.report());
+    expect(text).toContain('User tier: paid');
+    expect(text).toContain('Billed   : $1.5000 (₹128.25)');
+    expect(text).toContain('Wallet   : −12,825 tokens debited');
+    expect(text).toContain('Failures : VERTEX ×1');
+    expect(text).toContain('Tokens   : GLM 600.0k');
+    expect(text).toContain('Built by : GLM');
+  });
+
+  it('omits every new field when nothing was recorded (older reports/clean lanes unchanged)', () => {
+    const d = new BuildDiagnostics({ now: () => 1 });
+    const r = d.report();
+    expect(r.builtBy).toBeUndefined();
+    expect(r.providerFailures).toBeUndefined();
+    expect(r.providerTokens).toBeUndefined();
+    expect(r.billing).toBeUndefined();
   });
 });

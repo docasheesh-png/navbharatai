@@ -118,6 +118,27 @@ export interface PreviewErrorRecord {
   message: string;
 }
 
+/**
+ * Billing & tier facts for THIS build (admin 2026-07-11: "free user / paid user, app kisne banaya,
+ * kaun se providers fail hue" — the 2-day billing/provider system must show up in the report).
+ * Written at settle time from the REAL charge (never an estimate); absent on a build that never
+ * reached settle (e.g. a pre-stream refusal).
+ */
+export interface BuildBillingRecord {
+  /** Who the build ran for: 'free-list (admin/tester)' | 'free (welcome bonus — cheap engines)' |
+   *  'paid' | 'billing-off (no charge)'. */
+  userTier: string;
+  /** The ACTUAL amount charged (after every zeroing rule). 0 = a free build. */
+  billedUsd?: number;
+  billedInr?: number;
+  /** Wallet tokens actually debited (absent when billing is off / nothing was charged). */
+  walletTokensDebited?: number;
+  /** WHY a build was free when tokens were really spent (empty build / unrendered preview / onboarding). */
+  zeroBillReason?: string;
+  /** Power (Only Opus) mode. */
+  powerMode?: boolean;
+}
+
 export interface BuildDiagnosticsReport {
   schema: 'navbharatai.v3.build-diagnostics/1';
   sessionId?: string;
@@ -148,6 +169,17 @@ export interface BuildDiagnosticsReport {
   /** Which provider delivered each build turn → turn count (e.g. { GLM: 18, CLAUDE: 2 }). Shows whether
    *  the cheap floor (GLM/KIMI) actually built it or it fell back to Claude. Absent if nothing recorded. */
   providerDelivery?: Record<string, number>;
+  /** THE headline: the provider that drove the MOST turns — "app kisne banaya". Derived from
+   *  providerDelivery at report time. Absent when no turn was attributed (non-agentic lanes). */
+  builtBy?: string;
+  /** How many times each provider FAILED a turn (threw → fell through to the next), e.g.
+   *  { GLM: 3, VERTEX: 1 } — "kaun se providers fail hue, kitni baar". Absent if none failed. */
+  providerFailures?: Record<string, number>;
+  /** Per-provider REAL token spend for this build (reconciled to the billed total; 'other' = aux
+   *  calls). The report-level view of the Billing-Phase-3 ledger. */
+  providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /** Billing & tier facts (free/paid user, actual charge, wallet debit, why-free). */
+  billing?: BuildBillingRecord;
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
@@ -246,6 +278,9 @@ export class BuildDiagnostics {
   /** Which provider actually DELIVERED each build turn (GLM/KIMI/CLAUDE/…) → turn count. Lets the
    *  downloadable report answer "kaun sa reply kis provider se aaya" — the cheap-floor-vs-Claude split. */
   private readonly providerDelivery = new Map<string, number>();
+  private readonly providerFailures = new Map<string, number>();
+  private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private billing?: BuildBillingRecord;
   private reviewText?: string;
   private priorFailedBuilds: number | undefined;
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
@@ -564,6 +599,28 @@ export class BuildDiagnostics {
     this.notify();
   }
 
+  /**
+   * Record that a provider FAILED a turn (threw and the chain fell through to the next) — the
+   * per-provider failure COUNT the admin asked for ("kaun se providers fail hue, kitni baar").
+   * Complements the PROVIDER_FALLBACK timeline entries (those carry the messages; this is the tally).
+   */
+  recordProviderFailure(name: string): void {
+    if (!name) return;
+    this.providerFailures.set(name, (this.providerFailures.get(name) ?? 0) + 1);
+    this.notify();
+  }
+
+  /** Billing & tier facts, written once at settle time from the REAL charge (admin 2026-07-11). */
+  setBilling(b: BuildBillingRecord): void {
+    this.billing = b;
+    this.notify();
+  }
+
+  /** Per-provider real token spend (the Billing-Phase-3 ledger, reconciled to the billed total). */
+  setProviderTokens(u: Record<string, { inputTokens: number; outputTokens: number }>): void {
+    if (u && Object.keys(u).length > 0) this.providerTokens = u;
+  }
+
   /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
   setPriorFailedBuilds(n: number): void {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
@@ -606,6 +663,11 @@ export class BuildDiagnostics {
       generatedFiles: this.generatedFiles.length ? [...this.generatedFiles] : undefined,
       previewErrors: this.previewErrors.length ? [...this.previewErrors] : undefined,
       providerDelivery: this.providerDelivery.size ? Object.fromEntries(this.providerDelivery) : undefined,
+      // "App kisne banaya" — the provider with the MOST delivered turns (ties keep first-seen).
+      builtBy: dominantDeliveryProvider(this.providerDelivery),
+      providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
+      providerTokens: this.providerTokens,
+      billing: this.billing,
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       dataLossEvents: this.dataLossEvents.length ? [...this.dataLossEvents] : undefined,
@@ -698,6 +760,16 @@ export function formatProviderDelivery(delivery?: Record<string, number>): strin
     .join(', ');
 }
 
+/** The provider that drove the MOST delivered turns — "app kisne banaya". Ties keep first-seen. Pure. */
+export function dominantDeliveryProvider(delivery: ReadonlyMap<string, number>): string | undefined {
+  let best: string | undefined;
+  let bestN = 0;
+  for (const [name, n] of delivery) {
+    if (n > bestN) { best = name; bestN = n; }
+  }
+  return best;
+}
+
 /** Render a report as a human/Claude-readable plain-text document (for the .txt download). */
 export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   const lines: string[] = [];
@@ -708,8 +780,36 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   lines.push(`Model    : ${r.model ?? '(n/a)'}`);
   // Which provider(s) actually drove the build turns — the real "kaun sa reply kis provider se aaya".
   const deliveredBy = formatProviderDelivery(r.providerDelivery);
-  if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
+  if (r.builtBy) lines.push(`Built by : ${r.builtBy}${deliveredBy ? ` — full split: ${deliveredBy}` : ''}`);
+  else if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
   lines.push(`Outcome  : ${r.ok === undefined ? '(n/a)' : r.ok ? 'SUCCESS' : 'FAILED'}`);
+  // BILLING & PROVIDERS (admin 2026-07-11) — the report answers: free/paid user, actual charge,
+  // wallet debit, why-free, which providers failed and how many times, and the token split.
+  if (r.billing) {
+    lines.push(`User tier: ${r.billing.userTier}${r.billing.powerMode ? ' — POWER MODE (Only Opus)' : ''}`);
+    if (typeof r.billing.billedUsd === 'number') {
+      const inr = typeof r.billing.billedInr === 'number' ? ` (₹${r.billing.billedInr.toFixed(2)})` : '';
+      lines.push(`Billed   : $${r.billing.billedUsd.toFixed(4)}${inr}${r.billing.billedUsd === 0 ? ' — FREE build' : ''}`);
+    }
+    if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
+      lines.push(`Wallet   : −${r.billing.walletTokensDebited.toLocaleString()} tokens debited`);
+    }
+    if (r.billing.zeroBillReason) lines.push(`Why free : ${r.billing.zeroBillReason}`);
+  }
+  if (r.providerFailures && Object.keys(r.providerFailures).length > 0) {
+    const failures = Object.entries(r.providerFailures)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, n]) => `${name} ×${n}`)
+      .join(', ');
+    lines.push(`Failures : ${failures} (each fell through to the next provider)`);
+  }
+  if (r.providerTokens && Object.keys(r.providerTokens).length > 0) {
+    const tokens = Object.entries(r.providerTokens)
+      .sort((a, b) => (b[1].inputTokens + b[1].outputTokens) - (a[1].inputTokens + a[1].outputTokens))
+      .map(([name, t]) => `${name} ${((t.inputTokens + t.outputTokens) / 1000).toFixed(1)}k`)
+      .join(', ');
+    lines.push(`Tokens   : ${tokens} (in+out per provider; 'other' = plan/judge/aux calls)`);
+  }
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);
   }

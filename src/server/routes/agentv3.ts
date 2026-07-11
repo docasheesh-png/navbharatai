@@ -4138,11 +4138,16 @@ export function registerAgentV3Routes(app: Express): void {
         cheapOnly: freeTierBuildActive,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
-        onProviderError: (name, err) => buildDiag.record({
-          phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
-          message: `Provider ${name} failed — falling back to the next provider`,
-          autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
-        }),
+        onProviderError: (name, err) => {
+          // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
+          // kitni baar") + the existing per-event timeline entry (carries the message).
+          try { buildDiag.recordProviderFailure(name); } catch { /* diagnostics are best-effort */ }
+          buildDiag.record({
+            phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK',
+            message: `Provider ${name} failed — falling back to the next provider`,
+            autoResolved: true, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+          });
+        },
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
@@ -5367,7 +5372,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Escalating to Sonnet to fix the issues found in review…' : 'Escalating to a stronger model to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage }),
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name) => { try { buildDiag.recordProviderFailure(name); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -6060,11 +6065,15 @@ export function registerAgentV3Routes(app: Express): void {
       let effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
         ? perTierBilledUsd(reconciledProviderUsage, powerLevelReq)
         : flatBilledUsd;
+      // WHY a build ended up free — recorded into the build report's billing section (admin
+      // 2026-07-11) so a ₹0 build always explains itself.
+      let zeroBillReason: string | undefined;
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and
       // zero files were created (even after the Claude retry), the build failed — bill ₹0.
       // "Preview is EARNED" cuts both ways: no artifacts, no charge.
       if (expectsArtifacts && writtenFiles.size === 0) {
         effectiveBilledUsd = 0;
+        zeroBillReason = 'empty build (0 files produced) — never charged';
         // FREE-TIER: a cheap-only free build that produced nothing is NOT rescued on Claude (that would
         // spend the very budget free-tier protects). Instead, honestly invite the user to add credits
         // and finish on the strongest engine — converting the user to paid without shipping a broken app.
@@ -6077,6 +6086,7 @@ export function registerAgentV3Routes(app: Express): void {
       // now enforced on the money too.
       if (zeroBillForUnrenderedPreview(expectsArtifacts, previewVerifiedFailed)) {
         effectiveBilledUsd = 0;
+        zeroBillReason = 'preview did not render on verification — "preview is EARNED", so free';
         events.emit({ type: 'narration', agent: 'architect', text: '🛡️ Because the preview did not fully render on my verification, this build is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
@@ -6085,6 +6095,7 @@ export function registerAgentV3Routes(app: Express): void {
           .catch(() => false);
         if (isFree) {
           effectiveBilledUsd = 0;
+          zeroBillReason = 'free onboarding build (new-user welcome credit)';
           events.emit({ type: 'narration', agent: 'architect', text: '🎁 This build is on us — welcome to NavBharatAI Pro!', ts: Date.now() });
         }
       }
@@ -6188,6 +6199,26 @@ export function registerAgentV3Routes(app: Express): void {
       // GET /api/agentv3/diagnostics endpoint. Best-effort — never affects the build result.
       let diagnostics: BuildDiagnosticsReport | undefined;
       try {
+        // BILLING & PROVIDERS into the report (admin 2026-07-11): who the build ran for (free/paid),
+        // the REAL settled charge + wallet debit, why a ₹0 build was free, and the per-provider token
+        // split — written from the SAME values the user was billed on, never re-derived.
+        try {
+          buildDiag.setBilling({
+            userTier: isAgentV3FreeUser(userId, email)
+              ? 'free-list (admin/tester)'
+              : freeTierBuildActive
+                ? 'free (welcome bonus — cheap engines)'
+                : billingActive
+                  ? 'paid'
+                  : 'billing-off (no charge)',
+            billedUsd: Math.round(effectiveBilledUsd * 1_000_000) / 1_000_000,
+            billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100,
+            ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
+            ...(zeroBillReason ? { zeroBillReason } : {}),
+            powerMode: onlyOpus,
+          });
+          buildDiag.setProviderTokens(reconciledProviderUsage);
+        } catch { /* report enrichment is best-effort — never blocks the report itself */ }
         buildDiag.finish(result.ok, result.summary);
         diagnostics = buildDiag.report();
         lastDiagnostics.set(buildKey, diagnostics);

@@ -2163,6 +2163,28 @@ Each framework gets a full starter scaffold (package.json, config, entry files) 
     aiSurface: 'pro_chat',
     keywords: ['import', 'github', 'clone', 'existing app', 'existing project', 'repo', 'repository', 'my app', 'upload', 'firebase import', 'github se import', 'apni app', 'existing code', 'already made', 'meri app', 'koi bhi app'],
   },
+
+  // ─── MOBILE APP (Android/iOS shell) ──────────────────────────────────────
+  {
+    id: 'mobile_app_update',
+    name: 'App Update Notice (mobile)',
+    path: 'Automatic — inside the installed Android/iOS app.',
+    description: `When you use the NavBharatAI mobile app (installed from the Play Store) and a newer version has been published, the app shows a small "A new version is available" banner at the bottom of the screen with an "Update" button. Tapping it opens the store listing so you can install the latest version. This exists because the mobile app ships its screens bundled inside the app, so new features arrive with an app update — the banner tells you when one is ready. It only appears when an update actually exists; on the website there is nothing to update.`,
+    howToUse: '1. Open the NavBharatAI app after a new version is published. 2. If an update is available, a banner appears at the bottom. 3. Tap "Update" to go to the store and install it (or "×" to dismiss for now). On the website, updates are automatic — no action needed.',
+    relatedFeatures: ['mobile_app_rating'],
+    aiSurface: 'nbi_chat',
+    keywords: ['update', 'app update', 'new version', 'update app', 'update available', 'play store update', 'purana version', 'app update karo', 'naya version', 'update kaise kare', 'app update nahi ho raha', 'latest version', 'upgrade app'],
+  },
+  {
+    id: 'mobile_app_rating',
+    name: 'Rate the App (mobile)',
+    path: 'Automatic — the native rating card appears inside the installed app after you have used it a while.',
+    description: `In the NavBharatAI mobile app, after you have opened and used the app enough times over a few days, the native Google Play / App Store rating card appears so you can give a star rating and review without leaving the app. It is shown at a natural moment and never repeatedly nags — it respects the store's own limits. You can also rate the app any time from its Play Store / App Store listing.`,
+    howToUse: '1. Keep using the NavBharatAI app normally. 2. After enough real usage, the native rating popup appears — pick your star rating and (optionally) write a review right there. 3. To rate any time, open the app\'s Play Store / App Store page and tap the stars.',
+    relatedFeatures: ['mobile_app_update'],
+    aiSurface: 'nbi_chat',
+    keywords: ['rate', 'rating', 'review', 'rate app', 'give rating', 'stars', 'rate us', 'feedback', 'play store rating', 'rating do', 'app ko rate karo', 'review likho', 'rating popup', '5 star', 'rate the app'],
+  },
 ];
 
 /** Quick lookup by id. */

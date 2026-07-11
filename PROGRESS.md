@@ -13831,3 +13831,45 @@ NOTE for the admin: this only CHANGES behaviour when a cheap floor is actually c
 (`AGENTV3_CHEAP_FLOOR_USERS` — empty = everyone). Your own admin/test account is on `AGENTV3_FREE_LIST`, so
 free-TIER cheap-only routing still won't apply to you — but with the floor configured, GLM/Kimi will now LEAD
 your fast-lane builds (Claude backstops), which is exactly what you asked for.
+
+## 2026-07-11 — Fix 49: mobile app — Play In-App Update prompt + In-App Review (rating) popup (admin request)
+
+Admin asked for two native-app features: (1) when a new signed `.aab` is uploaded to Play Console, the
+installed app should notify the user that an update is available; (2) a rating popup should appear while the
+user is using the app, like professional apps do.
+
+**Why this matters for OUR app specifically:** the Capacitor shell runs in BUNDLED mode (the web UI is baked
+INTO the `.aab`, not loaded live), so installed users only get new code when they UPDATE from the store — an
+"update available" nudge is genuinely necessary, not cosmetic.
+
+**Implementation (real, wired, safe):**
+- Added two Capacitor-8 plugins: `@capawesome/capacitor-app-update` (Play In-App Update API) and
+  `@capacitor-community/in-app-review` (Play In-App Review API). Registered natively by the existing
+  `android-aab.yml` workflow (`npm ci` → build → `npx cap sync android` → `bundleRelease`), so the NEXT
+  `.aab` ships them — no manual Gradle editing.
+- `src/lib/mobileEngagement.ts` — PURE, unit-tested decision logic: `updateIsAvailable` (Play availability
+  === UPDATE_AVAILABLE), and the review-prompt gate (`shouldRequestReview` / `registerAppOpen` /
+  `parseReviewState`) tuned like professional apps — ask only after ≥3 opens AND ≥2 days since first open
+  AND not within a 120-day reprompt window, never on first run, never nagging.
+- `src/lib/mobileNative.ts` — thin plugin glue. `checkForAppUpdate`, `openAppStoreForUpdate`,
+  `maybeRequestReview`. Every call guards on `Capacitor.isNativePlatform()` and is try/catch-wrapped → a
+  pure NO-OP on web and can never crash the app.
+- `src/components/MobileEngagementGate.tsx` — mounted once in `main.tsx`. On the installed app it checks
+  Play for a newer versionCode; if found it shows a dismissible bottom "A new version is available" banner
+  whose Update button deep-links to the store (`openAppStore`). If NO update is pending, it instead
+  considers the native rating card at that safe moment (so the two prompts never collide). Renders nothing
+  on web / on an up-to-date install → zero new visible surface for website users.
+- `AppKnowledgeBase.ts`: added `mobile_app_update` + `mobile_app_rating` entries (EN + Hinglish keywords) so
+  every NavBharatAI AI can answer "app update kaise kare?" / "rating kaise du?".
+
+**Safe-by-default (rule 1):** web build is byte-identical in behaviour (native calls no-op); the live site and
+CI are unaffected. **Honest boundary (rule 6):** the native update/rating flows can only be exercised in a
+real Play-Store-installed build — proven by the next `android-aab.yml` run, NOT in web CI. If a plugin needs
+a minSdk/Play-Core dependency the Gradle build will surface it there; nothing is faked as "working" here.
+
+Regression tests +13 (`mobileEngagement`: update availability incl. null/other states; review gate across
+opens/age/reprompt boundaries; defensive localStorage parse of garbage/negative values).
+Gate: frontend tsc 0, server tsc 0, vitest 5947/5947 (+13), `npm run build` PASS, boot:check PASS.
+
+NEXT `.aab`: this is a phase/checkpoint that changes the app — build a fresh signed `.aab` (android-aab.yml)
+so the update-prompt + rating features ship to Play (per the Play-release rule in CLAUDE.md).

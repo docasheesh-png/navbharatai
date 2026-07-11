@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Menu, ChevronLeft, X, LogOut, Rocket } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../lib/signOutFlow';
 
 // Views that can be opened as a header tab but are intentionally NOT in the shared
 // menuItems list (which also feeds the sidebar, where they have a bespoke button).
@@ -122,35 +123,17 @@ export const Header = ({
               onClick={async (e) => {
                 e.stopPropagation();
                 if (!confirm('Logout from NavBharat?')) return;
-                // Logout must ALWAYS work. signOut() can hang when the Firebase auth
-                // helper iframe is unavailable, so cap it with a timeout and then
-                // forcibly clear the persisted session + reload — the app comes back
-                // signed out no matter what.
-                try {
-                  await Promise.race([
-                    signOut(auth).catch(() => {}),
-                    new Promise((resolve) => setTimeout(resolve, 2500)),
-                  ]);
-                } catch { /* ignore — fall through to the hard clear below */ }
-                try {
-                  for (const k of Object.keys(localStorage)) {
-                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
-                  }
-                } catch { /* storage may be unavailable — reload still signs out */ }
-                // Admin uses a SEPARATE server-password session (not Firebase): the
-                // `isAdmin` flag lives in localStorage and the token in sessionStorage,
-                // and a synthetic admin identity is rebuilt from them on reload. Without
-                // clearing these the admin can never sign out — the reload just restores
-                // them. Clear both so logout actually logs the admin out too.
-                try {
-                  localStorage.removeItem('navbharat_admin_v1');
-                  sessionStorage.removeItem('admin_token');
-                } catch { /* storage may be unavailable — reload still signs out */ }
-                // Firebase persists the signed-in user in IndexedDB (not localStorage),
-                // so a hung signOut() would otherwise be restored on reload. Best-effort
-                // delete the DB so the sign-out is guaranteed.
-                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore — reload still signs out */ }
-                window.location.reload();
+                // Logout must ALWAYS work AND must not break the next login. Centralized
+                // teardown (src/lib/signOutFlow.ts) caps signOut with a timeout, clears the
+                // persisted session + admin keys, and deletes Firebase's IndexedDB ONLY when
+                // signOut hangs (awaited before reload) — so a clean logout leaves the next
+                // login's persistence intact (root-cause fix for "logout ke baad login nahi hota").
+                await performSignOut({
+                  signOut: () => signOut(auth),
+                  clearStorage: defaultClearAuthStorage,
+                  deleteAuthDb: () => deleteFirebaseAuthDb(),
+                  reload: () => window.location.reload(),
+                });
               }}
               className="w-10 h-10 bg-white/5 hover:bg-red-500/10 rounded-xl flex items-center justify-center text-[#484f58] hover:text-red-500 transition-all border border-white/5 active:scale-90"
             >

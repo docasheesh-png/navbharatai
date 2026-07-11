@@ -69,6 +69,7 @@ import { firebaseConfig } from './config/firebase';
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
 import { auth, db } from './lib/firebase';
 export { auth, db };
+import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 
 /**
  * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
@@ -3121,24 +3122,19 @@ export default function App() {
               onNavigateToSettings={() => { setActiveView('settings'); }}
               onLogout={async () => {
                 if (!confirm('Sign out from NavBharatAI?')) return;
-                try {
-                  await Promise.race([
-                    signOut(auth).catch(() => {}),
-                    new Promise(r => setTimeout(r, 2500)),
-                  ]);
-                } catch { /* ignore */ }
-                try {
-                  for (const k of Object.keys(localStorage)) {
-                    if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
-                  }
-                  localStorage.removeItem('navbharat_admin_v1');
-                  sessionStorage.removeItem('admin_token');
+                // Centralized teardown (src/lib/signOutFlow.ts) — root-cause fix for the
+                // "logout ke baad login hota hi nahi" desktop bug: it deletes Firebase's
+                // IndexedDB ONLY when signOut hangs, and AWAITS that delete before reload,
+                // so the next login's persistence is never corrupted.
+                await performSignOut({
+                  signOut: () => signOut(auth),
+                  clearStorage: defaultClearAuthStorage,
                   // The GitHub connection must NOT outlive the session — else the next user on this
                   // browser would inherit it (and see/push to this user's GitHub account).
-                  clearGithubConnection();
-                } catch { /* ignore */ }
-                try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
-                window.location.reload();
+                  extraCleanup: clearGithubConnection,
+                  deleteAuthDb: () => deleteFirebaseAuthDb(),
+                  reload: () => window.location.reload(),
+                });
               }}
             />
           )}

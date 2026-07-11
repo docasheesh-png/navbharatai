@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
+import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
 
 interface MenuItem {
   id: string;
@@ -65,23 +66,14 @@ export function TopNav({
     e.stopPropagation();
     setDropdownOpen(false);
     if (!confirm('Sign out from NavBharatAI?')) return;
-    try {
-      await Promise.race([
-        signOut(auth).catch(() => {}),
-        new Promise((resolve) => setTimeout(resolve, 2500)),
-      ]);
-    } catch { /* ignore */ }
-    try {
-      for (const k of Object.keys(localStorage)) {
-        if (/^firebase:authUser/i.test(k) || /firebaseLocalStorage/i.test(k)) localStorage.removeItem(k);
-      }
-    } catch { /* storage may be unavailable */ }
-    try {
-      localStorage.removeItem('navbharat_admin_v1');
-      sessionStorage.removeItem('admin_token');
-    } catch { /* ignore */ }
-    try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch { /* ignore */ }
-    window.location.reload();
+    // Centralized teardown (src/lib/signOutFlow.ts) — deletes Firebase's IndexedDB ONLY when
+    // signOut hangs (awaited before reload), so a clean logout never corrupts the next login.
+    await performSignOut({
+      signOut: () => signOut(auth),
+      clearStorage: defaultClearAuthStorage,
+      deleteAuthDb: () => deleteFirebaseAuthDb(),
+      reload: () => window.location.reload(),
+    });
   };
 
   return (

@@ -13716,3 +13716,25 @@ back into the recorded outcome. This fix wires exactly that feedback for the ren
 - Reviewer's 5 nits not auto-fixed: needs a post-review auto-fix subsystem — separate, larger work.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5914/5914 (~6 new), boot:check PASS.
+
+## 2026-07-11 — SEC Phase 4 prep: Firebase-Hosting config for the mitrify.xyz preview origin (no-op until enabled)
+
+Admin approved isolating the untrusted preview on a SEPARATE origin (chose their spare domain
+mitrify.xyz — a fully separate registrable domain is stronger isolation than a subdomain: no shared
+cookies/localStorage, the CodeSandbox/StackBlitz model). Prepared the deploy path, all env-gated OFF
+so today's build is byte-identical:
+- `preview-host/` — a self-contained Firebase Hosting config (`firebase.json` site `mitrify-preview`,
+  serving the repo's `../public` = single source, no file copy/drift) + `.firebaserc` + a README with
+  the exact one-time steps (create site, point mitrify.xyz via DNS, `firebase deploy`, set the build
+  substitution). Touches NOTHING in the existing root firebase.json (main app is Cloud Run; Firebase
+  Hosting is not auto-deployed).
+- `Dockerfile`: `ARG VITE_PREVIEW_ORIGIN=""` + `ENV` so the Vite build can bake the origin. Empty
+  default → configuredPreviewSandboxUrl returns null → today's same-origin behaviour (zero change).
+- `cloudbuild.yaml`: `--build-arg VITE_PREVIEW_ORIGIN=${_VITE_PREVIEW_ORIGIN}` + a `substitutions:`
+  block defaulting it to `''` — current builds unchanged; the admin flips the trigger substitution to
+  https://mitrify.xyz once the origin is live.
+Cost note (honest): one ~2 KB static file on Firebase Hosting Spark (free) is effectively free — no
+Firestore/DB usage. Gate: frontend tsc 0, vitest 5896/5896 (config/docs only; previewOrigin test
+confirms empty env → same-origin). CODE step (wiring all 3 preview iframes to the isolated origin)
+deliberately deferred until the origin is live (admin's choice) — the fragile-preview surface is only
+touched once it can be live-tested.

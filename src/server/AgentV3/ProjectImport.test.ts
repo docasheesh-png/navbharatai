@@ -4,6 +4,7 @@ import {
   isZipAttachment,
   safeImportPath,
   extractZipProject,
+  zipEntryDeclaredBytes,
   detectImportedFramework,
   validateImportedProject,
   importSummaryLine,
@@ -462,5 +463,35 @@ describe('findUnresolvedLocalImports — an incomplete repo snapshot is named AT
     const imports = Array.from({ length: 30 }, (_, i) => `import X${i} from './gone/M${i}';`).join('\n');
     const files = { 'src/App.tsx': app(imports) };
     expect(findUnresolvedLocalImports(files)).toHaveLength(20);
+  });
+});
+
+describe('zip-bomb DoS guard (SECURITY) — a hostile archive is refused before it OOMs the process', () => {
+  it('zipEntryDeclaredBytes reads the declared uncompressed size defensively (0 when unavailable)', () => {
+    expect(zipEntryDeclaredBytes({ _data: { uncompressedSize: 12345 } })).toBe(12345);
+    expect(zipEntryDeclaredBytes({ _data: {} })).toBe(0);
+    expect(zipEntryDeclaredBytes({})).toBe(0);
+    expect(zipEntryDeclaredBytes(null)).toBe(0);
+    expect(zipEntryDeclaredBytes({ _data: { uncompressedSize: -5 } })).toBe(0);
+  });
+  it('drops a single over-inflating entry WITHOUT decompressing the whole thing (declared-size pre-check)', async () => {
+    const zip = new JSZip();
+    zip.file('package.json', '{"name":"ok"}');
+    // 4 MB of a repeated byte — compresses to a few KB, but DECLARES > the 3 MB lockfile ceiling, so
+    // the guard skips it before expanding it into memory (a hostile inflate-in-one-entry payload).
+    zip.file('bomb.txt', 'A'.repeat(4 * 1024 * 1024));
+    const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const out = await extractZipProject(buf);
+    expect(out.files['bomb.txt']).toBeUndefined();     // the over-inflating entry never lands
+    expect(out.dropped.tooLarge).toBeGreaterThanOrEqual(1);
+    expect(out.files['package.json']).toBe('{"name":"ok"}'); // the real file still imports
+  });
+  it('still imports a normal small project unchanged (guard never touches a legit zip)', async () => {
+    const zip = new JSZip();
+    zip.file('package.json', '{"name":"ok"}');
+    zip.file('src/App.tsx', 'export default () => null;');
+    const buf = await zip.generateAsync({ type: 'nodebuffer' });
+    const out = await extractZipProject(buf);
+    expect(Object.keys(out.files).sort()).toEqual(['package.json', 'src/App.tsx']);
   });
 });

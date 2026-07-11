@@ -47,6 +47,16 @@ const LOCKFILE_RE = /^(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 export const IMPORT_MAX_FILES = 16_000;
 export const IMPORT_MAX_FILE_BYTES = 900 * 1024; // durable store cap (Firestore 1MB/doc)
 export const IMPORT_MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+/** SECURITY (zip-bomb DoS guard): a hard ceiling on how many ENTRIES a zip may declare, checked
+ *  BEFORE anything is decompressed — stops a "millions of tiny entries" archive from OOM-ing the
+ *  Node process. Well above any real app (IMPORT_MAX_FILES = 16k), so a legitimate import is never
+ *  affected. */
+export const IMPORT_MAX_ZIP_ENTRIES = 60_000;
+/** SECURITY (zip-bomb DoS guard): the total UNCOMPRESSED bytes we will decompress across the whole
+ *  archive. A few-KB "zip bomb" that inflates 1000:1 is refused once its declared uncompressed sizes
+ *  cross this ceiling — BEFORE the runaway entry is expanded into memory. Generous headroom over the
+ *  80 MB kept-text budget so a real import never trips it. */
+export const IMPORT_MAX_DECOMPRESSED_BYTES = 300 * 1024 * 1024;
 /** A lockfile larger than the durable cap is still written to the SANDBOX (npm install needs it);
  *  only truly enormous ones are dropped. */
 export const IMPORT_MAX_LOCKFILE_BYTES = 3 * 1024 * 1024;
@@ -98,9 +108,21 @@ export function safeImportPath(raw: string): string | null {
 }
 
 /**
+ * SECURITY (zip-bomb guard) — the DECLARED uncompressed size of a JSZip entry, read defensively from
+ * its metadata WITHOUT decompressing it. JSZip does not expose this on the public object, so we read
+ * the internal `_data.uncompressedSize` best-effort; when it is unavailable this returns 0 and the
+ * caller falls back to the existing post-decompress byte caps (never worse than before). Pure.
+ */
+export function zipEntryDeclaredBytes(entry: unknown): number {
+  const d = (entry as { _data?: { uncompressedSize?: unknown } } | null)?._data;
+  const n = d && typeof d.uncompressedSize === 'number' ? d.uncompressedSize : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
  * Extract a project file map from a .zip buffer. Skips derived/secret/binary/oversized entries
  * (counted honestly in `dropped`), strips a single shared root folder ("repo-main/…" → "…"),
- * and never lets a traversal path through.
+ * and never lets a traversal path through. Guarded against decompression-bomb DoS.
  */
 export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number }): Promise<ExtractedProject> {
   const maxFiles = opts?.maxFiles ?? IMPORT_MAX_FILES;
@@ -111,13 +133,26 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
   // Collect candidate entries first so the root-strip decision sees the full listing.
   const entries: Array<{ path: string; entry: import('jszip').JSZipObject }> = [];
   let totalEntries = 0;
+  // SECURITY (zip-bomb): track the total DECLARED uncompressed size while listing — before any entry
+  // is expanded into memory — and refuse the archive the moment it crosses the decompression ceiling
+  // or the entry-count cap. Both are checked here, up front, so a malicious archive is rejected
+  // instead of OOM-ing the process at the first `entry.async()` below.
+  let declaredBytes = 0;
+  let bombRejected = false;
   zip.forEach((relPath, entry) => {
     if (entry.dir) return;
     totalEntries++;
+    if (bombRejected) return;
+    if (totalEntries > IMPORT_MAX_ZIP_ENTRIES) { bombRejected = true; return; }
+    declaredBytes += zipEntryDeclaredBytes(entry);
+    if (declaredBytes > IMPORT_MAX_DECOMPRESSED_BYTES) { bombRejected = true; return; }
     const safe = safeImportPath(relPath);
     if (!safe) { dropped.unsafe++; return; }
     entries.push({ path: safe, entry });
   });
+  if (bombRejected) {
+    throw new Error(`Refusing to import this archive: it declares too much content to unpack safely (over ${Math.round(IMPORT_MAX_DECOMPRESSED_BYTES / (1024 * 1024))} MB uncompressed, or over ${IMPORT_MAX_ZIP_ENTRIES.toLocaleString()} entries) — it looks like a decompression bomb. Import a smaller project, or a GitHub URL.`);
+  }
 
   // GitHub "Download ZIP" wraps everything in one "repo-main/" folder — strip it when EVERY
   // entry shares the same first segment (and there is more than the bare folder itself).
@@ -175,6 +210,12 @@ export async function extractZipProject(buf: Buffer, opts?: { maxFiles?: number 
       continue;
     }
     if (Object.keys(files).length >= maxFiles) { dropped.overCap++; continue; }
+    // SECURITY (zip-bomb): a single entry that DECLARES more than the lockfile ceiling is skipped
+    // WITHOUT decompressing it — no text file the app needs is that large, so this only ever drops a
+    // hostile inflate-in-one-entry payload (0 when the size is unknowable → falls through to the
+    // post-decompress byte cap below).
+    const declared = zipEntryDeclaredBytes(entry);
+    if (declared > IMPORT_MAX_LOCKFILE_BYTES && !LOCKFILE_RE.test(path)) { dropped.tooLarge++; continue; }
     const content = await entry.async('string');
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > IMPORT_MAX_FILE_BYTES) {

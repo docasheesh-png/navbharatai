@@ -13898,3 +13898,27 @@ Env registry (CLAUDE.md) updated: `AGENTV3_INTEGRITY_GATE` now SET to `on` (admi
 `AGENTV3_REVIEW_AUTOFIX_WARNINGS` documented (default OFF).
 
 Gate: frontend tsc 0, server tsc 0, vitest (+6 new), boot:check PASS.
+## 2026-07-11 — Wallet UX fixes (admin screenshots) + billing-flag registry sync
+
+Admin reported wallet UI issues from real screenshots. Fixed the safe, frontend-only ones in
+BillingPanel.tsx (no payment logic touched — the admin is fixing the Cashfree payment flow separately,
+"baad me dhyan se"):
+- #2 — the "Buy" card was 3rd; promoted it to FIRST position (CSS order-first, no risky JSX move) and
+  gave it an always-on emerald highlight (gradient + border-2 + glow) so the primary recharge CTA
+  visibly stands out. (Chose emerald over the admin's suggested red — red reads as error/danger in UI;
+  green is the buy/go convention. Admin explicitly allowed "jo best ho".) Badge → "⚡ RECHARGE".
+- #4 — swept "credit(s)"/"coins" → "token(s)" across the wallet: card labels, Active Token Balance,
+  Buy Tokens Instant Gateway, Wallet Tokens, "100 Tokens/₹", Purchase Wallet Tokens, referral text, etc.
+
+Diagnosed but NOT changed (per admin "payment baad me dhyan se"):
+- #3 — the Purchase button DOES fire (createBillingOrder → POST /api/payment/create-order → Cashfree);
+  nothing visible means the create-order endpoint or Cashfree gateway is failing. Deferred deep fix.
+- #1 — welcome bonus showing ₹10/1000 tokens: the CODE default is ALREADY 50,000 (payments.ts
+  welcomeBonusTokens(), raised 1000→50000 on 2026-07-11). The screenshot wallet is an OLD account minted
+  before the raise; a brand-new user now gets 50,000. If a fresh account still shows 1000, check/remove
+  WELCOME_BONUS_TOKENS in Cloud Run. No code bug.
+
+Also synced the CLAUDE.md env registry: AGENTV3_LINT_GATE=on (LintGate live) and
+AGENTV3_PAID_PUBLIC=true + AGENTV3_CREDIT_GATE=true (billing LIVE) — both admin-enabled today.
+
+Gate: fe tsc 0, build PASS, vitest 5897/5897 (frontend-only text/layout change — no server/boot needed).

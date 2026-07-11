@@ -25,6 +25,11 @@ steps:
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:latest'
       - '--build-arg'
       - 'BUILDKIT_INLINE_CACHE=1'
+      # SECURITY Phase 4 — cross-origin preview origin. Default EMPTY (see substitutions below) = the
+      # exact same-origin preview behaviour today (zero change). Set the _VITE_PREVIEW_ORIGIN trigger
+      # substitution to https://mitrify.xyz once the preview subdomain is live (preview-host/README.md).
+      - '--build-arg'
+      - 'VITE_PREVIEW_ORIGIN=${_VITE_PREVIEW_ORIGIN}'
       - '--tag'
       - 'gcr.io/$PROJECT_ID/navbharat-cloud-run:$COMMIT_SHA'
       - '-t'
@@ -87,6 +92,12 @@ steps:
   # P3.3 — Scalability/HA. min-instances stays 0 (budget). Cold starts are mitigated by
   # GET /api/warm + an external Cloud Scheduler ping (no self-ping); see docs/SCALABILITY.md
   # §1. Multi-region readiness (config-only, no spend yet) is assessed in docs/SCALABILITY.md §2.
+
+substitutions:
+  # SECURITY Phase 4 — the cross-origin preview origin, baked into the client bundle at build time.
+  # EMPTY default = the exact same-origin preview behaviour today (zero change). Override in the Cloud
+  # Build trigger (set _VITE_PREVIEW_ORIGIN = https://mitrify.xyz) once the preview subdomain is live.
+  _VITE_PREVIEW_ORIGIN: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY

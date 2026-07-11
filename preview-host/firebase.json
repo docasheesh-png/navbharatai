@@ -1,0 +1,21 @@
+{
+  "//": "SECURITY Phase 4 — the SEPARATE preview origin (mitrify.xyz). Deploy from THIS folder:",
+  "//deploy": "cd preview-host && firebase deploy --only hosting",
+  "//note": "Serves the repo's public/ dir (single source — no copy, no drift). preview-sandbox.html",
+  "//note2": "lives there; the untrusted preview runs on mitrify.xyz, whose localStorage is empty, so",
+  "//note3": "it can never read navbharatai.com's Firebase auth token. HTML is never cached so a",
+  "//note4": "sandbox-host update goes live on the next deploy.",
+  "hosting": {
+    "site": "mitrify-preview",
+    "public": "../public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**/*.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        ]
+      }
+    ]
+  }
+}

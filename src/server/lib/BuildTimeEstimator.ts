@@ -36,15 +36,17 @@ export interface BuildEstimate {
   complexityScore: number;
 }
 
-// Heuristic constants (milliseconds). Calibrated to REAL NavBharatAI Pro v3.0 build durations:
-// an E2B agentic build is dominated by fixed overhead (sandbox cold-start + `npm install` +
-// scaffold + preview), so even a simple app takes minutes, not seconds. Ballpark targets — simple
-// app ~8–12 min, medium ~13 min, complex ~18–20 min. The OLD values (12s base, 9s/module) under-
-// estimated by ~20× (a todo app showed "~25s" while really taking 10–15 min). The live in-build
-// updates (the heartbeat ETA) and optional history blending refine this as the build runs.
-const BASE_MS = 420_000; // ~7 min fixed overhead (sandbox + install + scaffold + first preview)
-const PER_MODULE_MS = 60_000; // ~1 min per page/screen/module
-const PER_FEATURE_MS = 30_000; // ~30s per distinct feature
+// Heuristic constants (milliseconds). RE-CALIBRATED to REAL measured NavBharatAI Pro v3.0 durations
+// (autopsy 2026-07-11): a Todo build (15 files) took ~3.7 min end-to-end and a Notes build (20 files)
+// ~4.0 min — with the file-by-file SimpleBuilder fast lane the fixed overhead is small (the reports
+// show npm install ~1s + npm run dev ~9–55s + first preview ~16s ≈ 90–120s, NOT 7 min). The PREVIOUS
+// constants (7 min base + 30s/feature) over-estimated these builds ~7× — every report opened with a
+// scary "~28 min" that finished in ~4. (The generation BEFORE that under-estimated 20× — "~25s" — so
+// the honest band is minutes, neither seconds nor half an hour.) Complex agentic builds still scale
+// up via module/feature counts; history blending refines it further once real durations accrue.
+const BASE_MS = 120_000; // ~2 min fixed overhead (sandbox + install + dev server + first preview)
+const PER_MODULE_MS = 45_000; // ~45s per page/screen/module
+const PER_FEATURE_MS = 8_000; // ~8s per distinct feature (a feature is far cheaper than a whole module)
 const PER_1K_TOKENS_MS = 5_000;
 
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n));

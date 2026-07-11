@@ -56,11 +56,13 @@ describe('BuildTimeEstimator (P-PME.4)', () => {
       expect(big).toBeGreaterThan(small);
       expect(small).toBeGreaterThan(10_000); // at least the base
     });
-    it('CALIBRATION: a real E2B build is minutes, not seconds (no more the "~25s" lie)', () => {
-      // Regression guard: the old constants estimated a todo app at ~25s while it really took
-      // 10–15 min. A simple app must now estimate in the multi-minute range and render in minutes.
+    it('CALIBRATION: a simple build estimates in the HONEST minutes band — neither ~25s nor ~28 min', () => {
+      // Regression guard for BOTH failure modes seen on real runs: the oldest constants said "~25s"
+      // for a build that took minutes (20× low); the next said "~8–12 min"/"~28 min" for Todo/Notes
+      // builds that really took ~3.7–4.0 min (~7× high). The honest band is a few minutes.
       const simple = estimateBuildTime(complexityFromPrompt('a todo app'));
-      expect(simple.estimateMs).toBeGreaterThan(5 * 60_000); // > 5 min, not ~25s
+      expect(simple.estimateMs).toBeGreaterThan(90_000);       // > 1.5 min — never the "~25s" lie
+      expect(simple.estimateMs).toBeLessThan(10 * 60_000);     // < 10 min — never the "~28 min" over-shoot
       expect(simple.etaText).toMatch(/min/);
       const complex = estimateBuildTime(complexityFromPrompt('a dashboard page with auth, charts, profile screen, search and payment'));
       expect(complex.estimateMs).toBeGreaterThan(simple.estimateMs);

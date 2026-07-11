@@ -476,7 +476,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'check_toolchain',
       description:
         'Report the toolchain the project DECLARES it needs (Node from .nvmrc/engines, Python from ' +
-        '.python-version/pyproject, Java from pom.xml, Go from go.mod) and flag any INTERNAL contradiction ' +
+        '.python-version/pyproject, Java from Maven pom.xml or Gradle build.gradle, Go from go.mod) and flag any INTERNAL contradiction ' +
         '(two files pinning different versions) — a silent cause of "works for them, breaks here" build ' +
         'drift on imported repos. Read-only, no arguments. Fix a flagged inconsistency by pinning one ' +
         'version across the files.',

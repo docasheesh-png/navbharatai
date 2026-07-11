@@ -1658,9 +1658,10 @@ export class ToolDispatcher {
       }
 
       case 'check_toolchain': {
-        // D11 — surface the toolchain the project DECLARES (.nvmrc/engines/.python-version/go.mod/pom.xml)
-        // and flag internal contradictions (two files disagreeing) — a silent cause of build drift. Pure logic.
-        const wanted = ['.nvmrc', '.node-version', 'package.json', '.python-version', 'runtime.txt', 'pyproject.toml', '.java-version', 'pom.xml', 'go.mod'];
+        // D11 — surface the toolchain the project DECLARES (.nvmrc/engines/.python-version/go.mod/
+        // Maven pom.xml + Gradle build.gradle Java) and flag internal contradictions (two files
+        // disagreeing) — a silent cause of build drift. Pure logic.
+        const wanted = ['.nvmrc', '.node-version', 'package.json', '.python-version', 'runtime.txt', 'pyproject.toml', '.java-version', 'pom.xml', 'build.gradle', 'build.gradle.kts', 'go.mod'];
         const map: Record<string, string> = {};
         for (const f of wanted) {
           try { map[f] = await this.actuator.readFile(this.workspaceId, f); } catch { /* file not present */ }

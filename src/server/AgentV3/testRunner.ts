@@ -6,6 +6,8 @@
 // stdout/stderr/exitCode. The ToolDispatcher `run_tests` tool wires these to the sandbox actuator's
 // runCommand(); nothing here executes anything itself.
 
+import { detectPackageManager, pmRun, pmExec } from '../lib/packageManager';
+
 export type TestFramework =
   | 'vitest'
   | 'jest'
@@ -82,26 +84,30 @@ function jsRunnerOf(scriptOrDep: string): TestFramework | undefined {
 export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPlan | null {
   const has = (re: RegExp) => files.some(f => re.test(f));
   const { testScript, deps } = parsePackageJson(packageJsonRaw);
+  // Run under the project's OWN package manager (pnpm/yarn/bun/npm), not a hardcoded npm — otherwise a
+  // pnpm/yarn/bun workspace's tests run under the wrong manager (D11 / P-PIPE-runtime).
+  const pm = detectPackageManager(files, packageJsonRaw);
+  const exec = pmExec(pm);
 
-  // 1. The project's own `npm test` script (skipping the npm-init placeholder).
+  // 1. The project's own test script (skipping the npm-init placeholder), via its package manager.
   if (testScript) {
     const framework = jsRunnerOf(testScript) ?? 'npm-script';
     return {
       framework,
-      command: 'npm test --silent',
-      reason: `package.json defines a real "test" script (${testScript}); running it via npm test.`,
+      command: pmRun(pm, 'test'),
+      reason: `package.json defines a real "test" script (${testScript}); running it via ${pmRun(pm, 'test')}.`,
     };
   }
 
-  // 2. JS/TS runners by config file or declared dependency.
+  // 2. JS/TS runners by config file or declared dependency — invoked through the project's PM runner.
   if (has(/(^|\/)vitest\.config\.[cm]?[jt]s$/) || 'vitest' in deps) {
-    return { framework: 'vitest', command: 'npx vitest run', reason: 'Vitest config/dependency detected.' };
+    return { framework: 'vitest', command: `${exec} vitest run`, reason: `Vitest config/dependency detected (${pm}).` };
   }
   if (has(/(^|\/)jest\.config\.[cm]?[jt]s$/) || has(/(^|\/)jest\.config\.json$/) || 'jest' in deps) {
-    return { framework: 'jest', command: 'npx jest --ci', reason: 'Jest config/dependency detected.' };
+    return { framework: 'jest', command: `${exec} jest --ci`, reason: `Jest config/dependency detected (${pm}).` };
   }
   if (has(/(^|\/)playwright\.config\.[cm]?[jt]s$/) || '@playwright/test' in deps) {
-    return { framework: 'playwright', command: 'npx playwright test', reason: 'Playwright config/dependency detected.' };
+    return { framework: 'playwright', command: `${exec} playwright test`, reason: `Playwright config/dependency detected (${pm}).` };
   }
 
   // 3. Python — pytest by convention.

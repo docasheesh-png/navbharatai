@@ -13679,3 +13679,40 @@ deploy lag) — advised a hard-refresh / incognito test.
 
 Gate: frontend tsc 0, vitest 5902/5902 (~12 new), npm run build PASS. Client-only change (no server code
 touched → server tsc / boot:check N/A).
+
+## 2026-07-11 — AUTOPSY (Todo build report) → Fix 45: a VERIFIED-rendering app was reported as BUILD_PARTIAL (honesty bug)
+
+Admin sent a real v3.0 Todo-app build report (fifth-rule forensic autopsy). Whole report read end to end.
+
+**Ledger:** ✅ 79/79 issues auto-resolved; 15 files; npm install exit 0; preview published + rendered. ❌
+The delivered app fully built, compiled, AND its real-browser preview self-check verified "renders correctly" —
+yet the recorded outcome was `BUILD_PARTIAL` and `rootCause` = the tautology "Build outcome: BUILD_PARTIAL".
+A working app reported as partial = the exact honesty failure rule 5 forbids. 🥵 The `npm run dev` health-check
+logged "dev server did not come up on port 5173 after automatic recovery" while the preview published on that
+same 5173 and rendered 16s later (false-negative). ⏭️ Reviewer (87/100) flagged 5 nits (double-spacing CSS
+bug, value-vs-type import, missing aria-labels, no <main>, nextId anti-pattern) — none auto-fixed. ⚠️ Estimate
+"~28 min" vs ~3.7 min actual (recurring; also seen in the counter autopsy).
+
+**Root cause (❌, DNA-level fix):** SimpleBuilder classifies with `previewOk` unknown → BUILD_PARTIAL and
+explicitly DEFERS the upgrade to the route ("previewOk is left unknown here — the route's preview self-check can
+upgrade BUILD_PARTIAL → BUILD_SUCCESS", SimpleBuilder.ts:527). But that upgrade was NEVER wired: the route's
+real-browser self-check (agentv3.ts ~L5598) emitted the "✅ Preview verified — renders correctly" narration and
+`break`, without re-recording the outcome. `deriveRootCause` returns the LAST `OUTCOME_*` event, so the stale
+BUILD_PARTIAL stood as the verdict forever. Fix: new tested `BuildDiagnostics.recordPreviewVerified()` — records
+`OUTCOME_BUILD_SUCCESS` when (and only when) the last outcome is `BUILD_PARTIAL` or `PREVIEW_FAILED`, so a
+verified render honestly upgrades the verdict; it can NEVER overwrite TYPECHECK_FAILED/BUILD_FAILED/RUNTIME_FAILED
+and is idempotent. Wired at the route's verified-render point. Regression tests +6 (upgrade from PARTIAL, upgrade
+from PREVIEW_FAILED, refuses TYPECHECK_FAILED, refuses BUILD_FAILED, no-op with no outcome, idempotent).
+
+**Missing subsystem (Step 2):** a truthful outcome reconciler — the engine's own real-browser verdict must feed
+back into the recorded outcome. This fix wires exactly that feedback for the render signal.
+
+**Open root causes (rule 6 — honestly NOT blind-fixed):**
+- Health-check dev-server-up FALSE-NEGATIVE: the report carries only the health-check's conclusion, not the raw
+  Vite dev-log it failed to pattern-match, so the miss can't be root-caused without guessing. Need the raw
+  `npm run dev` output on recurrence. Recorded as open.
+- Build-time estimate wildly high (~28min/~3.7min): separate cosmetic miscalibration, queued (kept out of this
+  focused honesty fix).
+- Reviewer's 5 nits not auto-fixed: needs a post-review auto-fix subsystem — separate, larger work.
+
+Gate: frontend tsc 0, server tsc 0, vitest 5914/5914 (~6 new), boot:check PASS.

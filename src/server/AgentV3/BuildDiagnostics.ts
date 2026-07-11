@@ -632,6 +632,28 @@ export class BuildDiagnostics {
     this.record({ phase: 'build', severity: 'warning', code: 'DATA_LOSS_EVENT', message: `${cause}: ${detail}`.slice(0, 400), autoResolved: true });
   }
 
+  /**
+   * Fix 45 (autopsy 2026-07-11) — record the deferred outcome upgrade after the route's real-browser
+   * preview self-check CONFIRMED the app renders. SimpleBuilder classifies with previewOk unknown
+   * (→ BUILD_PARTIAL) and explicitly defers the upgrade to the route: "previewOk is left unknown here —
+   * the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS." That upgrade was never
+   * wired, so a verified-rendering app stayed labelled BUILD_PARTIAL and `deriveRootCause` (last OUTCOME_*)
+   * reported "Build outcome: BUILD_PARTIAL" for a working app — a false verdict (rule 5 honesty).
+   *
+   * Honest by construction: it ONLY upgrades when the LAST recorded outcome is BUILD_PARTIAL or
+   * PREVIEW_FAILED (the two "compiled but the live app was not (yet) verified / preview was down" states
+   * the browser check actually resolves). It can NEVER overwrite a TYPECHECK_FAILED / BUILD_FAILED /
+   * RUNTIME_FAILED, and it no-ops when there is no outcome yet or the app already reads BUILD_SUCCESS.
+   * Returns whether an upgrade was recorded (for tests / callers).
+   */
+  recordPreviewVerified(): boolean {
+    const last = [...this.issues].reverse().find((i) => i.code.startsWith('OUTCOME_'));
+    if (!last) return false; // no classification yet — nothing to upgrade
+    if (last.code !== 'OUTCOME_BUILD_PARTIAL' && last.code !== 'OUTCOME_PREVIEW_FAILED') return false;
+    this.record({ phase: 'build', severity: 'info', code: 'OUTCOME_BUILD_SUCCESS', message: 'Build outcome: BUILD_SUCCESS', autoResolved: true });
+    return true;
+  }
+
   report(): BuildDiagnosticsReport {
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;

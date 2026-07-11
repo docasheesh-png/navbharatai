@@ -13311,3 +13311,28 @@ Admin: "Slice B pehle se bana hai to aur polish karo, rock-solid banao" + Slice 
 
 No AppKnowledgeBase change (router priority = internal, per the AKB rules).
 Gate: tsc fe+server 0, vitest 5834/5834 (10 new), boot:check PASS.
+
+---
+
+## 2026-07-11 — Routing Slices F + H: power mode paid-only + dead ProChatPanel deleted
+
+**Slice F — POWER MODE (Only Opus) is for PAYING accounts only (plan §1 row 6):**
+- `FreeTierBuildRouting` += `powerModeBlockedForFreeUser(powerRequested, wallet)` (pure) +
+  `powerModePaidOnlyMessage()` (provider-agnostic, no model names). 4 new tests.
+- Route: inside the existing paid-surface gate (billing on + non-free-list), a power request from a
+  never-paid account is refused pre-stream with an honest 402 `POWER_MODE_PAID_ONLY` — BEFORE any
+  balance math, with the specific actionable reason. ONE wallet read now serves the whole gate
+  (power check via totalMoneySpent + balance via the same doc — removed the double Firestore read).
+- Client: the 402 handler accepts `POWER_MODE_PAID_ONLY` too → the actionable add-credits card
+  (with the power-specific notice) instead of a raw error banner.
+- With billing off, nothing changes (inert). Free-list admins/testers bypass entirely.
+
+**Slice H — Pro Chat removal (verified before deleting, honesty rule):**
+- `ProChatPanel.tsx` was DEAD CODE — never imported/rendered anywhere (App.tsx only mentions it in a
+  comment: "the old ProChatPanel (v2.0) is retired"). Deleted. Zero UI/behavior change.
+- The `'pro'` ROUTER NAMESPACE was NOT deleted: it is LIVE — chat.ts → UniversalAIRouter maps the
+  `vishwakarma-pro`/`vip` tiers to it (paying VIP chat, Opus→Sonnet). Deleting it would break VIP
+  chat. Honest boundary: the admin's "remove Pro Chat" = the unreachable panel (done); the VIP tier
+  chat surface stays.
+
+Gate: tsc fe+server 0, vitest 5838/5838 (4 new), boot:check PASS.

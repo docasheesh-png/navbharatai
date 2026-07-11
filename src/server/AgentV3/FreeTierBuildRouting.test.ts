@@ -4,6 +4,8 @@ import {
   isFreeTierUser,
   isFreeTierBuild,
   freeTierUpsellMessage,
+  powerModeBlockedForFreeUser,
+  powerModePaidOnlyMessage,
 } from './FreeTierBuildRouting';
 
 const ORIG = process.env.AGENTV3_FREE_TIER_CHEAP;
@@ -70,6 +72,28 @@ describe('isFreeTierBuild — the AND of every activation condition', () => {
 describe('freeTierUpsellMessage', () => {
   it('is friendly, provider-agnostic (no model names leaked to the user)', () => {
     const msg = freeTierUpsellMessage();
+    expect(msg).toMatch(/add credits/i);
+    expect(msg).not.toMatch(/claude|glm|kimi|gemini|vertex|opus|sonnet/i);
+  });
+});
+
+describe('powerModeBlockedForFreeUser — Slice F: power mode is for PAYING accounts only', () => {
+  it('blocks a power request from a never-paid account', () => {
+    expect(powerModeBlockedForFreeUser(true, { totalMoneySpent: 0 })).toBe(true);
+    expect(powerModeBlockedForFreeUser(true, null)).toBe(true); // unknown wallet = conservative block
+  });
+
+  it('allows a power request from a paying account', () => {
+    expect(powerModeBlockedForFreeUser(true, { totalMoneySpent: 500 })).toBe(false);
+  });
+
+  it('never touches a NORMAL (non-power) build, paid or not', () => {
+    expect(powerModeBlockedForFreeUser(false, { totalMoneySpent: 0 })).toBe(false);
+    expect(powerModeBlockedForFreeUser(false, null)).toBe(false);
+  });
+
+  it('the refusal message asks for credits without leaking model names', () => {
+    const msg = powerModePaidOnlyMessage();
     expect(msg).toMatch(/add credits/i);
     expect(msg).not.toMatch(/claude|glm|kimi|gemini|vertex|opus|sonnet/i);
   });

@@ -262,9 +262,12 @@ below in that same session** (hand-to-hand, so nothing drifts). Every name below
 the code (it is actually read somewhere) on 2026-07-11.
 
 - **Core / infra:** `NODE_ENV`, `GOOGLE_CLOUD_PROJECT` (GCP/Firestore project = `gen-lang-client-0866594388`),
-  `FIREBASE_PROJECT_ID` (the Firebase/AUTH project = `navbharatai-3395f` — a DIFFERENT project; needed for
-  auth-token verification, do NOT delete), `FIRESTORE_DATABASE_ID`, `SECRET_ENCRYPTION_KEY`,
-  `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+  `FIREBASE_PROJECT_ID` (the AUTH project `verifyIdToken` checks tokens against — this MUST equal the
+  CLIENT's `firebaseConfig.projectId` in `src/config/firebase.ts` = **`gen-lang-client-0866594388`**, the
+  SAME value as `GOOGLE_CLOUD_PROJECT` here. ⚠️ `navbharatai-3395f` is ONLY the Firebase **Hosting/CLI**
+  project in `.firebaserc` — do NOT put it here; a wrong project makes `verifyIdToken` reject every real
+  token → every user silently becomes 'anon' → login broken. Verified against the client config 2026-07-11),
+  `FIRESTORE_DATABASE_ID`, `SECRET_ENCRYPTION_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
 - **AI providers:** `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY` (code also accepts `XAI_API_KEY`
   — same thing, set only one), `GLM_API_KEY`, `GLM_MODEL`, `KIMI_API_KEY`, `KIMI_MODEL`
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`

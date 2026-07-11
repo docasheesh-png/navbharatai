@@ -26,6 +26,22 @@ describe('detectChecks', () => {
     expect(plans.find(p => p.language === 'go')!.command).toBe('go build ./...');
   });
 
+  it('detects a Gradle JVM project and prefers the gradlew wrapper (classes task)', () => {
+    const withWrapper = detectChecks(['build.gradle', 'gradlew', 'src/main/java/App.java']);
+    const java = withWrapper.find(p => p.language === 'java')!;
+    expect(java.command).toBe('./gradlew classes');
+
+    const ktsNoWrapper = detectChecks(['app/build.gradle.kts', 'src/main/kotlin/App.kt']);
+    expect(ktsNoWrapper.find(p => p.language === 'java')!.command).toBe('gradle classes');
+  });
+
+  it('prefers Maven over Gradle when both build files exist (single Java plan)', () => {
+    const plans = detectChecks(['pom.xml', 'build.gradle', 'src/main/java/App.java']);
+    const javaPlans = plans.filter(p => p.language === 'java');
+    expect(javaPlans).toHaveLength(1);
+    expect(javaPlans[0].command).toBe('mvn -q -B compile');
+  });
+
   it('returns [] when nothing checkable is present (honest — never a fake ok)', () => {
     expect(detectChecks(['index.html', 'style.css'])).toEqual([]);
     // TS without a tsconfig is not type-checkable in isolation here.
@@ -57,6 +73,14 @@ describe('parseCheckOutcome', () => {
     expect(o.ok).toBe(false);
     expect(o.errorCount).toBe(1);
     expect(o.firstErrors[0]).toContain('main.go:10:2');
+  });
+
+  it('Java — counts Kotlin "e:" compile-error lines (Gradle JVM)', () => {
+    const out = '> Task :compileKotlin FAILED\ne: /src/main/kotlin/App.kt: (12, 5): unresolved reference: foo\nBUILD FAILED\n';
+    const o = parseCheckOutcome(planFor('java'), 1, out, '');
+    expect(o.ok).toBe(false);
+    expect(o.errorCount).toBe(1);
+    expect(o.firstErrors.some(l => /unresolved reference/.test(l))).toBe(true);
   });
 
   it('Java — counts [ERROR] lines', () => {

@@ -300,6 +300,9 @@ Bedrock test-chat page — neither is in use.)
   canary — set to the 3 test accounts first, clear to widen to everyone.
 - Legacy per-feature overrides (normally NOT needed — the master covers both): `AGENTV3_FREE_TIER_CHEAP`,
   `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` (default 50000) tunes the new-wallet bonus.
+- **`AGENTV3_LINT_GATE`** (= `on`) — U-1 opt-in LintGate: after a successful build, block `ok:true` on real
+  ESLint **errors** (warnings/formatting never block). Default OFF = builds unchanged. Turn on once you want
+  ESLint enforced as a hard gate (a few canary builds first, like the readiness gate's escape hatch in reverse).
 
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 

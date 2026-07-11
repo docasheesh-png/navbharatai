@@ -644,6 +644,15 @@ export function readinessGateEnabled(): boolean {
 }
 
 /**
+ * U-1 — the LintGate is OFF by default (opt-IN, the opposite of the readiness gate): a build blocks on
+ * real ESLint errors only when the admin sets AGENTV3_LINT_GATE=on. Kept a separate canary switch so it
+ * can be measured on a few builds before it ever gates everyone (like the escalation rollout).
+ */
+export function lintGateEnabled(): boolean {
+  return process.env.AGENTV3_LINT_GATE === 'on';
+}
+
+/**
  * Billing Phase 3 — PER-TIER billing switch. Default OFF: the whole build is billed at the single
  * power-derived tier (billedAmountUsd), byte-identical to today. ON (AGENTV3_PER_TIER_BILLING=1|true):
  * the build is billed per the reconciled per-provider ledger, so a mixed build (cheap floor builds +
@@ -4740,6 +4749,9 @@ export function registerAgentV3Routes(app: Express): void {
       // existing app (its pre-existing hardcoded keys / SQL patterns are the user's, not this build's,
       // and surfacing "NOT READY 0/100" on their working production app is wrong + alarming).
       const runReadinessGate = readinessGateEnabled() && !isImportTurn;
+      // U-1 — LintGate follows the same top-level-only / not-on-import scoping as the readiness gate,
+      // but is OFF unless the admin opts in (AGENTV3_LINT_GATE=on). Default OFF → builds are unchanged.
+      const runLintGate = lintGateEnabled() && !isImportTurn;
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -4768,6 +4780,8 @@ export function registerAgentV3Routes(app: Express): void {
         // readiness gate; sub-agents (SubAgent.ts, separate opts) never do. An import+survey turn
         // opts out (runReadinessGate) so the gate never audits the user's freshly-imported code.
         readinessGate: runReadinessGate,
+        // U-1 — opt-in lint gate (default OFF); blocks a finished build on real ESLint errors when enabled.
+        lintGate: runLintGate,
         // WATCHDOG — hard wall-clock cap so a build can never hang for 20-30 min (0 = disabled).
         maxBuildMs: effectiveBuildSeconds * 1000,
         // AI Diagnosis Bundle #4 — capture every model turn's I/O (truncation, failures, latency)

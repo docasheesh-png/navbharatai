@@ -8,7 +8,8 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
-import { detectLinters, parseLintOutcome } from './lintRunner';
+import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
+import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults } from './appDefaults';
@@ -234,6 +235,33 @@ export class ToolDispatcher {
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
         return this.lastReadiness ?? permissive;
       })(), 45_000, 'assessBuildReadiness');
+    } catch {
+      return permissive;
+    }
+  }
+
+  /**
+   * U-1 — run the project's OWN ESLint (+ Prettier) and return the lint-gate verdict (ESLint errors
+   * block; warnings/formatting do not). Default-OFF gate: AgentRunner only calls this when the admin
+   * enables AGENTV3_LINT_GATE. Best-effort + timeout-bounded: on no linter, an internal error, or a
+   * slow run it returns a NON-blocking verdict so it can never fail a real build on its own trouble.
+   */
+  async assessLintGate(): Promise<LintGateVerdict> {
+    const permissive: LintGateVerdict = { blocked: false, errorCount: 0, blockers: [], summary: 'Lint gate: not assessed.' };
+    try {
+      return await withTimeout((async () => {
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plans = detectLinters(files, pkgRaw);
+        if (!plans.length) return permissive; // no ESLint/Prettier configured → nothing to gate on
+        const outcomes: LintOutcome[] = [];
+        for (const plan of plans) {
+          const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+          outcomes.push(parseLintOutcome(plan, exitCode, stdout, stderr));
+        }
+        return lintGateVerdict(outcomes);
+      })(), 45_000, 'assessLintGate');
     } catch {
       return permissive;
     }

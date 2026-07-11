@@ -63,10 +63,12 @@ import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, on
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { firebaseConfig } from './config/firebase';
 
-const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
-export const auth = getAuth();
-setPersistence(auth, browserLocalPersistence);
-export const db = getFirestore(app, firebaseConfig.firestoreDbId);
+// Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
+// initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
+// depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
+// Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
+import { auth, db } from './lib/firebase';
+export { auth, db };
 
 /**
  * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync

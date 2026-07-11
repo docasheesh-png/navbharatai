@@ -37,6 +37,19 @@ export function reviewerAutoFixEnabled(): boolean {
   return process.env.AGENTV3_REVIEWER_AUTOFIX !== 'off';
 }
 
+/**
+ * EXTENDS the C9 reviewer auto-fix to also repair FUNCTIONAL [WARNING] findings (not just
+ * [CRITICAL]). OFF by default (canary — autopsy 2026-07-11): the Notes report's real bugs
+ * ("auto-focus broke", "sort ignores edits", "isAtLimit blocks Add") were all warnings, so C9
+ * skipped them and they shipped. Flip AGENTV3_REVIEW_AUTOFIX_WARNINGS=on after a few canary builds
+ * prove the extra repair is clean. Only functional warnings are fixed (selectAutoFixableWarnings
+ * filters out cosmetic/a11y/style), and it rides the SAME single bounded C9 repair pass — no new
+ * cost path, never blocks a build.
+ */
+export function reviewerWarningAutoFixEnabled(): boolean {
+  return process.env.AGENTV3_REVIEW_AUTOFIX_WARNINGS === 'on';
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);

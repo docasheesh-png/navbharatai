@@ -50,6 +50,34 @@ function parseReviewOutput(text: string): ReviewIssue[] {
   return issues;
 }
 
+// Post-review auto-fix scope (autopsy 2026-07-11, Notes report): the C9 repair pass fixes the
+// reviewer's [CRITICAL] findings, but the Notes app's REAL functional bugs were all [WARNING]
+// severity ("auto-focus broke", "sort ignores edits", "isAtLimit blocks Add") — so they shipped
+// unfixed. Not every warning deserves an (expensive) repair pass though: a11y polish, landmarks,
+// naming and pure style are advisory. These two pure classifiers split a WARNING into "functional
+// (a stated behaviour is broken/missing → worth fixing)" vs "cosmetic (advisory polish → leave it)".
+
+/** Cosmetic / advisory warning signals — NOT worth an auto-repair pass (a11y polish, naming, style). */
+const COSMETIC_WARNING_RE = /\b(aria-?\w*|landmark|<main>|semantic|role=|naming|readability|consider (adding|using|renaming)|could be|would be (nice|better|cleaner)|stylistic|cosmetic|whitespace|formatting|indentation|spacing|margin|padding|comment(s|ing)?|prefer\b|nit\b|minor)\b/i;
+
+/** Functional / correctness signals — a warning that names BROKEN behaviour or an unmet requirement. */
+const FUNCTIONAL_WARNING_RE = /\b(broke\w*|does ?n'?t|do ?n'?t|not work\w*|fail\w*|bug|incorrect|wrong|invalid|missing|never (fires|works|holds|updates|renders)|steal\w* focus|conflict\w*|ignor\w*|unnecessar\w*|block\w*|mismatch\w*|off-by|race\b|crash\w*|throw\w*|undefined\b|null\b|requirement|logic error)\b/i;
+
+/**
+ * From a reviewer's issues, pick the WARNINGs worth an automatic repair pass: functional/correctness
+ * warnings (a behaviour the user asked for is broken or missing), excluding purely cosmetic/advisory
+ * ones. Pure & deterministic — a fuzzy classifier over the reviewer's own text, kept conservative
+ * (must match a functional signal AND not read as cosmetic) so it never churns on style nits.
+ */
+export function selectAutoFixableWarnings(issues: ReviewIssue[]): ReviewIssue[] {
+  if (!Array.isArray(issues)) return [];
+  return issues.filter((i) =>
+    i && i.severity === 'warning' && typeof i.message === 'string' && i.message.trim().length > 0
+    && FUNCTIONAL_WARNING_RE.test(i.message)
+    && !COSMETIC_WARNING_RE.test(i.message),
+  );
+}
+
 /** Source-file extensions that mean "there is real reviewable code in the workspace". */
 const SOURCE_RE = /\.(tsx?|jsx?|html?|css|scss|vue|svelte|astro|mjs|cjs|py|go|java|php|rb|rs|swift|kt)$/i;
 

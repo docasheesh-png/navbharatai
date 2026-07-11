@@ -13531,3 +13531,28 @@ Recorded (separate, honestly not blind-fixed): the "~23 min" build-time estimate
 counter is wildly off (built in ~3 min) — cosmetic, queued. The in-browser preview's 25s timeout the
 user saw is the Fix-29 watchdog firing honestly (generic "slow network / module hung" = no specific CDN
 error recorded); needs the named failed-module to root-cause — asked the admin to send it if it recurs.
+
+## 2026-07-11 — SEC Phase 5 (partial): zip-bomb / decompression-DoS guard in extractZipProject
+
+Context: a PARALLEL session had already executed most of the admin-approved Security Master Plan and
+merged it — Phase 0 (identityPolicy.ts), Phase 1.1 (pro-chat/pro-build retired → 410), Phase 1.3
+(bill-or-refuse anon), Phase 1.4 (durable rate-limit + global anon ceiling), Phase 2.1-2.4 (report
+secret-redaction + bare-env block), Phase 3.1/3.2 (anon bucket + verified-uid gate for private
+report/trace reads), Phase 4 (cross-origin preview), and the encryption-key fail-loud. The whole
+/api/engineer-* family was deleted in the v3.0 cutover. Per safeguard #6 I did NOT duplicate any of
+that. The one clear, self-contained OPEN gap (the admin's own "evil zip upload" fear, untouched by
+their auth/preview work): extractZipProject had NO decompression-bomb guard — `entry.async('string')`
+fully expands each entry into memory BEFORE any size check, so a few-KB zip inflating 1000:1 OOM-kills
+the Node process (affecting all tenants on that instance).
+
+Fix: new pure `zipEntryDeclaredBytes(entry)` reads the declared uncompressed size defensively (0 when
+unavailable → degrades to the existing post-decompress caps, never worse). Guards added: (1) up-front
+entry-count cap (IMPORT_MAX_ZIP_ENTRIES=60k) + running declared-uncompressed-total cap
+(IMPORT_MAX_DECOMPRESSED_BYTES=300MB) in the listing pass — a bomb is rejected with an honest error
+BEFORE any entry is expanded; (2) a per-entry declared-size skip before each `entry.async()` so a
+single inflate-in-one-entry payload is dropped without decompressing. Legit imports never affected
+(60k entries / 300MB is far above any real app). Tests: +3 (declared-bytes helper incl. unavailable/
+negative; a 4MB over-inflating entry dropped without landing; a normal small zip imports unchanged).
+Gate: frontend tsc 0, server tsc 0, vitest 5886/5886, boot PASS. Remaining Phase-5 low items
+(admin-token TTL, extract-zip source-traversal) left for the parallel session or a follow-up — noted,
+not duplicated.

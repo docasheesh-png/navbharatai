@@ -164,7 +164,7 @@ import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -200,7 +200,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings } from '../AgentV3/ReviewerAgent';
 import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
@@ -5968,13 +5968,24 @@ export function registerAgentV3Routes(app: Express): void {
           // AGENTV3_AUTOFIX meant v3.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
           // best-effort — never blocks/fails the build; the fix's writes are saved.
           const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
+          // Option 2 (canary, autopsy 2026-07-11): also repair FUNCTIONAL [WARNING] findings — the
+          // Notes report's real bugs ("auto-focus broke", "sort ignores edits", "isAtLimit blocks
+          // Add") were warnings, so C9 (criticals-only) shipped them. selectAutoFixableWarnings keeps
+          // only functional ones (cosmetic/a11y/style excluded); gated OFF by default until canaried.
+          const warningFixes = reviewerWarningAutoFixEnabled()
+            ? selectAutoFixableWarnings(review?.issues ?? []).map((i) => i.message.trim()).filter(Boolean)
+            : [];
+          const autoFixItems = [...criticals, ...warningFixes];
           // NEVER on an import/survey turn (2026-07-07): the user said "do not change any files yet",
           // the reviewer found criticals in the IMPORTED code, and this pass went and edited the
           // project anyway — a direct instruction violation. On import turns the findings stay
           // advisory; the user decides ("create the missing files") — the AI turn already has the
           // [IMPORT COMPLETENESS] context to do it on request.
-          if (criticals.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted && !isImportTurn) {
-            events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${criticals.length} critical issue(s) — fixing them now…`, ts: Date.now() });
+          if (autoFixItems.length && reviewerAutoFixEnabled() && reviewHeadroomOk && !abort.signal.aborted && !isImportTurn) {
+            const label = warningFixes.length
+              ? `${criticals.length} critical + ${warningFixes.length} functional issue(s)`
+              : `${criticals.length} critical issue(s)`;
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${label} — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ claudeFirst: true }),
@@ -5982,15 +5993,15 @@ export function registerAgentV3Routes(app: Express): void {
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             try {
-              const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, criticals)), 120_000, 'reviewer-critical-autofix');
+              const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), 120_000, 'reviewer-autofix');
               if (fix.ok) result = fix;
               // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
               // TURN's writes (on an edit turn that's a handful of files), and the old
               // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
               // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
               if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
-              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${criticals.length} reviewer critical issue(s)`, autoResolved: true }); } catch { /* best-effort */ }
-            } catch (e) { console.log(`[AGENTV3] reviewer-critical auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
+              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${label} from the reviewer`, autoResolved: true }); } catch { /* best-effort */ }
+            } catch (e) { console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }

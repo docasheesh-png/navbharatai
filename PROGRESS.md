@@ -13873,3 +13873,28 @@ Gate: frontend tsc 0, server tsc 0, vitest 5947/5947 (+13), `npm run build` PASS
 
 NEXT `.aab`: this is a phase/checkpoint that changes the app — build a fresh signed `.aab` (android-aab.yml)
 so the update-prompt + rating features ship to Play (per the Play-release rule in CLAUDE.md).
+
+## 2026-07-11 — Fix 50 (Option 2): reviewer auto-fix extended to FUNCTIONAL warnings (canary, default OFF)
+
+Admin approved "dono" (canary the integrity gate AND build post-review auto-fix). Note: admin set
+`AGENTV3_INTEGRITY_GATE=on` in Cloud Run (Fix 46's self-heal now live as a canary — recorded in the env
+registry).
+
+**Gap (safeguard #6 — most already existed):** a post-review auto-fix ALREADY exists — "C9" in the route
+(agentv3.ts ~L5906) fixes the reviewer's `[CRITICAL]` findings, default-ON. But the Notes report's REAL
+functional bugs were all `[WARNING]` severity (auto-focus conflict, sort-ignores-edits, isAtLimit blocks
+Add, maxLength/isSaveDisabled mismatch) — so C9 skipped them and they shipped. That is the genuine gap.
+
+**Fix:** pure `selectAutoFixableWarnings(issues)` in ReviewerAgent.ts — keeps only FUNCTIONAL warnings
+(a stated behaviour broken/missing: broke/doesn't-work/fails/ignores/blocks/conflict/mismatch/…) and
+EXCLUDES cosmetic/advisory ones (aria/landmark/semantic/naming/spacing/style/"consider"). New flag
+`reviewerWarningAutoFixEnabled()` (`AGENTV3_REVIEW_AUTOFIX_WARNINGS=on`, default OFF — canary). When on, the
+route's C9 block adds the functional warnings to the SAME single bounded repair pass (no new cost path,
+never blocks a build). Two of the Notes warnings (focus, duplicate-stylesheet) are ALSO covered
+deterministically by Fix 46's integrity gate — complementary, harmless overlap. Tests +6 (real Notes
+warnings picked; cosmetic excluded; severity filter; junk-input robust; conservative when both-worded).
+
+Env registry (CLAUDE.md) updated: `AGENTV3_INTEGRITY_GATE` now SET to `on` (admin, canary); new
+`AGENTV3_REVIEW_AUTOFIX_WARNINGS` documented (default OFF).
+
+Gate: frontend tsc 0, server tsc 0, vitest (+6 new), boot:check PASS.

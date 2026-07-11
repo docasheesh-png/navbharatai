@@ -1,6 +1,56 @@
 import { describe, it, expect } from 'vitest';
-import { reviewBuild, formatReview, isReviewFailureSummary } from './ReviewerAgent';
+import { reviewBuild, formatReview, isReviewFailureSummary, selectAutoFixableWarnings } from './ReviewerAgent';
+import type { ReviewIssue } from './ReviewerAgent';
 import type { SubAgentSpawn } from './ToolDispatcher';
+
+// Option 2 (autopsy 2026-07-11, Notes report): the C9 auto-fix only repaired [CRITICAL] findings,
+// but the Notes app's real functional bugs were all [WARNING] — so they shipped. This classifier
+// picks the FUNCTIONAL warnings worth an auto-repair while leaving cosmetic/advisory ones alone.
+describe('selectAutoFixableWarnings — functional warnings in, cosmetic warnings out', () => {
+  const w = (message: string): ReviewIssue => ({ severity: 'warning', message });
+
+  it('picks the REAL Notes-report functional warnings', () => {
+    const issues: ReviewIssue[] = [
+      w('Double auto-focus conflict — NoteEditor steals focus from SearchBar; the note input never holds focus'),
+      w('Sort applied before filter but sorted on createdAt only, ignoring edits'),
+      w('isAtLimit blocks the Add Note button unnecessarily'),
+    ];
+    const picked = selectAutoFixableWarnings(issues).map((i) => i.message);
+    expect(picked).toHaveLength(3);
+  });
+
+  it('EXCLUDES cosmetic / a11y / style advisories', () => {
+    const issues: ReviewIssue[] = [
+      w('No aria-label on the Complete/Delete buttons for screen readers'),
+      w('No <main> landmark element — consider adding one for semantics'),
+      w('Naming convention: prefer PascalCase for the component file'),
+      w('Double spacing between the input and list (margin + gap)'),
+    ];
+    expect(selectAutoFixableWarnings(issues)).toHaveLength(0);
+  });
+
+  it('only considers WARNING severity (criticals + suggestions are handled elsewhere / left)', () => {
+    const issues: ReviewIssue[] = [
+      { severity: 'critical', message: 'Login is completely broken' },
+      { severity: 'suggestion', message: 'this does not work well, consider refactor' },
+      w('the delete button does not work'),
+    ];
+    const picked = selectAutoFixableWarnings(issues);
+    expect(picked).toHaveLength(1);
+    expect(picked[0].message).toContain('delete button');
+  });
+
+  it('is robust to junk input (non-array, empty/blank messages)', () => {
+    expect(selectAutoFixableWarnings(undefined as unknown as ReviewIssue[])).toEqual([]);
+    expect(selectAutoFixableWarnings([{ severity: 'warning', message: '' } as ReviewIssue])).toEqual([]);
+    expect(selectAutoFixableWarnings([{ severity: 'warning', message: '   ' } as ReviewIssue])).toEqual([]);
+  });
+
+  it('a warning that is BOTH functional and cosmetic-worded stays conservative (cosmetic wins → skipped)', () => {
+    // "consider" + "aria" read as advisory even though "missing" appears — don't churn on it.
+    expect(selectAutoFixableWarnings([w('Missing aria-label — consider adding one')])).toHaveLength(0);
+  });
+});
 
 const makeSpawn =
   (summary: string): SubAgentSpawn =>

@@ -303,6 +303,16 @@ Bedrock test-chat page — neither is in use.)
 - **`AGENTV3_LINT_GATE`** (= `on`) — U-1 opt-in LintGate: after a successful build, block `ok:true` on real
   ESLint **errors** (warnings/formatting never block). Default OFF = builds unchanged. Turn on once you want
   ESLint enforced as a hard gate (a few canary builds first, like the readiness gate's escape hatch in reverse).
+- **`AGENTV3_INTEGRITY_GATE`** (= `on`) — **SET to `on` by the admin 2026-07-11 (canary).** After a build,
+  auto-fix two deterministic defect classes the analyzer suite missed: multiple mount-focus owners (broke
+  "auto-focus") and a stylesheet imported by 2+ modules. Default OFF only RECORDS the findings honestly;
+  `on` runs a bounded LLM self-heal (never blocks/fails a build). Applies to ALL builds when on (no per-user
+  scoping yet — fine in test mode; add scoping before wide public exposure).
+- **`AGENTV3_REVIEW_AUTOFIX_WARNINGS`** (= `on`) — canary extension of the C9 reviewer auto-fix: also repair
+  the reviewer's **functional** `[WARNING]` findings (e.g. "sort ignores edits", "isAtLimit blocks Add"), not
+  just `[CRITICAL]`. Cosmetic/a11y/style warnings are always excluded (`selectAutoFixableWarnings`). Rides the
+  SAME single bounded C9 repair pass — no new cost path. Default OFF; flip on after a canary proves it clean.
+  (The C9 critical auto-fix itself stays default-ON; kill switch `AGENTV3_REVIEWER_AUTOFIX=off`.)
 
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 

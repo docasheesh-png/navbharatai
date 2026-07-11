@@ -8,6 +8,18 @@ import type { Express, Request, Response, RequestHandler } from 'express';
 const passthrough: RequestHandler = (_req, _res, next) => next();
 
 /**
+ * SECURITY — true when a zip entry path escapes the extraction root: an absolute path (`/etc/…`), a
+ * Windows drive path (`C:\…`), or any `..` segment (`../../etc/passwd`). Backslashes are normalised
+ * first so `..\..\` is caught too. Pure + unit-tested. (Same rule as ProjectImport.safeImportPath,
+ * inlined to keep this yauzl route free of the jszip import chain.)
+ */
+export function isTraversalPath(p: string): boolean {
+  const s = String(p || '').replace(/\\/g, '/');
+  if (s.startsWith('/') || /^[a-zA-Z]:/.test(s)) return true;
+  return s.split('/').some((seg) => seg === '..');
+}
+
+/**
  * ZIP import/export routes extracted from the server.ts monolith (Phase 1).
  * Self-contained — uses fs/path/crypto + yauzl (extract) and zip-stream (download).
  * Behavior unchanged.
@@ -112,6 +124,14 @@ export function registerZipRoutes(app: Express, limiter: RequestHandler = passth
 
               const entryPath = (prefixToStrip && rawPath.startsWith(prefixToStrip))
                 ? rawPath.slice(prefixToStrip.length) : rawPath;
+
+              // SECURITY (SEC Phase 5 — traversal rejection at the source): refuse any entry whose
+              // path escapes the extraction root — a `..` segment or an absolute/drive path
+              // (`../../etc/passwd`, `/etc/passwd`, `C:\…`). Downstream sinks already re-sanitize, but
+              // this route emitted the raw traversal path to the client; rejecting it here means the
+              // hostile path never leaves the parser. Mirrors safeImportPath's rule (kept inline to
+              // avoid importing the jszip-heavy ProjectImport module into this yauzl route).
+              if (isTraversalPath(entryPath)) { send({ type: 'skipped', path: entryPath, reason: 'unsafe path' }); next(); return; }
 
               // Skip empty paths, directories, and unwanted folders (node_modules/.git/etc.)
               if (!entryPath || entryPath.endsWith('/') || SKIP_RE.test('/' + rawPath)) { next(); return; }

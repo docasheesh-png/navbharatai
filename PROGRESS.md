@@ -13589,3 +13589,12 @@ window) → resolved as signed-in, not cancel; genuine cancel → null after the
 during the window don't resolve early. Existing `popupFailureAction` tests unchanged.
 
 Gate: frontend tsc 0, server tsc 0, vitest 5887/5887 (~4 new), npm run build PASS, boot:check PASS.
+## 2026-07-11 — SEC Phase 5 (item 1/2): /api/extract-zip rejects path-traversal at the source
+
+The zip.ts extract route (yauzl) was already bomb-safe (uncompressedSize pre-check + mid-stream abort),
+but it emitted a traversal entry path (`../../etc/passwd`, `/etc/passwd`, `C:\…`) straight to the
+client — safe only because every downstream write sink re-sanitizes. Closed the gap at the source: new
+pure `isTraversalPath(p)` (absolute / drive / any `..` segment, backslashes normalised) skips a hostile
+entry with an honest 'unsafe path' before it leaves the parser. Kept inline (not imported from the
+jszip-heavy ProjectImport) so this yauzl route stays light. Tests: +3. Gate: frontend tsc 0, server tsc
+0, vitest 5889/5889, boot PASS. Remaining Phase-5 item: admin static-token TTL/expiry, then re-audit.

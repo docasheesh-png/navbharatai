@@ -17,6 +17,8 @@ export {
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
   isAgentV3CreditGateEnabled,
+  costRoutingEnabled,
+  costRoutingActiveFor,
   buildRequiresSignIn,
 } from './featureFlag';
 export { decideAffordability } from './Affordability';

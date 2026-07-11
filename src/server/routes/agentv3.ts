@@ -73,6 +73,7 @@ import {
   isAgentV3FreeUser,
   isAgentV3PaidPublicEnabled,
   isAgentV3CreditGateEnabled,
+  costRoutingActiveFor,
   buildRequiresSignIn,
   estimateBuildCost,
   readWalletBalanceInr,
@@ -3170,7 +3171,9 @@ export function registerAgentV3Routes(app: Express): void {
     // user to paid (upsell) rather than rescuing on Claude — see the build-failed handling below.
     let freeTierBuildActive = false;
     if (
-      freeTierCheapEnabled() &&
+      // Slice G: the ONE master switch (AGENTV3_COST_ROUTING, per-user canary via _USERS) turns this
+      // on; the older per-feature flag stays honored as a surgical override. Either activates it.
+      (freeTierCheapEnabled() || costRoutingActiveFor(userId, email)) &&
       userId &&
       (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) &&
       !isAgentV3FreeUser(userId, email) &&
@@ -6036,9 +6039,11 @@ export function registerAgentV3Routes(app: Express): void {
       // remainder lands in the 'other' bucket. Cost is unchanged unless per-tier billing is flipped ON.
       const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), buildUsage.total());
       const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
-      // With the flag OFF this is exactly flatBilledUsd (today's behavior). ON, it prices each tier's
-      // share separately (Sonnet work at ×3). Both are recorded to telemetry so the flip is measured.
-      let effectiveBilledUsd = perTierBillingEnabled()
+      // With the flags OFF this is exactly flatBilledUsd (today's behavior). ON — the per-feature
+      // flag OR the Slice-G cost-routing master (same per-user canary as the routing, so a canary
+      // user's cheap-led build is billed on the same regime it ran on) — it prices each tier's share
+      // separately (Sonnet work at ×3). Both are recorded to telemetry so the flip is measured.
+      let effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
         ? perTierBilledUsd(reconciledProviderUsage, powerLevelReq)
         : flatBilledUsd;
       // NEVER charge for a build that produced nothing. If the user asked for an app/edit and

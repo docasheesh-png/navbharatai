@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled, isAgentV3CreditGateEnabled, buildRequiresSignIn } from './featureFlag';
+import { agentV3FreeList, isAgentV3FreeUser, isAgentV3PaidPublicEnabled, isAgentV3CreditGateEnabled, buildRequiresSignIn, costRoutingEnabled, costRoutingActiveFor } from './featureFlag';
 
 const save = { ...process.env };
 afterEach(() => {
@@ -7,10 +7,14 @@ afterEach(() => {
   process.env.AGENTV3_ALLOWLIST = save.AGENTV3_ALLOWLIST;
   process.env.AGENTV3_PAID_PUBLIC = save.AGENTV3_PAID_PUBLIC;
   process.env.AGENTV3_CREDIT_GATE = save.AGENTV3_CREDIT_GATE;
+  process.env.AGENTV3_COST_ROUTING = save.AGENTV3_COST_ROUTING;
+  process.env.AGENTV3_COST_ROUTING_USERS = save.AGENTV3_COST_ROUTING_USERS;
   if (save.AGENTV3_FREE_LIST === undefined) delete process.env.AGENTV3_FREE_LIST;
   if (save.AGENTV3_ALLOWLIST === undefined) delete process.env.AGENTV3_ALLOWLIST;
   if (save.AGENTV3_PAID_PUBLIC === undefined) delete process.env.AGENTV3_PAID_PUBLIC;
   if (save.AGENTV3_CREDIT_GATE === undefined) delete process.env.AGENTV3_CREDIT_GATE;
+  if (save.AGENTV3_COST_ROUTING === undefined) delete process.env.AGENTV3_COST_ROUTING;
+  if (save.AGENTV3_COST_ROUTING_USERS === undefined) delete process.env.AGENTV3_COST_ROUTING_USERS;
 });
 
 describe('isAgentV3PaidPublicEnabled — money-path master switch (default OFF)', () => {
@@ -98,5 +102,39 @@ describe('buildRequiresSignIn — Phase 1.3 bill-or-refuse (anon paid build is r
     process.env.AGENTV3_ALLOWLIST = ''; // public: empty allowlist matches nobody → anon refused
     expect(buildRequiresSignIn(null, 'drive-by@public.com')).toBe(true);
     expect(buildRequiresSignIn(null, null)).toBe(true);
+  });
+});
+
+describe('costRoutingEnabled / costRoutingActiveFor — the Slice-G ONE master switch (+ canary)', () => {
+  it('is OFF by default and only "on"/"true" turn it on (a typo stays a safe no-op)', () => {
+    delete process.env.AGENTV3_COST_ROUTING;
+    expect(costRoutingEnabled()).toBe(false);
+    process.env.AGENTV3_COST_ROUTING = 'glm'; // stray value → OFF, never a silent enable
+    expect(costRoutingEnabled()).toBe(false);
+    process.env.AGENTV3_COST_ROUTING = 'on';
+    expect(costRoutingEnabled()).toBe(true);
+    process.env.AGENTV3_COST_ROUTING = 'TRUE';
+    expect(costRoutingEnabled()).toBe(true);
+  });
+
+  it('master OFF ⇒ nobody is in the regime, regardless of the canary list', () => {
+    delete process.env.AGENTV3_COST_ROUTING;
+    process.env.AGENTV3_COST_ROUTING_USERS = 'tester@x.com';
+    expect(costRoutingActiveFor('uid1', 'tester@x.com')).toBe(false);
+  });
+
+  it('master ON + EMPTY canary ⇒ everyone is in the regime', () => {
+    process.env.AGENTV3_COST_ROUTING = 'on';
+    delete process.env.AGENTV3_COST_ROUTING_USERS;
+    expect(costRoutingActiveFor('any-uid', 'anyone@x.com')).toBe(true);
+    expect(costRoutingActiveFor(null, null)).toBe(true);
+  });
+
+  it('master ON + canary list ⇒ ONLY the listed uid/email (case-insensitive email)', () => {
+    process.env.AGENTV3_COST_ROUTING = 'on';
+    process.env.AGENTV3_COST_ROUTING_USERS = 'uid-42, Tester@X.com';
+    expect(costRoutingActiveFor('uid-42', null)).toBe(true);
+    expect(costRoutingActiveFor(null, 'tester@x.com')).toBe(true); // case-insensitive
+    expect(costRoutingActiveFor('other-uid', 'other@x.com')).toBe(false);
   });
 });

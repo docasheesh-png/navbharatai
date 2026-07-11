@@ -102,3 +102,32 @@ export function buildRequiresSignIn(verifiedUserId: string | null, email: string
   if (verifiedUserId) return false;
   return !matchesIdentityList(agentV3Allowlist(), null, email);
 }
+
+/**
+ * COST-ROUTING master switch (Slice G, NAVBHARATAI_ROUTING_PLAN.md §3 — admin 2026-07-11: "kam flags
+ * = kam galti"). ONE switch turns the whole cheap-routing regime on: free-tier cheap-only builds
+ * (no Claude for never-paid users) and per-tier billing (Sonnet share ×3). The older per-feature
+ * flags (AGENTV3_FREE_TIER_CHEAP, AGENTV3_PER_TIER_BILLING) remain honored as independent overrides
+ * for surgical rollback of one behavior, but the admin only needs THIS one. Default OFF = today's
+ * exact behavior. Accepts 'on' or 'true'.
+ */
+export function costRoutingEnabled(): boolean {
+  const v = (process.env.AGENTV3_COST_ROUTING || '').trim().toLowerCase();
+  return v === 'on' || v === 'true';
+}
+
+/**
+ * Per-user CANARY for the cost-routing regime (plan §4). `AGENTV3_COST_ROUTING_USERS` is an optional
+ * comma-separated uid/email list: set it to the test accounts to trial the regime narrowly (the live
+ * bake-off — watch usage-report/telemetry, then clear the list to widen to everyone). Empty/unset =
+ * every user once the master is on. Master off = nobody, regardless of the list.
+ */
+export function costRoutingActiveFor(userId?: string | null, email?: string | null): boolean {
+  if (!costRoutingEnabled()) return false;
+  const canary = (process.env.AGENTV3_COST_ROUTING_USERS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (canary.length === 0) return true;
+  return matchesIdentityList(canary, userId, email);
+}

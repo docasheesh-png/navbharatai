@@ -31,7 +31,19 @@ export const triggerCashfreeCheckout = (sessionId: string, environment?: string)
     script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
     script.async = true;
     script.onload = () => {
-      startCheckout(sessionId, environment);
+      // Guard: if the script tag resolved but the global still isn't a function (blocked/partial
+      // load), don't call into `undefined` and die silently — surface an honest error instead.
+      if (typeof (window as any).Cashfree === 'function') {
+        startCheckout(sessionId, environment);
+      } else {
+        window.alert('Payment gateway could not initialize. Please retry, or disable any script blocker and try again.');
+      }
+    };
+    // Without onerror a blocked/failed SDK load (CSP, network, ad-blocker) fails SILENTLY — the
+    // "Purchase" button appears to do nothing. Surface the real reason so it is never a silent dead-end.
+    script.onerror = () => {
+      console.error('Cashfree SDK failed to load from sdk.cashfree.com (blocked or offline).');
+      window.alert('Could not load the secure payment gateway. Check your connection or any content/script blocker, then try again.');
     };
     document.body.appendChild(script);
   }

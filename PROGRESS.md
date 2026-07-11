@@ -13922,3 +13922,23 @@ Also synced the CLAUDE.md env registry: AGENTV3_LINT_GATE=on (LintGate live) and
 AGENTV3_PAID_PUBLIC=true + AGENTV3_CREDIT_GATE=true (billing LIVE) — both admin-enabled today.
 
 Gate: fe tsc 0, build PASS, vitest 5897/5897 (frontend-only text/layout change — no server/boot needed).
+
+## 2026-07-11 — ROOT CAUSE: payment "atka hua" = CSP blocked the Cashfree SDK (admin report)
+
+Admin: Cashfree keys are set but payment is stuck ("purchase par click se kuch nahi hota"). Root-caused
+end to end (rule 4): frontend createBillingOrder → POST /api/payment/create-order (returns a real
+paymentSessionId) → triggerCashfreeCheckout injects sdk.cashfree.com/js/v3/cashfree.js as a <script>.
+That script host was NOT in the CSP script-src (securityHeaders.ts) → the browser BLOCKED the SDK load →
+onload never fired → checkout never booted → the button silently did nothing. There was also NO onerror
+handler, so the failure was completely silent (no error surfaced).
+
+Fix (root + honesty + regression):
+1. Added `https://sdk.cashfree.com` to CSP scriptSrc (securityHeaders.ts) — the SDK loads now, checkout
+   boots. frameSrc/connectSrc already allow https so the checkout frame + API were never the blocker.
+2. paymentService.ts: added script.onerror + an onload init-guard — a blocked/failed SDK load now
+   surfaces an honest error instead of a silent dead-end (rule 5 — the system tells the truth).
+3. Regression test in tests/security/headers.test.ts asserting sdk.cashfree.com stays in the CSP, so a
+   future CSP tighten can never silently re-break payments.
+
+Gate: tsc fe+server 0, vitest 5947/5947, build PASS, boot:check PASS. (Same PR also carries the wallet
+token-wording + Buy-card-promote UI and the billing-flag registry sync.)

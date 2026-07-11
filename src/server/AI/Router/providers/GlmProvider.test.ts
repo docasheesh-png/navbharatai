@@ -60,4 +60,44 @@ describe('GlmProvider', () => {
     await glm.execute('hi');
     expect(createMock.mock.calls[0][0].model).toBe('glm-4.7-flashx');
   });
+
+  // Rock-solid hardening (admin 2026-07-11): a free tier that "succeeds" with nothing is a failure.
+  it('throws on an HTTP-200 EMPTY reply so the chain falls through (never a blank answer)', async () => {
+    process.env.GLM_API_KEY = 'k';
+    createMock.mockResolvedValue({ choices: [{ message: { content: '' } }] });
+    const glm = new GlmProvider();
+    await expect(glm.execute('hi')).rejects.toThrow(/empty reply/);
+    createMock.mockResolvedValue({ choices: [{ message: { content: '   ' } }] });
+    await expect(glm.execute('hi')).rejects.toThrow(/empty reply/); // whitespace-only too
+  });
+
+  it('trims the returned content (no stray whitespace shells)', async () => {
+    process.env.GLM_API_KEY = 'k';
+    createMock.mockResolvedValue({ choices: [{ message: { content: '  hello  ' } }] });
+    const glm = new GlmProvider();
+    const res = await glm.execute('hi');
+    expect(res.content).toBe('hello');
+  });
+
+  it('a stream that completes with ZERO chunks throws (silent-empty stream = failure)', async () => {
+    process.env.GLM_API_KEY = 'k';
+    createMock.mockResolvedValue({ [Symbol.asyncIterator]: async function* () { /* no chunks */ } });
+    const glm = new GlmProvider();
+    await expect(glm.executeStream('hi', undefined, () => {})).rejects.toThrow(/no content/);
+  });
+
+  it('a healthy stream forwards chunks and returns the full text', async () => {
+    process.env.GLM_API_KEY = 'k';
+    createMock.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield { choices: [{ delta: { content: 'hel' } }] };
+        yield { choices: [{ delta: { content: 'lo' } }] };
+      },
+    });
+    const glm = new GlmProvider();
+    const chunks: string[] = [];
+    const full = await glm.executeStream('hi', undefined, (c) => chunks.push(c));
+    expect(full).toBe('hello');
+    expect(chunks).toEqual(['hel', 'lo']);
+  });
 });

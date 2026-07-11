@@ -4,18 +4,21 @@ import { visionProviderOrder, runVisionChain } from './visionChain';
 describe('visionProviderOrder — universe isolation', () => {
   it('Free universe (allowClaude=false) NEVER includes Claude', () => {
     const order = visionProviderOrder(false);
-    expect(order).toEqual(['VERTEX', 'GEMINI', 'GROK']);
+    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI', 'GROK']);
     expect(order).not.toContain('CLAUDE');
   });
 
-  it('leads with Vertex so the Free universe reads images AND PDFs via its primary Google auth', () => {
-    expect(visionProviderOrder(false)[0]).toBe('VERTEX');
-    expect(visionProviderOrder(true)[0]).toBe('VERTEX');
+  // Slice C (NAVBHARATAI_ROUTING_PLAN.md §1 row 3): GLM-4.6V-Flash is $0 in/out, so it leads —
+  // a free image turn costs NavBharatAI nothing; Vertex stays right behind it for PDFs + fallback.
+  it('leads with GLM (free vision) and keeps Vertex second for PDFs/fallback', () => {
+    expect(visionProviderOrder(false)[0]).toBe('GLM');
+    expect(visionProviderOrder(true)[0]).toBe('GLM');
+    expect(visionProviderOrder(false)[1]).toBe('VERTEX');
   });
 
   it('non-Free universes may use Claude, but only as the LAST resort', () => {
     const order = visionProviderOrder(true);
-    expect(order).toEqual(['VERTEX', 'GEMINI', 'GROK', 'CLAUDE']);
+    expect(order).toEqual(['GLM', 'VERTEX', 'GEMINI', 'GROK', 'CLAUDE']);
     expect(order[order.length - 1]).toBe('CLAUDE');
   });
 });

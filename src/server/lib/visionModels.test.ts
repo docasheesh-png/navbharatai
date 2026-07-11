@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   claudeVisionModel,
   claudeVisionAnswerModel,
+  glmVisionModels,
   grokVisionModels,
   geminiVisionModels,
   vertexVisionModels,
@@ -10,6 +11,7 @@ import {
 const ENV_KEYS = [
   'VISION_CLAUDE_MODEL',
   'VISION_CLAUDE_ANSWER_MODEL',
+  'VISION_GLM_MODELS',
   'VISION_GROK_MODELS',
   'VISION_GEMINI_MODELS',
   'VISION_VERTEX_MODELS',
@@ -39,6 +41,13 @@ describe('visionModels — current, env-overridable vision model ids', () => {
     expect(geminiVisionModels()[0]).toBe('gemini-2.5-flash');
     expect(vertexVisionModels()[0]).toBe('gemini-2.5-flash');
     expect(geminiVisionModels().length).toBeGreaterThan(1); // has a fallback
+  });
+
+  // Slice C — the FREE vision leader ($0 in/out on Z.AI, verified 2026-07-11).
+  it('GLM vision defaults to the free glm-4.6v-flash and honors VISION_GLM_MODELS', () => {
+    expect(glmVisionModels()).toEqual(['glm-4.6v-flash']);
+    process.env.VISION_GLM_MODELS = 'glm-5v-turbo, glm-4.6v-flash';
+    expect(glmVisionModels()).toEqual(['glm-5v-turbo', 'glm-4.6v-flash']);
   });
 
   it('env overrides win and are parsed as comma-separated lists', () => {

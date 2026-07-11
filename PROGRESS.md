@@ -13283,3 +13283,31 @@ Vision chain (visionChain.ts: VERTEX → GEMINI → GROK → CLAUDE) does NOT ye
 that remains Slice C's real work.
 
 Gate: tsc fe+server 0, vitest 5824/5824 (3 new), boot:check PASS.
+
+---
+
+## 2026-07-11 — Routing Slices B-polish + C: GLM free chat hardened rock-solid + GLM free vision leader
+
+Admin: "Slice B pehle se bana hai to aur polish karo, rock-solid banao" + Slice C (vision).
+
+**B-polish — GlmProvider (free chat leader) hardening (3 surgical fixes, 5 new tests):**
+- CHAT-leader timeout 60s → 20s (env GLM_CHAT_TIMEOUT_MS): a hung Z.AI free tier now fails fast so
+  Vertex answers in seconds, not after a minute (60s was the BUILD floor's number; chat turns are small).
+- HTTP-200-with-EMPTY-content now THROWS at the provider (free tiers do this when rate-limited) — the
+  router already guarded, but the provider-level throw makes every future caller safe (class fix) and
+  the returned content is trimmed.
+- A stream that completes with ZERO chunks now THROWS (silent-empty stream = failure, not success) —
+  the router's catch path (cooldown + race-partner/honest busy message) takes over; a user can never
+  be left staring at nothing.
+
+**Slice C — GLM-4.6V-Flash leads the vision chain (free image turns = ₹0):**
+- `visionModels.ts` += `glmVisionModels()` (default `glm-4.6v-flash` — $0 in/out on Z.AI, verified
+  against the official pricing 2026-07-11; env VISION_GLM_MODELS).
+- `visionChain.ts` += `tryGlm` (OpenAI-compatible, mirrors tryGrok's data-URL shape; images only —
+  an image+PDF batch defers to Vertex/Gemini which read both; gates on GLM_API_KEY; hard timeout).
+- Order now GLM → VERTEX → GEMINI → GROK (+ CLAUDE last for non-free universes only, unchanged).
+  On any GLM failure/rate-limit the chain continues exactly as before — reliability unchanged, cost down.
+- visionChain/visionModels tests updated + extended (order, free-leader, env override).
+
+No AppKnowledgeBase change (router priority = internal, per the AKB rules).
+Gate: tsc fe+server 0, vitest 5834/5834 (10 new), boot:check PASS.

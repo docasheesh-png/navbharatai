@@ -24,6 +24,16 @@ export class GlmProvider implements AIProvider {
     return process.env.GLM_CHAT_MODEL || 'glm-4.7-flash';
   }
 
+  /**
+   * CHAT-leader timeout (rock-solid hardening, admin 2026-07-11). A chat turn is small — if the free
+   * tier hangs, the user must NOT wait a minute before Vertex answers. 20s default (vs the build
+   * floor's 60s, which carries much larger prompts); env-tunable without a deploy.
+   */
+  private static timeoutMs(): number {
+    const n = Number(process.env.GLM_CHAT_TIMEOUT_MS);
+    return Number.isFinite(n) && n > 0 ? n : 20_000;
+  }
+
   // Lazily constructed: `new OpenAI({ apiKey: '' })` throws, which would crash
   // server boot whenever the GLM key is absent (e.g. CI). Build the client only
   // when actually used (the router skips GLM via healthCheck when no key).
@@ -33,7 +43,7 @@ export class GlmProvider implements AIProvider {
       this._client = new OpenAI({
         apiKey: process.env.GLM_API_KEY || 'missing-key',
         baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4',
-        timeout: 60_000, // fail fast so the router can fall through quickly
+        timeout: GlmProvider.timeoutMs(), // fail fast so the router falls through quickly
         maxRetries: 0,
       });
     }
@@ -56,8 +66,14 @@ export class GlmProvider implements AIProvider {
 
     const response = await this.client.chat.completions.create({ model, messages, max_tokens: 8000 });
 
+    // Rock-solid: an HTTP-200 with EMPTY content is NOT an answer (free tiers do this when
+    // rate-limited/overloaded). Throw at the provider level so EVERY caller — current router
+    // (which also guards) or any future one — falls through instead of showing a blank reply.
+    const content = response.choices[0]?.message?.content?.trim();
+    if (!content) throw new Error('GLM returned an empty reply — deferring to the next provider');
+
     return {
-      content: response.choices[0]?.message?.content || '',
+      content,
       latencyMs: Date.now() - startTime,
       provider: 'GLM',
       model,
@@ -79,6 +95,10 @@ export class GlmProvider implements AIProvider {
       const text = chunk.choices[0]?.delta?.content || '';
       if (text) { full += text; onChunk(text); }
     }
+    // Rock-solid: a stream that completed without ONE chunk is a silent failure, not a success —
+    // returning '' quietly would leave the user staring at nothing. Throw so the router's catch
+    // path (cooldown + fallback/honest busy message) takes over.
+    if (!full.trim()) throw new Error('GLM stream produced no content — deferring to the next provider');
     return full;
   }
 

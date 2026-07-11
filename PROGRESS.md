@@ -13381,3 +13381,30 @@ typecheck tool comments/messages and the ToolCatalog run_tests description; no u
 no AppKnowledgeBase entry (backend engine capability).
 
 Gate: tsc fe+server 0, vitest 5829/5829 (3 new here; 5 in #1186), build PASS, boot:check PASS.
+
+## 2026-07-11 — Gradle toolchain pins (D11) — completes the rule-3 JVM sibling hunt
+
+Third and final sibling of the Maven-only JVM blindness (after run_tests #1186 and typecheck #1190):
+`toolchainPins.ts` (the D11 check_toolchain tool) read the declared Java version ONLY from pom.xml, so
+a Gradle Java/Kotlin/Android project's pinned JVM was invisible to the drift check.
+
+- Added Gradle parsing to analyzeToolchain: build.gradle / build.gradle.kts → JavaLanguageVersion.of(N)
+  (toolchain block), Kotlin jvmToolchain(N), and source/targetCompatibility (= '17' | 1.8 |
+  JavaVersion.VERSION_17). Source label "build.gradle(.kts) toolchain".
+- Added build.gradle + build.gradle.kts to the check_toolchain `wanted` file list (ToolDispatcher).
+- ROOT-CAUSE (rule 5 — fix the class): introduced a shared javaKey() normalizer used for BOTH pom.xml
+  and Gradle, correctly mapping Java's legacy 1.x scheme (1.8 / VERSION_1_8 → real major 8) instead of
+  the old major() that returned "1" for 1.8. This also fixes a latent Maven bug AND prevents a false
+  inconsistency when a Gradle "1.8" and a Maven "1.8" would otherwise normalize to different keys.
+- Updated the header comment, the "No toolchain pins declared" summary, and the ToolCatalog
+  check_toolchain description to include Gradle. 4 regression tests (JavaLanguageVersion.of(17)→17,
+  VERSION_17→17, legacy 1.8→8 with no false inconsistency, Gradle-17-vs-Maven-11 flagged).
+
+Net: Gradle is now first-class across ALL THREE JVM-aware verify tools — run_tests (B4), typecheck
+(B6), and check_toolchain (D11). The Maven-only hole is fully closed. Backend engine capability → no
+AppKnowledgeBase entry.
+
+Also this session: .aab release build #11 GREEN on main (signed app-release.aab ready for the admin to
+download + upload to Play Console): https://github.com/docasheesh-png/navbharatai/actions/runs/29146168513
+
+Gate: tsc fe+server 0, vitest 5849/5849 (4 new), build PASS, boot:check PASS.

@@ -1,5 +1,6 @@
 // D11 (roadmap Tier 2) — toolchain version pinning check. Big / imported repos pin exact toolchains
-// (.nvmrc, engines, .python-version, go.mod, pom.xml java.version) and fail cryptically on drift. This
+// (.nvmrc, engines, .python-version, go.mod, Maven pom.xml + Gradle build.gradle Java) and fail
+// cryptically on drift. This
 // surfaces the toolchain a project DECLARES and flags INTERNAL contradictions (two files disagreeing on
 // the version) — a real, silent cause of "works for them, breaks here" that no other check catches.
 //
@@ -38,6 +39,30 @@ function majorMinor(raw: string): string | null {
   const one = raw.match(/(\d+)/);
   return one ? one[1] : null;
 }
+/**
+ * Normalize a Java version to its real major. Java's legacy scheme (1.8, VERSION_1_8) means Java 8,
+ * so the plain `major()` (first integer → "1") is WRONG for it; this maps 1.x → x and 17/VERSION_17 → 17.
+ * Used for every Java source (pom.xml AND Gradle) so the two never falsely disagree over "1.8" vs "8".
+ */
+function javaKey(raw: string): string | null {
+  const legacy = raw.match(/1[._](\d+)/); // 1.8, 1_8, VERSION_1_8 → the real major (8)
+  if (legacy) return legacy[1];
+  const modern = raw.match(/(\d+)/); // 17, VERSION_17, 11
+  return modern ? modern[1] : null;
+}
+/**
+ * Extract the declared Java version from a Gradle build script (Groovy `build.gradle` or Kotlin
+ * `build.gradle.kts`): the JVM toolchain block, Kotlin's jvmToolchain, or source/targetCompatibility.
+ */
+function gradleJavaVersion(content: string): string | null {
+  const toolchain = content.match(/JavaLanguageVersion\.of\(\s*(\d+)\s*\)/);
+  if (toolchain) return toolchain[1];
+  const jvm = content.match(/jvmToolchain\(\s*(\d+)\s*\)/); // Kotlin `kotlin { jvmToolchain(17) }`
+  if (jvm) return jvm[1];
+  const compat = content.match(/(?:source|target)Compatibility\s*=?\s*(?:JavaVersion\.)?(VERSION_[\d_]+|["']?\d[\d.]*["']?)/);
+  if (compat) return compat[1].replace(/["']/g, '');
+  return null;
+}
 
 function readJson(raw: string | undefined): Record<string, unknown> | null {
   if (!raw) return null;
@@ -73,14 +98,21 @@ export function analyzeToolchain(files: Record<string, string>): ToolchainResult
     if (m) add('python', 'pyproject.toml requires-python', m[1], majorMinor(m[1]));
   }
 
-  // ── Java ──
-  if (files['.java-version'] != null) { const v = files['.java-version'].trim(); add('java', '.java-version', v, major(v)); }
+  // ── Java / JVM ──
+  if (files['.java-version'] != null) { const v = files['.java-version'].trim(); add('java', '.java-version', v, javaKey(v)); }
   if (files['pom.xml'] != null) {
     const jv = files['pom.xml'].match(/<java\.version>\s*([^<]+?)\s*<\/java\.version>/);
-    if (jv) add('java', 'pom.xml java.version', jv[1], major(jv[1]));
+    if (jv) add('java', 'pom.xml java.version', jv[1], javaKey(jv[1]));
     else {
       const cs = files['pom.xml'].match(/<maven\.compiler\.(?:source|release)>\s*([^<]+?)\s*</);
-      if (cs) add('java', 'pom.xml maven.compiler', cs[1], major(cs[1]));
+      if (cs) add('java', 'pom.xml maven.compiler', cs[1], javaKey(cs[1]));
+    }
+  }
+  // Gradle — the JVM toolchain / source-compat in build.gradle(.kts) declares the Java version.
+  for (const gf of ['build.gradle', 'build.gradle.kts']) {
+    if (files[gf] != null) {
+      const gv = gradleJavaVersion(files[gf]);
+      if (gv) add('java', `${gf} toolchain`, gv, javaKey(gv));
     }
   }
 
@@ -110,7 +142,7 @@ export function analyzeToolchain(files: Record<string, string>): ToolchainResult
     .filter(Boolean);
   const summary = declarations.length
     ? `Declared toolchain: ${parts.join(', ')}.` + (inconsistencies.length ? ` ${inconsistencies.length} inconsistency(ies).` : ' Consistent.')
-    : 'No toolchain pins declared (.nvmrc / engines / .python-version / go.mod / pom.xml).';
+    : 'No toolchain pins declared (.nvmrc / engines / .python-version / go.mod / pom.xml / build.gradle).';
 
   return { declarations, inconsistencies, summary };
 }

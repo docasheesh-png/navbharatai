@@ -13433,3 +13433,27 @@ launcher). They are behavior-correct today; converging them onto the shared modu
 best done with those subsystems' own tests in view. Backend engine capability → no AppKnowledgeBase entry.
 
 Gate: tsc fe+server 0, vitest 5860/5860 (11 new), build PASS, boot:check PASS.
+
+## 2026-07-11 — U-1 LintGate behind a default-OFF flag (admin-requested)
+
+The admin asked to build the LintGate behind a default-OFF flag (safe canary pattern, like the
+escalation rollout). Done — real, fully wired, and byte-identical to today until the flag is set.
+
+- NEW pure `LintGate.ts` — `lintGateVerdict(outcomes)` blocks ONLY on ESLint errors; Prettier
+  formatting and ESLint warnings never block; an unparseable ESLint run (errorCount null) never blocks
+  (best-effort). 6 unit tests.
+- `ToolDispatcher.assessLintGate()` — mirrors assessBuildReadiness: runs the project's detected linters
+  (detectLinters + parseLintOutcome), timeout-bounded (45s), returns a NON-blocking permissive verdict
+  on no-linter / internal error / slowness so it can never fail a real build on its own trouble.
+- `AgentRunner` — new `lintGate?` opt (default false). When on AND the build is still ok, at BOTH the
+  normal finish and the step-cap exit it runs assessLintGate and downgrades ok:false with an honest
+  "N ESLint errors — fix before shipping" summary. 3 AgentRunner tests (ON+errors→false, ON+clean→true,
+  OFF→unaffected).
+- `routes/agentv3.ts` — `lintGateEnabled()` (`AGENTV3_LINT_GATE === 'on'`, default OFF) + `runLintGate`
+  (same top-level-only / not-on-import scoping as the readiness gate) wired into baseRunnerOpts.
+- CLAUDE.md flag registry updated with `AGENTV3_LINT_GATE`.
+
+Default OFF → every build path is unchanged until the admin opts in; backend engine capability → no
+AppKnowledgeBase entry. This is the safe, measurable way to enforce ESLint as a hard gate.
+
+Gate: tsc fe+server 0, vitest 5869/5869 (9 new), build PASS, boot:check PASS.

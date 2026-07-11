@@ -39,6 +39,43 @@ function safeStrEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ba, bb);
 }
 
+/** Admin session lifetime (SEC Phase 5, F8). Default 30 days — long enough not to log the admin out
+ *  mid-work, but no longer INFINITE: a leaked token now expires instead of granting permanent access.
+ *  Env-tunable (`ADMIN_TOKEN_TTL_HOURS`); clamped to a sane [1h, 365d] range. */
+export function adminTokenTtlMs(rawHours?: string): number {
+  const h = Number(rawHours);
+  const hours = Number.isFinite(h) && h > 0 ? h : 720; // 720h = 30 days
+  return Math.min(Math.max(hours, 1), 365 * 24) * 60 * 60 * 1000;
+}
+
+/**
+ * Mint a TIME-STAMPED admin token: `<issuedAtMs>.<HMAC(pass, "admin:v2:<user>:<issuedAtMs>")>`. The
+ * issued-at is part of the signed payload, so it can't be forged forward, and `verifyAdminTokenValue`
+ * rejects it once older than the TTL. Replaces the old static (never-expiring) HMAC. Pure.
+ */
+export function mintAdminToken(pass: string, username: string, issuedAtMs: number): string {
+  const sig = crypto.createHmac('sha256', pass).update(`admin:v2:${username}:${issuedAtMs}`).digest('hex');
+  return `${issuedAtMs}.${sig}`;
+}
+
+/**
+ * Verify a timestamped admin token: the signature must match AND the token must be within the TTL.
+ * A malformed / legacy (dotless) / expired token fails — the admin simply logs in again (their
+ * password still works). Constant-time signature compare. Pure + unit-tested.
+ */
+export function verifyAdminTokenValue(token: string, pass: string, username: string, nowMs: number, ttlMs: number): boolean {
+  if (!token || !pass) return false;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return false; // legacy static / malformed → must re-login
+  const issuedAt = Number(token.slice(0, dot));
+  const sig = token.slice(dot + 1);
+  if (!Number.isFinite(issuedAt) || issuedAt <= 0) return false;
+  if (nowMs - issuedAt > ttlMs) return false; // expired
+  if (issuedAt - nowMs > 60_000) return false; // issued in the future (clock skew tolerance) → reject
+  const expected = crypto.createHmac('sha256', pass).update(`admin:v2:${username}:${issuedAt}`).digest('hex');
+  return safeStrEqual(sig, expected);
+}
+
 /**
  * Normalise an admin credential read from the environment. Cloud Run / console /
  * gcloud frequently store a value with a trailing newline, stray whitespace, or
@@ -120,10 +157,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           return res.status(401).json({ error: 'Invalid authenticator code.', mfaRequired: true });
         }
       }
-      // Static token — no daily rotation so sessions don't break at midnight UTC.
-      const token = crypto.createHmac('sha256', validPass)
-        .update(`admin:static:${username}`)
-        .digest('hex');
+      // SEC Phase 5 (F8): a TIME-STAMPED token with a 30-day TTL (was a static, never-expiring HMAC).
+      // The issued-at is signed in, so a leaked token now expires instead of granting permanent access.
+      const token = mintAdminToken(validPass, username, Date.now());
       audit('ADMIN_LOGIN_SUCCESS', { username, ip: req.ip, mfa: mfa.enabled });
       return res.json({ ok: true, token });
     }
@@ -140,12 +176,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const token = req.headers['x-admin-token'] as string;
     const validPass = adminPassword();
     if (!validPass || !token) return res.status(401).json({ error: 'Admin token required.' });
-    const expected = crypto.createHmac('sha256', validPass)
-      .update(`admin:static:${adminUsername()}`)
-      .digest('hex');
-    if (!safeStrEqual(token, expected)) {
+    // SEC Phase 5 (F8): verify the signature AND the TTL — an expired/legacy/forged token is rejected
+    // (the admin re-logs in; their password still works). A 401 (not 403) on expiry so the client
+    // knows to prompt for login rather than treat it as a permissions error.
+    if (!verifyAdminTokenValue(token, validPass, adminUsername(), Date.now(), adminTokenTtlMs(process.env.ADMIN_TOKEN_TTL_HOURS))) {
       audit('ADMIN_ACCESS_DENIED', { ip: req.ip, path: req.path });
-      return res.status(403).json({ error: 'Forbidden.' });
+      return res.status(401).json({ error: 'Admin session expired — please log in again.' });
     }
     next();
   };

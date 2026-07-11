@@ -13598,3 +13598,16 @@ pure `isTraversalPath(p)` (absolute / drive / any `..` segment, backslashes norm
 entry with an honest 'unsafe path' before it leaves the parser. Kept inline (not imported from the
 jszip-heavy ProjectImport) so this yauzl route stays light. Tests: +3. Gate: frontend tsc 0, server tsc
 0, vitest 5889/5889, boot PASS. Remaining Phase-5 item: admin static-token TTL/expiry, then re-audit.
+
+## 2026-07-11 — SEC Phase 5 (item 2/2): admin token TTL/expiry (F8)
+
+The admin session token was a STATIC, never-expiring HMAC — a single leak granted permanent access.
+Replaced with a TIME-STAMPED token `<issuedAtMs>.<HMAC(pass,"admin:v2:<user>:<issuedAtMs>")>` and a
+30-day TTL (env-tunable ADMIN_TOKEN_TTL_HOURS, clamped [1h,365d]). New pure helpers mintAdminToken /
+verifyAdminTokenValue / adminTokenTtlMs (unit-tested): verify checks the signature AND the age, and
+rejects a legacy dotless / malformed / future-dated / expired token → 401 "log in again" (was 403), so
+the client prompts re-login. One-time transition cost: existing admin sessions re-login once (the token
+lives in sessionStorage, already ephemeral; the password + MFA are unchanged). Tests: +5 (fresh verify,
+wrong pass/user/sig, expiry boundary, legacy/future reject, TTL clamp). The consistency regression test
+now exercises the REAL mint/verify. Gate: frontend tsc 0, server tsc 0, vitest 5893/5893, boot PASS.
+Both Phase-5 hardening items done; next is the final 4-agent re-audit.

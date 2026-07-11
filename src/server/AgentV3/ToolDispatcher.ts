@@ -1454,7 +1454,7 @@ export class ToolDispatcher {
       }
 
       case 'run_tests': {
-        // B4 — detect and RUN the project's OWN test suite (vitest/jest/playwright/pytest/JUnit/go),
+        // B4 — detect and RUN the project's OWN test suite (vitest/jest/playwright/pytest/Maven/Gradle/go),
         // then read honest pass/fail counts. Stronger evidence than `tsc` alone: the build is EARNED.
         // Detection + parsing are pure (testRunner.ts); this only wires them to the sandbox actuator.
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
@@ -1463,7 +1463,7 @@ export class ToolDispatcher {
         const plan = detectTestPlan(files, pkgRaw);
         if (!plan) {
           const msg = 'run_tests: no test suite detected (no real npm "test" script, no vitest/jest/playwright ' +
-            'config, no pytest/JUnit/go tests). Seed real tests with generate_tests, then run_tests again — ' +
+            'config, no pytest/Maven/Gradle/go tests). Seed real tests with generate_tests, then run_tests again — ' +
             'do NOT report the build verified without running tests.';
           this.state?.appendTerminal(msg);
           return msg;

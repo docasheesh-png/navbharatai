@@ -1,11 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { detectPackageManager } from '../lib/packageManager';
 
 export class WorkspaceLauncher {
     async detectPackageManager(workspaceId: string): Promise<'npm' | 'pnpm' | 'yarn'> {
-        if (fs.existsSync(path.join(workspaceId, 'pnpm-lock.yaml'))) return 'pnpm';
-        if (fs.existsSync(path.join(workspaceId, 'yarn.lock'))) return 'yarn';
-        return 'npm';
+        // Delegate to the shared detector (single source of truth). The launcher handles npm/pnpm/yarn,
+        // so a bun project maps to npm — identical to the prior behavior.
+        const present = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'bun.lockb']
+            .filter((f) => fs.existsSync(path.join(workspaceId, f)));
+        const pm = detectPackageManager(present);
+        return pm === 'bun' ? 'npm' : pm;
     }
 
     installDependencies(workspaceId: string, packageManager: string): [string, string[]] {

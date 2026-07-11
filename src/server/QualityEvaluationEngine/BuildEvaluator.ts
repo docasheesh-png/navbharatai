@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import util from 'util';
+import { detectPackageManager } from '../lib/packageManager';
 const execPromise = util.promisify(exec);
 
 export class BuildEvaluator {
@@ -17,8 +18,11 @@ export class BuildEvaluator {
     }
 
     private detectPackageManager(workspaceId: string): 'npm' | 'pnpm' | 'yarn' {
-        if (fs.existsSync(path.join(workspaceId, 'pnpm-lock.yaml'))) return 'pnpm';
-        if (fs.existsSync(path.join(workspaceId, 'yarn.lock'))) return 'yarn';
-        return 'npm';
+        // Delegate to the shared detector (single source of truth). This evaluator's `build` command
+        // supports npm/pnpm/yarn, so a bun project maps to npm — identical to the prior behavior.
+        const present = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'bun.lockb']
+            .filter((f) => fs.existsSync(path.join(workspaceId, f)));
+        const pm = detectPackageManager(present);
+        return pm === 'bun' ? 'npm' : pm;
     }
 }

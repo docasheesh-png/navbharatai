@@ -13408,3 +13408,28 @@ Also this session: .aab release build #11 GREEN on main (signed app-release.aab 
 download + upload to Play Console): https://github.com/docasheesh-png/navbharatai/actions/runs/29146168513
 
 Gate: tsc fe+server 0, vitest 5849/5849 (4 new), build PASS, boot:check PASS.
+
+## 2026-07-11 — Centralized package-manager detection (D12 / P-PIPE-runtime) — drifted-duplicate root cause
+
+Root-cause fix (CLAUDE.md rule 2 — fix the class, not the instance). Package-manager detection was
+DUPLICATED and had drifted: PreviewRunner/WorkspaceLauncher and QualityEvaluationEngine/BuildEvaluator
+each carried their own fs-based copy (npm/pnpm/yarn, no bun, no packageManager field), while the AgentV3
+verify tools (testRunner) HARDCODED `npm test` — so a pnpm/yarn/bun project's tests ran under the wrong
+manager (a real latent bug).
+
+- NEW `src/server/lib/packageManager.ts` (pure, dependency-free, neutral location): detectPackageManager
+  (packageManager field wins → lockfile bun→pnpm→yarn→npm precedence) + pmRun / pmExec / pmInstall
+  command builders. 9 unit tests.
+- Wired testRunner.detectTestPlan to run the project's OWN test script + inferred runners through its PM
+  (pnpm run test / yarn test / bun run test; pnpm exec vitest / bunx jest / yarn playwright). npm projects
+  are behavior-identical (npm run test ≡ npm test; npx unchanged). 2 new tests.
+- Hunted siblings (rule 3): WorkspaceLauncher + BuildEvaluator now DELEGATE to the shared detector
+  (behavior-preserving — both handle npm/pnpm/yarn, so a bun project maps to npm exactly as before);
+  the drifted literal copies are gone.
+
+Honest remaining siblings (rule 6 — tracked, not silently patched): a couple of tiny inline forks still
+exist in other subsystems (e.g. DeploymentArtifactBuilder's `yarn.lock ? yarn : npm`, ServerContainerRuntime's
+launcher). They are behavior-correct today; converging them onto the shared module is a low-risk follow-up
+best done with those subsystems' own tests in view. Backend engine capability → no AppKnowledgeBase entry.
+
+Gate: tsc fe+server 0, vitest 5860/5860 (11 new), build PASS, boot:check PASS.

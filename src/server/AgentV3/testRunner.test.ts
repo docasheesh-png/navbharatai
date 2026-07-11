@@ -5,12 +5,28 @@ import { detectTestPlan, parseTestOutcome, type TestPlan } from './testRunner';
 // every framework branch with real-shaped tool output — no sandbox needed.
 
 describe('detectTestPlan', () => {
-  it('prefers the project\'s own real npm test script', () => {
+  it('prefers the project\'s own real test script (npm by default)', () => {
     const pkg = JSON.stringify({ scripts: { test: 'vitest run' }, devDependencies: { vitest: '^2' } });
     const plan = detectTestPlan(['package.json', 'src/a.test.ts'], pkg);
     expect(plan).not.toBeNull();
     expect(plan!.framework).toBe('vitest');
-    expect(plan!.command).toBe('npm test --silent');
+    expect(plan!.command).toBe('npm run test');
+  });
+
+  it('runs the test script under the project\'s own package manager (pnpm/yarn/bun)', () => {
+    const pkg = JSON.stringify({ scripts: { test: 'vitest run' } });
+    expect(detectTestPlan(['package.json', 'pnpm-lock.yaml'], pkg)!.command).toBe('pnpm run test');
+    expect(detectTestPlan(['package.json', 'yarn.lock'], pkg)!.command).toBe('yarn test');
+    expect(detectTestPlan(['package.json', 'bun.lockb'], pkg)!.command).toBe('bun run test');
+    // Corepack packageManager field wins even without a lockfile.
+    const pinned = JSON.stringify({ scripts: { test: 'vitest run' }, packageManager: 'pnpm@9.0.0' });
+    expect(detectTestPlan(['package.json'], pinned)!.command).toBe('pnpm run test');
+  });
+
+  it('invokes an inferred runner through the project\'s PM exec (pnpm exec / bunx)', () => {
+    expect(detectTestPlan(['vitest.config.ts', 'pnpm-lock.yaml'])!.command).toBe('pnpm exec vitest run');
+    expect(detectTestPlan(['jest.config.js', 'bun.lockb'])!.command).toBe('bunx jest --ci');
+    expect(detectTestPlan(['playwright.config.ts', 'yarn.lock'])!.command).toBe('yarn playwright test');
   });
 
   it('ignores the npm-init placeholder test script and falls through to config detection', () => {

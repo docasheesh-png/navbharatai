@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { computeCreditedWallet, inrToWalletTokens, inrToDebitTokens, TOKENS_PER_RUPEE, type WalletCreditTx } from '../src/server/lib/payments';
+import { afterEach } from 'vitest';
+import { computeCreditedWallet, inrToWalletTokens, inrToDebitTokens, welcomeBonusTokens, TOKENS_PER_RUPEE, type WalletCreditTx } from '../src/server/lib/payments';
 
 const T = '2026-07-05T00:00:00.000Z';
 const EMPTY = { tokenBalance: 0, totalTokensPurchased: 0, totalMoneySpent: 0, remaining_balance: 0, total_balance: 0, walletLedger: [] };
@@ -110,5 +111,33 @@ describe('inrToDebitTokens — the DEBIT conversion rounds UP (margin protection
     expect(inrToDebitTokens(-5)).toBe(0);
     expect(inrToDebitTokens(NaN)).toBe(0);
     expect(inrToDebitTokens(Infinity)).toBe(0);
+  });
+});
+
+describe('welcomeBonusTokens — new-wallet mint (admin routing plan 2026-07-11)', () => {
+  const ORIG = process.env.WELCOME_BONUS_TOKENS;
+  afterEach(() => {
+    if (ORIG === undefined) delete process.env.WELCOME_BONUS_TOKENS;
+    else process.env.WELCOME_BONUS_TOKENS = ORIG;
+  });
+
+  it('defaults to 50,000 tokens (₹500 equivalent — a first real build fits inside the bonus)', () => {
+    delete process.env.WELCOME_BONUS_TOKENS;
+    expect(welcomeBonusTokens()).toBe(50_000);
+    expect(welcomeBonusTokens() / TOKENS_PER_RUPEE).toBe(500); // the ₹ mirror derives cleanly
+  });
+
+  it('is env-overridable from Cloud Run (no deploy needed to tune it)', () => {
+    process.env.WELCOME_BONUS_TOKENS = '10000';
+    expect(welcomeBonusTokens()).toBe(10_000);
+    process.env.WELCOME_BONUS_TOKENS = '0'; // switching the bonus off entirely is a valid choice
+    expect(welcomeBonusTokens()).toBe(0);
+  });
+
+  it('a bad override (non-numeric / negative) falls back to the default, never NaN', () => {
+    process.env.WELCOME_BONUS_TOKENS = 'lots';
+    expect(welcomeBonusTokens()).toBe(50_000);
+    process.env.WELCOME_BONUS_TOKENS = '-5';
+    expect(welcomeBonusTokens()).toBe(50_000);
   });
 });

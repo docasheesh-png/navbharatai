@@ -13260,3 +13260,26 @@ remaining clean+non-risky+non-billing Tier 1 item to build — the earlier "paus
 gate-enforce" turned out to be moot because the gate is already live. Honest end-of-run stands.
 
 Gate: docs-only change (ROADMAP.md + PROGRESS.md) — no code touched.
+
+---
+
+## 2026-07-11 — Routing Slice A: welcome bonus 1,000 → 50,000 tokens (+ Slice B verified already built)
+
+Per NAVBHARATAI_ROUTING_PLAN.md (admin-finalized). Slice A: a new wallet now mints 50,000 tokens
+(₹500 equivalent) so a new user's FIRST real app build fits inside the bonus — that build runs on
+the free-tier cheap engines (never Claude) once the free-tier routing activates.
+
+- `payments.ts` += `welcomeBonusTokens()` — single source of truth, env-overridable
+  (WELCOME_BONUS_TOKENS; bad/negative override falls back to 50,000; '0' validly disables). 3 tests.
+- `wallet.ts` new-wallet path derives the ₹ mirror from the SAME rate (welcomeTokens/TOKENS_PER_RUPEE)
+  so token and ₹ columns can never drift; ledger line reflects the real amount; the new-wallet JSON
+  now carries `tokensPerRupee` too (parity with the existing-doc path).
+
+REDUNDANCY CATCH (safeguard #6): **Slice B (Free Chat → GLM-4.7-Flash lead) is ALREADY BUILT** — the
+'free' router chain is GLM-flash(p0) → Vertex×3 → Gemini×2 → Grok, and PROFESSIONAL-FREE is
+GLM-flash-only with the paid race as fallback (GlmProvider defaults `glm-4.7-flash`, env-overridable
+GLM_CHAT_MODEL, text-only with vision deferral). No work needed; plan updated mentally: B = done.
+Vision chain (visionChain.ts: VERTEX → GEMINI → GROK → CLAUDE) does NOT yet lead with GLM-4.6V-Flash —
+that remains Slice C's real work.
+
+Gate: tsc fe+server 0, vitest 5824/5824 (3 new), boot:check PASS.

@@ -13359,3 +13359,25 @@ Rollout playbook (plan §4): AGENTV3_COST_ROUTING=on + _USERS=<3 test emails> �
 usage-report/telemetry (the live bake-off) → clear _USERS to widen. Default OFF = byte-identical today.
 
 Gate: tsc fe+server 0, vitest 5842/5842 (4 new), boot:check PASS.
+## 2026-07-10 — Gradle across the verify quartet (B4 #1186 + B6 sibling) — root-cause sibling hunt
+
+Roadmap-completion mode. Two slices closing the SAME root cause — the JVM detection across the AgentV3
+verify tools was Maven-only, so Gradle (Java/Kotlin/Android) projects were invisible.
+
+- **#1186 (merged)** — B4 `run_tests`: added Gradle to `testRunner.ts` (detect build.gradle/.kts →
+  ./gradlew test or gradle test, prefer the committed wrapper; parse "Class > method FAILED" honestly,
+  counts null + exit code authoritative). 5 regression tests.
+- **This change** — B6 `typecheck` sibling (rule 3 — hunt the siblings): `crossLangCheck.ts` detected
+  Java ONLY via Maven pom.xml → `mvn compile`, the exact same blindness. Added Gradle JVM detection
+  (build.gradle/.kts → ./gradlew classes or gradle classes, wrapper-preferred, `else if` so Maven still
+  wins when both build files exist → one Java plan, never two). Extended the Java error parser to also
+  count Kotlin `e:` compile-error lines so a Gradle/Kotlin failure surfaces honest error lines (exit
+  code stays authoritative for ok). 3 regression tests (wrapper-vs-system, Maven-wins precedence,
+  Kotlin `e:` parse).
+
+Net: Gradle is now first-class in BOTH run_tests (B4) and typecheck (B6). The verify quartet
+(run_tests + typecheck + lint + tsc) no longer has a Maven-only JVM hole. Updated the run_tests +
+typecheck tool comments/messages and the ToolCatalog run_tests description; no user-facing surface, so
+no AppKnowledgeBase entry (backend engine capability).
+
+Gate: tsc fe+server 0, vitest 5829/5829 (3 new here; 5 in #1186), build PASS, boot:check PASS.

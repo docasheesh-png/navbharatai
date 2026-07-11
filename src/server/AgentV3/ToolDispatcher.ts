@@ -1587,7 +1587,7 @@ export class ToolDispatcher {
         try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
         const plans = detectChecks(files, pkgRaw);
         if (!plans.length) {
-          const msg = 'typecheck: no compilable sources detected (no tsconfig+TS, Python, Maven/Java, or Go). Nothing to type-check.';
+          const msg = 'typecheck: no compilable sources detected (no tsconfig+TS, Python, Maven/Gradle JVM, or Go). Nothing to type-check.';
           this.state?.appendTerminal(msg);
           return msg;
         }

@@ -60,9 +60,20 @@ export function detectChecks(files: string[], packageJsonRaw?: string): CheckPla
     plans.push({ language: 'python', command: 'python -m compileall -q .', reason: 'Python sources present — compiling all modules.' });
   }
 
-  // Java (Maven) — `mvn compile` surfaces type/compile errors.
+  // JVM — prefer Maven (`mvn compile`), else Gradle (`gradlew classes`, which compiles the Java AND
+  // Kotlin main source sets). Both surface type/compile errors. `else if` so a repo carrying both build
+  // files doesn't push two competing Java plans (Maven wins, matching the run_tests precedence).
   if (has(/(^|\/)pom\.xml$/)) {
     plans.push({ language: 'java', command: 'mvn -q -B compile', reason: 'Maven pom.xml — compiling the Java sources.' });
+  } else if (has(/(^|\/)build\.gradle(\.kts)?$/)) {
+    const wrapper = has(/(^|\/)gradlew$/);
+    plans.push({
+      language: 'java',
+      command: wrapper ? './gradlew classes' : 'gradle classes',
+      reason: wrapper
+        ? 'Gradle build file + gradlew wrapper — compiling the JVM sources (./gradlew classes).'
+        : 'Gradle build file — compiling the JVM sources (gradle classes).',
+    });
   }
 
   // Go — `go build ./...` type-checks and compiles every package.
@@ -109,7 +120,8 @@ export function parseCheckOutcome(
       break;
     }
     case 'java': {
-      errorLines = lines.filter(l => /\[ERROR\]/.test(l) || /\.java:\[?\d+/.test(l));
+      // Maven "[ERROR]", javac "Foo.java:12:" (also Gradle's Java compile), and Kotlin "e: Foo.kt: …".
+      errorLines = lines.filter(l => /\[ERROR\]/.test(l) || /\.java:\[?\d+/.test(l) || /^e:\s/.test(l.trim()));
       errorCount = errorLines.length || (exitCode === 0 ? 0 : null);
       break;
     }

@@ -52,7 +52,6 @@ import { generateOfflineResponse } from './src/server/lib/offlineResponse';
 import { aiRouter } from './src/server/lib/aiRouter';
 import { registerAuditRoutes } from './src/server/routes/audit';
 import { registerChatRoutes } from './src/server/routes/chat';
-import { registerTestChatRoutes } from './src/server/routes/testChat';
 import { registerProRoutes } from './src/server/routes/pro';
 import { registerSdaRoutes } from './src/server/routes/sda';
 import { registerProfessionalsRoutes } from './src/server/routes/professionals';
@@ -504,10 +503,6 @@ setInterval(() => {
   // New Isolated Chat Endpoints
   // Chat routes (general + Vishwakarma tiers) — extracted to src/server/routes/chat.ts (Phase 1, AI-core step c).
   registerChatRoutes(app, chatLimiter);
-
-  // 🧪 Test Chat — ISOLATED AWS Bedrock GLM-5 test endpoint (POST /api/test-chat). Debug-only,
-  // gated by TEST_CHAT_ENABLED; talks ONLY to AWS Bedrock, never the production provider router.
-  registerTestChatRoutes(app);
 
   // Pro engine routes (pro-chat + pro-build + callClaudePro) — extracted to src/server/routes/pro.ts (Phase 1, AI-core step d).
   registerProRoutes(app);

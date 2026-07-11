@@ -107,6 +107,28 @@ describe('analyzeRequirementCoverage', () => {
     );
     expect(r.findings.length).toBeLessThanOrEqual(5);
   });
+
+  it('flags newly-catalogued surfaces (upload/booking/reviews) when requested but not built', () => {
+    const r = analyzeRequirementCoverage(
+      'a listings app with image upload, a booking calendar and reviews',
+      graph({ components: ['ListingCard'], files: ['src/ListingCard.tsx'] }),
+    );
+    expect(r.missing).toEqual(expect.arrayContaining(['file / image upload', 'calendar / booking / appointment', 'reviews / ratings']));
+  });
+
+  it('counts the new surfaces as covered when a matching artifact exists (broad synonyms)', () => {
+    const upload = analyzeRequirementCoverage('let users upload a photo', graph({ components: ['Dropzone'] }));
+    expect(upload.covered).toContain('file / image upload');
+
+    const booking = analyzeRequirementCoverage('an appointment booking page', graph({ files: ['src/pages/AppointmentScheduler.tsx'] }));
+    expect(booking.covered).toContain('calendar / booking / appointment');
+
+    const reports = analyzeRequirementCoverage('a sales analytics report', graph({ components: ['SalesChart'] }));
+    expect(reports.covered).toContain('analytics / reports / charts');
+
+    const reset = analyzeRequirementCoverage('add a forgot password flow', graph({ files: ['src/ResetPassword.tsx'] }));
+    expect(reset.covered).toContain('password reset');
+  });
 });
 
 describe('requirementCoverageSummary', () => {

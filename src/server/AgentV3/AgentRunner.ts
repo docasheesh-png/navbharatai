@@ -87,6 +87,12 @@ export interface AgentRunnerOptions {
    * so "done" means verified. Off by default; never applied to sub-agents.
    */
   readinessGate?: boolean;
+  /**
+   * U-1 — when true, run the project's ESLint after a successful build and downgrade to ok:false if it
+   * reports real ERRORS (warnings/formatting never block). Default-OFF (admin flag AGENTV3_LINT_GATE),
+   * so the default build is byte-identical. Top-level builds only; never applied to sub-agents.
+   */
+  lintGate?: boolean;
   /** When aborted (e.g. the user pressed Stop), the loop stops between turns. */
   signal?: AbortSignal;
   /**
@@ -228,6 +234,7 @@ export class AgentRunner {
     const toolConcurrency = Math.max(1, this.opts.toolConcurrency ?? 4);
     const expectsArtifacts = this.opts.expectsArtifacts === true;
     const readinessGate = this.opts.readinessGate === true;
+    const lintGate = this.opts.lintGate === true;
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -513,6 +520,18 @@ export class AgentRunner {
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
           }
 
+          // U-1 — LintGate (default-OFF): after a still-successful build, block on real ESLint errors.
+          if (ok && lintGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const lint = await dispatcher.assessLintGate();
+              if (lint.blocked) {
+                ok = false;
+                const detail = lint.blockers.length ? ` ${lint.blockers.slice(0, 3).join('; ')}.` : '';
+                summary = `${summary}\n\n⚠️ Lint gate: ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'} — fix before shipping.${detail}`;
+              }
+            } catch { /* lint gate is best-effort — a scan error never fails a real build */ }
+          }
+
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed() };
@@ -611,6 +630,17 @@ export class AgentRunner {
               summary = `Step limit reached (${maxSteps}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
             }
           } catch { /* gate is best-effort — a scan error never flips the evidence verdict */ }
+        }
+        // U-1 — LintGate (default-OFF) also applies at the step-cap exit.
+        if (ok && lintGate) {
+          try {
+            const lint = await dispatcher.assessLintGate();
+            if (lint.blocked) {
+              ok = false;
+              const detail = lint.blockers.length ? ` ${lint.blockers.slice(0, 3).join('; ')}.` : '';
+              summary = `Step limit reached (${maxSteps}) — and the lint gate found ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'}.${detail}`;
+            }
+          } catch { /* lint gate is best-effort — a scan error never flips the verdict */ }
         }
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });

@@ -32,7 +32,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
-    "@aws-sdk/client-bedrock-runtime": "^3.1083.0",
     "@babel/standalone": "^7.26.4",
     "@capacitor-firebase/authentication": "^8.3.0",
     "@capacitor/android": "^8.4.1",

@@ -603,6 +603,50 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
   });
 });
 
+describe('AgentRunner — LintGate (U-1, default-OFF)', () => {
+  function lintDispatcher(blocked: boolean) {
+    return {
+      dispatch: async (tu: { id: string; name: string; input: Record<string, unknown> }) =>
+        ({ tool_use_id: tu.id, content: 'ok', is_error: false }),
+      // readiness is always fine here so we isolate the lint gate's own ok-downgrade.
+      assessBuildReadiness: async () => ({ score: 100, ready: true, blockers: [] as string[], warnings: [] as string[] }),
+      assessLintGate: async () => blocked
+        ? { blocked: true, errorCount: 2, blockers: ['src/a.ts:3 no-undef — foo is not defined'], summary: 'Lint gate: 2 ESLint errors block the build.' }
+        : { blocked: false, errorCount: 0, blockers: [] as string[], summary: 'Lint gate: no blocking ESLint errors.' },
+    };
+  }
+
+  function runner(dispatcher: unknown, opts: Partial<AgentRunnerOptions>) {
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const client = new ClaudeClient(scriptedClient([
+      { content: [{ type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } },
+      { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+    ]));
+    return new AgentRunner({
+      client, dispatcher: dispatcher as never, state, events: stream,
+      model: 'm', system: 's', tools: defaultToolCatalog(), expectsArtifacts: true, ...opts,
+    });
+  }
+
+  it('with the lint gate ON, ESLint errors downgrade the build to ok:false', async () => {
+    const result = await runner(lintDispatcher(true), { lintGate: true }).run('build an app');
+    expect(result.ok).toBe(false);
+    expect(result.summary).toContain('ESLint error');
+    expect(result.summary).toContain('no-undef');
+  });
+
+  it('with the lint gate ON but no ESLint errors, the build stays ok:true', async () => {
+    const result = await runner(lintDispatcher(false), { lintGate: true }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+
+  it('with the lint gate OFF (default), ESLint errors do NOT fail the build', async () => {
+    const result = await runner(lintDispatcher(true), { lintGate: false }).run('build an app');
+    expect(result.ok).toBe(true);
+  });
+});
+
 // ── E4 (audit Batch 3): per-turn / per-tool hard timeouts ──────────────────────────────────────
 // A hung provider call must NOT block the build until the 30-min watchdog (which is only checked
 // BETWEEN turns and so never even runs while a single turn hangs). Same for a stuck tool.

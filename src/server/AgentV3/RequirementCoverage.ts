@@ -63,6 +63,19 @@ const FEATURES: FeatureSpec[] = [
   { label: 'notifications', request: /\bnotification/i, artifact: /(notification|toast|snackbar)/i },
   { label: 'contact page', request: /\bcontact\b/i, artifact: /contact/i },
   { label: 'about page', request: /\babout\b/i, artifact: /about/i },
+  // High-signal surfaces users frequently ask for and builders frequently skip silently. Each
+  // `artifact` is broad (synonyms + common real component names) so a feature built under a
+  // reasonable alternate name still counts — the module stays high-precision, not nagging.
+  { label: 'file / image upload', request: /\b(upload|file upload|image upload|attach(ment)?)\b/i, artifact: /(upload|dropzone|filepicker|attach)/i },
+  { label: 'calendar / booking / appointment', request: /\b(calendar|booking|appointment|schedul(e|ing)|reservation)\b/i, artifact: /(calendar|booking|appointment|schedul|reservation|datepicker)/i },
+  { label: 'reviews / ratings', request: /\b(review|reviews|rating|ratings)\b/i, artifact: /(review|rating|star)/i },
+  { label: 'comments', request: /\bcomments?\b/i, artifact: /(comment|discuss|reply|replies)/i },
+  { label: 'wishlist / favorites', request: /\b(wishlist|favou?rites?|saved items?|bookmarks?)\b/i, artifact: /(wishlist|favou?rite|saved|bookmark)/i },
+  { label: 'map / location', request: /\b(maps?|location|geolocation)\b/i, artifact: /(map|leaflet|mapbox|googlemap|location|geo)/i },
+  { label: 'blog / articles', request: /\b(blog|articles?)\b/i, artifact: /(blog|article|post|feed)/i },
+  { label: 'analytics / reports / charts', request: /\b(analytics|reports?|charts?|graphs?|statistics)\b/i, artifact: /(analytic|report|chart|graph|stat|metric|dashboard)/i },
+  { label: 'gallery / portfolio', request: /\b(gallery|portfolio)\b/i, artifact: /(gallery|portfolio|lightbox)/i },
+  { label: 'password reset', request: /\b(forgot password|reset password|password reset)\b/i, artifact: /(forgot|reset|password)/i },
 ];
 
 /**

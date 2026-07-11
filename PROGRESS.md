@@ -13942,3 +13942,30 @@ Fix (root + honesty + regression):
 
 Gate: tsc fe+server 0, vitest 5947/5947, build PASS, boot:check PASS. (Same PR also carries the wallet
 token-wording + Buy-card-promote UI and the billing-flag registry sync.)
+
+## 2026-07-11 — Fix 50: ✕-closing Settings / Professionals now also closes the options opened from inside them (admin bug)
+
+Admin: "professional aur setting ke andar koi option open karo, phir header ke ✕ se professional/setting
+band karo — to woh option band nahi hota, khula rah jaata hai." Settings and Professionals have many options
+inside; all of them should close when the parent is ✕-closed.
+
+**Root cause.** Options launched from inside Settings (Wallet, Voice, Bot Builder, API Tester, … — the
+`tab: true` items) and every Professional AI (Teacher/Lawyer/… via the Professionals hub) open as their OWN
+sibling header tabs through `toggleTab`. `closeTab` only removed the ONE tab clicked and reset state for the
+three chat tabs — it had NO notion that those sibling tabs were "children" of Settings/Professionals, and it
+never reset `settingsScreen`. So ✕-closing the parent left every option it had spawned dangling in the header,
+and reopening Settings landed back on the last sub-option instead of the root menu.
+
+**Fix (root cause, not a patch).** Track parentage: a new `tabOpeners` map records `child → parent` whenever a
+tab is opened while Settings/Professionals is the active view (set in `toggleTab`, pruned in `closeTab`).
+Closing logic is centralized in a new PURE, unit-tested `src/lib/tabClose.ts` → `computeTabClose(view, openTabs,
+activeView, openers, companions)` which returns the full set to close (the tab + its children + fixed companions
+like the Pro chat's `preview`) and the next active view. `closeTab` now: removes that whole set, resets
+`settingsScreen` to `'root'`, prunes the opener/history maps, and runs each closed tab's own state reset (the
+chat tabs' clean-slate logic is preserved, just applied per-closed-tab). So ✕ on Settings/Professionals truly
+closes everything opened from within them, and an unrelated tab (opened from elsewhere) is never swept up.
+
+Regression tests +8 (`tabClose`: leaf close + active-switch, non-active close leaves active view, home
+fallback, Settings closes its children only, Professionals closes its AIs + their companions, cross-parent
+isolation, Pro-chat→preview companion, no self-loop).
+Gate: frontend tsc 0, vitest 5960/5960 (+8), `npm run build` PASS. Client-only change (no server touched).

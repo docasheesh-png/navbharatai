@@ -4,6 +4,7 @@ import { useToast, ToastContainer } from './components/Toast';
 import { ProductTour } from './components/ProductTour';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
+import { computeTabClose } from './lib/tabClose';
 // AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
@@ -646,6 +647,9 @@ export default function App() {
   const [pendingKey, setPendingKey] = useState('');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openTabs, setOpenTabs] = useState<ViewType[]>(() => (readV3ViewFlag() ? ['nbi_pro_chat'] : []));
+  // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
+  // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
+  const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
   // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v3.0 from the menu/
   // sidebar (a plain open → start a NEW chat). A reload restores the v3.0 view WITHOUT toggleTab, so
   // the nonce stays 0 → AgentV3Panel takes the RESTORE path instead. A History reopen sets v3Resume
@@ -1149,8 +1153,14 @@ export default function App() {
 
     if (!openTabs.includes(view)) {
       setOpenTabs(prev => [...prev, view]);
+      // Remember which tab OPENED this one when it is launched from inside Settings or Professionals,
+      // so ✕-closing that parent also closes the option it spawned (admin bug 2026-07-11). Opened from
+      // anywhere else → no parent link (it's an independent tab).
+      if ((activeView === 'settings' || activeView === 'professionals') && view !== activeView) {
+        setTabOpeners(prev => ({ ...prev, [view]: activeView }));
+      }
     }
-    
+
     if (pushToHistory && activeView !== view) {
       setTabHistories(prev => ({
         ...prev,
@@ -1253,67 +1263,72 @@ export default function App() {
       return;
     }
 
-    setOpenTabs(prev => {
-      let nextTabs = prev.filter(t => t !== view);
+    // Compute the FULL set of tabs to close: the tab itself + every option opened from inside it
+    // (Settings/Professionals children) + fixed companions (the Pro chat owns the preview tab). This is
+    // what makes ✕-closing Settings/Professionals also close the options launched from within them.
+    const { closing, nextTabs, nextActiveView } = computeTabClose(
+      view,
+      openTabs as string[],
+      activeView as string,
+      tabOpeners as Record<string, string>,
+      { nbi_pro_chat: ['preview'] },
+    );
+    const closingSet = new Set<string>(closing);
 
-      // When closing pro chat, also remove the preview tab
-      if (view === 'nbi_pro_chat') {
-        nextTabs = nextTabs.filter(t => t !== 'preview');
+    setOpenTabs(prev => prev.filter(t => !closingSet.has(t)));
+    if (nextActiveView !== null) setActiveView(nextActiveView as ViewType);
+
+    setTabHistories(prevHistories => {
+      const nextHistories = { ...prevHistories };
+      for (const v of closing) delete nextHistories[v as ViewType];
+      return nextHistories;
+    });
+    // Drop the parent links for every tab we just closed so they can't leak into a future close.
+    setTabOpeners(prev => {
+      const next = { ...prev };
+      for (const v of closing) delete next[v as ViewType];
+      return next;
+    });
+
+    // Per-tab state reset for EVERY tab actually closed (the parent and each child), so nothing is left
+    // half-open on reopen — Settings drops back to its root menu, and the chat tabs get a clean slate.
+    for (const v of closing) {
+      if (v === 'settings') {
+        // ✕-closing Settings clears the open sub-option so the next open starts at the root menu.
+        setSettingsScreen('root');
+      } else if (v === 'nbi_chat') {
+        setMessages([]);
+        setInput('');
+        // Reset session so memorySummary doesn't bleed into next conversation
+        setCurrentSessionId(Date.now().toString());
+      } else if (v === 'nbi_pro_chat') {
         // ✕ CLOSE = one of the only ways the v3.0 chat ends (admin rule 2026-07-05): clear the sticky
         // session so the NEXT open starts a fresh chat. Everything short of this ✕ (tab switches,
         // reload, phone off) restores the same chat. A still-running build keeps running server-side
         // and lands in ☰ History with all its build files (durable WorkspaceFileStore).
         clearStickySession(user?.uid);
-        // If active view is preview or pro-chat, redirect away
-        if (activeView === 'preview' || activeView === 'nbi_pro_chat') {
-          const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
-          setActiveView(nextActiveView);
-        }
-      } else if (activeView === view) {
-        // If we are closing the active view, switch to another one
-        const nextActiveView = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : 'home';
-        setActiveView(nextActiveView);
+        setProMessages([]);
+        setProInput('');
+        try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
+        // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
+        const newProSessionId = `pro-${Date.now()}`;
+        try { localStorage.setItem('pro_session_id', newProSessionId); } catch { /* ignore */ }
+        setCurrentProSessionId(newProSessionId);
+        // Wipe workspace so next open starts with a blank canvas
+        setFiles({});
+        clearWorkspace().catch(() => {});
+        setBuildVersionStack([]);
+        setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
+        setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
+        setHasGeneratedCode(false);
+        setIsAppBuilt(false);
+      } else if (v === 'sda_chat') {
+        // Force SDAChat to fully remount, wiping all its internal state
+        try { localStorage.removeItem('sda_messages'); } catch {}
+        setSdaResetKey(k => k + 1);
       }
-
-      return nextTabs;
-    });
-
-    setTabHistories(prevHistories => {
-      const nextHistories = { ...prevHistories };
-      delete nextHistories[view];
-      return nextHistories;
-    });
-
-    // Full state reset when chat tab is explicitly closed — clean slate on reopen
-    if (view === 'nbi_chat') {
-      setMessages([]);
-      setInput('');
-      // Reset session so memorySummary doesn't bleed into next conversation
-      setCurrentSessionId(Date.now().toString());
     }
-    if (view === 'nbi_pro_chat') {
-      setProMessages([]);
-      setProInput('');
-      try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
-      // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
-      const newProSessionId = `pro-${Date.now()}`;
-      try { localStorage.setItem('pro_session_id', newProSessionId); } catch { /* ignore */ }
-      setCurrentProSessionId(newProSessionId);
-      // Wipe workspace so next open starts with a blank canvas
-      setFiles({});
-      clearWorkspace().catch(() => {});
-      setBuildVersionStack([]);
-      setProBuildProgress({ active: false, stage: '', steps: [], percent: 0, generatedFiles: {} });
-      setGeneratedCode('<!DOCTYPE html><html><body style="background:#0d1117;color:#8b949e;display:flex;justify-content:center;align-items:center;height:100vh;font-family:sans-serif;margin:0"><div><h2 style="color:white">Waiting for magic...</h2><p>Ask Navbharat to build something!</p></div></body></html>');
-      setHasGeneratedCode(false);
-      setIsAppBuilt(false);
-    }
-    if (view === 'sda_chat') {
-      // Force SDAChat to fully remount, wiping all its internal state
-      try { localStorage.removeItem('sda_messages'); } catch {}
-      setSdaResetKey(k => k + 1);
-    }
-  }, [activeView, toggleTab, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey]);
+  }, [openTabs, activeView, tabOpeners, toggleTab, user, setMessages, setProMessages, setInput, setProInput, setGeneratedCode, setHasGeneratedCode, setIsAppBuilt, setFiles, setBuildVersionStack, setProBuildProgress, setCurrentSessionId, setCurrentProSessionId, setSdaResetKey, setSettingsScreen]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const pendingViewAfterLoginRef = useRef<ViewType | null>(null);

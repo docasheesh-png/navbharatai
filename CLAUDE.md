@@ -252,6 +252,50 @@ The trigger handles the deploy. No `gcloud` access from the Claude session.
 - A backup `.github/workflows/deploy.yml` exists; it only deploys if repo secrets
   `GCP_PROJECT_ID` + `GCP_SA_KEY` are set (currently NOT set → it skips cleanly).
 
+## Configured Cloud Run environment keys — NAMES ONLY (maintained registry, admin-mandated 2026-07-11)
+
+**Why this exists:** the admin sets env keys in Cloud Run; Claude cannot see Cloud Run. This is the
+running record of which key NAMES are configured, so both sides know what exists and never create a
+duplicate. **VALUES ARE NEVER WRITTEN HERE — names only** (a value would be a secret leak). **Rule:
+whenever the admin says they added a key in Cloud Run, Claude appends its name to the right group
+below in that same session** (hand-to-hand, so nothing drifts). Every name below was verified against
+the code (it is actually read somewhere) on 2026-07-11.
+
+- **Core / infra:** `NODE_ENV`, `GOOGLE_CLOUD_PROJECT` (GCP/Firestore project = `gen-lang-client-0866594388`),
+  `FIREBASE_PROJECT_ID` (the AUTH project `verifyIdToken` checks tokens against — this MUST equal the
+  CLIENT's `firebaseConfig.projectId` in `src/config/firebase.ts` = **`gen-lang-client-0866594388`**, the
+  SAME value as `GOOGLE_CLOUD_PROJECT` here. ⚠️ `navbharatai-3395f` is ONLY the Firebase **Hosting/CLI**
+  project in `.firebaserc` — do NOT put it here; a wrong project makes `verifyIdToken` reject every real
+  token → every user silently becomes 'anon' → login broken. Verified against the client config 2026-07-11),
+  `FIRESTORE_DATABASE_ID`, `SECRET_ENCRYPTION_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+- **AI providers:** `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY` (code also accepts `XAI_API_KEY`
+  — same thing, set only one), `GLM_API_KEY`, `GLM_MODEL`, `KIMI_API_KEY`, `KIMI_MODEL`
+- **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
+- **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
+  `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
+- **Payments:** `CASHFREE_APP_ID`, `CASHFREE_SECRET_KEY` (code also accepts the `CASHFREE_CLIENT_ID` /
+  `CASHFREE_CLIENT_SECRET` pair — use ONE pair, not both)
+- **Deploy / CDN providers:** `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`
+- **AgentV3 controls:** `AGENTV3_ENABLED`, `AGENTV3_PAID_PUBLIC`, `AGENTV3_CREDIT_GATE`, `AGENTV3_CHEAP_FLOOR`,
+  `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
+  `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free)
+
+**Known valid VALUES (from the code, for the admin to cross-check):**
+- `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
+  (GLM + Kimi together) | `bedrock`. It must hold ONE value. For the current GLM bake-off → `glm`.
+  `on` and `glm` are NOT both allowed at once — pick one.
+- `GLM_MODEL` → `glm-4.7` (the cheap coder; leave the flagship `glm-5.2` OUT of the cost floor).
+  `KIMI_MODEL` → `kimi-k2.6`. Both accept a comma newest→older list (e.g. `glm-4.7,glm-4.6`).
+- `AGENTV3_ENABLED` → `true`. `AGENTV3_PAID_PUBLIC` → keep `false`/unset until recharge is verified live.
+
+**REMOVE from Cloud Run (retired — Bedrock never worked + test-chat deleted; code degrades cleanly
+when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODEL`, `AWS_REGION`,
+`AWS_DEFAULT_REGION`, `TEST_CHAT_ENABLED`. (These are read ONLY by the Bedrock cheap-floor rung and the
+Bedrock test-chat page — neither is in use.)
+
+**Available AgentV3 flags NOT yet set (leave unset = today's behavior; set only when ready):**
+`AGENTV3_FREE_TIER_CHEAP` (new-user cheap-only routing), `AGENTV3_PER_TIER_BILLING` (Sonnet-share ×3 billing).
+
 ## Play Store release — build a signed `.aab` on every roadmap/checkpoint completion (mandatory, admin-mandated 2026-07-10)
 
 **NavBharatAI is now LIVE on the Google Play Store** (Android app package `com.navbharat.ai`,

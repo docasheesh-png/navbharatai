@@ -13738,3 +13738,39 @@ Firestore/DB usage. Gate: frontend tsc 0, vitest 5896/5896 (config/docs only; pr
 confirms empty env → same-origin). CODE step (wiring all 3 preview iframes to the isolated origin)
 deliberately deferred until the origin is live (admin's choice) — the fragile-preview surface is only
 touched once it can be live-tested.
+
+## 2026-07-11 — AUTOPSY (Notes build report) + Builder-Architecture directive → Fix 46: deterministic project-integrity checks (focus conflict + duplicate stylesheet)
+
+Admin sent a 2nd real v3.0 report (Notes app, 20 files) AND a builder-architecture directive: "improve the
+v3 App Builder itself so these classes can never recur — not a per-app fix." Read the whole report.
+
+**Ledger (Notes):** ✅ 105/105 auto-resolved; 20 files, 6 components; npm install exit 0; **npm run dev exit 0
+with a CLEAN health-check log** ("VITE ready in 241 ms … dev server is UP on port 5173") — so the Todo report's
+"did not come up" false-negative did NOT recur (supports leaving it as an open, evidence-needed item). ❌ SAME
+BUILD_PARTIAL-after-verified-render bug (fixed in #1209, now merged). ❌ Reviewer 74/100 caught REAL defects that
+SHIPPED unfixed: **focus conflict** (NoteEditor + SearchBar both `.focus()` at mount → SearchBar steals it → the
+required "auto-focus input" broke), **global.css imported twice** (main.tsx + App.tsx), sort-ignores-edits,
+isAtLimit blocks Add, edit maxLength/isSaveDisabled mismatch. ⚠️ estimate ~28min vs ~4min again.
+
+**Honest directive mapping (safeguard #6 — most already exists, do NOT rebuild):** shared-contract generation,
+8-state BuildOutcome, ArchitectureAnalysis (cycles/unresolved-imports/orphans), WorkspaceHealth (hooks/import-
+export/JSX resolution), deadCode, Readiness gate, DependencyReconciler, preview self-check, escalation — all
+already real + tested. The GENUINE gaps the two reports prove: (a) BUILD_PARTIAL-after-success → #1209; (b) focus
+conflict + (c) duplicate stylesheet → NO deterministic check existed (only fuzzy LLM reviewer caught them, and
+nothing fixed them); (d) reviewer findings not auto-fixed; (e) estimate miscalibration.
+
+**Fix 46 (Slice 1 of the builder-hardening — real, tested, safe):** new pure `ProjectIntegrityChecks.ts`:
+`findFocusOwners` (autoFocus attr OR `.focus()` in an EMPTY-deps mount effect; ignores non-empty-deps effects,
+autoFocus={false}, comments), `findDuplicateStylesheets` (same sheet side-effect-imported by 2+ modules, relative-
+path/basename aware), `analyzeProjectIntegrity`, `integrityRepairInstruction` (precise, file-named repair text).
+Wired into the route (both build lanes, before the preview self-check): findings are ALWAYS recorded honestly
+(INTEGRITY_FOCUS_CONFLICT / INTEGRITY_DUPLICATE_STYLESHEET) — previously only the fuzzy reviewer text mentioned
+them, never structured. A bounded LLM self-heal is wired behind `AGENTV3_INTEGRITY_GATE` (default OFF — canary
+first, exactly like LintGate); flip to `on` to auto-fix. Never blocks/fails a build (best-effort). Tests +14.
+
+**Open (rule 6, NOT blind-fixed):** the LLM self-heal defaults OFF pending a canary (flip AGENTV3_INTEGRITY_GATE=on
+after a few test builds prove the repair is clean) — this is the next slice. Reviewer's other findings (sort-by-
+createdAt, isAtLimit, maxLength mismatch) need a broader post-review auto-fix subsystem — separate slice. Estimate
+miscalibration — separate. Health-check false-negative — needs the raw Vite dev-log on recurrence.
+
+Gate: frontend tsc 0, server tsc 0, vitest (+14 new), boot:check PASS.

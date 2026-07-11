@@ -119,6 +119,7 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance } from '../AgentV3/SimpleBuilder';
+import { analyzeProjectIntegrity, integrityRepairInstruction } from '../AgentV3/ProjectIntegrityChecks';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -5565,6 +5566,48 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       }
+
+      // PROJECT INTEGRITY (autopsy 2026-07-11, Todo + Notes reports) — two real defect CLASSES the
+      // deterministic analyzer suite (ArchitectureAnalysis / WorkspaceHealth / deadCode) does not cover
+      // and that shipped in both apps: (1) MULTIPLE mount-focus owners — the Notes build had NoteEditor
+      // AND SearchBar both grabbing focus, so the required "auto-focus the note input" silently broke;
+      // (2) the same stylesheet imported by 2+ modules (Notes imported global.css from main.tsx AND
+      // App.tsx). Deterministic + free. Findings are ALWAYS recorded honestly (previously only the fuzzy
+      // LLM reviewer text mentioned them — never structured). The bounded LLM SELF-HEAL is gated behind
+      // AGENTV3_INTEGRITY_GATE (default OFF — canary first, like LintGate); flip on to auto-fix them.
+      try {
+        const integrity = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
+        if (!integrity.ok) {
+          if (integrity.focusOwners.length >= 2) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', message: `${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`, autoResolved: false });
+          }
+          for (const d of integrity.duplicateStylesheets) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', message: `"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`, autoResolved: false });
+          }
+          // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
+          // that can't fix leaves the honest warnings above and the app still ships.
+          if (process.env.AGENTV3_INTEGRITY_GATE === 'on' && result.ok && !abort.signal.aborted) {
+            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
+            try {
+              const integrityRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner({ claudeFirst: true }),
+                model: resolveModel(onlyOpus),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await integrityRunner.run(
+                `The app is built and compiles. Fix ONLY these project-integrity defects — make the smallest ` +
+                `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
+              );
+              if (healed.ok) {
+                result = healed;
+                const after = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
+                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed (single focus owner; no duplicate stylesheet).', autoResolved: true });
+              }
+            } catch { /* self-heal is best-effort — the honest warnings stand */ }
+          }
+        }
+      } catch { /* integrity analysis is best-effort — never blocks a build */ }
 
       // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v3.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it

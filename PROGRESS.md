@@ -13433,3 +13433,33 @@ launcher). They are behavior-correct today; converging them onto the shared modu
 best done with those subsystems' own tests in view. Backend engine capability → no AppKnowledgeBase entry.
 
 Gate: tsc fe+server 0, vitest 5860/5860 (11 new), build PASS, boot:check PASS.
+
+---
+
+## 2026-07-11 — Build report: billing & provider facts + "No build report" 100% guarantee (admin-mandated)
+
+Admin: the 2-day billing/provider system must SHOW UP in the build report (free/paid user, app kisne
+banaya, kaun se providers fail hue, kitni baar) — and "No build report" must become impossible.
+
+**Report enrichment (BuildDiagnostics):**
+- Report += `builtBy` (dominant delivery provider — THE headline), `providerFailures` (per-provider
+  failure tally — new `recordProviderFailure()`, fed from onProviderError on the main client AND the
+  escalation runner), `providerTokens` (the Billing-Phase-3 reconciled per-provider token split), and
+  `billing` (`setBilling()`: userTier free-list/free-welcome/paid/billing-off, REAL settled billedUsd/
+  billedInr, walletTokensDebited, zeroBillReason, powerMode).
+- Route: `zeroBillReason` now recorded at each zeroing branch (empty build / unrendered preview /
+  free onboarding) and written into the report at settle time from the SAME values the user was billed
+  on. Text render gains User tier / Billed / Wallet / Why free / Failures / Tokens lines; "Built by"
+  now leads with the dominant builder + keeps the full split.
+
+**"No build report" pukhta prabandh (the residual 404 class closed):**
+- Server already had 4 layers (durable per-workspace + history + per-user latest + in-memory) — the
+  remaining failures were all server-unreachable cases (anon/token-blip fetch, fresh-session new
+  workspaceId, plain network failure).
+- NEW `reportCache.ts` (client, 4 tests): the moment ANY report reaches the device (it rides the live
+  result event), it is persisted to localStorage — quota-safe (a too-big report stores a SLIM copy
+  with heavy raw sections dropped, honestly marked), never throws. `getLatestDiagnostics` falls back
+  to it LAST, so the device where the build ran can ALWAYS produce the last report, even offline.
+  The "No build report yet" alert can now only fire on a device that truly never received one.
+
+Gate: tsc fe+server 0, vitest 5868/5868 (~9 new), boot:check PASS.

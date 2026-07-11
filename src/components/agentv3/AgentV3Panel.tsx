@@ -12,6 +12,7 @@ import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
+import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
@@ -1426,8 +1427,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (data.diagnostics) return data.diagnostics;
       }
     } catch { /* fall through to the local copy */ }
-    return buildId ? null : (state.diagnostics ?? null); // the local copy is only ever "latest"
+    // Latest-report fallbacks: the live state's copy, then the DEVICE-LOCAL cache (saved the moment
+    // any report reached this device) — the last-resort layer that makes "No build report" impossible
+    // on the device where the build ran, even fully offline (admin 2026-07-11, pukhta prabandh).
+    return buildId ? null : (state.diagnostics ?? readLastReport());
   }, [userId, email, state.workspaceId, state.diagnostics]);
+
+  // Persist every report that reaches this device (rides the live result event) into the local
+  // last-resort cache — see reportCache.ts. Quota-safe; never throws.
+  useEffect(() => {
+    if (state.diagnostics) saveLastReport(state.diagnostics);
+  }, [state.diagnostics]);
 
   const downloadDiagnostics = async () => {
     if (downloadingDiag) return;

@@ -13774,3 +13774,21 @@ createdAt, isAtLimit, maxLength mismatch) need a broader post-review auto-fix su
 miscalibration — separate. Health-check false-negative — needs the raw Vite dev-log on recurrence.
 
 Gate: frontend tsc 0, server tsc 0, vitest (+14 new), boot:check PASS.
+
+## 2026-07-11 — Fix 47: build-time estimate recalibrated to REAL measured durations (~28 min → ~4 min honesty)
+
+Every build report opened with "⏱️ Estimated build time: ~28 min" and "~26 min to go" — yet the Todo
+build finished in ~3.7 min (221s) and the Notes build in ~4.0 min (240s). A ~7× over-estimate, recurring
+in all three reports (counter, Todo, Notes). Rule-5 honesty: the ETA must tell the truth.
+
+Root cause: `BuildTimeEstimator` heuristic constants were calibrated to an OLD belief ("simple app ~8–12
+min", 7-min fixed overhead, 30s/feature). But with the file-by-file SimpleBuilder fast lane the reports
+show the real fixed overhead is ~90–120s (npm install ~1s + npm run dev ~9–55s + first preview ~16s), not
+7 min, and per-feature cost is far smaller. Recalibrated against the two real data points: BASE_MS 420s→120s,
+PER_MODULE 60s→45s, PER_FEATURE 30s→8s. Now: minimal Todo ≈ 2.9 min, full Notes ≈ 5–6 min (real 3.7–4.0),
+while complex apps still scale up via module/feature counts + history blending. Updated the CALIBRATION
+regression test to guard the HONEST band (>1.5 min so we never re-introduce the ancient "~25s" lie; <10 min
+so we never re-introduce the "~28 min" over-shoot). PipelineDepth thresholds (module+feature magnitude)
+untouched — only the time constants changed, so lane selection is identical.
+
+Gate: server tsc 0, vitest (estimator 14 + preflight 8 pass).

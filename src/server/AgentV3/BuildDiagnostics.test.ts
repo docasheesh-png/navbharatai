@@ -167,6 +167,55 @@ describe('capProblems (bounds the problems view; shared by BuildDiagnostics.repo
   });
 });
 
+// Autopsy 2026-07-11 (Todo report): a fully-built app whose real-browser preview check "renders
+// correctly" was STILL reported as BUILD_PARTIAL — the promised BUILD_PARTIAL→BUILD_SUCCESS upgrade
+// was never wired, so deriveRootCause (last OUTCOME_*) reported a false verdict for a working app.
+describe('recordPreviewVerified — the deferred BUILD_PARTIAL → BUILD_SUCCESS honesty upgrade', () => {
+  it('upgrades a BUILD_PARTIAL to BUILD_SUCCESS once the browser confirmed the app renders (THE bug)', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'info', code: 'OUTCOME_BUILD_PARTIAL', message: 'Build outcome: BUILD_PARTIAL', autoResolved: true });
+    expect(d.recordPreviewVerified()).toBe(true);
+    const r = d.report();
+    // The report's root cause is now the honest, verified success — not the stale "partial".
+    expect(r.rootCause).toBe('Build outcome: BUILD_SUCCESS');
+    expect(r.issues[r.issues.length - 1].code).toBe('OUTCOME_BUILD_SUCCESS');
+  });
+
+  it('upgrades a PREVIEW_FAILED to BUILD_SUCCESS when a heal pass made it render', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'info', code: 'OUTCOME_PREVIEW_FAILED', message: 'Build outcome: PREVIEW_FAILED', autoResolved: true });
+    expect(d.recordPreviewVerified()).toBe(true);
+    expect(d.report().rootCause).toBe('Build outcome: BUILD_SUCCESS');
+  });
+
+  it('NEVER papers over a real build failure — a TYPECHECK_FAILED is left untouched', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'warning', code: 'OUTCOME_TYPECHECK_FAILED', message: 'Build outcome: TYPECHECK_FAILED', autoResolved: false });
+    expect(d.recordPreviewVerified()).toBe(false);
+    expect(d.report().rootCause).toBe('Build outcome: TYPECHECK_FAILED');
+  });
+
+  it('NEVER upgrades a BUILD_FAILED (no files produced)', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'info', code: 'OUTCOME_BUILD_FAILED', message: 'Build outcome: BUILD_FAILED', autoResolved: true });
+    expect(d.recordPreviewVerified()).toBe(false);
+  });
+
+  it('no-ops when no outcome was classified yet', () => {
+    const d = fresh();
+    expect(d.recordPreviewVerified()).toBe(false);
+    expect(d.report().issues.find((i) => i.code.startsWith('OUTCOME_'))).toBeUndefined();
+  });
+
+  it('is idempotent — a second call after the upgrade does not stack another SUCCESS', () => {
+    const d = fresh();
+    d.record({ phase: 'build', severity: 'info', code: 'OUTCOME_BUILD_PARTIAL', message: 'Build outcome: BUILD_PARTIAL', autoResolved: true });
+    expect(d.recordPreviewVerified()).toBe(true);
+    expect(d.recordPreviewVerified()).toBe(false); // last outcome is already SUCCESS → nothing to do
+    expect(d.report().issues.filter((i) => i.code === 'OUTCOME_BUILD_SUCCESS')).toHaveLength(1);
+  });
+});
+
 describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixed entries)', () => {
   it('prefers the deterministic BuildOutcome classification above everything else', () => {
     const issues = [

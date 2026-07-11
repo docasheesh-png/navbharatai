@@ -5597,6 +5597,11 @@ export function registerAgentV3Routes(app: Express): void {
           } catch { /* console capture is best-effort */ }
           if (verdict.rendered && consoleErrs.length === 0) {
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
+            // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
+            // so the deferred previewOk signal is now TRUE — upgrade OUTCOME_BUILD_PARTIAL → BUILD_SUCCESS
+            // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
+            // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
+            try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
             break;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];

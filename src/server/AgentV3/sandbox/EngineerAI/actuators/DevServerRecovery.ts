@@ -226,6 +226,22 @@ export function planDevServerRecovery(log: string, attempt: number, maxAttempts:
  * The honest one-line health-check summary the actuator appends to its output — a REAL root cause when
  * the server is down, not a generic "did not come up". PURE.
  */
+/**
+ * Fix 42 (report 2026-07-11): a dev log that shows the launch command's own binary was NOT FOUND
+ * (`sh: 1: vite: not found`, `next: command not found`, …) means THIS launch produced no server —
+ * anything answering on the port is a stale/zombie process or the sandbox proxy, not the app. The
+ * caller uses this to demand a REAL HTTP response before trusting a TCP-open "PORT_UP", so a build
+ * can never again report "dev server is UP" + "preview verified" while the runner never even started.
+ * Pure.
+ */
+export function devServerRunnerMissing(log: string): boolean {
+  const text = (log || '').slice(-8000);
+  // "sh: 1: vite: not found" / "vite: command not found" / "next: not found" — the RUNNER binary,
+  // not a generic module (a missing npm module is handled by the missing_module reinstall path).
+  return /\b(vite|next|nuxt|astro|remix|react-scripts|vue-cli-service|ng|webpack|parcel|tsx|node)\b\s*:\s*(?:command\s+)?not\s+found/i.test(text)
+    || /sh:\s*\d+:\s*[\w./-]+:\s*not\s+found/i.test(text);
+}
+
 export function devServerHealthLine(portUp: boolean, port: number, diagnosis?: DevServerDiagnosis): string {
   if (portUp) return `[health-check] dev server is UP on port ${port}. Call update_preview with port=${port}.`;
   const why = diagnosis?.detail ? ` Root cause: ${diagnosis.detail}` : '';

@@ -3,9 +3,9 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, buildHttpLivenessCommand, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
-import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, type DevServerDiagnosis } from './DevServerRecovery';
+import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError } from './sandboxHealth';
@@ -801,6 +801,22 @@ export class E2BActuator implements IEngineerActuator {
         const reUp = await sandbox.commands.run(buildPortWaitCommand(boundPort, 10), { timeoutMs: 15_000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         if (reUp.stdout.includes('PORT_UP')) portUp = true;
+      }
+      // FALSE-POSITIVE GUARD (Fix 42, report 2026-07-11): the port-wait's first probe is `nc -z` (a
+      // pure TCP-open check), so a stale/zombie process or the sandbox proxy holding the port reads as
+      // "PORT_UP" even when the dev log screams `sh: 1: vite: not found` (the runner never started).
+      // That shipped a false "dev server is UP" + "preview verified renders correctly". When the log
+      // shows the RUNNER BINARY was not found, demand a REAL HTTP response before trusting the port —
+      // a genuinely-serving prior attempt answers HTTP (stays UP); a stale TCP port does not (honest
+      // DOWN with the real reason). Only triggers on the runner-missing signal, so a normal healthy
+      // build is never affected.
+      if (portUp && devServerRunnerMissing(devLog || stdout)) {
+        const httpOk = await sandbox.commands.run(buildHttpLivenessCommand(boundPort), { timeoutMs: 6000 })
+          .then((r) => r.stdout.includes('HTTP_OK')).catch(() => false);
+        if (!httpOk) {
+          portUp = false;
+          lastDiagnosis = { cause: 'missing_module', recovery: 'code_fix', detail: `The dev-server runner (e.g. vite) was "not found" and nothing is serving real HTTP on port ${boundPort} — the port was only held by a stale/unrelated process. The app's dependencies did not install correctly (ensure the framework CLI is in devDependencies and the install completed).` };
+        }
       }
       // Honest health line: the verified port when UP, the REAL root cause when DOWN.
       stdout += `\n${devServerHealthLine(portUp, boundPort, portUp ? undefined : (lastDiagnosis ?? classifyDevServerFailure(devLog)))}`;

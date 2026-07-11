@@ -13505,3 +13505,29 @@ banaya, kaun se providers fail hue, kitni baar) — and "No build report" must b
   The "No build report yet" alert can now only fire on a device that truly never received one.
 
 Gate: tsc fe+server 0, vitest 5868/5868 (~9 new), boot:check PASS.
+## 2026-07-11 — AUTOPSY (Counter-app report) → Fix 42: "vite: not found" but health-check said "dev server is UP" (false positive)
+
+Report proved a hidden HONESTY bug in the live-server health-check. The `npm run dev` log:
+`> vite --host … --strictPort` → `sh: 1: vite: not found` → yet the very next line `[health-check]
+dev server is UP on port 5173`, followed by `✅ Preview verified — renders correctly`. The runner
+binary was NOT found (nothing THIS launch started), but the build reported success.
+
+**Root cause:** `buildPortWaitCommand`'s first probe is `nc -z` — a pure TCP-open check. A stale/zombie
+process (or the E2B port proxy) holding the port reads as `PORT_UP`, and `devServerHealthLine(portUp)`
+trusts it unconditionally — it never reconciles against a `vite: not found` in the same log. So a
+TCP-open port with no real HTTP server shipped as "dev server is UP" + "preview verified".
+
+**Fix (targeted, cannot break a working build):** new pure `devServerRunnerMissing(log)` detects the
+runner-binary-not-found signal (`sh: N: vite: not found`, `next: command not found`, framework CLIs).
+When `portUp && devServerRunnerMissing`, E2BActuator runs a STRICT HTTP liveness check
+(`buildHttpLivenessCommand` — curl a real response, not just TCP) before trusting the port: a
+genuinely-serving prior attempt answers HTTP (stays UP, no change); a stale TCP port does not → portUp
+flips to false with the honest cause. Only triggers on the runner-missing signal, so a normal healthy
+build never runs it. Tests: +4 (the exact report log; other CLIs; healthy-log false; missing-MODULE
+excluded so reinstall still owns that path; the HTTP command shape). Gate: frontend tsc 0, server tsc 0,
+vitest 5550/5550, boot PASS.
+
+Recorded (separate, honestly not blind-fixed): the "~23 min" build-time estimate for a trivial 13-file
+counter is wildly off (built in ~3 min) — cosmetic, queued. The in-browser preview's 25s timeout the
+user saw is the Fix-29 watchdog firing honestly (generic "slow network / module hung" = no specific CDN
+error recorded); needs the named failed-module to root-cause — asked the admin to send it if it recurs.

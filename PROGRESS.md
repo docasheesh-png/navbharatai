@@ -14976,3 +14976,33 @@ dep added). Non-semver specifiers (workspace:/file:/git/*/latest) are skipped so
 conflict; one issue per package (version-conflict wins). Wired into `analyzeDependencies` — the existing
 `evaluate` dependency dimension — so conflicts surface to the agent (and user) to fix, never a synthetic
 "looks fine". +7 tests. Remaining GA-3: an auto-resolver + Bun/UV engines. Gate: tsc fe+server 0, vitest 6122/6122.
+
+## 2026-07-12 — Comparison-driven gap-closing: 4 GA-3/edit-discipline builds shipped (admin: "ek ek kar ke builds deployed karo")
+
+After the v3.0-vs-Claude-Code 25-topic face-off produced a categorized gap ledger, closed the safest,
+most self-contained ledger items one-by-one through the full ship cycle (branch → gate → PR → CI green →
+squash-merge → Cloud Run auto-deploy). Each is real, root-caused, regression-tested, purely additive
+(analyzer/report/tool-result only — zero change to what apps get built), and CI-gated before merge.
+
+- **#1260 — GA-3 dependency conflict RESOLVER.** Every detected version-conflict / peer-violation now
+  ships a concrete, deterministic single-edit reconciliation (align the older pin onto the newer range;
+  bump a peer-violating dep to the peer floor), surfaced in `dependencySummary` as a `↳ Fix:` line.
+  Added `semver.minVersion`/`gt` to the ambient shim. +6 tests. (Closes the "auto-resolver" minor gap.)
+- **#1261 — Forensic edit-discipline.** New pure `rewriteRisk.assessFullRewrite`: a `write_file` full
+  rewrite that is materially SMALLER (<50% on a ≥400-byte file) than the file it replaced now returns an
+  honest `LIKELY CONTENT LOSS` verdict with the byte delta (the classic "regenerated from memory and
+  dropped code" signature) instead of a generic nudge. Result text only — never blocks a write. +8 tests.
+  (Closes the medium edit-discipline gap; serves the honest-reporting absolute rule.)
+- **#1262 — GA-3 @types major-mismatch.** `detectTypesMajorMismatch`: flags a runtime lib and its
+  `@types/*` pinned to different majors (e.g. react ^18 / @types/react ^17 — silent typecheck drift).
+  Handles the `@types/babel__core → @babel/core` convention; non-intersecting-range signal so a trailing
+  @types minor is never flagged; skips @types/node + non-semver. Medium, with align suggestion. +8 tests.
+- **#1263 — GA-3 unpinned-git deps.** `detectUnpinnedGitDeps`: a git dep with no `#commit`/`#tag` ref
+  (github:/gitlab:/bitbucket:/gist:/git://:/git+) resolves to the moving default-branch HEAD →
+  non-reproducible. Conservative (bare `user/repo` shorthand + workspace/file/npm never flagged). Medium,
+  reuses the `unpinned` kind, with a "append #<commit-or-tag>" suggestion. +7 tests.
+
+Remaining GA-3: Bun/UV engines + a live "apply the suggestion" action. The larger ledger gaps (agentic
+read→run→observe→fix as the norm, large-project ceiling / Project Mode, mandatory tests-green gate,
+extensibility surface, cheap-model tool-use fidelity) carry real breakage risk and are architectural —
+per safeguard #3 they should be admin-directed, not shipped blind. Gate each PR: tsc fe+server 0, vitest green.

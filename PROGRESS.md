@@ -14501,3 +14501,25 @@ silencer. Idempotent + DI so it's unit-tested without patching the real global p
 foreign-parent no-op, insertBefore foreign-ref no-op, legit insertBefore still works, idempotent, no-DOM→false).
 
 Gate: frontend tsc 0, vitest 6015/6015, `npm run build` PASS. Client-only (main.tsx + new lib).
+
+## 2026-07-12 — Fix 54: live per-file build progress shown INLINE in the chat (admin: "hide me nahi, real-time me har file dikhe")
+
+Admin circled the collapsed "created src/App.tsx 33s ›" action row (screenshot): the file-by-file activity
+("writing src/index.css", "created src/utils/storage.ts", … every file) was HIDDEN behind a tap. The admin
+wants each file's progress line shown in the main chat as real-time text, not hidden.
+
+**Root cause.** The Claude-style collapse (admin's own earlier 2026-07-02 redesign) rendered each action group
+as ONE glanceable row (`ActionGroupRow`), and it defaulted to COLLAPSED (`useState(false)`) — so even while a
+build was actively writing files, the per-file lines were only visible after a manual tap.
+
+**Fix (honors the newer instruction).** New pure, tested `actionGroupOpen(userOverride, active)`: while a group
+is ACTIVE the row auto-EXPANDS so every `writing X` / `created X` streams live inline in the feed (real-time
+progress), and once the build finishes it auto-collapses to the glanceable summary — while a user tap still
+overrides and sticks either way. Wired into `ActionGroupRow` (default open = block.active). The per-file
+entries already flow live from `state.activity`; they were just hidden — now they show as they happen.
+
+Regression tests +3 (`actionGroupOpen`: active → open, done → collapsed, user override sticks both ways).
+Gate: frontend tsc 0, vitest 6027/6027, `npm run build` PASS. Client-only (no server touched).
+
+NOTE: finished groups still collapse to the one-line summary (keeps a long build's history glanceable); if the
+admin wants finished builds to STAY expanded too, that's a one-line flip (default open = true).

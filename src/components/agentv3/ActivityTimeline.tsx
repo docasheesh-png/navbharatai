@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { ChevronRight, Loader2, X, Check, FileCode, Terminal as TerminalIcon, Search, BookOpen, Bot, Globe, ClipboardList } from 'lucide-react';
 import type { ActivityEntry } from './agentV3Types';
 import type { ChatBlock, TimelineMsgLike } from './activityTimeline';
-import { detailEntries } from './activityTimeline';
+import { detailEntries, actionGroupOpen } from './activityTimeline';
 
 function entryIcon(e: ActivityEntry) {
   const t = e.text || '';
@@ -27,7 +27,10 @@ function entryIcon(e: ActivityEntry) {
 const MAX_DETAIL_ROWS = 80;
 
 export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Extract<ChatBlock<M>, { kind: 'actions' }> }) {
-  const [open, setOpen] = useState(false);
+  // Untouched (null) → auto: EXPANDED while the build is active so each file streams live in the feed
+  // (admin 2026-07-12), collapsed to the summary once done. A tap overrides and sticks.
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
+  const open = actionGroupOpen(userOverride, block.active);
   const rows = open ? detailEntries(block.entries) : [];
   const hasCommand = block.entries.some((e) => /^running: /.test(e.text || ''));
   return (
@@ -35,7 +38,7 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Ex
       <div className="max-w-[90%] w-full">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setUserOverride(!open)}
           className={`group/act inline-flex items-center gap-2 max-w-full rounded-lg border px-2.5 py-1.5 text-xs touch-manipulation transition-colors ${
             block.failed
               ? 'border-red-500/30 bg-red-500/5 text-red-200 hover:bg-red-500/10'

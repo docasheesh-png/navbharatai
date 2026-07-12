@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks } from './activityTimeline';
+import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks, actionGroupOpen } from './activityTimeline';
 import type { ActivityEntry } from './agentV3Types';
 
 const tool = (id: string, ts: number, text: string, extra: Partial<ActivityEntry> = {}): ActivityEntry =>
@@ -137,5 +137,18 @@ describe('buildChatBlocks — prose interleaved with collapsed action groups', (
     const blocks = buildChatBlocks([u(1, '⏱ mera message')], [], {});
     expect(blocks).toHaveLength(1);
     expect(blocks[0].kind).toBe('msg');
+  });
+});
+
+describe('actionGroupOpen — live per-file progress is shown inline while building (admin 2026-07-12)', () => {
+  it('auto-EXPANDS while the build is active (each file streams in the feed, not hidden)', () => {
+    expect(actionGroupOpen(null, true)).toBe(true);
+  });
+  it('auto-COLLAPSES to the summary once the build is done', () => {
+    expect(actionGroupOpen(null, false)).toBe(false);
+  });
+  it('a user tap overrides either way and sticks — even against the active state', () => {
+    expect(actionGroupOpen(false, true)).toBe(false); // user collapsed a running group
+    expect(actionGroupOpen(true, false)).toBe(true);  // user re-opened a finished group
   });
 });

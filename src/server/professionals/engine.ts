@@ -1,6 +1,7 @@
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { liveSearchContext } from '../lib/liveSearchContext';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -82,7 +83,15 @@ export async function runProfessionalChat(
     .slice(-8)
     .map((m) => `${m.role === 'user' ? 'User' : config.name}: ${m.content}`)
     .join('\n');
-  const prompt = transcript ? `Conversation so far:\n${transcript}\n\nUser: ${message}` : message;
+  let prompt = transcript ? `Conversation so far:\n${transcript}\n\nUser: ${message}` : message;
+
+  // Live web grounding: when the user's question needs current facts (latest rules/rates/results),
+  // fold in real search results so the professional answers from today's data, not its training
+  // cutoff. Gated + bounded + best-effort — never blocks the reply.
+  try {
+    const liveBlock = await liveSearchContext(message);
+    if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
+  } catch { /* live search is best-effort */ }
 
   return resilientCall(systemPrompt, prompt);
 }

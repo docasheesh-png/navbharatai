@@ -14790,3 +14790,24 @@ Gate: fe tsc 0 (pre-existing mobile-plugin errors only), vitest 6067 pass. Clien
 Honest note (rule 6): the deeper transcript/timeline restoration subsystem is heavily owned by the
 parallel account; this fix deliberately routes through its existing tested openConversation path rather
 than re-implementing restore, to avoid touching that architecture.
+
+## 2026-07-12 — T0-9 slice 3: /stop + /attach match builds by VERIFIED uid (no cross-user stop/stream)
+
+Continuing the T0-9 route re-audit. `/api/agentv3/stop` and `/api/agentv3/attach` matched a running build
+via buildKeyCandidates(CLAIMED body.userId, …). Builds are keyed (perWorkspace lock OFF by default) under
+the account uid, so a caller who knew a victim's uid could STOP their build (DoS) or ATTACH and stream its
+live transcript (cross-user leak). The client ALREADY sends its Bearer token to both routes (comments:
+"so the server's identity matches the key the build was registered under — the dead-Stop/Resume fix") — the
+server simply wasn't verifying it. Fix: both routes now resolve `verifiedIdentity(req)` and pass the
+VERIFIED uid to buildKeyCandidates; an unverifiable token → null → only the shared anon bucket (still
+session-guarded by the unguessable sessionId), never another account's key. Matches how /chat keys the
+build (resolveBuildIdentity = verified). Added a VITEST-only `__setRunningBuildForTest` seam +
+tests/routesBuildLifecycleIdentity.test.ts (unverified attacker cannot stop/attach a victim's build; the
+verified owner can).
+
+Audit findings this pass (all already-safe, no change): `/ship` + `/revert` are gated by the caller's OWN
+GitHub token's push access (getRepoAccess.canPush) — a caller can only ship/revert a repo they own;
+`/diagnostics` is IDOR-hardened (Phase 3.2 — verifiedWorkspaceReadOk / verified-token owner); `/status` is
+display-only (the build route re-enforces every entitlement server-side). Remaining T0-9: converge the
+ad-hoc guards (verifyFirebaseToken / assertWorkspaceOwner / resolveReadIdentity / requireUserMatch) onto the
+identityPolicy primitives + a final re-audit. Gate: tsc fe+server 0, vitest 6075/6075.

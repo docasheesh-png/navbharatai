@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileImportExports, reconcileAndReanalyze } from './ImportExportReconcile';
+import { reconcileImportExports, reconcileAndReanalyze, addMissingProjectImports } from './ImportExportReconcile';
 
 describe('reconcileImportExports — the reported bug (named import of a default export)', () => {
   it('rewrites `import { App } from "./App"` to a default import when App is the default export', async () => {
@@ -124,3 +124,72 @@ describe('reconcileImportExports — safety (never guess, never break a working 
     expect(r.fixes).toHaveLength(0);
   });
 });
+
+describe('addMissingProjectImports — the jungle-game bug (uses a shared const without importing it)', () => {
+  it('adds the forgotten value import (CANVAS_HEIGHT used, only the type was imported)', async () => {
+    const r = await addMissingProjectImports({
+      'src/game/constants.ts': `export const CANVAS_WIDTH = 800;\nexport const CANVAS_HEIGHT = 450;\nexport interface LayerConfig { id: number }`,
+      'src/game/Background.ts': `import type { LayerConfig } from './constants';\nexport class Background {\n  draw(ctx: any) { ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); }\n}`,
+    });
+    expect(r.added.length).toBe(2); // CANVAS_WIDTH + CANVAS_HEIGHT
+    const out = r.files['src/game/Background.ts'];
+    expect(out).toContain('import { CANVAS_HEIGHT } from "./constants"');
+    expect(out).toContain('import { CANVAS_WIDTH } from "./constants"');
+  });
+
+  it('computes the correct relative path across folders', async () => {
+    const r = await addMissingProjectImports({
+      'src/game/constants.ts': `export const SPEED = 5;`,
+      'src/App.tsx': `export default function App() { return SPEED; }`,
+    });
+    expect(r.added).toHaveLength(1);
+    expect(r.files['src/App.tsx']).toContain('from "./game/constants"');
+  });
+
+  it('does NOT add when the name is already imported (even as the wrong kind is left to the reconciler)', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const X = 1;`,
+      'src/use.ts': `import { X } from './c';\nexport const y = X;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT add for a locally-declared name (never shadow/duplicate)', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const X = 1;`,
+      'src/use.ts': `const X = 99;\nexport const y = X;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT add for an ambiguous name exported by 2+ modules', async () => {
+    const r = await addMissingProjectImports({
+      'src/a.ts': `export const DUP = 1;`,
+      'src/b.ts': `export const DUP = 2;`,
+      'src/use.ts': `export const y = DUP;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT add for a property access (obj.CANVAS_HEIGHT is not a free variable)', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const CANVAS_HEIGHT = 450;`,
+      'src/use.ts': `const cfg = { CANVAS_HEIGHT: 1 };\nexport const y = cfg.CANVAS_HEIGHT;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('does NOT touch a name that is not a project export (globals/typos left alone)', async () => {
+    const r = await addMissingProjectImports({
+      'src/c.ts': `export const X = 1;`,
+      'src/use.ts': `export const y = window.innerHeight + Math.PI;`,
+    });
+    expect(r.added).toHaveLength(0);
+  });
+
+  it('never throws on unparseable content', async () => {
+    const files = { 'src/broken.tsx': 'const <<< =', 'src/c.ts': 'export const X = 1;' };
+    const r = await addMissingProjectImports(files);
+    expect(Array.isArray(r.added)).toBe(true);
+  });
+})

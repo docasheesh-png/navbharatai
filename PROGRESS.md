@@ -14378,3 +14378,39 @@ recorded no usage (older/clean reports unchanged).
 
 Tests: BuildDiagnostics.test.ts — rewrote the render test to assert the per-provider calls·in·out·total
 rows, the TOTAL row, and the charge-to-user line. Gate: server tsc 0, vitest 6005 pass.
+
+## 2026-07-12 — Preview crash fix: auto-add a forgotten shared-symbol import (jungle-game report 104f5b09)
+
+Admin: "preview me app ayi nahi." First, the WINS this report confirmed: routing is FIXED — the new
+CHEAP_FLOOR_DECISION line read "Cheap floor ACTIVE — ON leads", providerDelivery {GLM: 15} (all 15 build
+calls GLM, zero Claude). The per-provider tokens + charge block also rendered. So #1235/#1236/#1237 work.
+
+The real bug: PREVIEW_ERROR "ReferenceError: Can't find variable: CANVAS_HEIGHT". Root cause traced from
+the report's llmCalls: the generator wrote src/game/Background.ts that USES CANVAS_HEIGHT but imported
+only `import type { LayerConfig } from './constants'` — the value import was forgotten. The fast lane
+(SimpleBuilder) never ran tsc (no tsc in commands[]), so "Cannot find name 'CANVAS_HEIGHT'" was never
+caught and shipped as a runtime crash. (Verified the phantom `import type {...} from "canvas"` was NOT
+the cause — Babel strips type-only imports correctly; reproduced with @babel/standalone.)
+
+Root-cause fix (rule 4 — fix the class): new `addMissingProjectImports(files)` in ImportExportReconcile.ts
+— when a file uses a bare VALUE identifier that exactly ONE project module exports as a named export, and
+the file neither declares nor imports it, deterministically ADD the import. Paranoid-safe: skips ambiguous
+names (2+ exporters), locally-declared names (never shadow/duplicate), property accesses (obj.X), types,
+and non-project names (globals/typos untouched). ts-morph, pure, never throws — can only turn a broken
+build into a working one.
+
+Wired into BOTH build lanes so it reaches the failing path:
+- SimpleBuilder (the fast lane that produced this bug): runs reconcile + add-missing on the generated
+  files BEFORE writeFiles/preview, so the preview gets correct files.
+- ToolDispatcher evaluate/readiness gate (agentic lane): runs add-missing alongside the existing
+  named<->default reconciler, persisting via the durable write path.
+Both honor the AGENTV3_IMPORT_RECONCILE=off kill switch.
+
+Tests: ImportExportReconcile.test.ts +8 (the CANVAS_HEIGHT case, cross-folder rel path, + safety: already-
+imported, locally-declared, ambiguous, property-access, non-export, unparseable). SimpleBuilder.test.ts +1
+(end-to-end: the forgotten import is added before writeFiles). Gate: server tsc 0, vitest 6014 pass.
+
+OPEN (honest, rule 6): the deeper systemic gap is that the fast lane declares "Build verified — compiles"
+without a real tsc type-check, so undefined-name bugs slip through. The auto-adder fixes the shared-symbol
+class deterministically; a fast-lane tsc gate (to catch the general "Cannot find name" case) is a larger
+follow-up tracked here.

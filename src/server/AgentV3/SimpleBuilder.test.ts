@@ -125,6 +125,27 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(written.map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']);
   });
 
+  it('auto-adds a forgotten shared-symbol import before writing (jungle-game CANVAS_HEIGHT crash)', async () => {
+    // Reproduce the real bug: constants.ts exports CANVAS_HEIGHT; Background.ts uses it but imports
+    // only the type. Without the fix, the written file crashes the preview with a ReferenceError.
+    let written: OneShotFile[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      writeFiles: async (f) => { written = f; },
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) {
+          return 'src/game/constants.ts :: shared consts\nsrc/game/Background.ts :: forest bg\nsrc/App.tsx :: root';
+        }
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        if (path === 'src/game/constants.ts') return `<<<FILE ${path}>>>\nexport const CANVAS_HEIGHT = 450;\nexport interface LayerConfig { id: number }\n<<<ENDFILE>>>`;
+        if (path === 'src/game/Background.ts') return `<<<FILE ${path}>>>\nimport type { LayerConfig } from './constants';\nexport class Background { draw(c: any){ c.fillRect(0,0,10,CANVAS_HEIGHT); } }\n<<<ENDFILE>>>`;
+        return `<<<FILE ${path}>>>\nexport default function App(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    const bg = written.find((f) => f.path === 'src/game/Background.ts');
+    expect(bg?.content).toContain('import { CANVAS_HEIGHT } from "./constants"'); // the forgotten import was added
+  });
+
   it('falls back (ok:false) when the manifest is too small', async () => {
     const r = await runSimpleBuild(baseDeps({ generate: async () => 'src/App.tsx :: only one' }));
     expect(r.ok).toBe(false);

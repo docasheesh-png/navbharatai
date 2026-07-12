@@ -3,6 +3,7 @@ import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages,
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
+import { AttachMenu } from '../AttachMenu';
 import axios from 'axios';
 import { AgentProgress, BuildStep } from './AgentProgress';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
@@ -342,7 +343,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   onGuiderSend,
 }) => {
   const { buildSteps } = useBuild();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const kbHeight = useKeyboardHeight();
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -385,22 +385,20 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showChatSearch, setShowChatSearch] = useState(false);
 
   const [uploadError, setUploadError] = useState<string>('');
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const MAX_BYTES = 10 * 1024 * 1024; // F10: 10 MB limit
-      const allFiles: File[] = Array.from(e.target.files) as File[];
-      const tooBig = allFiles.filter((f: File) => f.size > MAX_BYTES);
-      if (tooBig.length > 0) {
-        const names = tooBig.map((f: File) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
-        setUploadError(`File too large (max 10 MB): ${names}`);
-        setTimeout(() => setUploadError(''), 5000);
-        const allowed = allFiles.filter((f: File) => f.size <= MAX_BYTES);
-        if (allowed.length > 0) setAttachments(prev => [...prev, ...allowed]);
-      } else {
-        setAttachments(prev => [...prev, ...allFiles]);
-      }
+  const addPickedFiles = (fileList: FileList | null) => {
+    if (!fileList) return;
+    const MAX_BYTES = 10 * 1024 * 1024; // F10: 10 MB limit
+    const allFiles: File[] = Array.from(fileList) as File[];
+    const tooBig = allFiles.filter((f: File) => f.size > MAX_BYTES);
+    if (tooBig.length > 0) {
+      const names = tooBig.map((f: File) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ');
+      setUploadError(`File too large (max 10 MB): ${names}`);
+      setTimeout(() => setUploadError(''), 5000);
+      const allowed = allFiles.filter((f: File) => f.size <= MAX_BYTES);
+      if (allowed.length > 0) setAttachments(prev => [...prev, ...allowed]);
+    } else {
+      setAttachments(prev => [...prev, ...allFiles]);
     }
-    e.target.value = '';
   };
 
   const removeAttachment = (index: number) => {
@@ -1610,14 +1608,7 @@ export const AIChat: React.FC<AIChatProps> = ({
             )}
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileSelect}
-                    className="hidden"
-                    multiple
-                    accept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
-                  />
+                  {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}
                   <textarea
                     ref={textareaRef}
                     value={input}
@@ -1663,14 +1654,13 @@ export const AIChat: React.FC<AIChatProps> = ({
                     </div>
                   )}
                   <div className="absolute right-2 bottom-2 flex gap-1 items-center">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      title="Attach image or PDF"
-                      className="p-2.5 text-gray-500 hover:text-indigo-400 transition-colors"
-                    >
-                      <LinkIcon className="w-4 h-4" />
-                    </button>
+                    <AttachMenu
+                      onFiles={addPickedFiles}
+                      fileAccept="image/*,.pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.md,.csv,.json,.html,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.zip,.js,.ts,.tsx,.jsx,.py,.css,.xml,.yaml,.yml,.go,.java,.php,.sql,.rs,.kt,.swift,.rb,.sh,.env,.toml,.ini"
+                      badge={attachments.length}
+                      title="Attach (photo, gallery, or file)"
+                      buttonClassName="p-2.5 text-gray-500 hover:text-indigo-400 transition-colors"
+                    />
                     <button
                       type="button"
                       onClick={isListening ? stopVoice : startVoice}

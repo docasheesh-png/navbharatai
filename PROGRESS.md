@@ -15166,3 +15166,21 @@ Kill: AGENTV3_HTML_ENTRY_GUARD=off. So a per-file JS build now ships a BOOTING a
 
 Net: simple JS apps build in ONE fast per-file pass instead of always paying the one-shot fallback tax.
 Tests: HtmlEntryGuard (7), SimpleBuilder ran:false-ships-no-fallback (1). Gate: server tsc 0, suite 6214.
+## 2026-07-12 — Fix 57: unified attach menu (Take Photo / Choose photo or video / Choose file) everywhere
+
+Admin: the 📎 attach button opened the file picker directly — the camera was never offered. Wanted the
+3-option sheet (like other apps / the GitHub app) EVERYWHERE: NavBharatAI Free, Pro v3.0, and every
+Professional AI.
+
+New shared `src/components/AttachMenu.tsx`: the 📎 button opens a 3-option menu — **Take Photo** (real
+`<input accept="image/*" capture="environment">` → camera on mobile), **Choose photo or video**
+(`accept="image/*,video/*"` → gallery), **Choose file** (the caller's own accept — PDF/Word/Excel/PPT/ZIP/
+code). Closes on outside-tap/Escape; keeps the attached-file count badge; on desktop `capture` is ignored so
+every option is a normal file dialog (graceful everywhere).
+
+Wired into all three composers, replacing each direct file-input+button (handlers/accept preserved):
+- `AgentV3Panel` (Pro v3.0) — `addFiles`.
+- `ProfessionalChat` (every Professional AI) — `addFiles`.
+- `AIChat` (NavBharatAI Free) — refactored `handleFileSelect`→`addPickedFiles(FileList)` (10 MB guard kept).
+
+Gate: frontend tsc 0, vitest 6069/6069, `npm run build` PASS. Client-only (no server touched).

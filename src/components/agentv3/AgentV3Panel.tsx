@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilesPanel, type FilesPanelProps } from '../panels/FilesPanel';
+import { AttachMenu } from '../AttachMenu';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
@@ -202,7 +203,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
@@ -2525,14 +2525,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 ))}
               </div>
             )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
-              className="hidden"
-              onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
-            />
+            {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
             <div className="flex items-stretch gap-1.5 px-2 py-1">
               {/* LEFT COLUMN (admin 2026-07-07 — back to the OLD position): the Build/Plan/Advise
                   MODE SELECTOR on TOP as a dropup ("pyramid" — opens upward above the input), with
@@ -2666,16 +2659,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
+              <AttachMenu
+                onFiles={(fl) => addFiles(fl)}
+                fileAccept="image/*,.pdf,.txt,.md,.csv,.json,.html,.docx,.xlsx,.xls,.pptx,.zip,.js,.ts,.tsx,.jsx,.py,.css"
                 disabled={running}
-                title="Attach files (images, PDF, Word, Excel, PowerPoint, ZIP, text…)"
-                className="relative h-[42px] w-10 shrink-0 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
-              >
-                <Paperclip className="w-4 h-4" />
-                {files.length > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-indigo-500 text-[9px] leading-[14px] text-white text-center">{files.length}</span>}
-              </button>
+                badge={files.length}
+                title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
+                buttonClassName="h-[42px] w-10 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+              />
               </div>{/* /settings + attach row */}
               </div>{/* /left column (mode selector + settings/attach) */}
               <div className="relative flex-1" data-tour="chat">

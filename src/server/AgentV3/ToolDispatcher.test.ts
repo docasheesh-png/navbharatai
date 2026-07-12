@@ -433,7 +433,15 @@ describe('ToolDispatcher', () => {
     expect(state.snapshot().files[0].kind).toBe('modify');
     // Overwriting an EXISTING file warns the agent to prefer a surgical edit_file patch.
     expect(res.is_error).toBe(false);
-    expect(res.content).toContain('already existed');
+    expect(res.content).toContain('FULL-REWRITE WARNING');
+    expect(res.content).toContain('edit_file');
+  });
+
+  it('write_file that rewrites a substantial file to under half its size flags likely content loss', async () => {
+    act.files.set('big.ts', 'x'.repeat(2000));
+    const res = await d.dispatch(call('write_file', { path: 'big.ts', content: 'x'.repeat(300) }));
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('LIKELY CONTENT LOSS');
     expect(res.content).toContain('edit_file');
   });
 

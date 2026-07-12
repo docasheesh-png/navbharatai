@@ -11,6 +11,7 @@ import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
+import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
@@ -828,11 +829,12 @@ export class ToolDispatcher {
             existingContent.length <= 2000
               ? existingContent
               : existingContent.slice(0, 2000) + '\n…(truncated — use read_file for full content)';
+          // Forensic edit-discipline verdict: a rewrite materially smaller than the file it replaced
+          // is the classic "model regenerated from memory and dropped code" signature — say so honestly.
+          const risk = assessFullRewrite(existingContent, content);
           return (
             `Updated ${path} (${content.length} bytes).\n` +
-            `⚠️  FULL-REWRITE WARNING: ${path} already existed and write_file replaced the ENTIRE file. ` +
-            `Unless you intentionally wanted a full rewrite, use edit_file (old_string → new_string) next time — ` +
-            `it is surgical and safe. The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
+            `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
             reviewNote + cascadeNote + testHint
           );
         }

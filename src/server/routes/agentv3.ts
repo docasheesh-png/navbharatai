@@ -1147,9 +1147,21 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
  * (today's behaviour) — so an unconfigured env, or a Grok outage, never changes or breaks a build.
  * Grok speaks the OpenAI-compatible API (same client the GLM/KIMI floor uses), so no new infra.
  */
-function selectReviewJudge(): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' } {
+/**
+ * Pure, mode-aware judge SELECTION (Model Routing Policy, admin 2026-07-12): Free = Grok, Paid = Grok
+ * or Sonnet (either is fine), Power = Opus. FREE never resolves to a Claude judge — if no Grok key it
+ * returns 'sonnet' as a signal that no non-Claude judge is available, and the free-ladder caller SKIPS
+ * the judge rather than spend Claude. Exported for tests.
+ */
+export function resolveJudgeKind(mode: 'free' | 'paid' | 'power', grokKey: string | undefined, reviewerEnv: string | undefined): 'grok' | 'sonnet' | 'opus' {
+  if (mode === 'power') return 'opus';
+  if (mode === 'free') return grokKey ? 'grok' : 'sonnet';
+  return selectReviewer({ reviewer: reviewerEnv, grokKey });
+}
+
+function selectReviewJudge(mode: 'free' | 'paid' | 'power' = 'paid'): { runTurn: JudgeRunTurn; modelId: string; kind: 'grok' | 'sonnet' | 'opus' } {
   const grokKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-  const kind = selectReviewer({ reviewer: process.env.AGENTV3_REVIEWER, grokKey });
+  const kind = resolveJudgeKind(mode, grokKey, process.env.AGENTV3_REVIEWER);
   if (kind === 'grok') {
     try {
       const client = new OpenAI({ apiKey: grokKey, baseURL: process.env.GROK_BASE_URL || 'https://api.x.ai/v1', timeout: 30_000, maxRetries: 1 });
@@ -1162,10 +1174,11 @@ function selectReviewJudge(): { runTurn: JudgeRunTurn; modelId: string; kind: 'g
         return { text: r.choices?.[0]?.message?.content ?? '' };
       };
       return { runTurn, modelId: process.env.GROK_JUDGE_MODEL || 'grok-3', kind: 'grok' };
-    } catch { /* client not constructable → fall through to Sonnet */ }
+    } catch { /* client not constructable → fall through to the Claude judge */ }
   }
+  // Claude judge — Opus in power mode, Sonnet otherwise.
   const runTurn: JudgeRunTurn = (a) => new ClaudeClient(undefined, { maxRetries: 1 }).runTurn(a).then((t) => ({ text: t.text }));
-  return { runTurn, modelId: sonnetModel(), kind: 'sonnet' };
+  return { runTurn, modelId: kind === 'opus' ? opusModel() : sonnetModel(), kind: kind === 'opus' ? 'opus' : 'sonnet' };
 }
 
 /**
@@ -5034,7 +5047,10 @@ export function registerAgentV3Routes(app: Express): void {
         // fallback if Grok is down. When no Grok key is set, use the normal build client.
         // The plan's Claude fallback model stays cheap (Haiku) — Grok ignores it (forces
         // grok-3); only the fallback path uses it.
-        const planGrok = grokPlanRunner();
+        // POWER MODE (Model Routing Policy, admin 2026-07-12): "power mode = sab kuch Opus" — the
+        // plan phase too. In power mode we do NOT route planning to Grok; `planGrok = null` falls the
+        // plan runner to the normal build `client` + `model`, which in power mode is Opus.
+        const planGrok = onlyOpus ? null : grokPlanRunner();
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
@@ -5479,8 +5495,10 @@ export function registerAgentV3Routes(app: Express): void {
             // ADMIN PLAN (2026-07-05): review the cheap build with GROK (cheaper than Sonnet + an
             // independent family), and give GLM/KIMI EXACTLY ONE self-repair bounce — re-reviewed by
             // Grok — BEFORE we ever spend Sonnet. Claude is touched only for the FINAL repair below.
-            const judge = selectReviewJudge();
-            const reviewerName = judge.kind === 'grok' ? 'Grok' : 'Sonnet';
+            // This escalation loop only runs for a paid, non-power build (free/power skip escalation),
+            // so the mode is 'paid' here; passed explicitly so the judge selection is mode-correct.
+            const judge = selectReviewJudge(onlyOpus ? 'power' : 'paid');
+            const reviewerName = judge.kind === 'grok' ? 'Grok' : judge.kind === 'opus' ? 'Opus' : 'Sonnet';
             const collectFiles = (): Array<{ path: string; content: string }> => [...writtenFiles.entries()].map(([path, content]) => ({ path, content }));
             const recordVerdict = (v: { pass: boolean; score: number; findings: string[] }, tag: string): void => {
               try { buildDiag.record({ phase: 'build', severity: v.pass ? 'info' : 'warning', code: 'CHEAP_REVIEW', message: `${tag}: ${v.pass ? 'PASS' : 'FAIL'} (score ${v.score})${v.pass ? '' : ' — ' + v.findings.slice(0, 3).join('; ')}`, autoResolved: true }); } catch { /* diagnostics best-effort */ }

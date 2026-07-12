@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -310,6 +310,25 @@ describe('planGrokEnabled — planning runs on Grok when a key is set', () => {
   it('opt-out with AGENTV3_PLAN_GROK=0 / off even when a key is set', () => {
     expect(planGrokEnabled('xai-abc', '0')).toBe(false);
     expect(planGrokEnabled('xai-abc', 'off')).toBe(false);
+  });
+});
+
+// Model Routing Policy (admin 2026-07-12): judge is mode-aware — Free=Grok, Paid=Grok/Sonnet, Power=Opus.
+describe('resolveJudgeKind — mode-aware judge selection', () => {
+  it('POWER → always Opus (judge runs on Opus like everything in power mode)', () => {
+    expect(resolveJudgeKind('power', undefined, undefined)).toBe('opus');
+    expect(resolveJudgeKind('power', 'grok-key', 'sonnet')).toBe('opus'); // power ignores grok/env
+  });
+  it('FREE → Grok when a Grok key exists; never a Claude judge', () => {
+    expect(resolveJudgeKind('free', 'grok-key', undefined)).toBe('grok');
+  });
+  it('FREE without a Grok key → "sonnet" signal (caller SKIPS the judge — free never spends Claude)', () => {
+    expect(resolveJudgeKind('free', undefined, undefined)).toBe('sonnet');
+  });
+  it('PAID → Grok when a key exists and reviewer≠sonnet; Sonnet otherwise (today\'s behaviour)', () => {
+    expect(resolveJudgeKind('paid', 'grok-key', undefined)).toBe('grok');
+    expect(resolveJudgeKind('paid', 'grok-key', 'sonnet')).toBe('sonnet'); // AGENTV3_REVIEWER=sonnet forces Sonnet
+    expect(resolveJudgeKind('paid', undefined, undefined)).toBe('sonnet'); // no grok → Sonnet
   });
 });
 

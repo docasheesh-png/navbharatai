@@ -344,7 +344,7 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
 });
 
 describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF (instant rollback)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL'];
   let saved: Record<string, string | undefined>;
   beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
@@ -406,6 +406,23 @@ describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF 
     process.env.AGENTV3_CHEAP_FLOOR = 'deepseek';
     process.env.GLM_API_KEY = 'x';
     expect(cheapBuildFloorRunners()).toEqual([]);
+  });
+  // Slice 3 (Model Routing Policy, admin 2026-07-12): a FREE build uses a graduated flash-first ladder.
+  it('FREE ladder is flash-first + longer — default GLM = glm-4.7-flash,glm-4.7,glm-5.2 (3 rungs) vs paid 2', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    // default (paid/flagship-first) → 2 GLM rungs (glm-5.2, glm-4.7)
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'GLM']);
+    // free (flash-first) → 3 GLM rungs (glm-4.7-flash → glm-4.7 → glm-5.2)
+    expect(cheapBuildFloorRunners({ free: true }).map((r) => r.name)).toEqual(['GLM', 'GLM', 'GLM']);
+  });
+  it('AGENTV3_FREE_GLM_MODEL overrides the free ladder without touching the paid GLM_MODEL', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.GLM_MODEL = 'glm-5.2'; // paid = 1 rung
+    process.env.AGENTV3_FREE_GLM_MODEL = 'glm-4.7-flash,glm-4.7'; // free = 2 rungs
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM']); // paid unaffected
+    expect(cheapBuildFloorRunners({ free: true }).map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
 
   it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, GLM first (admin decision, 2026-07-01)', () => {

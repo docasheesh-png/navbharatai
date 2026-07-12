@@ -14914,3 +14914,22 @@ This closes the LAST build-lifecycle cross-user reach. The T0-9 build-lifecycle 
 (GitHub-token push access), /diagnostics (Phase 3.2 IDOR), /status (display-only), conversations list
 (slice 2), entitlement/billing email (slice 1). Remaining T0-9 = converge the ad-hoc guards onto
 identityPolicy primitives + a final re-audit. Gate: tsc fe+server 0, vitest 6079/6079.
+## 2026-07-12 — T1-sec-redact: mask secrets in bash/grep tool output (transcript leak closed)
+
+The dispatch-level redaction (R1.1) masked only the USER-visible event surface (tool_call input +
+tool_result summary), deliberately leaving the MODEL-facing `content` raw so edit_file's exact-string
+matching never breaks on a redacted file value. That tradeoff is correct for read_file (you edit-match
+against file content) — but COMMAND OUTPUT is never an edit_file match source, so a secret printed by
+`printenv` / `cat .env` / `grep KEY .env` used to flow into the model transcript (persisted forever in
+ConversationStore) and the terminal tab UNredacted. That is the exact T1-sec-redact leak.
+
+FIX (root-cause, at the tool boundary): the `bash` tool now redacts stdout AND stderr (redactSecrets)
+before building `out` — so the returned model content, the terminal append, AND the recorded error-memory
+are all masked. The `grep` tool redacts its matched-line output too. read_file is intentionally left raw
+(documented edit-correctness tradeoff; its user-visible summary is already redacted at dispatch). Command
+output that contains no secret is untouched.
+
+Tests: ToolDispatcher.test.ts +4 (bash masks a key in returned content AND the tool_result event; masks a
+stderr secret; grep masks a matched-line secret; non-secret output untouched) + updated the R1.1
+"kept in model content" test to assert the new, more-secure "redacted in model content too" behaviour.
+Gate: server tsc 0, ToolDispatcher 126 green.

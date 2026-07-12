@@ -995,8 +995,11 @@ export class ToolDispatcher {
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
         } catch { /* diagnostics capture is best-effort */ }
+        // T1-sec-redact: a command can print a secret (`cat .env`, `printenv`, `echo $API_KEY`).
+        // Command stdout/stderr is NEVER an edit_file match source, so — unlike read_file content —
+        // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
         let out =
-          `exit=${exitCode}\n${stdout}` + (stderr ? `\n[stderr]\n${stderr}` : '');
+          `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
         if (risk.level !== 'none') {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[${risk.level}] ran: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,
@@ -1004,9 +1007,10 @@ export class ToolDispatcher {
           out = `${governanceNote(risk)}\n${out}`;
         }
         this.state?.appendTerminal(out);
-        // Remember real failures so the team can recall what went wrong (error memory).
+        // Remember real failures so the team can recall what went wrong (error memory) — redacted, since
+        // recalled lessons are shown back to the model/user later.
         if (exitCode !== 0) {
-          getWorkspaceMemory(this.workspaceId).recordError(`bash failed (exit ${exitCode}): ${command}\n${stderr.slice(0, 300)}`);
+          getWorkspaceMemory(this.workspaceId).recordError(redactSecrets(`bash failed (exit ${exitCode}): ${command}\n${stderr.slice(0, 300)}`));
         } else {
           // Verification ledger (slice 4): record successful installs/typechecks so delegated
           // specialists don't redundantly re-run them (they receive verificationStatus()).
@@ -1024,7 +1028,8 @@ export class ToolDispatcher {
           this.workspaceId,
           `grep -rn ${shellQuote(pattern)} ${shellQuote(path)} || true`,
         );
-        return stdout.trim() || '(no matches)';
+        // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
+        return redactSecrets(stdout.trim()) || '(no matches)';
       }
 
       case 'glob': {

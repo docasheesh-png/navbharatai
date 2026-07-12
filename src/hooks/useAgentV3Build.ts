@@ -3,7 +3,7 @@ import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
-import { shouldSurfaceStreamError, reconnectOutcome } from './agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../App';
 
@@ -56,7 +56,7 @@ export interface UseAgentV3Build {
   /** Re-attach to a build that is already running for this account (replays its events so the UI
    *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
    *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
-  resume: (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string }) => Promise<void>;
+  resume: (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; goneNotice?: string; resultAlreadySeen?: boolean }) => Promise<import('./agentV3StreamError').ReconnectOutcome | 'aborted'>;
   /** Ship to main (own-repo storage): merge `navbharatai/work` → the repo default via a PR, server-side
    *  merging ONLY on green CI. Returns an honest result to render in-thread. */
   shipToMain: (opts: { repo: string; userId?: string; email?: string; githubToken?: string }) => Promise<ShipResult>;
@@ -604,8 +604,8 @@ export function useAgentV3Build(): UseAgentV3Build {
   // `workspaceId`, when given, must be the CALLER's current session — the server refuses to attach
   // if the running build belongs to a different session under the same account (see /attach route).
   // Omit it only for a truly account-wide manual "Resume" (no session context to check against).
-  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; goneNotice?: string; resultAlreadySeen?: boolean }) => {
-    if (resumeInFlightRef.current) return; // don't stack concurrent reconnects
+  const resume = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string; notice?: string; goneNotice?: string; resultAlreadySeen?: boolean }): Promise<ReconnectOutcome | 'aborted'> => {
+    if (resumeInFlightRef.current) return 'aborted'; // don't stack concurrent reconnects
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
@@ -634,7 +634,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: opts?.workspaceId }),
         signal: controller.signal,
       });
-      if (isStale(gen)) return; // a reset() happened while /attach was in flight
+      if (isStale(gen)) return 'aborted'; // a reset() happened while /attach was in flight
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
         // One coherent decision (pure + tested) for what this reconnect result MEANS, so the user
@@ -657,7 +657,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
         setServerBuildRunning(false);
         setRunning(false);
-        return;
+        return outcome; // 'gone-notice' | 'gone-silent' | 'error' — the panel restores on 'gone-notice'
       }
       // Live build CONFIRMED (the attach opened a real stream). ONLY NOW show the optimistic
       // "re-attached live" notice, so the promise can never precede its own confirmation.
@@ -665,11 +665,13 @@ export function useAgentV3Build(): UseAgentV3Build {
         setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: opts.notice as string, ts: Date.now() }));
       }
       await pumpStream(res, gen, sink);
+      return 'live';
     } catch (err) {
       const isAbort = err instanceof DOMException && err.name === 'AbortError';
       if (shouldSurfaceStreamError({ isAbort, isStale: isStale(gen), sawResult: sink.sawResult, reconnected: false })) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      return isAbort || isStale(gen) ? 'aborted' : 'error';
     } finally {
       resumeInFlightRef.current = false;
       // Only clear shared flags if THIS resume is still the current generation — otherwise a NEWER

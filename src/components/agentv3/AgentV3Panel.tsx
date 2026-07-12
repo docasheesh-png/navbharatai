@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
-import { isBuildBusyError } from '../../hooks/agentV3StreamError';
+import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
@@ -495,7 +495,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
-      void resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() });
+      void (async () => {
+        const outcome = await resumeBuild({ userId, email, workspaceId: expectedWorkspaceId() });
+        // "SAB CHALA GAYA" FIX (admin IMG_5822/5823, 2026-07-12): a build that FINISHED during the
+        // stream drop comes back 'gone-notice' — resume() wiped the live state and left only a "that
+        // build isn't running anymore" banner, so the chat showed just the prompt + banner and the
+        // preview was blank, even though the whole build is durable server-side. Auto-run the SAME
+        // durable restore the user gets by opening this chat from History — but PEEK the transcript
+        // first and only restore when it genuinely has content, so we never blank the banner on a
+        // transcript that hasn't finished saving yet.
+        if (shouldRestoreFinishedBuild(outcome) && sessionIdRef.current) {
+          const sid = sessionIdRef.current;
+          const restored = await loadConversation({ userId, email, id: `v3_${sid}` }).catch(() => null);
+          if (restored && restored.messages.length > 0 && sessionIdRef.current === sid) {
+            await openConversation(`v3_${sid}`, { silent: true });
+          }
+        }
+      })();
     }
     if (!serverBuildRunning && !running) autoResumedRef.current = false; // re-arm only once genuinely idle again
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2761,7 +2777,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             <div className={previewWrapClass(showWorkspace, tab)}>
               <PreviewSurface
                 url={state.previewUrl}
-                workspaceId={state.workspaceId}
+                // Prefer the live build's workspace, but FALL BACK to this session's derived id when a
+                // restored/idle session has no live workspace in state (the "preview gaya" half of the
+                // stream-drop bug): PreviewSurface then recompiles from the durable files, exactly like
+                // the file-rehydrate effect already does. During a live build state.workspaceId wins.
+                workspaceId={expectedWorkspaceId()}
                 userId={userId}
                 email={email}
                 framework={framework}

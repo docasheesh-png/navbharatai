@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldSurfaceStreamError, reconnectOutcome, isBuildBusyError, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, isBuildBusyError, shouldRestoreFinishedBuild, type StreamErrorContext } from '../src/hooks/agentV3StreamError';
 
 function ctx(over: Partial<StreamErrorContext> = {}): StreamErrorContext {
   return { isAbort: false, isStale: false, sawResult: false, reconnected: false, ...over };
@@ -82,6 +82,24 @@ describe('reconnectOutcome', () => {
       expect(out === 'live' || out === 'error').toBe(false);
       expect(out.startsWith('gone')).toBe(true);
     }
+  });
+});
+
+describe('shouldRestoreFinishedBuild', () => {
+  // THE exact bug (admin IMG_5822/5823, 2026-07-12: "app bani thi, last second par sab chala gaya —
+  // chat + preview"): a build that FINISHED during a stream drop reconnects as 'gone-notice'. resume()
+  // had wiped the live state and left only a banner, so the chat/preview looked empty even though the
+  // build is durable. ONLY 'gone-notice' must trigger the auto-restore.
+  it("restores ONLY on 'gone-notice' (the finished-mid-drop build)", () => {
+    expect(shouldRestoreFinishedBuild('gone-notice')).toBe(true);
+  });
+  it("does NOT restore on 'gone-silent' (result already seen — transcript intact)", () => {
+    expect(shouldRestoreFinishedBuild('gone-silent')).toBe(false);
+  });
+  it("does NOT restore on 'live' (re-attached a still-running build) or 'error'/'aborted'", () => {
+    expect(shouldRestoreFinishedBuild('live')).toBe(false);
+    expect(shouldRestoreFinishedBuild('error')).toBe(false);
+    expect(shouldRestoreFinishedBuild('aborted')).toBe(false);
   });
 });
 

@@ -77,6 +77,20 @@ export function reconnectOutcome(input: { ok: boolean; status: number; resultAlr
   return 'error';
 }
 
+/**
+ * After a reconnect (`resume()`), should the panel AUTO-RESTORE the finished build's durable chat?
+ *
+ * ROOT CAUSE (admin IMG_5822/5823, 2026-07-12: "app bani thi, last second par sab chala gaya — chat +
+ * preview"): a build that FINISHED during a stream drop comes back as `gone-notice`. `resume()` had
+ * already wiped the live state and only left a "that build isn't running anymore" banner, so the chat
+ * showed just the prompt + banner and the preview was blank — even though the whole build is durable
+ * server-side. ONLY `gone-notice` needs the restore: `gone-silent` means the result was already seen
+ * (transcript intact), `live` re-attached a running build, `error` is a genuine failure. Pure.
+ */
+export function shouldRestoreFinishedBuild(outcome: ReconnectOutcome | 'aborted'): boolean {
+  return outcome === 'gone-notice';
+}
+
 // ── "A build is already running" error class ────────────────────────────────────────────────────
 //
 // ROOT CAUSE it fixes (2026-07-05, admin's IMG_5718 "100 baar fix kiya, theek nahi hua"): when the

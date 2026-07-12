@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -340,6 +340,24 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
   });
   it('PAID / POWER build → Claude-first, not cheap-only (unchanged)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });
+  });
+});
+
+describe('pickPreviewErrorBase — a late preview error must never fork the evidence (jungle-game reports)', () => {
+  const rep = (ws: string) => ({ workspaceId: ws, marker: ws });
+  it('prefers the durable copy when present', () => {
+    const durable = rep('ws-1'); const mem = rep('ws-1');
+    expect(pickPreviewErrorBase(durable, mem, 'ws-1')).toBe(durable);
+  });
+  it('falls back to the in-memory copy when durable is missing (the fork that hid CANVAS_HEIGHT)', () => {
+    const mem = rep('ws-1');
+    expect(pickPreviewErrorBase(null, mem, 'ws-1')).toBe(mem);
+  });
+  it('rejects an in-memory copy from a DIFFERENT workspace (per-user map can hold another project)', () => {
+    expect(pickPreviewErrorBase(null, rep('ws-other'), 'ws-1')).toBeNull();
+  });
+  it('null when neither copy exists — nothing to attach to (honest, not a blind ok)', () => {
+    expect(pickPreviewErrorBase(null, null, 'ws-1')).toBeNull();
   });
 });
 

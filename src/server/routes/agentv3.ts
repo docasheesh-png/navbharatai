@@ -1275,6 +1275,23 @@ export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
 }
 
 /**
+ * Pick the report a late preview error should be APPENDED to (evidence must never fork — jungle-game
+ * reports 2026-07-12): prefer the durable copy; when it is missing/unreadable, fall back to this
+ * instance's IN-MEMORY report — but only when it is genuinely the SAME workspace's build (the memory
+ * map is keyed per-user, so it can hold a different, newer project). Null = nothing to attach to.
+ * Pure + exported for testing.
+ */
+export function pickPreviewErrorBase<R extends { workspaceId?: string }>(
+  durable: R | null,
+  mem: R | null,
+  workspaceId: string,
+): R | null {
+  if (durable) return durable;
+  if (mem && mem.workspaceId === workspaceId) return mem;
+  return null;
+}
+
+/**
  * PR4 delivery telemetry — given per-provider turn counts gathered over a build (via the
  * `onProviderUsed` callback), return the provider that drove the MOST turns: the build's
  * dominant builder. AgentV3CostTelemetry records this as `deliveredVia`, so an admin can see
@@ -1995,23 +2012,45 @@ export function registerAgentV3Routes(app: Express): void {
       const mem = lastDiagnostics.get(userId ?? 'anon');
       if (mem) lastDiagnostics.set(userId ?? 'anon', append(mem));
       // Update the durable copy so the download/copy reflects it even after an instance rotation.
+      //
+      // EVIDENCE MUST NEVER FORK (jungle-game reports, 2026-07-12): when the durable read returned
+      // null this whole block silently no-op'd — the error then lived ONLY in this instance's memory,
+      // so one download (memory path) showed the PREVIEW_ERROR while the session-stitch download
+      // (durable history) said "0 errors / BUILD_SUCCESS" — two different stories for one build, and
+      // the second one hid the bug entirely. Fall back to the IN-MEMORY report as the base (same
+      // build — it was just updated above) so the append always lands durably; only when NEITHER copy
+      // exists is there genuinely nothing to attach to (and we say so instead of a blind ok:true).
       const durable = await loadDiagnostics(workspaceId).catch(() => null);
-      if (durable) {
-        const withPreviewError = append(durable);
-        await saveDiagnostics(workspaceId, withPreviewError).catch(() => {});
+      const base = pickPreviewErrorBase(durable, mem ?? null, workspaceId);
+      if (base) {
+        const withPreviewError = append(base);
+        // LOUD failures (same discipline as DiagnosticsStore's own saves): silently-swallowed saves
+        // here are exactly how the durable copies quietly diverged from memory.
+        await saveDiagnostics(workspaceId, withPreviewError).catch((e) => {
+          console.error(`[DIAGNOSTICS] preview-error append: saveDiagnostics failed (workspace=${workspaceId}): ${e instanceof Error ? e.message : String(e)}`);
+        });
         // Refresh the SAME history entry (same startedAt → same id) with the late-arriving preview
         // error, so a build's history record isn't missing evidence captured after it settled.
-        await saveDiagnosticsHistory(workspaceId, withPreviewError).catch(() => {});
+        await saveDiagnosticsHistory(workspaceId, withPreviewError).catch((e) => {
+          console.error(`[DIAGNOSTICS] preview-error append: saveDiagnosticsHistory failed (workspace=${workspaceId}): ${e instanceof Error ? e.message : String(e)}`);
+        });
         // Keep the durable per-USER "latest report" in sync too, so a preview error that arrives after
         // the build settled still reaches the userId-keyed copy the report UI falls back to — but ONLY
         // when this workspace IS the user's latest build (same/newer startedAt). This prevents a late
         // preview error from an OLDER workspace regressing the per-user copy to a stale build.
         const perUser = await loadLatestForUser(userId).catch(() => null);
         if (!perUser || (withPreviewError.startedAt ?? 0) >= (perUser.startedAt ?? 0)) {
-          await saveLatestForUser(userId, withPreviewError).catch(() => {});
+          await saveLatestForUser(userId, withPreviewError).catch((e) => {
+            console.error(`[DIAGNOSTICS] preview-error append: saveLatestForUser failed (user=${userId ?? 'anon'}): ${e instanceof Error ? e.message : String(e)}`);
+          });
         }
+        res.json({ ok: true });
+        return;
       }
-      res.json({ ok: true });
+      // No report exists anywhere for this workspace (neither durable nor memory) — the error was
+      // received but could not be attached. Honest response; the client treats it as best-effort.
+      console.error(`[DIAGNOSTICS] preview-error append: no report found to attach to (workspace=${workspaceId})`);
+      res.json({ ok: false, reason: 'no report found for this workspace to attach the preview error to' });
     } catch {
       res.json({ ok: false }); // best-effort — never break the client over a diagnostics append
     }

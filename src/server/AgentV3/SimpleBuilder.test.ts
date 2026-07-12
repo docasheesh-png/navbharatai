@@ -199,16 +199,31 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(verifies).toBe(2); // verify → repair → verify
   });
 
-  it('verify still fails after maxRepairs → ok:false (hands off to the full builder, NO fake success)', async () => {
+  it('verify keeps failing (with NEW errors each time) after maxRepairs → ok:false (hands off, NO fake success)', async () => {
     let repairs = 0;
+    let v = 0;
     const r = await runSimpleBuild(baseDeps({
-      verify: async () => ({ ok: false, errors: 'error TS2339: broken' }),
-      repair: async (_e, files) => { repairs++; return [{ path: files[0].path, content: '// still broken' }]; },
+      // Distinct errors each attempt → the circuit-breaker does NOT fire; the loop runs the full budget.
+      verify: async () => ({ ok: false, errors: `error TS2339: broken #${++v}` }),
+      repair: async (_e, files) => { repairs++; return [{ path: files[0].path, content: `// attempt ${repairs}` }]; },
       maxRepairs: 2,
     }));
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('verify_failed');
     expect(repairs).toBe(2); // tried exactly maxRepairs times before handing off
+  });
+
+  it('GA-8 circuit-breaker: identical errors after a repair → stops early (no wasted attempts), still hands off', async () => {
+    let repairs = 0;
+    const r = await runSimpleBuild(baseDeps({
+      // The SAME error every time → a repair makes zero progress → break after the first no-progress attempt.
+      verify: async () => ({ ok: false, errors: 'error TS2339: stuck' }),
+      repair: async (_e, files) => { repairs++; return [{ path: files[0].path, content: `// no progress ${repairs}` }]; },
+      maxRepairs: 5, // budget is 5, but the breaker should stop long before exhausting it
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('verify_failed');
+    expect(repairs).toBe(1); // one attempt proved no progress → handed off instead of burning 4 more
   });
 
   it('a verify infra error does NOT block success (best-effort) — but is HONEST about it', async () => {

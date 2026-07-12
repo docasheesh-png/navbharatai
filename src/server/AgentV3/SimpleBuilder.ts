@@ -523,6 +523,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // shipped a runtime ReferenceError behind "Build verified ✓" through exactly this silent catch.
     let verdict: VerifyResult = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
     let attempt = 0;
+    // GA-8 circuit-breaker: the errors that prompted the CURRENT attempt. If a repair comes back with the
+    // byte-identical error set, the model is stuck and every further attempt burns a model call + verify
+    // round to fail the same way — hand off to the full builder now. Safe: only ever fires while the build
+    // is ALREADY failing (!verdict.ok), so it can never turn a passing build into a failing one.
+    let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {
       attempt++;
       deps.log?.(`Found build errors — fixing them (attempt ${attempt}/${maxRepairs})…`);
@@ -541,6 +546,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       for (const f of fixed) byPath.set(f.path, f);
       try { await deps.writeFiles(fixed); } catch { break; }
       verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
+      // Circuit-breaker: the repair produced the identical compiler errors → zero progress, it's stuck.
+      if (!verdict.ok && verdict.errors === promptingErrors) {
+        deps.log?.('The same build errors remain after a repair attempt — handing to the full builder to finish it.');
+        break;
+      }
+      promptingErrors = verdict.errors;
     }
     if (!verdict.ok) {
       deps.log?.('The app still has build errors — handing to the full builder to finish it.');

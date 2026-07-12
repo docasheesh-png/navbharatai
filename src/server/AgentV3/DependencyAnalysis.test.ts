@@ -5,6 +5,7 @@ import {
   normalizeImportToPackage,
   detectVersionConflicts,
   detectTypesMajorMismatch,
+  detectUnpinnedGitDeps,
 } from './DependencyAnalysis';
 
 describe('normalizeImportToPackage', () => {
@@ -120,16 +121,15 @@ describe('analyzeDependencies', () => {
     expect(issues.some((x) => x.kind === 'unpinned')).toBe(false);
   });
 
-  it('does not flag special protocols (workspace:/file:/git/npm) as unpinned', () => {
+  it('does not flag workspace:/file:/npm protocols as unpinned', () => {
     const pkg = JSON.stringify({
       dependencies: {
         a: 'workspace:*',
         b: 'file:../b',
-        c: 'github:user/repo',
         d: 'npm:other@*',
       },
     });
-    const issues = analyzeDependencies(['a', 'b', 'c', 'd'], pkg);
+    const issues = analyzeDependencies(['a', 'b', 'd'], pkg);
     expect(issues.some((x) => x.kind === 'unpinned')).toBe(false);
   });
 
@@ -407,5 +407,67 @@ describe('detectTypesMajorMismatch (GA-3 — @types/* on a different major than 
     expect(detectTypesMajorMismatch(null)).toEqual([]);
     expect(detectTypesMajorMismatch('{ not json')).toEqual([]);
     expect(detectTypesMajorMismatch('[]')).toEqual([]);
+  });
+});
+
+describe('detectUnpinnedGitDeps (GA-3 — git source with no pinned ref)', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('flags a github: shortcut with no ref (medium unpinned) with a pin suggestion', () => {
+    const issues = detectUnpinnedGitDeps(pkg({ dependencies: { lib: 'github:user/repo' } }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('unpinned');
+    expect(issues[0].package).toBe('lib');
+    expect(issues[0].severity).toBe('medium');
+    expect(issues[0].detail).toContain('default branch HEAD');
+    expect(issues[0].suggestion).toContain('#<commit-sha-or-tag>');
+  });
+
+  it('flags a git+https URL with no ref', () => {
+    const issues = detectUnpinnedGitDeps(pkg({
+      dependencies: { lib: 'git+https://github.com/user/repo.git' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('unpinned');
+  });
+
+  it('does NOT flag a git source that IS pinned to a commit or tag', () => {
+    expect(detectUnpinnedGitDeps(pkg({
+      dependencies: {
+        a: 'github:user/repo#a1b2c3d',
+        b: 'git+https://github.com/user/repo.git#v1.2.3',
+        c: 'github:user/repo#semver:^1.0.0',
+      },
+    }))).toEqual([]);
+  });
+
+  it('does NOT flag registry ranges, workspace:/file:/npm:, or the ambiguous user/repo shorthand', () => {
+    expect(detectUnpinnedGitDeps(pkg({
+      dependencies: {
+        a: '^1.2.3',
+        b: 'workspace:*',
+        c: 'file:../c',
+        d: 'npm:other@1',
+        e: 'user/repo',
+      },
+    }))).toEqual([]);
+  });
+
+  it('flags gitlab: and bitbucket: shortcuts too', () => {
+    const issues = detectUnpinnedGitDeps(pkg({
+      dependencies: { x: 'gitlab:user/repo', y: 'bitbucket:user/repo' },
+    }));
+    expect(issues.map((i) => i.package).sort()).toEqual(['x', 'y']);
+  });
+
+  it('is wired into analyzeDependencies (surfaces in the main scan)', () => {
+    const issues = analyzeDependencies(['lib'], pkg({ dependencies: { lib: 'github:user/repo' } }));
+    expect(issues.some((i) => i.kind === 'unpinned' && i.package === 'lib')).toBe(true);
+  });
+
+  it('returns [] for null / unparseable manifests', () => {
+    expect(detectUnpinnedGitDeps(null)).toEqual([]);
+    expect(detectUnpinnedGitDeps('{ not json')).toEqual([]);
+    expect(detectUnpinnedGitDeps('[]')).toEqual([]);
   });
 });

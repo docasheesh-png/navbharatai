@@ -14957,3 +14957,22 @@ ROADMAP.md statuses corrected to ✅ with the code evidence, so no future sessio
 work is now either large multi-PR UX (ship-live polish) or infra-gated (Tier 4 durable host) — not the
 mis-marked Tier-1A floor. Recommend the admin pick the next target from the corrected list rather than
 "complete everything" blind, since most of it is already done.
+
+## 2026-07-12 — Tier 2 start: GA-3 slice 1 — dependency version-conflict intelligence (admin: "2 start karo")
+
+Started Tier 2 (engine tracks). Chose GA-3 after auditing the actual code (safeguard #1 — the roadmap
+markers were stale): B4 (run the project's own tests) is already DONE and owned by the parallel session's
+just-merged Immune System (#1249, testRunner + Vaccine + Red-team); A1 code_graph tool + architectureMap
+already exist. To avoid duplicating the parallel session's hot AgentV3 verify/heal area, picked a
+genuinely-unbuilt, self-contained analyzer.
+
+GA-3 slice 1: `DependencyAnalysis.detectVersionConflicts` — a pure, semver-backed detector of DECLARED
+version conflicts that `npm install` resolves silently-wrong: (a) the SAME package pinned to
+NON-INTERSECTING ranges across dependencies/devDependencies/optionalDependencies (npm installs ONE
+version → one section resolves outside its range — the classic "types say v18, runtime got v17" break);
+(b) a dependencies/devDependencies version that does NOT satisfy the project's OWN declared
+peerDependencies range. Uses the installed `semver@7.8.3` via a tiny ambient `semver.d.ts` (no @types/semver
+dep added). Non-semver specifiers (workspace:/file:/git/*/latest) are skipped so it never emits a false
+conflict; one issue per package (version-conflict wins). Wired into `analyzeDependencies` — the existing
+`evaluate` dependency dimension — so conflicts surface to the agent (and user) to fix, never a synthetic
+"looks fine". +7 tests. Remaining GA-3: an auto-resolver + Bun/UV engines. Gate: tsc fe+server 0, vitest 6122/6122.

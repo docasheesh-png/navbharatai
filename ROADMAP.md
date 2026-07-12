@@ -182,7 +182,7 @@ safely edit, or truly verify it).
 - **GA-1** ⚠️ — Multi-Workspace Manager (unified orchestrator: list/switch/quota/cleanup).
 - **GA-2** ❌ — Runtime Supervisor + Background Task Manager + durable Job Queue (long-run
   process tracking, restart-on-crash). *(Out-of-process half is infra → Tier 4 / V4-4.)*
-- **GA-3** ❌ — Dependency Intelligence: real version-range/conflict resolver + Bun & UV engines.
+- **GA-3** 🟡 — Dependency Intelligence. **Slice 1 ✅ (2026-07-12):** semver-backed version-CONFLICT detector in `DependencyAnalysis.detectVersionConflicts` — flags the same package pinned to non-intersecting ranges across dependencies/devDependencies/optionalDependencies (npm resolves ONE version → one section wrong) + a dep/devDep version that violates the project's OWN peerDependencies range. Wired into `analyzeDependencies` (the `evaluate` dependency dimension), so conflicts surface to the agent to fix. Non-semver specifiers skipped (no false positives). **Remaining ❌:** an auto-resolver (pick a satisfying version) + Bun & UV package-manager engines.
 - **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
 - **GA-5** ❌ — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
 - **GA-6** ❌ — Persistent Engineering Memory (ADR, tech-debt register, bug DB, deploy/migration history).

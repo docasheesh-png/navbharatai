@@ -3,6 +3,7 @@ import {
   analyzeDependencies,
   dependencySummary,
   normalizeImportToPackage,
+  detectVersionConflicts,
 } from './DependencyAnalysis';
 
 describe('normalizeImportToPackage', () => {
@@ -190,5 +191,84 @@ describe('dependencySummary', () => {
     const out = dependencySummary(analyzeDependencies(['react'], pkg));
     expect(out).toContain('1 medium');
     expect(out).toContain('[medium] unpinned: react');
+  });
+});
+
+describe('detectVersionConflicts (GA-3 — semver-backed version-conflict intelligence)', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('flags the SAME package pinned to non-intersecting ranges across sections (version-conflict, high)', () => {
+    const issues = detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.2' },
+      devDependencies: { react: '^18.2.0' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('version-conflict');
+    expect(issues[0].package).toBe('react');
+    expect(issues[0].severity).toBe('high');
+  });
+
+  it('does NOT flag overlapping/compatible ranges', () => {
+    // ^18.0.0 and >=18.1.0 intersect; ~4.9 and ^4.9.5 intersect.
+    expect(detectVersionConflicts(pkg({
+      dependencies: { typescript: '^4.9.5' },
+      devDependencies: { typescript: '~4.9.0' },
+    }))).toEqual([]);
+    expect(detectVersionConflicts(pkg({
+      dependencies: { react: '^18.0.0' },
+      devDependencies: { react: '>=18.1.0' },
+    }))).toEqual([]);
+  });
+
+  it('flags a dep version that violates the project\'s OWN peerDependencies range (peer-violation, high)', () => {
+    const issues = detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.0' },
+      peerDependencies: { react: '>=18.0.0' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('peer-violation');
+    expect(issues[0].package).toBe('react');
+  });
+
+  it('does NOT flag a peer range the installed version DOES satisfy', () => {
+    expect(detectVersionConflicts(pkg({
+      dependencies: { react: '^18.2.0' },
+      peerDependencies: { react: '>=18.0.0' },
+    }))).toEqual([]);
+  });
+
+  it('skips non-semver specifiers (workspace:/file:/git/*/latest) — never a false conflict', () => {
+    expect(detectVersionConflicts(pkg({
+      dependencies: { pkg: 'workspace:*' },
+      devDependencies: { pkg: 'file:../pkg' },
+    }))).toEqual([]);
+    expect(detectVersionConflicts(pkg({
+      dependencies: { a: '*' },
+      devDependencies: { a: 'latest' },
+    }))).toEqual([]);
+  });
+
+  it('emits at most ONE issue per package (version-conflict wins over peer-violation)', () => {
+    const issues = detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.0' },
+      devDependencies: { react: '^18.0.0' }, // cross-section conflict
+      peerDependencies: { react: '>=18.0.0' }, // also a peer violation for the ^17 dep
+    }));
+    expect(issues.filter((i) => i.package === 'react')).toHaveLength(1);
+    expect(issues[0].kind).toBe('version-conflict');
+  });
+
+  it('returns [] for null / unparseable / non-object manifests', () => {
+    expect(detectVersionConflicts(null)).toEqual([]);
+    expect(detectVersionConflicts('{ not json')).toEqual([]);
+    expect(detectVersionConflicts('[]')).toEqual([]);
+  });
+
+  it('is wired into analyzeDependencies (conflicts surface in the main scan)', () => {
+    const issues = analyzeDependencies([], pkg({
+      dependencies: { react: '^17.0.0' },
+      devDependencies: { react: '^18.0.0' },
+    }));
+    expect(issues.some((i) => i.kind === 'version-conflict' && i.package === 'react')).toBe(true);
   });
 });

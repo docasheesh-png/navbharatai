@@ -135,6 +135,9 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
+import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -6030,6 +6033,53 @@ export function registerAgentV3Routes(app: Express): void {
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            // APP HEALTH CULTURE (slice 1, admin 2026-07-12 "culture, not just stain"): the app RENDERS
+            // — now check it actually has the interactive features the user asked for (Add/Delete/Filter…
+            // present as real controls in the running DOM). Deterministic + ADVISORY: records an honest
+            // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
+            // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
+            try {
+              let coverage = checkFeaturePresence(prompt, html);
+              // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
+              // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
+              // then re-open the running app and re-probe (only a control now in the live DOM counts).
+              // Budget-gated + abortable; if the control still isn't there, the honest FEATURE_COVERAGE
+              // warning below still stands. Never blocks or fails a build.
+              if (
+                coverage.missing.length > 0 && featureHealEnabled() && !abort.signal.aborted
+                && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+              ) {
+                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${coverage.missing.join(', ')}. Adding it now…`, ts: Date.now() });
+                try {
+                  const featureRunner = new AgentRunner({
+                    ...baseRunnerOpts,
+                    client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                    model: resolveModel(onlyOpus),
+                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                  });
+                  const healed = await featureRunner.run(featurePresenceRepairPrompt(coverage));
+                  if (healed.ok) {
+                    result = healed;
+                    try {
+                      const after = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+                      const afterCoverage = checkFeaturePresence(prompt, after);
+                      if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                    } catch { /* re-open best-effort — keep the pre-heal coverage */ }
+                  }
+                } catch (e) {
+                  console.log(`[AGENTV3] feature heal failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }
+              if (coverage.probes.length > 0) {
+                buildDiag.record({
+                  phase: 'readiness',
+                  severity: coverage.missing.length > 0 ? 'warning' : 'info',
+                  code: 'FEATURE_COVERAGE',
+                  message: featurePresenceSummary(coverage),
+                  autoResolved: coverage.missing.length === 0,
+                });
+              }
+            } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             break;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];
@@ -6055,6 +6105,120 @@ export function registerAgentV3Routes(app: Express): void {
             break;
           }
         }
+      }
+
+      // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a
+      // TOOL the agent MAY skip; the vaccine makes it a SYSTEM reflex. If the built project ships a real
+      // test suite, the platform runs it ITSELF, reads honest pass/fail counts, and records a TEST_SUITE
+      // finding — so a green build whose own tests fail can never be reported as verified. When the suite
+      // fails and the feature-heal-style flag budget allows, ONE bounded repair pass fixes the SOURCE (never
+      // deletes/skips a test) and re-runs. No suite → honest no-op. Best-effort, budget-gated, abortable —
+      // never blocks or hangs a build.
+      if (
+        vaccineEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          const vaxHealMax = featureHealEnabled() ? 1 : 0; // repair only when the heal budget is opted in
+          for (let attempt = 0; attempt <= vaxHealMax && !abort.signal.aborted; attempt++) {
+            const files = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+            let pkgRaw: string | undefined;
+            try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+            const plan = detectTestPlan(files, pkgRaw);
+            if (!plan) break; // no real suite — honest no-op, never a fake pass
+            let outcome;
+            try {
+              const { exitCode, stdout, stderr } = await withTimeout(actuator.runCommand(workspaceId, plan.command), 180_000, 'vaccine-run-tests');
+              outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
+            } catch { break; /* couldn't run the suite (timeout / no sandbox) — skip silently */ }
+            if (outcome.ok) {
+              buildDiag.record({ phase: 'readiness', severity: 'info', code: 'TEST_SUITE', message: outcome.summary, autoResolved: true });
+              if (attempt > 0) events.emit({ type: 'narration', agent: 'architect', text: `✅ Test suite green after fix — ${outcome.summary}.`, ts: Date.now() });
+              break;
+            }
+            // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
+            if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+              buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
+              break;
+            }
+            events.emit({ type: 'narration', agent: 'architect', text: `🧬 The app's own tests are failing (${outcome.summary}). Fixing the source now…`, ts: Date.now() });
+            try {
+              const vaxRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                model: resolveModel(onlyOpus),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
+              if (healed.ok) result = healed; else break;
+            } catch (e) {
+              console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
+              break;
+            }
+          }
+        } catch { /* vaccine is best-effort — never blocks a build */ }
+      }
+
+      // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the
+      // happy-path preview check only proves the app renders on GOOD input. The red-team ADVERSARIALLY
+      // types hostile values (empty, oversized, injection-shaped, malformed numbers) into the app's own
+      // inputs via a real browser and watches for a CRASH (uncaught error / React error / unhandled
+      // rejection). A crash on hostile input is a real robustness bug the build never sees; it is recorded
+      // as a FUZZ_ROBUSTNESS finding and (with the heal budget opted in) hardened by ONE bounded repair
+      // pass. Hard-capped total cases + wall-clock budget + abortable — never blocks or hangs a build.
+      if (
+        redTeamEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        && actuator.browserAction && actuator.getConsoleErrors && actuator.browseUrl && lastPreviewUrl
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 120_000)
+      ) {
+        try {
+          let fuzzHtml = '';
+          try { fuzzHtml = (await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'redteam-browse')).html; } catch { fuzzHtml = ''; }
+          const plan = generateFuzzPlan(fuzzHtml);
+          const MAX_TOTAL_CASES = 12; // hard cap across all inputs so the attack is always bounded
+          const redTeamDeadline = Date.now() + 90_000; // whole red-team pass ≤ 90s regardless of case count
+          const findings: { input: FuzzInput; case: FuzzCase; verdict: FuzzVerdict }[] = [];
+          let casesRun = 0;
+          outer:
+          for (const target of plan) {
+            for (const fcase of target.cases) {
+              if (casesRun >= MAX_TOTAL_CASES || Date.now() > redTeamDeadline || abort.signal.aborted) break outer;
+              casesRun++;
+              const caseStart = Date.now();
+              try {
+                // Reset to a clean app state, type the hostile value, and submit (Enter).
+                await withTimeout(actuator.browserAction(workspaceId, 'navigate', { url: lastPreviewUrl }), 15_000, 'redteam-nav');
+                await withTimeout(actuator.browserAction(workspaceId, 'type', { selector: target.input.selector, text: fcase.value }), 12_000, 'redteam-type');
+                await withTimeout(actuator.browserAction(workspaceId, 'press', { selector: target.input.selector, text: 'Enter' }), 12_000, 'redteam-submit');
+              } catch { continue; /* the input wasn't reachable / action timed out — skip this case */ }
+              let errs: string[] = [];
+              try {
+                if (actuator.getConsoleErrors) errs = (await actuator.getConsoleErrors(workspaceId, caseStart)).errors.map((e) => e.text);
+              } catch { /* capture best-effort */ }
+              const verdict = interpretFuzzErrors(errs);
+              if (verdict.crashed) findings.push({ input: target.input, case: fcase, verdict });
+            }
+          }
+          if (findings.length > 0) {
+            buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
+            // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.
+            if (featureHealEnabled() && !abort.signal.aborted && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🛡️ Red-team crashed ${findings.length} input(s) on hostile input — hardening validation now…`, ts: Date.now() });
+              try {
+                const rtRunner = new AgentRunner({
+                  ...baseRunnerOpts,
+                  client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                  model: resolveModel(onlyOpus),
+                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                });
+                const healed = await rtRunner.run(fuzzRepairPrompt(findings));
+                if (healed.ok) { result = healed; buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
+              } catch (e) {
+                console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
+          }
+        } catch { /* red-team is best-effort — never blocks a build */ }
       }
 
       // R4 §2.3 — RUNTIME-ERROR AUTO-FIX LOOP (opt-in: AGENTV3_AUTOFIX=on). A build can compile

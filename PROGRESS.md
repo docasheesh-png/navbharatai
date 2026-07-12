@@ -14811,3 +14811,87 @@ GitHub token's push access (getRepoAccess.canPush) — a caller can only ship/re
 display-only (the build route re-enforces every entitlement server-side). Remaining T0-9: converge the
 ad-hoc guards (verifyFirebaseToken / assertWorkspaceOwner / resolveReadIdentity / requireUserMatch) onto the
 identityPolicy primitives + a final re-audit. Gate: tsc fe+server 0, vitest 6075/6075.
+## 2026-07-12 — Immune System Phase 1a (Culture): feature-presence check — "does the running app DO what the user asked?"
+
+Admin's biology framing (2026-07-12): staining shows morphology; CULTURE shows whether the organism is
+alive AND doing its job. PreviewVerify already answers "is the app alive?" (renders/blank/crash). This
+adds the next question — "does the living app have the features the user asked for?" — the first slice
+of the "App Health Culture".
+
+New pure `FeaturePresence.ts` (`checkFeaturePresence(prompt, html)`): from the prompt it derives which
+common interactive features were REQUESTED (add / delete / edit / complete / filter / search / list /
+auth / theme), then checks the RENDERED preview DOM for a matching affordance. A feature is reported
+MISSING only when its keyword is clearly in the prompt AND no matching control is found — so it
+highlights "asked for Delete but there's no delete control" without false-flagging different wording.
+Deterministic, conservative, pure; ADVISORY only (records an honest FEATURE_COVERAGE finding, never
+blocks a build — a heuristic must never false-fail a working app).
+
+Wired into the preview-verify pass: the moment the real-browser check confirms the app renders, it also
+records feature coverage (present vs missing) into the build report. Auto-fixing the missing features
+(feeding them to the bounded heal pass) is the next slice (1b).
+
+Tests: FeaturePresence.test.ts (11 — TaskLite full-present, bare-build flags Delete+Filter missing,
+only-requested-features probed, empty-state counts as list present, robustness). Gate: server tsc 0,
+FeaturePresence + suite green.
+
+## 2026-07-12 — Immune System Phase 1b (Culture auto-fix): add the missing requested control, then re-probe
+
+Slice 1 only RECORDED the FEATURE_COVERAGE finding (advisory). Slice 1b closes the loop: when the
+running app RENDERED but a requested control is missing, run ONE bounded heal pass that adds the missing
+UI (`featurePresenceRepairPrompt`), then RE-OPEN the running app in the browser and re-probe — only a
+control that is NOW in the live DOM counts (no self-reported success). Opt-in `AGENTV3_FEATURE_HEAL=on`
+(default OFF — same discipline as the runtime auto-fix loop, since it spends an extra repair pass). It
+is budget-gated (skips when the wall-clock cap is near), abortable, and free-tier routing is honoured
+via healRunnerRoutingOpts (cheap coders for a free build, never Claude — Model Routing Policy). If the
+heal doesn't add the control, the honest FEATURE_COVERAGE warning still stands — it NEVER blocks or
+fails a build.
+
+Tests: +3 (featureHealEnabled off-by-default / on only for exact 'on' / off for any other value).
+Gate: server tsc 0, FeaturePresence 14 green.
+
+## 2026-07-12 — Immune System Phase 2 (Vaccine): the app runs its OWN test suite as a system reflex
+
+`run_tests` already existed as an agent TOOL — but the agent may skip it, so a green build whose own
+tests fail could still be reported "verified". The vaccine makes running the suite a guaranteed SYSTEM
+reflex: after a successful, artifact-producing build, if the project ships a REAL test suite
+(detectTestPlan — vitest/jest/playwright/pytest/Maven/Gradle/go, honoring the project's own `npm test`
+and package manager), the platform runs it ITSELF, parses honest pass/fail counts (parseTestOutcome),
+and records a TEST_SUITE finding in the build report (info when green, warning + failing-test names when
+red). No suite → honest no-op (never a fake pass).
+
+Opt-in `AGENTV3_VACCINE=on` (default OFF — runs an extra command, same discipline as the runtime
+auto-fix and feature-heal loops). When the suite FAILS and the heal budget is opted in
+(AGENTV3_FEATURE_HEAL=on), ONE bounded repair pass fixes the SOURCE — the repair prompt explicitly
+forbids deleting/skipping/weakening a test to make it green (that would hide the bug) — then re-runs.
+Budget-gated (180s per run, skips near the wall-clock cap), abortable, free-tier routing honoured. It
+NEVER blocks or hangs a build.
+
+Tests: +7 (vaccineEnabled off-by-default/exact-on; testOutcomeRepairPrompt empty-on-pass, names failing
+tests + forbids skip/delete, source-fix ask when unattributable). Gate: server tsc 0, testRunner 28 green.
+
+## 2026-07-12 — Immune System Phase 3 (Red-team / GA-17): adversarially crash the running app's inputs
+
+The happy-path preview check only proves the app renders on GOOD input. The red-team goes further: it
+ADVERSARIALLY types hostile values into the app's OWN inputs via a real browser and watches for a crash.
+
+New pure `FuzzProbe.ts`: `generateFuzzPlan(html)` parses the rendered preview for inputs/textareas
+(skipping hidden/checkbox/radio/submit/file), derives a best-effort selector (#id → [name] → [placeholder]
+→ positional nth) + kind (text/number/email/url/date/…), and a bounded adversarial catalog per kind
+(empty, whitespace, 5000-char, unicode/emoji/markup, injection-shaped text; negative/huge/NaN/Infinity for
+numbers; malformed email/url/date). `interpretFuzzErrors` classifies captured console errors into an
+honest crash verdict (only real signatures — uncaught / TypeError / React error / unhandled rejection —
+count; warnings and 404s do not). `fuzzSummary` / `fuzzRepairPrompt` for the report + heal.
+
+Wired into the route as an opt-in post-build pass (`AGENTV3_REDTEAM=on`, default OFF): re-open the app,
+for each input type a hostile value + submit (Enter), capture console errors, and record a
+FUZZ_ROBUSTNESS warning for every input that crashed. Hard-capped (≤12 total cases, ≤90s whole-pass
+deadline, per-action timeouts, abortable) so it can never slow or hang a build. When crashes are found
+and the heal budget is opted in (AGENTV3_FEATURE_HEAL=on), ONE bounded pass hardens the SOURCE
+validation/sanitization (fuzzRepairPrompt — never removes the inputs). Best-effort; never blocks a build.
+
+Tests: FuzzProbe.test.ts (15 — selector precedence, kind→cases mapping, skips non-value inputs, textarea
+nth selectors, input/case caps, crash-signature classification incl. dedupe + non-string tolerance,
+summary/repair emptiness). Gate: server tsc 0, full suite 6110 green.
+
+This completes the Immune System trio: Culture (does it DO the job?) + Vaccine (do its own tests pass?)
++ Red-team (does it survive hostile input?). All three are default-OFF/advisory and can never fail a build.

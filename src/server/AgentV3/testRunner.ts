@@ -141,6 +141,35 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
   return null;
 }
 
+/**
+ * App Health Culture — the VACCINE pass (Immune System Phase 2, admin 2026-07-12).
+ *
+ * `run_tests` is an agent TOOL — the build agent may or may not choose to call it. The vaccine turns
+ * that into a guaranteed SYSTEM reflex: after a successful build, if the project ships a real test
+ * suite, the platform runs it itself, reads honest pass/fail counts, and records a TEST_SUITE finding
+ * in the build report — so a green build that its own tests fail can never be reported as "verified".
+ * OFF by default (`AGENTV3_VACCINE=on` to enable) because it runs an extra command (build time / cost),
+ * same opt-in discipline as the runtime auto-fix and feature-heal loops. It NEVER blocks a build: when
+ * no suite exists it is an honest no-op, and a failing suite is a WARNING finding, not a hard fail.
+ */
+export function vaccineEnabled(): boolean {
+  return process.env.AGENTV3_VACCINE === 'on';
+}
+
+/** An agent-facing repair instruction for a failing test suite (used only when a heal pass runs). */
+export function testOutcomeRepairPrompt(outcome: TestOutcome): string {
+  if (outcome.ok) return '';
+  const names = outcome.failingTests.slice(0, 15);
+  return [
+    `The app builds, but its OWN test suite is failing (${outcome.summary}).`,
+    ...(names.length ? ['Failing tests:', ...names.map((n) => `  - ${n}`)] : []),
+    '',
+    'Read the failing test(s) and the code under test, then fix the SOURCE so the tests pass — do not',
+    'delete, skip, or weaken a test to make it green (that would hide the bug, not fix it). Make the',
+    'smallest correct edits and keep the existing passing tests intact.',
+  ].join('\n');
+}
+
 function toInt(v: string | undefined): number | null {
   if (v == null) return null;
   const n = parseInt(v, 10);

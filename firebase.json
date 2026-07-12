@@ -40,6 +40,7 @@
     ]
   },
   "firestore": {
+    "database": "navbharat-prod",
     "rules": "firestore.rules"
   }
 }

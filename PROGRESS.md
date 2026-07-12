@@ -14933,3 +14933,27 @@ Tests: ToolDispatcher.test.ts +4 (bash masks a key in returned content AND the t
 stderr secret; grep masks a matched-line secret; non-secret output untouched) + updated the R1.1
 "kept in model content" test to assert the new, more-secure "redacted in model content too" behaviour.
 Gate: server tsc 0, ToolDispatcher 126 green.
+
+## 2026-07-12 — Immune System shipped + Tier-1A roadmap audit (stale ❌ corrected)
+
+Shipped this session (both merged to main, auto-deploying via Cloud Run):
+- **#1249 — Immune System for v3.0** (admin's "culture, not just stain"): three default-OFF, advisory,
+  never-blocking post-build passes — Culture (`FeaturePresence`: does the app DO what was asked?),
+  Vaccine (`testRunner` reflex: do the app's own tests pass? — closes roadmap B4), and Red-team
+  (`FuzzProbe`: does it survive hostile input? — closes roadmap GA-17). +36 tests.
+- **#1253 — T1-sec-redact**: `bash`/`grep` command output is now redacted in the model transcript +
+  terminal (not only the event summary) — the real leak the R1.1 surface-only redaction left open.
+
+Honest audit finding (safeguard #6 — verify roadmap against real code before building): several Tier-1
+items still marked ❌ in ROADMAP.md are ALREADY IMPLEMENTED and were verified in code this session:
+- **T1-spend-ceiling** — `userMonthlyCapUsd()` + `checkMonthlyCap()` wired at build entry (HTTP 402,
+  default-off via `AGENTV3_USER_MONTHLY_CAP_USD`, fails-open). DONE.
+- **T1-injection-defense** — `UntrustedContent.fenceUntrusted` + the systemPrompt data-fence rule,
+  applied to imported/external content. DONE.
+- **T1-deploy-1click** — client `deployLive()` + provider selection + durable live-URL, on the real
+  `DeployProviders` backend. DONE.
+ROADMAP.md statuses corrected to ✅ with the code evidence, so no future session rebuilds working code
+(the exact PR#1/#4 redundant-work trap CLAUDE.md safeguard #6 exists to prevent). Genuinely-remaining
+work is now either large multi-PR UX (ship-live polish) or infra-gated (Tier 4 durable host) — not the
+mis-marked Tier-1A floor. Recommend the admin pick the next target from the corrected list rather than
+"complete everything" blind, since most of it is already done.

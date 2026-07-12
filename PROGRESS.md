@@ -14523,3 +14523,30 @@ Gate: frontend tsc 0, vitest 6027/6027, `npm run build` PASS. Client-only (no se
 
 NOTE: finished groups still collapse to the one-line summary (keeps a long build's history glanceable); if the
 admin wants finished builds to STAY expanded too, that's a one-line flip (default open = true).
+## 2026-07-12 — Fast-lane tsc-gate hardened: "Build verified ✓" can never again be printed for a check that didn't run (admin: "haan lagao tsc-gate")
+
+Investigation first (rule 4): the fast lane ALREADY had a real tsc gate (fastVerify — Fix 38b's
+__TSC_CLEAN__ marker + missing-files + CSS gates). The jungle-game build still shipped a runtime
+ReferenceError behind "Build verified — the app compiles ✓" because of a DIFFERENT hole: two silent
+catch paths converted "the verify pipeline THREW" (sandbox infra hiccup) into ok:true —
+`deps.verify().catch(() => ({ ok: true }))` in SimpleBuilder and fastVerify's own outer catch — and
+then the fake "verified ✓" line printed AND fastLaneGated=true skipped the agentic tsc gate too:
+one infra failure silently disabled BOTH checks.
+
+Fix (honesty + resilience, no fake success ever):
+1. `VerifyResult.ran?: boolean` — false = the check could not EXECUTE (distinct from ran-and-passed).
+2. fastVerify: ONE bounded retry on a throw (transient sandbox hiccups usually pass on retry), then an
+   honest `ran:false`; fastVerifyOnce no longer swallows the throw.
+3. SimpleBuilder: a throw/ran:false NEVER prints "Build verified ✓" — it logs "⚠️ type-check could not
+   run — shipping unverified", returns `typecheckRan:false`, and classifies with typecheckOk:null
+   (an un-run check is "unknown", never a pass).
+4. Route: on typecheckRan:false records a `VERIFY_DID_NOT_RUN` warning in the report AND keeps
+   `fastLaneGated=false` → the G3 post-agentic tsc gate (real `tsc --noEmit` + one bounded repair)
+   RUNS on the shipped files — so even on a sandbox hiccup the app still gets a genuine type-check.
+   Same tri-state wiring for the one-shot lane (ran:false → osVerified null, gate stays on).
+
+Net: every fast-lane build is now either (a) genuinely tsc-verified in-lane, or (b) honestly marked
+unverified AND re-checked by the downstream gate — never a silent double-skip.
+
+Tests: SimpleBuilder.test.ts — throw → ships but typecheckRan:false + honest log + BUILD_PARTIAL + NO
+"Build verified" line; ran:false same; genuine pass unchanged; no-verify tri-state. 6016 pass, boot PASS.

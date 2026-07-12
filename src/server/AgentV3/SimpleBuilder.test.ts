@@ -211,14 +211,48 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(repairs).toBe(2); // tried exactly maxRepairs times before handing off
   });
 
-  it('a verify infra error does NOT block success (best-effort)', async () => {
-    const r = await runSimpleBuild(baseDeps({ verify: async () => { throw new Error('sandbox gone'); } }));
+  it('a verify infra error does NOT block success (best-effort) — but is HONEST about it', async () => {
+    // The jungle-game bug (2026-07-12): a verify THROW was silently converted into ok:true and the
+    // build printed "Build verified ✓" for a check that never ran. Now: still ships (sticky success),
+    // but typecheckRan=false, the honest warning is logged, and "Build verified" is NEVER printed.
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      log: (m) => logs.push(m),
+      verify: async () => { throw new Error('sandbox gone'); },
+    }));
     expect(r.ok).toBe(true);
+    expect(r.typecheckRan).toBe(false);
+    expect(logs.some((l) => l.includes('Build verified'))).toBe(false); // no fake success line
+    expect(logs.some((l) => l.includes('could not run'))).toBe(true);   // the honest warning instead
+    expect(r.outcome).toBe('BUILD_PARTIAL'); // typecheckOk null — "unknown", never a pass
+  });
+
+  it('a verify that reports ran:false (retries exhausted) is treated the same as a throw', async () => {
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      log: (m) => logs.push(m),
+      verify: async () => ({ ok: true, errors: '', ran: false }),
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.typecheckRan).toBe(false);
+    expect(logs.some((l) => l.includes('Build verified'))).toBe(false);
+  });
+
+  it('a verify that genuinely RAN and passed still prints "Build verified ✓" (unchanged)', async () => {
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      log: (m) => logs.push(m),
+      verify: async () => ({ ok: true, errors: '' }),
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.typecheckRan).toBe(true);
+    expect(logs.some((l) => l.includes('Build verified'))).toBe(true);
   });
 
   it('without a verify dep, behavior is unchanged (sticky success)', async () => {
     const r = await runSimpleBuild(baseDeps());
     expect(r.ok).toBe(true);
+    expect(r.typecheckRan).toBeUndefined(); // verify not wired — tri-state stays honest
   });
 });
 

@@ -26,6 +26,31 @@ export const CREATOR_IDENTITY =
   'partners, or dates; keep it short, warm, and genuine.';
 
 
+/**
+ * CURRENT-DATE + RECENCY directive (admin request 2026-07-12) — injected into every user-facing chat
+ * system prompt (NavBharatAI Free, Pro v3.0 chat, and every Professional AI) so the model NEVER
+ * presents stale training-cutoff facts as current. ROOT CAUSE it fixes: with no "today" in the prompt,
+ * the model answered a time-sensitive question (e.g. the India cricket squad) with a PAST year's data
+ * as if it were the present. The real date is computed at call time in IST, so it is always correct.
+ * This is an honesty directive: it does not fetch live data, but it stops the AI from stating old
+ * information as if it were the latest, and makes it flag its own recency limits.
+ */
+export function recencyDirective(now: Date = new Date()): string {
+  let today: string;
+  try {
+    today = now.toLocaleDateString('en-IN', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata',
+    });
+  } catch {
+    today = now.toISOString().slice(0, 10); // fallback if the ICU timezone data is unavailable
+  }
+  return `CURRENT DATE & RECENCY (MANDATORY):
+- Today's date is ${today} (India). Treat this as "now" for anything time-relative — "current", "latest", "this year", "these days", "abhi", "aaj".
+- Your training data has a cutoff and may be OUTDATED. For anything that changes over time — sports (team squads, captains, match/series results, tournament winners), news and current events, prices/rates, who currently holds a post/title/record, latest app or product versions, and any "latest / current / this year" question — DO NOT state old information as if it is the present.
+- If you are not certain your information is up to date, say so honestly, give the most recent you reliably know WITH its date/year, and tell the user to verify the very latest. NEVER present a past year's squad, winner, price, or office-holder as the current one.`;
+}
+
+
 export const getSecurityContext = (target: string): string => {
   return `You are a Senior Web Security Auditor for navBharatAI.
 

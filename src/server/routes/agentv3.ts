@@ -197,7 +197,7 @@ import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
-import { CREATOR_IDENTITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -3267,7 +3267,7 @@ export function registerAgentV3Routes(app: Express): void {
         const roleRecall = (() => {
           try { return sessionRecallContextLine(getWorkspaceMemory(roleWorkspaceId).snapshot().episodes); } catch { return ''; }
         })();
-        const system = LANGUAGE_RULE + '\n\n' + roleSystemPrompt(chatRole) + roleRecall + formatRoleContext(fileTree, picked);
+        const system = LANGUAGE_RULE + '\n\n' + roleSystemPrompt(chatRole) + '\n\n' + recencyDirective() + roleRecall + formatRoleContext(fileTree, picked);
         const roleRouter = AIRouterManager.getRouter('free');
         const { response } = await raceTimeout(roleRouter.route(prompt, system), 45_000, 'roleChat.route');
         const fullReply = response.content || '';
@@ -3746,7 +3746,7 @@ export function registerAgentV3Routes(app: Express): void {
               LANGUAGE_RULE + '\n\n' +
                 "You are NavBharatAI's friendly assistant. Reply briefly and warmly, following the " +
                 "LANGUAGE rule above (match the user's language; never default to Hindi). Do not " +
-                "mention which model you are.\n\n" + CREATOR_IDENTITY + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
+                "mention which model you are.\n\n" + CREATOR_IDENTITY + '\n\n' + recencyDirective() + chatWorkspaceContext + chatPreviewHealth + chatSessionRecall +
                 (ambiguousBuildAsk
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "

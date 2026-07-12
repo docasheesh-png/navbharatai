@@ -14015,3 +14015,38 @@ without rules the client gets permission-denied). Only AFTER rules are published
 (auto-deploys via Cloud Run). Fresh start — old ai-studio data is left behind (test data, 1 user).
 
 Gate: tsc fe+server 0, build PASS, JSON valid; no test references the DB id. CI runs full vitest before merge.
+
+## 2026-07-12 — Root cause of navbharat-prod PERMISSION_DENIED: server wrote via the CLIENT SDK (money path fixed via ADMIN-SDK shim)
+
+The DB migration above surfaced a real architectural bug it did NOT cause but exposed. The whole server
+reached Firestore through the **CLIENT SDK** (`firebase/firestore` modular API on the handle `setDb()`
+installs in server.ts). Run from the server that handle is **unauthenticated** (`request.auth == null`),
+so every write is subject to security rules. The old ai-studio DB "worked" only because its rules were
+wide-open. `navbharat-prod`'s `firestore.rules` correctly default-DENY and mark the server-only
+collections `allow write: if false`, so EVERY unauthenticated server write began failing with
+`7 PERMISSION_DENIED` — payment (`payment_transactions`/`user_token_wallets`), and the same class for
+`user_secrets`, `user_workspaces`, `chat_*`. The rules are right; the server must stop pretending to be a
+client and use the **ADMIN SDK** (bypasses rules by design, service-account authed).
+
+Fix (rule 2 — fix the class, one implementation): new `src/server/lib/serverDb.ts` — an admin-backed
+DROP-IN for the exact modular API the code used (`doc/getDoc/setDoc/updateDoc/deleteDoc/runTransaction/
+collection/addDoc/getDocs/query/where/orderBy/limit`), keeping CLIENT snapshot semantics (`snap.exists()`
+stays a METHOD — the silent money-path gotcha vs admin's `.exists` property). Named DB targeted with
+`getFirestore(app, dbId)` (per-databaseId cached instance — probed: no `.settings()` collision).
+Migrating a file = a one-line import swap (`getServerDb as getDb`), bodies untouched, proven credit/
+debit/transaction logic unchanged. Shim has its own unit test (7) locking the semantics.
+
+THIS PR = the money path only (the reported fire): payment.ts, payments.ts, walletDebit.ts, wallet.ts,
+WalletBalance.ts (owner-only wallet READ was also blocked), createOrder.ts, agentv3.ts (wallet read/debit
+sites). Gate: tsc fe+server 0, vitest 5968/5968.
+
+OPEN (next PR, same class — rule 3 hunt-siblings): migrate the data-path server files still on the client
+SDK — sync.ts (user_workspaces), chat.ts, secrets.ts (route+lib, user_secrets), domains.ts, profile.ts,
+admin.ts, engineerQuota.ts, DurableRateLimit.ts, FeatureFlagManager.ts, TechnicalDebtTracker.ts,
+BackendScaffolder.ts — onto the same shim. Until then those write paths stay blocked on navbharat-prod.
+
+OPEN (separate root cause, recorded per rule 6): the ~20 AgentV3/lib stores that target the DB via
+`admin.firestore().settings({databaseId})` are fragile — `.settings()` THROWS on the 2nd caller of the
+shared default-app singleton, so only the first store to initialize wins and later ones catch→null→
+silently skip persistence. This is the likely real reason "build report save nahi hoti thi". Fix =
+centralize them onto `serverDb.getServerDb()` (collision-free `getFirestore(app,id)`). Tracked, not yet done.

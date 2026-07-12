@@ -12,7 +12,7 @@
 //   • firestoreWalletReader(db) — binds the pure reader to the shared Firestore handle (may be null when
 //     Firebase isn't configured → reader yields null → unknown → proceed).
 
-import { doc, getDoc, type Firestore } from 'firebase/firestore';
+import { doc, getDoc, type Firestore } from '../lib/serverDb'; // admin-SDK binding — reads the owner-only wallet doc
 
 /** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; anything else is ignored here. */
 export interface WalletDocData {

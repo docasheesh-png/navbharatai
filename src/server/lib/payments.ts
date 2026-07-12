@@ -1,6 +1,7 @@
 import axios from 'axios';
-import { doc, getDoc, runTransaction } from 'firebase/firestore';
-import { getDb } from './db';
+// ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
+// payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
+import { doc, getDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
 
 // SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is

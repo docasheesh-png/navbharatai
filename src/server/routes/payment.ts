@@ -2,8 +2,10 @@ import crypto from 'crypto';
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
-import { doc, getDoc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. The server writes payment_transactions
+// / user_token_wallets which navbharat-prod's rules mark `allow write: if false` (server-only); the old
+// unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
+import { doc, getDoc, setDoc, updateDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { getSecretValue } from '../lib/secrets';
 import { verifyPaymentInternal } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';

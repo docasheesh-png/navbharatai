@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
+// which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
+import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
 

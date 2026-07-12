@@ -14811,3 +14811,25 @@ GitHub token's push access (getRepoAccess.canPush) — a caller can only ship/re
 display-only (the build route re-enforces every entitlement server-side). Remaining T0-9: converge the
 ad-hoc guards (verifyFirebaseToken / assertWorkspaceOwner / resolveReadIdentity / requireUserMatch) onto the
 identityPolicy primitives + a final re-audit. Gate: tsc fe+server 0, vitest 6075/6075.
+## 2026-07-12 — Immune System Phase 1a (Culture): feature-presence check — "does the running app DO what the user asked?"
+
+Admin's biology framing (2026-07-12): staining shows morphology; CULTURE shows whether the organism is
+alive AND doing its job. PreviewVerify already answers "is the app alive?" (renders/blank/crash). This
+adds the next question — "does the living app have the features the user asked for?" — the first slice
+of the "App Health Culture".
+
+New pure `FeaturePresence.ts` (`checkFeaturePresence(prompt, html)`): from the prompt it derives which
+common interactive features were REQUESTED (add / delete / edit / complete / filter / search / list /
+auth / theme), then checks the RENDERED preview DOM for a matching affordance. A feature is reported
+MISSING only when its keyword is clearly in the prompt AND no matching control is found — so it
+highlights "asked for Delete but there's no delete control" without false-flagging different wording.
+Deterministic, conservative, pure; ADVISORY only (records an honest FEATURE_COVERAGE finding, never
+blocks a build — a heuristic must never false-fail a working app).
+
+Wired into the preview-verify pass: the moment the real-browser check confirms the app renders, it also
+records feature coverage (present vs missing) into the build report. Auto-fixing the missing features
+(feeding them to the bounded heal pass) is the next slice (1b).
+
+Tests: FeaturePresence.test.ts (11 — TaskLite full-present, bare-build flags Delete+Filter missing,
+only-requested-features probed, empty-state counts as list present, robustness). Gate: server tsc 0,
+FeaturePresence + suite green.

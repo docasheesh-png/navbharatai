@@ -135,6 +135,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
+import { checkFeaturePresence, featurePresenceSummary } from '../AgentV3/FeaturePresence';
 import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -6030,6 +6031,23 @@ export function registerAgentV3Routes(app: Express): void {
             // (the upgrade SimpleBuilder left to the route). Without this a verified-working app was
             // permanently reported as BUILD_PARTIAL. No-ops unless the last outcome was PARTIAL/PREVIEW_FAILED.
             try { buildDiag.recordPreviewVerified(); } catch { /* diagnostics best-effort */ }
+            // APP HEALTH CULTURE (slice 1, admin 2026-07-12 "culture, not just stain"): the app RENDERS
+            // — now check it actually has the interactive features the user asked for (Add/Delete/Filter…
+            // present as real controls in the running DOM). Deterministic + ADVISORY: records an honest
+            // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
+            // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
+            try {
+              const coverage = checkFeaturePresence(prompt, html);
+              if (coverage.probes.length > 0) {
+                buildDiag.record({
+                  phase: 'readiness',
+                  severity: coverage.missing.length > 0 ? 'warning' : 'info',
+                  code: 'FEATURE_COVERAGE',
+                  message: featurePresenceSummary(coverage),
+                  autoResolved: coverage.missing.length === 0,
+                });
+              }
+            } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             break;
           }
           const problems = [...verdict.problems, ...consoleErrs.map((e) => `console: ${e}`)];

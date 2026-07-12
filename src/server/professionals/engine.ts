@@ -1,6 +1,6 @@
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
-import { CREATOR_IDENTITY } from '../lib/prompts';
+import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -28,7 +28,9 @@ export const PROFESSIONAL_PERSONA_LAYER = `HOW TO BEHAVE LIKE A REAL PROFESSIONA
  * unit-testable.
  */
 export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = ''): string {
-  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, kbBlock, CREATOR_IDENTITY]
+  // recencyDirective() anchors every professional to TODAY so none presents stale facts as current
+  // (a lawyer must not cite a repealed rule as live, a CA a past year's slab as this year's, etc.).
+  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, kbBlock, recencyDirective(), CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }

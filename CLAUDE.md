@@ -518,6 +518,65 @@ This override is **scoped to AgentV3** and was added in the same change that
 wired v3.0 billing. Do not extend it to Engineer AI or remove the constraints
 above for the other builders without separate admin sign-off.
 
+## NavBharatAI Pro v3.0 — Model Routing Policy (admin-CONFIRMED 2026-07-12) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
+
+**This is the single source of truth for which AI model runs where in v3.0.** It was explicitly
+designed and confirmed by the admin (aashishcpmt09) on 2026-07-12. **DO NOT change any part of this
+routing — the ladders, the judge-per-mode, the co-agent mapping, or the "no Claude in free" rule —
+without first confirming the exact change with the admin.** (Same discipline as the absolute rules.)
+Model ids are env-tunable (defaults below); the STRUCTURE is the policy.
+
+### 1) FREE user (the 50,000 gift-token / never-paid user) — cheapest first, NEVER Claude
+A graduated ladder (start cheapest; only climb when the judge still finds a real mistake):
+1. **`glm-4.7-flash`** / **cheapest Kimi** (flash rung — sasta)
+2. **`glm-4.7`** / **`kimi-k2.5`** (cheap coders)
+3. **flagship `glm-5.2` / `kimi-k2.7`** (only as the LAST model rung)
+4. **Vertex** — allowed ONLY as the absolute last resort, after the flagship rung also fails (admin: "agar sab failed ho to vertex use bhi kar sakte hai, but last me").
+- **Judge = Grok.** After a build, Grok judges → OK ⇒ done; "repair" ⇒ fix on the cheap coders
+  (`glm-4.7`/`kimi-k2.5`) and re-judge; still failing ⇒ climb to the flagship rung; flagship fails ⇒ Vertex.
+- **Claude/Sonnet/Opus NEVER run for a free user — anywhere.** This includes the post-build heal gates
+  (integrity / preview / C9 reviewer-autofix / runtime): on a free build they MUST run on the **non-flagship
+  cheap coders (`glm-4.7` / `kimi-k2.5`)** — NOT flash (too weak to repair), NOT flagship, NOT Claude. (This
+  closes the current leak where those gates build a `claudeFirst` runner regardless of tier.)
+
+### 2) PAID user (bought tokens with real ₹) — flagship first, Claude only as last resort
+1. Every 1st build: **flagship `glm-5.2` / `kimi-k2.7`**.
+2. **Judge** → no error ⇒ done; error ⇒ send back to **GLM/Kimi** to repair → re-judge.
+3. Still error after that ⇒ **Claude fixes it itself** (Sonnet repair).
+- **Judge = Grok OR Sonnet — either is fine** (admin: "koi na, dono chalne do, chalega").
+
+### 3) POWER mode ("Only Opus", paid users only) — everything on Opus
+- Builder + all repair/heal gates + **the judge** + **the plan phase** ⇒ **Opus** (`claude-opus-4-8`).
+  (Today the builder/repair are Opus but the judge is Grok/Sonnet and the plan phase is Grok — those two
+  must become Opus in power mode.)
+
+### Judge (reviewer) per mode — must become MODE-AWARE (today it is a single global setting)
+| Mode | Judge |
+|---|---|
+| Free | **Grok** |
+| Paid | **Grok or Sonnet** (either) |
+| Power | **Opus** |
+
+### Co-agents / other engines — the mapping (same spirit: cheap for free, strong for paid, Opus for power)
+| Engine | Free | Paid | Power |
+|---|---|---|---|
+| Builder + frontend/backend sub-agents | flash → 4.7/kimi → flagship → Vertex | flagship → cheap-repair → Claude | Opus |
+| Manifest / shared-contract planner | cheap (GLM/Kimi) | cheap-first, Claude backstop | Opus |
+| **Judge / Reviewer** | **Grok** | **Grok or Sonnet** | **Opus** |
+| Plan phase | Grok | Grok/Sonnet | **Opus** |
+| Vision (image describe) | Gemini/Grok (cheap) | Gemini/Grok | Claude/Opus |
+| Heal gates (integrity / preview / C9 / runtime) | **`glm-4.7`/`kimi-k2.5` — NEVER Claude/flash/flagship** | Claude/Sonnet | Opus |
+
+### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
+- Free ladder is a NEW per-tier ladder (to be added): flash rung + cheap-coder rung + flagship rung + Vertex.
+- Paid/default ladder: `GLM_MODEL` (flagship-first, e.g. `glm-5.2,glm-4.7`), `KIMI_MODEL` (e.g. `kimi-k2.7,kimi-k2.6`).
+- ⚠️ The exact Kimi rung ids (`kimi-k2.5` / `kimi-k2.6` / `kimi-k2.7` / `-code` suffix) are admin-tunable —
+  cross-check them against the live Moonshot model list before flipping on.
+
+**Implementation status (2026-07-12):** policy SAVED here; code changes ship slice-by-slice (per-tier free
+ladder, mode-aware judge, free-tier heal-gate re-route to cheap coders, power-mode judge+plan→Opus), each
+tested + gated + merged. Until a slice ships, the current behaviour (audited 2026-07-12) still applies.
+
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 
 These were previously only stated inside `PROGRESS.md`. Because that file is

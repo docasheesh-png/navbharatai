@@ -14091,3 +14091,23 @@ the USER's generated app), not NavBharatAI's own Firestore. lib/db.ts is now ves
 
 With this, every unauthenticated server Firestore access on navbharat-prod goes through the admin SDK —
 the strict client-facing rules stay fully intact. Gate: tsc fe+server 0, vitest 5968/5968.
+## 2026-07-12 — Model Routing Policy SAVED to CLAUDE.md (admin-confirmed 2026-07-12; implementation slice-by-slice next)
+
+Admin designed + confirmed the full v3.0 model-routing policy (free/paid/power ladders, judge-per-mode,
+co-agent mapping, "no Claude in free", Vertex as free's absolute last resort). Saved it as the single source
+of truth in CLAUDE.md ("## NavBharatAI Pro v3.0 — Model Routing Policy") WITH a hard "confirm-with-admin
+before changing" guard. Preceded by a full evidence-based audit of the CURRENT routing (file:line) so the
+gap to the policy is explicit.
+
+Confirmed gaps to implement (each a separate tested slice; current behaviour stands until a slice ships):
+1. FREE per-tier graduated ladder: flash (`glm-4.7-flash`/cheap-kimi) → cheap coders (`glm-4.7`/`kimi-k2.5`)
+   → flagship (`glm-5.2`/`kimi-k2.7`) → Vertex (absolute last). Today free leads with the flagship + has NO
+   judge loop.
+2. Free-tier judge loop = Grok, driving the climb (repair on cheap coders → flagship → Vertex).
+3. Close the FREE "no Claude" leak: the post-build heal gates (integrity/preview/C9/runtime) build a
+   claudeFirst runner regardless of tier — on a free build they must run on the non-flagship cheap coders
+   (`glm-4.7`/`kimi-k2.5`), never Claude/flash/flagship.
+4. Mode-aware judge: Free=Grok, Paid=Grok-or-Sonnet, Power=Opus (today a single global Grok/Sonnet, never Opus).
+5. Power-mode consistency: the judge and the plan phase → Opus (today Grok/Sonnet + Grok).
+
+Doc-only change; no code touched this PR. Gate: CI (full vitest) on the branch.

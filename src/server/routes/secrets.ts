@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
+import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, getServerDb as getDb } from '../lib/serverDb';
 import { encrypt } from '../lib/secrets';
 import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 

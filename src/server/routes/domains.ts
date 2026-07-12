@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { doc, setDoc } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes custom_domains (server-only).
+import { doc, setDoc, getServerDb as getDb } from '../lib/serverDb';
 import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   cloudflareConfigured,

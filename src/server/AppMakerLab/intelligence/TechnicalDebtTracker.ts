@@ -6,8 +6,8 @@
  * list per project: CRITICAL security first, then by severity, with `firstSeen`/`lastSeen` so chronic
  * debt is visible. Pure merge/prioritize logic is unit-tested; Firestore persistence is best-effort.
  */
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDb } from '../../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see lib/serverDb.ts. Writes techDebt (server-only).
+import { doc, getDoc, setDoc, getServerDb as getDb } from '../../lib/serverDb';
 
 export type DebtSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type DebtCategory = 'security' | 'architecture' | 'lint' | 'runtime' | 'test' | 'other';

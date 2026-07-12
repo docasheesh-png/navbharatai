@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
-import { collection, addDoc } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
+import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';

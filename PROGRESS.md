@@ -14050,6 +14050,7 @@ OPEN (separate root cause, recorded per rule 6): the ~20 AgentV3/lib stores that
 shared default-app singleton, so only the first store to initialize wins and later ones catch→null→
 silently skip persistence. This is the likely real reason "build report save nahi hoti thi". Fix =
 centralize them onto `serverDb.getServerDb()` (collision-free `getFirestore(app,id)`). Tracked, not yet done.
+
 ## 2026-07-11 — Fix 51: remove the cheap-floor size skip — GLM/Kimi lead EVERY prompt (admin: "kimi/glm se limit hata do, 1st try for every file")
 
 Autopsy of a real edit/continue build report: GLM AND Kimi were skipped on every call —
@@ -14072,3 +14073,21 @@ Also confirmed live from the same report: estimate now "~3 min" (Fix 47 working,
 data-loss self-heal restored all 16 files after a sandbox recycle (durable store + GitHub retained them).
 
 Gate: frontend tsc 0, server tsc 0, vitest (+1), boot:check PASS.
+
+## 2026-07-12 — Data-path server writes migrated onto the Admin-SDK shim (the rest of the class)
+
+Follow-up to the money-path fix (#1220): migrated the remaining server files that reached Firestore via
+the CLIENT SDK — all broken by navbharat-prod's strict rules — onto `serverDb` (admin, bypasses rules):
+sync.ts (user_workspaces), chat.ts (ai_usage_logs), secrets.ts route + lib (user_secrets), domains.ts
+(custom_domains), profile.ts (reads user_token_wallets), admin.ts (admin_mfa + wallet/log/tx aggregation),
+engineerQuota.ts (engineer_quota), DurableRateLimit.ts (durable rate windows), FeatureFlagManager.ts
+(feature flags), TechnicalDebtTracker.ts (techDebt). One-line import swaps (`getServerDb as getDb`);
+bodies untouched. Tests routesSecretsIdor + routesDomainsAuth re-pointed their mocks at the shim.
+
+NOT migrated (verified false positive): EngineerAI/BackendScaffolder.ts — its `firebase/firestore`
+import + `getDb()` live inside a CODEGEN TEMPLATE STRING (they are MongoDB `Db` scaffolding emitted into
+the USER's generated app), not NavBharatAI's own Firestore. lib/db.ts is now vestigial (only server.ts
+`setDb()` + dbModule.test reference it); left in place to avoid touching the bootstrap in this PR.
+
+With this, every unauthenticated server Firestore access on navbharat-prod goes through the admin SDK —
+the strict client-facing rules stay fully intact. Gate: tsc fe+server 0, vitest 5968/5968.

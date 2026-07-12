@@ -14833,3 +14833,18 @@ records feature coverage (present vs missing) into the build report. Auto-fixing
 Tests: FeaturePresence.test.ts (11 — TaskLite full-present, bare-build flags Delete+Filter missing,
 only-requested-features probed, empty-state counts as list present, robustness). Gate: server tsc 0,
 FeaturePresence + suite green.
+
+## 2026-07-12 — Immune System Phase 1b (Culture auto-fix): add the missing requested control, then re-probe
+
+Slice 1 only RECORDED the FEATURE_COVERAGE finding (advisory). Slice 1b closes the loop: when the
+running app RENDERED but a requested control is missing, run ONE bounded heal pass that adds the missing
+UI (`featurePresenceRepairPrompt`), then RE-OPEN the running app in the browser and re-probe — only a
+control that is NOW in the live DOM counts (no self-reported success). Opt-in `AGENTV3_FEATURE_HEAL=on`
+(default OFF — same discipline as the runtime auto-fix loop, since it spends an extra repair pass). It
+is budget-gated (skips when the wall-clock cap is near), abortable, and free-tier routing is honoured
+via healRunnerRoutingOpts (cheap coders for a free build, never Claude — Model Routing Policy). If the
+heal doesn't add the control, the honest FEATURE_COVERAGE warning still stands — it NEVER blocks or
+fails a build.
+
+Tests: +3 (featureHealEnabled off-by-default / on only for exact 'on' / off for any other value).
+Gate: server tsc 0, FeaturePresence 14 green.

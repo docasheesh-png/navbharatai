@@ -159,6 +159,19 @@ export function featurePresenceSummary(r: FeaturePresenceResult): string {
   return `Feature coverage: ${r.missing.length} requested feature(s) have NO visible control in the running app — ${r.missing.join(', ')}. Present: ${r.present.join(', ') || 'none'}.`;
 }
 
+/**
+ * App Health Culture slice 2 (Phase 1b) — the missing-feature AUTO-FIX pass.
+ *
+ * Slice 1 only RECORDS a FEATURE_COVERAGE finding (advisory). This flag turns on the closed loop:
+ * when the running app rendered but a requested control is missing, run ONE bounded heal pass that
+ * adds the missing UI, then re-check. OFF by default (`AGENTV3_FEATURE_HEAL=on` to enable) because
+ * it spends an extra repair pass — same opt-in discipline as the runtime auto-fix loop. It NEVER
+ * blocks or fails a build: if the heal doesn't add the control, the honest finding still stands.
+ */
+export function featureHealEnabled(): boolean {
+  return process.env.AGENTV3_FEATURE_HEAL === 'on';
+}
+
 /** An agent-facing repair instruction for the missing features (used only when a heal pass runs). */
 export function featurePresenceRepairPrompt(r: FeaturePresenceResult): string {
   if (r.missing.length === 0) return '';

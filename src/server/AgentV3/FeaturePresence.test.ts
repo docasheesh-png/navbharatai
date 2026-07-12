@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt } from './FeaturePresence';
+import { afterEach } from 'vitest';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from './FeaturePresence';
 
 // The TaskLite prompt (admin report a06e7fd2) — Add / Delete / Mark complete / Filter (All/Active/
 // Completed) / footer stats / a task list.
@@ -90,5 +91,28 @@ describe('summary + repair prompt', () => {
     const allPresent = checkFeaturePresence('add support', '<input/><button>Add</button>');
     expect(allPresent.missing).toHaveLength(0);
     expect(featurePresenceRepairPrompt(allPresent)).toBe('');
+  });
+});
+
+describe('featureHealEnabled — Phase 1b opt-in flag', () => {
+  const prev = process.env.AGENTV3_FEATURE_HEAL;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_FEATURE_HEAL;
+    else process.env.AGENTV3_FEATURE_HEAL = prev;
+  });
+
+  it('is OFF by default (unset) — advisory only, no extra repair pass', () => {
+    delete process.env.AGENTV3_FEATURE_HEAL;
+    expect(featureHealEnabled()).toBe(false);
+  });
+  it("is ON only for the exact opt-in value 'on'", () => {
+    process.env.AGENTV3_FEATURE_HEAL = 'on';
+    expect(featureHealEnabled()).toBe(true);
+  });
+  it("stays OFF for any other value (e.g. 'true', '1', 'yes')", () => {
+    for (const v of ['true', '1', 'yes', 'off', '']) {
+      process.env.AGENTV3_FEATURE_HEAL = v;
+      expect(featureHealEnabled()).toBe(false);
+    }
   });
 });

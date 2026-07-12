@@ -135,7 +135,7 @@ import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlan
 import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
-import { checkFeaturePresence, featurePresenceSummary } from '../AgentV3/FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -6037,7 +6037,37 @@ export function registerAgentV3Routes(app: Express): void {
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              const coverage = checkFeaturePresence(prompt, html);
+              let coverage = checkFeaturePresence(prompt, html);
+              // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
+              // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
+              // then re-open the running app and re-probe (only a control now in the live DOM counts).
+              // Budget-gated + abortable; if the control still isn't there, the honest FEATURE_COVERAGE
+              // warning below still stands. Never blocks or fails a build.
+              if (
+                coverage.missing.length > 0 && featureHealEnabled() && !abort.signal.aborted
+                && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+              ) {
+                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${coverage.missing.join(', ')}. Adding it now…`, ts: Date.now() });
+                try {
+                  const featureRunner = new AgentRunner({
+                    ...baseRunnerOpts,
+                    client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                    model: resolveModel(onlyOpus),
+                    persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                  });
+                  const healed = await featureRunner.run(featurePresenceRepairPrompt(coverage));
+                  if (healed.ok) {
+                    result = healed;
+                    try {
+                      const after = (await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'browseUrl')).html;
+                      const afterCoverage = checkFeaturePresence(prompt, after);
+                      if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                    } catch { /* re-open best-effort — keep the pre-heal coverage */ }
+                  }
+                } catch (e) {
+                  console.log(`[AGENTV3] feature heal failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }
               if (coverage.probes.length > 0) {
                 buildDiag.record({
                   phase: 'readiness',

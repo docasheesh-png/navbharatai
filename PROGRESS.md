@@ -14868,3 +14868,30 @@ NEVER blocks or hangs a build.
 
 Tests: +7 (vaccineEnabled off-by-default/exact-on; testOutcomeRepairPrompt empty-on-pass, names failing
 tests + forbids skip/delete, source-fix ask when unattributable). Gate: server tsc 0, testRunner 28 green.
+
+## 2026-07-12 — Immune System Phase 3 (Red-team / GA-17): adversarially crash the running app's inputs
+
+The happy-path preview check only proves the app renders on GOOD input. The red-team goes further: it
+ADVERSARIALLY types hostile values into the app's OWN inputs via a real browser and watches for a crash.
+
+New pure `FuzzProbe.ts`: `generateFuzzPlan(html)` parses the rendered preview for inputs/textareas
+(skipping hidden/checkbox/radio/submit/file), derives a best-effort selector (#id → [name] → [placeholder]
+→ positional nth) + kind (text/number/email/url/date/…), and a bounded adversarial catalog per kind
+(empty, whitespace, 5000-char, unicode/emoji/markup, injection-shaped text; negative/huge/NaN/Infinity for
+numbers; malformed email/url/date). `interpretFuzzErrors` classifies captured console errors into an
+honest crash verdict (only real signatures — uncaught / TypeError / React error / unhandled rejection —
+count; warnings and 404s do not). `fuzzSummary` / `fuzzRepairPrompt` for the report + heal.
+
+Wired into the route as an opt-in post-build pass (`AGENTV3_REDTEAM=on`, default OFF): re-open the app,
+for each input type a hostile value + submit (Enter), capture console errors, and record a
+FUZZ_ROBUSTNESS warning for every input that crashed. Hard-capped (≤12 total cases, ≤90s whole-pass
+deadline, per-action timeouts, abortable) so it can never slow or hang a build. When crashes are found
+and the heal budget is opted in (AGENTV3_FEATURE_HEAL=on), ONE bounded pass hardens the SOURCE
+validation/sanitization (fuzzRepairPrompt — never removes the inputs). Best-effort; never blocks a build.
+
+Tests: FuzzProbe.test.ts (15 — selector precedence, kind→cases mapping, skips non-value inputs, textarea
+nth selectors, input/case caps, crash-signature classification incl. dedupe + non-string tolerance,
+summary/repair emptiness). Gate: server tsc 0, full suite 6110 green.
+
+This completes the Immune System trio: Culture (does it DO the job?) + Vaccine (do its own tests pass?)
++ Red-team (does it survive hostile input?). All three are default-OFF/advisory and can never fail a build.

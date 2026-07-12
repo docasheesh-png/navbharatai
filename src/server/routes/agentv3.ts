@@ -137,6 +137,7 @@ import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
+import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -6156,6 +6157,68 @@ export function registerAgentV3Routes(app: Express): void {
             }
           }
         } catch { /* vaccine is best-effort — never blocks a build */ }
+      }
+
+      // APP HEALTH CULTURE — RED-TEAM (Immune System Phase 3 / GA-17, opt-in AGENTV3_REDTEAM=on): the
+      // happy-path preview check only proves the app renders on GOOD input. The red-team ADVERSARIALLY
+      // types hostile values (empty, oversized, injection-shaped, malformed numbers) into the app's own
+      // inputs via a real browser and watches for a CRASH (uncaught error / React error / unhandled
+      // rejection). A crash on hostile input is a real robustness bug the build never sees; it is recorded
+      // as a FUZZ_ROBUSTNESS finding and (with the heal budget opted in) hardened by ONE bounded repair
+      // pass. Hard-capped total cases + wall-clock budget + abortable — never blocks or hangs a build.
+      if (
+        redTeamEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        && actuator.browserAction && actuator.getConsoleErrors && actuator.browseUrl && lastPreviewUrl
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 120_000)
+      ) {
+        try {
+          let fuzzHtml = '';
+          try { fuzzHtml = (await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'redteam-browse')).html; } catch { fuzzHtml = ''; }
+          const plan = generateFuzzPlan(fuzzHtml);
+          const MAX_TOTAL_CASES = 12; // hard cap across all inputs so the attack is always bounded
+          const redTeamDeadline = Date.now() + 90_000; // whole red-team pass ≤ 90s regardless of case count
+          const findings: { input: FuzzInput; case: FuzzCase; verdict: FuzzVerdict }[] = [];
+          let casesRun = 0;
+          outer:
+          for (const target of plan) {
+            for (const fcase of target.cases) {
+              if (casesRun >= MAX_TOTAL_CASES || Date.now() > redTeamDeadline || abort.signal.aborted) break outer;
+              casesRun++;
+              const caseStart = Date.now();
+              try {
+                // Reset to a clean app state, type the hostile value, and submit (Enter).
+                await withTimeout(actuator.browserAction(workspaceId, 'navigate', { url: lastPreviewUrl }), 15_000, 'redteam-nav');
+                await withTimeout(actuator.browserAction(workspaceId, 'type', { selector: target.input.selector, text: fcase.value }), 12_000, 'redteam-type');
+                await withTimeout(actuator.browserAction(workspaceId, 'press', { selector: target.input.selector, text: 'Enter' }), 12_000, 'redteam-submit');
+              } catch { continue; /* the input wasn't reachable / action timed out — skip this case */ }
+              let errs: string[] = [];
+              try {
+                if (actuator.getConsoleErrors) errs = (await actuator.getConsoleErrors(workspaceId, caseStart)).errors.map((e) => e.text);
+              } catch { /* capture best-effort */ }
+              const verdict = interpretFuzzErrors(errs);
+              if (verdict.crashed) findings.push({ input: target.input, case: fcase, verdict });
+            }
+          }
+          if (findings.length > 0) {
+            buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
+            // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.
+            if (featureHealEnabled() && !abort.signal.aborted && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🛡️ Red-team crashed ${findings.length} input(s) on hostile input — hardening validation now…`, ts: Date.now() });
+              try {
+                const rtRunner = new AgentRunner({
+                  ...baseRunnerOpts,
+                  client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                  model: resolveModel(onlyOpus),
+                  persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                });
+                const healed = await rtRunner.run(fuzzRepairPrompt(findings));
+                if (healed.ok) { result = healed; buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
+              } catch (e) {
+                console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
+          }
+        } catch { /* red-team is best-effort — never blocks a build */ }
       }
 
       // R4 §2.3 — RUNTIME-ERROR AUTO-FIX LOOP (opt-in: AGENTV3_AUTOFIX=on). A build can compile

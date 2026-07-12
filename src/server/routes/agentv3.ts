@@ -2743,7 +2743,12 @@ export function registerAgentV3Routes(app: Express): void {
       // exact file contents + the origin baked into the HTML.
       const cacheKey = `${workspaceId}|${previewOrigin ?? ''}`;
       const filesHash = hashKey(Object.entries(files).flatMap(([p, c]) => [p, c]));
-      const cached = inbrowserPreviewCache.get(cacheKey);
+      // DEEP REFRESH (`fresh: true`): the client's "Fix with AI" on a broken preview first asks for a
+      // cache-bypassing recompile — a blank/failed preview is often just a stale cached render, so
+      // re-rendering from scratch can make the app work with no AI turn spent. Skip the cache READ
+      // (still WRITE the fresh render below so subsequent normal reloads stay fast).
+      const fresh = req.body?.fresh === true;
+      const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
         res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true });
         return;

@@ -10,6 +10,7 @@ import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from '
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
+import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 
@@ -206,9 +207,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).
   const inFlight = useRef(false);
-  const loadInBrowser = useCallback(async () => {
-    if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return; }
-    if (inFlight.current) return;
+  // Returns true when the preview rendered (non-empty HTML) — the "Fix with AI" deep-refresh flow
+  // uses this to decide whether the app recovered (skip the AI) or still needs a fix. `fresh:true`
+  // asks the server to BYPASS its render cache so a stale cached render can't mask a recovery.
+  const loadInBrowser = useCallback(async (opts?: { fresh?: boolean }): Promise<boolean> => {
+    if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return false; }
+    if (inFlight.current) return false;
     inFlight.current = true;
     setLoading(true);
     setErr('');
@@ -218,20 +222,54 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         headers: await authJsonHeaders(),
         // Send our own origin so the server loads the self-hosted preview compiler via an absolute
         // same-origin URL (a root-relative path doesn't resolve inside the sandboxed iframe srcDoc).
-        body: JSON.stringify({ workspaceId, userId, email, origin: window.location.origin }),
+        body: JSON.stringify({ workspaceId, userId, email, origin: window.location.origin, fresh: opts?.fresh === true }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
-      setHtml(typeof data.html === 'string' ? data.html : '');
+      const nextHtml = typeof data.html === 'string' ? data.html : '';
+      setHtml(nextHtml);
       setKind(typeof data.kind === 'string' ? data.kind : '');
+      return nextHtml.length > 0;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setHtml('');
+      return false;
     } finally {
       setLoading(false);
       inFlight.current = false;
     }
   }, [workspaceId, userId, email]);
+
+  // "Fix with AI" on a broken preview — try a FREE deep refresh BEFORE spending an AI turn. A blank/
+  // failed preview is frequently just a stale cached render or a transient cold-start miss (admin
+  // report fae70e42: a blank canvas that fixed itself on a clean re-publish, no code change). The
+  // deep refresh recompiles from scratch (server bypasses its render cache); if the app now renders
+  // the user never needed the AI. Only if it STILL fails do we hand the error to the AI (onFixError).
+  const [deepRefreshing, setDeepRefreshing] = useState(false);
+  const [recovered, setRecovered] = useState(false);
+  const fixWithAiAfterRefresh = useCallback(async (errorText: string) => {
+    if (!onFixError) return;
+    setRecovered(false);
+    setDeepRefreshing(true);
+    try {
+      await fixWithAiAfterDeepRefresh({
+        errorText,
+        deepRefresh: () => loadInBrowser({ fresh: true }),
+        onRecovered: () => setRecovered(true),
+        onNeedsAi: (text) => onFixError(text),
+      });
+    } finally {
+      setDeepRefreshing(false);
+    }
+  }, [onFixError, loadInBrowser]);
+  // The "recovered — no AI needed" note is transient; auto-clear it after a few seconds and whenever
+  // the workspace changes, so it never lingers stale over a later different state.
+  useEffect(() => {
+    if (!recovered) return;
+    const t = setTimeout(() => setRecovered(false), 6_000);
+    return () => clearTimeout(t);
+  }, [recovered]);
+  useEffect(() => { setRecovered(false); }, [workspaceId]);
 
   useEffect(() => {
     // Auto-(re)load the in-browser preview whenever the tab is shown or the workspace (re)appears.
@@ -471,12 +509,20 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             {editMode ? 'Editing…' : 'Edit'}
           </button>
         )}
-        <button onClick={loadInBrowser} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
+        <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
       {editError && (
         <div className="px-3 py-1.5 text-[11px] text-amber-300 bg-amber-950/40 border-b border-amber-900">{editError}</div>
+      )}
+      {recovered && (
+        // The deep refresh made a previously-broken preview render again — tell the user honestly
+        // that no AI fix was needed (and no credit was spent).
+        <div className="px-3 py-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
+          <span>✓ Preview recovered after a deep refresh — no AI fix was needed.</span>
+          <button onClick={() => setRecovered(false)} className="shrink-0 text-emerald-500 hover:text-emerald-300">Dismiss</button>
+        </div>
       )}
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
@@ -491,16 +537,23 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6">
           <Empty>Couldn't build the in-browser preview: {err}</Empty>
           {onFixError && (
-            // P-UX.3 — One-click AI fix: hand the exact preview error to the agent so it can diagnose
-            // and repair the build. Prepopulates the chat (the user reviews + sends) rather than
-            // firing silently, so a destructive auto-fix never runs without the user's go-ahead.
+            // P-UX.3 + deep refresh (admin 2026-07-12): clicking "Fix with AI" first runs a FREE deep
+            // refresh (cache-bypassing recompile) — the preview often just recovers, so no AI turn is
+            // spent. Only if it still fails does the exact error get prepopulated into the chat (the
+            // user reviews + sends) rather than firing silently, so a destructive auto-fix never runs
+            // without the user's go-ahead.
             <button
-              onClick={() => onFixError(err)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
-              title="Send this error to the AI to fix"
+              onClick={() => void fixWithAiAfterRefresh(err)}
+              disabled={deepRefreshing}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
+              title="First deep-refreshes the preview (it may just start working); only if it still fails does it send the error to the AI"
             >
-              <Wand2 className="w-3.5 h-3.5" /> Fix with AI
+              {deepRefreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {deepRefreshing ? 'Deep-refreshing preview…' : 'Fix with AI'}
             </button>
+          )}
+          {deepRefreshing && (
+            <p className="text-[11px] text-zinc-500 max-w-xs text-center">Trying a clean rebuild first — it may just start working without an AI fix.</p>
           )}
         </div>
       ) : html && previewSandboxUrl ? (

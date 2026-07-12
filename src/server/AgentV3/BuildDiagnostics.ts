@@ -805,16 +805,39 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   if (r.builtBy) lines.push(`Built by : ${r.builtBy}${deliveredBy ? ` — full split: ${deliveredBy}` : ''}`);
   else if (deliveredBy) lines.push(`Built by : ${deliveredBy}`);
   lines.push(`Outcome  : ${r.ok === undefined ? '(n/a)' : r.ok ? 'SUCCESS' : 'FAILED'}`);
-  // BILLING & PROVIDERS (admin 2026-07-11) — the report answers: free/paid user, actual charge,
-  // wallet debit, why-free, which providers failed and how many times, and the token split.
+  // PROVIDER USAGE + BILLING (admin 2026-07-11 / expanded 2026-07-12: "kitne token API call me
+  // provider ne use kiya + user se kitna charge kiya") — the report answers, per provider: how many
+  // API calls it drove and its input/output/total tokens; then how much the user was actually charged.
+  // Joins providerDelivery (call counts) with providerTokens (in/out); 'other' = plan/judge/aux calls.
+  const provNames = new Set<string>([
+    ...Object.keys(r.providerTokens ?? {}),
+    ...Object.keys(r.providerDelivery ?? {}),
+  ]);
+  if (provNames.size > 0) {
+    lines.push('Provider usage (per provider — API calls · input · output · total tokens):');
+    let totIn = 0, totOut = 0, totCalls = 0;
+    const rows = [...provNames]
+      .map((name) => {
+        const calls = r.providerDelivery?.[name] ?? 0;
+        const t = r.providerTokens?.[name] ?? { inputTokens: 0, outputTokens: 0 };
+        return { name, calls, inTok: t.inputTokens, outTok: t.outputTokens, total: t.inputTokens + t.outputTokens };
+      })
+      .sort((a, b) => (b.total - a.total) || (b.calls - a.calls));
+    for (const row of rows) {
+      totIn += row.inTok; totOut += row.outTok; totCalls += row.calls;
+      lines.push(`  ${row.name.padEnd(8)}: ${row.calls} call(s) · ${row.inTok.toLocaleString()} in · ${row.outTok.toLocaleString()} out · ${row.total.toLocaleString()} total`);
+    }
+    lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString()} in · ${totOut.toLocaleString()} out · ${(totIn + totOut).toLocaleString()} total`);
+  }
   if (r.billing) {
     lines.push(`User tier: ${r.billing.userTier}${r.billing.powerMode ? ' — POWER MODE (Only Opus)' : ''}`);
     if (typeof r.billing.billedUsd === 'number') {
-      const inr = typeof r.billing.billedInr === 'number' ? ` (₹${r.billing.billedInr.toFixed(2)})` : '';
-      lines.push(`Billed   : $${r.billing.billedUsd.toFixed(4)}${inr}${r.billing.billedUsd === 0 ? ' — FREE build' : ''}`);
-    }
-    if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
-      lines.push(`Wallet   : −${r.billing.walletTokensDebited.toLocaleString()} tokens debited`);
+      const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
+      const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0
+        ? ` · ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited` : '';
+      lines.push(`Charged to user: ${inr}($${r.billing.billedUsd.toFixed(4)})${r.billing.billedUsd === 0 ? ' — FREE build' : ''}${wallet}`);
+    } else if (typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0) {
+      lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }
     if (r.billing.zeroBillReason) lines.push(`Why free : ${r.billing.zeroBillReason}`);
   }
@@ -824,13 +847,6 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       .map(([name, n]) => `${name} ×${n}`)
       .join(', ');
     lines.push(`Failures : ${failures} (each fell through to the next provider)`);
-  }
-  if (r.providerTokens && Object.keys(r.providerTokens).length > 0) {
-    const tokens = Object.entries(r.providerTokens)
-      .sort((a, b) => (b[1].inputTokens + b[1].outputTokens) - (a[1].inputTokens + a[1].outputTokens))
-      .map(([name, t]) => `${name} ${((t.inputTokens + t.outputTokens) / 1000).toFixed(1)}k`)
-      .join(', ');
-    lines.push(`Tokens   : ${tokens} (in+out per provider; 'other' = plan/judge/aux calls)`);
   }
   if (typeof r.startedAt === 'number' && typeof r.endedAt === 'number') {
     lines.push(`Duration : ${Math.max(0, Math.round((r.endedAt - r.startedAt) / 1000))}s`);

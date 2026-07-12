@@ -14848,3 +14848,23 @@ fails a build.
 
 Tests: +3 (featureHealEnabled off-by-default / on only for exact 'on' / off for any other value).
 Gate: server tsc 0, FeaturePresence 14 green.
+
+## 2026-07-12 — Immune System Phase 2 (Vaccine): the app runs its OWN test suite as a system reflex
+
+`run_tests` already existed as an agent TOOL — but the agent may skip it, so a green build whose own
+tests fail could still be reported "verified". The vaccine makes running the suite a guaranteed SYSTEM
+reflex: after a successful, artifact-producing build, if the project ships a REAL test suite
+(detectTestPlan — vitest/jest/playwright/pytest/Maven/Gradle/go, honoring the project's own `npm test`
+and package manager), the platform runs it ITSELF, parses honest pass/fail counts (parseTestOutcome),
+and records a TEST_SUITE finding in the build report (info when green, warning + failing-test names when
+red). No suite → honest no-op (never a fake pass).
+
+Opt-in `AGENTV3_VACCINE=on` (default OFF — runs an extra command, same discipline as the runtime
+auto-fix and feature-heal loops). When the suite FAILS and the heal budget is opted in
+(AGENTV3_FEATURE_HEAL=on), ONE bounded repair pass fixes the SOURCE — the repair prompt explicitly
+forbids deleting/skipping/weakening a test to make it green (that would hide the bug) — then re-runs.
+Budget-gated (180s per run, skips near the wall-clock cap), abortable, free-tier routing honoured. It
+NEVER blocks or hangs a build.
+
+Tests: +7 (vaccineEnabled off-by-default/exact-on; testOutcomeRepairPrompt empty-on-pass, names failing
+tests + forbids skip/delete, source-fix ask when unattributable). Gate: server tsc 0, testRunner 28 green.

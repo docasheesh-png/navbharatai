@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { detectTestPlan, parseTestOutcome, type TestPlan } from './testRunner';
+import { describe, it, expect, afterEach } from 'vitest';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan } from './testRunner';
 
 // B4: detection + parsing of the project's OWN test suite. Both functions are pure, so we exercise
 // every framework branch with real-shaped tool output — no sandbox needed.
@@ -176,5 +176,46 @@ describe('parseTestOutcome', () => {
     const bad = parseTestOutcome(planFor('vitest'), 1, 'crashed before running', 'stack trace');
     expect(bad.ok).toBe(false);
     expect(bad.total).toBeNull();
+  });
+});
+
+describe('vaccineEnabled — Phase 2 opt-in flag', () => {
+  const prev = process.env.AGENTV3_VACCINE;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTV3_VACCINE;
+    else process.env.AGENTV3_VACCINE = prev;
+  });
+  it('is OFF by default (unset)', () => {
+    delete process.env.AGENTV3_VACCINE;
+    expect(vaccineEnabled()).toBe(false);
+  });
+  it("is ON only for the exact opt-in value 'on'", () => {
+    process.env.AGENTV3_VACCINE = 'on';
+    expect(vaccineEnabled()).toBe(true);
+  });
+  it("stays OFF for any other value", () => {
+    for (const v of ['true', '1', 'yes', 'off', '']) {
+      process.env.AGENTV3_VACCINE = v;
+      expect(vaccineEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('testOutcomeRepairPrompt', () => {
+  it('is empty for a passing suite (no repair needed)', () => {
+    const ok = parseTestOutcome(planFor('vitest'), 0, 'Tests  5 passed (5)', '');
+    expect(testOutcomeRepairPrompt(ok)).toBe('');
+  });
+  it('names the failing tests and forbids deleting/skipping them', () => {
+    const bad = parseTestOutcome(planFor('vitest'), 1, 'Tests  1 failed | 4 passed (5)\n × adds a task 3ms', '');
+    const p = testOutcomeRepairPrompt(bad);
+    expect(p).toMatch(/failing/i);
+    expect(p).toMatch(/do not/i);
+    expect(p).toMatch(/skip|delete|weaken/i);
+  });
+  it('still asks for a source fix when no individual failing test could be attributed', () => {
+    const bad = parseTestOutcome(planFor('vitest'), 1, 'crashed before running', 'stack');
+    const p = testOutcomeRepairPrompt(bad);
+    expect(p).toMatch(/fix the source/i);
   });
 });

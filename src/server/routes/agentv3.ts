@@ -136,6 +136,7 @@ import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
 import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -6103,6 +6104,58 @@ export function registerAgentV3Routes(app: Express): void {
             break;
           }
         }
+      }
+
+      // APP HEALTH CULTURE — VACCINE (Immune System Phase 2, opt-in AGENTV3_VACCINE=on): run_tests is a
+      // TOOL the agent MAY skip; the vaccine makes it a SYSTEM reflex. If the built project ships a real
+      // test suite, the platform runs it ITSELF, reads honest pass/fail counts, and records a TEST_SUITE
+      // finding — so a green build whose own tests fail can never be reported as verified. When the suite
+      // fails and the feature-heal-style flag budget allows, ONE bounded repair pass fixes the SOURCE (never
+      // deletes/skips a test) and re-runs. No suite → honest no-op. Best-effort, budget-gated, abortable —
+      // never blocks or hangs a build.
+      if (
+        vaccineEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          const vaxHealMax = featureHealEnabled() ? 1 : 0; // repair only when the heal budget is opted in
+          for (let attempt = 0; attempt <= vaxHealMax && !abort.signal.aborted; attempt++) {
+            const files = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
+            let pkgRaw: string | undefined;
+            try { pkgRaw = await actuator.readFile(workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+            const plan = detectTestPlan(files, pkgRaw);
+            if (!plan) break; // no real suite — honest no-op, never a fake pass
+            let outcome;
+            try {
+              const { exitCode, stdout, stderr } = await withTimeout(actuator.runCommand(workspaceId, plan.command), 180_000, 'vaccine-run-tests');
+              outcome = parseTestOutcome(plan, exitCode, stdout, stderr);
+            } catch { break; /* couldn't run the suite (timeout / no sandbox) — skip silently */ }
+            if (outcome.ok) {
+              buildDiag.record({ phase: 'readiness', severity: 'info', code: 'TEST_SUITE', message: outcome.summary, autoResolved: true });
+              if (attempt > 0) events.emit({ type: 'narration', agent: 'architect', text: `✅ Test suite green after fix — ${outcome.summary}.`, ts: Date.now() });
+              break;
+            }
+            // Out of repair budget OR near the wall-clock cap → record the honest failure and stop.
+            if (attempt >= vaxHealMax || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
+              buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
+              break;
+            }
+            events.emit({ type: 'narration', agent: 'architect', text: `🧬 The app's own tests are failing (${outcome.summary}). Fixing the source now…`, ts: Date.now() });
+            try {
+              const vaxRunner = new AgentRunner({
+                ...baseRunnerOpts,
+                client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                model: resolveModel(onlyOpus),
+                persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+              });
+              const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
+              if (healed.ok) result = healed; else break;
+            } catch (e) {
+              console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
+              break;
+            }
+          }
+        } catch { /* vaccine is best-effort — never blocks a build */ }
       }
 
       // R4 §2.3 — RUNTIME-ERROR AUTO-FIX LOOP (opt-in: AGENTV3_AUTOFIX=on). A build can compile

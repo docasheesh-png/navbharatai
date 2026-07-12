@@ -4,11 +4,11 @@ import {
   ChevronRight, Save, X, AlertCircle, Eye, Loader2, Check
 } from 'lucide-react';
 import {
-  getFirestore, collection, getDocs, doc, setDoc, deleteDoc, addDoc,
+  collection, getDocs, doc, setDoc, deleteDoc, addDoc,
   query, orderBy, limit, onSnapshot, startAfter,
   QueryDocumentSnapshot
 } from 'firebase/firestore';
-import { getApp } from 'firebase/app';
+import { db } from '../../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 import { cn } from '../../lib/utils';
 
 interface DatabaseUIProps {
@@ -85,14 +85,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
   const [realtimeEnabled, setRealtimeEnabled] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  const getDb = useCallback(() => {
-    try {
-      const app = getApp();
-      return getFirestore(app);
-    } catch {
-      return null;
-    }
-  }, []);
+  const getDb = useCallback(() => db, []); // shared handle → navbharat-prod
 
   const loadDocs = useCallback(async (colName: string, append = false, cursor: QueryDocumentSnapshot | null = null) => {
     if (!colName) return;

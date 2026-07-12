@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Lock, Eye, EyeOff, Save, Trash2, Plus, Copy } from 'lucide-react';
-import { getFirestore, collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase'; // shared handle → navbharat-prod (NOT the (default) DB)
 
 interface Secret {
   id: string;
@@ -27,7 +28,6 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [customDomain, setCustomDomain] = useState('https://navbharatai.com');
 
   useEffect(() => {
-    const db = getFirestore();
     const q = query(
       collection(db, 'user_secrets'),
       where('user_id', '==', userId)

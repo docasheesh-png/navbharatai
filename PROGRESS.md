@@ -14738,3 +14738,23 @@ The `/api/agentv3/status` route's `isAgentV3FreeUser(query.userId, query.email)`
 the build route re-enforces server-side) — left as-is, noted. Remaining T0-9: `listableBy` enumeration
 fixes on list routes + converge ad-hoc guards onto identityPolicy + full re-audit. Gate: tsc fe+server 0,
 vitest 6069/6069.
+
+## 2026-07-12 — T0-9 slice 2: close the conversation-LIST enumeration leak (verified-only)
+
+`GET /api/agentv3/conversations` resolved identity via resolveReadIdentity, which falls back to a
+client-CLAIMED ?userId when the Firebase token can't be verified. So an unverified caller who knew a
+victim's uid (a random 28-char id — not normally exposed, so low-exploitability but a real Tier-1
+violation) could pass ?userId=<victim> and enumerate that account's conversation metadata (titles,
+timestamps, billed ₹). Fix (Phase-0 policy): the LIST route now resolves the caller from the VERIFIED
+token only (identityPolicy.verifiedIdentity); an unverified/unresolved caller (or the anon bucket) gets
+an EMPTY list — never an error, never a leak. UX preserved: the client already force-refreshes its token
+for this route (#819), so a genuinely signed-in user verifies and sees their history; the rare server-side
+verify hiccup self-heals on the next fetch/reload instead of the old permanent claimed-uid trust. GET-one
+and delete are unchanged — they stay capability-gated (additionally require the UNGUESSABLE conversation
+id), so their resolveReadIdentity fallback is safe.
+
+Note: the AskUserQuestion to confirm the security-vs-resilience trade-off failed to deliver; per the
+60-second auto-answer rule I proceeded with the strongest-for-the-app choice (close the leak, preserve UX
+via empty-not-error) — reversible, and the admin can dial it back if the rare empty-history case ever bites.
+Regression test: tests/routesConversationsEnum.test.ts (claimed ?userId / body.userId with no token →
+empty list). Gate: tsc fe+server 0, vitest 6072/6072.

@@ -170,6 +170,18 @@ export function summarizeActions(
   return { summary, stats: sawPatch ? { plus, minus } : null };
 }
 
+/**
+ * Whether an action group should be OPEN (its per-file lines shown inline in the chat feed) by default,
+ * given the user's explicit toggle (null = untouched) and whether the group is still ACTIVE. Admin
+ * 2026-07-12 ("real-time progress — har file main chat me dikhe, hide me nahi"): while a build is running
+ * the group auto-EXPANDS so every "writing X / created X" streams live in the feed instead of being hidden
+ * behind a click; once the build finishes it auto-collapses to the glanceable summary. A user tap on the row
+ * overrides either way and sticks. Pure + tested.
+ */
+export function actionGroupOpen(userOverride: boolean | null, active: boolean): boolean {
+  return userOverride ?? active;
+}
+
 /** Detail rows for an expanded group: real entries, minus tool lines that duplicate a file event. */
 export function detailEntries(entries: ActivityEntry[]): ActivityEntry[] {
   const filePaths = new Set<string>();

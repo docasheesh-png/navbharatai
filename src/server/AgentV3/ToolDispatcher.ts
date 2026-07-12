@@ -48,7 +48,7 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
-import { reconcileImportExports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -1241,6 +1241,26 @@ export class ToolDispatcher {
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`, ts: Date.now() });
             }
           } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
+          // MISSING-IMPORT SELF-HEAL (root cause — admin jungle-game report 104f5b09): a generated file
+          // used a shared const (CANVAS_HEIGHT) but forgot to import it → runtime ReferenceError crashed
+          // the preview. Deterministically ADD the forgotten import when the bare value-identifier is
+          // exported by exactly one project module and is not declared/imported in the file. Same durable
+          // write path; feeds the analyzers below.
+          try {
+            const addRes = await addMissingProjectImports(astFiles);
+            if (addRes.added.length) {
+              const changedFiles = new Set(addRes.added.map((a) => a.file));
+              for (const file of changedFiles) {
+                const content = addRes.files[file];
+                if (typeof content !== 'string') continue;
+                astFiles[file] = content;
+                try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+              }
+              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`, ts: Date.now() });
+            }
+          } catch { /* best-effort — a failure just leaves the honest finding below */ }
         }
         const [hooksRep, importRep, jsxRep, undefHookRep] = await Promise.all([
           analyzeHooksRules(astFiles),

@@ -199,6 +199,150 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
   return { files: out, fixes };
 }
 
+export interface AddedImport {
+  file: string;
+  name: string;
+  from: string;
+  statement: string;
+}
+
+export interface AddMissingResult {
+  files: Record<string, string>;
+  added: AddedImport[];
+}
+
+/** Relative import specifier from `importer` to `target` (both project-root file paths), ext-stripped. */
+function relImportSpecifier(importer: string, target: string): string {
+  const impDir = importer.includes('/') ? importer.slice(0, importer.lastIndexOf('/')) : '';
+  const noExt = target.replace(/\.(t|j)sx?$/, '');
+  const impParts = impDir ? impDir.split('/') : [];
+  const tgtParts = noExt.split('/');
+  let i = 0;
+  while (i < impParts.length && i < tgtParts.length && impParts[i] === tgtParts[i]) i++;
+  const up = impParts.slice(i).map(() => '..');
+  const down = tgtParts.slice(i);
+  const rel = [...up, ...down].join('/');
+  return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+/**
+ * Deterministically ADD a missing import when a file uses a bare value-identifier that exactly ONE
+ * project module exports (a named export) and the file neither declares nor imports it.
+ *
+ * WHY (root cause, admin jungle-game report 104f5b09): the generator wrote `Background.ts` that USES
+ * `CANVAS_HEIGHT` but imported only `import type { LayerConfig } from './constants'` — the value import
+ * was forgotten. The fast lane never ran `tsc`, so "Cannot find name 'CANVAS_HEIGHT'" was never caught
+ * and shipped as a runtime `ReferenceError: Can't find variable: CANVAS_HEIGHT` → the preview crashed.
+ *
+ * Paranoid-safe: it only acts when the name is unambiguous (exported by exactly one module), used as a
+ * VALUE (not a property access `obj.X`, not a type, not a declaration/param name), and NOT already
+ * declared or imported anywhere in the file. It only ADDS an import that must exist — it can only turn a
+ * broken build into a working one. Pure; never throws.
+ */
+export async function addMissingProjectImports(files: Record<string, string>): Promise<AddMissingResult> {
+  const unchanged: AddMissingResult = { files, added: [] };
+  const mod = await loadTsMorph();
+  if (!mod) return unchanged;
+  const { SyntaxKind } = mod;
+
+  let project: any;
+  try {
+    project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2 } });
+  } catch { return unchanged; }
+
+  const sources = new Map<string, any>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!CODE_FILE.test(path) || typeof content !== 'string') continue;
+    try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
+  }
+  if (sources.size === 0) return unchanged;
+
+  // Build the export index: name -> the set of project modules that export it as a NAMED export.
+  // A name exported by 2+ modules is ambiguous → never auto-imported.
+  const exportIndex = new Map<string, Set<string>>();
+  for (const [path, sf] of sources) {
+    try {
+      const decls: Map<string, any[]> = sf.getExportedDeclarations?.() ?? new Map();
+      for (const name of decls.keys()) {
+        if (name === 'default') continue;
+        if (!exportIndex.has(name)) exportIndex.set(name, new Set());
+        exportIndex.get(name)!.add(path);
+      }
+    } catch { /* skip a file we can't read exports from */ }
+  }
+  if (exportIndex.size === 0) return unchanged;
+
+  const added: AddedImport[] = [];
+  const touched = new Set<string>();
+
+  for (const [path, sf] of sources) {
+    // Names DECLARED or IMPORTED anywhere in this file — never add an import for any of them (safety:
+    // a duplicate/shadowing import would BREAK a working file). Conservative: if a name is declared
+    // anywhere (even a nested local), we leave it alone.
+    const local = new Set<string>();
+    try {
+      for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+        const parent = id.getParent?.();
+        const pk = parent?.getKind?.();
+        // The NAME side of a declaration / binding / import / parameter.
+        if (
+          pk === SyntaxKind.VariableDeclaration || pk === SyntaxKind.FunctionDeclaration ||
+          pk === SyntaxKind.ClassDeclaration || pk === SyntaxKind.EnumDeclaration ||
+          pk === SyntaxKind.InterfaceDeclaration || pk === SyntaxKind.TypeAliasDeclaration ||
+          pk === SyntaxKind.Parameter || pk === SyntaxKind.BindingElement ||
+          pk === SyntaxKind.ImportSpecifier || pk === SyntaxKind.ImportClause ||
+          pk === SyntaxKind.NamespaceImport
+        ) {
+          try { if (parent.getNameNode?.() === id || parent.getName?.() === id.getText()) local.add(id.getText()); }
+          catch { local.add(id.getText()); }
+        }
+      }
+    } catch { continue; }
+
+    // Candidate: iterate the (small) set of project-exported names and see if THIS file uses one as a
+    // value without declaring/importing it.
+    for (const [name, owners] of exportIndex) {
+      if (owners.size !== 1) continue;             // ambiguous export → never guess
+      const owner = [...owners][0];
+      if (owner === path) continue;                 // a module can't import from itself
+      if (local.has(name)) continue;                // already declared/imported here
+      let usedAsValue = false;
+      try {
+        for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+          if (id.getText() !== name) continue;
+          const parent = id.getParent?.();
+          const pk = parent?.getKind?.();
+          // Exclude the `.name` of a property access (obj.CANVAS_HEIGHT), object-literal keys, type
+          // references, qualified names, and any declaration-name position (covered by `local`).
+          if (pk === SyntaxKind.PropertyAccessExpression && parent.getNameNode?.() === id) continue;
+          if (pk === SyntaxKind.QualifiedName) continue;
+          if (pk === SyntaxKind.PropertyAssignment && parent.getNameNode?.() === id) continue;
+          if (pk === SyntaxKind.TypeReference) continue;
+          usedAsValue = true;
+          break;
+        }
+      } catch { usedAsValue = false; }
+      if (!usedAsValue) continue;
+
+      const spec = relImportSpecifier(path, owner);
+      try {
+        sf.addImportDeclaration({ moduleSpecifier: spec, namedImports: [name] });
+        touched.add(path);
+        added.push({ file: path, name, from: spec, statement: `import { ${name} } from "${spec}";` });
+      } catch { /* leave untouched on any mutation error */ }
+    }
+  }
+
+  if (added.length === 0) return unchanged;
+  const out: Record<string, string> = { ...files };
+  for (const path of touched) {
+    const sf = sources.get(path);
+    if (!sf) continue;
+    try { out[path] = sf.getFullText(); } catch { /* keep original on serialization error */ }
+  }
+  return { files: out, added };
+}
+
 /**
  * Convenience: reconcile, then re-analyze so the caller sees exactly which mismatches survived (i.e.
  * were NOT safely auto-fixable and still need real attention). Never throws.

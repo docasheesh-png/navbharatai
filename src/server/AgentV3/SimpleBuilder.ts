@@ -17,6 +17,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
+import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
 
 export interface SimpleFileSpec {
   path: string;
@@ -467,6 +468,24 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         for (const f of gen) if (f && f.content) written.push(f);
       }
       if (written.length < minFiles) throw new Error('too_few_files_generated');
+      // DETERMINISTIC IMPORT SELF-HEAL before the files are written/previewed (jungle-game report
+      // 104f5b09 + fae70e42): (1) fix unambiguous named<->default import mismatches; (2) ADD a
+      // forgotten shared-symbol import — a value used but never imported (e.g. Background.ts using
+      // CANVAS_HEIGHT with only `import type { LayerConfig }`) shipped as a runtime ReferenceError that
+      // CRASHED the preview, because the fast lane never ran tsc. Best-effort; only ever turns a broken
+      // build into a working one. Kill switch: AGENTV3_IMPORT_RECONCILE=off.
+      if (process.env.AGENTV3_IMPORT_RECONCILE !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const recd = await reconcileImportExports(before);
+          const addd = await addMissingProjectImports(recd.files);
+          const changes = recd.fixes.length + addd.added.length;
+          if (changes > 0) {
+            for (const f of written) { const nc = addd.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind or forgotten import) before preview.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
       await deps.writeFiles(written);
       return written;
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');

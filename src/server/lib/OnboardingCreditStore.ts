@@ -15,6 +15,7 @@
  * Doc ID:     `{userId}`  → { userId, freeBuildsUsed, updatedAt }
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 export interface OnboardingCreditDoc {
   userId: string;
@@ -45,7 +46,7 @@ class OnboardingCreditStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

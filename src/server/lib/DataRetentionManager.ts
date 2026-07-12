@@ -15,6 +15,7 @@
 // delete the wrong user's data (catastrophic), so nothing is added on a guess.
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 // ── Injected Firestore surface (satisfied by admin.firestore.Firestore and by the test mock) ──────
 export interface RetentionDocRef {
@@ -140,7 +141,7 @@ export function getRetentionDb(): RetentionFirestore | null {
   try {
     if (!cachedDb) {
       if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-      cachedDb = admin.firestore();
+      cachedDb = getServerDb();
     }
     return cachedDb as unknown as RetentionFirestore;
   } catch {

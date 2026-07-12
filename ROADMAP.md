@@ -61,7 +61,7 @@ highest priority because they violate the one absolute rule *today*.
 |----|------|--------|------|
 | T0-1 | **Heavy full-stack app preview dies ~2 min** into a still-running E2B sandbox (likely OOM / watcher / app-env crash) — make Diagnose name the killer, then fix the class | ⚠️ | 🟢 (needs one repro log) |
 | T0-2 | **In-browser preview white screen** (CoreUI session) — surface the 25s-watchdog's named error, then fix | ⚠️ | 🟢 |
-| T0-3 | **"No build report yet" after Done** — a swallowed best-effort Firestore save error; make the save error observable, then root-cause | ⚠️ | 🟢 |
+| T0-3 | **"No build report yet" after Done** — ✅ **DONE** (#T0-3, 2026-07-12): ROOT CAUSE was the shared-`admin.firestore()` `.settings()` collision — the first store to init won the once-per-instance `settings()`, every later store threw→null→silently skipped persistence (DiagnosticsStore among them), and no-settings stores piggybacked onto whatever DB the singleton got (often the client-invisible `(default)`). FIX: centralized ALL 51 server stores onto one collision-free `getServerDb()` (`getFirestore(app, dbId)`), + static regression guard banning `admin.firestore()`/`.settings({databaseId})`. | ✅ | 🟢 |
 | T0-4 | **Plan progress shows 0/7 after "Done"** — suspected downstream of a fixed misroute; confirm + kill | ⚠️ | 🟢 |
 | T0-5 | **preview-verify overlay race** — verify can report "renders correctly" while a Vite/babel error overlay had crashed (shadow-DOM/timing race) | ⚠️ | 🟢 |
 | T0-6 | **In-browser "No React entry module found"** when the VFS reaching preview has no entry file — capture client-side VFS at render to pin the short file set | ⚠️ | 🟢 |

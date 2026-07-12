@@ -12,6 +12,7 @@
  */
 
 import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
+import { getServerDb } from '../lib/serverDb';
 
 export type AbuseKind = 'jailbreak' | 'prompt-extraction' | 'repetition-stuffing' | 'excessive-length';
 
@@ -156,7 +157,8 @@ export async function evaluateAbuse(
   try {
     const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    const db = admin.firestore();
+    const db = getServerDb(); // shared collision-free handle → navbharat-prod
+    if (!db) return FAIL_OPEN; // no DB → fail open (never block a build on infra)
     const ref = db.collection('abuseLedger').doc(userId);
     const snap = await ref.get();
     const events: AbuseLedgerEvent[] = (snap.exists ? snap.data()?.events : null) || [];

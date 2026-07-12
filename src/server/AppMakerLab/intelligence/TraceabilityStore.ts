@@ -7,6 +7,7 @@
 // Collection: `workspace_traceability/{workspaceId}` — a single "latest" doc per workspace.
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../../lib/serverDb';
 import type { TraceabilityMatrix } from './RequirementTraceabilityMatrix';
 
 class TraceabilityStore {
@@ -16,7 +17,7 @@ class TraceabilityStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

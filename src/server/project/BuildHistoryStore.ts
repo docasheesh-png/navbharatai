@@ -15,6 +15,7 @@
  * limit). Never throws — build must never be blocked by history writes.
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 export interface VersionEntry {
   id: string;
@@ -56,7 +57,7 @@ class BuildHistoryStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

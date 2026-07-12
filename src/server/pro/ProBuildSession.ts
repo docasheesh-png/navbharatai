@@ -12,6 +12,7 @@
  * normally — the session store is write-once best-effort, never load-bearing.
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 export interface BuildSessionDoc {
   ok: boolean;
@@ -35,7 +36,7 @@ class ProBuildSessionStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

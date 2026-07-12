@@ -9,6 +9,7 @@
 // Pure core (DecisionTrace.record/snapshot/format) → unit-tested. Persistence is VITEST-skip + never throws.
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 export interface Decision {
   stage: string;
@@ -55,8 +56,7 @@ const MAX_CACHE = 100;
 function getDb(): admin.firestore.Firestore | null {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
   try {
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    return admin.firestore();
+    return getServerDb();
   } catch {
     return null;
   }

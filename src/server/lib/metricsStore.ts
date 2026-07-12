@@ -8,6 +8,7 @@
  * Collection: `metrics_snapshots`
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 import { getMetrics, type MetricsSnapshot } from './metrics';
 
 export interface DailyMetricsDoc {
@@ -24,7 +25,7 @@ class MetricsStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

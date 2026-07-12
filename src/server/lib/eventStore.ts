@@ -12,6 +12,7 @@
  */
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from './firestoreDb';
+import { getServerDb } from './serverDb';
 import { eventBus, type BusEvent } from './eventBus';
 
 const COLLECTION = 'build_events';
@@ -37,8 +38,7 @@ class EventStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        const db = admin.firestore();
-        db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+        const db = getServerDb();
         this.db = db;
       }
       return this.db;

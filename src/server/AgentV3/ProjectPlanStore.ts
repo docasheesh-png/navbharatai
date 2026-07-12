@@ -16,6 +16,7 @@ import * as admin from 'firebase-admin';
 import type { ProjectPlan } from './ProjectPlan';
 import { serializeProjectPlan, parseStoredProjectPlan } from './ProjectPlan';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 
 const COLLECTION = 'project_plans_v3';
@@ -30,14 +31,8 @@ function getDb(): admin.firestore.Firestore | null {
   if (process.env.VITEST) return null; // unit tests never hit real Firestore
   if (_db) return _db;
   try {
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    // Cache the instance BEFORE settings() so a settings() throw can't leave the store disabled.
-    _db = admin.firestore();
-    try {
-      _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
-    } catch {
-      // Another store already configured this shared instance — same databaseId, safe to proceed.
-    }
+    // Collision-free shared admin handle (getFirestore(app, dbId)) — no per-store .settings() race.
+    _db = getServerDb();
     return _db;
   } catch (e) {
     notePersistenceFailure('project_plan', 'init', e);

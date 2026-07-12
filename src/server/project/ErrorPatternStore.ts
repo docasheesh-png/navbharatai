@@ -13,6 +13,7 @@
  * Never throws. VITEST-skipped. All writes are best-effort fire-and-forget.
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 interface SessionHints {
   hints: string[];
@@ -30,7 +31,7 @@ class ErrorPatternStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

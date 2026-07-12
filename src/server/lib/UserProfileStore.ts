@@ -9,6 +9,7 @@
  * Pattern: VITEST-skip, best-effort, admin SDK — mirrors UserCostStore.
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 export interface UserProfile {
   userId: string;
@@ -33,7 +34,7 @@ class UserProfileStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

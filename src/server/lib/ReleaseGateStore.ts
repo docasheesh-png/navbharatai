@@ -7,6 +7,7 @@
 // Collection: `platform_config`  ·  Doc ID: `release_gate`
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 import { normalizeGateConfig, OPEN_GATE, type ReleaseGateConfig } from './ReleaseGate';
 
 const COLLECTION = 'platform_config';
@@ -19,7 +20,7 @@ class ReleaseGateStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

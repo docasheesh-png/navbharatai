@@ -9,6 +9,7 @@
 // Collection: `teams/{teamId}/library/{itemId}`
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 export type LibraryKind = 'prompt' | 'template' | 'component';
 const KINDS: LibraryKind[] = ['prompt', 'template', 'component'];
@@ -57,7 +58,7 @@ class TeamLibraryStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

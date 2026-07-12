@@ -21,6 +21,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import {
   normalizeLessonText,
   isNearDuplicate,
@@ -189,8 +190,7 @@ class UserLessonBrainStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
-        this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

@@ -17,6 +17,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { parseDataUri } from './ProjectImport';
 
@@ -31,13 +32,8 @@ function getDb(): admin.firestore.Firestore | null {
   if (process.env.VITEST) return null; // unit tests never hit real Firestore
   if (_db) return _db;
   try {
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    _db = admin.firestore(); // cache BEFORE settings() so a settings() throw can't disable the store (#873)
-    try {
-      _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
-    } catch {
-      // Another store already configured this shared instance — same databaseId, safe to proceed.
-    }
+    // Collision-free shared admin handle (getFirestore(app, dbId)) — no per-store .settings() race.
+    _db = getServerDb();
     return _db;
   } catch (e) {
     notePersistenceFailure('workspace_assets', 'init', e);

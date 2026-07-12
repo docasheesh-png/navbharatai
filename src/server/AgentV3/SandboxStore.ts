@@ -18,6 +18,7 @@
 //   with the single-build-per-account lock (activeBuilds 409), two instances never resume the same
 //   sandbox concurrently. Mirrors DeploymentStore: VITEST-skip, best-effort, never throws/blocks a build.
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 export interface SandboxRecord {
   workspaceId: string;
@@ -34,7 +35,7 @@ class SandboxStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

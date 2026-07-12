@@ -12,6 +12,7 @@
 import crypto from 'crypto';
 import { sendBuildWebhook } from './NotificationManager';
 import { loadFirebaseAdmin } from './lib/firebaseAdminModule';
+import { getServerDb } from './lib/serverDb';
 
 export const WEBHOOK_EVENTS = ['BUILD_COMPLETE', 'BUILD_FAILED', 'DEPLOY_COMPLETE', 'DEPLOY_FAILED'] as const;
 export type WebhookEvent = typeof WEBHOOK_EVENTS[number];
@@ -48,7 +49,7 @@ async function getAdminFirestore(): Promise<import('firebase-admin/firestore').F
   try {
     const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    return admin.firestore();
+    return getServerDb(); // shared collision-free handle → navbharat-prod
   } catch {
     return null;
   }

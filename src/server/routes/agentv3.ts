@@ -80,7 +80,8 @@ import {
   firestoreWalletReader,
   decidePaidGate,
 } from '../AgentV3';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses rules) — getDb() here feeds only the wallet read/debit money path.
+import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';

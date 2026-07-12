@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import type { Express, Request, Response } from 'express';
 import { Cashfree } from 'cashfree-pg';
-import { doc, setDoc } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Writes payment_transactions (server-only).
+import { doc, setDoc, getServerDb as getDb } from '../lib/serverDb';
 
 /**
  * Legacy `/api/create-order` endpoint (direct Cashfree PGCreateOrder) extracted

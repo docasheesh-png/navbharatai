@@ -1,4 +1,4 @@
-import { doc, runTransaction } from 'firebase/firestore';
+import { doc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens } from './payments';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.

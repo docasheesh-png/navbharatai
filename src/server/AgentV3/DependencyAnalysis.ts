@@ -15,7 +15,7 @@
 
 // `semver` (installed, 7.x) ships no bundled types and @types/semver isn't a dependency; the tiny
 // surface we use is declared ambiently in ./semver.d.ts so the version-conflict analyzer stays typed.
-import { validRange, intersects } from 'semver';
+import { validRange, intersects, minVersion, gt } from 'semver';
 
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
@@ -24,6 +24,12 @@ export interface DependencyIssue {
   package: string;
   severity: DependencySeverity;
   detail: string;
+  /**
+   * GA-3 resolver (version-conflict / peer-violation only): a concrete, deterministic
+   * reconciliation the caller can apply — e.g. `Set devDependencies."react" to "^18.2.0"`.
+   * Absent when no safe single-edit fix exists (the ranges must be reconciled by hand).
+   */
+  suggestion?: string;
 }
 
 const MAX_ISSUES = 50;
@@ -247,6 +253,45 @@ function rangesIncompatible(a: string, b: string): boolean {
   try { return !intersects(a, b, { loose: true }); } catch { return false; }
 }
 
+/** The lowest concrete version a range admits (e.g. "^18.2.0" → "18.2.0"), or null if unknowable. */
+function rangeFloor(range: string): string | null {
+  if (!isSemverRange(range)) return null;
+  try { return minVersion(range, { loose: true })?.version ?? null; } catch { return null; }
+}
+
+/**
+ * GA-3 resolver — for a version-conflict between two sections, recommend aligning the OLDER section
+ * onto the NEWER range (the standard human fix: bump the lagging pin up to the current one). Returns
+ * a concrete, single-edit instruction, or null when neither floor can be computed. `caretForm` keeps
+ * the newer range's own spelling so we don't silently widen/narrow it (e.g. "^18.2.0" stays "^18.2.0").
+ */
+function suggestConflictFix(
+  name: string,
+  aSection: string, aRange: string,
+  bSection: string, bRange: string,
+): string | null {
+  const aFloor = rangeFloor(aRange);
+  const bFloor = rangeFloor(bRange);
+  if (!aFloor || !bFloor) return null;
+  // The "newer" side is the one whose lowest admissible version is higher.
+  const aIsNewer = gt(aFloor, bFloor, { loose: true });
+  const [newerSec, newerRange, olderSec] = aIsNewer
+    ? [aSection, aRange, bSection]
+    : [bSection, bRange, aSection];
+  return `Set ${olderSec}."${name}" to "${newerRange}" to match ${newerSec} (align the older pin onto the newer range).`;
+}
+
+/**
+ * GA-3 resolver — for a peer-violation, recommend bumping the installed dep to the peer range's
+ * floor (the lowest version that satisfies the peer contract), spelled as a caret range so future
+ * patch/minor updates stay allowed. Returns null when the peer floor can't be computed.
+ */
+function suggestPeerFix(name: string, section: string, peerRange: string): string | null {
+  const floor = rangeFloor(peerRange);
+  if (!floor) return null;
+  return `Set ${section}."${name}" to "^${floor}" to satisfy the peerDependencies requirement "${peerRange}".`;
+}
+
 /**
  * GA-3 (Tier 2 dependency intelligence) — detect DECLARED version conflicts in a manifest that
  * `npm install` resolves silently-wrong (or that violate the project's own peer contract):
@@ -290,11 +335,15 @@ export function detectVersionConflicts(packageJsonContent: string | null): Depen
       for (let j = i + 1; j < present.length; j++) {
         if (rangesIncompatible(present[i][1], present[j][1])) {
           flagged.add(name);
+          const suggestion = suggestConflictFix(
+            name, present[i][0], present[i][1], present[j][0], present[j][1],
+          );
           issues.push({
             kind: 'version-conflict',
             package: name,
             severity: 'high',
             detail: `'${name}' is pinned to incompatible ranges: "${present[i][1]}" (${present[i][0]}) vs "${present[j][1]}" (${present[j][0]}) — npm installs ONE version, so one section resolves outside its range`,
+            ...(suggestion ? { suggestion } : {}),
           });
           break outer;
         }
@@ -305,15 +354,18 @@ export function detectVersionConflicts(packageJsonContent: string | null): Depen
   // B) An installed version that violates the project's OWN peerDependencies requirement.
   for (const [name, peerRange] of peer) {
     if (flagged.has(name) || !isSemverRange(peerRange)) continue;
+    const ownSection = deps.has(name) ? 'dependencies' : 'devDependencies';
     const own = deps.get(name) ?? dev.get(name);
     if (!own || !isSemverRange(own)) continue;
     if (rangesIncompatible(own, peerRange)) {
       flagged.add(name);
+      const suggestion = suggestPeerFix(name, ownSection, peerRange);
       issues.push({
         kind: 'peer-violation',
         package: name,
         severity: 'high',
         detail: `'${name}' is installed as "${own}" but this project's peerDependencies require "${peerRange}" — the resolved version won't satisfy the peer contract`,
+        ...(suggestion ? { suggestion } : {}),
       });
     }
   }
@@ -338,7 +390,10 @@ export function dependencySummary(issues: DependencyIssue[]): string {
       .map((s) => `${counts[s]} ${s}`)
       .join(', ') + '.';
   const shown = sorted.slice(0, 15);
-  const body = shown.map((x) => `  - [${x.severity}] ${x.kind}: ${x.package} — ${x.detail}`);
+  const body = shown.map((x) =>
+    `  - [${x.severity}] ${x.kind}: ${x.package} — ${x.detail}` +
+    (x.suggestion ? `\n      ↳ Fix: ${x.suggestion}` : ''),
+  );
   const more = issues.length > shown.length ? [`  …and ${issues.length - shown.length} more.`] : [];
   return [head, ...body, ...more].join('\n');
 }

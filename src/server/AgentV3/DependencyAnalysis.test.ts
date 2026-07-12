@@ -272,3 +272,67 @@ describe('detectVersionConflicts (GA-3 — semver-backed version-conflict intell
     expect(issues.some((i) => i.kind === 'version-conflict' && i.package === 'react')).toBe(true);
   });
 });
+
+describe('GA-3 resolver — concrete reconciliation suggestions', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('suggests aligning the OLDER section onto the NEWER range (dev newer than deps)', () => {
+    const [issue] = detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.2' },
+      devDependencies: { react: '^18.2.0' },
+    }));
+    expect(issue.kind).toBe('version-conflict');
+    // deps (^17) is older → it should be moved onto dev's ^18.2.0.
+    expect(issue.suggestion).toBe(
+      'Set dependencies."react" to "^18.2.0" to match devDependencies (align the older pin onto the newer range).',
+    );
+  });
+
+  it('picks the newer range regardless of which section it sits in (deps newer than dev)', () => {
+    const [issue] = detectVersionConflicts(pkg({
+      dependencies: { lodash: '^4.17.0' },
+      devDependencies: { lodash: '^3.10.0' },
+    }));
+    // deps (^4) is newer → devDependencies should be aligned to ^4.17.0.
+    expect(issue.suggestion).toBe(
+      'Set devDependencies."lodash" to "^4.17.0" to match dependencies (align the older pin onto the newer range).',
+    );
+  });
+
+  it('suggests bumping a peer-violating dep to the peer floor as a caret range', () => {
+    const [issue] = detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.0' },
+      peerDependencies: { react: '>=18.0.0' },
+    }));
+    expect(issue.kind).toBe('peer-violation');
+    expect(issue.suggestion).toBe(
+      'Set dependencies."react" to "^18.0.0" to satisfy the peerDependencies requirement ">=18.0.0".',
+    );
+  });
+
+  it('names the correct section for a peer-violating devDependency', () => {
+    const [issue] = detectVersionConflicts(pkg({
+      devDependencies: { typescript: '^4.9.0' },
+      peerDependencies: { typescript: '>=5.0.0' },
+    }));
+    expect(issue.kind).toBe('peer-violation');
+    expect(issue.suggestion).toBe(
+      'Set devDependencies."typescript" to "^5.0.0" to satisfy the peerDependencies requirement ">=5.0.0".',
+    );
+  });
+
+  it('surfaces the ↳ Fix line in dependencySummary when a suggestion exists', () => {
+    const out = dependencySummary(detectVersionConflicts(pkg({
+      dependencies: { react: '^17.0.2' },
+      devDependencies: { react: '^18.2.0' },
+    })));
+    expect(out).toContain('↳ Fix: Set dependencies."react" to "^18.2.0"');
+  });
+
+  it('a compatible manifest yields no suggestion (nothing to reconcile)', () => {
+    expect(detectVersionConflicts(pkg({
+      dependencies: { react: '^18.0.0' },
+      devDependencies: { react: '>=18.1.0' },
+    }))).toEqual([]);
+  });
+});

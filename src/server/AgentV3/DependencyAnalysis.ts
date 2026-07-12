@@ -242,6 +242,9 @@ export function analyzeDependencies(
   // Unpinned git sources (medium, GA-3): a git dep with no #commit/#tag ref → non-reproducible.
   issues.push(...detectUnpinnedGitDeps(packageJsonContent));
 
+  // Sibling major skew (high, GA-3): react/react-dom (etc.) on different majors → runtime break.
+  issues.push(...detectSiblingMajorSkew(packageJsonContent));
+
   return issues.slice(0, MAX_ISSUES);
 }
 
@@ -454,6 +457,71 @@ export function detectTypesMajorMismatch(packageJsonContent: string | null): Dep
       detail: `'${typesName}' ("${typesRange}") types a DIFFERENT major than the installed '${runtimeName}' ("${runtimeRange}") — the editor's API won't match runtime and typechecking will drift`,
       ...(suggestion ? { suggestion } : {}),
     });
+  }
+  return issues;
+}
+
+/**
+ * Sibling packages that MUST share the same major version or they break at runtime — different-major
+ * combinations that `npm install` happily installs but that crash the app (react/react-dom is the
+ * canonical case: a v18 react with a v17 react-dom throws on render). Curated + conservative: only
+ * pairs with a hard same-major contract belong here, so we never false-positive on independent libs.
+ */
+const SIBLING_MAJOR_GROUPS: string[][] = [
+  ['react', 'react-dom'],
+  ['@angular/core', '@angular/common', '@angular/compiler', '@angular/platform-browser', '@angular/platform-browser-dynamic'],
+];
+
+/**
+ * GA-3 (Tier-2 dependency intelligence) — detect SIBLING packages pinned to different majors when they
+ * must share one (e.g. `react: "^18"` with `react-dom: "^17"`). Unlike `detectVersionConflicts` (the
+ * SAME package across sections), this catches DIFFERENT package names bound by a hard same-major
+ * contract — a very common, hard runtime break. Uses non-intersecting ranges as the signal and only
+ * real semver ranges; suggests aligning the older sibling onto the newer major. Pure. Exported for tests.
+ */
+export function detectSiblingMajorSkew(packageJsonContent: string | null): DependencyIssue[] {
+  if (packageJsonContent == null) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    pkg = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const declared = new Map<string, string>([
+    ...collectVersionEntries(pkg.dependencies),
+    ...collectVersionEntries(pkg.devDependencies),
+  ]);
+
+  const issues: DependencyIssue[] = [];
+  const flagged = new Set<string>(); // one issue per group
+  for (const group of SIBLING_MAJOR_GROUPS) {
+    const members = group
+      .map((name) => [name, declared.get(name)] as const)
+      .filter((e): e is readonly [string, string] => !!e[1] && isSemverRange(e[1]));
+    if (members.length < 2) continue;
+    // Find the newest member (highest major floor) and any member on a different, non-intersecting major.
+    const newest = members.reduce((a, b) => ((rangeMajor(b[1]) ?? 0) > (rangeMajor(a[1]) ?? 0) ? b : a));
+    const newestMajor = rangeMajor(newest[1]);
+    for (const [name, range] of members) {
+      if (name === newest[0] || flagged.has(group[0])) continue;
+      if (rangesIncompatible(range, newest[1])) {
+        flagged.add(group[0]);
+        const suggestion = newestMajor != null
+          ? `Set "${name}" to "^${newestMajor}" to match ${newest[0]} (${newest[1]}) — they must share a major.`
+          : undefined;
+        issues.push({
+          kind: 'version-conflict',
+          package: name,
+          severity: 'high',
+          detail: `'${name}' ("${range}") and '${newest[0]}' ("${newest[1]}") are pinned to DIFFERENT majors but must share one — the app breaks at runtime`,
+          ...(suggestion ? { suggestion } : {}),
+        });
+        break;
+      }
+    }
   }
   return issues;
 }

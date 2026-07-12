@@ -14449,3 +14449,32 @@ Admin shared the live Cloud Run Variables screenshot. Synced the CLAUDE.md env r
   49+50). This confirms the affordability gate is genuinely active, which is what makes the Fix 51 ₹0-balance
   block actually bite. `AGENTV3_INTEGRITY_GATE` = `on` and `AGENTV3_LINT_GATE` = `on` also confirmed on.
 Docs-only (CLAUDE.md + this note); no code touched.
+
+## 2026-07-12 — Fix 52: MONEY BLEED #2 — logout→login re-granted the 50,000-token welcome bonus every time (infinite free-token farm)
+
+Admin: "jab bhi user logout kar ke login karta hai, 50,000 token show ho rahe hai. user un 50k use kar ke
+logout→login karta hai, wapas 50k free me aa jaate hai." An unlimited free-token farm.
+
+**Root cause.** `GET /api/wallet/:userId` granted the 50k welcome bonus in the `else` of `if (walletDoc.exists())`
+— i.e. the ONLY idempotency key was the wallet doc's existence. A wallet doc is RE-CREATABLE (a lost/absent
+doc, the recent navbharat-prod DB migration, or a pre-migration write that never persisted under the old
+client-SDK PERMISSION_DENIED), and each recreation ran the else-branch → `setDoc(walletRef, initialWallet)`
+(NO merge) → wiped any spent balance and re-minted 50,000 tokens. The bonus was gated on the wrong thing.
+
+**Fix (rule 2 — idempotency keyed on a DURABLE marker, not the recreatable wallet doc).** The grant now checks
+the durable `payment_transactions/welcome_${userId}` marker, which lives in a SEPARATE collection and SURVIVES
+wallet-doc recreation. New pure, tested `src/server/lib/welcomeBonus.ts`: `welcomeGrantTokens(alreadyGranted)` →
+the configured bonus ONLY if never granted, else **0**; `buildInitialWallet(...)` → a 0-token recreation writes
+an EMPTY ledger + ₹0 balance (no fake "Welcome Bonus" row, no free tokens). The wallet route's else-branch now
+runs a Firestore TRANSACTION: re-read the wallet (return it if it was created concurrently — never overwrite),
+read the marker, grant 50k + stamp the marker ONLY on a true first grant, else create an empty wallet. So a
+user who already got (and spent) their bonus gets a ₹0 wallet on re-login and must recharge — the farm is dead.
+
+Regression tests +5 (`welcomeBonus`: grant-once for a new user, 0 on re-grant, first-grant wallet shape/ledger,
+re-grant wallet is empty with NO bonus row, identity fields carried). Gate: frontend tsc 0, server tsc 0,
+vitest 5982/5982, boot:check PASS.
+
+Honest note (rule 6): there is no wallet-DELETE anywhere in the code and debits persist via the admin-SDK
+(navbharat-prod) — so a stable-uid Google user's doc should not vanish going forward; the historical
+disappearance was the pre-admin-SDK write failures. This fix makes the re-grant impossible regardless of why a
+wallet is ever recreated, which is the durable guarantee.

@@ -280,7 +280,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_ESCALATION`, `AGENTV3_ESCALATION_PCT`, `AGENTV3_BLUEPRINT`, `AGENTV3_SANDBOX_RESUME`,
   `AGENTV3_MAX_BUILD_SECONDS`, `AGENTV3_FREE_LIST` (the 3 test/admin emails kept free),
   `AGENTV3_LINT_GATE` (set `on` by the admin 2026-07-11 — a build fails on real ESLint **errors**;
-  warnings/formatting never block. Set to `off`/unset to disable if it ever over-blocks a working app.)
+  warnings/formatting never block. Set to `off`/unset to disable if it ever over-blocks a working app.),
+  `AGENTV3_COST_ROUTING` + `AGENTV3_COST_ROUTING_USERS` (set `on`, canary → `aashishcpmt09@gmail.com`, by the
+  admin 2026-07-12 — the free-tier cheap-routing master switch, live for the admin's account only for now),
+  `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below)
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
@@ -312,9 +315,12 @@ the code (it is actually read somewhere) on 2026-07-11.
 - `AGENTV3_ENABLED` → `true`. `AGENTV3_PAID_PUBLIC` → set to `true` by the admin 2026-07-11 (billing LIVE:
   real wallet debit + affordability gate + ₹0-balance block now active for every non-free-list user).
   `AGENTV3_CREDIT_GATE` → also `true` (redundant once paid-public is on — paid-public is the superset — but
-  harmless). ⚠️ With these ON, a ₹0/negative-balance user is REFUSED new builds, so the recharge flow
-  (Cashfree) MUST work end-to-end or such users get stranded; keep the 3 test/admin emails in
-  `AGENTV3_FREE_LIST` so admin testing stays free.
+  harmless). ✅ **Both VERIFIED = `true` in the live Cloud Run env (admin screenshot 2026-07-12, Names 49+50)**
+  — so the affordability gate is genuinely active, which is what makes the ₹0-balance block (Fix 51) actually
+  bite (a 0-balance non-free-list user is now REFUSED, instead of the old bug where the −₹20 overdraft floor let
+  them build on the full engine for free). ⚠️ With these ON, a ₹0/negative-balance user is REFUSED new builds,
+  so the recharge flow (Cashfree) MUST work end-to-end or such users get stranded; keep the 3 test/admin emails
+  in `AGENTV3_FREE_LIST` so admin testing stays free.
 - `AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS` → **default is now `0` = NO size skip** (Fix 51, admin "kimi/glm se
   limit hata do — 1st try for every file"): GLM/Kimi lead EVERY prompt regardless of size; Claude backstops any
   real timeout. Set a POSITIVE value (e.g. `45000`) ONLY if you want to re-impose the old "skip huge prompts
@@ -325,11 +331,14 @@ when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODE
 `AWS_DEFAULT_REGION`, `TEST_CHAT_ENABLED`. (These are read ONLY by the Bedrock cheap-floor rung and the
 Bedrock test-chat page — neither is in use.)
 
-**Available AgentV3 flags NOT yet set (leave unset = today's behavior; set only when ready):**
+**Available AgentV3 flags (state below is the live Cloud Run config; leave unset = today's behavior):**
 - **`AGENTV3_COST_ROUTING`** (= `on`) — the ONE master switch for the whole cheap-routing regime
-  (free-tier cheap-only builds + per-tier billing). **This is the only one the admin needs**; flip it
-  AFTER the bake-off proves GLM/Kimi. Optional **`AGENTV3_COST_ROUTING_USERS`** (comma uid/email) =
-  canary — set to the 3 test accounts first, clear to widen to everyone.
+  (free-tier cheap-only builds + per-tier billing). ✅ **SET to `on` by the admin 2026-07-12, CANARY-scoped via
+  `AGENTV3_COST_ROUTING_USERS` = `aashishcpmt09@gmail.com`** — so it is live for the admin's own account ONLY
+  right now (everyone else stays on today's Claude path). Watch the `deliveredVia` telemetry on the admin's
+  builds, then CLEAR `AGENTV3_COST_ROUTING_USERS` to widen to all users once GLM/Kimi are proven. NOTE: the
+  free-tier cheap-only path also needs a real cheap floor configured (`AGENTV3_CHEAP_FLOOR` naming a provider
+  with its key present); with the floor off it stays inert even for the canary user.
 - Legacy per-feature overrides (normally NOT needed — the master covers both): `AGENTV3_FREE_TIER_CHEAP`,
   `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` (default 50000) tunes the new-wallet bonus.
 - **`AGENTV3_INTEGRITY_GATE`** (= `on`) — **SET to `on` by the admin 2026-07-11 (canary).** After a build,

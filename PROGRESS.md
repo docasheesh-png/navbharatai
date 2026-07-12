@@ -14439,3 +14439,13 @@ Root causes (two, both fixed):
 
 Gate: fe tsc 0 (pre-existing mobile-plugin-only errors — both ARE in package.json; this container's
 node_modules is stale, CI's npm ci installs them), server untouched, vitest 6014 pass. Client-only.
+## 2026-07-12 — Registry sync: AGENTV3_COST_ROUTING now live (canary), PAID_PUBLIC/CREDIT_GATE verified ON (admin Cloud Run screenshot)
+
+Admin shared the live Cloud Run Variables screenshot. Synced the CLAUDE.md env registry to the real state:
+- `AGENTV3_COST_ROUTING` = `on`, canary-scoped via `AGENTV3_COST_ROUTING_USERS` = `aashishcpmt09@gmail.com`
+  (free-tier cheap-routing master switch, live for the admin's account only) — moved from "NOT yet set" to
+  the configured list. (Still needs a real `AGENTV3_CHEAP_FLOOR` provider to actually route cheap.)
+- `AGENTV3_PAID_PUBLIC` = `true` and `AGENTV3_CREDIT_GATE` = `true` — VERIFIED both set in the live env (Names
+  49+50). This confirms the affordability gate is genuinely active, which is what makes the Fix 51 ₹0-balance
+  block actually bite. `AGENTV3_INTEGRITY_GATE` = `on` and `AGENTV3_LINT_GATE` = `on` also confirmed on.
+Docs-only (CLAUDE.md + this note); no code touched.

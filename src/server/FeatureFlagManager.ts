@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDb } from './lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see lib/serverDb.ts. Reads/writes feature flags (server-only).
+import { doc, getDoc, setDoc, getServerDb as getDb } from './lib/serverDb';
 
 /**
  * P-PME.8 — Feature Flag Manager.

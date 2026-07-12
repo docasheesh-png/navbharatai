@@ -9,8 +9,8 @@
  * All routes require a valid Firebase ID token (Bearer header).
  */
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads user_token_wallets (owner-only).
+import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { userProfileStore } from '../lib/UserProfileStore';

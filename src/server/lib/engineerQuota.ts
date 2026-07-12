@@ -1,5 +1,5 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDb } from './db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes engineer_quota (server-only).
+import { doc, getDoc, setDoc, getServerDb as getDb } from './serverDb';
 
 /**
  * Per-user daily quota for Engineer AI builds — a real cost guard so a single

@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
+// aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';

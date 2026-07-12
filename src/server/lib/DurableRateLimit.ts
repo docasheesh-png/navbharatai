@@ -1,5 +1,5 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { getDb } from './db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes durable rate-limit docs (server-only).
+import { doc, getDoc, setDoc, getServerDb as getDb } from './serverDb';
 
 // SECURITY Phase 1.4 (admin-approved 2026-07-07) — DURABLE rate limiting.
 //

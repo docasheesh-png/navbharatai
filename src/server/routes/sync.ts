@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { getDb } from '../lib/db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes user_workspaces (server-only).
+import { doc, getDoc, setDoc, deleteDoc, getServerDb as getDb } from '../lib/serverDb';
 import { encodeWorkspace, decodeWorkspace } from '../project/WorkspaceStore';
 import { mergeWorkspaceState, type WorkspacePayload } from '../project/SyncMerge';
 import { requireUserMatch } from '../lib/authMiddleware';

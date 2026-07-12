@@ -12,7 +12,9 @@ process.env.VITEST = 'true';
 const DOCS: Record<string, { user_id: string; deleted?: boolean }> = {};
 const UPDATES: Array<{ id: string; patch: any }> = [];
 
-vi.mock('firebase/firestore', () => ({
+// secrets.ts now uses the admin-SDK serverDb shim (getServerDb as getDb) instead of the client SDK.
+// The shim keeps client snapshot semantics (exists() is a method), so this mock is unchanged in shape.
+vi.mock('../src/server/lib/serverDb', () => ({
   doc: (_db: any, _col: string, id: string) => ({ id }),
   getDoc: async (ref: any) => ({
     exists: () => Object.prototype.hasOwnProperty.call(DOCS, ref.id),
@@ -24,10 +26,8 @@ vi.mock('firebase/firestore', () => ({
   getDocs: async () => ({ docs: [] }),
   query: () => ({}),
   where: () => ({}),
+  getServerDb: () => ({}), // non-null db so the route proceeds past its handle
 }));
-
-// Non-null db so the route proceeds past its `getDb()` handle.
-vi.mock('../src/server/lib/db', () => ({ getDb: () => ({}) }));
 
 async function getDeleteHandler() {
   const { registerSecretsRoutes } = await import('../src/server/routes/secrets');

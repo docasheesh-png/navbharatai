@@ -19,11 +19,12 @@ vi.mock('../src/server/lib/cloudflare', () => ({
   getCustomHostname: async () => null,
   fallbackOrigin: () => 'https://fallback.example',
 }));
-vi.mock('firebase/firestore', () => ({
+// domains.ts now uses the admin-SDK serverDb shim (getServerDb as getDb) instead of the client SDK.
+vi.mock('../src/server/lib/serverDb', () => ({
   doc: (_db: any, _c: string, id: string) => ({ id }),
   setDoc: setDocMock,
+  getServerDb: () => ({}),
 }));
-vi.mock('../src/server/lib/db', () => ({ getDb: () => ({}) }));
 
 async function getConnectHandler() {
   const { registerDomainsRoutes } = await import('../src/server/routes/domains');

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { query, collection, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { getDb } from './db';
+// ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
+import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb } from './serverDb';
 
 /**
  * Encryption & user-secret helpers.

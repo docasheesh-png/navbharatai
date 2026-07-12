@@ -6,6 +6,7 @@ import {
   detectVersionConflicts,
   detectTypesMajorMismatch,
   detectUnpinnedGitDeps,
+  detectSiblingMajorSkew,
 } from './DependencyAnalysis';
 
 describe('normalizeImportToPackage', () => {
@@ -469,5 +470,57 @@ describe('detectUnpinnedGitDeps (GA-3 — git source with no pinned ref)', () =>
     expect(detectUnpinnedGitDeps(null)).toEqual([]);
     expect(detectUnpinnedGitDeps('{ not json')).toEqual([]);
     expect(detectUnpinnedGitDeps('[]')).toEqual([]);
+  });
+});
+
+describe('detectSiblingMajorSkew (GA-3 — sibling packages that must share a major)', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('flags react ^18 with react-dom ^17 (high) and suggests aligning to the newer major', () => {
+    const issues = detectSiblingMajorSkew(pkg({
+      dependencies: { react: '^18.2.0', 'react-dom': '^17.0.2' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('version-conflict');
+    expect(issues[0].severity).toBe('high');
+    expect(issues[0].package).toBe('react-dom'); // the older sibling is the one to move
+    expect(issues[0].suggestion).toBe('Set "react-dom" to "^18" to match react (^18.2.0) — they must share a major.');
+  });
+
+  it('does NOT flag react and react-dom on the same major', () => {
+    expect(detectSiblingMajorSkew(pkg({
+      dependencies: { react: '^18.2.0', 'react-dom': '^18.0.1' },
+    }))).toEqual([]);
+  });
+
+  it('does not flag when only one sibling of the group is present', () => {
+    expect(detectSiblingMajorSkew(pkg({ dependencies: { react: '^18.2.0' } }))).toEqual([]);
+  });
+
+  it('flags an @angular/* group member on a different major', () => {
+    const issues = detectSiblingMajorSkew(pkg({
+      dependencies: { '@angular/core': '^17.0.0', '@angular/common': '^16.2.0' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('version-conflict');
+  });
+
+  it('skips non-semver specifiers (never a false positive)', () => {
+    expect(detectSiblingMajorSkew(pkg({
+      dependencies: { react: 'workspace:*', 'react-dom': '^17.0.0' },
+    }))).toEqual([]);
+  });
+
+  it('is wired into analyzeDependencies (surfaces in the main scan)', () => {
+    const issues = analyzeDependencies([], pkg({
+      dependencies: { react: '^18.2.0', 'react-dom': '^17.0.2' },
+    }));
+    expect(issues.some((i) => i.kind === 'version-conflict' && i.package === 'react-dom')).toBe(true);
+  });
+
+  it('returns [] for null / unparseable manifests', () => {
+    expect(detectSiblingMajorSkew(null)).toEqual([]);
+    expect(detectSiblingMajorSkew('{ not json')).toEqual([]);
+    expect(detectSiblingMajorSkew('[]')).toEqual([]);
   });
 });

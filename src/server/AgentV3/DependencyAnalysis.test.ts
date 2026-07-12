@@ -4,6 +4,7 @@ import {
   dependencySummary,
   normalizeImportToPackage,
   detectVersionConflicts,
+  detectTypesMajorMismatch,
 } from './DependencyAnalysis';
 
 describe('normalizeImportToPackage', () => {
@@ -334,5 +335,77 @@ describe('GA-3 resolver — concrete reconciliation suggestions', () => {
       dependencies: { react: '^18.0.0' },
       devDependencies: { react: '>=18.1.0' },
     }))).toEqual([]);
+  });
+});
+
+describe('detectTypesMajorMismatch (GA-3 — @types/* on a different major than the runtime lib)', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('flags @types/react on major 17 when react is major 18 (medium) with an align suggestion', () => {
+    const issues = detectTypesMajorMismatch(pkg({
+      dependencies: { react: '^18.2.0' },
+      devDependencies: { '@types/react': '^17.0.2' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('types-mismatch');
+    expect(issues[0].package).toBe('@types/react');
+    expect(issues[0].severity).toBe('medium');
+    expect(issues[0].suggestion).toBe('Set "@types/react" to "^18" to match react (^18.2.0).');
+  });
+
+  it('does NOT flag matching majors (the @types minor legitimately trails the lib)', () => {
+    expect(detectTypesMajorMismatch(pkg({
+      dependencies: { react: '^18.2.0' },
+      devDependencies: { '@types/react': '^18.0.5' },
+    }))).toEqual([]);
+  });
+
+  it('resolves the double-underscore scoped convention (@types/babel__core → @babel/core)', () => {
+    const issues = detectTypesMajorMismatch(pkg({
+      dependencies: { '@babel/core': '^7.0.0' },
+      devDependencies: { '@types/babel__core': '^6.0.0' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].package).toBe('@types/babel__core');
+    expect(issues[0].suggestion).toBe('Set "@types/babel__core" to "^7" to match @babel/core (^7.0.0).');
+  });
+
+  it('skips a types package with no matching runtime dependency (e.g. @types/node)', () => {
+    expect(detectTypesMajorMismatch(pkg({
+      devDependencies: { '@types/node': '^20.0.0', typescript: '^5.0.0' },
+    }))).toEqual([]);
+  });
+
+  it('skips non-semver specifiers on either side (never a false positive)', () => {
+    expect(detectTypesMajorMismatch(pkg({
+      dependencies: { react: 'workspace:*' },
+      devDependencies: { '@types/react': '^17.0.0' },
+    }))).toEqual([]);
+    expect(detectTypesMajorMismatch(pkg({
+      dependencies: { react: '^18.0.0' },
+      devDependencies: { '@types/react': 'latest' },
+    }))).toEqual([]);
+  });
+
+  it('matches a runtime lib declared in devDependencies too', () => {
+    const issues = detectTypesMajorMismatch(pkg({
+      devDependencies: { lodash: '^4.17.0', '@types/lodash': '^3.10.0' },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].suggestion).toBe('Set "@types/lodash" to "^4" to match lodash (^4.17.0).');
+  });
+
+  it('is wired into analyzeDependencies (surfaces in the main scan)', () => {
+    const issues = analyzeDependencies([], pkg({
+      dependencies: { react: '^18.2.0' },
+      devDependencies: { '@types/react': '^17.0.2' },
+    }));
+    expect(issues.some((i) => i.kind === 'types-mismatch' && i.package === '@types/react')).toBe(true);
+  });
+
+  it('returns [] for null / unparseable manifests', () => {
+    expect(detectTypesMajorMismatch(null)).toEqual([]);
+    expect(detectTypesMajorMismatch('{ not json')).toEqual([]);
+    expect(detectTypesMajorMismatch('[]')).toEqual([]);
   });
 });

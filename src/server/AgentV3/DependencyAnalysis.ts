@@ -20,7 +20,7 @@ import { validRange, intersects, minVersion, gt } from 'semver';
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
 export interface DependencyIssue {
-  kind: 'missing' | 'unused' | 'unpinned' | 'version-conflict' | 'peer-violation';
+  kind: 'missing' | 'unused' | 'unpinned' | 'version-conflict' | 'peer-violation' | 'types-mismatch';
   package: string;
   severity: DependencySeverity;
   detail: string;
@@ -236,6 +236,9 @@ export function analyzeDependencies(
   // Version conflicts (high, GA-3): incompatible cross-section ranges + own-peer violations.
   issues.push(...detectVersionConflicts(packageJsonContent));
 
+  // Types/runtime major skew (medium, GA-3): `@types/x` on a different major than `x`.
+  issues.push(...detectTypesMajorMismatch(packageJsonContent));
+
   return issues.slice(0, MAX_ISSUES);
 }
 
@@ -370,6 +373,85 @@ export function detectVersionConflicts(packageJsonContent: string | null): Depen
     }
   }
 
+  return issues;
+}
+
+/**
+ * Map an `@types/*` package to the runtime package it types, or null if it isn't a types package.
+ * Handles the double-underscore scoped convention: `@types/babel__core` → `@babel/core`.
+ * `@types/node` maps to `node` (which is never a declared dependency, so it is naturally skipped).
+ */
+function typesToRuntime(name: string): string | null {
+  if (!name.startsWith('@types/')) return null;
+  const sub = name.slice('@types/'.length);
+  if (!sub) return null;
+  if (sub.includes('__')) {
+    const [scope, pkg] = sub.split('__');
+    if (!scope || !pkg) return null;
+    return `@${scope}/${pkg}`;
+  }
+  return sub;
+}
+
+/** The major-version number a range's lowest admissible version carries (e.g. "^18.2.0" → 18), or null. */
+function rangeMajor(range: string): number | null {
+  const floor = rangeFloor(range);
+  if (!floor) return null;
+  const major = Number.parseInt(floor.split('.')[0], 10);
+  return Number.isNaN(major) ? null : major;
+}
+
+/**
+ * GA-3 (Tier-2 dependency intelligence) — detect a runtime package and its `@types/*` package pinned to
+ * DIFFERENT majors (e.g. `react: "^18"` with `@types/react: "^17"`). The typings then describe a
+ * different major than the installed library — the classic silent typecheck break where the API in the
+ * editor doesn't match the API at runtime. Uses non-intersecting ranges as the signal (so a `@types`
+ * minor that legitimately trails the lib is never flagged), and only when both are real semver ranges.
+ * Medium severity: it breaks typechecking / DX, not the install. Pure + semver-backed. Exported for tests.
+ */
+export function detectTypesMajorMismatch(packageJsonContent: string | null): DependencyIssue[] {
+  if (packageJsonContent == null) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    pkg = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  // Runtime version for a package name from either dependencies or devDependencies (deps wins).
+  const deps = new Map(collectVersionEntries(pkg.dependencies));
+  const dev = new Map(collectVersionEntries(pkg.devDependencies));
+  const typesEntries = [
+    ...collectVersionEntries(pkg.dependencies),
+    ...collectVersionEntries(pkg.devDependencies),
+  ].filter(([name]) => name.startsWith('@types/'));
+
+  const issues: DependencyIssue[] = [];
+  const seen = new Set<string>();
+  for (const [typesName, typesRange] of typesEntries) {
+    if (seen.has(typesName)) continue;
+    const runtimeName = typesToRuntime(typesName);
+    if (!runtimeName) continue;
+    const runtimeRange = deps.get(runtimeName) ?? dev.get(runtimeName);
+    if (!runtimeRange) continue; // no runtime package to compare against (e.g. @types/node)
+    if (!isSemverRange(typesRange) || !isSemverRange(runtimeRange)) continue;
+    // Non-intersecting ranges ⇒ the types major cannot line up with the runtime major.
+    if (!rangesIncompatible(runtimeRange, typesRange)) continue;
+    seen.add(typesName);
+    const rtMajor = rangeMajor(runtimeRange);
+    const suggestion = rtMajor != null
+      ? `Set "${typesName}" to "^${rtMajor}" to match ${runtimeName} (${runtimeRange}).`
+      : undefined;
+    issues.push({
+      kind: 'types-mismatch',
+      package: typesName,
+      severity: 'medium',
+      detail: `'${typesName}' ("${typesRange}") types a DIFFERENT major than the installed '${runtimeName}' ("${runtimeRange}") — the editor's API won't match runtime and typechecking will drift`,
+      ...(suggestion ? { suggestion } : {}),
+    });
+  }
   return issues;
 }
 

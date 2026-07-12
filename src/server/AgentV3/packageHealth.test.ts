@@ -54,6 +54,54 @@ describe('analyzePackageHealth', () => {
   it('handles invalid JSON honestly', () => {
     expect(analyzePackageHealth('{ not json').ok).toBe(false);
   });
+
+  it('flags `npm run X` referencing a script that does not exist', () => {
+    const pkg = JSON.stringify({
+      scripts: { build: 'npm run clean && vite build' }, // no "clean" script
+      devDependencies: { vite: '^5.0.0' },
+    });
+    const r = analyzePackageHealth(pkg);
+    const ref = r.issues.find((i) => i.kind === 'script-missing-ref');
+    expect(ref).toBeTruthy();
+    expect(ref!.detail).toContain('Missing script: clean');
+  });
+
+  it('does NOT flag `npm run X` when the referenced script exists', () => {
+    const pkg = JSON.stringify({
+      scripts: { clean: 'rm -rf dist', build: 'npm run clean && vite build' },
+      devDependencies: { vite: '^5.0.0' },
+    });
+    expect(analyzePackageHealth(pkg).issues.some((i) => i.kind === 'script-missing-ref')).toBe(false);
+  });
+
+  it('recognizes pnpm/yarn/bun run invocations and captures the name past flags', () => {
+    const pkg = JSON.stringify({
+      scripts: {
+        a: 'pnpm run missinga',
+        b: 'yarn run missingb',
+        c: 'bun run missingc -- --watch',
+      },
+    });
+    const refs = analyzePackageHealth(pkg).issues
+      .filter((i) => i.kind === 'script-missing-ref')
+      .map((i) => i.detail);
+    expect(refs.some((d) => d.includes('missinga'))).toBe(true);
+    expect(refs.some((d) => d.includes('missingb'))).toBe(true);
+    expect(refs.some((d) => d.includes('missingc'))).toBe(true);
+  });
+
+  it('does NOT flag a bare `yarn X` (no run) — ambiguous with a binary, kept zero-false-positive', () => {
+    const pkg = JSON.stringify({ scripts: { start: 'yarn dev' } });
+    expect(analyzePackageHealth(pkg).issues.some((i) => i.kind === 'script-missing-ref')).toBe(false);
+  });
+
+  it('emits one script-missing-ref per (script, referenced-name) pair', () => {
+    const pkg = JSON.stringify({
+      scripts: { ci: 'npm run lint && npm run lint && npm run typecheck' }, // lint twice, both missing
+    });
+    const refs = analyzePackageHealth(pkg).issues.filter((i) => i.kind === 'script-missing-ref');
+    expect(refs).toHaveLength(2); // lint (once, deduped) + typecheck
+  });
 });
 
 describe('packageHealthSummary', () => {

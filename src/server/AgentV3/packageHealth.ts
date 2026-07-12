@@ -2,14 +2,16 @@
 // DependencyReconciler covers "source imports a package that isn't declared"; DependencyAnalysis covers
 // unused + floating versions. NEITHER catches the two most common package.json foot-guns:
 //   1. an npm SCRIPT that runs a build tool the project never installed (e.g. "lint": "eslint ." with no
-//      eslint dep) — the script dies with "command not found" the moment anyone runs it, and
-//   2. the same package declared in BOTH dependencies and devDependencies (ambiguous resolution).
+//      eslint dep) — the script dies with "command not found" the moment anyone runs it,
+//   2. the same package declared in BOTH dependencies and devDependencies (ambiguous resolution), and
+//   3. a script that invokes another script by name (`npm run X`) that doesn't exist — it dies with
+//      "Missing script: X" (the classic "build" → "npm run clean" where clean was renamed/removed).
 //
 // PURE + dependency-free (reads only the package.json text) → fully unit-testable. The ToolDispatcher
 // `check_package` tool reports the result. Conservative by design: it only flags a KNOWN build tool whose
 // package is genuinely absent, so it never false-positives on a custom/shell command.
 
-export type PackageIssueKind = 'script-tool-missing' | 'dup-dep';
+export type PackageIssueKind = 'script-tool-missing' | 'dup-dep' | 'script-missing-ref';
 
 export interface PackageIssue {
   kind: PackageIssueKind;
@@ -31,6 +33,11 @@ const TOOL_PACKAGE: Record<string, string> = {
   concurrently: 'concurrently', rimraf: 'rimraf', 'cross-env': 'cross-env', turbo: 'turbo',
   astro: 'astro', remix: '@remix-run/dev', gatsby: 'gatsby', parcel: 'parcel', biome: '@biomejs/biome',
 };
+
+// A script that invokes another script by name via a package manager: `npm run X`, `pnpm run X`,
+// `yarn run X`, `bun run X`. Bare `yarn X` (no `run`) is intentionally excluded — it's ambiguous with a
+// binary, so requiring the explicit `run` keeps this zero-false-positive. Captures the referenced name.
+const SCRIPT_REF_RE = /\b(?:npm|pnpm|yarn|bun)\s+run\s+([a-zA-Z0-9:_.-]+)/g;
 
 // Wrapper commands to skip so we reach the REAL tool (e.g. `npx eslint`, `cross-env NODE_ENV=x vite`).
 const WRAPPERS = new Set(['npx', 'npm', 'pnpm', 'yarn', 'bun', 'cross-env', 'concurrently', 'run-p', 'run-s', 'npm-run-all', 'dotenv', 'env']);
@@ -76,9 +83,26 @@ export function analyzePackageHealth(pkgRaw: string): PackageHealthResult {
     if (name in devDeps) issues.push({ kind: 'dup-dep', detail: `"${name}" is in both dependencies and devDependencies — keep it in one.` });
   }
 
-  // 2. Scripts that call a known build tool whose package isn't declared.
+  const scripts = pkg.scripts ?? {};
+  const scriptNames = new Set(Object.keys(scripts));
+
+  // 2. Scripts that invoke another script (`npm run X`) that doesn't exist → "Missing script: X".
+  const refFlagged = new Set<string>();
+  for (const [scriptName, cmd] of Object.entries(scripts)) {
+    for (const m of cmd.matchAll(SCRIPT_REF_RE)) {
+      const ref = m[1];
+      if (scriptNames.has(ref) || refFlagged.has(`${scriptName}:${ref}`)) continue;
+      refFlagged.add(`${scriptName}:${ref}`);
+      issues.push({
+        kind: 'script-missing-ref',
+        detail: `script "${scriptName}" runs \`${m[0].trim()}\` but there is no "${ref}" script — it will fail with "Missing script: ${ref}". Add the "${ref}" script or fix the reference.`,
+      });
+    }
+  }
+
+  // 3. Scripts that call a known build tool whose package isn't declared.
   const flagged = new Set<string>();
-  for (const [scriptName, cmd] of Object.entries(pkg.scripts ?? {})) {
+  for (const [scriptName, cmd] of Object.entries(scripts)) {
     for (const fragment of cmd.split(/&&|\|\||[|;]/)) {
       const tool = leadingTool(fragment);
       if (!tool || ALWAYS_OK.has(tool)) continue;

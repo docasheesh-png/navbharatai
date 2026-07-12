@@ -14130,3 +14130,17 @@ env and will be pinned precisely in Slice 3 (the free graduated ladder). Even to
 cheaper than Claude.
 
 Tests +2 (free → cheapOnly no-Claude; paid/power → claudeFirst). Gate: server tsc 0, vitest (+2), boot PASS.
+
+## 2026-07-12 — Model-id maintenance = Decision "A" (admin): GLM_MODEL/KIMI_MODEL stay EMPTY, ids live in code
+
+Admin asked: pin GLM_MODEL/KIMI_MODEL (churn on every model release) vs auto-latest vs leave it. Gave the
+honest recommendation (rule 3): NOT auto-latest — a new/preview model can be worse at the agentic tool-loop,
+pricier, or break a build ("newest" ≠ "best coder"), and the comma-ladder + Claude/Vertex backstop already
+means a RETIRED id auto-falls-through so the app never breaks even if the env is never touched. Admin chose
+"A": keep GLM_MODEL/KIMI_MODEL EMPTY in Cloud Run; the ids live in the CODE defaults
+(`glm-5.2,glm-4.7` / `kimi-k2.7-code,kimi-k2.6`), maintained by Claude — bumped in a PR (after a quick
+bake-off) only when a genuinely better stable coder ships. Recorded the decision in the code (comment at
+`cheapBuildFloorRunners`) and the CLAUDE.md env registry so it's durable across sessions. No behaviour change
+(the defaults already equal today's values). Admin action: delete/empty GLM_MODEL & KIMI_MODEL in Cloud Run.
+
+Gate: server tsc 0, vitest, boot PASS (comment + doc only, no logic change).

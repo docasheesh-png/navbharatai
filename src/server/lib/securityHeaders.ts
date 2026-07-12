@@ -20,6 +20,13 @@ import type { HelmetOptions } from 'helmet';
  *    injected as a <script> at pay time; without this host CSP blocks the load and the "Purchase"
  *    button silently does nothing (the payment never boots). The checkout itself opens in an https
  *    frame (covered by `frameSrc`) and talks to the API over https (`connectSrc`).
+ *  - `formAction` allows `https://*.cashfree.com` — Cashfree v3 `cashfree.checkout({redirectTarget:
+ *    '_self'})` navigates by SUBMITTING A FORM from our page to the hosted checkout URL (observed:
+ *    `https://api.cashfree.com/pg/view/sessions/checkout`; sandbox/payments live on sibling
+ *    subdomains). Helmet's DEFAULT CSP includes `form-action 'self'`, which blocks that POST — the SDK
+ *    loads, an order is created, but the browser silently refuses the redirect ("load hota hai, phir
+ *    kuch nahi"). Allowing Cashfree's own domain here is the piece that actually opens the pay page;
+ *    it is domain-scoped (only *.cashfree.com), so it does not broadly weaken form-action.
  */
 export const securityHeadersConfig: HelmetOptions = {
   contentSecurityPolicy: {
@@ -32,6 +39,9 @@ export const securityHeadersConfig: HelmetOptions = {
       fontSrc:    ["'self'", "data:", "https:"],
       frameSrc:   ["'self'", "https:"],
       objectSrc:  ["'none'"],
+      // Cashfree checkout redirects by POSTing a form from our page to its hosted pay URL; Helmet's
+      // default `form-action 'self'` blocks it. Scope the allowance to Cashfree's own subdomains.
+      formAction: ["'self'", "https://*.cashfree.com"],
     },
   },
   crossOriginEmbedderPolicy: false,

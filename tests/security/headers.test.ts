@@ -55,6 +55,11 @@ describe('P-TQA.10 — production security headers', () => {
     // the user pays — without this host in script-src, CSP blocks the load and the "Purchase" button
     // silently does nothing. Guard it so a CSP tighten can't re-break payments.
     expect(csp).toContain('https://sdk.cashfree.com');
+    // Cashfree checkout REDIRECTS by submitting a form to its hosted pay URL (api.cashfree.com/...).
+    // Helmet's default `form-action 'self'` blocks that POST — the SDK loads and an order is created,
+    // but the browser refuses the redirect (payment never opens). This allowance is what actually
+    // opens the pay page; guard it (and that 'self' is retained) so a CSP change can't re-break it.
+    expect(csp).toContain("form-action 'self' https://*.cashfree.com");
   });
 
   it('sets X-Content-Type-Options: nosniff (blocks MIME sniffing)', async () => {

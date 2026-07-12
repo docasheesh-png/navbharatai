@@ -177,6 +177,18 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(errored.done).toBe(true);
     expect(errored.ok).toBe(false);
     expect(errored.error).toBe('boom');
+
+    // A crashed build's error event now carries the diagnostics report so the failure card renders
+    // ("fail par report bhi milni chahiye"). The reducer must keep it in state.
+    const report = { issues: [{ code: 'BUILD_EXCEPTION', message: 'boom' }] };
+    const erroredWithReport = agentV3Reducer(initialAgentV3State(), { type: 'error', message: 'boom', ts: 1, diagnostics: report });
+    expect(erroredWithReport.ok).toBe(false);
+    expect(erroredWithReport.done).toBe(true);
+    expect(erroredWithReport.diagnostics).toEqual(report);
+    // Absent diagnostics must NOT clobber a report already in state.
+    const prior = { ...initialAgentV3State(), diagnostics: report };
+    const noReport = agentV3Reducer(prior, { type: 'error', message: 'boom2', ts: 2 });
+    expect(noReport.diagnostics).toEqual(report);
   });
 
   it('carries the token count from a result (P-UX.7 usage badge)', () => {

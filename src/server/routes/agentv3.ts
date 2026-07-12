@@ -6921,11 +6921,16 @@ export function registerAgentV3Routes(app: Express): void {
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash
       // must explicitly durable-save here, or this report is lost the moment the instance recycles
       // (exactly the "empty build report" DiagnosticsStore.ts exists to prevent, but this path missed it).
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Hoisted out of the try below so the client `error` emit can carry the crash report (see the
+      // emit at the end of this catch) — a bare error message never told the user WHAT went wrong.
+      let crashReportForClient: unknown = undefined;
       try {
-        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: err instanceof Error ? err.message : String(err), autoResolved: false });
+        buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_EXCEPTION', message: errMsg, autoResolved: false });
         buildDiagRef?.finish(false);
         const crashReport = buildDiagRef?.report();
         if (crashReport) {
+          crashReportForClient = crashReport;
           lastDiagnostics.set(buildKey, crashReport);
           saveDiagnostics(workspaceId, crashReport).catch(() => {});
           saveDiagnosticsHistory(workspaceId, crashReport).catch(() => {});
@@ -6934,6 +6939,30 @@ export function registerAgentV3Routes(app: Express): void {
           saveLatestForUser(userId, crashReport).catch(() => {});
         }
       } catch { /* diagnostics are best-effort */ }
+      // BUILD-FAIL CHAT PERSIST (admin 2026-07-12: "fail par na chat milti hai na report") — a build
+      // that crashes BEFORE/OUTSIDE the agentic runner (setup/sandbox/import errors, or a fast-lane-only
+      // failure) never persisted a conversation, so the user's own chat vanished. Save it here so EVERY
+      // failed build leaves a retrievable chat that also shows WHY it failed. Dedup-safe: if the runner
+      // already saved this conversation (mid-run crash), append only the failure line (no duplicate
+      // prompt); otherwise create it with the prompt + the failure. Best-effort — never blocks the emit.
+      try {
+        const convId = conversationIdForWorkspace(workspaceId);
+        const store = getConversationStore();
+        const failTurn = { role: 'assistant' as const, content: `❌ Build failed: ${errMsg}`, ts: Date.now() };
+        const existing = await store.get(convId).catch(() => null);
+        if (existing) {
+          await store.appendMessages(convId, [failTurn], { status: 'error', updatedAt: Date.now() }).catch(() => {});
+        } else {
+          await upsertConversationTurn(store, {
+            conversationId: convId,
+            userId: userId ?? 'anon',
+            workspaceId,
+            title: deriveTitle(prompt),
+            turn: [{ role: 'user' as const, content: prompt, ts: Date.now() - 1000 }, failTurn],
+            patch: { status: 'error', updatedAt: Date.now() },
+          }).catch(() => {});
+        }
+      } catch { /* chat persist is best-effort — never blocks the error emit */ }
       // Same durable-file-save guarantee as the deadline-timeout path: a crash mid-build must not
       // strand whatever files WERE captured behind only the flaky fire-and-forget 3s debounce. In its
       // own try/catch — `writtenFiles` may not be declared yet if the crash happened very early (before
@@ -6943,7 +6972,10 @@ export function registerAgentV3Routes(app: Express): void {
           saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)).catch(() => {});
         }
       } catch { /* writtenFiles not yet in scope (crash before any write), or save failed — best-effort */ }
-      emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      // Surface the crash report to the client so the user SEES what happened. The report was already
+      // durable-saved above; attaching it here (same shape the success path emits) makes the failure
+      // card / "Build report" render immediately instead of a bare error with no detail.
+      emit({ type: 'error', message: errMsg, ts: Date.now(), ...(crashReportForClient ? { diagnostics: crashReportForClient } : {}) });
     } finally {
       // Flush the LAST background checkpoint so the finished app is captured in History/restore.
       // Bounded (6s) + best-effort: checkpoints are off the hot path during the build, so this is

@@ -14230,3 +14230,23 @@ is dormant-tier work — recorded as the next slice, to be built + tested on its
 (#1228, resolveJudgeKind free→Grok) is the foundation it will call.
 
 Gate: server tsc 0, vitest (+2), boot PASS.
+## 2026-07-12 — Payment redirect FIXED: allow Cashfree in CSP `form-action` (#1227, the LAST payment block)
+
+Live console evidence from a real ₹500 attempt on the deployed Admin-SDK build:
+`Sending form data to 'https://api.cashfree.com/pg/view/sessions/checkout' violates the following
+Content Security Policy directive: "form-action 'self'". The request has been blocked.`
+The same screen's invoice table listed 2 real persisted `ord_nb_…` CASHFREE orders — CONFIRMING the
+Admin-SDK migration (#1220) works end to end: orders now save to Firestore (previously PERMISSION_DENIED).
+
+Root cause: Cashfree v3 `cashfree.checkout({redirectTarget:'_self'})` redirects by SUBMITTING A FORM from
+our page to the hosted pay URL. Helmet's DEFAULT CSP includes `form-action 'self'`, which blocks that
+cross-origin POST. #1205 had fixed `script-src` (SDK loads) but `form-action` was never set → it silently
+used Helmet's `'self'` default → SDK loaded + order created, but the browser refused the redirect ("load
+hota hai phir kuch nahi"). Fix (#1227): `formAction: ["'self'", "https://*.cashfree.com"]` in
+securityHeaders.ts — domain-scoped to Cashfree's own subdomains, does not broadly weaken form-action.
+Regression test asserts the exact `form-action 'self' https://*.cashfree.com` serialization. NOTE: the PR
+was landed CODE+TEST only (PROGRESS entry split out to this commit) to escape a PROGRESS.md merge-race with
+a parallel session — the fix itself is unchanged. Gate: tsc fe+server 0, vitest green.
+
+OPEN (unrelated, seen in same console): `/api/build-session/pro-…` 404 on the Pro v3.0 tab. Tracked for a
+later look; independent of payment.

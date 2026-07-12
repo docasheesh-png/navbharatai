@@ -13,10 +13,14 @@
 // Pure and deterministic: no I/O. The caller (ToolDispatcher.evaluate) collects the
 // external imports from the project graph and reads package.json best-effort.
 
+// `semver` (installed, 7.x) ships no bundled types and @types/semver isn't a dependency; the tiny
+// surface we use is declared ambiently in ./semver.d.ts so the version-conflict analyzer stays typed.
+import { validRange, intersects } from 'semver';
+
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
 export interface DependencyIssue {
-  kind: 'missing' | 'unused' | 'unpinned';
+  kind: 'missing' | 'unused' | 'unpinned' | 'version-conflict' | 'peer-violation';
   package: string;
   severity: DependencySeverity;
   detail: string;
@@ -223,7 +227,98 @@ export function analyzeDependencies(
     }
   }
 
+  // Version conflicts (high, GA-3): incompatible cross-section ranges + own-peer violations.
+  issues.push(...detectVersionConflicts(packageJsonContent));
+
   return issues.slice(0, MAX_ISSUES);
+}
+
+/** True only for a REAL semver range. Non-semver specifiers (workspace: / file: / git / url / star /
+ *  latest / x) can't be judged and are skipped so we never emit a false conflict. */
+function isSemverRange(v: string): boolean {
+  const t = v.trim();
+  if (!t) return false;
+  try { return validRange(t, { loose: true }) != null; } catch { return false; }
+}
+
+/** Do two real semver ranges have NO version in common? (Safe: unknown/erroring → treated as compatible.) */
+function rangesIncompatible(a: string, b: string): boolean {
+  if (!isSemverRange(a) || !isSemverRange(b)) return false;
+  try { return !intersects(a, b, { loose: true }); } catch { return false; }
+}
+
+/**
+ * GA-3 (Tier 2 dependency intelligence) — detect DECLARED version conflicts in a manifest that
+ * `npm install` resolves silently-wrong (or that violate the project's own peer contract):
+ *   • version-conflict (high): the SAME package pinned to NON-INTERSECTING ranges across the
+ *     installed sections (dependencies / devDependencies / optionalDependencies). npm installs ONE
+ *     version, so one section gets a version outside its range — the classic "types say v18 but the
+ *     runtime resolved v17" break.
+ *   • peer-violation (high): a dependencies/devDependencies version that does NOT satisfy the
+ *     project's OWN declared peerDependencies range for that package.
+ * Pure + semver-backed. Non-semver specifiers are skipped (never a false positive). Exported so the
+ * exact conflict logic is unit-tested independently of the import scan.
+ */
+export function detectVersionConflicts(packageJsonContent: string | null): DependencyIssue[] {
+  if (packageJsonContent == null) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    pkg = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const deps = new Map(collectVersionEntries(pkg.dependencies));
+  const dev = new Map(collectVersionEntries(pkg.devDependencies));
+  const opt = new Map(collectVersionEntries(pkg.optionalDependencies));
+  const peer = new Map(collectVersionEntries(pkg.peerDependencies));
+
+  const issues: DependencyIssue[] = [];
+  const flagged = new Set<string>(); // one issue per package — the highest-signal one
+
+  // A) Incompatible ranges across the installed sections (npm resolves to a single version).
+  const installed: Array<[string, Map<string, string>]> = [
+    ['dependencies', deps], ['devDependencies', dev], ['optionalDependencies', opt],
+  ];
+  const names = new Set<string>([...deps.keys(), ...dev.keys(), ...opt.keys()]);
+  for (const name of names) {
+    const present = installed.filter(([, m]) => m.has(name)).map(([sec, m]) => [sec, m.get(name)!] as const);
+    if (present.length < 2) continue;
+    outer: for (let i = 0; i < present.length; i++) {
+      for (let j = i + 1; j < present.length; j++) {
+        if (rangesIncompatible(present[i][1], present[j][1])) {
+          flagged.add(name);
+          issues.push({
+            kind: 'version-conflict',
+            package: name,
+            severity: 'high',
+            detail: `'${name}' is pinned to incompatible ranges: "${present[i][1]}" (${present[i][0]}) vs "${present[j][1]}" (${present[j][0]}) — npm installs ONE version, so one section resolves outside its range`,
+          });
+          break outer;
+        }
+      }
+    }
+  }
+
+  // B) An installed version that violates the project's OWN peerDependencies requirement.
+  for (const [name, peerRange] of peer) {
+    if (flagged.has(name) || !isSemverRange(peerRange)) continue;
+    const own = deps.get(name) ?? dev.get(name);
+    if (!own || !isSemverRange(own)) continue;
+    if (rangesIncompatible(own, peerRange)) {
+      flagged.add(name);
+      issues.push({
+        kind: 'peer-violation',
+        package: name,
+        severity: 'high',
+        detail: `'${name}' is installed as "${own}" but this project's peerDependencies require "${peerRange}" — the resolved version won't satisfy the peer contract`,
+      });
+    }
+  }
+
+  return issues;
 }
 
 /** A concise, honest dependency-consistency report for the agent (and the user). */

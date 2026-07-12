@@ -1087,7 +1087,13 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // oversized blocks are trimmed before reaching the cheap model (sizeGatedRunner does 2+3); the
   // 2-consecutive-timeout BENCH lives in makeMultiProviderTurnRunner. All env-tunable.
   const floorTimeoutMs = Number(process.env.AGENTV3_CHEAP_FLOOR_TIMEOUT_MS) || 60_000;
-  const floorMaxPromptChars = Number(process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS) || 45_000;
+  // ADMIN OVERRIDE (2026-07-11, "kimi/glm se limit hata do — 1st try for every file glm/kimi"): the
+  // 45k skip meant edit/continue turns (file grounding pushes the prompt just over 45k) NEVER used the
+  // cheap floor — every one fell to Claude, defeating "direct sonnet kahi nahi chahiye". Default is now
+  // 0 = NO size skip, so GLM/Kimi lead every prompt (the prompt-diet trim still applies; Claude still
+  // backstops any real timeout). The env can RE-impose a positive limit if timeouts ever return.
+  const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
+  const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
   const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}): void => {
     if (!apiKey) return; // no key → a second, independent off-switch
     for (const model of models) {

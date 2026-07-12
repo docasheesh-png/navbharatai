@@ -294,6 +294,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   harmless). ⚠️ With these ON, a ₹0/negative-balance user is REFUSED new builds, so the recharge flow
   (Cashfree) MUST work end-to-end or such users get stranded; keep the 3 test/admin emails in
   `AGENTV3_FREE_LIST` so admin testing stays free.
+- `AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS` → **default is now `0` = NO size skip** (Fix 51, admin "kimi/glm se
+  limit hata do — 1st try for every file"): GLM/Kimi lead EVERY prompt regardless of size; Claude backstops any
+  real timeout. Set a POSITIVE value (e.g. `45000`) ONLY if you want to re-impose the old "skip huge prompts
+  straight to Claude" behaviour. The prompt-diet block-trim (`perBlockCap` 6000) always applies either way.
 
 **REMOVE from Cloud Run (retired — Bedrock never worked + test-chat deleted; code degrades cleanly
 when absent):** `BEDROCK_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_GLM_MODEL`, `AWS_REGION`,

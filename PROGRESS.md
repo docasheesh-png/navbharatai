@@ -14186,3 +14186,23 @@ Gate: frontend tsc 0, server tsc 0, vitest 5962/5962, boot:check PASS.
    DESIGN and bypass the gate — so if **z@gmail.com is a free-list/test email**, the observed free build is
    intentional and expected, and this fix (correctly) does not change it. Confirm whether z@gmail.com is
    free-listed; if it is and should be billed, remove it from the list.
+
+## 2026-07-12 — Routing Slices 2 + 4: mode-aware judge + power-mode plan → Opus
+
+Continuing the Model Routing Policy autonomously (admin: "100% automatic, ek-ek kar ke sare tier complete karo").
+
+**Slice 4 (power plan → Opus):** the plan phase routed to Grok unconditionally. Policy: "power mode = sab
+kuch Opus", the plan phase too. Fix (1 line): `const planGrok = onlyOpus ? null : grokPlanRunner()` — in
+power mode planning falls to the normal build `client` + `model` (Opus). Non-power unchanged (Grok).
+
+**Slice 2 (mode-aware judge):** `selectReviewJudge` was a single global (Grok if key else Sonnet), never
+Opus, not tier-aware. Now takes a `mode` and a new pure `resolveJudgeKind(mode, grokKey, reviewerEnv)`:
+Power → Opus; Free → Grok (never a Claude judge — no-grok returns a 'sonnet' SIGNAL that the free-ladder
+caller uses to SKIP the judge rather than spend Claude); Paid → Grok or Sonnet (unchanged, `selectReviewer`).
+`selectReviewJudge` builds the Grok client for 'grok', else a Claude judge on Opus (power) or Sonnet. The
+paid escalation call site passes its mode explicitly (`onlyOpus ? 'power' : 'paid'`) and labels an Opus
+judge correctly. No runtime change to the paid path (still Grok/Sonnet); the Free/Power judge branches
+become live when the free ladder (Slice 3) and power-judge wiring call them.
+
+Tests +4 (resolveJudgeKind: power→opus always; free+grok→grok; free-no-grok→sonnet signal; paid grok/sonnet).
+Gate: server tsc 0, vitest, boot PASS.

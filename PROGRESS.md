@@ -14550,3 +14550,29 @@ unverified AND re-checked by the downstream gate — never a silent double-skip.
 
 Tests: SimpleBuilder.test.ts — throw → ships but typecheckRan:false + honest log + BUILD_PARTIAL + NO
 "Build verified" line; ran:false same; genuine pass unchanged; no-verify tri-state. 6016 pass, boot PASS.
+
+## 2026-07-12 — Report evidence must never fork: late preview errors now always land durably (autopsy 6c2266e1)
+
+Admin sent a SECOND download of the SAME jungle-game build: the session-stitch copy showed "68 issues,
+0 errors, BUILD_SUCCESS" while the earlier copy of the same build had the PREVIEW_ERROR (CANVAS_HEIGHT,
+69 issues, 1 error). Two downloads = two different stories; the second one HID the bug entirely.
+
+Root cause: `/api/agentv3/preview-error` appended the late-arriving error to the in-memory copy, but the
+durable path was guarded by `if (durable)` on a `loadDiagnostics()` read — when that read returned null
+(or a save failed into a swallowed `.catch(() => {})`), the durable/latest/history/per-user copies never
+got the error. Every durable-sourced download (session stitch, post-rotation latest) then told the
+clean-but-false story, while only the same-instance memory copy knew the truth.
+
+Fix:
+- New pure `pickPreviewErrorBase(durable, mem, workspaceId)`: prefer durable; when missing, fall back to
+  the IN-MEMORY report as the append base — but only when it is genuinely the same workspace's build
+  (the per-user memory map can hold a different project). Wired into the endpoint so the append always
+  lands durably whenever ANY copy of the report exists.
+- LOUD failures: the three durable saves (workspace latest / history / per-user latest) now log a
+  specific `[DIAGNOSTICS] preview-error append: … failed` line instead of silently swallowing — the
+  divergence is diagnosable from Cloud Run logs forever after.
+- Honest response: when NO copy exists anywhere, the endpoint returns `ok:false` with the reason instead
+  of a blind `ok:true` for an append that never happened.
+
+Tests: agentv3.test.ts +4 (prefers durable / memory fallback = the CANVAS_HEIGHT fork / wrong-workspace
+memory rejected / nothing-to-attach → null). Gate: server tsc 0, vitest 6033 pass, boot PASS.

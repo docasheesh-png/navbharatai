@@ -41,7 +41,7 @@ export interface AgentRunnerOptions {
    * 'off' (Sonnet×3.5) | 'mini' (Opus low, ×5) | 'medium' (Opus medium, ×10) |
    * 'max' (Opus max, ×20). When set it takes precedence over `onlyOpus` for billing.
    */
-  powerLevel?: 'off' | 'mini' | 'medium' | 'max';
+  powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max';
   /** Opus reasoning effort (output_config.effort) for every turn. Omitted → model default. */
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */

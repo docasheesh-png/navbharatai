@@ -14611,3 +14611,82 @@ through to the user's last build of a *different app* and returned it. Nothing e
 Regression tests +13 (`buildIdentity`: the exact Jungle-Runner-vs-Expense-Tracker rejection, own-report match,
 no-build-id rejection, prompt-hash/workspace mismatch, empty-expectation legacy pass, null report). Gate:
 frontend tsc 0, server tsc 0, vitest 6040/6040, `npm run build` PASS, boot:check PASS.
+
+## 2026-07-12 — Fix 56: 5-tier Power selector with free/paid gating (admin: free user = "weak" only, server-enforced)
+
+Admin's solution to "free user par Sonnet kyu chala": replace the 4-option Power selector (Off / Strong /
+Powerful Force / Full Team) with FIVE user-facing tiers and gate them by paid/free — so a free account is
+STRUCTURALLY limited to the cheap engine, no env-canary needed.
+
+**New tiers** (internal keys kept stable): weak → "Weak" (GLM/Kimi cheap floor, NEVER Claude — the free tier);
+off → "Normal" (Sonnet); mini → "Strong 💪" (Opus low); medium → "Powerful" (Opus high); max → "Full Team"
+(Opus max). Weak & Normal bill at the cheap rate (×1.2); Opus tiers real Opus ×2.
+
+**Gating (money-critical, ENFORCED SERVER-SIDE — not a UI trick):**
+- New pure `powerGating.ts` (`allowedPowerLevels`/`defaultPowerLevel`/`clampPowerForUser`, +11 tests): a FREE
+  user (logged in, never purchased, NOT free-list) is CLAMPED to 'weak' regardless of what the client sends —
+  so a hand-crafted `power:'max'` request can never spend Claude/Opus (the money-leak class). Paid users +
+  free-list admins/testers get all five, default Normal.
+- Route: reads the wallet only when a non-free-list user requests a non-weak tier (free→weak path costs no
+  extra read), clamps, and forces cheap-only routing (`freeTierBuildActive`) whenever the effective tier is
+  'weak' — independent of the AGENTV3_COST_ROUTING canary. Billed at the weak/cheap rate.
+- HONEST guard (rule 6): if 'weak' is forced but NO cheap floor is configured, the build is refused
+  (503 WEAK_ENGINE_UNAVAILABLE) rather than silently falling back to Claude — no free-user leak.
+- `powerLevel.ts` gains the 'weak' level (cheapOnly flag); `pricing.ts` bills 'weak' as cheap; `AgentRunner`
+  accepts it.
+- UI (`AgentV3Panel`): the selector shows all five to a paid/unlocked account (default Normal) and ONLY "Weak"
+  to a free account. `/api/agentv3/status` now returns `powerUnlocked` (free-list OR has-ever-paid), computed
+  server-side, so the client shows the right tiers (the server enforces regardless).
+- AppKnowledgeBase Power entry updated to the 5 tiers + gating.
+
+Regression tests +11 (`powerGating`). Gate: frontend tsc 0, server tsc 0, vitest 6057/6057, build PASS,
+boot:check PASS.
+
+NOTE (billing of 'weak', admin to confirm): shipped with the SAFE default — weak charges the wallet at the
+cheap GLM/Kimi rate and is blocked at ₹0 (consistent with the money-leak fixes). Flip to fully-free/unlimited
+or a daily-limit is a small change if the admin prefers a loss-leader model.
+
+## 2026-07-12 — Fix 56b: Power-tier final spec — locked tiers visible, localized weak-mode welcome, chat guidance (admin)
+
+Admin's final spec on top of Fix 56 (same PR #1244):
+- **All five tiers now VISIBLE to free users, four LOCKED** (🔒, disabled, "recharge any amount to unlock")
+  instead of hidden — the admin wants free users to SEE what a recharge unlocks. Server clamp unchanged
+  (free→weak enforced server-side; a UI/API bypass still can't reach a paid engine — "koi hacker bhi bypass
+  na kar paye").
+- **First-reply weak-mode notice:** a free user's build now opens with a localized narration — "you are on
+  the free Weak engine, the 🎚️ tier selector is just left of the message box, recharge any amount (even ₹1)
+  unlocks Normal → Full Team." New pure `weakTierNotice.ts` (+5 tests): hand-written Hindi (Devanagari) and
+  English/Hinglish variants, phrasing ROTATES by seed so repeats never read identically, and every variant is
+  HONEST (never claims a free user can switch without recharging — the admin's draft said "change any time";
+  corrected per rule 3, since changing requires a recharge). Language picked via the existing
+  detectLanguageHint; shown once per user per instance. Wallet-free-tier flag reuses the affordability gate's
+  existing wallet read (zero extra Firestore reads).
+- **Chat guidance:** AppKnowledgeBase Power entry now instructs every AI surface — when a free user asks why
+  tiers are locked / "select nahi ho raha" — to explain in the USER'S language, in fresh words each time
+  (never a canned string), that free = Weak only and any recharge unlocks all tiers.
+- **Tier fidelity confirmed (already structural):** weak = cheap-only chain (Claude not present → a weak
+  build can never silently run on Normal/Power); Opus tiers force Opus; paid default = Normal. ✅
+- Env note: admin DELETED `AGENTV3_COST_ROUTING_USERS` — identical to leaving it empty (empty canary = all
+  users), so cost-routing is now account-wide; the weak-tier clamp is independent of it anyway.
+
+Gate: frontend tsc 0, server tsc 0, vitest 6062/6062 (+5), build PASS, boot:check PASS.
+
+## 2026-07-12 — Fix 56c: "maine recharge kar liya fir bhi tiers locked" — stale powerUnlocked fixed + honest chat guidance
+
+Admin asked what v3 answers when a user says "recharge kar diya, fir bhi tier select nahi ho rahe". Verified
+the flow end-to-end (rule 4): the REAL Cashfree verify path (`computeCreditedWallet`) does set
+`totalMoneySpent` on every branch → the server-side unlock (`isFreeTierUser` → `powerUnlocked`) is correct.
+The REAL gap was the CLIENT: `powerUnlocked` was fetched once per page load, so a user who recharged on the
+Wallet page and returned without a reload still saw all four paid tiers 🔒 — exactly the complaint scenario.
+
+Fixes (same PR #1244):
+- `AgentV3Panel`: the billing/power status now REFETCHES whenever the 🎚️ settings popover opens (the exact
+  moment the tiers are shown) — recharge → open settings → tiers unlock, no page reload needed. (Popover
+  state declared before the effect; added to its deps.)
+- AppKnowledgeBase Power entry: for the "already paid but still locked" case, every AI surface is told to
+  NEVER repeat "recharge karo" — instead, in the user's language and fresh words: (1) reopen the 🎚️
+  settings popover / refresh once (it re-checks the account); (2) confirm the payment shows SUCCESS + tokens
+  credited in Wallet & Billing; (3) if verified paid and still locked, apologize and route to support with
+  the payment reference. No blame, no loops.
+
+Gate: frontend tsc 0, server tsc 0, vitest 6062/6062. Client + AKB only (no billing-path code touched).

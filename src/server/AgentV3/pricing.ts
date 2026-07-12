@@ -27,8 +27,8 @@ export const POWER_MULTIPLIER = OPUS_MULTIPLIER;
 /** The model tier that actually did the work — the axis billing is charged on. */
 export type BillingTier = 'cheap' | 'sonnet' | 'opus';
 
-/** A power level for billing. 'off' bills at the normal Sonnet rate. */
-export type BillingPowerLevel = 'off' | 'mini' | 'medium' | 'max';
+/** A power level for billing. 'weak' and 'off' both bill at the cheap tier (× 1.2). */
+export type BillingPowerLevel = 'weak' | 'off' | 'mini' | 'medium' | 'max';
 
 function envRate(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -99,7 +99,9 @@ export function billedForTier(usage: BilledUsage, tier: BillingTier): number {
  * SONNET tier (× 3) is reached via billedForTier() once per-model token accounting is wired.
  */
 export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
-  const tier: BillingTier = (power === false || power === 'off') ? 'cheap' : 'opus';
+  // 'weak' (free tier, GLM/Kimi) bills at the CHEAP tier exactly like 'off'/normal — the difference is
+  // routing (weak = cheap-floor only), not price. Any Opus power level → opus tier.
+  const tier: BillingTier = (power === false || power === 'off' || power === 'weak') ? 'cheap' : 'opus';
   return billedForTier(usage, tier);
 }
 

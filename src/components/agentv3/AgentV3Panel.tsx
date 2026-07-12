@@ -134,12 +134,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReverting(false);
     }
   }, [state.ownRepo, reverting, revertLastMerge, userId, email]);
-  // Power level (admin tiers 2026-07-05): Off = normal (cheap tier, Sonnet-equivalent × 1.2);
-  // mini "Strong" = Opus low effort; medium "Powerful Force" = Opus high effort; max "Full Team" =
-  // Opus ultracode (max effort). All Opus tiers bill the real Opus cost × 2.
-  const [powerLevel, setPowerLevel] = useState<'off' | 'mini' | 'medium' | 'max'>('off');
+  // Power level (admin UI redesign 2026-07-12): weak (free tier, GLM/Kimi) / off="Normal" (Sonnet) /
+  // mini="Strong" (Opus low) / medium="Powerful" (Opus high) / max="Full Team" (Opus max). A FREE user
+  // (server `powerUnlocked:false`) may pick ONLY 'weak'; a paid/free-list user gets all five, default Normal.
+  // The server clamps free→weak regardless, so this is purely presentation.
+  const [powerUnlocked, setPowerUnlocked] = useState<boolean>(false); // false until /status confirms paid
+  const [powerLevel, setPowerLevel] = useState<'weak' | 'off' | 'mini' | 'medium' | 'max'>('off');
+  // Once we know the account tier, snap the default: paid → Normal (off), free → weak (their only option).
+  // Never fights a running build. Also clamps a stale paid-tier selection back to weak for a free user.
+  useEffect(() => {
+    setPowerLevel((cur) => (powerUnlocked ? cur : 'weak'));
+  }, [powerUnlocked]);
   // Derived for the existing boolean call sites (start/telemetry) — any Opus power level.
-  const onlyOpus = powerLevel !== 'off';
+  const onlyOpus = powerLevel === 'mini' || powerLevel === 'medium' || powerLevel === 'max';
   const [planFirst, setPlanFirst] = useState(false); // chat-first: no forced plan gate by default
   const [thinking, setThinking] = useState(false); // adaptive thinking, off by default
   const [tab, setTab] = useState<SurfaceTab>('preview');
@@ -154,11 +161,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
   }, [showWorkspace, tab]);
+  // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power). Declared BEFORE the
+  // billing-status effect so opening the popover can trigger a fresh powerUnlocked check (admin scenario
+  // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
+  // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
-  // Refetches when the user changes, after a build finishes (balance was just spent), and after a 402.
+  // Refetches when the user changes, after a build finishes (balance was just spent), after a 402, and
+  // whenever the settings popover opens (fresh powerUnlocked right where the tiers are shown).
   useEffect(() => {
-    if (!userId) { setBilled(false); setWalletBalanceInr(null); setWalletTokens(null); return; }
+    if (!userId) { setBilled(false); setPowerUnlocked(false); setWalletBalanceInr(null); setWalletTokens(null); return; }
     let cancelled = false;
     void (async () => {
       try {
@@ -169,6 +182,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         const isBilled = sres.ok && (sj as { billed?: unknown }).billed === true;
         if (cancelled) return;
         setBilled(isBilled);
+        // Power-tier gating: show the paid tiers only when the server says this account is unlocked
+        // (free-list admin/tester OR has ever purchased). Free users get 'weak' only.
+        setPowerUnlocked(sres.ok && (sj as { powerUnlocked?: unknown }).powerUnlocked === true);
         if (!isBilled) { setWalletBalanceInr(null); setWalletTokens(null); return; }
         const wres = await fetch(`/api/wallet/${encodeURIComponent(userId)}${email ? `?email=${encodeURIComponent(email)}` : ''}`, { headers });
         const wj = await wres.json().catch(() => ({} as Record<string, unknown>));
@@ -181,9 +197,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       } catch { if (!cancelled) { setBilled(false); setWalletBalanceInr(null); setWalletTokens(null); } }
     })();
     return () => { cancelled = true; };
-  }, [userId, email, state.done, billingBlock]);
-  // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  }, [userId, email, state.done, billingBlock, settingsOpen]);
   // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
@@ -2556,39 +2570,56 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      {/* Power level (Opus effort tiers): Off (normal) / Strong (low) / Powerful Force (high) / Full Team (ultracode). All Opus tiers bill real Opus cost × 2. */}
+                      {/* Power tiers (admin final spec 2026-07-12): Weak (free — GLM/Kimi) / Normal (Sonnet)
+                          / Strong (Opus low) / Powerful (Opus high) / Full Team (Opus max). ALL FIVE are
+                          always VISIBLE; a FREE user (powerUnlocked=false) sees the paid four LOCKED (🔒,
+                          not selectable) until they recharge — and the server clamps free→weak regardless,
+                          so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
                       <div className="px-3 py-2">
                         <div className="text-sm text-zinc-200 mb-1.5">Power</div>
                         <div className="flex flex-col gap-1">
                           {([
-                            { key: 'off', label: 'Off' },
+                            { key: 'weak', label: 'Weak' },
+                            { key: 'off', label: 'Normal' },
                             { key: 'mini', label: 'Strong 💪' },
-                            { key: 'medium', label: 'Powerful Force' },
+                            { key: 'medium', label: 'Powerful' },
                             { key: 'max', label: 'Full Team' },
-                          ] as const).map((opt) => (
-                            <button
-                              key={opt.key}
-                              type="button"
-                              disabled={running}
-                              onClick={() => setPowerLevel(opt.key)}
-                              className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
-                                powerLevel === opt.key
-                                  ? 'bg-indigo-600 text-white'
-                                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
+                          ] as const).map((opt) => {
+                            const locked = !powerUnlocked && opt.key !== 'weak';
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                disabled={running || locked}
+                                title={locked ? 'Add credits to unlock this tier' : undefined}
+                                onClick={() => { if (!locked) setPowerLevel(opt.key); }}
+                                className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
+                                  powerLevel === opt.key
+                                    ? 'bg-indigo-600 text-white'
+                                    : locked
+                                    ? 'bg-zinc-800/50 text-zinc-500 cursor-not-allowed'
+                                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                                }`}
+                              >
+                                <span className="flex items-center justify-between">
+                                  <span>{opt.label}</span>
+                                  {locked && <span aria-hidden>🔒</span>}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-1">
-                          {powerLevel === 'off'
-                            ? 'Normal — fast & lowest cost'
+                          {powerLevel === 'weak'
+                            ? 'Free engine — fast & lightweight'
+                            : powerLevel === 'off'
+                            ? 'Normal — balanced (Sonnet)'
                             : powerLevel === 'mini'
                             ? 'Opus · low effort'
                             : powerLevel === 'medium'
                             ? 'Opus · high effort'
                             : 'Opus · ultracode (max effort)'}
+                          {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>
                       </div>
                       <div className="border-t border-zinc-800 my-1" />

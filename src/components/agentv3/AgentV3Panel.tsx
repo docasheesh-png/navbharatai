@@ -6,7 +6,7 @@ import {
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
   SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet,
+  FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -1520,7 +1520,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (state.diagnostics) saveLastReport(state.diagnostics);
   }, [state.diagnostics]);
 
-  const downloadDiagnostics = async () => {
+  // mode 'download' saves the report JSON as a file; 'copy' (admin 2026-07-12 — re-add the removed
+  // "Copy build report" button) writes the SAME resolved report to the clipboard. All the resolution
+  // logic below is shared, so copy and download always carry the identical report.
+  const downloadDiagnostics = async (mode: 'download' | 'copy' = 'download') => {
     if (downloadingDiag) return;
     setDownloadingDiag(true);
     try {
@@ -1584,11 +1587,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (!payload) payload = await getLatestDiagnostics(null);
         if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
       }
-      // iOS Safari IGNORES <a download> (nothing saves) — deliverTextFile prefers the Web Share API
-      // (share sheet → "Save to Files") on mobile and falls back to the anchor download on desktop.
-      await deliverTextFile(`navbharatai-v3-build-diagnostics-${Date.now()}.json`, JSON.stringify(payload, null, 2));
+      const reportText = JSON.stringify(payload, null, 2);
+      if (mode === 'copy') {
+        // Copy the full report JSON to the clipboard (re-added button). Falls back to a hidden textarea
+        // + execCommand when the async Clipboard API is unavailable (older / insecure-context WebViews).
+        let copied = false;
+        try { await navigator.clipboard.writeText(reportText); copied = true; } catch { /* fall through */ }
+        if (!copied) {
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = reportText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select(); copied = document.execCommand('copy'); document.body.removeChild(ta);
+          } catch { copied = false; }
+        }
+        alert(copied ? '✅ Build report copied to clipboard.' : 'Could not copy — try the Download button instead.');
+      } else {
+        // iOS Safari IGNORES <a download> (nothing saves) — deliverTextFile prefers the Web Share API
+        // (share sheet → "Save to Files") on mobile and falls back to the anchor download on desktop.
+        await deliverTextFile(`navbharatai-v3-build-diagnostics-${Date.now()}.json`, reportText);
+      }
     } catch (e) {
-      alert(`Could not download the report: ${e instanceof Error ? e.message : String(e)}.`);
+      alert(`Could not ${mode === 'copy' ? 'copy' : 'download'} the report: ${e instanceof Error ? e.message : String(e)}.`);
     } finally {
       setDownloadingDiag(false);
     }
@@ -2089,13 +2108,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               removed to declutter. The single JSON "Build report" download stays (the canonical report
               to send to support), alongside the per-build History dropdown below. */}
           <button
-            onClick={downloadDiagnostics}
+            onClick={() => downloadDiagnostics('download')}
             disabled={downloadingDiag}
             title="Download the diagnostics report from your last build (JSON) — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             {downloadingDiag ? 'Preparing…' : 'Build report'}
+          </button>
+          {/* Copy build report (admin 2026-07-12 — re-added, right next to Download): copies the SAME
+              report JSON to the clipboard so it can be pasted straight into a chat/support without a file. */}
+          <button
+            onClick={() => downloadDiagnostics('copy')}
+            disabled={downloadingDiag}
+            title="Copy the last build's diagnostics report (JSON) to the clipboard — paste it straight into a chat or support message."
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5" /> Copy
           </button>
           <div className="relative">
             <button

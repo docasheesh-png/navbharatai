@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
-import { SESSION_ID_RE } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity } from '../lib/identityPolicy';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -1706,19 +1706,24 @@ export function registerAgentV3Routes(app: Express): void {
   // D7 — list a user's persisted builds (most-recently-updated first) so the client can
   // reload one after a refresh/reconnect. Metadata only (no transcript) for a cheap list.
   app.get('/api/agentv3/conversations', async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
+    // SECURITY T0-9 (enumeration fix, Phase-0 Tier-1): LISTING a user's conversations is cross-user data,
+    // so the caller is resolved from the VERIFIED Firebase token ONLY — never a claimed ?userId. The old
+    // resolveReadIdentity fallback trusted a claimed uid when the token failed to verify, so an unverified
+    // caller who knew a victim's uid could enumerate that account's transcripts (titles, timestamps,
+    // billed amounts). An unverified/unresolved caller now gets an EMPTY list (not an error), so a real
+    // user's History self-heals on the next fetch/reload instead of ever leaking another account — the
+    // client already force-refreshes its token for this route (#819). GET-one/delete stay capability-gated
+    // (they additionally require the UNGUESSABLE conversation id), so they keep resolveReadIdentity.
+    const verified = await verifiedIdentity(req);
+    const userId = verified?.uid ?? null;
+    const email = verified?.email ?? null;
+    // No verified identity, the shared-anon bucket, or a token that failed to verify → empty (never a leak,
+    // never a hard error). The anon bucket is likewise never enumerable (would leak every degraded session).
+    if (!userId || userId === 'anon') { res.json({ conversations: [] }); return; }
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required.' });
-      return;
-    }
-    // SECURITY Phase 3.1 — the shared-anon bucket is never enumerable (would leak every user's
-    // degraded-session workspaceIds/sessionIds). The store enforces this too; guarded here for a
-    // clear empty response instead of relying on the enable gate. Anon sessions restore by-id only.
-    if (userId === 'anon') { res.json({ conversations: [] }); return; }
     try {
       const list = await getConversationStore().listByUser(userId, 50);
       // LIVE-DOT enrichment: mark each session whose workspace has an ACTIVE published deployment

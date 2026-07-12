@@ -198,6 +198,7 @@ import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmart, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild } from '../AgentV3/IntentClassifier';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -3697,9 +3698,16 @@ export function registerAgentV3Routes(app: Express): void {
         // build/edit/informational/problem/continuation/social/short signal matched at all) apart from
         // CLEAR chit-chat ('social'/'short') — only the ambiguous case gets nudged to offer building.
         const ambiguousBuildAsk = classifyIntentWithConfidence(prompt).signal === 'default';
-        const chatPrompt = attachmentContext
+        let chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
+        // LIVE WEB GROUNDING (admin 2026-07-12): a plain chat question that needs current facts
+        // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v3.0 answers from
+        // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
+        try {
+          const liveBlock = await liveSearchContext(prompt);
+          if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
+        } catch { /* live search is best-effort */ }
         // v3.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
         // intent classification (no extra Firestore call needed here).

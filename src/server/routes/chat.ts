@@ -7,6 +7,7 @@ import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
+import { liveSearchContext } from '../lib/liveSearchContext';
 
 /**
  * Chat routes (general + Vishwakarma tiers) extracted from the server.ts monolith
@@ -310,6 +311,14 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       }
       return;
     }
+
+    // LIVE WEB GROUNDING (admin 2026-07-12): for a message that needs current facts (sports/news/
+    // prices/"latest"/"aaj"), fetch real results and prepend them so the model answers from TODAY's
+    // data, not its training cutoff. Gated + bounded + best-effort — never blocks or slows normal chat.
+    try {
+      const liveBlock = await liveSearchContext(message);
+      if (liveBlock) contextualMessage = `${liveBlock}\n\n---\n${contextualMessage}`;
+    } catch { /* live search is best-effort */ }
 
     try {
       if (req.body.stream === true) {

@@ -14714,3 +14714,27 @@ server file reintroduces `admin.firestore()` as a primary handle or `.settings({
 This also structurally strengthens durable chat history, wallet/cost/profile visibility, checkpoints, and
 every other persisted subsystem — they now deterministically read/write the same navbharat-prod DB the
 client uses. Gate: tsc fe+server 0, vitest 6048/6048 (+3).
+
+## 2026-07-12 — T0-9 slice 1: close the free-list email spoof (verified-only entitlement, no free Opus)
+
+Roadmap Tier-0 T0-9 (wire the Phase-0 identity policy). First + highest-value slice: a real Tier-1 money
+leak in the build handler (`/api/agentv3/chat`). `isAgentV3FreeUser` and `buildRequiresSignIn` match the
+free-list/allowlist by EMAIL (case-insensitive), and the handler passed a client-CLAIMED `body.email` when
+the token wasn't verified (the old "Fix-26" graceful degrade). So an UNVERIFIED caller could send
+`{ email: "aashishcpmt09@gmail.com" }` (the admin's free-list address), pass buildRequiresSignIn, AND be
+treated as free-list → billing gate skipped → and free-list unlocks the paid power tiers → **free Opus
+builds on NavBharatAI's account**. Directly violates the admin-approved Phase-0 rule ("no token → refuse,
+never degrade and spend anyway").
+
+Fix: new pure `entitlementEmail(verified)` returns the VERIFIED token email or null — never a claim. The
+build handler now derives its single `email` var from it, so every in-handler entitlement/billing gate
+(buildRequiresSignIn, isAgentV3FreeUser ×4, the billingActive debit decision, userTier) is verified-only.
+Confirmed no `email` redeclaration between handler start and the deep billing block — single source. Real
+admins are unaffected: a genuine free-list admin is verified → real email → still free; a transient token
+blip self-heals (the client force-refreshes its token on the 401 and retries). 5 regression tests lock the
+security property (spoofed free-list email → no free status; verified admin unaffected).
+
+The `/api/agentv3/status` route's `isAgentV3FreeUser(query.userId, query.email)` is DISPLAY-ONLY (UI flags;
+the build route re-enforces server-side) — left as-is, noted. Remaining T0-9: `listableBy` enumeration
+fixes on list routes + converge ad-hoc guards onto identityPolicy + full re-audit. Gate: tsc fe+server 0,
+vitest 6069/6069.

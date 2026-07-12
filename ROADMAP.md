@@ -67,7 +67,7 @@ highest priority because they violate the one absolute rule *today*.
 | T0-6 | **In-browser "No React entry module found"** when the VFS reaching preview has no entry file — capture client-side VFS at render to pin the short file set | ⚠️ | 🟢 |
 | T0-7 | **Inconsistent file counts** (one run reported 165 vs 317 vs 165) — unify the single count source | ⚠️ | 🟢 |
 | T0-8 | **Sub-agent churn on complex builds** — specialists create-beyond-scope → delete → rebuild; orchestration-quality problem | ⚠️ | 🟢 |
-| T0-9 | **Security master-plan P1/P3/P5** — Phase 0 identity policy shipped but no route wires to it yet; do route wiring, enumeration fixes, re-audit; keep `AGENTV3_PAID_PUBLIC` OFF + allowlist ON until re-audit clean | ⚠️ | 🟢 |
+| T0-9 | **Security master-plan P1/P3/P5** — Phase 0 identity policy wiring. **Slice 1 ✅ (2026-07-12):** closed a real Tier-1 money leak — the build handler trusted a client-claimed `body.email` for the free-list/allowlist entitlement checks, so an UNVERIFIED caller could spoof the admin's free-list email and run billing-exempt **free Opus** builds. Now entitlement email is VERIFIED-only (`entitlementEmail`), superseding the Fix-26 claimed-email degrade (real admins self-heal via client token-refresh on the 401). **Remaining ⚠️:** enumeration fixes (`listableBy` on list routes), converge remaining ad-hoc guards onto identityPolicy, full re-audit; keep `AGENTV3_PAID_PUBLIC` gated until clean. | 🟡 | 🟢 |
 
 ---
 

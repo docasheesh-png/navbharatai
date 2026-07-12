@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
+import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
 import { userCostStore } from '../lib/UserCostStore';
 
 describe('raceTimeout — bounds request-setup calls that run before the build deadline is armed', () => {
@@ -1245,6 +1246,39 @@ describe('resolveBuildIdentity — C1 verified-identity gate for the build path'
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.code).toBe('mismatch');
+  });
+});
+
+describe('entitlementEmail — T0-9: billing/free-list email must be VERIFIED-only (no free-Opus spoof)', () => {
+  const prevFreeList = process.env.AGENTV3_FREE_LIST;
+  beforeEach(() => { process.env.AGENTV3_FREE_LIST = 'aashishcpmt09@gmail.com'; });
+  afterEach(() => {
+    if (prevFreeList === undefined) delete process.env.AGENTV3_FREE_LIST;
+    else process.env.AGENTV3_FREE_LIST = prevFreeList;
+  });
+
+  it('returns the verified token email when the caller is verified', () => {
+    expect(entitlementEmail({ email: 'real@user.com' })).toBe('real@user.com');
+    expect(entitlementEmail({ email: null })).toBeNull(); // verified but no email → still null, never a claim
+  });
+  it('returns null for an UNVERIFIED caller — a claimed body email is discarded', () => {
+    expect(entitlementEmail(null)).toBeNull();
+  });
+  it('SECURITY: an unverified caller spoofing a free-list email gets NO free-list status', () => {
+    // The free-list matches by email alone: isAgentV3FreeUser(null, adminEmail) === true. Before the fix,
+    // the handler passed the CLAIMED body email here, so an anon caller claiming the admin's address ran
+    // billing-exempt (free Opus). Now the handler passes entitlementEmail(verified=null) === null.
+    const claimedAdminEmail = 'aashishcpmt09@gmail.com';
+    expect(isAgentV3FreeUser(null, claimedAdminEmail)).toBe(true);       // the raw function still matches email
+    expect(isAgentV3FreeUser(null, entitlementEmail(null))).toBe(false); // but the handler now feeds it null → refused
+  });
+  it('SECURITY: an unverified free-list-email claim no longer bypasses the sign-in/billing gate', () => {
+    // buildRequiresSignIn(null, allowlistEmail) === false was the Fix-26 degrade; feeding verified-only
+    // email closes it — an anon caller is required to sign in (→ billable identity) before spending.
+    expect(buildRequiresSignIn(null, entitlementEmail(null))).toBe(true);
+  });
+  it('a genuinely verified free-list admin is unaffected (their real email still grants free-list)', () => {
+    expect(isAgentV3FreeUser('admin-uid', entitlementEmail({ email: 'aashishcpmt09@gmail.com' }))).toBe(true);
   });
 });
 

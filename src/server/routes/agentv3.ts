@@ -300,6 +300,20 @@ export function resolveBuildIdentity(verifiedUid: string | null, claimedUid: str
 }
 
 /**
+ * SECURITY (T0-9 / Phase-0 identity policy, Tier 1) — the ONLY email an entitlement/billing gate may
+ * trust is the VERIFIED token email. A client-claimed `body.email` must grant NOTHING: `isAgentV3FreeUser`
+ * and `buildRequiresSignIn` match the free-list/allowlist by EMAIL (case-insensitive), so trusting a
+ * claimed email let an UNVERIFIED caller spoof a free-list address (e.g. the admin's) and run
+ * billing-exempt builds — and the free-list unlocks the paid power tiers, i.e. FREE Opus on NavBharatAI's
+ * account. This is the exact "no token → refuse, never degrade and spend anyway" rule of the admin-approved
+ * Phase-0 policy; it supersedes the old Fix-26 claimed-email degrade (a real admin's transient token blip
+ * still self-heals — the client force-refreshes its token on the resulting 401 and retries). Pure + tested.
+ */
+export function entitlementEmail(verified: { email: string | null } | null): string | null {
+  return verified ? verified.email : null;
+}
+
+/**
  * SECURITY (C1 fast-follow) — verified identity for READ/mutate v3.0 routes that take the caller from
  * the request (conversation list/get/delete, etc.). Returns the uid+email from the VERIFIED Firebase
  * token — never the spoofable query/body `userId` (which let one account read/delete another's build
@@ -3108,10 +3122,11 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const userId = identity.userId;
-    // Allowlist/enable must key off the VERIFIED email when we have a token; only a genuinely
-    // anonymous caller (no verified identity) falls back to the claimed email — where there's no uid
-    // to impersonate anyway. Never trust a client `email` for an authenticated user.
-    const email = verified ? verified.email : (typeof req.body?.email === 'string' ? req.body.email : null);
+    // SECURITY (T0-9): entitlement/billing email is the VERIFIED token email ONLY — a client-claimed
+    // body email grants nothing (see entitlementEmail). This closes a free-list spoof: an unverified
+    // caller could previously claim the admin's free-list email and run billing-exempt FREE Opus builds.
+    // A real admin's transient token blip self-heals (the client refreshes its token on the 401 below).
+    const email = entitlementEmail(verified);
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;

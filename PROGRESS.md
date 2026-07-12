@@ -14576,3 +14576,38 @@ Fix:
 
 Tests: agentv3.test.ts +4 (prefers durable / memory fallback = the CANVAS_HEIGHT fork / wrong-workspace
 memory rejected / nothing-to-attach → null). Gate: server tsc 0, vitest 6033 pass, boot PASS.
+
+## 2026-07-12 — P0 Fix 55: Build Report exported the WRONG build's diagnostics (Jungle-Runner JSON for an Expense-Tracker build)
+
+Admin P0: built an Expense Tracker, but the exported diagnostics JSON belonged to a previous Jungle Runner
+game — prompt, files and summary all mismatched. The report was not reliably bound to the current build.
+
+**Root cause (evidence, not guess).** The diagnostics report had **NO unique build id**. It was persisted
+keyed only by `workspaceId` (`workspace_diagnostics_v3/{workspaceId}`, latest-wins) and, as a fallback, by
+`userId` (`user_diagnostics_v3/{userId}` = "the user's LAST settled build of ANY app"). The export endpoint
+(`GET /api/agentv3/diagnostics`) resolved a report through `loadDiagnostics(workspaceId)` →
+`lastDiagnostics.get(uid)` → **`loadLatestForUser(uid)`** with **zero validation that the resolved report
+belonged to the build being viewed** — so when the current build's report wasn't found under the queried
+workspace (fresh session mints a new workspaceId, an anon-degraded save, a not-yet-saved report), it fell
+through to the user's last build of a *different app* and returned it. Nothing ever compared build identity.
+
+**Fix (builder CORE, not a UI workaround) — every requirement met:**
+- **Unique Build ID + prompt hash per build.** `agentv3.ts` mints `buildId = randomUUID()` and
+  `promptHash = computePromptHash(prompt)` at build start, stamps both into `BuildDiagnostics` (new report
+  fields), and echoes them to the client via a new early `build_meta` event AND the final `result`.
+- **Every diagnostics doc is bound to that Build ID.** `buildId`/`promptHash` ride in the report through the
+  durable workspace/user docs, the history subcollection, AND the compact embedded-in-conversation copy.
+- **Export validates + ABORTS on mismatch.** New pure, tested `buildIdentity.ts`
+  (`computePromptHash`, `reportMatchesActiveBuild`, `hasActiveBuildExpectation`): the client echoes the ACTIVE
+  build's `activeBuildId` + `promptHash`; the endpoint validates EVERY candidate source (workspace doc,
+  in-memory map, per-user fallback, and the session-stitch per-user fallback) against it and DROPS any
+  mismatch — a stale/other-app report can never leak through any fallback tier. When nothing matches, it
+  returns **409 BUILD_REPORT_NOT_READY** ("wait for the build to finish, then export") instead of a different
+  build's report, and audits `AGENTV3_REPORT_IDENTITY_MISMATCH`. The build id (a uuid minted at build start)
+  subsumes the timestamp-consistency check; workspace + prompt-hash are secondary guards.
+- **Backward compatible:** a legacy client that sends no identity → checks inert → prior behaviour, so no
+  finished-build report suddenly 404s during the deploy window; new builds carry the id and are strictly bound.
+
+Regression tests +13 (`buildIdentity`: the exact Jungle-Runner-vs-Expense-Tracker rejection, own-report match,
+no-build-id rejection, prompt-hash/workspace mismatch, empty-expectation legacy pass, null report). Gate:
+frontend tsc 0, server tsc 0, vitest 6040/6040, `npm run build` PASS, boot:check PASS.

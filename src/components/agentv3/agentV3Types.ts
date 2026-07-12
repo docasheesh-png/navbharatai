@@ -39,6 +39,9 @@ export interface GitCheckpoint {
 /** One NDJSON line from /api/agentv3/chat: an engine AgentEvent or the final result. */
 export type AgentV3WireEvent =
   | { type: 'workspace'; workspaceId: string; ts: number }
+  // P0 (2026-07-12) — the ACTIVE build's unique identity, emitted at build start (and echoed on `result`),
+  // so the "Build report" export can be validated to belong to THIS build (never a previous, different app).
+  | { type: 'build_meta'; buildId: string; promptHash: string; workspaceId?: string; ts?: number }
   | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
@@ -63,7 +66,7 @@ export type AgentV3WireEvent =
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -139,6 +142,10 @@ export interface AgentV3ClientState {
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */
   workspaceId?: string;
+  /** P0 — the ACTIVE build's unique id + prompt hash (from `build_meta`/`result`). Echoed on the report
+   *  export so the server can validate the returned report belongs to THIS build, never a different app's. */
+  buildId?: string;
+  promptHash?: string;
   /** The live "AI Team" tracker, keyed by role (D9). */
   agents: Record<string, AgentCard>;
   /** Internal: bash callId → command, so a tool_result can be routed to the terminal. */

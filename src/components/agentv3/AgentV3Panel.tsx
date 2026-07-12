@@ -1466,6 +1466,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       if (email) params.set('email', email);
       if (state.workspaceId) params.set('workspaceId', state.workspaceId);
       if (buildId) params.set('buildId', buildId);
+      // P0 — for the LATEST-report path (no specific history buildId), assert the ACTIVE build's identity
+      // so the server returns THIS build's report or aborts — never a previous, different app's report.
+      else {
+        if (state.buildId) params.set('activeBuildId', state.buildId);
+        if (state.promptHash) params.set('promptHash', state.promptHash);
+      }
       const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
       if (res.ok) {
         const data = await res.json() as { diagnostics?: unknown };
@@ -1476,7 +1482,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // any report reached this device) — the last-resort layer that makes "No build report" impossible
     // on the device where the build ran, even fully offline (admin 2026-07-11, pukhta prabandh).
     return buildId ? null : (state.diagnostics ?? readLastReport());
-  }, [userId, email, state.workspaceId, state.diagnostics]);
+  }, [userId, email, state.workspaceId, state.diagnostics, state.buildId, state.promptHash]);
 
   // Persist every report that reaches this device (rides the live result event) into the local
   // last-resort cache — see reportCache.ts. Quota-safe; never throws.
@@ -1508,6 +1514,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           const params = new URLSearchParams({ workspaceId: state.workspaceId, scope: 'session' });
           if (userId) params.set('userId', userId);
           if (email) params.set('email', email);
+          // P0 — assert the active build so the session stitch's per-user fallback can't splice in a
+          // previous, different app's report when this workspace's own history is momentarily empty.
+          if (state.buildId) params.set('activeBuildId', state.buildId);
+          if (state.promptHash) params.set('promptHash', state.promptHash);
           const res = await fetch(`/api/agentv3/diagnostics?${params.toString()}`, { headers: await authJsonHeaders() });
           if (res.ok) payload = await res.json();
         } catch { /* session stitch failed — the latest-report fallback below still delivers */ }

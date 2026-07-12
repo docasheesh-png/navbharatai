@@ -45,6 +45,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'workspace':
       return { ...state, workspaceId: event.workspaceId };
 
+    // P0 — capture THIS build's unique identity so the report export can be validated against it.
+    case 'build_meta':
+      return { ...state, buildId: event.buildId, promptHash: event.promptHash, ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}) };
+
     case 'stream_delta': {
       const kind = event.kind ?? 'text';
       // Find the LAST live line for this turn id + kind and append the delta.
@@ -215,7 +219,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'result':
       // T1-health-card: the successful build terminates with `result` (not `done`), so surface the
       // build-health verdict from here too — otherwise <BuildHealthCard/> only ever showed on failure.
-      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
+      return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'error':
       return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };

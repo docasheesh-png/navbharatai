@@ -141,6 +141,11 @@ export interface BuildBillingRecord {
 
 export interface BuildDiagnosticsReport {
   schema: 'navbharatai.v3.build-diagnostics/1';
+  /** P0 (2026-07-12) — the UNIQUE id of the build this report belongs to. Every build mints its own;
+   *  the export validates it so a report can NEVER be exported for a different build than the active one. */
+  buildId?: string;
+  /** Stable hash of `prompt` (buildIdentity.computePromptHash) — a secondary consistency guard on export. */
+  promptHash?: string;
   sessionId?: string;
   workspaceId?: string;
   prompt?: string;
@@ -203,6 +208,10 @@ export interface BuildDiagnosticsReport {
 }
 
 export interface BuildDiagnosticsMeta {
+  /** P0 — the unique id minted for THIS build (route generates it at build start). */
+  buildId?: string;
+  /** Stable hash of the prompt (route passes computePromptHash(prompt)). */
+  promptHash?: string;
   sessionId?: string;
   workspaceId?: string;
   prompt?: string;
@@ -660,6 +669,8 @@ export class BuildDiagnostics {
     const autoResolved = this.issues.filter((i) => i.autoResolved).length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
+      buildId: this.meta.buildId,
+      promptHash: this.meta.promptHash,
       sessionId: this.meta.sessionId,
       workspaceId: this.meta.workspaceId,
       prompt: this.meta.prompt,

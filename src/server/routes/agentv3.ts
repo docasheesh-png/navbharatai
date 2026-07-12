@@ -117,6 +117,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance } from '../AgentV3/SimpleBuilder';
@@ -1906,7 +1907,16 @@ export function registerAgentV3Routes(app: Express): void {
       // yet". Mirror that per-user fallback so the whole-session download never falsely reports "none".
       if (byStart.size === 0) {
         const perUser = await loadLatestForUser(verifiedReportUid).catch(() => null); // verified uid, not query (Phase 3.2)
-        if (perUser) byStart.set(perUser.startedAt, perUser);
+        // P0 — only splice the per-user fallback in when it belongs to the ACTIVE build the client asked
+        // for; otherwise it could be the user's last build of a DIFFERENT app (the reported bug).
+        const sessExpect: ActiveBuildExpectation = {
+          buildId: typeof req.query.activeBuildId === 'string' && req.query.activeBuildId ? req.query.activeBuildId : undefined,
+          promptHash: typeof req.query.promptHash === 'string' && req.query.promptHash ? req.query.promptHash : undefined,
+          workspaceId: workspaceId || undefined,
+        };
+        if (perUser && (!hasActiveBuildExpectation(sessExpect) || reportMatchesActiveBuild(perUser, sessExpect).ok)) {
+          byStart.set(perUser.startedAt, perUser);
+        }
       }
       const ordered = [...byStart.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
       if (ordered.length === 0) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
@@ -1928,21 +1938,44 @@ export function registerAgentV3Routes(app: Express): void {
       report = await getDiagnosticsHistoryItem(workspaceId, req.query.buildId).catch(() => null);
       if (!report) { res.status(404).json({ error: 'No diagnostics found for that build.' }); return; }
     } else {
-      // Prefer the DURABLE (Firestore) copy keyed by workspaceId: it is the freshest authoritative
-      // copy — it survives an instance rotation AND carries PREVIEW errors appended AFTER the build
-      // (the in-memory copy, keyed only by userId, can be a stale earlier build or miss the preview
-      // append). Fall back to the in-memory copy only when there is no workspaceId or no durable copy.
-      if (workspaceId) report = await loadDiagnostics(workspaceId).catch(() => null);
-      // Per-user fallbacks are keyed to the VERIFIED uid (Phase 3.2) — never the spoofable query
-      // userId — so a caller can only ever reach their OWN latest report, not another account's.
-      if (!report && verifiedReportUid) report = lastDiagnostics.get(verifiedReportUid);
-      // Durable per-USER fallback (P-REPORT.5): the workspaceId-keyed doc can be missing (a fresh
-      // session mints a NEW workspaceId with no report yet) and the in-memory map is wiped by every
-      // cold start. This Firestore doc keyed by userId alone holds the user's LAST settled build
-      // report across cold starts / instance rotation / reloads / new sessions — so the "Build report"
-      // never vanishes after a real build.
-      if (!report) report = await loadLatestForUser(verifiedReportUid).catch(() => null);
-      if (!report) { res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return; }
+      // P0 (2026-07-12) — the client echoes the ACTIVE build's identity (its unique buildId + promptHash,
+      // from the build's `build_meta`/`result` events). Every candidate source below is VALIDATED against
+      // it, so the export can only ever return the report for THAT build — never a previous, different
+      // app's report (the Jungle-Runner-for-Expense-Tracker bug). When no identity is asserted (a legacy
+      // client), the checks are inert and resolution behaves exactly as before.
+      const expect: ActiveBuildExpectation = {
+        // `activeBuildId` (distinct from the history-item `buildId` param above) = the unique id of the
+        // build the client is currently looking at, echoed from its `build_meta`/`result` events.
+        buildId: typeof req.query.activeBuildId === 'string' && req.query.activeBuildId ? req.query.activeBuildId : undefined,
+        promptHash: typeof req.query.promptHash === 'string' && req.query.promptHash ? req.query.promptHash : undefined,
+        workspaceId: workspaceId || undefined,
+      };
+      const strict = hasActiveBuildExpectation(expect);
+      // Accept a candidate only if it matches the asserted active build; a mismatch is DROPPED (never
+      // returned), so a stale/other-app report can't leak through any fallback tier.
+      const accept = (r: BuildDiagnosticsReport | null | undefined): BuildDiagnosticsReport | null => {
+        if (!r) return null;
+        if (strict) {
+          const m = reportMatchesActiveBuild(r, expect);
+          if (!m.ok) { audit('AGENTV3_REPORT_IDENTITY_MISMATCH', { workspaceId, wantBuildId: expect.buildId, gotBuildId: r.buildId, reason: m.reason }, 'warn'); return null; }
+        }
+        return r;
+      };
+      // Prefer the DURABLE (Firestore) copy keyed by workspaceId: freshest authoritative copy — survives
+      // instance rotation AND carries PREVIEW errors appended after the build.
+      if (workspaceId) report = accept(await loadDiagnostics(workspaceId).catch(() => null));
+      // Per-user fallbacks are keyed to the VERIFIED uid (Phase 3.2) — never the spoofable query userId.
+      if (!report && verifiedReportUid) report = accept(lastDiagnostics.get(verifiedReportUid));
+      // Durable per-USER fallback (P-REPORT.5): survives cold starts / new sessions — but ONLY returned
+      // when it belongs to the active build (the identity check above), so it can never leak the user's
+      // last build of a DIFFERENT app.
+      if (!report) report = accept(await loadLatestForUser(verifiedReportUid).catch(() => null));
+      if (!report) {
+        // Strict + nothing matched → the report for THIS build isn't available yet. ABORT honestly rather
+        // than hand back whatever last report happened to exist (a different build/app).
+        if (strict) { res.status(409).json({ error: 'The report for this build is not ready yet — wait for the build to finish, then export again.', code: 'BUILD_REPORT_NOT_READY' }); return; }
+        res.status(404).json({ error: 'No build diagnostics yet — run a build first.' }); return;
+      }
     }
     // SECURITY Phase 2.1 — redact secrets on the OUTPUT path too. Durable copies are already redacted
     // at save, but the in-memory `lastDiagnostics` fallback (line above) holds the RAW build report;
@@ -4249,7 +4282,15 @@ export function registerAgentV3Routes(app: Express): void {
       // durable from the very first recorded issue); the terminal save still writes the complete report.
       const DIAG_FLUSH_MS = 10_000;
       let _lastDiagFlushAt = 0;
+      // P0 (2026-07-12) — every build mints a UNIQUE build id + a stable prompt hash. Both are stamped into
+      // the diagnostics report AND echoed to the client (early `build_meta` event + the final `result`), so
+      // the "Build report" export can be validated to belong to THIS build and can NEVER hand back a
+      // previous, different app's report (the Jungle-Runner-for-Expense-Tracker bug).
+      const buildId = randomUUID();
+      const promptHash = computePromptHash(prompt);
+      emit({ type: 'build_meta', buildId, promptHash, workspaceId });
       const buildDiag = new BuildDiagnostics({
+        buildId, promptHash,
         sessionId: typeof req.body?.sessionId === 'string' ? req.body.sessionId : undefined,
         workspaceId, prompt, model, framework,
         // REAL-TIME: persist the report after every recorded issue, so "Build report" is never empty
@@ -6598,7 +6639,7 @@ export function registerAgentV3Routes(app: Express): void {
       // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
       // render it. Additive: the field is optional and the client no-ops when it's absent.
       const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
-      emit({ type: 'result', ...result, ...projectContinue, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

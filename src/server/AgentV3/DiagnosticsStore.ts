@@ -200,6 +200,10 @@ export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildD
   const issues = (report.issues ?? []).slice(-EMBED_MAX_ISSUES).map((i) => ({ ...i, message: cap(i.message, 400) ?? '' }));
   return {
     schema: report.schema,
+    // P0 — the identity fields MUST ride with the embedded copy too, else the export can't verify a
+    // report loaded from the conversation record belongs to the active build.
+    buildId: report.buildId,
+    promptHash: report.promptHash,
     sessionId: report.sessionId,
     workspaceId: report.workspaceId,
     framework: report.framework,

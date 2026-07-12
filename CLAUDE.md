@@ -286,7 +286,15 @@ the code (it is actually read somewhere) on 2026-07-11.
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
   (GLM + Kimi together) | `bedrock`. It must hold ONE value. For the current GLM bake-off → `glm`.
   `on` and `glm` are NOT both allowed at once — pick one.
-- `GLM_MODEL` / `KIMI_MODEL` — comma newest→older ladder (1st = try first, rest = error-fallback). **EMPTY/unset
+- `GLM_MODEL` / `KIMI_MODEL` — **DECISION "A" (admin 2026-07-12): keep these EMPTY in Cloud Run on purpose.**
+  The model ids live in the CODE defaults (`cheapBuildFloorRunners` in `routes/agentv3.ts`), maintained by Claude.
+  Rationale: env-pinning = the admin edits Cloud Run on every model release (churn); blind "auto-latest" is unsafe
+  (a new/preview model can be worse at the agentic tool-loop, pricier, or break a build). New models are adopted
+  DELIBERATELY — bump the code default in a PR (after a quick bake-off) when GLM/Kimi ship a better stable coder.
+  The comma ladder + Claude/Vertex backstop means a RETIRED id auto-falls-through, so the app never breaks even if
+  these stay empty forever. (Setting a value still works — it OVERRIDES the code default — but that reintroduces the
+  per-release churn Decision A avoids.)
+  Comma newest→older ladder (1st = try first, rest = error-fallback). **EMPTY/unset
   is SAFE** — `parseModelLadder` falls back to the code default. Confirmed exact ids (admin screenshots 2026-07-12):
   - **GLM_MODEL** default `glm-5.2,glm-4.7` (flagship coder → 1-step-back). GLM ids: `glm-5.2` (flagship),
     `glm-4.7` (cheap coder), `glm-4.7-flash` (cheapest, free-tier only).

@@ -1107,6 +1107,15 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // config left over from a different provider name) stays a safe no-op instead of silently turning
   // on paid GLM/KIMI calls. 'glm'/'kimi' still pin to ONE (explicit single-provider testing/rollback);
   // 'both'/'on' enable the "friends" pair.
+  //
+  // MODEL-ID SOURCE OF TRUTH (admin decision "A", 2026-07-12): GLM_MODEL / KIMI_MODEL are kept EMPTY in
+  // Cloud Run ON PURPOSE — the model ids live HERE, in these code defaults, maintained by Claude. Why not
+  // env-pin or auto-latest: env-pinning means the admin edits Cloud Run on every model release (churn);
+  // blindly auto-picking "latest" is unsafe (a new/preview model can be worse at the agentic tool-loop,
+  // pricier, or break a build — "newest" ≠ "best coder"). So new models are adopted DELIBERATELY: when
+  // GLM/Kimi ship a genuinely better stable coder, bump the default below in a PR (ideally after a quick
+  // bake-off). The comma ladder + Claude/Vertex backstop means a RETIRED id auto-falls-through — the app
+  // never breaks even if these are never touched; updating is only ever to ADOPT a better model.
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
     // thinkingControl: the app-level thinking toggle (same one that drives Claude's adaptive
     // thinking) is forwarded to GLM's reasoning switch — one setting controls every module.

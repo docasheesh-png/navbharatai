@@ -5392,8 +5392,19 @@ export function registerAgentV3Routes(app: Express): void {
         // contract mismatch (e.g. a hook that doesn't return what a component destructures) that
         // separate per-file generation can produce. `|| true` keeps a clean run at exit 0; a real
         // type error is detected by the "error TSxxxx" marker. A throw → "couldn't verify" (non-blocking).
-        const fastVerify = async (): Promise<{ ok: boolean; errors: string }> => {
-          try {
+        // ONE bounded retry when the whole verify pipeline THROWS (a transient sandbox hiccup — the
+        // command channel dropping, a cold E2B reconnect): a second attempt usually succeeds, and a
+        // type-check that RUNS beats an honest-but-unverified ship. Still-failing → ran:false (honest).
+        const fastVerify = async (): Promise<import('../AgentV3/SimpleBuilder').VerifyResult> => {
+          const attempt = () => fastVerifyOnce();
+          try { return await attempt(); }
+          catch {
+            try { return await attempt(); }
+            catch { return { ok: true, errors: '', ran: false }; } // could not verify — say so, never fake a pass
+          }
+        };
+        const fastVerifyOnce = async (): Promise<import('../AgentV3/SimpleBuilder').VerifyResult> => {
+          {
             // MISSING-FILES GATE (Fix 38c — Task-Manager report 2026-07-07: App.tsx lazy-imported 10
             // pages that were never written, yet verify said "compiles ✓"). Deterministic + free:
             // every LOCAL module a written file references must exist (in the written set or the
@@ -5457,19 +5468,22 @@ export function registerAgentV3Routes(app: Express): void {
               return { ok: false, errors: 'VERIFICATION DID NOT RUN — the TypeScript compiler could not be executed in the sandbox (tsc missing or npx failed). Ensure typescript is in devDependencies and package.json installs cleanly.' };
             }
             return { ok: true, errors: '' };
-          } catch {
-            return { ok: true, errors: '' }; // could not verify → don't block (best-effort)
           }
+          // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
+          // (one retry, then an honest ran:false), never be silently converted into a pass.
         };
         const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string): Promise<{ path: string; content: string }[]> => {
           const text = await fastGenerate(repairSystemPrompt(framework), repairUserPrompt(prompt, errors, currentFiles, contract));
           return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
-        const fastResult = (summary: string, steps: number) => {
+        const fastResult = (summary: string, steps: number, typecheckRan = true) => {
           result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
           deliveredTier = analysis?.startTier ?? 'haiku';
-          fastLaneGated = true; // the fast lane already type-checked + repaired — skip the agentic gate
+          // Skip the agentic readiness gate ONLY when the fast lane genuinely type-checked. If the
+          // sandbox check could not run (typecheckRan=false), the downstream gate stays ON so the app
+          // is still audited — never two skipped checks stacked on one infra failure.
+          fastLaneGated = typecheckRan;
         };
 
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
@@ -5481,7 +5495,10 @@ export function registerAgentV3Routes(app: Express): void {
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
         if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
         if (sb.ok) {
-          fastResult(sb.summary, sb.filesWritten);
+          if (sb.typecheckRan === false) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
+          }
+          fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
         } else if (classifyForOneShot(analysis?.startTier)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
@@ -5505,7 +5522,8 @@ export function registerAgentV3Routes(app: Express): void {
                   const fixed = (await fastRepair(v.errors, cur).catch(() => [])).filter((f) => f && f.path && f.content);
                   if (fixed.length) { await fastWrite(fixed); v = await fastVerify(); }
                 }
-                osVerified = v.ok;
+                // ran:false = the check never executed — "unknown", never a pass (no fake success).
+                osVerified = v.ran === false ? null : v.ok;
               } catch { osVerified = null; /* could not verify → don't block (matches fastVerify's own policy) */ }
             }
             const osOutcome = classifyBuildOutcome({ filesWritten: os.filesWritten, typecheckOk: osVerified });
@@ -5514,7 +5532,8 @@ export function registerAgentV3Routes(app: Express): void {
               buildDiag.record({ phase: 'build', severity: 'warning', code: 'ONESHOT_VERIFY_FAILED', message: 'One-shot app did not compile after one repair — handing to the full builder.', autoResolved: true });
               fastLog('The one-shot app still has build errors — switching to the full builder to finish it.');
             } else {
-              fastResult(os.summary, os.filesWritten);
+              // osVerified null = the check never ran → keep the agentic gate ON (audited downstream).
+              fastResult(os.summary, os.filesWritten, osVerified === true);
             }
           }
         }

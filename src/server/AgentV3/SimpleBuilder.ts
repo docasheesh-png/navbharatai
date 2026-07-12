@@ -334,6 +334,13 @@ export interface VerifyResult {
   ok: boolean;
   /** Compiler error text (empty when ok) — fed verbatim to the repair pass. */
   errors: string;
+  /**
+   * FALSE when the check could not EXECUTE at all (sandbox command threw/timed out) — distinct from
+   * "ran and passed". The jungle-game report (2026-07-12) shipped a runtime ReferenceError behind a
+   * "Build verified ✓" line because an infra failure was silently converted into ok:true; this flag
+   * is what lets the caller stay honest ("shipped unverified") instead. Absent/undefined = ran.
+   */
+  ran?: boolean;
 }
 
 export interface SimpleBuildDeps {
@@ -395,6 +402,12 @@ export interface SimpleBuildResult {
   reason?: string;
   /** Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …). */
   outcome?: BuildOutcome;
+  /**
+   * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
+   * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
+   * and passed; undefined = verify was not wired at all.
+   */
+  typecheckRan?: boolean;
 }
 
 /**
@@ -501,10 +514,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // is kept unchanged. On a verify infra error we DON'T block (best-effort). If it still doesn't
   // compile after repairs, return ok:false so the caller falls through to the full agentic builder
   // (its own repair loop + readiness gate finish it) — never worse than today, never a fake success.
+  let typecheckRan: boolean | undefined;
   if (deps.verify) {
     const maxRepairs = deps.maxRepairs ?? 2;
     const byPath = new Map(files.map((f) => [f.path, f] as const));
-    let verdict = await deps.verify().catch(() => ({ ok: true, errors: '' }));
+    // A verify THROW = the check never executed (sandbox infra failure) — record that honestly
+    // (ran:false) instead of silently converting it into a pass. The jungle-game report (2026-07-12)
+    // shipped a runtime ReferenceError behind "Build verified ✓" through exactly this silent catch.
+    let verdict: VerifyResult = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
     let attempt = 0;
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {
       attempt++;
@@ -523,7 +540,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       if (!fixed.length) break;
       for (const f of fixed) byPath.set(f.path, f);
       try { await deps.writeFiles(fixed); } catch { break; }
-      verdict = await deps.verify().catch(() => ({ ok: true, errors: '' }));
+      verdict = await deps.verify().catch(() => ({ ok: true, errors: '', ran: false }));
     }
     if (!verdict.ok) {
       deps.log?.('The app still has build errors — handing to the full builder to finish it.');
@@ -531,10 +548,18 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
+        typecheckRan: verdict.ran !== false,
       };
     }
     files = [...byPath.values()];
-    deps.log?.('Build verified — the app compiles. ✓');
+    typecheckRan = verdict.ran !== false;
+    if (typecheckRan) {
+      deps.log?.('Build verified — the app compiles. ✓');
+    } else {
+      // NEVER print "verified ✓" for a check that did not happen (rule: no fake success). The files
+      // are still delivered (sticky success), but the caller keeps its own downstream gates ON.
+      deps.log?.('⚠️ The type-check could not run in the sandbox — shipping the files unverified; the build gate will still audit them.');
+    }
   }
 
   // VERIFIED (or verify not wired) → success; the preview is a best-effort bonus.
@@ -542,8 +567,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }
     catch { deps.log?.('Preview is still starting — your files are ready.'); }
   }
-  // typecheckOk: true when the verify gate ran + passed; null when verify wasn't wired (no sandbox).
+  // typecheckOk: true ONLY when the verify gate genuinely RAN and passed; null when verify wasn't
+  // wired OR could not execute (an un-run check is "unknown", never a pass — no fake success).
   // previewOk is left unknown here — the route's preview self-check can upgrade BUILD_PARTIAL → BUILD_SUCCESS.
-  const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify ? true : null });
-  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome };
+  const outcome = classifyBuildOutcome({ filesWritten: files.length, typecheckOk: deps.verify && typecheckRan ? true : null });
+  return { ok: true, filesWritten: files.length, summary: `Built your app file-by-file — ${files.length} file(s).`, outcome, typecheckRan };
 }

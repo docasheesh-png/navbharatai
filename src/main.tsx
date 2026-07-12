@@ -2,6 +2,12 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { installDomTranslateGuard } from './lib/domTranslateGuard';
+
+// FIRST, before React touches the DOM: make removeChild/insertBefore resilient so Google Translate (Chrome's
+// "Translate to Hindi", very common on this India-facing app) can't crash React with "Failed to execute
+// 'insertBefore' on 'Node' … not a child of this node". Keeps translation working instead of disabling it.
+installDomTranslateGuard();
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';

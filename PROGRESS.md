@@ -14478,3 +14478,26 @@ Honest note (rule 6): there is no wallet-DELETE anywhere in the code and debits 
 (navbharat-prod) — so a stable-uid Google user's doc should not vanish going forward; the historical
 disappearance was the pre-admin-SDK write failures. This fix makes the re-grant impossible regardless of why a
 wallet is ever recreated, which is the durable guarantee.
+
+## 2026-07-12 — Fix 53: Google-Translate crash — "Failed to execute 'insertBefore' on 'Node'" (React ↔ browser translation)
+
+Admin screenshot (mobile v3.0): the ErrorBoundary card "कुछ गलत हो गया" with "'नोड' पर 'INSERTBEFORE'
+निष्पादित करने में विफलता: जिस नोड से पहले नया नोड डाला जाना है, वह इस नोड का चाइल्ड नहीं है।" The whole UI was
+translated to Hindi (STUDIO stayed English but घर/पूर्व दर्शन/आधिक were translated — Google Translate's
+signature).
+
+**Root cause.** Chrome's "Translate to Hindi" (very common on this India-facing app) REPLACES text nodes with
+its own `<font>` wrappers and MOVES nodes. React still holds refs to the originals, so its next reconciliation
+calls `removeChild`/`insertBefore` on a node the browser already detached → the DOM API throws → the app
+ErrorBoundary-crashes. This is the well-known React ↔ browser-translation crash class. The true root (the
+browser rewriting our DOM) is outside our code (rule 6).
+
+**Fix.** New tested `src/lib/domTranslateGuard.ts` — `installDomTranslateGuard()` patches
+`Node.prototype.removeChild`/`insertBefore` so that if the target isn't actually where React expects, it
+NO-OPS gracefully instead of throwing (React survives and re-reconciles next render). Installed as the FIRST
+thing in `main.tsx`, before React touches the DOM. This KEEPS translation working (India users can still read
+the app in Hindi) rather than disabling it — the widely-used, accepted resilience mitigation, not a symptom
+silencer. Idempotent + DI so it's unit-tested without patching the real global prototype (+5 tests: removeChild
+foreign-parent no-op, insertBefore foreign-ref no-op, legit insertBefore still works, idempotent, no-DOM→false).
+
+Gate: frontend tsc 0, vitest 6015/6015, `npm run build` PASS. Client-only (main.tsx + new lib).

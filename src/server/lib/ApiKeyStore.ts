@@ -9,6 +9,7 @@
 // Fields: id, userId, name, hash, displayPrefix, last4, scopes[], createdAt, lastUsedAt, revoked
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 export interface ApiKeyRecord {
   id: string;
@@ -41,7 +42,7 @@ class ApiKeyStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

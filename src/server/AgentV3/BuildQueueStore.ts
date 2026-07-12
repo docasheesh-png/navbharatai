@@ -9,6 +9,7 @@
 import * as admin from 'firebase-admin';
 import { emptyQueue, serializeQueue, parseStoredQueue, type CommandQueue } from './BuildQueue';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 
 const COLLECTION = 'build_queues_v3';
@@ -20,9 +21,8 @@ function getDb(): admin.firestore.Firestore | null {
   if (process.env.VITEST) return null;
   if (_db) return _db;
   try {
-    if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    _db = admin.firestore();
-    try { _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true }); } catch { /* shared instance already configured */ }
+    // Collision-free shared admin handle (getFirestore(app, dbId)) — no per-store .settings() race.
+    _db = getServerDb();
     return _db;
   } catch (e) {
     notePersistenceFailure('build_queue', 'init', e);

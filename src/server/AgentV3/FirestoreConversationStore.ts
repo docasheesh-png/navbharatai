@@ -27,6 +27,7 @@ import type {
 import { isEnumerableUserId } from './ConversationStore';
 import type { TurnUsage } from './ClaudeClient';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 
 const COLLECTION = 'agentv3_conversations';
 const ZERO_USAGE: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
@@ -68,20 +69,13 @@ export class FirestoreConversationStore implements ConversationStore {
     if (!admin.apps || admin.apps.length === 0) {
       admin.initializeApp({});
     }
-    this.db = admin.firestore();
-    // The default Firestore instance is SHARED by every store in this process, and settings()
-    // may only be called ONCE on it — whichever store initializes first wins the call. Every
-    // store passes the same firestoreDatabaseId(), so a second settings() throwing simply means
-    // the instance is ALREADY pointed at the right database. This guard is what keeps durable
-    // history durable: letting the throw propagate made getConversationStore()'s catch demote
-    // the whole conversation store to IN-MEMORY for the life of the instance — transcripts then
-    // existed only in that instance's RAM ("history works while the tab is open, gone after a
-    // reload that lands on a fresh/recycled Cloud Run instance"). The other stores survive the
-    // same throw by caching their db reference BEFORE calling settings(); this constructor's
-    // exception instead discarded the store entirely.
-    try {
-      this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
-    } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
+    // Collision-free shared admin handle (getFirestore(app, dbId)) — targets navbharat-prod with NO
+    // per-store .settings() race. This is what keeps durable history durable: the old
+    // default-instance settings() pattern threw on every store after the first (settings() is
+    // once-per-instance), which demoted this conversation store to IN-MEMORY for the life of the
+    // Cloud Run instance ("history works while the tab is open, gone after a reload"). The shared
+    // handle configures the database exactly once, centrally, so no store is ever demoted.
+    this.db = getServerDb() ?? admin.firestore();
   }
 
   private mainDoc(id: string) {

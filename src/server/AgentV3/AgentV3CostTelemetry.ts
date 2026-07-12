@@ -17,6 +17,7 @@
  * Doc ID:     `YYYY-MM-DD` (one doc per calendar day)
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 /** One build's measured outcome, fed into the daily aggregate. */
 export interface CostTelemetryEntry {
@@ -313,7 +314,7 @@ class AgentV3CostTelemetryStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

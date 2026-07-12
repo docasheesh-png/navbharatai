@@ -14690,3 +14690,27 @@ Fixes (same PR #1244):
   the payment reference. No blame, no loops.
 
 Gate: frontend tsc 0, server tsc 0, vitest 6062/6062. Client + AKB only (no billing-path code touched).
+## 2026-07-12 — T0-3 FIXED at the class level: all 51 server stores centralized on getServerDb() (no more .settings() collision)
+
+Roadmap Tier-0 item T0-3 ("No build report yet after Done"). Root cause (confirmed during the payment
+Admin-SDK work): every server store obtained its Firestore handle from the ONE process-wide default
+instance via `admin.firestore()`, and the ~20 that needed the named DB called `.settings({databaseId})`
+on it. `Firestore.settings()` may be called only ONCE per instance — the first store won, every later
+store's `.settings()` THREW → its try/catch demoted it to null → it silently skipped ALL persistence
+(DiagnosticsStore = the build-report store was one of them → "no build report"). Stores that never called
+settings piggybacked on whoever configured the singleton first (nondeterministic → frequently the
+`(default)` database, which the navbharat-prod client can't even read → wallet/cost/profile data invisible;
+chat history demoted to RAM and "gone after reload").
+
+Fix (rule 2 — fix the class, one implementation): migrated ALL 51 stores off `admin.firestore()[.settings]`
+onto the single collision-free `getServerDb()` (serverDb.ts, `getFirestore(app, dbId)` — per-databaseId
+cached instance configured exactly once, centrally, always navbharat-prod). 20 collision stores + 27 plain
+piggyback stores + 4 async (loadFirebaseAdmin) stores incl. authMiddleware/sessionTracker/WebhookManager/
+AbuseDetector. Two non-nullable class stores keep a documented `getServerDb() ?? admin.firestore()` last-
+resort fallback. Updated FirestoreConversationStore.init.test to lock the new invariant (store never calls
+settings()); added tests/serverDbCentralization.test.ts — a STATIC regression guard that fails CI if any
+server file reintroduces `admin.firestore()` as a primary handle or `.settings({databaseId})`.
+
+This also structurally strengthens durable chat history, wallet/cost/profile visibility, checkpoints, and
+every other persisted subsystem — they now deterministically read/write the same navbharat-prod DB the
+client uses. Gate: tsc fe+server 0, vitest 6048/6048 (+3).

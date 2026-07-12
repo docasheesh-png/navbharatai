@@ -18,6 +18,7 @@
 // Collection: `userPrefs/{userId}`
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 /** A single build's observed (inferred) choices. Any field may be null when not detectable. */
 export interface ObservedPreferences {
@@ -260,7 +261,7 @@ class UserPreferenceStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

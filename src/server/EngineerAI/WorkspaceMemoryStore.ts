@@ -13,6 +13,7 @@
  */
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 
 class WorkspaceMemoryStore {
   private db: admin.firestore.Firestore | null = null;
@@ -27,8 +28,7 @@ class WorkspaceMemoryStore {
         if (!admin.apps || admin.apps.length === 0) {
           admin.initializeApp({});
         }
-        const db = admin.firestore();
-        db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+        const db = getServerDb();
         this.db = db;
       }
       return this.db;

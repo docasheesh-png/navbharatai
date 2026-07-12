@@ -16,6 +16,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 
 const COLLECTION = 'workspace_files_v3';
@@ -31,8 +32,7 @@ function getDb(): admin.firestore.Firestore | null {
   if (_db) return _db;
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    _db = admin.firestore();
-    _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+    _db = getServerDb();
     return _db;
   } catch (e) {
     notePersistenceFailure('workspace_files', 'init', e);

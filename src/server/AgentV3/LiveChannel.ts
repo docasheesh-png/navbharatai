@@ -25,6 +25,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { appendEvents, eventsSince, emptyLiveBuffer, type LiveBuffer } from './LiveEventBuffer';
 
 export interface LiveRead {
@@ -83,8 +84,7 @@ class FirestoreLiveChannel implements LiveChannel {
     if (this.db) return this.db;
     try {
       if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-      this.db = admin.firestore();
-      this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+      this.db = getServerDb();
       return this.db;
     } catch {
       return null;

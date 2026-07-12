@@ -22,6 +22,7 @@
  */
 import crypto from 'crypto';
 import { loadFirebaseAdmin } from './firebaseAdminModule';
+import { getServerDb } from './serverDb';
 
 /** Stable short hash of a value (truncated SHA-256 hex) — we store hashes, never raw IPs (privacy). */
 export function hashValue(value: string): string {
@@ -83,7 +84,7 @@ async function getAdminFirestore(): Promise<import('firebase-admin/firestore').F
   try {
     const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    return admin.firestore();
+    return getServerDb(); // shared collision-free handle → navbharat-prod
   } catch {
     return null;
   }

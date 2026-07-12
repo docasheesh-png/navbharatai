@@ -11,6 +11,7 @@
 
 import { createHash } from 'crypto';
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 
 export type HashMap = Record<string, string>;
 
@@ -122,7 +123,7 @@ class IncrementalBuildCache {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

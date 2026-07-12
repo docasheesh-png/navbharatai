@@ -7,6 +7,7 @@
 // user can only ever read/mark their OWN notifications.
 
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 import { resolveMentions, type MentionMember } from './MentionRouter';
 
 export interface MentionNotification {
@@ -74,7 +75,7 @@ class MentionNotificationStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

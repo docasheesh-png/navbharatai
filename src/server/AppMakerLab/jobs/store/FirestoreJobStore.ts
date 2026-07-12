@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { BuildJob, JobStatus } from '../BuildJobManager';
 import { JobStore } from './JobStore';
 import { firestoreDatabaseId } from '../../../lib/firestoreDb';
+import { getServerDb } from '../../../lib/serverDb';
 
 export class FirestoreJobStore implements JobStore {
     private db: admin.firestore.Firestore;
@@ -11,14 +12,8 @@ export class FirestoreJobStore implements JobStore {
         if (!admin.apps || admin.apps.length === 0) {
             admin.initializeApp({});
         }
-        this.db = admin.firestore();
-        // Same shared-instance rule as FirestoreConversationStore: settings() may only be called
-        // once per process-wide Firestore instance, and every store passes the same databaseId —
-        // a second call throwing means it is already configured. Without this guard the
-        // constructor throw silently demoted job persistence to whatever fallback the caller had.
-        try {
-            this.db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
-        } catch { /* already configured by an earlier store — same databaseId, safe to proceed */ }
+        // Collision-free shared admin handle (getFirestore(app, dbId)) — no per-store .settings() race.
+        this.db = getServerDb() ?? admin.firestore();
     }
 
     async saveJob(job: BuildJob): Promise<void> {

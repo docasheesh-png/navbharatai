@@ -12,6 +12,7 @@
 // Pattern mirrors UserCostStore: VITEST-skip (tests never touch Firestore), best-effort (never
 // throws, never blocks a deploy), set+merge so a missing doc is created atomically.
 import * as admin from 'firebase-admin';
+import { getServerDb } from '../lib/serverDb';
 import { enforceHostingQuota, isFirstPartyProvider, deployBytesMb } from '../lib/HostingQuota';
 import { hostingUsageStore } from '../lib/HostingUsageStore';
 import { scanPublishedContent, publishScanBlocks } from './ContentSafetyScanner';
@@ -46,7 +47,7 @@ class DeploymentStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

@@ -16,6 +16,7 @@
  * count. Kept a SEPARATE collection/doc from user_costs so it never clobbers the billing total.
  */
 import * as admin from 'firebase-admin';
+import { getServerDb } from './serverDb';
 
 export interface HostingUsageDoc {
   userId: string;
@@ -32,7 +33,7 @@ class HostingUsageStore {
     try {
       if (!this.db) {
         if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-        this.db = admin.firestore();
+        this.db = getServerDb();
       }
       return this.db;
     } catch {

@@ -18,6 +18,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { consumeDurableRate } from './DurableRateLimit';
 import { loadFirebaseAdmin } from './firebaseAdminModule';
+import { getServerDb } from './serverDb';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -270,7 +271,8 @@ async function getAdminFirestore(): Promise<import('firebase-admin/firestore').F
   try {
     const admin = await loadFirebaseAdmin();
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
-    return admin.firestore();
+    // Collision-free shared handle targeting navbharat-prod (not the (default) DB the client can't read).
+    return getServerDb();
   } catch (err) {
     console.error('[AUTH] getAdminFirestore failed to initialize firebase-admin:', err instanceof Error ? err.message : err);
     return null;

@@ -10,6 +10,7 @@
 
 import * as admin from 'firebase-admin';
 import { firestoreDatabaseId } from '../lib/firestoreDb';
+import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
 import { capProblems, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { redactSecrets } from './SecretRedactor';
@@ -25,8 +26,7 @@ function getDb(): admin.firestore.Firestore | null {
   if (_db) return _db;
   try {
     if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-    _db = admin.firestore();
-    _db.settings({ databaseId: firestoreDatabaseId(), ignoreUndefinedProperties: true });
+    _db = getServerDb();
     return _db;
   } catch {
     return null;

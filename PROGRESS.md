@@ -14645,3 +14645,28 @@ boot:check PASS.
 NOTE (billing of 'weak', admin to confirm): shipped with the SAFE default — weak charges the wallet at the
 cheap GLM/Kimi rate and is blocked at ₹0 (consistent with the money-leak fixes). Flip to fully-free/unlimited
 or a daily-limit is a small change if the admin prefers a loss-leader model.
+
+## 2026-07-12 — Fix 56b: Power-tier final spec — locked tiers visible, localized weak-mode welcome, chat guidance (admin)
+
+Admin's final spec on top of Fix 56 (same PR #1244):
+- **All five tiers now VISIBLE to free users, four LOCKED** (🔒, disabled, "recharge any amount to unlock")
+  instead of hidden — the admin wants free users to SEE what a recharge unlocks. Server clamp unchanged
+  (free→weak enforced server-side; a UI/API bypass still can't reach a paid engine — "koi hacker bhi bypass
+  na kar paye").
+- **First-reply weak-mode notice:** a free user's build now opens with a localized narration — "you are on
+  the free Weak engine, the 🎚️ tier selector is just left of the message box, recharge any amount (even ₹1)
+  unlocks Normal → Full Team." New pure `weakTierNotice.ts` (+5 tests): hand-written Hindi (Devanagari) and
+  English/Hinglish variants, phrasing ROTATES by seed so repeats never read identically, and every variant is
+  HONEST (never claims a free user can switch without recharging — the admin's draft said "change any time";
+  corrected per rule 3, since changing requires a recharge). Language picked via the existing
+  detectLanguageHint; shown once per user per instance. Wallet-free-tier flag reuses the affordability gate's
+  existing wallet read (zero extra Firestore reads).
+- **Chat guidance:** AppKnowledgeBase Power entry now instructs every AI surface — when a free user asks why
+  tiers are locked / "select nahi ho raha" — to explain in the USER'S language, in fresh words each time
+  (never a canned string), that free = Weak only and any recharge unlocks all tiers.
+- **Tier fidelity confirmed (already structural):** weak = cheap-only chain (Claude not present → a weak
+  build can never silently run on Normal/Power); Opus tiers force Opus; paid default = Normal. ✅
+- Env note: admin DELETED `AGENTV3_COST_ROUTING_USERS` — identical to leaving it empty (empty canary = all
+  users), so cost-routing is now account-wide; the weak-tier clamp is independent of it anyway.
+
+Gate: frontend tsc 0, server tsc 0, vitest 6062/6062 (+5), build PASS, boot:check PASS.

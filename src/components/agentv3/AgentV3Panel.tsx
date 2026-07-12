@@ -2566,36 +2566,44 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      {/* Power tiers (admin 2026-07-12): Weak (free — GLM/Kimi) / Normal (Sonnet) /
-                          Strong (Opus low) / Powerful (Opus high) / Full Team (Opus max). A FREE user
-                          (powerUnlocked=false) sees ONLY Weak; paid/free-list users see all five. */}
+                      {/* Power tiers (admin final spec 2026-07-12): Weak (free — GLM/Kimi) / Normal (Sonnet)
+                          / Strong (Opus low) / Powerful (Opus high) / Full Team (Opus max). ALL FIVE are
+                          always VISIBLE; a FREE user (powerUnlocked=false) sees the paid four LOCKED (🔒,
+                          not selectable) until they recharge — and the server clamps free→weak regardless,
+                          so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
                       <div className="px-3 py-2">
                         <div className="text-sm text-zinc-200 mb-1.5">Power</div>
                         <div className="flex flex-col gap-1">
-                          {(powerUnlocked
-                            ? ([
-                                { key: 'weak', label: 'Weak' },
-                                { key: 'off', label: 'Normal' },
-                                { key: 'mini', label: 'Strong 💪' },
-                                { key: 'medium', label: 'Powerful' },
-                                { key: 'max', label: 'Full Team' },
-                              ] as const)
-                            : ([{ key: 'weak', label: 'Weak' }] as const)
-                          ).map((opt) => (
-                            <button
-                              key={opt.key}
-                              type="button"
-                              disabled={running}
-                              onClick={() => setPowerLevel(opt.key)}
-                              className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
-                                powerLevel === opt.key
-                                  ? 'bg-indigo-600 text-white'
-                                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
+                          {([
+                            { key: 'weak', label: 'Weak' },
+                            { key: 'off', label: 'Normal' },
+                            { key: 'mini', label: 'Strong 💪' },
+                            { key: 'medium', label: 'Powerful' },
+                            { key: 'max', label: 'Full Team' },
+                          ] as const).map((opt) => {
+                            const locked = !powerUnlocked && opt.key !== 'weak';
+                            return (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                disabled={running || locked}
+                                title={locked ? 'Add credits to unlock this tier' : undefined}
+                                onClick={() => { if (!locked) setPowerLevel(opt.key); }}
+                                className={`w-full px-2.5 py-1.5 rounded text-xs font-medium text-left transition-colors disabled:opacity-50 ${
+                                  powerLevel === opt.key
+                                    ? 'bg-indigo-600 text-white'
+                                    : locked
+                                    ? 'bg-zinc-800/50 text-zinc-500 cursor-not-allowed'
+                                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                                }`}
+                              >
+                                <span className="flex items-center justify-between">
+                                  <span>{opt.label}</span>
+                                  {locked && <span aria-hidden>🔒</span>}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                         <div className="text-[11px] text-zinc-500 mt-1">
                           {powerLevel === 'weak'
@@ -2607,7 +2615,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             : powerLevel === 'medium'
                             ? 'Opus · high effort'
                             : 'Opus · ultracode (max effort)'}
-                          {!powerUnlocked && ' · add credits to unlock stronger tiers'}
+                          {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>
                       </div>
                       <div className="border-t border-zinc-800 my-1" />

@@ -108,6 +108,7 @@ import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
+import { weakTierWelcomeNotice } from '../AgentV3/weakTierNotice';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -828,6 +829,8 @@ const runningBuilds = new Map<string, RunningBuild>();
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
 const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
+/** Free users already shown the weak-tier welcome notice this instance (once per user — see the send). */
+const weakNoticeShownFor = new Set<string>();
 
 /** Push an event into a build's replay buffer and fan it out to every subscriber. */
 function broadcastBuild(rb: RunningBuild, e: unknown): void {
@@ -3341,6 +3344,10 @@ export function registerAgentV3Routes(app: Express): void {
     // overdraft in Affordability absorbs any estimate miss). `paidEconomyNotice` is emitted once the
     // stream opens (below) so a low-balance user is told honestly, without blocking their work.
     let paidEconomyNotice: string | null = null;
+    // Weak-tier notice (admin final spec 2026-07-12): true when the CALLER is a free-tier user (never
+    // purchased) — used to emit the localized "you are on the free Weak engine, recharge unlocks all
+    // tiers" narration once the stream opens. Stays null when billing is off / no wallet read happened.
+    let callerIsFreeTier: boolean | null = null;
     // The affordability gate runs when EITHER the full paid-public switch OR the decoupled credit gate
     // (AGENTV3_CREDIT_GATE) is on. The credit gate lets ₹0-balance accounts be blocked from spending
     // NavBharatAI's model budget without turning on the rest of paid-public (which stays OFF during the
@@ -3351,6 +3358,7 @@ export function registerAgentV3Routes(app: Express): void {
       // An anonymous caller (userId null) has no wallet to read → balance-unknown → fail-open proceed.
       const walletDoc = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
       const balanceInr = userId ? await readWalletBalanceInr(async () => walletDoc, userId) : null;
+      if (userId) callerIsFreeTier = isFreeTierUser(walletDoc);
       // Slice F (admin routing plan §1 row 6): POWER MODE (Only Opus) is for PAYING accounts only —
       // a user who has never purchased cannot spend the most expensive engine. Refused pre-stream,
       // BEFORE the balance math, with the specific actionable reason (not a generic credits message).
@@ -3472,6 +3480,16 @@ export function registerAgentV3Routes(app: Express): void {
     // narration so it renders in the build conversation right away. Null (the default / gate-off) → nothing.
     if (paidEconomyNotice) {
       send({ type: 'narration', agent: 'system', text: paidEconomyNotice, ts: Date.now() });
+    }
+    // Weak-tier welcome notice (admin final spec 2026-07-12): a FREE user on the weak tier is told — in
+    // their own language, right at the top of the reply — that they are on the free Weak engine, where the
+    // 🎚️ tier selector lives (just left of the message box), and that any recharge unlocks all tiers.
+    // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
+    // the phrasing rotates by seed so repeats never read identically.
+    if (callerIsFreeTier === true && powerSpecResolved.cheapOnly && userId && !weakNoticeShownFor.has(userId)) {
+      weakNoticeShownFor.add(userId);
+      const langCode = detectLanguageHint(prompt)?.code ?? null;
+      send({ type: 'narration', agent: 'system', text: weakTierWelcomeNotice(langCode, userId.length + prompt.length), ts: Date.now() });
     }
     // SSE keepalive: send a ping every 15 s so Chrome never throttles/drops the
     // connection when the tab is backgrounded or minimised. Cleared on response end.

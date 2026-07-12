@@ -1076,7 +1076,7 @@ export function geminiLastResortEnabled(flag: string | undefined): boolean {
   return v !== '0' && v !== 'off';
 }
 
-export function cheapBuildFloorRunners(): NamedRunner[] {
+export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[] {
   const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
   if (floor === 'off' || floor === '') return [];
   const runners: NamedRunner[] = [];
@@ -1116,13 +1116,22 @@ export function cheapBuildFloorRunners(): NamedRunner[] {
   // GLM/Kimi ship a genuinely better stable coder, bump the default below in a PR (ideally after a quick
   // bake-off). The comma ladder + Claude/Vertex backstop means a RETIRED id auto-falls-through — the app
   // never breaks even if these are never touched; updating is only ever to ADOPT a better model.
+  //
+  // FREE-TIER graduated ladder (Model Routing Policy, admin 2026-07-12): a FREE build climbs CHEAPEST-FIRST
+  // — flash → cheap coder → flagship — so it starts on the cheapest model and only climbs (error-fallback
+  // + the Grok judge loop) when it must. Paid/default stays flagship-first. Its own env overrides
+  // (AGENTV3_FREE_GLM_MODEL / AGENTV3_FREE_KIMI_MODEL) so the free ladder is tunable without touching paid.
+  const glmDefault = opts?.free ? ['glm-4.7-flash', 'glm-4.7', 'glm-5.2'] : ['glm-5.2', 'glm-4.7'];
+  const kimiDefault = opts?.free ? ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code'] : ['kimi-k2.7-code', 'kimi-k2.6'];
+  const glmEnv = opts?.free ? process.env.AGENTV3_FREE_GLM_MODEL : process.env.GLM_MODEL;
+  const kimiEnv = opts?.free ? process.env.AGENTV3_FREE_KIMI_MODEL : process.env.KIMI_MODEL;
   if (floor === 'glm' || floor === 'both' || floor === 'on') {
     // thinkingControl: the app-level thinking toggle (same one that drives Claude's adaptive
     // thinking) is forwarded to GLM's reasoning switch — one setting controls every module.
-    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(process.env.GLM_MODEL, ['glm-5.2', 'glm-4.7']), { thinkingControl: true });
+    add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(glmEnv, glmDefault), { thinkingControl: true });
   }
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
-    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(process.env.KIMI_MODEL, ['kimi-k2.7-code', 'kimi-k2.6']));
+    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(kimiEnv, kimiDefault));
   }
   // Amazon Bedrock — Z.AI GLM 5 as a cheap-floor rung (admin 2026-07-08). Bedrock exposes its
   // SERVERLESS models via an OpenAI-COMPATIBLE endpoint, so the SAME OpenAiToolRunner the GLM/KIMI
@@ -1273,7 +1282,7 @@ export function healRunnerRoutingOpts(freeTierBuildActive: boolean): { claudeFir
   return freeTierBuildActive ? { claudeFirst: false, cheapOnly: true } : { claudeFirst: true, cheapOnly: false };
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -1305,7 +1314,7 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // provider with its key present. Escalation / claudeFirst retries never opt in, so they stay on
   // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
   // env (no Vertex/Gemini configured).
-  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners() : [];
+  const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free }) : [];
   if (cheap.length === 0 && floorRunners.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
@@ -1346,7 +1355,14 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   const cheapOnly = opts?.cheapOnly === true && floorRunners.length > 0;
   // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
   // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
-  const chain = cheapOnly ? [...floorRunners] : [...floorRunners, ...baseChain];
+  //
+  // FREE-TIER last resort (Model Routing Policy, admin 2026-07-12: "agar sab failed ho to vertex use bhi
+  // kar sakte hai, but last me"): a free cheap-only build appends Vertex/Gemini as the ABSOLUTE last rung
+  // — still NEVER Claude — so a free build has a final non-Claude attempt after the whole GLM/Kimi ladder
+  // fails, instead of failing outright. Non-free cheap-only stays floor-only (unchanged).
+  const chain = cheapOnly
+    ? (opts?.free ? [...floorRunners, ...cheap] : [...floorRunners])
+    : [...floorRunners, ...baseChain];
   return makeMultiProviderTurnRunner(chain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
@@ -4215,6 +4231,7 @@ export function registerAgentV3Routes(app: Express): void {
         ...(analysis ? { geminiModel: tierToGeminiBuildModel(analysis.startTier) } : {}),
         allowCheapFloor,
         cheapOnly: freeTierBuildActive,
+        free: freeTierBuildActive,
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         onProviderError: recordProviderFallback,
       });
@@ -4228,6 +4245,7 @@ export function registerAgentV3Routes(app: Express): void {
         // FREE-TIER: force the cheap floor ON and cheap-ONLY (no Claude) for a not-yet-paying user.
         allowCheapFloor,
         cheapOnly: freeTierBuildActive,
+        free: freeTierBuildActive,
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,

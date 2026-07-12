@@ -583,7 +583,10 @@ A graduated ladder (start cheapest; only climb when the judge still finds a real
 | Heal gates (integrity / preview / C9 / runtime) | **`glm-4.7`/`kimi-k2.5` — NEVER Claude/flash/flagship** | Claude/Sonnet | Opus |
 
 ### Env model-id defaults (tune the exact ids here — the code reads these, so no redeploy to change a rung)
-- Free ladder is a NEW per-tier ladder (to be added): flash rung + cheap-coder rung + flagship rung + Vertex.
+- Free ladder (LIVE, Slice 3): flash-first — `AGENTV3_FREE_GLM_MODEL` (default `glm-4.7-flash,glm-4.7,glm-5.2`),
+  `AGENTV3_FREE_KIMI_MODEL` (default `kimi-k2.5,kimi-k2.6,kimi-k2.7-code`), then Vertex/Gemini as the absolute
+  last rung (never Claude). Separate from the paid `GLM_MODEL`/`KIMI_MODEL` so tuning free never touches paid.
+  Dormant until the free-tier master (`AGENTV3_FREE_TIER_CHEAP` / `AGENTV3_COST_ROUTING`) is on.
 - Paid/default ladder: `GLM_MODEL` (flagship-first, e.g. `glm-5.2,glm-4.7`), `KIMI_MODEL` (e.g. `kimi-k2.7,kimi-k2.6`).
 - ⚠️ The exact Kimi rung ids (`kimi-k2.5` / `kimi-k2.6` / `kimi-k2.7` / `-code` suffix) are admin-tunable —
   cross-check them against the live Moonshot model list before flipping on.

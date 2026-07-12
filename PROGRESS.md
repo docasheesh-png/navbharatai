@@ -14206,3 +14206,27 @@ become live when the free ladder (Slice 3) and power-judge wiring call them.
 
 Tests +4 (resolveJudgeKind: power→opus always; free+grok→grok; free-no-grok→sonnet signal; paid grok/sonnet).
 Gate: server tsc 0, vitest, boot PASS.
+
+## 2026-07-12 — Routing Slice 3: FREE tier flash-first graduated ladder + Vertex last-resort
+
+Final structural slice of the Model Routing Policy. The free build used the global (flagship-first) cheap
+ladder with no last resort. Now:
+- `cheapBuildFloorRunners({ free: true })` builds a GRADUATED flash-first ladder: GLM
+  `glm-4.7-flash → glm-4.7 → glm-5.2`, KIMI `kimi-k2.5 → kimi-k2.6 → kimi-k2.7-code` (cheapest first, climb
+  on error-fallback). Env-overridable via `AGENTV3_FREE_GLM_MODEL` / `AGENTV3_FREE_KIMI_MODEL` — SEPARATE from
+  the paid `GLM_MODEL`/`KIMI_MODEL` so tuning free never touches paid. Paid/default stays flagship-first.
+- `buildTurnRunner` gains a `free` option; a free cheap-only chain now appends Vertex/Gemini as the ABSOLUTE
+  last rung (admin: "agar sab failed ho to vertex, but last me") — still NEVER Claude. Non-free unchanged.
+- Wired `free: freeTierBuildActive` into both free-build client sites (fast lane + main client).
+
+Entirely DORMANT until the free-tier master flag (`AGENTV3_FREE_TIER_CHEAP` / `AGENTV3_COST_ROUTING`) is on,
+so zero risk to live builds. Tests +2 (free ladder = 3 flash-first GLM rungs vs paid 2; free env override
+doesn't touch paid). CLAUDE.md env note updated (free ladder now live).
+
+REMAINING (honest, rule 6): Slice 3b — the Grok JUDGE LOOP for free (judge → repair on cheap coders →
+climb to flagship → Vertex) that drives a QUALITY-based climb (not just error-fallback). Today the free
+ladder climbs on hard errors + the existing gate; the judge-driven quality climb is a larger subsystem and
+is dormant-tier work — recorded as the next slice, to be built + tested on its own. The mode-aware judge
+(#1228, resolveJudgeKind free→Grok) is the foundation it will call.
+
+Gate: server tsc 0, vitest (+2), boot PASS.

@@ -1240,6 +1240,17 @@ export function fastLaneProviderLabel(used: string | undefined): string {
   }
 }
 
+/**
+ * Routing for the post-build HEAL/retry runners (integrity / preview / C9 reviewer-autofix / runtime
+ * auto-fix / the no-files rebuild). Model Routing Policy (admin 2026-07-12): a FREE build must NEVER
+ * touch Claude — anywhere — so on a free build these runners go CHEAP-ONLY (GLM/Kimi, no Claude); a
+ * paid/power build keeps Claude-first (Sonnet in normal, Opus in power). Pure + exported for tests.
+ * (This closes the leak where the heal gates built a `claudeFirst` runner regardless of tier.)
+ */
+export function healRunnerRoutingOpts(freeTierBuildActive: boolean): { claudeFirst: boolean; cheapOnly: boolean } {
+  return freeTierBuildActive ? { claudeFirst: false, cheapOnly: true } : { claudeFirst: true, cheapOnly: false };
+}
+
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
@@ -5547,7 +5558,7 @@ export function registerAgentV3Routes(app: Express): void {
         // build from ever burning the most-expensive model (the "$26 failed todo" driver).
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
-          client: buildTurnRunner({ claudeFirst: true }),
+          client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
           model: resolveModel(onlyOpus), // Opus only in power mode; Sonnet in normal mode
           effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
           persistence: {
@@ -5654,7 +5665,7 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner({ claudeFirst: true }),
+                client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
                 model: resolveModel(onlyOpus),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -5722,7 +5733,7 @@ export function registerAgentV3Routes(app: Express): void {
           try {
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ claudeFirst: true }),
+              client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
               model: resolveModel(onlyOpus),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -5755,7 +5766,7 @@ export function registerAgentV3Routes(app: Express): void {
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
             ...baseRunnerOpts,
-            client: buildTurnRunner({ claudeFirst: true }),
+            client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
             model: resolveModel(onlyOpus),
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
@@ -5995,7 +6006,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${label} — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ claudeFirst: true }),
+              client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
               model: resolveModel(onlyOpus),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });

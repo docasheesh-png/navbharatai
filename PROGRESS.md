@@ -14111,3 +14111,22 @@ Confirmed gaps to implement (each a separate tested slice; current behaviour sta
 5. Power-mode consistency: the judge and the plan phase → Opus (today Grok/Sonnet + Grok).
 
 Doc-only change; no code touched this PR. Gate: CI (full vitest) on the branch.
+
+## 2026-07-12 — Routing Slice 1: close the FREE-tier "no Claude" leak in the post-build heal gates
+
+First implementation slice of the admin-confirmed Model Routing Policy. Policy: a FREE build must NEVER
+touch Claude — anywhere. The audit found a leak: the post-build heal/retry runners (integrity, preview,
+C9 reviewer-autofix, runtime auto-fix, and the no-files rebuild) each built `buildTurnRunner({claudeFirst:
+true})` regardless of tier — so on a free build, if any of those gates fired, it spent Claude/Sonnet.
+
+Fix: new pure `healRunnerRoutingOpts(freeTierBuildActive)` → free ⇒ `{cheapOnly:true}` (GLM/Kimi floor, no
+Claude), paid/power ⇒ `{claudeFirst:true}` (Sonnet/Opus — unchanged). Applied at all 5 heal/retry sites.
+Safe: `buildTurnRunner`'s cheapOnly only engages when a cheap floor is configured (and `freeTierBuildActive`
+already requires that), so a free heal always has GLM/Kimi to run on; best-effort heal never blocks a build.
+
+HONEST scope note: this closes the Claude leak (the admin's #1 concern) using the cheap floor. The exact
+heal RUNG (admin wants `glm-4.7`/`kimi-k2.5`, NOT flash, NOT flagship) is governed by the cheap-floor model
+env and will be pinned precisely in Slice 3 (the free graduated ladder). Even today the free heal is far
+cheaper than Claude.
+
+Tests +2 (free → cheapOnly no-Claude; paid/power → claudeFirst). Gate: server tsc 0, vitest (+2), boot PASS.

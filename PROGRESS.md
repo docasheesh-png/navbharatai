@@ -14439,3 +14439,65 @@ Root causes (two, both fixed):
 
 Gate: fe tsc 0 (pre-existing mobile-plugin-only errors — both ARE in package.json; this container's
 node_modules is stale, CI's npm ci installs them), server untouched, vitest 6014 pass. Client-only.
+## 2026-07-12 — Registry sync: AGENTV3_COST_ROUTING now live (canary), PAID_PUBLIC/CREDIT_GATE verified ON (admin Cloud Run screenshot)
+
+Admin shared the live Cloud Run Variables screenshot. Synced the CLAUDE.md env registry to the real state:
+- `AGENTV3_COST_ROUTING` = `on`, canary-scoped via `AGENTV3_COST_ROUTING_USERS` = `aashishcpmt09@gmail.com`
+  (free-tier cheap-routing master switch, live for the admin's account only) — moved from "NOT yet set" to
+  the configured list. (Still needs a real `AGENTV3_CHEAP_FLOOR` provider to actually route cheap.)
+- `AGENTV3_PAID_PUBLIC` = `true` and `AGENTV3_CREDIT_GATE` = `true` — VERIFIED both set in the live env (Names
+  49+50). This confirms the affordability gate is genuinely active, which is what makes the Fix 51 ₹0-balance
+  block actually bite. `AGENTV3_INTEGRITY_GATE` = `on` and `AGENTV3_LINT_GATE` = `on` also confirmed on.
+Docs-only (CLAUDE.md + this note); no code touched.
+
+## 2026-07-12 — Fix 52: MONEY BLEED #2 — logout→login re-granted the 50,000-token welcome bonus every time (infinite free-token farm)
+
+Admin: "jab bhi user logout kar ke login karta hai, 50,000 token show ho rahe hai. user un 50k use kar ke
+logout→login karta hai, wapas 50k free me aa jaate hai." An unlimited free-token farm.
+
+**Root cause.** `GET /api/wallet/:userId` granted the 50k welcome bonus in the `else` of `if (walletDoc.exists())`
+— i.e. the ONLY idempotency key was the wallet doc's existence. A wallet doc is RE-CREATABLE (a lost/absent
+doc, the recent navbharat-prod DB migration, or a pre-migration write that never persisted under the old
+client-SDK PERMISSION_DENIED), and each recreation ran the else-branch → `setDoc(walletRef, initialWallet)`
+(NO merge) → wiped any spent balance and re-minted 50,000 tokens. The bonus was gated on the wrong thing.
+
+**Fix (rule 2 — idempotency keyed on a DURABLE marker, not the recreatable wallet doc).** The grant now checks
+the durable `payment_transactions/welcome_${userId}` marker, which lives in a SEPARATE collection and SURVIVES
+wallet-doc recreation. New pure, tested `src/server/lib/welcomeBonus.ts`: `welcomeGrantTokens(alreadyGranted)` →
+the configured bonus ONLY if never granted, else **0**; `buildInitialWallet(...)` → a 0-token recreation writes
+an EMPTY ledger + ₹0 balance (no fake "Welcome Bonus" row, no free tokens). The wallet route's else-branch now
+runs a Firestore TRANSACTION: re-read the wallet (return it if it was created concurrently — never overwrite),
+read the marker, grant 50k + stamp the marker ONLY on a true first grant, else create an empty wallet. So a
+user who already got (and spent) their bonus gets a ₹0 wallet on re-login and must recharge — the farm is dead.
+
+Regression tests +5 (`welcomeBonus`: grant-once for a new user, 0 on re-grant, first-grant wallet shape/ledger,
+re-grant wallet is empty with NO bonus row, identity fields carried). Gate: frontend tsc 0, server tsc 0,
+vitest 5982/5982, boot:check PASS.
+
+Honest note (rule 6): there is no wallet-DELETE anywhere in the code and debits persist via the admin-SDK
+(navbharat-prod) — so a stable-uid Google user's doc should not vanish going forward; the historical
+disappearance was the pre-admin-SDK write failures. This fix makes the re-grant impossible regardless of why a
+wallet is ever recreated, which is the durable guarantee.
+
+## 2026-07-12 — Fix 53: Google-Translate crash — "Failed to execute 'insertBefore' on 'Node'" (React ↔ browser translation)
+
+Admin screenshot (mobile v3.0): the ErrorBoundary card "कुछ गलत हो गया" with "'नोड' पर 'INSERTBEFORE'
+निष्पादित करने में विफलता: जिस नोड से पहले नया नोड डाला जाना है, वह इस नोड का चाइल्ड नहीं है।" The whole UI was
+translated to Hindi (STUDIO stayed English but घर/पूर्व दर्शन/आधिक were translated — Google Translate's
+signature).
+
+**Root cause.** Chrome's "Translate to Hindi" (very common on this India-facing app) REPLACES text nodes with
+its own `<font>` wrappers and MOVES nodes. React still holds refs to the originals, so its next reconciliation
+calls `removeChild`/`insertBefore` on a node the browser already detached → the DOM API throws → the app
+ErrorBoundary-crashes. This is the well-known React ↔ browser-translation crash class. The true root (the
+browser rewriting our DOM) is outside our code (rule 6).
+
+**Fix.** New tested `src/lib/domTranslateGuard.ts` — `installDomTranslateGuard()` patches
+`Node.prototype.removeChild`/`insertBefore` so that if the target isn't actually where React expects, it
+NO-OPS gracefully instead of throwing (React survives and re-reconciles next render). Installed as the FIRST
+thing in `main.tsx`, before React touches the DOM. This KEEPS translation working (India users can still read
+the app in Hindi) rather than disabling it — the widely-used, accepted resilience mitigation, not a symptom
+silencer. Idempotent + DI so it's unit-tested without patching the real global prototype (+5 tests: removeChild
+foreign-parent no-op, insertBefore foreign-ref no-op, legit insertBefore still works, idempotent, no-DOM→false).
+
+Gate: frontend tsc 0, vitest 6015/6015, `npm run build` PASS. Client-only (main.tsx + new lib).

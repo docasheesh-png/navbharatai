@@ -1,9 +1,10 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Reads/writes user_token_wallets,
 // which navbharat-prod's rules restrict to the owner (server is unauthenticated → was denied).
-import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
-import { TOKENS_PER_RUPEE, welcomeBonusTokens } from '../lib/payments';
+import { TOKENS_PER_RUPEE } from '../lib/payments';
 
 /**
  * Wallet / token-balance read routes extracted from the server.ts monolith
@@ -44,54 +45,42 @@ export function registerWalletRoutes(app: Express): void {
         // payments.ts TOKENS_PER_RUPEE), so no client ever hardcodes its own conversion again.
         return res.json({ ...data, tokensPerRupee: TOKENS_PER_RUPEE });
       } else {
-        // Welcome bonus (admin routing plan 2026-07-11): 50,000 tokens (= ₹500 equivalent) so a new
-        // user's FIRST real build fits inside the bonus. Single source of truth: payments.ts
-        // welcomeBonusTokens() (env-overridable); the ₹ mirror is derived at the shared rate so the
-        // token and ₹ columns can never drift apart.
-        const welcomeTokens = welcomeBonusTokens();
-        const welcomeBalance = welcomeTokens / TOKENS_PER_RUPEE;
-        const initialWallet = {
-          userId,
-          userEmail: email,
-          userName: name,
-          total_balance: welcomeBalance,
-          remaining_balance: welcomeBalance,
-          total_output_tokens_used: 0,
-          total_money_spent: 0,
-          hasVishwakarmaPass: false,
-          vishwakarmaPassActivatedAt: null,
-          tokenBalance: welcomeTokens,
-          totalTokensPurchased: welcomeTokens,
-          totalTokensUsed: 0,
-          lastRechargeAt: null,
-          walletLedger: [
-            {
-              type: 'purchase',
-              amountCoinsOrTokens: welcomeTokens,
-              moneySpent: 0,
-              timestamp: new Date().toISOString(),
-              description: `Welcome Bonus: ${welcomeTokens.toLocaleString()} AI Tokens Credited!`
-            }
-          ],
-          updatedAt: new Date().toISOString()
-        };
-        await setDoc(walletRef, initialWallet);
-
-        // Add welcome bonus transaction to transaction list
-        const welcomeTxRef = doc(db, 'payment_transactions', `welcome_${userId}`);
-        await setDoc(welcomeTxRef, {
-          transactionId: `welcome_${userId}`,
-          userId,
-          amountPaid: 0,
-          balanceAdded: welcomeBalance,
-          paymentProvider: 'WELCOME_BONUS',
-          paymentStatus: 'SUCCESS',
-          paymentReference: 'WELCOME_BONUS',
-          createdAt: new Date().toISOString()
+        // The wallet doc is missing → (re)create it. MONEY-BLEED FIX (admin 2026-07-12): grant the 50,000
+        // welcome bonus ONLY if this user has NEVER received it, guarded by the DURABLE welcome-bonus marker
+        // (`payment_transactions/welcome_${userId}`) which lives in a SEPARATE collection and so SURVIVES any
+        // wallet-doc recreation. The old code granted the bonus purely because the wallet doc was absent, so a
+        // re-created wallet re-minted 50k every logout→login — an infinite free-token farm. Done in a
+        // transaction so two concurrent first-time reads can't double-grant, and so a wallet created
+        // concurrently is returned instead of overwritten.
+        const welcomeMarkerRef = doc(db, 'payment_transactions', `welcome_${userId}`);
+        const nowIso = new Date().toISOString();
+        const createdWallet = await runTransaction(db, async (tx) => {
+          const wSnap = await tx.get(walletRef);
+          if (wSnap.exists()) return wSnap.data(); // created concurrently — never overwrite, never re-grant
+          const markerSnap = await tx.get(welcomeMarkerRef);
+          const alreadyGranted = markerSnap.exists();
+          const welcomeTokens = welcomeGrantTokens(alreadyGranted);
+          const initialWallet = buildInitialWallet({ userId, email, name, welcomeTokens, nowIso });
+          tx.set(walletRef, initialWallet);
+          // Only stamp the durable grant marker on a REAL grant (first time). A 0-token recreation must not
+          // write it (there was nothing to grant), and if it already exists we leave it untouched.
+          if (!alreadyGranted && welcomeTokens > 0) {
+            tx.set(welcomeMarkerRef, {
+              transactionId: `welcome_${userId}`,
+              userId,
+              amountPaid: 0,
+              balanceAdded: welcomeTokens / TOKENS_PER_RUPEE,
+              paymentProvider: 'WELCOME_BONUS',
+              paymentStatus: 'SUCCESS',
+              paymentReference: 'WELCOME_BONUS',
+              createdAt: nowIso,
+            });
+          }
+          return initialWallet;
         });
 
         // The rate travels WITH the wallet on the new-wallet path too (same as the existing-doc path).
-        return res.json({ ...initialWallet, tokensPerRupee: TOKENS_PER_RUPEE });
+        return res.json({ ...createdWallet, tokensPerRupee: TOKENS_PER_RUPEE });
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);

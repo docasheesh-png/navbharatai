@@ -286,8 +286,15 @@ the code (it is actually read somewhere) on 2026-07-11.
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
   (GLM + Kimi together) | `bedrock`. It must hold ONE value. For the current GLM bake-off → `glm`.
   `on` and `glm` are NOT both allowed at once — pick one.
-- `GLM_MODEL` → `glm-4.7` (the cheap coder; leave the flagship `glm-5.2` OUT of the cost floor).
-  `KIMI_MODEL` → `kimi-k2.6`. Both accept a comma newest→older list (e.g. `glm-4.7,glm-4.6`).
+- `GLM_MODEL` / `KIMI_MODEL` — comma newest→older ladder (1st = try first, rest = error-fallback). **EMPTY/unset
+  is SAFE** — `parseModelLadder` falls back to the code default. Confirmed exact ids (admin screenshots 2026-07-12):
+  - **GLM_MODEL** default `glm-5.2,glm-4.7` (flagship coder → 1-step-back). GLM ids: `glm-5.2` (flagship),
+    `glm-4.7` (cheap coder), `glm-4.7-flash` (cheapest, free-tier only).
+  - **KIMI_MODEL** default `kimi-k2.7-code,kimi-k2.6`. Kimi ids (from platform.kimi.ai/docs/models):
+    `kimi-k2.7-code` (strongest coder, 256k), `kimi-k2.7-code-highspeed`, `kimi-k2.6`, `kimi-k2.5` (older/cheaper).
+  - Per the Model Routing Policy above, this is the flagship-first PAID/default ladder; the FREE-tier flash-first
+    ladder is a SEPARATE (Slice-3) env, not `GLM_MODEL`/`KIMI_MODEL`. (Supersedes the old "flagship stays OUT of
+    the floor" note — the admin confirmed flagship leads the paid ladder on 2026-07-12.)
 - `AGENTV3_ENABLED` → `true`. `AGENTV3_PAID_PUBLIC` → set to `true` by the admin 2026-07-11 (billing LIVE:
   real wallet debit + affordability gate + ₹0-balance block now active for every non-free-list user).
   `AGENTV3_CREDIT_GATE` → also `true` (redundant once paid-public is on — paid-public is the superset — but

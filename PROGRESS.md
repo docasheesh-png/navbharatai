@@ -13995,3 +13995,23 @@ durable long-term fix is a NEW (non-free-tier) Firestore database; recorded for 
 Also earlier this session: Cashfree SDK was CSP-blocked (fixed #1205) — a separate payment issue now cleared.
 
 Gate: tsc fe+server 0, vitest 5953/5953 (1 new), build PASS, boot:check PASS.
+
+## 2026-07-12 — Migrate off the AI-Studio free-tier Firestore DB → navbharat-prod (uncapped)
+
+Root fix for the daily write-quota exhaustion (admin: fresh start chosen). The app connected to
+`ai-studio-cc9cd998-…`, a database Google AI Studio created in a FREE tier that is HARD-CAPPED to 40k
+writes/day even on Blaze ("cannot exceed free quota even when a billing instrument is enabled"). That cap
+exhausted daily → payments/wallet-credit/session-save/build-report all silently failed once hit.
+
+Admin created a fresh Native-mode database `navbharat-prod` (standard billing, NO daily cap). Migration
+is config-driven (the whole app already picks its DB from two config values):
+- `src/config/firebase.ts` firestoreDbId default → `navbharat-prod` (client SDK: getFirestore(app, id))
+- `firebase-applet-config.json` firestoreDatabaseId → `navbharat-prod` (server admin SDK via firestoreDatabaseId())
+- `firebase.json` firestore.database → `navbharat-prod` (so rule deploys target the right DB)
+
+COORDINATION (must land in order): the admin publishes firestore.rules to navbharat-prod FIRST (the new
+DB defaults to Restrictive deny-all rules; the client reads Firestore directly — History/wallet — so
+without rules the client gets permission-denied). Only AFTER rules are published is this config PR merged
+(auto-deploys via Cloud Run). Fresh start — old ai-studio data is left behind (test data, 1 user).
+
+Gate: tsc fe+server 0, build PASS, JSON valid; no test references the DB id. CI runs full vitest before merge.

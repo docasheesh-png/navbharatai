@@ -37,7 +37,11 @@ export const firebaseConfig = {
   appId:            import.meta.env.VITE_FIREBASE_APP_ID            || '1:950841184325:web:5f54018ec63af0376d132c',
   apiKey:           import.meta.env.VITE_FIREBASE_API_KEY           || 'AIzaSyAGIUMRMGgD4MTUxflH4pVbVhVleM0LdwE',
   authDomain:       AUTH_DOMAIN,
-  firestoreDbId:    import.meta.env.VITE_FIREBASE_FIRESTORE_DB      || 'ai-studio-cc9cd998-d842-4462-9833-b44f49825878',
+  // MIGRATED 2026-07-12 off the AI-Studio free-tier database (ai-studio-cc9cd998-…), which is
+  // HARD-CAPPED to 40k writes/day even on Blaze ("cannot exceed free quota even with billing") — that
+  // cap exhausted daily and broke payments/wallet/session-save. `navbharat-prod` is a fresh Native-mode
+  // database on standard billing with NO daily write cap. Override per-env with VITE_FIREBASE_FIRESTORE_DB.
+  firestoreDbId:    import.meta.env.VITE_FIREBASE_FIRESTORE_DB      || 'navbharat-prod',
   storageBucket:    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET    || 'gen-lang-client-0866594388.firebasestorage.app',
   messagingSenderId:import.meta.env.VITE_FIREBASE_MESSAGING_SENDER  || '950841184325',
   measurementId:    import.meta.env.VITE_FIREBASE_MEASUREMENT_ID    || '',

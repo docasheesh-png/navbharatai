@@ -181,6 +181,16 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     expect((await gated.runTurn(PARAMS)).text).toBe('from glm');
   });
 
+  it('a skip limit of 0 DISABLES the skip — GLM/Kimi lead every prompt, however large (admin 2026-07-11)', async () => {
+    const { sizeGatedRunner } = await import('./MultiProviderTurnRunner');
+    const inner = runnerOk('from glm');
+    const gated = sizeGatedRunner(inner, 0); // 0 = no size skip
+    const huge = { ...PARAMS, system: 'x'.repeat(500_000) };
+    // The inner cheap runner IS called (no reject) even for a 500k-char prompt; the prompt diet still trims.
+    expect((await gated.runTurn(huge)).text).toBe('from glm');
+    expect(inner.runTurn).toHaveBeenCalledOnce();
+  });
+
   it('prompt diet: oversized tool_result/text blocks are trimmed with an honest marker; structure preserved', async () => {
     const { capMessageContentForCheapFloor } = await import('./MultiProviderTurnRunner');
     const fat = 'y'.repeat(10_000);

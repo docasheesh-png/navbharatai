@@ -14050,3 +14050,25 @@ OPEN (separate root cause, recorded per rule 6): the ~20 AgentV3/lib stores that
 shared default-app singleton, so only the first store to initialize wins and later ones catch→null→
 silently skip persistence. This is the likely real reason "build report save nahi hoti thi". Fix =
 centralize them onto `serverDb.getServerDb()` (collision-free `getFirestore(app,id)`). Tracked, not yet done.
+## 2026-07-11 — Fix 51: remove the cheap-floor size skip — GLM/Kimi lead EVERY prompt (admin: "kimi/glm se limit hata do, 1st try for every file")
+
+Autopsy of a real edit/continue build report: GLM AND Kimi were skipped on every call —
+"prompt 46258 chars exceeds the cheap-floor limit 45000 (routed to the next provider)" ×12 — so an
+edit/continue turn (file-grounding pushes the prompt just over 45k) ALWAYS fell back to Claude, defeating
+the admin's "direct sonnet kahi nahi chahiye". providerDelivery was GLM 3 / CLAUDE 3, providerFailures
+GLM 6 / KIMI 6.
+
+Root cause: `sizeGatedRunner` skips the cheap floor when the prompt exceeds `AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS`
+(default 45_000) — a 2026-07-07 timeout-avoidance measure that was too low (GLM/Kimi context windows are
+100k+ chars). Admin decision: remove the skip. Fix: `sizeGatedRunner` now treats `skipOverChars <= 0` as
+NO skip (GLM/Kimi run every prompt; only the prompt-diet block trim still applies), and the default
+`floorMaxPromptChars` is now 0 (no skip). The env `AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS` can RE-impose a
+positive limit if timeouts ever return. Claude still backstops any real GLM/Kimi timeout/failure, so the app
+never breaks — a huge prompt just may run a slower cheap-model turn. Prompt-diet trimming (perBlockCap 6000)
+is unchanged, so the cheap model never chokes on a giant single block. Tests +1 (skip-limit 0 → inner runs
+even for a 500k-char prompt); existing size-skip test (positive limit) unchanged.
+
+Also confirmed live from the same report: estimate now "~3 min" (Fix 47 working, not ~28 min), and the
+data-loss self-heal restored all 16 files after a sandbox recycle (durable store + GitHub retained them).
+
+Gate: frontend tsc 0, server tsc 0, vitest (+1), boot:check PASS.

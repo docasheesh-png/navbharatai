@@ -136,17 +136,23 @@ export function capMessageContentForCheapFloor(params: RunTurnParams, perBlockCa
  * Wrap a CHEAP-FLOOR runner with the admin's combined design (2026-07-07):
  *   1. prompt-size-aware routing — a turn whose prompt exceeds `skipOverChars` SKIPS this runner
  *      instantly (throws a cheap, non-timeout error → the chain falls through in ~0ms) instead of
- *      gambling a long timeout on it; evidence: every GLM/KIMI failure today was "Request timed out."
- *      on the largest prompts, while small turns succeeded 7/7.
- *   2. prompt diet — turns that DO go to the cheap model get oversized blocks trimmed first.
+ *      gambling a long timeout on it. ADMIN OVERRIDE (2026-07-11, "kimi/glm se limit hata do — 1st
+ *      try for every file glm/kimi"): a skip limit of 0 (or negative) DISABLES this skip entirely, so
+ *      GLM/Kimi are tried FIRST for every prompt regardless of size — Claude still backstops any real
+ *      timeout/failure, so the app never breaks, it just may run a slower turn on a huge prompt.
+ *   2. prompt diet — turns that go to the cheap model get oversized blocks trimmed first. This ALWAYS
+ *      applies (even with the skip disabled), so the cheap model never chokes on a giant single block.
  * PURE wrapper; the inner runner is injected (unit-testable without providers).
  */
 export function sizeGatedRunner(inner: TurnRunner, skipOverChars: number, perBlockCap = 6_000): TurnRunner {
   return {
     runTurn(params: RunTurnParams): Promise<TurnResult> {
-      const size = estimatePromptChars(params);
-      if (size > skipOverChars) {
-        return Promise.reject(new Error(`skipped: prompt ${size} chars exceeds the cheap-floor limit ${skipOverChars} (routed to the next provider)`));
+      // skipOverChars <= 0 → no size skip (admin: GLM/Kimi lead every prompt); only the diet applies.
+      if (skipOverChars > 0) {
+        const size = estimatePromptChars(params);
+        if (size > skipOverChars) {
+          return Promise.reject(new Error(`skipped: prompt ${size} chars exceeds the cheap-floor limit ${skipOverChars} (routed to the next provider)`));
+        }
       }
       return inner.runTurn(capMessageContentForCheapFloor(params, perBlockCap));
     },

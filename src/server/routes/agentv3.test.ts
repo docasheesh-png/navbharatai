@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { userCostStore } from '../lib/UserCostStore';
@@ -340,6 +340,42 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
   });
   it('PAID / POWER build → Claude-first, not cheap-only (unchanged)', () => {
     expect(healRunnerRoutingOpts(false)).toEqual({ claudeFirst: true, cheapOnly: false });
+  });
+});
+
+describe('cheapFloorDecision — honest routing reason for every build report', () => {
+  const base = { allowCheapFloor: true, routeStrong: false, freeTierBuildActive: false, tierAllowed: true, userAllowed: true };
+  it('ACTIVE when flag on + a key present + allowed', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', GLM_API_KEY: 'k' } as any, base);
+    expect(d.active).toBe(true);
+    expect(d.reason).toMatch(/ACTIVE/);
+  });
+  it('OFF reason when the flag is explicitly off', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'off', GLM_API_KEY: 'k' } as any, base);
+    expect(d.active).toBe(false);
+    expect(d.reason).toMatch(/AGENTV3_CHEAP_FLOOR=off/);
+  });
+  it('KEY-MISSING reason when flag on but no GLM/KIMI key (the fae70e42 mystery, made explicit)', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on' } as any, base);
+    expect(d.active).toBe(false);
+    expect(d.reason).toMatch(/no matching API key/);
+    expect(d.reason).toMatch(/GLM_API_KEY\/KIMI_API_KEY/);
+  });
+  it('CANARY reason when a key is present but the account is not in AGENTV3_CHEAP_FLOOR_USERS', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', GLM_API_KEY: 'k' } as any,
+      { ...base, allowCheapFloor: false, userAllowed: false });
+    expect(d.active).toBe(false);
+    expect(d.reason).toMatch(/AGENTV3_CHEAP_FLOOR_USERS/);
+  });
+  it('STRONG-ROUTE reason for a large/import build (skipped by design)', () => {
+    const d = cheapFloorDecision({ AGENTV3_CHEAP_FLOOR: 'on', KIMI_API_KEY: 'k' } as any,
+      { ...base, allowCheapFloor: false, routeStrong: true });
+    expect(d.active).toBe(false);
+    expect(d.reason).toMatch(/Large project \/ import/);
+  });
+  it('defaults the flag to on (unset) — key present + allowed → ACTIVE', () => {
+    const d = cheapFloorDecision({ GLM_API_KEY: 'k' } as any, base);
+    expect(d.active).toBe(true);
   });
 });
 

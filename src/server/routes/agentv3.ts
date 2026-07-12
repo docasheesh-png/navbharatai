@@ -1241,6 +1241,40 @@ export function cheapFloorAllowedForUser(userId: string | null | undefined, emai
 }
 
 /**
+ * HONEST ROUTING DIAGNOSIS (admin 2026-07-12, autopsy of fae70e42): a report that shows "Claude built
+ * this" never said WHY the cheap GLM/Kimi floor did NOT lead — so "1st call claude kyun?" was a guess.
+ * This resolves the EXACT reason from the same inputs the router uses, so every build report can state
+ * it plainly. Pure + exported for testing; reads the env for the flag + key presence (never the values).
+ */
+export function cheapFloorDecision(env: NodeJS.ProcessEnv, ctx: {
+  allowCheapFloor: boolean; routeStrong: boolean; freeTierBuildActive: boolean;
+  tierAllowed: boolean; userAllowed: boolean;
+}): { active: boolean; reason: string } {
+  const floor = (env.AGENTV3_CHEAP_FLOOR || 'on').trim().toLowerCase();
+  if (floor === 'off' || floor === '') {
+    return { active: false, reason: 'Cheap floor OFF (AGENTV3_CHEAP_FLOOR=off) → Claude leads. Set it to on/glm/kimi to make GLM/Kimi lead.' };
+  }
+  const hasGlm = !!(env.GLM_API_KEY && env.GLM_API_KEY.trim());
+  const hasKimi = !!(env.KIMI_API_KEY && env.KIMI_API_KEY.trim());
+  const hasBedrock = !!(env.BEDROCK_API_KEY && env.BEDROCK_API_KEY.trim());
+  const wantsGlm = floor === 'glm' || floor === 'both' || floor === 'on';
+  const wantsKimi = floor === 'kimi' || floor === 'both' || floor === 'on';
+  const wantsBedrock = floor === 'bedrock';
+  const keyOk = (wantsGlm && hasGlm) || (wantsKimi && hasKimi) || (wantsBedrock && hasBedrock);
+  if (!keyOk) {
+    const need = wantsBedrock ? 'BEDROCK_API_KEY' : [wantsGlm ? 'GLM_API_KEY' : '', wantsKimi ? 'KIMI_API_KEY' : ''].filter(Boolean).join('/');
+    return { active: false, reason: `Cheap floor '${floor}' is ON but no matching API key is set (${need}) → the keyless rung is skipped, Claude leads. Set the key in Cloud Run.` };
+  }
+  if (!ctx.allowCheapFloor) {
+    if (ctx.routeStrong) return { active: false, reason: 'Large project / import build → routed straight to the strong model by design (cheap floor intentionally skipped).' };
+    if (!ctx.userAllowed) return { active: false, reason: 'This build account is NOT in the AGENTV3_CHEAP_FLOOR_USERS canary allowlist → Claude leads. Clear that env var to enable GLM/Kimi for everyone.' };
+    if (!ctx.tierAllowed) return { active: false, reason: 'This app tier is not eligible for the cheap floor (escalation off + complex app) → strong model leads.' };
+    return { active: false, reason: 'Cheap floor not allowed for this build → Claude leads.' };
+  }
+  return { active: true, reason: `Cheap floor ACTIVE — ${floor.toUpperCase()} leads the first attempt; Claude/Haiku only backstop on failure.` };
+}
+
+/**
  * PR4 delivery telemetry — given per-provider turn counts gathered over a build (via the
  * `onProviderUsed` callback), return the provider that drove the MOST turns: the build's
  * dominant builder. AgentV3CostTelemetry records this as `deliveredVia`, so an admin can see
@@ -4220,7 +4254,22 @@ export function registerAgentV3Routes(app: Express): void {
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
       // reused by BOTH the agentic architect chain AND the fast lane (Simple Builder / OneShot), so the
       // fast lane is governed by the SAME policy as everything else — no divergent "direct Sonnet" path.
-      const allowCheapFloor = freeTierBuildActive || (!routeStrong && cheapFloorAllowedForTier(analysis?.startTier, workspaceId) && cheapFloorAllowedForUser(userId, email));
+      const cheapTierAllowed = cheapFloorAllowedForTier(analysis?.startTier, workspaceId);
+      const cheapUserAllowed = cheapFloorAllowedForUser(userId, email);
+      const allowCheapFloor = freeTierBuildActive || (!routeStrong && cheapTierAllowed && cheapUserAllowed);
+      // HONEST ROUTING RECORD (autopsy fae70e42): state in the build report EXACTLY why the cheap
+      // GLM/Kimi floor did or did not lead — so "1st call claude kyun?" is answered by the report
+      // itself, never a guess. Best-effort; never affects the build.
+      try {
+        const floorDecision = cheapFloorDecision(process.env, {
+          allowCheapFloor, routeStrong, freeTierBuildActive,
+          tierAllowed: cheapTierAllowed, userAllowed: cheapUserAllowed,
+        });
+        buildDiag.record({
+          phase: 'provider', severity: floorDecision.active ? 'info' : 'warning',
+          code: 'CHEAP_FLOOR_DECISION', message: floorDecision.reason, autoResolved: floorDecision.active,
+        });
+      } catch { /* diagnostics are best-effort — never blocks a build */ }
       const recordProviderFallback = (name: string, err: unknown): void => {
         // Structured per-provider failure TALLY (admin 2026-07-11: "kaun se providers fail hue,
         // kitni baar") + the existing per-event timeline entry (carries the message).

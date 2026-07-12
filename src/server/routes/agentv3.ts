@@ -840,6 +840,18 @@ export interface RunningBuild {
   workspaceId?: string;
 }
 const runningBuilds = new Map<string, RunningBuild>();
+
+/**
+ * TEST-ONLY seam (VITEST): register/clear a running build under a key so the /stop and /attach identity
+ * guards (T0-9 — match by VERIFIED uid, never a claimed body.userId) can be regression-tested;
+ * `runningBuilds` is module-internal. A hard no-op outside tests, so it can never affect production.
+ */
+export function __setRunningBuildForTest(key: string, rb: RunningBuild | null): void {
+  if (!process.env.VITEST) return;
+  if (rb) runningBuilds.set(key, rb);
+  else runningBuilds.delete(key);
+}
+
 const MAX_BUILD_BUFFER = 4000;
 /** The most recent build's diagnostics report per build key (userId) — for download/endpoint. */
 const lastDiagnostics = new Map<string, BuildDiagnosticsReport>();
@@ -2343,7 +2355,7 @@ export function registerAgentV3Routes(app: Express): void {
   // Stop the running build — aborts the agent loop (between turns), ends every attached stream, and
   // frees the slot so a fresh build can start. Under per-workspace locking (FIX #3) the client passes
   // `workspaceId` so Stop targets THIS app's build (not the whole account); flag OFF → the account key.
-  app.post('/api/agentv3/stop', (req: Request, res: Response) => {
+  app.post('/api/agentv3/stop', async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -2351,11 +2363,18 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     const stopWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    // SECURITY T0-9: match the build under the VERIFIED identity it was registered under — never the
+    // claimed body.userId, which would let a caller stop ANOTHER account's build by passing its uid
+    // (builds are keyed by /chat's resolveBuildIdentity = verified uid, or the anon bucket). The client
+    // already sends its Bearer token here for exactly this (the dead-Stop fix); the server just has to
+    // honour it. A token that can't be verified resolves to null → only the shared anon bucket, never
+    // another user's account key.
+    const verifiedStopUid = (await verifiedIdentity(req))?.uid ?? null;
     // CANDIDATE KEYS (admin's dead-Stop fix, 2026-07-06): the build may be registered under the
-    // workspace key, the claimed account key, OR the shared 'anon' bucket (when /chat's verified
+    // workspace key, the verified account key, OR the shared 'anon' bucket (when /chat's verified
     // identity fell back to anon — the exact case where Stop used to look up the WRONG key, stop
     // nothing, and leave the 409 loop unbreakable). Stop the FIRST live build found; free its lock.
-    const candidates = buildKeyCandidates(userId, stopWorkspaceId, perWorkspaceLockEnabled());
+    const candidates = buildKeyCandidates(verifiedStopUid, stopWorkspaceId, perWorkspaceLockEnabled());
     let wasRunning = false;
     for (const key of candidates) {
       const rb = runningBuilds.get(key);
@@ -2560,21 +2579,27 @@ export function registerAgentV3Routes(app: Express): void {
 
   // Resume: re-attach to a running build whose original connection was lost. Replays the
   // buffered events so the UI catches up, then streams live ones — same NDJSON contract.
-  app.post('/api/agentv3/attach', (req: Request, res: Response) => {
+  app.post('/api/agentv3/attach', async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;
     }
+    // SECURITY T0-9: /attach replays a build's full LIVE transcript, so it must match the build under the
+    // VERIFIED identity it was registered under — never the claimed body.userId, which would let a caller
+    // stream ANOTHER account's live build by passing its uid. The client already sends its Bearer token
+    // here for exactly this (the dead-Resume fix). A token that can't be verified resolves to null → only
+    // the shared anon bucket (still session-guarded below by the unguessable sessionId), never an account.
+    const verifiedAttachUid = (await verifiedIdentity(req))?.uid ?? null;
     // `workspaceId` is OPTIONAL for back-compat, but the panel's auto-resume ALWAYS sends the session
     // it's asking about. CANDIDATE KEYS (admin's dead-Resume fix, 2026-07-06): the build may live under
-    // the workspace key, the claimed account key, OR the shared 'anon' bucket (verified-identity
+    // the workspace key, the verified account key, OR the shared 'anon' bucket (verified-identity
     // fallback) — look in all three, refusing any build from a DIFFERENT session (session-aware match:
     // an anon-keyed build of the SAME session must attach, a different session's build never may).
     const requestedWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
     let rb: RunningBuild | undefined;
-    for (const key of buildKeyCandidates(userId, requestedWorkspaceId, perWorkspaceLockEnabled())) {
+    for (const key of buildKeyCandidates(verifiedAttachUid, requestedWorkspaceId, perWorkspaceLockEnabled())) {
       const cand = runningBuilds.get(key);
       if (!cand || cand.ended) continue;
       // Never replay a DIFFERENT session's build into the open one (defense-in-depth on every key).

@@ -161,9 +161,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
   }, [showWorkspace, tab]);
+  // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power). Declared BEFORE the
+  // billing-status effect so opening the popover can trigger a fresh powerUnlocked check (admin scenario
+  // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
+  // comes back; without this refetch the tiers stayed 🔒 until a full page reload).
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Paid-public (billing PR 5): learn whether this user is on paid billing and, if so, their wallet
   // balance — so the header can show a live ₹ chip and the composer can warn before a build is refused.
-  // Refetches when the user changes, after a build finishes (balance was just spent), and after a 402.
+  // Refetches when the user changes, after a build finishes (balance was just spent), after a 402, and
+  // whenever the settings popover opens (fresh powerUnlocked right where the tiers are shown).
   useEffect(() => {
     if (!userId) { setBilled(false); setPowerUnlocked(false); setWalletBalanceInr(null); setWalletTokens(null); return; }
     let cancelled = false;
@@ -191,9 +197,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       } catch { if (!cancelled) { setBilled(false); setWalletBalanceInr(null); setWalletTokens(null); } }
     })();
     return () => { cancelled = true; };
-  }, [userId, email, state.done, billingBlock]);
-  // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power).
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  }, [userId, email, state.done, billingBlock, settingsOpen]);
   // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
   // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.

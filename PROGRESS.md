@@ -14670,3 +14670,23 @@ Admin's final spec on top of Fix 56 (same PR #1244):
   users), so cost-routing is now account-wide; the weak-tier clamp is independent of it anyway.
 
 Gate: frontend tsc 0, server tsc 0, vitest 6062/6062 (+5), build PASS, boot:check PASS.
+
+## 2026-07-12 — Fix 56c: "maine recharge kar liya fir bhi tiers locked" — stale powerUnlocked fixed + honest chat guidance
+
+Admin asked what v3 answers when a user says "recharge kar diya, fir bhi tier select nahi ho rahe". Verified
+the flow end-to-end (rule 4): the REAL Cashfree verify path (`computeCreditedWallet`) does set
+`totalMoneySpent` on every branch → the server-side unlock (`isFreeTierUser` → `powerUnlocked`) is correct.
+The REAL gap was the CLIENT: `powerUnlocked` was fetched once per page load, so a user who recharged on the
+Wallet page and returned without a reload still saw all four paid tiers 🔒 — exactly the complaint scenario.
+
+Fixes (same PR #1244):
+- `AgentV3Panel`: the billing/power status now REFETCHES whenever the 🎚️ settings popover opens (the exact
+  moment the tiers are shown) — recharge → open settings → tiers unlock, no page reload needed. (Popover
+  state declared before the effect; added to its deps.)
+- AppKnowledgeBase Power entry: for the "already paid but still locked" case, every AI surface is told to
+  NEVER repeat "recharge karo" — instead, in the user's language and fresh words: (1) reopen the 🎚️
+  settings popover / refresh once (it re-checks the account); (2) confirm the payment shows SUCCESS + tokens
+  credited in Wallet & Billing; (3) if verified paid and still locked, apologize and route to support with
+  the payment reference. No blame, no loops.
+
+Gate: frontend tsc 0, server tsc 0, vitest 6062/6062. Client + AKB only (no billing-path code touched).

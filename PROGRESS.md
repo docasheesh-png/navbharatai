@@ -14758,3 +14758,35 @@ Note: the AskUserQuestion to confirm the security-vs-resilience trade-off failed
 via empty-not-error) — reversible, and the admin can dial it back if the rare empty-history case ever bites.
 Regression test: tests/routesConversationsEnum.test.ts (claimed ?userId / body.userId with no token →
 empty list). Gate: tsc fe+server 0, vitest 6072/6072.
+## 2026-07-12 — "sab chala gaya" FIXED: a build that finished during a stream drop now auto-restores its chat + preview
+
+Admin (IMG_5822/5823 + report a06e7fd2): "app bani thi, banne ke baad last second par sab chala gaya —
+sara chat data, sara preview." Verified NOT fixed on current main first (admin: "shayad dusre account se
+fix ho chuka — pehle padh lo") — the bug is live.
+
+Root cause (traced end-to-end): the 949s TaskLite build finished successfully (ok:true, GLM 32 + KIMI
+107, 84/100 READY), but a mobile stream drop triggered `resume()`, which:
+1. wiped the live state (`setState(initialAgentV3State())`), then
+2. got `gone-notice` from /attach (the build had already FINISHED), and
+3. only printed the "that build isn't running anymore" banner — it NEVER re-loaded the finished build's
+   durable transcript. The sticky-restore effect is blocked by its own guard (userMsgs still holds the
+   prompt), so nothing recovered the chat/preview even though everything was durable server-side.
+
+Fix (reuses the PROVEN manual-recovery path — no new restoration logic invented):
+- `resume()` now RETURNS its outcome (`ReconnectOutcome | 'aborted'`) instead of void.
+- New pure `shouldRestoreFinishedBuild(outcome)` = `outcome === 'gone-notice'` (tested).
+- The panel's auto-resume effect, on `gone-notice`, PEEKS the durable transcript (loadConversation) and,
+  only when it genuinely has content, runs `openConversation(v3_<sid>, {silent:true})` — the exact
+  restore the user already gets by opening the chat from History. The peek-first guard means a
+  not-yet-saved transcript keeps the banner instead of being blanked (no regression).
+- Preview half: PreviewSurface now receives `expectedWorkspaceId()` (state.workspaceId → else this
+  session's derived id) instead of raw `state.workspaceId`, so a restored/idle session recompiles the
+  preview from its durable files, exactly like the file-rehydrate effect already does. Live builds are
+  unchanged (state.workspaceId wins).
+
+Tests: agentV3StreamError.test.ts +3 (restore only on gone-notice; not on gone-silent/live/error/aborted).
+Gate: fe tsc 0 (pre-existing mobile-plugin errors only), vitest 6067 pass. Client-only.
+
+Honest note (rule 6): the deeper transcript/timeline restoration subsystem is heavily owned by the
+parallel account; this fix deliberately routes through its existing tested openConversation path rather
+than re-implementing restore, to avoid touching that architecture.

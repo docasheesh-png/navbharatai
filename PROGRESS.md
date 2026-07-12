@@ -14356,3 +14356,25 @@ GLM/Kimi did or didn't lead — this class of question answers itself forever.
 
 Tests: agentv3.test.ts +6 (active / off / key-missing / canary / strong-route / unset-defaults-on).
 Gate: server tsc 0, vitest 6005 pass.
+
+## 2026-07-12 — Build report: per-provider token/API-call usage + charge-to-user, made explicit (admin)
+
+Admin: "build report me kitne token API call me provider ne use kiya! aur hamne user se kitna charge
+kiya woh bhi add karo." The data already existed in the JSON (providerDelivery = call counts,
+providerTokens = in/out, billing = charge) but the human-readable report showed tokens only as a single
+combined number and no call count. Reworked renderDiagnosticsText's usage/billing section into an
+explicit per-provider block:
+
+  Provider usage (per provider — API calls · input · output · total tokens):
+    GLM     : 2 call(s) · 500,000 in · 100,000 out · 600,000 total
+    CLAUDE  : 1 call(s) · 4,000 in · 2,000 out · 6,000 total
+    TOTAL   : 3 call(s) · 504,000 in · 102,000 out · 606,000 total
+  User tier: paid
+  Charged to user: ₹128.25 ($1.5000) · 12,825 wallet tokens debited
+
+Joins providerDelivery (calls) with providerTokens (in/out), adds a TOTAL row, and relabels the billing
+line to "Charged to user" (₹ first, then $). 'other' = plan/judge/aux calls. Nothing shown when a lane
+recorded no usage (older/clean reports unchanged).
+
+Tests: BuildDiagnostics.test.ts — rewrote the render test to assert the per-provider calls·in·out·total
+rows, the TOTAL row, and the charge-to-user line. Gate: server tsc 0, vitest 6005 pass.

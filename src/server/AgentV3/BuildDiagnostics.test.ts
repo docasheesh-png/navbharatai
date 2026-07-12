@@ -710,19 +710,24 @@ describe('billing & provider facts in the report (free/paid, builtBy, failures, 
     expect(r.providerTokens?.GLM.inputTokens).toBe(800_000);
   });
 
-  it('renders the new facts in the TEXT report (tier, billed, failures, tokens lines)', () => {
+  it('renders per-provider usage (calls·in·out·total) + charge-to-user in the TEXT report', () => {
     const d = new BuildDiagnostics({ now: () => 1 });
-    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('GLM'); d.recordProviderTurn('GLM'); d.recordProviderTurn('CLAUDE');
     d.recordProviderFailure('VERTEX');
     d.setBilling({ userTier: 'paid', billedUsd: 1.5, billedInr: 128.25, walletTokensDebited: 12_825, powerMode: false });
-    d.setProviderTokens({ GLM: { inputTokens: 500_000, outputTokens: 100_000 } });
+    d.setProviderTokens({ GLM: { inputTokens: 500_000, outputTokens: 100_000 }, CLAUDE: { inputTokens: 4_000, outputTokens: 2_000 } });
     d.finish(true, 'built');
     const text = renderDiagnosticsText(d.report());
+    expect(text).toContain('Provider usage (per provider — API calls · input · output · total tokens):');
+    // GLM: 2 calls, 500k in, 100k out, 600k total
+    expect(text).toContain('GLM     : 2 call(s) · 500,000 in · 100,000 out · 600,000 total');
+    // CLAUDE: 1 call, 4k in, 2k out, 6k total
+    expect(text).toContain('CLAUDE  : 1 call(s) · 4,000 in · 2,000 out · 6,000 total');
+    // TOTAL across providers
+    expect(text).toContain('TOTAL   : 3 call(s) · 504,000 in · 102,000 out · 606,000 total');
     expect(text).toContain('User tier: paid');
-    expect(text).toContain('Billed   : $1.5000 (₹128.25)');
-    expect(text).toContain('Wallet   : −12,825 tokens debited');
+    expect(text).toContain('Charged to user: ₹128.25 ($1.5000) · 12,825 wallet tokens debited');
     expect(text).toContain('Failures : VERTEX ×1');
-    expect(text).toContain('Tokens   : GLM 600.0k');
     expect(text).toContain('Built by : GLM');
   });
 

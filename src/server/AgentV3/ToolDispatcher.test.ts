@@ -85,6 +85,43 @@ describe('ToolDispatcher', () => {
     expect(res.content).not.toContain('edit_file');
   });
 
+  // T1-sec-redact: a command that prints a secret must never leak it into the model transcript,
+  // the terminal, or the user-visible tool_result event. Command output is safe to mask (it is
+  // never an edit_file match source), so the returned content itself is redacted.
+  it('bash output masks a leaked API key in the returned content AND the tool_result event', async () => {
+    const secret = 'sk-ant-abcdef0123456789ABCDEFGHIJ';
+    act.commandResult = { exitCode: 0, stdout: `printed key ${secret}\n`, stderr: '' };
+    const res = await d.dispatch(call('bash', { command: 'printenv ANTHROPIC_API_KEY' }), 'backend');
+    expect(res.is_error).toBe(false);
+    expect(res.content).not.toContain(secret);
+    expect(res.content).toContain('[REDACTED:api-key]');
+    const result = events.find((e) => e.type === 'tool_result');
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it('bash masks a secret printed to stderr too', async () => {
+    const secret = 'xai-ABCDEFGHIJKLMNOPQRSTUV0123';
+    act.commandResult = { exitCode: 1, stdout: '', stderr: `auth failed with token ${secret}\n` };
+    const res = await d.dispatch(call('bash', { command: 'node run.js' }), 'backend');
+    expect(res.content).not.toContain(secret);
+    expect(res.content).toContain('[REDACTED:api-key]');
+  });
+
+  it('grep masks a secret sitting in a matched line', async () => {
+    const secret = 'AIzaSyA1234567890123456789012345678901';
+    act.commandResult = { exitCode: 0, stdout: `src/.env:3:GEMINI_API_KEY=${secret}\n`, stderr: '' };
+    const res = await d.dispatch(call('grep', { pattern: 'KEY', path: 'src' }), 'backend');
+    expect(res.content).not.toContain(secret);
+    expect(res.content).toContain('[REDACTED:');
+  });
+
+  it('bash leaves ordinary (non-secret) output untouched', async () => {
+    act.commandResult = { exitCode: 0, stdout: 'added 42 packages in 3s\n', stderr: '' };
+    const res = await d.dispatch(call('bash', { command: 'npm install' }), 'backend');
+    expect(res.content).toContain('added 42 packages in 3s');
+    expect(res.content).not.toContain('[REDACTED');
+  });
+
   it('write_files_batch records create vs modify honestly and warns on a wholesale overwrite', async () => {
     // One brand-new file + one that already exists → the batch must record the second as a MODIFY
     // and surface a full-rewrite warning naming it (not silently record both as "create").
@@ -1227,7 +1264,10 @@ describe('ToolDispatcher — secret redaction on the user-visible event surface 
     d = new ToolDispatcher(act, 'ws-1', state, stream);
   });
 
-  it('redacts a secret in bash stdout from the tool_result summary, but keeps it in model content', async () => {
+  it('redacts a secret in bash stdout from BOTH the tool_result summary and the model content (T1-sec-redact)', async () => {
+    // Command output is never an edit_file match source, so — unlike read_file content — it is safe to
+    // mask in the model-facing content too. This closes the transcript leak the R1.1 surface-only
+    // redaction left open (a secret printed by `printenv`/`cat .env` used to persist in the transcript).
     const secret = 'sk-ant-api03-' + 'A'.repeat(30);
     act.commandResult = { exitCode: 0, stdout: `ANTHROPIC_API_KEY=${secret}`, stderr: '' };
     const res = await d.dispatch(call('bash', { command: 'printenv ANTHROPIC_API_KEY' }));
@@ -1236,8 +1276,9 @@ describe('ToolDispatcher — secret redaction on the user-visible event surface 
     // User-visible summary must NOT contain the raw secret.
     expect(result && 'summary' in result ? (result as { summary: string }).summary : '').not.toContain(secret);
     expect(result && 'summary' in result ? (result as { summary: string }).summary : '').toContain('[REDACTED:');
-    // Model-facing content is intact (so the agent can still reason; exact-match edits never break).
-    expect(res.content).toContain(secret);
+    // Model-facing content is now ALSO redacted — the secret never reaches the persisted transcript.
+    expect(res.content).not.toContain(secret);
+    expect(res.content).toContain('[REDACTED:');
   });
 
   it('redacts a secret inlined in the tool_call input shown to the user', async () => {

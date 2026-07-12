@@ -13,12 +13,22 @@ describe('readWalletBalanceInr — fail-open wallet balance read', () => {
     expect(await readWalletBalanceInr(reader({ remaining_balance: -12.5 }), 'u1')).toBe(-12.5);
   });
 
-  it('unknown → null: missing doc, missing/non-numeric field, NaN', async () => {
+  it('unknown → null ONLY when neither ₹ nor token balance is present', async () => {
     expect(await readWalletBalanceInr(reader(null), 'u1')).toBeNull(); // no wallet doc yet
-    expect(await readWalletBalanceInr(reader({}), 'u1')).toBeNull(); // field absent
-    expect(await readWalletBalanceInr(reader({ remaining_balance: 'x' }), 'u1')).toBeNull();
+    expect(await readWalletBalanceInr(reader({}), 'u1')).toBeNull(); // neither field
+    expect(await readWalletBalanceInr(reader({ remaining_balance: 'x' }), 'u1')).toBeNull(); // both non-numeric/absent
     expect(await readWalletBalanceInr(reader({ remaining_balance: NaN }), 'u1')).toBeNull();
-    expect(await readWalletBalanceInr(reader({ remaining_balance: Infinity }), 'u1')).toBeNull();
+    expect(await readWalletBalanceInr(reader({ remaining_balance: Infinity, tokenBalance: 'y' }), 'u1')).toBeNull();
+  });
+
+  it('FALLBACK to tokenBalance (₹ = tokens/100) when remaining_balance is absent — no fail-open free build', async () => {
+    // The reported bug: a wallet with 0 tokens and no ₹ mirror must read as ₹0 (blockable), not null.
+    expect(await readWalletBalanceInr(reader({ tokenBalance: 0 }), 'u1')).toBe(0);
+    expect(await readWalletBalanceInr(reader({ tokenBalance: 500 }), 'u1')).toBe(5); // 500 tokens = ₹5
+    // an explicit numeric remaining_balance still WINS over the token fallback
+    expect(await readWalletBalanceInr(reader({ remaining_balance: 12, tokenBalance: 999 }), 'u1')).toBe(12);
+    // remaining_balance non-numeric but tokenBalance present → derive from tokens
+    expect(await readWalletBalanceInr(reader({ remaining_balance: null, tokenBalance: 250 }), 'u1')).toBe(2.5);
   });
 
   it('FAIL-OPEN: a reader that throws yields null (never propagates, never blocks a build)', async () => {

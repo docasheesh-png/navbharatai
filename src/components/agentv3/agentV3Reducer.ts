@@ -222,7 +222,9 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return { ...state, done: true, ok: event.ok, summary: event.summary, billedUsd: event.billedUsd, billedInr: event.billedInr, resumable: event.resumable === true, planRemaining: typeof event.planRemaining === 'number' ? event.planRemaining : undefined, tokens: typeof event.tokens === 'number' ? event.tokens : undefined, walletTokensDebited: typeof event.walletTokensDebited === 'number' ? event.walletTokensDebited : undefined, walletTokenBalance: typeof event.walletTokenBalance === 'number' ? event.walletTokenBalance : undefined, pendingPermission: undefined, ...(event.buildId ? { buildId: event.buildId } : {}), ...(event.promptHash ? { promptHash: event.promptHash } : {}), ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}), ...(event.readiness ? { buildHealth: event.readiness } : {}) };
 
     case 'error':
-      return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined };
+      // A crashed build now carries its diagnostics report (server attaches it) — keep it so the
+      // failure card / "Build report" renders and the user can see WHAT went wrong, not a bare error.
+      return { ...state, done: true, ok: false, error: event.message, pendingPermission: undefined, ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}) };
 
     default:
       return state;

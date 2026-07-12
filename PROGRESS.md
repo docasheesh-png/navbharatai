@@ -14271,3 +14271,39 @@ NO AI turn is spent.
 - Tests: `previewDeepRefresh.test.ts` (4 cases: recovered→no AI, still-broken→AI, throw→AI, refresh-runs-
   first). AppKnowledgeBase "ONE-CLICK AI FIX" entry updated to describe the deep-refresh-first behavior.
 Gate: fe tsc 0 (pre-existing mobile-plugin-only errors unrelated), server tsc 0, vitest 5983 pass, boot ok.
+Shipped as PR #1232 (merged, CI green).
+
+## 2026-07-12 — ROOT CAUSE (autopsy fae70e42): deterministic named↔default import reconciler kills the #1 recurring build blocker
+
+Autopsy of build report fae70e42 ("ghadi ka time real time sync nahi hai. fix karo", Sonnet, ok:false):
+66 self-heals (incl. a clean sandbox-recycle restore of 18 files), 1 real failure — and it is the SAME
+class I've now seen in the Notes, Car-typing and Watch reports. The generator wrote TEST files with a
+NAMED import for a DEFAULT-exported component:
+  src/App.test.tsx:2       import { App }       from './App'      (App is `export default`)
+  src/Watch.test.tsx:2     import { Watch }     from './Watch'
+  src/WatchHand.test.tsx:2 import { WatchHand } from './WatchHand'
+The import/export readiness gate correctly flags these as build-breaking "broken imports" → NOT READY
+62/100 → ok:false, while the chat still LED with "✅ Fix ho gaya!" (honesty mismatch). Nothing ever fixed
+them because in an edit turn the agent's intent is elsewhere and these files are never revisited.
+
+Root-cause fix (rule 4 — fix the CLASS, not the instance): a new deterministic reconciler,
+`ImportExportReconcile.ts` (`reconcileImportExports`), repairs the UNAMBIGUOUS named↔default mismatches:
+- CASE A: `import { App } from './App'` where App is not a named export but IS the default (default's own
+  identifier === App) → rewrite to `import App from './App'`.
+- CASE B: `import App from './m'` where App has no default but IS a named export → rewrite to `import { App }`.
+Intent-preserving + paranoid-safe: only acts when the exact name is exported the opposite way; never
+guesses, never renames, skips namespace imports / wildcard re-exports / anonymous defaults / aliases /
+parse failures. Built on ts-morph, rewrites via replaceWithText (clean braces), pure + never throws — so
+it can ONLY turn a broken build into a working one, never the reverse.
+
+Wired into the ONE place the false blocker is born — the `evaluate`/readiness gate in ToolDispatcher.ts
+(right before `analyzeImportExports`): reconcile first, PERSIST corrected files through the same durable
+write path as any file write (actuator.writeFile + onFileWrite + memory reindex), then the analyzers see
+the repaired content so the readiness verdict reflects the fix. Emits an honest narration ("Auto-fixed N
+import(s)…") which flows into the diagnostics report. Kill switch `AGENTV3_IMPORT_RECONCILE=off` (default ON).
+
+Tests: `ImportExportReconcile.test.ts` (13 — the exact 3-file fae70e42 case clears the blocker, const/
+function defaults, preserves co-imports, Case B, + safety: anonymous default, name-mismatch coincidence,
+aliased, already-correct, external pkg, unparseable). ToolDispatcher.test.ts +2 integration (auto-fix
+clears the blocker AND persists the corrected file; a genuinely-missing export still blocks — no
+over-reach). Gate: fe tsc 0 (pre-existing mobile-only), server tsc 0, vitest 5998 pass, boot PASS.

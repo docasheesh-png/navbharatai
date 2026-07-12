@@ -1311,6 +1311,34 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).toContain('NOT READY');
   });
 
+  it('AUTO-FIXES a named import of a default export (the recurring test-file bug) so it does NOT block', async () => {
+    // Root cause fae70e42/Notes/Car/Watch: generated test files do `import { App } from './App'` for a
+    // DEFAULT-exported App → readiness NOT READY (ok:false). The deterministic reconciler must rewrite
+    // it to a default import at the gate, clearing the false blocker AND persisting the corrected file.
+    const dd = makeDispatcher('ws-eval-import-autofix');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));
+    await write(dd, 'src/App.tsx', 'export default function App() { return null; }\n');
+    await write(dd, 'src/App.test.tsx', "import { App } from './App';\nexport const t = App;\n");
+    const out = await evalText(dd);
+    expect(out).not.toContain('broken import'); // the blocker is auto-repaired, not raised
+    // The corrected import is persisted through the actuator (durable write path).
+    const fixed = (await dd.dispatch(call('read_file', { path: 'src/App.test.tsx' }))).content;
+    expect(fixed).toContain("import App from './App'");
+    expect(fixed).not.toContain('{ App }');
+  });
+
+  it('still BLOCKS a genuinely-missing named import (reconciler does not over-reach)', async () => {
+    // A name that is exported NEITHER as named NOR default has no safe reconciliation — it must stay a
+    // real blocker so the agent fixes it (the reconciler only touches unambiguous named<->default swaps).
+    const dd = makeDispatcher('ws-eval-import-nofix');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: {} }));
+    await write(dd, 'src/util.ts', 'export const add = 1;');
+    await write(dd, 'src/App.tsx', "import { subtract } from './util';\nexport const v = subtract;\n");
+    const out = await evalText(dd);
+    expect(out).toContain('broken import');
+    expect(out).toContain('NOT READY');
+  });
+
   it('BLOCKS readiness on a hook called but never imported', async () => {
     const dd = makeDispatcher('ws-eval-undefhook');
     await write(dd, 'package.json', JSON.stringify({ dependencies: { react: '^18' } }));

@@ -48,6 +48,7 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
+import { reconcileImportExports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -1217,6 +1218,30 @@ export class ToolDispatcher {
         // so they degrade to "no finding" rather than ever false-blocking a working build.
         const astFiles: Record<string, string> = {};
         for (const s of snap.sources) astFiles[s.path] = s.content;
+        // DETERMINISTIC IMPORT SELF-HEAL (root cause — recurring generator bug, admin reports
+        // fae70e42 / Notes / Car / Watch): before the import/export gate can flag a build-breaking
+        // "broken import", auto-repair the UNAMBIGUOUS named<->default mismatches — e.g. a generated
+        // test file `import { App }` for a default-exported `App`. Intent-preserving + proven safe
+        // (only acts when the exact name is exported the opposite way), so it can only turn a broken
+        // build into a working one. Corrected files persist via the SAME durable write path as any
+        // file write (actuator + onFileWrite), and the reconciled content feeds the analyzers below so
+        // the readiness verdict reflects the repair. Kill switch: AGENTV3_IMPORT_RECONCILE=off.
+        if (process.env.AGENTV3_IMPORT_RECONCILE !== 'off') {
+          try {
+            const rec = await reconcileImportExports(astFiles);
+            if (rec.fixes.length) {
+              for (const fx of rec.fixes) {
+                const content = rec.files[fx.file];
+                if (typeof content !== 'string') continue;
+                astFiles[fx.file] = content;
+                try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
+              }
+              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Auto-fixed ${rec.fixes.length} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`, ts: Date.now() });
+            }
+          } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
+        }
         const [hooksRep, importRep, jsxRep, undefHookRep] = await Promise.all([
           analyzeHooksRules(astFiles),
           analyzeImportExports(astFiles),

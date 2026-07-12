@@ -14250,3 +14250,24 @@ a parallel session — the fix itself is unchanged. Gate: tsc fe+server 0, vites
 
 OPEN (unrelated, seen in same console): `/api/build-session/pro-…` 404 on the Pro v3.0 tab. Tracked for a
 later look; independent of payment.
+
+## 2026-07-12 — "Fix with AI" tries a FREE deep refresh BEFORE spending an AI turn (admin request)
+
+Admin: "jab preview me app na chale, to 'Fix with AI' par click karne se PEHLE ek deep refresh hona
+chahiye — ho sakta hai chal jaye." Motivating evidence: build report fae70e42 showed a blank WebGL
+canvas that fixed ITSELF after a clean dev-server restart + re-publish — no code change. Spending an
+AI turn (and the user's credit) on a preview that would recover on its own is pure waste.
+
+Change: the in-browser Preview's "Fix with AI" button (PreviewSurface.tsx, shown when the preview
+fails to compile) now runs a cache-bypassing DEEP REFRESH first. Only if the app STILL doesn't render
+does it hand the exact error to the AI (the existing prepopulate-the-chat flow). If the deep refresh
+recovers the preview, a green "recovered after a deep refresh — no AI fix was needed" note is shown and
+NO AI turn is spent.
+- Server (`/api/agentv3/inbrowser-preview`): new `fresh:true` body flag SKIPS the render-cache READ so a
+  stale cached render can never mask a recovery (still WRITES the fresh render → normal reloads stay fast).
+- Client: `loadInBrowser({fresh})` now returns whether the app rendered (non-empty HTML). New pure flow
+  module `previewDeepRefresh.ts` (`fixWithAiAfterDeepRefresh`) encodes the branch: deep-refresh → recovered?
+  skip AI : send to AI. A refresh that THROWS falls through to the AI (never swallows the user's intent).
+- Tests: `previewDeepRefresh.test.ts` (4 cases: recovered→no AI, still-broken→AI, throw→AI, refresh-runs-
+  first). AppKnowledgeBase "ONE-CLICK AI FIX" entry updated to describe the deep-refresh-first behavior.
+Gate: fe tsc 0 (pre-existing mobile-plugin-only errors unrelated), server tsc 0, vitest 5983 pass, boot ok.

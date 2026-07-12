@@ -577,6 +577,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     autoRestoredSessionRef.current = sid; // explicit resume → mark handled (auto-restore must not override)
     rehydratedWsRef.current = '';         // re-arm file rehydrate for the resumed workspace
     reset();
+    // Session switch = full surface switch: the resumed chat must not inherit the PREVIOUS session's
+    // plan/advice threads, report history, git/ship state, or preview (same class as the "+New chat"
+    // leak). Its own durable framework is adopted below when known.
+    clearProjectSurfaces();
+    setFramework('vite-react');
     // Seed instantly from the passed thread (legacy chat_sessions copy — may be empty for sessions
     // saved after the metadata-only cutover), then replace with the SERVER transcript below: the
     // server ConversationStore is the single source of truth for what was actually said.
@@ -994,6 +999,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // items used to silently no-op (`if (running) return`) for as long as the current session's build
   // was in progress — with auto-resume now correctly reattaching to a genuinely long build, this made
   // the panel look permanently "stuck" on whatever chat had an active build.
+  // "+New chat" ROOT CAUSE (admin 2026-07-12: "new chat me sirf main chatbox naya hota hai — preview,
+  // report, plan, advice sab purane build ke rehte hain"): startNewSession only cleared the CHAT
+  // thread; every other per-project surface lived in its own state and silently survived into the new
+  // session. This clears ALL of them in one place, shared by New-chat, resume, and open-chat so no
+  // session switch can ever leak a previous project's surfaces again.
+  const clearProjectSurfaces = () => {
+    // Plan / Advice lanes — their threads, any streaming reply, proposed steps, and the step queue.
+    roleAbortRef.current?.abort();
+    setRoleBusy(false);
+    setRoleThreads({ planner: [], advisor: [] });
+    setRoleProposedSteps(null);
+    setAddedSteps(new Set());
+    setQueueItems([]);
+    setQueueOpen(false);
+    setChatMode('build');
+    // Report surfaces — the past-builds dropdown and any picked past build.
+    setSelectedHistoryBuildId(null);
+    setHistoryReportItems([]);
+    setHistoryReportOpen(false);
+    // Git / ship / billing footers from the previous project.
+    setGitStatus(null);
+    setRestoreNote('');
+    setShipNote(null);
+    setBilled(false);
+    // Composer extras + workspace view: back to the defaults a truly new chat starts with. The
+    // preview surface unmounts (previewEverOpened=false), so no stale iframe can survive; its own
+    // workspaceId-keyed clear (PreviewSurface) covers the mounted case too.
+    setImportUrl('');
+    setTab('preview');
+    setShowWorkspace(false);
+    setPreviewEverOpened(false);
+  };
+
   const startNewSession = () => {
     sessionIdRef.current = newSessionId();
     persistSessionId(sessionIdRef.current); // the new project is now the sticky one across reloads
@@ -1006,6 +1044,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setAgentHistory([]);
     setCheckpointHistory([]);
     setFiles([]);
+    clearProjectSurfaces();
+    setFramework('vite-react'); // a new project starts on the default stack, not the previous one's
     reset();
   };
 
@@ -1166,6 +1206,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setAgentHistory([]);
       setCheckpointHistory([]);
       setFiles([]);
+      // Session switch = full surface switch (same class as the "+New chat" leak): the opened chat
+      // must not inherit the previous session's plan/advice threads, report history, git/ship state,
+      // or preview. Its own durable framework is adopted just below when known.
+      clearProjectSurfaces();
+      setFramework('vite-react');
       const restored = await loadConversation({ userId, email, id });
       if (restored) {
         if (restored.workspaceId) {
@@ -1470,6 +1515,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           payload = await getLatestDiagnostics(null);
           if (!payload) { alert('No build report yet — build an app first, then download the report.'); return; }
         }
+      } else if (userMsgs.length === 0 && agentHistory.length === 0) {
+        // BLANK NEW CHAT (admin 2026-07-12, "+New chat" leak): zero messages + no workspace = this
+        // chat has never built anything, so it honestly has NO report. Without this guard the
+        // per-user "latest" fallback below would hand back the PREVIOUS project's report here.
+        alert('No build report yet in this chat — build an app first, then download the report.');
+        return;
       } else {
         // NO LIVE WORKSPACE (a reopened/remounted panel — Fix 26, the "No build report yet" after a
         // finished build, 2026-07-07): the report is stored per-WORKSPACE, and this session's workspace

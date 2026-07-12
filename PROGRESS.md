@@ -14414,3 +14414,28 @@ OPEN (honest, rule 6): the deeper systemic gap is that the fast lane declares "B
 without a real tsc type-check, so undefined-name bugs slip through. The auto-adder fixes the shared-symbol
 class deterministically; a fast-lane tsc gate (to catch the general "Cannot find name" case) is a larger
 follow-up tracked here.
+
+## 2026-07-12 — "+New chat" now truly starts NEW: preview/plan/advice/report/git surfaces no longer leak (admin bug)
+
+Admin: "v3.0 ne app build ki, uske baad +New chat kiya to sirf main chatbox hi naya hota hai — preview,
+report, files, plan and advice sab purane build ke same rahte hai."
+
+Root causes (two, both fixed):
+1. PreviewSurface held its compiled `html` in its OWN state and never cleared it when `workspaceId`
+   changed — "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
+   Fix: the existing workspaceId-keyed clear effect now also clears html/kind/err (a workspace's
+   compiled HTML dies with that workspace).
+2. `startNewSession` cleared only the CHAT thread; every other per-project surface lived in separate
+   panel state and silently survived: plan/advice role threads + streaming reply + proposed steps +
+   step queue, report history dropdown (selectedHistoryBuildId/historyReportItems), git status /
+   restore note / ship note / billed flag, importUrl, framework, tab/showWorkspace/previewEverOpened.
+   Fix: new `clearProjectSurfaces()` clears ALL of them, and is shared by all three session-switch
+   paths — "+New chat", History resume, and open-chat — so no switch can leak a previous project's
+   surfaces (fix-the-class, rule 4). startNewSession additionally resets framework to the default.
+3. Report honesty: in a BLANK new chat (zero messages, no workspace) the report download used the
+   per-user "latest" fallback and handed back the PREVIOUS project's report. Now it honestly says
+   "No build report yet in this chat" (the fallback still works for reopened/remounted sessions —
+   the guard only fires when the chat has no messages at all).
+
+Gate: fe tsc 0 (pre-existing mobile-plugin-only errors — both ARE in package.json; this container's
+node_modules is stale, CI's npm ci installs them), server untouched, vitest 6014 pass. Client-only.

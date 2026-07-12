@@ -73,7 +73,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // A4: do NOT force the view to "live" just because a live URL arrived — that yanked the user off the
   // reliable in-browser render onto an ephemeral sandbox URL (the flakiness source). Live is opt-in via
   // the toggle; the "Live server" button lights up as available whenever `effectiveUrl` exists.
-  useEffect(() => { setFoundUrl(''); setDiagResult(null); }, [workspaceId]); // a new workspace never inherits a stale diagnosis
+  // A new/changed workspace never inherits ANY of the previous project's surface: not a stale
+  // diagnosis, and — the "+New chat" bug (admin 2026-07-12) — not the previous app's compiled HTML.
+  // `html` only ever loads under a truthy workspaceId, so it must die with that workspaceId; without
+  // this, "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
+  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setErr(''); }, [workspaceId]);
 
   const runDiagnose = useCallback(async () => {
     if (!workspaceId) return;

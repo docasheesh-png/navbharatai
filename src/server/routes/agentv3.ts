@@ -106,7 +106,8 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { freeTierCheapEnabled, isFreeTierBuild, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage } from '../AgentV3/FreeTierBuildRouting';
+import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage } from '../AgentV3/FreeTierBuildRouting';
+import { clampPowerForUser } from '../AgentV3/powerGating';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
 import { usdInrRate } from '../lib/UsdInrRate';
@@ -1634,7 +1635,7 @@ let lastDiagProbeTs = 0;
 
 export function registerAgentV3Routes(app: Express): void {
   // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
-  app.get('/api/agentv3/status', (req: Request, res: Response) => {
+  app.get('/api/agentv3/status', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     // `workspaceId` is OPTIONAL (older/other callers that only care "is this account building
@@ -1668,6 +1669,16 @@ export function registerAgentV3Routes(app: Express): void {
       // add-credits block screen only when this is true — so nothing money-related is visible while the
       // flag is off (today) or for admin/tester free-list accounts.
       billed: isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(userId, email),
+      // POWER-TIER GATING (admin 2026-07-12) — is this account allowed the PAID power tiers (normal/strong/
+      // powerful/full team)? True for a free-list admin/tester OR a user who has EVER purchased. A free user
+      // (never purchased) gets false → the UI shows ONLY 'weak'. The build route enforces the same clamp
+      // server-side, so this is purely which tiers to SHOW. Computed via the same wallet read the UI uses.
+      powerUnlocked: await (async () => {
+        if (isAgentV3FreeUser(userId, email)) return true; // free-list admin/tester → all tiers
+        if (!userId) return false;
+        const w = await firestoreWalletReader(getDb())(userId).catch(() => null);
+        return !isFreeTierUser(w); // has ever purchased (totalMoneySpent > 0) → paid → all tiers
+      })(),
       buildRunning,
       buildRunningHere,
       ...agentV3Status(),
@@ -3295,8 +3306,32 @@ export function registerAgentV3Routes(app: Express): void {
     // boolean (→ 'mini'). `onlyOpus` below stays a boolean (true for any Opus power level)
     // so every existing boolean call site — vision, cost-ladder, escalation — is unchanged.
     const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
-    const powerSpecResolved = powerSpec(powerLevelReq);
+    // POWER-TIER GATING (admin 2026-07-12): a FREE user (logged in, never purchased, NOT free-list) may use
+    // ONLY the cheap 'weak' tier (GLM/Kimi, never Claude). Clamp it SERVER-SIDE — the UI only shows 'weak'
+    // to free users, but the server enforces it so a UI bypass (a hand-crafted request with power:'max')
+    // can never spend NavBharatAI's Claude/Opus budget. Free-list admins/testers + paying users keep all
+    // five tiers. The wallet is read here ONLY when a non-free-list user asks for a NON-weak tier (so the
+    // common free→weak path costs no extra Firestore read).
+    const powerFreeListUnrestricted = isAgentV3FreeUser(userId, email);
+    let powerLevelReqEffective = powerLevelReq;
+    if (!powerFreeListUnrestricted && powerLevelReq !== 'weak') {
+      const powerWallet = userId ? await firestoreWalletReader(getDb())(userId).catch(() => null) : null;
+      // isFreeTierUser(null) → true (conservative: an unreadable wallet is treated as free → clamped to
+      // weak). Fail-CLOSED on purpose — a Firestore blip must never let a free account reach a paid tier.
+      const isPaidForPower = !isFreeTierUser(powerWallet);
+      powerLevelReqEffective = clampPowerForUser(powerLevelReq, isPaidForPower);
+    }
+    const powerSpecResolved = powerSpec(powerLevelReqEffective);
     const onlyOpus = powerSpecResolved.powerMode;
+    // Honest guard (rule 6): if a build is forced onto the cheap 'weak' tier but NO cheap floor is
+    // configured (AGENTV3_CHEAP_FLOOR unset / keyless), there is nothing to run it on — and it must NOT
+    // silently fall back to Claude (that is the exact free-user money leak). Refuse honestly instead.
+    if (powerSpecResolved.cheapOnly && cheapBuildFloorRunners().length === 0) {
+      activeBuilds.delete(buildKey);
+      audit('AGENTV3_WEAK_TIER_NO_FLOOR', { userId }, 'warn');
+      res.status(503).json({ error: 'The free engine is temporarily unavailable. Please try again shortly, or add credits to build on the full engine.', code: 'WEAK_ENGINE_UNAVAILABLE' });
+      return;
+    }
 
     // PAID-PUBLIC AFFORDABILITY GATE (admin plan 2026-07-06) — flag-gated OFF by default.
     // Runs BEFORE flushHeaders() so a refusal is a clean pre-stream HTTP 402 (no stream started). The
@@ -3331,7 +3366,7 @@ export function registerAgentV3Routes(app: Express): void {
         });
         return;
       }
-      const estimate = estimateBuildCost(prompt, powerLevelReq, usdInrRate());
+      const estimate = estimateBuildCost(prompt, powerLevelReqEffective, usdInrRate());
       const gate = decidePaidGate({
         // The gate itself is active here (outer condition already gated on the two flags); decidePaidGate
         // keys its block/economy/proceed decision on this being true, so pass true regardless of which
@@ -3394,6 +3429,14 @@ export function registerAgentV3Routes(app: Express): void {
       if (freeTierBuildActive) {
         audit('AGENTV3_FREE_TIER_CHEAP_BUILD', { userId }, 'info');
       }
+    }
+    // POWER-TIER (admin 2026-07-12): the 'weak' tier ALWAYS routes cheap-only (GLM/Kimi, never Claude),
+    // independent of the AGENTV3_COST_ROUTING env canary — a free user is clamped to 'weak' above, so this
+    // is what makes "free user par kabhi Sonnet nahi" true by construction. The no-floor case was already
+    // refused honestly at the clamp (WEAK_ENGINE_UNAVAILABLE), so here the floor is guaranteed present.
+    if (!freeTierBuildActive && powerSpecResolved.cheapOnly && cheapBuildFloorRunners().length > 0) {
+      freeTierBuildActive = true;
+      audit('AGENTV3_WEAK_TIER_CHEAP_BUILD', { userId }, 'info');
     }
 
     // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
@@ -4131,7 +4174,7 @@ export function registerAgentV3Routes(app: Express): void {
         // Billing accounting fix: show the REAL spend so far from the build-level sink (not one
         // runner's snapshot), so a wall-clock-finalized build's displayed amount matches the actual
         // charge settled later at the sink total.
-        const billedUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
+        const billedUsd = billedAmountUsd(buildUsage.total(), powerLevelReqEffective);
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd, billedInr: Math.round(billedUsd * usdInrRate() * 100) / 100, ...(dl ? { diagnostics: dl } : {}) });
       } else {
         // RC-4 (admin 2026-07-06): HONEST pause wording. The old line claimed "It was likely almost
@@ -5013,7 +5056,7 @@ export function registerAgentV3Routes(app: Express): void {
         system: architectSystem,
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
-        powerLevel: powerLevelReq,
+        powerLevel: powerLevelReqEffective,
         effort: powerSpecResolved.effort,
         thinking,
         maxBudgetUsd: maxBudgetUsdForRunner,
@@ -5220,7 +5263,7 @@ export function registerAgentV3Routes(app: Express): void {
           system: planSystemPrompt(),
           tools: catalogForTools(['update_todo']),
           onlyOpus,
-          powerLevel: powerLevelReq,
+          powerLevel: powerLevelReqEffective,
           effort: powerSpecResolved.effort,
           thinking,
           maxBudgetUsd: maxBudgetUsdForRunner,
@@ -5558,7 +5601,7 @@ export function registerAgentV3Routes(app: Express): void {
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
         const fastResult = (summary: string, steps: number, typecheckRan = true) => {
-          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReq) };
+          result = { ok: true, summary, steps, usage: osUsage, billedUsd: billedAmountUsd({ inputTokens: osUsage.inputTokens, outputTokens: osUsage.outputTokens }, powerLevelReqEffective) };
           deliveredTier = analysis?.startTier ?? 'haiku';
           // Skip the agentic readiness gate ONLY when the fast lane genuinely type-checked. If the
           // sandbox check could not run (typecheckRan=false), the downstream gate stays ON so the app
@@ -6395,13 +6438,13 @@ export function registerAgentV3Routes(app: Express): void {
       // the per-provider view (admin usage-report) always sums to exactly what was billed; the aux-call
       // remainder lands in the 'other' bucket. Cost is unchanged unless per-tier billing is flipped ON.
       const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), buildUsage.total());
-      const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReq);
+      const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReqEffective);
       // With the flags OFF this is exactly flatBilledUsd (today's behavior). ON — the per-feature
       // flag OR the Slice-G cost-routing master (same per-user canary as the routing, so a canary
       // user's cheap-led build is billed on the same regime it ran on) — it prices each tier's share
       // separately (Sonnet work at ×3). Both are recorded to telemetry so the flip is measured.
       let effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
-        ? perTierBilledUsd(reconciledProviderUsage, powerLevelReq)
+        ? perTierBilledUsd(reconciledProviderUsage, powerLevelReqEffective)
         : flatBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.

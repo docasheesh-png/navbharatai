@@ -14611,3 +14611,37 @@ through to the user's last build of a *different app* and returned it. Nothing e
 Regression tests +13 (`buildIdentity`: the exact Jungle-Runner-vs-Expense-Tracker rejection, own-report match,
 no-build-id rejection, prompt-hash/workspace mismatch, empty-expectation legacy pass, null report). Gate:
 frontend tsc 0, server tsc 0, vitest 6040/6040, `npm run build` PASS, boot:check PASS.
+
+## 2026-07-12 — Fix 56: 5-tier Power selector with free/paid gating (admin: free user = "weak" only, server-enforced)
+
+Admin's solution to "free user par Sonnet kyu chala": replace the 4-option Power selector (Off / Strong /
+Powerful Force / Full Team) with FIVE user-facing tiers and gate them by paid/free — so a free account is
+STRUCTURALLY limited to the cheap engine, no env-canary needed.
+
+**New tiers** (internal keys kept stable): weak → "Weak" (GLM/Kimi cheap floor, NEVER Claude — the free tier);
+off → "Normal" (Sonnet); mini → "Strong 💪" (Opus low); medium → "Powerful" (Opus high); max → "Full Team"
+(Opus max). Weak & Normal bill at the cheap rate (×1.2); Opus tiers real Opus ×2.
+
+**Gating (money-critical, ENFORCED SERVER-SIDE — not a UI trick):**
+- New pure `powerGating.ts` (`allowedPowerLevels`/`defaultPowerLevel`/`clampPowerForUser`, +11 tests): a FREE
+  user (logged in, never purchased, NOT free-list) is CLAMPED to 'weak' regardless of what the client sends —
+  so a hand-crafted `power:'max'` request can never spend Claude/Opus (the money-leak class). Paid users +
+  free-list admins/testers get all five, default Normal.
+- Route: reads the wallet only when a non-free-list user requests a non-weak tier (free→weak path costs no
+  extra read), clamps, and forces cheap-only routing (`freeTierBuildActive`) whenever the effective tier is
+  'weak' — independent of the AGENTV3_COST_ROUTING canary. Billed at the weak/cheap rate.
+- HONEST guard (rule 6): if 'weak' is forced but NO cheap floor is configured, the build is refused
+  (503 WEAK_ENGINE_UNAVAILABLE) rather than silently falling back to Claude — no free-user leak.
+- `powerLevel.ts` gains the 'weak' level (cheapOnly flag); `pricing.ts` bills 'weak' as cheap; `AgentRunner`
+  accepts it.
+- UI (`AgentV3Panel`): the selector shows all five to a paid/unlocked account (default Normal) and ONLY "Weak"
+  to a free account. `/api/agentv3/status` now returns `powerUnlocked` (free-list OR has-ever-paid), computed
+  server-side, so the client shows the right tiers (the server enforces regardless).
+- AppKnowledgeBase Power entry updated to the 5 tiers + gating.
+
+Regression tests +11 (`powerGating`). Gate: frontend tsc 0, server tsc 0, vitest 6057/6057, build PASS,
+boot:check PASS.
+
+NOTE (billing of 'weak', admin to confirm): shipped with the SAFE default — weak charges the wallet at the
+cheap GLM/Kimi rate and is blocked at ₹0 (consistent with the money-leak fixes). Flip to fully-free/unlimited
+or a daily-limit is a small change if the admin prefers a loss-leader model.

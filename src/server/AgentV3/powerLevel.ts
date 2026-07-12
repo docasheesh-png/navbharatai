@@ -20,8 +20,16 @@
 
 import { NORMAL_MULTIPLIER, OPUS_MULTIPLIER } from './pricing';
 
-/** The four user-facing power levels. 'off' is normal (Power toggle OFF). */
-export type PowerLevel = 'off' | 'mini' | 'medium' | 'max';
+/**
+ * The user-facing power levels (admin UI redesign 2026-07-12). Internal keys are kept stable for
+ * back-compat; the UI relabels them:
+ *   'weak'   → "Weak"        — cheap floor (GLM/Kimi) ONLY, never Claude. The FREE-tier engine.
+ *   'off'    → "Normal"      — Sonnet (the paid default).
+ *   'mini'   → "Strong"      — Opus, low effort.
+ *   'medium' → "Powerful"    — Opus, high effort.
+ *   'max'    → "Full Team"   — Opus, max effort (ultracode).
+ */
+export type PowerLevel = 'weak' | 'off' | 'mini' | 'medium' | 'max';
 
 /** Claude Opus reasoning-effort values (output_config.effort). */
 export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -29,8 +37,14 @@ export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface PowerSpec {
   /** The level itself. */
   level: PowerLevel;
-  /** True for any Opus power level (real Opus × 2). False for normal mode. */
+  /** True for any Opus power level (real Opus × 2). False for normal/weak mode. */
   powerMode: boolean;
+  /**
+   * 'weak' ONLY: route on the cheap floor (GLM/Kimi) alone and NEVER fall back to Claude — the free
+   * tier. The route forces cheap-only routing (freeTierBuildActive) when this is set, so a free user's
+   * build can never spend NavBharatAI's Claude budget. Bills at the cheap tier (× 1.2, like 'off').
+   */
+  cheapOnly?: boolean;
   /**
    * Opus reasoning effort for this level. Undefined in normal mode so Sonnet/Haiku
    * run at their own default (effort errors on Haiku 4.5, so we never force it for
@@ -44,6 +58,8 @@ export interface PowerSpec {
 }
 
 const SPECS: Record<PowerLevel, PowerSpec> = {
+  // Weak = the FREE tier: cheap floor (GLM/Kimi) only, never Claude. Bills at the cheap rate (× 1.2).
+  weak: { level: 'weak', powerMode: false, cheapOnly: true, effort: undefined, ceilingEffort: 'low', multiplier: NORMAL_MULTIPLIER },
   off: { level: 'off', powerMode: false, effort: undefined, ceilingEffort: 'low', multiplier: NORMAL_MULTIPLIER },
   // Admin label→effort map (2026-07-05): 5× = low, 10× = high, 20× = ultracode (max). All bill real Opus × 2.
   mini: { level: 'mini', powerMode: true, effort: 'low', ceilingEffort: 'low', multiplier: OPUS_MULTIPLIER },
@@ -59,7 +75,7 @@ const SPECS: Record<PowerLevel, PowerSpec> = {
 export function toPowerLevel(input: PowerLevel | boolean | string | undefined | null): PowerLevel {
   if (input === true) return 'mini';
   if (input === false || input == null) return 'off';
-  if (input === 'off' || input === 'mini' || input === 'medium' || input === 'max') return input;
+  if (input === 'weak' || input === 'off' || input === 'mini' || input === 'medium' || input === 'max') return input;
   return 'off';
 }
 

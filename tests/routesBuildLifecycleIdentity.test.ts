@@ -12,6 +12,7 @@ process.env.VITEST = 'true';
 
 let stopHandler: any;
 let attachHandler: any;
+let liveHandler: any;
 let setRunningBuild: (key: string, rb: any) => void;
 
 const prevEnabled = process.env.AGENTV3_ENABLED;
@@ -25,6 +26,7 @@ beforeAll(async () => {
   const routes = captureRoutes(mod.registerAgentV3Routes);
   stopHandler = routes.get('POST /api/agentv3/stop');
   attachHandler = routes.get('POST /api/agentv3/attach');
+  liveHandler = routes.get('GET /api/agentv3/live');
 }, 30_000);
 
 afterAll(() => {
@@ -68,5 +70,18 @@ describe('POST /api/agentv3/attach — cannot stream another account\'s live bui
     // The victim's build lives under 'victim-uid'; an unverified caller resolves to the anon bucket only,
     // so there is no running build to resume → 404 BEFORE any stream is opened.
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /api/agentv3/live — cross-device mirror keys off VERIFIED uid, not claimed ?userId (T0-9)', () => {
+  beforeEach(() => { setRunningBuild('victim-uid', makeVictimBuild()); });
+
+  it('an UNVERIFIED caller claiming ?userId=victim-uid gets an empty, NON-running poll (no leak)', async () => {
+    const req = mockReq({ query: { userId: 'victim-uid', email: 'v@x.com', sinceSeq: '0' } }); // no token
+    const res = mockRes();
+    await liveHandler(req, res);
+    // Must NOT reveal that the victim's build is running, and must return no events. Before the fix this
+    // returned running:true + the victim's live event stream (read from the durable LiveChannel by uid).
+    expect(res.body).toEqual({ events: [], seq: 0, gap: false, running: false });
   });
 });

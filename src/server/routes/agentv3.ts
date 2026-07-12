@@ -2649,24 +2649,30 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
       return;
     }
-    if (!userId) {
-      res.status(400).json({ error: 'userId is required.' });
+    const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
+    // SECURITY T0-9: the cross-device live mirror streams a build's EVENTS, so it keys off the VERIFIED
+    // token — never a claimed ?userId (which would let a caller mirror ANOTHER account's live build via
+    // the durable LiveChannel, even cross-instance). An unverified/anon caller gets an empty, non-running
+    // poll: the mirror simply winds down (the build + the primary /chat stream are unaffected). The client
+    // sends its Bearer token on this poll for exactly this.
+    const verifiedUid = (await verifiedIdentity(req))?.uid ?? null;
+    if (!verifiedUid) {
+      res.json({ events: [], seq: sinceSeq, gap: false, running: false });
       return;
     }
-    const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
     // `workspaceId` is OPTIONAL for back-compat with older clients. When THIS instance is the one
     // actually running the build (the common case — same-instance), its in-memory `rb.workspaceId`
     // is authoritative: if it's for a DIFFERENT session than the caller asked about, report nothing —
     // otherwise a build genuinely still running in session A bleeds its progress into session B's
     // live-mirror poll.
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
-    const localRb = runningBuilds.get(userId);
+    const localRb = runningBuilds.get(verifiedUid);
     if (workspaceId && localRb && !localRb.ended && localRb.workspaceId && localRb.workspaceId !== workspaceId) {
       res.json({ events: [], seq: sinceSeq, gap: false, running: false });
       return;
     }
     try {
-      const { events, seq, gap, workspaceId: eventsWorkspaceId } = await liveChannel.readSince(userId, sinceSeq);
+      const { events, seq, gap, workspaceId: eventsWorkspaceId } = await liveChannel.readSince(verifiedUid, sinceSeq);
       // CROSS-INSTANCE workspace scoping (closes the gap the #804 fix documented): the LiveChannel
       // now stamps events with the workspaceId of the build that produced them, so even when THIS
       // instance has no local record of the build (it runs — or ran — on a different Cloud Run
@@ -2680,7 +2686,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       // `running` lets the watcher stop polling once the build is done on this instance; the durable
       // result then syncs via the normal conversation reload.
-      res.json({ events, seq, gap, running: isBuildRunning(userId) });
+      res.json({ events, seq, gap, running: isBuildRunning(verifiedUid) });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }

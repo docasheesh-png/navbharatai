@@ -239,6 +239,9 @@ export function analyzeDependencies(
   // Types/runtime major skew (medium, GA-3): `@types/x` on a different major than `x`.
   issues.push(...detectTypesMajorMismatch(packageJsonContent));
 
+  // Unpinned git sources (medium, GA-3): a git dep with no #commit/#tag ref → non-reproducible.
+  issues.push(...detectUnpinnedGitDeps(packageJsonContent));
+
   return issues.slice(0, MAX_ISSUES);
 }
 
@@ -450,6 +453,58 @@ export function detectTypesMajorMismatch(packageJsonContent: string | null): Dep
       severity: 'medium',
       detail: `'${typesName}' ("${typesRange}") types a DIFFERENT major than the installed '${runtimeName}' ("${runtimeRange}") — the editor's API won't match runtime and typechecking will drift`,
       ...(suggestion ? { suggestion } : {}),
+    });
+  }
+  return issues;
+}
+
+/**
+ * Explicit git dependency specifiers (npm's git forms + host shortcuts). A bare `user/repo` shorthand
+ * is intentionally excluded — it's ambiguous with a scopeless package name, so flagging it would
+ * false-positive. Matched case-insensitively against the trimmed version string.
+ */
+function isGitSpec(version: string): boolean {
+  const t = version.trim().toLowerCase();
+  return (
+    t.startsWith('github:') || t.startsWith('gitlab:') || t.startsWith('bitbucket:') ||
+    t.startsWith('gist:') || t.startsWith('git://') || t.startsWith('git+')
+  );
+}
+
+/**
+ * GA-3 (Tier-2 dependency intelligence) — flag a git dependency with NO pinned ref (e.g.
+ * `"dep": "github:user/repo"` or `"git+https://…/repo.git"`). Without a `#<commit|tag>` fragment npm
+ * resolves it to the repository's DEFAULT BRANCH HEAD, which moves over time — the same "worked
+ * yesterday, broke on reinstall" non-reproducibility the `unpinned` check guards for `*`/`latest`, but
+ * for git sources (which that check deliberately skips). Conservative: only explicit git forms without
+ * a `#` fragment are flagged; a `#commit`/`#tag`/`#semver:` ref is treated as pinned. Pure. Exported
+ * for tests. Reuses the `unpinned` kind (same non-reproducibility class), medium severity.
+ */
+export function detectUnpinnedGitDeps(packageJsonContent: string | null): DependencyIssue[] {
+  if (packageJsonContent == null) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    pkg = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const issues: DependencyIssue[] = [];
+  const seen = new Set<string>();
+  for (const [name, version] of [
+    ...collectVersionEntries(pkg.dependencies),
+    ...collectVersionEntries(pkg.devDependencies),
+  ]) {
+    if (seen.has(name) || !isGitSpec(version) || version.includes('#')) continue;
+    seen.add(name);
+    issues.push({
+      kind: 'unpinned',
+      package: name,
+      severity: 'medium',
+      detail: `'${name}' points at a git source "${version}" with no ref — it resolves to the default branch HEAD and changes over time; installs are not reproducible`,
+      suggestion: `Append a "#<commit-sha-or-tag>" to "${version}" so the install is reproducible.`,
     });
   }
   return issues;

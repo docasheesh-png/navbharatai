@@ -13969,6 +13969,7 @@ Regression tests +8 (`tabClose`: leaf close + active-switch, non-active close le
 fallback, Settings closes its children only, Professionals closes its AIs + their companions, cross-parent
 isolation, Pro-chat→preview companion, no self-loop).
 Gate: frontend tsc 0, vitest 5960/5960 (+8), `npm run build` PASS. Client-only change (no server touched).
+
 ## 2026-07-11 — ROOT-CAUSE: Firestore write-quota exhaustion broke payments (rate-limiter per-request write)
 
 Admin reported payment stuck. Traced end-to-end (rule 4). NOT a code bug in payment nor a cost issue
@@ -14144,3 +14145,44 @@ bake-off) only when a genuinely better stable coder ships. Recorded the decision
 (the defaults already equal today's values). Admin action: delete/empty GLM_MODEL & KIMI_MODEL in Cloud Run.
 
 Gate: server tsc 0, vitest, boot PASS (comment + doc only, no logic change).
+## 2026-07-12 — Fix 51: MONEY BLEED — ₹0-balance users could build on NavBharatAI's paid engine for free (admin report + screenshots)
+
+Admin sent two screenshots: TOKEN BALANCE **0 tokens (₹0.00)**, account z@gmail.com, yet a full v3.0 build ran
+(9 files, index.html, repairs). "00 balance par bhi app build ho rahi hai! yeh mere sare paisa kha jayenge free
+me." A ₹0-balance non-free-list user must NOT spend NavBharatAI's Claude budget.
+
+**Two independent leaks let a ₹0 wallet through the pre-flight affordability gate:**
+1. **Fail-open on a missing ₹ mirror (`WalletBalance.ts`).** `readWalletBalanceInr` read ONLY `remaining_balance`;
+   if that field was absent/non-numeric it returned `null`, and `decidePaidGate` treats `null` as
+   FAIL-OPEN → proceed. A wallet doc that carries only the token balance (or was created without the ₹
+   mirror) therefore slipped past the gate entirely.
+2. **Overdraft floor granted free builds (`Affordability.ts`).** The block floor was `-overdraft` (₹20), so a
+   balance of exactly 0 (and anything down to −₹20) hit the `'economy'` branch and PROCEEDED. But the "economy
+   engine" cheap routing is NOT wired (the route comment admits it just continues on the STANDARD engine) — so
+   those builds ran at FULL Claude price, for free, until the wallet crossed −₹20. ~₹20 of free full-price
+   builds per user × every user = the bleed.
+
+**Root-cause fix (matches the design's OWN stated intent — "blocked for the NEXT build until top-up"):**
+- `Affordability.ts`: the block floor is now a hard **0** — a non-free-list user with balance ≤ 0 is REFUSED a
+  new build. Positive-balance behavior is UNCHANGED: `balance ≥ estimate` → proceed; `0 < balance < estimate`
+  → economy (so an over-cautious estimate never wrongly refuses a user who has money, and a paying-but-low
+  user's work isn't stopped). Any real overrun still settles negative post-build, and the very next build is
+  then blocked. The `overdraft` param is now ignored by the start-gate (kept for call-site compatibility;
+  overdraft belongs to post-build settlement, not to starting a build with an empty wallet).
+- `WalletBalance.ts`: when `remaining_balance` is absent/non-numeric, FALL BACK to `tokenBalance` (₹ =
+  tokens ÷ 100). An existing wallet with 0 tokens now reads as a real **₹0** (blockable) instead of `null`
+  (fail-open). Only a doc with NEITHER numeric field stays `null` → fail-open (brand-new user / infra blip).
+
+Regression tests updated + added (Affordability 7, PaidGate 6, WalletBalance 5): balance 0 → block, any
+negative → block, smallest positive → economy, overdraft param ignored, and the tokenBalance fallback
+(0 tokens → ₹0 → block; 500 tokens → ₹5; explicit ₹ mirror still wins).
+Gate: frontend tsc 0, server tsc 0, vitest 5962/5962, boot:check PASS.
+
+**HONEST boundaries the admin must verify (rule 6) — this code fix only bites when the gate is actually live:**
+1. The credit gate must be ON in Cloud Run — `AGENTV3_CREDIT_GATE=true` (or `AGENTV3_PAID_PUBLIC=true`). If BOTH
+   are unset, the whole affordability block is inert and every build is free regardless of this fix. Both were
+   set true per the env registry; confirm they still are.
+2. The building account must NOT be on `AGENTV3_FREE_LIST`. Free-list (admin/tester) accounts build free BY
+   DESIGN and bypass the gate — so if **z@gmail.com is a free-list/test email**, the observed free build is
+   intentional and expected, and this fix (correctly) does not change it. Confirm whether z@gmail.com is
+   free-listed; if it is and should be billed, remove it from the list.

@@ -13,10 +13,13 @@
 //     Firebase isn't configured → reader yields null → unknown → proceed).
 
 import { doc, getDoc, type Firestore } from '../lib/serverDb'; // admin-SDK binding — reads the owner-only wallet doc
+import { TOKENS_PER_RUPEE } from '../lib/payments';
 
-/** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; anything else is ignored here. */
+/** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; `tokenBalance` is the token mirror. */
 export interface WalletDocData {
   remaining_balance?: unknown;
+  /** Token balance (the wallet's primary unit). Used as the ₹-balance fallback when remaining_balance is absent. */
+  tokenBalance?: unknown;
   /** Total ₹ ever spent buying tokens — used by free-tier routing to tell a paying user from a new one. */
   totalMoneySpent?: unknown;
 }
@@ -38,9 +41,18 @@ export async function readWalletBalanceInr(read: WalletReader, userId: string): 
   } catch {
     return null; // Firestore error → unknown → fail-open (never block a build on infra failure).
   }
-  if (!data) return null;
+  if (!data) return null; // no wallet doc at all → unknown → fail-open (brand-new user / infra blip).
   const bal = data.remaining_balance;
-  return typeof bal === 'number' && Number.isFinite(bal) ? bal : null;
+  if (typeof bal === 'number' && Number.isFinite(bal)) return bal;
+  // FALLBACK (money-bleed fix, admin 2026-07-12): a wallet doc that EXISTS but has no numeric ₹ mirror
+  // (only the token balance) must NOT read as "unknown" — that would fail-open and let a 0-balance user
+  // build for free. Derive ₹ from the token balance at the shared rate. An existing wallet with 0 tokens
+  // is a real ₹0 → the gate blocks it. Only a doc with NEITHER numeric field stays null (→ fail-open).
+  const tok = data.tokenBalance;
+  if (typeof tok === 'number' && Number.isFinite(tok)) {
+    return TOKENS_PER_RUPEE > 0 ? tok / TOKENS_PER_RUPEE : 0;
+  }
+  return null;
 }
 
 /**

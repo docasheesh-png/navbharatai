@@ -26,16 +26,20 @@ describe('decidePaidGate — paid-public build gate composition', () => {
     expect(decidePaidGate({ ...base, balanceInr: 60 }).reason).toBe('covers-estimate');
   });
 
-  it('floor < balance < estimate → economy with notice', () => {
+  it('0 < balance < estimate → economy with notice (paying-but-low user keeps working)', () => {
     const d = decidePaidGate({ ...base, balanceInr: 5 });
     expect(d.action).toBe('economy');
     expect(d.notice).toBeTruthy();
   });
 
-  it('balance ≤ floor (-overdraft) → block with add-credits notice', () => {
+  it('balance ≤ 0 → block with add-credits notice (no free builds at zero balance, admin 2026-07-12)', () => {
+    expect(decidePaidGate({ ...base, balanceInr: 0 }).action).toBe('block');
+    expect(decidePaidGate({ ...base, balanceInr: 0 }).notice).toMatch(/add credits/i);
+    // the old -overdraft window is gone: any negative balance now blocks
+    expect(decidePaidGate({ ...base, balanceInr: -0.01 }).action).toBe('block');
+    expect(decidePaidGate({ ...base, balanceInr: -19.99 }).action).toBe('block');
     expect(decidePaidGate({ ...base, balanceInr: -20 }).action).toBe('block');
-    expect(decidePaidGate({ ...base, balanceInr: -20 }).notice).toMatch(/add credits/i);
-    // boundary: -19.99 is still economy, -20 blocks
-    expect(decidePaidGate({ ...base, balanceInr: -19.99 }).action).toBe('economy');
+    // boundary: the smallest positive balance is still economy, exactly 0 blocks
+    expect(decidePaidGate({ ...base, balanceInr: 0.01 }).action).toBe('economy');
   });
 });

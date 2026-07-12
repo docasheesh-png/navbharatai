@@ -14895,3 +14895,22 @@ summary/repair emptiness). Gate: server tsc 0, full suite 6110 green.
 
 This completes the Immune System trio: Culture (does it DO the job?) + Vaccine (do its own tests pass?)
 + Red-team (does it survive hostile input?). All three are default-OFF/advisory and can never fail a build.
+
+## 2026-07-12 — T0-9 slice 4: /live cross-device mirror keys off VERIFIED uid (no cross-user event stream)
+
+Final build-lifecycle route in the T0-9 re-audit. `/api/agentv3/live` (the SECOND-device live mirror) read
+`runningBuilds.get(userId)`, `liveChannel.readSince(userId)`, and `isBuildRunning(userId)` by the CLAIMED
+`?userId`. Because the LiveChannel is a durable Firestore ring buffer keyed by the build's account uid, a
+caller who knew a victim's uid could poll `?userId=<victim>` and stream that account's live build events —
+worse than /attach, since it works cross-Cloud-Run-instance. Unlike /stop & /attach, the client sent NO
+token on this poll, so the fix is client+server: server now keys off `verifiedIdentity(req)` (empty
+non-running poll when unverified/anon — the mirror simply winds down; the build and the primary /chat stream
+are untouched); the client now sends its cached Bearer token on the /live poll (no forced refresh — it polls
+frequently; a token blip yields a self-healing empty poll). Regression test added to
+routesBuildLifecycleIdentity.test.ts (unverified ?userId=victim → {events:[], running:false}).
+
+This closes the LAST build-lifecycle cross-user reach. The T0-9 build-lifecycle audit is now complete:
+/chat (resolveBuildIdentity — verified), /stop + /attach + /live (verified — slices 3-4), /ship + /revert
+(GitHub-token push access), /diagnostics (Phase 3.2 IDOR), /status (display-only), conversations list
+(slice 2), entitlement/billing email (slice 1). Remaining T0-9 = converge the ad-hoc guards onto
+identityPolicy primitives + a final re-audit. Gate: tsc fe+server 0, vitest 6079/6079.

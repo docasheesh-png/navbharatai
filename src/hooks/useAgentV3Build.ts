@@ -420,7 +420,10 @@ export function useAgentV3Build(): UseAgentV3Build {
         if (opts?.workspaceId) params.set('workspaceId', opts.workspaceId);
         params.set('sinceSeq', String(sinceSeq));
         // Bounded: a dead-zone mobile connection must fail this poll fast and retry, not hang it.
-        const res = await fetch(`/api/agentv3/live?${params.toString()}`, { signal: AbortSignal.timeout(10_000) });
+        // SECURITY T0-9: send the Bearer token — the server keys the live mirror off the VERIFIED uid now
+        // (a claimed ?userId could otherwise mirror another account's build). Cached token (no forced
+        // refresh) since this polls frequently; a token blip just yields an empty poll that self-heals.
+        const res = await fetch(`/api/agentv3/live?${params.toString()}`, { headers: await authJsonHeaders(), signal: AbortSignal.timeout(10_000) });
         if (res.ok) {
           const j = await res.json().catch(() => ({} as Record<string, unknown>));
           if (typeof j.seq === 'number') { sinceSeq = j.seq; liveSeqRef.current[seqKey] = sinceSeq; }

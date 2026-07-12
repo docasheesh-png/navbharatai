@@ -14307,3 +14307,34 @@ function defaults, preserves co-imports, Case B, + safety: anonymous default, na
 aliased, already-correct, external pkg, unparseable). ToolDispatcher.test.ts +2 integration (auto-fix
 clears the blocker AND persists the corrected file; a genuinely-missing export still blocks — no
 over-reach). Gate: fe tsc 0 (pre-existing mobile-only), server tsc 0, vitest 5998 pass, boot PASS.
+
+## 2026-07-12 — Cheap floor (GLM/Kimi) now LEADS by default — "1st call claude nahi chahiye" (admin)
+
+Admin, after seeing report fae70e42 ran entirely on claude-sonnet-4-6 (17/17 CLAUDE calls, 0 GLM/Kimi):
+"mujhe 1st call claude nahi chahiye — 1st call jaisa CLAUDE.md me save hai, waise karo."
+
+Root cause of the Claude-first build: `cheapBuildFloorRunners()` returned `[]` because
+`AGENTV3_CHEAP_FLOOR` defaulted to `off`. The whole GLM/Kimi-first machinery was already built and
+wired (allowCheapFloor was true for that small paid edit) — only the master default kept the floor
+empty, so the chain was Claude-only.
+
+Change: flip the CODE DEFAULT of `AGENTV3_CHEAP_FLOOR` from `off` → `on` (routes/agentv3.ts
+`cheapBuildFloorRunners`). Now an UNSET flag leads the FIRST build call with flagship GLM (`glm-5.2`)
+→ `glm-4.7` → Kimi (`kimi-k2.7-code` → `kimi-k2.6`), with Claude/Haiku still the permanent backstop —
+exactly the admin-confirmed Model Routing Policy (paid: flagship cheap first, Claude only last resort).
+Safety: a missing GLM/KIMI key makes that rung a no-op (`add()` skips keyless), so with NO keys the
+chain is still byte-for-byte the old Claude path — the flip can never break a keyless deployment.
+`AGENTV3_CHEAP_FLOOR=off` remains the instant, env-authoritative kill switch.
+
+⚠️ HONEST BOUNDARY (rule 6): an ENV value ALWAYS overrides the code default. If Cloud Run currently
+pins `AGENTV3_CHEAP_FLOOR=off`, that `off` still wins after this deploy → Claude leads again; the admin
+must REMOVE it (or set `on`/`glm`). Likewise GLM_API_KEY/KIMI_API_KEY must be valid or the rung falls
+to Claude. I cannot see/set Cloud Run — flagged to the admin to verify the live value + keys.
+
+Code defaults confirmed (Decision A — ids live in code, env kept empty): paid `GLM_MODEL` default
+`glm-5.2,glm-4.7`; `KIMI_MODEL` default `kimi-k2.7-code,kimi-k2.6`. Free-tier (dormant) defaults:
+GLM `glm-4.7-flash,glm-4.7,glm-5.2`; KIMI `kimi-k2.5,kimi-k2.6,kimi-k2.7-code`.
+
+Tests: agentv3.test.ts — flag-unset+keys → GLM leads (name 'GLM' first) + Kimi present; flag-unset+no-keys
+→ still [] (safe); explicit off + key present → [] (kill switch wins). CLAUDE.md registry updated (default
+now `on`, env-override + key caveats). Gate: server tsc 0, vitest 5999 pass.

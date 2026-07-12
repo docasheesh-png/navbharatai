@@ -343,17 +343,28 @@ describe('healRunnerRoutingOpts — free heal is cheap-only (no Claude); paid/po
   });
 });
 
-describe('cheapBuildFloorRunners — optional GLM/Kimi cheap floor, DEFAULT OFF (instant rollback)', () => {
+describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
   const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL'];
   let saved: Record<string, string | undefined>;
   beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
 
-  it('returns [] by default (flag unset) — chain stays byte-for-byte today\'s Claude path', () => {
+  it('returns [] when flag unset AND no keys — still byte-for-byte the Claude path (safe with no keys)', () => {
+    // Default is now 'on', but a keyless rung is skipped by add(), so with NO GLM/KIMI keys the floor is
+    // still empty and Claude leads — the default flip can never break a deployment that has no keys.
     expect(cheapBuildFloorRunners()).toEqual([]);
   });
-  it('returns [] when explicitly off', () => {
+  it('LEADS with GLM+Kimi by default (flag unset) when keys are present — 1st call is not Claude', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const runners = cheapBuildFloorRunners();
+    expect(runners.length).toBeGreaterThan(0);
+    expect(runners[0].name).toBe('GLM'); // flagship GLM (glm-5.2) leads the very first attempt
+    expect(runners.some((r) => r.name === 'KIMI')).toBe(true);
+  });
+  it('returns [] when explicitly off (env-authoritative kill switch overrides the on default)', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'off';
+    process.env.GLM_API_KEY = 'glm-test-key'; // even WITH a key, explicit off wins
     expect(cheapBuildFloorRunners()).toEqual([]);
   });
   it('returns [] when the flag names a provider but its KEY is absent (second off-switch)', () => {

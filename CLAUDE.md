@@ -284,8 +284,14 @@ the code (it is actually read somewhere) on 2026-07-11.
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`
-  (GLM + Kimi together) | `bedrock`. It must hold ONE value. For the current GLM bake-off → `glm`.
-  `on` and `glm` are NOT both allowed at once — pick one.
+  (GLM + Kimi together) | `bedrock`. It must hold ONE value.
+  **CODE DEFAULT is now `on`** (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me
+  save hai"): per the Model Routing Policy the FIRST build call must be the flagship cheap coder
+  (GLM `glm-5.2` / Kimi), not Claude — Claude only backstops. So when `AGENTV3_CHEAP_FLOOR` is UNSET,
+  the floor now LEADS with GLM+Kimi (Claude/Haiku still backstop). ⚠️ An ENV value ALWAYS wins over the
+  code default — so if Cloud Run pins `AGENTV3_CHEAP_FLOOR=off`, that `off` wins and Claude leads again;
+  REMOVE it (or set `on`/`glm`) for GLM/Kimi to lead. Also requires a valid `GLM_API_KEY`/`KIMI_API_KEY`
+  (a keyless rung is skipped → falls to Claude). `off` stays the instant, env-authoritative kill switch.
 - `GLM_MODEL` / `KIMI_MODEL` — **DECISION "A" (admin 2026-07-12): keep these EMPTY in Cloud Run on purpose.**
   The model ids live in the CODE defaults (`cheapBuildFloorRunners` in `routes/agentv3.ts`), maintained by Claude.
   Rationale: env-pinning = the admin edits Cloud Run on every model release (churn); blind "auto-latest" is unsafe

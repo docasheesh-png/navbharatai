@@ -1077,7 +1077,14 @@ export function geminiLastResortEnabled(flag: string | undefined): boolean {
 }
 
 export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[] {
-  const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'off').trim().toLowerCase();
+  // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
+  // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
+  // (GLM glm-5.2 / Kimi), NOT Claude — Claude is only the last-resort backstop. So the cheap floor now
+  // LEADS by default; Claude/Haiku still backstop the chain, and a missing GLM/KIMI key makes `add()`
+  // skip that rung (keyless → no-op), so with NO keys this is still byte-for-byte the old Claude path.
+  // Explicit `AGENTV3_CHEAP_FLOOR=off` remains the instant, env-authoritative kill switch (env overrides
+  // this default). NOTE: an env value always wins — if Cloud Run pins it to `off`, that off wins here.
+  const floor = (process.env.AGENTV3_CHEAP_FLOOR || 'on').trim().toLowerCase();
   if (floor === 'off' || floor === '') return [];
   const runners: NamedRunner[] = [];
   // ADMIN DESIGN (2026-07-07, combined plan): every GLM/KIMI failure that day was "Request timed

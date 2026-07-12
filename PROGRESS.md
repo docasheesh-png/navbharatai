@@ -14338,3 +14338,21 @@ GLM `glm-4.7-flash,glm-4.7,glm-5.2`; KIMI `kimi-k2.5,kimi-k2.6,kimi-k2.7-code`.
 Tests: agentv3.test.ts — flag-unset+keys → GLM leads (name 'GLM' first) + Kimi present; flag-unset+no-keys
 → still [] (safe); explicit off + key present → [] (kill switch wins). CLAUDE.md registry updated (default
 now `on`, env-override + key caveats). Gate: server tsc 0, vitest 5999 pass.
+
+## 2026-07-12 — Build report now states WHY the cheap floor did/didn't lead (honesty fix — autopsy fae70e42)
+
+Admin confirmed `AGENTV3_CHEAP_FLOOR=on` AND GLM/KIMI keys ARE set in Cloud Run (screenshot: vars 33-34
+ESCALATION=on, CHEAP_FLOOR=on) — yet report fae70e42 ran 17/17 on claude-sonnet-4-6 with ZERO GLM/Kimi
+attempts and ZERO provider-fallback records. Traced the gates: small 18-file paid edit → routeStrong
+false, escalation on → tierAllowed true. With flag on + keys set the ONLY remaining skip paths are the
+`AGENTV3_CHEAP_FLOOR_USERS` canary (account not on the allowlist) or the report predating the config.
+
+Root honesty gap (rule 5): the build report never RECORDED the routing decision — it only showed the
+delivered provider, so "1st call claude kyun?" was a guess. Fix: new pure `cheapFloorDecision(env, ctx)`
+resolves the EXACT reason (flag off / no key for the selected provider / not in canary allowlist / large-
+import strong-route / tier ineligible / ACTIVE) and the route records it as a `CHEAP_FLOOR_DECISION`
+diagnostic on every build (info when active, warning when skipped). Now every report states plainly why
+GLM/Kimi did or didn't lead — this class of question answers itself forever.
+
+Tests: agentv3.test.ts +6 (active / off / key-missing / canary / strong-route / unset-defaults-on).
+Gate: server tsc 0, vitest 6005 pass.

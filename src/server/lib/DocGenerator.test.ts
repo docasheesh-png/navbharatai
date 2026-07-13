@@ -46,6 +46,15 @@ describe('DocGenerator (P-CGE.2)', () => {
     it('honestly reports no routes', () => {
       expect(generateApiDocs([])).toContain('_No routes documented._');
     });
+    it('escapes a pipe and collapses newlines in a description so the table is not corrupted', () => {
+      const md = generateApiDocs([
+        { method: 'get', path: '/x', description: 'Returns a | b\nsecond line' },
+      ]);
+      const row = md.split('\n').find((l) => l.startsWith('| GET'))!;
+      // exactly 5 pipes delimiting 4 cells — an unescaped `|`/newline would add columns or split the row.
+      expect((row.match(/(?<!\\)\|/g) || []).length).toBe(5);
+      expect(row).toContain('Returns a \\| b second line');
+    });
   });
 
   describe('generateTsDoc', () => {

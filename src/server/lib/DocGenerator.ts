@@ -69,6 +69,12 @@ export interface RouteDoc {
   auth?: boolean;
 }
 
+/** Escape a value for a GFM table cell: a raw `|` ends the cell and a newline ends the row, both of
+ *  which corrupt the whole table. Escape the pipe and collapse newlines to spaces. Pure. */
+function tableCell(s: unknown): string {
+  return clean(s).replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ');
+}
+
 /** Generate an API reference (Markdown) from a list of routes. Pure. */
 export function generateApiDocs(routes: RouteDoc[]): string {
   const valid = (routes || []).filter((r) => r && clean(r.method) && clean(r.path));
@@ -76,10 +82,10 @@ export function generateApiDocs(routes: RouteDoc[]): string {
   const lines: string[] = ['# API Reference', '', '| Method | Path | Auth | Description |', '| --- | --- | --- | --- |'];
   const sorted = [...valid].sort((a, b) => clean(a.path).localeCompare(clean(b.path)) || clean(a.method).localeCompare(clean(b.method)));
   for (const r of sorted) {
-    const method = clean(r.method).toUpperCase();
+    const method = tableCell(r.method).toUpperCase();
     const auth = r.auth ? '🔒' : '—';
-    const desc = clean(r.description) || '—';
-    lines.push(`| ${method} | \`${clean(r.path)}\` | ${auth} | ${desc} |`);
+    const desc = tableCell(r.description) || '—';
+    lines.push(`| ${method} | \`${tableCell(r.path)}\` | ${auth} | ${desc} |`);
   }
   return lines.join('\n');
 }

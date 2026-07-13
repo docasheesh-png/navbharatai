@@ -73,6 +73,55 @@ export function analyzeLockfiles(files: ReadonlyArray<string>): LockfileIssue[] 
   return issues;
 }
 
+export interface PackageManagerInfo {
+  manager: 'npm' | 'yarn' | 'pnpm' | 'bun';
+  /** The root lockfile that identified it. */
+  lockfile: string;
+  /** The install + run commands for this manager (npm is the platform default assumption). */
+  installCmd: string;
+  runCmd: string;
+}
+
+const MANAGER_COMMANDS: Record<PackageManagerInfo['manager'], { install: string; run: string }> = {
+  npm: { install: 'npm install', run: 'npm run' },
+  yarn: { install: 'yarn install', run: 'yarn' },
+  pnpm: { install: 'pnpm install', run: 'pnpm run' },
+  bun: { install: 'bun install', run: 'bun run' },
+};
+
+/**
+ * GA-3 (remaining) / P-PIPE-runtime — detect the project's package manager from its ROOT lockfile so the
+ * agent uses the RIGHT install/run commands instead of assuming npm (the roadmap's "npm is hard-coded"
+ * gap). Only the project root is considered (a nested package's lockfile doesn't define the whole build),
+ * and only when a SINGLE manager is present there — an ambiguous root (multiple managers) returns null and
+ * is left to `analyzeLockfiles` to flag as a conflict rather than guessed. Pure. Exported for tests.
+ */
+export function detectPackageManager(files: ReadonlyArray<string>): PackageManagerInfo | null {
+  const rootManagers = new Map<string, string>(); // manager → the lockfile name that identified it
+  for (const path of files || []) {
+    if (typeof path !== 'string' || dirOf(path) !== '') continue; // root-level lockfiles only
+    const base = baseOf(path);
+    const manager = LOCKFILE_MANAGER[base];
+    if (manager && !rootManagers.has(manager)) rootManagers.set(manager, base);
+  }
+  if (rootManagers.size !== 1) return null; // none, or ambiguous (conflict handled by analyzeLockfiles)
+  const [[manager, lockfile]] = [...rootManagers.entries()] as Array<[PackageManagerInfo['manager'], string]>;
+  const cmds = MANAGER_COMMANDS[manager];
+  return { manager, lockfile, installCmd: cmds.install, runCmd: cmds.run };
+}
+
+/**
+ * Advisory line naming the detected package manager + its commands — surfaced ONLY when it is NOT npm
+ * (npm is the platform default, so there is nothing to correct). Empty string otherwise. Pure.
+ */
+export function packageManagerSummary(info: PackageManagerInfo | null): string {
+  if (!info || info.manager === 'npm') return '';
+  return (
+    `Package manager: this project uses ${info.manager} (${info.lockfile}) — install with ` +
+    `\`${info.installCmd}\` and run scripts with \`${info.runCmd}\`, NOT npm (its lockfile is authoritative).`
+  );
+}
+
 /** A concise, honest lockfile-consistency line for the evaluate report. Pure. */
 export function lockfileSummary(issues: LockfileIssue[]): string {
   if (!issues || issues.length === 0) {

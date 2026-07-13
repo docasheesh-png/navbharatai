@@ -79,9 +79,17 @@ describe('DeployArtifactGenerator (P-CGE.9)', () => {
       expect(c).toContain('image: mongo:7');
       expect(c).toContain('- "27017:27017"');
       expect(c).toContain('- MONGO_URL=mongodb://mongo:27017/app'); // app can reach it on the network
-      expect(c).toContain('depends_on:');
       expect(c).toContain('mongo-data:/data/db');
       expect(c).toMatch(/volumes:\n {2}mongo-data:/); // top-level named volume declared
+      // app waits for mongo to be HEALTHY, not just started; mongo declares a healthcheck.
+      expect(c).toContain('condition: service_healthy');
+      expect(c).toContain('healthcheck:');
+      expect(c).toContain("db.adminCommand('ping')");
+    });
+
+    it('gives each DB a healthcheck (postgres pg_isready, redis redis-cli ping)', () => {
+      expect(generateDockerCompose({ dependencies: ['pg'] })).toContain('pg_isready -U postgres');
+      expect(generateDockerCompose({ dependencies: ['redis'] })).toContain('redis-cli ping');
     });
 
     it('adds postgres with credentials env for a pg app', () => {

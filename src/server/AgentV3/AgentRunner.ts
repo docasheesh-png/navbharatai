@@ -531,7 +531,17 @@ export class AgentRunner {
                 const blockers = readiness.blockers.length
                   ? ` Must fix before it's production-ready: ${readiness.blockers.join('; ')}.`
                   : '';
-                summary = `${turn.text.trim() || 'Build finished.'}\n\n⚠️ Readiness gate: NOT READY (score ${readiness.score}/100).${blockers}`;
+                // HONESTY (deep-test App #7 + #8): the model's turn text almost always OPENS with a
+                // celebratory "fully built and running!" claim. Leading the summary with that prose
+                // and only appending the verdict below misled the user at a glance about a build that
+                // FAILED the gate. Put the honest NOT-READY verdict FIRST; keep the model's prose
+                // below it, clearly labelled as possibly overstating — so the very first thing the
+                // user reads is the truth, not a false success.
+                const claim = turn.text.trim();
+                const claimBlock = claim
+                  ? `\n\n———\nWhat the agent reported (may overstate — the readiness verdict above is the real status):\n\n${claim}`
+                  : '';
+                summary = `⚠️ Readiness gate: NOT READY — score ${readiness.score}/100. This build is not production-ready yet.${blockers}${claimBlock}`;
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
           }

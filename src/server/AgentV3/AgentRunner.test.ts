@@ -587,6 +587,18 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('leads a NOT-READY summary with the honest verdict, NOT the model\'s "Build complete." prose (App #7/#8)', async () => {
+    // The scripted final turn text is "Build complete." — a false success claim on a failed
+    // build. The summary must OPEN with the NOT-READY verdict so the user is not misled at a
+    // glance; the model's prose is demoted below a clear "may overstate" label.
+    const result = await gateRunner(gateDispatcher(false), { readinessGate: true }).run('build an app');
+    expect(result.ok).toBe(false);
+    // the first line is the honest verdict, not the celebratory prose
+    expect(result.summary.split('\n')[0]).toContain('NOT READY');
+    expect(result.summary.indexOf('NOT READY')).toBeLessThan(result.summary.indexOf('Build complete.'));
+    expect(result.summary).toContain('may overstate');
+  });
+
   it('does NOT gate when readinessGate is off (default) — a not-ready scan cannot fail the build', async () => {
     const result = await gateRunner(gateDispatcher(false), { readinessGate: false }).run('build an app');
     expect(result.ok).toBe(true);

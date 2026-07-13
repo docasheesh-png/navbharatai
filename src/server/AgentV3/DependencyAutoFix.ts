@@ -13,7 +13,7 @@
 // It NEVER touches package.json or the install path (the builder applies fixes under its own
 // judgment, a second false-positive filter). Pure, no I/O, never throws. Advisory report content only.
 
-import type { DependencyIssue } from './DependencyAnalysis';
+import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis';
 
 /**
  * Curated well-known npm packages → a known-good caret range. Deliberately EXCLUDES bare names that
@@ -83,6 +83,82 @@ export function planDependencyAutoFix(missing: readonly DependencyIssue[]): Depe
     else needsReview.push(name);
   }
   return { autofixable, needsReview };
+}
+
+export interface DependencyReconcileResult {
+  /** The file set with package.json updated (unchanged when nothing was safely addable). */
+  files: Record<string, string>;
+  /** Every dependency added, for honest diagnostics. Empty when nothing was applied. */
+  added: Array<{ package: string; version: string }>;
+}
+
+/** Matches import/require specifiers so external package imports can be collected without a parser. */
+const IMPORT_SPECIFIER_RE = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*|require\(\s*)['"]([^'"\n]+)['"]/g;
+const CODE_FILE_RE = /\.(?:m?[jt]sx?)$/i;
+
+/**
+ * Deterministically ADD the well-known, version-pinned missing dependencies to package.json (P-PIPE
+ * reconciler). This is the apply-half of the advisory `planDependencyAutoFix`: DependencyAnalysis detects
+ * a package imported but not declared, and — ONLY for the curated `WELL_KNOWN_DEPS` allowlist (real npm
+ * packages with a known-good caret range; names that collide with local aliases are deliberately excluded)
+ * — the package is written into `dependencies` so the app actually installs and runs.
+ *
+ * WHY (autopsy theme, 2026-07-13): an app that imports `axios`/`zustand`/`react-router-dom` without
+ * declaring it fails at install/runtime with "Cannot find module". Leaving that to the builder LLM to
+ * notice the advisory is unreliable; the unambiguous, allowlisted subset can be reconciled deterministically.
+ *
+ * Paranoid-safe: only the allowlist is added (never a `needsReview` alias), idempotent (skips a package
+ * already in deps/devDeps/peerDeps), and it validates the rewritten package.json re-parses before returning
+ * — any parse/shape problem returns the input unchanged. It can only turn a missing-dependency build into a
+ * working one. Pure; never throws.
+ */
+export function applyWellKnownMissingDeps(files: Record<string, string>): DependencyReconcileResult {
+  const unchanged: DependencyReconcileResult = { files, added: [] };
+  const pkgRaw = files?.['package.json'];
+  if (typeof pkgRaw !== 'string') return unchanged;
+
+  const external: string[] = [];
+  for (const [path, content] of Object.entries(files)) {
+    if (!CODE_FILE_RE.test(path) || typeof content !== 'string') continue;
+    let m: RegExpExecArray | null;
+    IMPORT_SPECIFIER_RE.lastIndex = 0;
+    while ((m = IMPORT_SPECIFIER_RE.exec(content))) {
+      const spec = m[1];
+      if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('@/')) continue; // local, not npm
+      external.push(spec);
+    }
+  }
+  if (external.length === 0) return unchanged;
+
+  let missing: DependencyIssue[];
+  try { missing = analyzeDependencies(external, pkgRaw).filter((d) => d.kind === 'missing'); }
+  catch { return unchanged; }
+  const plan = planDependencyAutoFix(missing);
+  if (plan.autofixable.length === 0) return unchanged;
+
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(pkgRaw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return unchanged;
+    pkg = parsed as Record<string, unknown>;
+  } catch { return unchanged; }
+
+  const asObj = (v: unknown): Record<string, string> =>
+    v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {};
+  const deps = { ...asObj(pkg.dependencies) };
+  const declaredElsewhere = new Set([...Object.keys(asObj(pkg.devDependencies)), ...Object.keys(asObj(pkg.peerDependencies))]);
+  const added: Array<{ package: string; version: string }> = [];
+  for (const fix of plan.autofixable) {
+    if (fix.package in deps || declaredElsewhere.has(fix.package)) continue; // idempotent — never overwrite
+    deps[fix.package] = fix.version;
+    added.push(fix);
+  }
+  if (added.length === 0) return unchanged;
+
+  pkg.dependencies = Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)));
+  let out: string;
+  try { out = `${JSON.stringify(pkg, null, 2)}\n`; JSON.parse(out); } catch { return unchanged; }
+  return { files: { ...files, 'package.json': out }, added };
 }
 
 /** Advisory report line(s), or '' when there is nothing to say. Pure. */

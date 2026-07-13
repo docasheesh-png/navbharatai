@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, Palette, X, Globe } from 'lucide-react';
+import { Info, Lock, Settings, Heart, Palette, X, Globe, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { ViewType, ChatSession } from '../../types';
@@ -237,6 +238,20 @@ export function SidebarNav({
                       onClick={makeClickHandler(item, true)}
                     />
                   ))}
+
+                  {/* Download app — mobile WEB on navbharatai.com only (never inside the installed app,
+                      never on desktop). Downloads the direct APK when VITE_APK_DOWNLOAD_URL is set,
+                      else opens the Play listing so it is always a real link. */}
+                  {shouldShowDownloadApp() && (
+                    <a
+                      href={apkDownloadUrl()}
+                      onClick={() => setIsMenuOpen(false)}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-emerald-500/25 bg-emerald-600/10 text-emerald-300 hover:bg-emerald-600/20 hover:text-emerald-200"
+                    >
+                      <Download className="w-4.5 h-4.5 group-hover:scale-110 transition-transform" />
+                      <span className="text-sm font-bold tracking-tight">Download app</span>
+                    </a>
+                  )}
 
                   {/* Theme Selector */}
                   <div className="space-y-2 mt-2 px-1">

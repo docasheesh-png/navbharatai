@@ -31,6 +31,21 @@ export interface AppFeature {
 }
 
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
+  // ─── DOWNLOAD APP (mobile web → Android app) ─────────────────────────────
+  {
+    id: 'download_app',
+    name: 'Download app (Android)',
+    path: 'Sidebar menu → "Download app" (shows only on a mobile browser on navbharatai.com)',
+    description:
+      'A one-tap way to get the NavBharatAI Android app. The "Download app" button appears in the sidebar ONLY when you open navbharatai.com in a mobile browser (never inside the already-installed app, never on desktop). Tapping it downloads the Android app directly (a signed APK) when a direct-download is configured, otherwise it opens the Google Play listing (com.navbharat.ai). Inside the installed app, the app also tells you when a new version is available (with an Update / Later choice) and occasionally asks for a Play Store rating.',
+    howToUse:
+      'On your phone, open navbharatai.com in a browser, open the sidebar menu, and tap "Download app" — the Android app download/Play page opens. If you are already using the installed app, you will instead get an in-app "Update available" prompt when a newer version is published.',
+    relatedFeatures: ['nbi_chat'],
+    keywords: [
+      'download app', 'download', 'apk', 'android app', 'install app', 'mobile app', 'play store',
+      'app download karo', 'app install', 'update app', 'rate app', 'review app',
+    ],
+  },
   // ─── NAVBHARATAI PRO v3.0 (Vargen 3.0) ───────────────────────────────────
   {
     id: 'agentv3_builder',

@@ -43,6 +43,37 @@ describe('generateReadme', () => {
     expect(generateReadme({ graph: graph({}), packageJson: pkg2 })).toContain('npm start');
   });
 
+  it('uses the caller-detected package manager for install + run commands (pnpm)', () => {
+    const pkg = JSON.stringify({ scripts: { dev: 'vite', test: 'vitest' } });
+    const md = generateReadme({ graph: graph({}), packageJson: pkg, packageManager: 'pnpm' });
+    expect(md).toContain('pnpm install');
+    expect(md).toContain('pnpm dev');      // dev script, pnpm form (no "run")
+    expect(md).toContain('`pnpm test`');   // available-scripts line
+    expect(md).not.toContain('npm run dev'); // the npm-specific script form is gone (note: "pnpm install" ⊃ "npm install")
+  });
+
+  it('falls back to the package.json packageManager (Corepack) field when the caller passes none', () => {
+    const pkg = JSON.stringify({ scripts: { dev: 'vite' }, packageManager: 'yarn@4.1.0' });
+    const md = generateReadme({ graph: graph({}), packageJson: pkg });
+    expect(md).toContain('yarn'); // "yarn" install + "yarn dev"
+    expect(md).toContain('yarn dev');
+    expect(md).not.toContain('npm install');
+  });
+
+  it('bun uses "bun run <script>" and "bun install"', () => {
+    const pkg = JSON.stringify({ scripts: { dev: 'vite' } });
+    const md = generateReadme({ graph: graph({}), packageJson: pkg, packageManager: 'bun' });
+    expect(md).toContain('bun install');
+    expect(md).toContain('bun run dev');
+  });
+
+  it('an explicit caller manager overrides the packageManager field', () => {
+    const pkg = JSON.stringify({ scripts: { dev: 'vite' }, packageManager: 'yarn@4' });
+    const md = generateReadme({ graph: graph({}), packageJson: pkg, packageManager: 'pnpm' });
+    expect(md).toContain('pnpm install');
+    expect(md).not.toContain('yarn');
+  });
+
   it('summarizes components and routes from the graph', () => {
     const md = generateReadme({
       graph: graph({

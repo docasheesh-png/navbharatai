@@ -252,8 +252,40 @@ export interface DeployArtifactInput {
   ci?: CiOptions;
 }
 
+/**
+ * Generate a `.dockerignore`. Without it, the Dockerfile's `COPY . .` ships node_modules (huge, and
+ * host-built native modules break in the image), .git, build output AND .env secrets into the image —
+ * bloated, slow, and a secret-leak. `.env.example` is kept (it's a safe template). Pure + deterministic.
+ */
+export function generateDockerignore(): string {
+  return [
+    'node_modules',
+    '.git',
+    '.gitignore',
+    'dist',
+    'build',
+    '.env',
+    '.env.*',
+    '!.env.example',
+    '*.log',
+    'npm-debug.log*',
+    'coverage',
+    '.DS_Store',
+    '.vscode',
+    '.idea',
+    '.next',
+    '.turbo',
+    '*.tsbuildinfo',
+    'Dockerfile',
+    '.dockerignore',
+    'docker-compose.yml',
+    '',
+  ].join('\n');
+}
+
 export interface DeployArtifactOutput {
   dockerfile?: string;
+  dockerignore?: string;
   dockerCompose?: string;
   ciWorkflow?: string;
 }
@@ -261,7 +293,8 @@ export interface DeployArtifactOutput {
 /** Generate whatever deployment artifacts the input requests. Pure. */
 export function generateDeployArtifacts(input: DeployArtifactInput): DeployArtifactOutput {
   const out: DeployArtifactOutput = {};
-  if (input.docker) out.dockerfile = generateDockerfile(input.docker);
+  // A Dockerfile without a .dockerignore copies node_modules/.git/.env into the image — always pair them.
+  if (input.docker) { out.dockerfile = generateDockerfile(input.docker); out.dockerignore = generateDockerignore(); }
   if (input.compose) out.dockerCompose = generateDockerCompose(input.compose);
   if (input.ci) out.ciWorkflow = generateCiWorkflow(input.ci);
   return out;

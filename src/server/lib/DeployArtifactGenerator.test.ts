@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  generateDockerfile, generateDockerCompose, generateCiWorkflow, generateDeployArtifacts,
+  generateDockerfile, generateDockerCompose, generateCiWorkflow, generateDeployArtifacts, generateDockerignore,
 } from './DeployArtifactGenerator';
 
 describe('DeployArtifactGenerator (P-CGE.9)', () => {
@@ -163,11 +163,25 @@ describe('DeployArtifactGenerator (P-CGE.9)', () => {
   });
 
   describe('generateDeployArtifacts', () => {
-    it('returns only the requested artifacts', () => {
+    it('returns only the requested artifacts, and always pairs a .dockerignore with the Dockerfile', () => {
       const out = generateDeployArtifacts({ docker: { port: 8080 }, ci: { testCmd: 'npm test' } });
       expect(out.dockerfile).toBeTruthy();
+      expect(out.dockerignore).toBeTruthy(); // a Dockerfile without .dockerignore ships node_modules/.env
       expect(out.ciWorkflow).toBeTruthy();
       expect(out.dockerCompose).toBeUndefined();
+    });
+
+    it('does NOT emit a .dockerignore when no Dockerfile is requested', () => {
+      const out = generateDeployArtifacts({ ci: { testCmd: 'npm test' } });
+      expect(out.dockerignore).toBeUndefined();
+    });
+
+    it('the .dockerignore excludes node_modules/.git/.env but keeps .env.example', () => {
+      const di = generateDockerignore();
+      for (const e of ['node_modules', '.git', 'dist', '.env', '*.tsbuildinfo', 'Dockerfile']) {
+        expect(di.split('\n')).toContain(e);
+      }
+      expect(di).toContain('!.env.example'); // the safe template is NOT ignored
     });
   });
 });

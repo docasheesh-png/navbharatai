@@ -15318,3 +15318,28 @@ HONEST BOUNDARY (rule 6): this closes the null-email code fragility. If the admi
 in the live `AGENTV3_FREE_LIST` env at all, that is infra — the admin adds their Firebase UID to the list
 (recorded in the session reply). Once exemption is restored, the negative wallet is irrelevant (free-list
 skips BOTH the affordability gate and the debit — routes/agentv3.ts:3442/6830). Gate: server tsc 0, suite 6252.
+
+## 2026-07-13 — Conveyor cont'd: GA-3 lockfile/PM + GA-12 maintainability + GA-14 PM-correct artifacts (#1277–#1286)
+
+Autonomous conveyor (admin: "bina ruke 100% automatic"), strict safeguard-#6 redundancy-checks first. This
+batch found REAL bugs (not padding) via a "audit the existing generators" sweep:
+
+- **#1277 — GA-12 maintainability**: oversized God-file detector (advisory in `evaluate`, never blocks).
+- **#1280 — GA-3 lockfile conflict**: `analyzeLockfiles` flags a directory with ≥2 different package-manager
+  lockfiles (npm+yarn etc. → inconsistent installs dev-vs-CI). Deterministic, zero-FP, advisory.
+- **#1282 — GA-3 package-manager detection**: `detectPackageManager` reads the root lockfile → the project's
+  real manager + install/run commands; advisory in `evaluate` (only when not npm).
+- **#1284 — GA-14 CI fix**: `generate_deploy_artifacts` hardcoded `npm ci`/`cache: npm`, so a pnpm/yarn/bun
+  project got a BROKEN GitHub Actions workflow. Now PM-aware (pnpm/action-setup, oven-sh/setup-bun, frozen
+  installs, right cache). REDUNDANCY-CHECK WIN: GA-14 CI *generation* already existed — fixed the bug within it
+  instead of rebuilding.
+- **#1285 — GA-14 Dockerfile fix (sibling)**: same hardcoded-npm bug in the Dockerfile — now node base +
+  `corepack enable` in BOTH stages for pnpm/yarn, `oven/bun` base + `bun` user for bun, correct lockfile COPY.
+- **#1286 — GA-14 README fix (sibling)**: README Getting-Started/scripts said `npm install`/`npm run` for every
+  project — now uses the detected manager (lockfile → Corepack `packageManager` field → npm). Extracted a shared
+  `ToolDispatcher.detectWorkspacePackageManager()` reused by the deploy-artifact + README generators.
+
+Also confirmed via redundancy-check (no rebuild): T1-ratelimit-all already done. Each PR: tsc fe+server 0,
+vitest green, CI-gated before merge. Roadmap reconciled (GA-3 slices 1–8, GA-12 slice, GA-14 → 🟡).
+Honest remaining high-value work stays: Tier-0 live defects (need the admin's real build report — deferred,
+not guess-fixed) and the risky "wire non-npm into the live install path" half of GA-3.

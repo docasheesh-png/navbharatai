@@ -186,7 +186,7 @@ safely edit, or truly verify it).
 - **GA-1** ⚠️ — Multi-Workspace Manager (unified orchestrator: list/switch/quota/cleanup).
 - **GA-2** ❌ — Runtime Supervisor + Background Task Manager + durable Job Queue (long-run
   process tracking, restart-on-crash). *(Out-of-process half is infra → Tier 4 / V4-4.)*
-- **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269). **Remaining ❌:** Bun & UV package-manager engines (multi-PM detection = P-PIPE-runtime).
+- **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269); (7) conflicting package-manager lockfiles in one directory — inconsistent installs dev-vs-CI (#1280); (8) package-manager DETECTION from the root lockfile (`detectPackageManager`, #1282) now driving the CI/Docker/README generators (#1284–#1286). **Remaining ❌:** actually WIRING the detected non-npm manager into the live install/build path (the risky half — detection + all generated artifacts are done; the sandbox still installs with npm). UV (Python) engine is separate (P-PIPE-runtime).
 - **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
 - **GA-5** ❌ — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
 - **GA-6** ❌ — Persistent Engineering Memory (ADR, tech-debt register, bug DB, deploy/migration history).
@@ -204,7 +204,11 @@ safely edit, or truly verify it).
   "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
   `evaluate` (never blocks a build). **Remaining ❌:** Prettier-as-engine + coupling/fan-in hotspot + more code-smell detectors.
 - **GA-13** ❌ — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
-- **GA-14** ⚠️ — CI/CD intelligence: generate + repair pipelines (GitHub Actions first, GitLab/Jenkins later).
+- **GA-14** 🟡 — CI/CD intelligence. GENERATION exists: `generate_deploy_artifacts` writes a GitHub Actions
+  `ci.yml` + Dockerfile + docker-compose, and (#1284/#1285/#1286, 2026-07-13) all three are now
+  **package-manager-correct** — the CI workflow, Dockerfile, and README use the project's real manager
+  (npm/yarn/pnpm/bun, detected from its root lockfile via a shared probe) instead of a broken hardcoded
+  `npm ci`. **Remaining ❌:** pipeline REPAIR (fix a failing/misconfigured existing workflow) + GitLab/Jenkins.
 - **GA-15** ❌ — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.
 - **GA-16** ❌ — Performance intelligence: runtime profiler, bundle analyzer, memory-leak, query optimizer.
 - **GA-17** ✅ — SHIPPED (#1249, 2026-07-12, Immune System Phase 3 "Red-team"): `FuzzProbe.generateFuzzPlan`

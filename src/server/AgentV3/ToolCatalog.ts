@@ -709,6 +709,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_db_config',
+      description:
+        'Wire the app to connect to the user\'s OWN database (Bring-Your-Own): generates a real client module ' +
+        '(src/lib/*) + the .env.example keys + the npm dependency for the chosen provider (supabase, neon, ' +
+        'firebase, postgres). The user pastes their credentials into .env — NavBharatAI never stores them. ' +
+        'This wires the connection; it does NOT auto-create the database (that needs the provider\'s console). ' +
+        'It never overwrites an existing .env.example. Use for a fullstack app that needs a database.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['supabase', 'neon', 'firebase', 'postgres'], description: 'The database provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -896,6 +912,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_iac',
   'scan_vulnerabilities',
   'run_migrations',
+  'generate_db_config',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

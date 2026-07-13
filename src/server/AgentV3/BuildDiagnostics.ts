@@ -137,6 +137,11 @@ export interface BuildBillingRecord {
   zeroBillReason?: string;
   /** Power (Only Opus) mode. */
   powerMode?: boolean;
+  /** The RESOLVED power level this build ran at ('weak' | 'off' | 'mini' | 'medium' | 'max') — so a
+   *  report unambiguously shows whether it was the free/cheap WEAK tier (no Claude) or a normal build. */
+  powerLevel?: string;
+  /** True when this build was forced onto the cheap tier with Claude excluded by construction. */
+  noClaude?: boolean;
 }
 
 export interface BuildDiagnosticsReport {
@@ -841,7 +846,8 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
     lines.push(`  ${'TOTAL'.padEnd(8)}: ${totCalls} call(s) · ${totIn.toLocaleString()} in · ${totOut.toLocaleString()} out · ${(totIn + totOut).toLocaleString()} total`);
   }
   if (r.billing) {
-    lines.push(`User tier: ${r.billing.userTier}${r.billing.powerMode ? ' — POWER MODE (Only Opus)' : ''}`);
+    const tierTag = r.billing.powerLevel ? ` [power: ${r.billing.powerLevel}${r.billing.noClaude ? ', no-Claude' : ''}]` : '';
+    lines.push(`User tier: ${r.billing.userTier}${tierTag}${r.billing.powerMode ? ' — POWER MODE (Only Opus)' : ''}`);
     if (typeof r.billing.billedUsd === 'number') {
       const inr = typeof r.billing.billedInr === 'number' ? `₹${r.billing.billedInr.toFixed(2)} ` : '';
       const wallet = typeof r.billing.walletTokensDebited === 'number' && r.billing.walletTokensDebited > 0

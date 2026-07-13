@@ -13,6 +13,7 @@
 // never nags a solid build and never invents requirements.
 
 import type { ProjectGraph } from './WorkspaceMemory';
+import { isAffirmativelyRequested } from './featureRequest';
 
 export interface RequirementFinding {
   level: 'medium';
@@ -104,7 +105,9 @@ export function analyzeRequirementCoverage(
   const covered: string[] = [];
   const missing: string[] = [];
   for (const feat of FEATURES) {
-    if (!feat.request.test(req)) continue;
+    // Negation-aware (deep-test App #1): "No settings, no other features" must NOT count settings as
+    // requested — a plain keyword test flagged a false "Requested feature not found: settings".
+    if (!isAffirmativelyRequested(req, feat.request)) continue;
     requested.push(feat.label);
     if (feat.artifact.test(surface)) covered.push(feat.label);
     else missing.push(feat.label);

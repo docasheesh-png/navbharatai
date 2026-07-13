@@ -18,6 +18,7 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
+import { reconcileLanguageExtensions } from './LanguageCoherence';
 
 export interface SimpleFileSpec {
   path: string;
@@ -408,6 +409,13 @@ export interface SimpleBuildResult {
    * and passed; undefined = verify was not wired at all.
    */
   typecheckRan?: boolean;
+  /**
+   * The ACTUAL compiler/verify error text that made the per-file build fail (after repairs) — so the
+   * build report can show WHY the fast lane fell back to the full builder, not just the outcome code.
+   * Deep-test App #2 (2026-07-13): the report said only "TYPECHECK_FAILED" with no error, so the real
+   * cause (a plan↔contract mismatch) could not be mined. Capped; only set on the ok:false verify path.
+   */
+  verifyErrors?: string;
 }
 
 /**
@@ -499,6 +507,25 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
+      // DETERMINISTIC LANGUAGE-COHERENCE RECONCILE before write/preview (admin deep-test App #1,
+      // 2026-07-13): the shared-contract phase always emits TypeScript, and the per-file generator can
+      // paste that TS (enum/interface/import type/`: Type`) into a `.jsx` file — which esbuild cannot
+      // parse ("Unexpected token, expected from"), triggering failed repairs → one-shot fallback →
+      // orphaned broken files → a permanently broken preview, on the SIMPLEST app. Renaming such a file
+      // to its `.tsx`/`.ts` sibling (Vite parses TS fine) makes it compile on the FIRST pass. Extension-
+      // less imports resolve automatically; explicit refs (index.html `<script src>`) are rewritten.
+      // Best-effort; only ever turns a would-be-broken build into a working one. Kill: AGENTV3_LANG_RECONCILE=off.
+      if (process.env.AGENTV3_LANG_RECONCILE !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const lang = reconcileLanguageExtensions(before);
+          if (lang.renames.length > 0) {
+            written.length = 0;
+            for (const [path, content] of Object.entries(lang.files)) written.push({ path, content });
+            deps.log?.(`🔧 Renamed ${lang.renames.length} file(s) to a TypeScript extension (contained TS syntax in a JS file) so they compile.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
       await deps.writeFiles(written);
       return written;
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
@@ -560,6 +587,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
         typecheckRan: verdict.ran !== false,
+        // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
+        verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
       };
     }
     files = [...byPath.values()];

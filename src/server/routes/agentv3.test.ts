@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, enforceNoClaude, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1404,5 +1404,36 @@ describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never 
     expect(failedImportPromptNote(null)).toBe('');
     expect(failedImportPromptNote(undefined)).toBe('');
     expect(failedImportPromptNote({ url: '', reason: 'x' })).toBe('');
+  });
+});
+
+describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13)', () => {
+  const chain = [
+    { name: 'GLM' }, { name: 'KIMI' }, { name: 'CLAUDE' },
+    { name: 'CLAUDE_HAIKU' }, { name: 'VERTEX' }, { name: 'GEMINI' },
+  ];
+
+  // THE exact leak (deep-test App #1): a weak/free build ran 4 claude-sonnet-4-6 calls on the heal gate
+  // because the "no Claude" guarantee was tied only to cheapOnly. This chokepoint strips Claude no matter
+  // how the chain was assembled, so a weak build can NEVER touch Claude — builder or heal.
+  it('strips CLAUDE and the forced-Haiku backstop when noClaude is set', () => {
+    const out = enforceNoClaude(chain, true).map((r) => r.name);
+    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI']);
+    expect(out).not.toContain('CLAUDE');
+    expect(out).not.toContain('CLAUDE_HAIKU');
+  });
+
+  it('leaves the chain untouched for a non-weak build (noClaude false)', () => {
+    expect(enforceNoClaude(chain, false)).toBe(chain);
+  });
+
+  it('a weak build with only cheap providers is unchanged (no Claude to strip)', () => {
+    const cheapOnly = [{ name: 'GLM' }, { name: 'KIMI' }];
+    expect(enforceNoClaude(cheapOnly, true).map((r) => r.name)).toEqual(['GLM', 'KIMI']);
+  });
+
+  it('is exhaustive — no Claude-named runner survives, in any position', () => {
+    const weird = [{ name: 'CLAUDE' }, { name: 'GLM' }, { name: 'CLAUDE_HAIKU' }, { name: 'CLAUDE' }];
+    expect(enforceNoClaude(weird, true).every((r) => !r.name.startsWith('CLAUDE'))).toBe(true);
   });
 });

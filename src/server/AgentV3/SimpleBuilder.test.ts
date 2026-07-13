@@ -211,6 +211,9 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('verify_failed');
     expect(repairs).toBe(2); // tried exactly maxRepairs times before handing off
+    // Observability (deep-test App #2): the REAL compiler error is carried out so the report is minable
+    // (not just "TYPECHECK_FAILED"). The last verify's error text must survive on the result.
+    expect(r.verifyErrors).toMatch(/error TS2339: broken/);
   });
 
   it('GA-8 circuit-breaker: identical errors after a repair → stops early (no wasted attempts), still hands off', async () => {

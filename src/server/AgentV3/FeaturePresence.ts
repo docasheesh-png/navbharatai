@@ -13,6 +13,8 @@
 // Pure + dependency-free (fully unit-testable). Advisory only — it records an honest finding; it never
 // blocks or fails a build (a heuristic must never false-fail a working app — the one absolute rule).
 
+import { isAffirmativelyRequested } from './featureRequest';
+
 export interface FeatureProbeResult {
   /** The requested feature (stable slug, e.g. 'add', 'delete', 'filter'). */
   feature: string;
@@ -138,7 +140,9 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
 
   const probes: FeatureProbeResult[] = [];
   for (const def of FEATURES) {
-    if (!def.requested.test(promptLower)) continue; // not requested → don't probe (no false flags)
+    // Negation-aware (deep-test App #1): a feature the user DECLINED ("no delete", "without search")
+    // must not be probed, or we'd false-flag it missing. Shares the RequirementCoverage guard.
+    if (!isAffirmativelyRequested(promptLower, def.requested)) continue; // not requested → don't probe
     let present = false;
     try { present = def.present(htmlLower, textLower); } catch { present = false; }
     probes.push({ feature: def.feature, label: def.label, present });

@@ -15060,3 +15060,80 @@ stuck build lock — the Fix that killed the 100-retries loop), `/attach` + `/li
 path — throttling breaks resume), or `/queue/next` + `/queue/complete` (an executor drains these on a
 loop). The limiter keys off authed-uid / anon-IP (not workspace) and is VITEST-skipped, so no behaviour
 change in tests. Gate: server tsc 0, boot smoke green.
+
+## 2026-07-13 — Deep-test autopsy: App #1 (digital clock) → language-coherence + negation-aware feature detection
+
+Admin's 1000-app deep test, App #1 (complexity 1, "digital clock"). Report `aacff3a8`. The SIMPLEST app
+took 3.5 min, 13 LLM calls (9 GLM + 4 Claude), 2 failed GLM repairs, a full one-shot fallback, and STILL
+shipped with a broken in-browser preview + orphaned files. Full 5-bucket ledger: 1 self-heal (duplicate
+stylesheet — symptom-level), 2 workaround (one-shot fallback + GLM 429), 2 skip (orphan broken files +
+late preview error), 4 still-broken (App.jsx un-parseable, in-browser preview crash, false BUILD_SUCCESS,
+false "settings" warning), 1 big struggle (the whole build). ₹198 billed for a clock.
+
+**Root cause (seed of the entire cascade):** the shared-CONTRACT phase's prompt ALWAYS asks the model
+for "a single TypeScript code block", and the per-file generator pasted that TS (`enum`/`interface`/
+`import type`/`: ClockProps`/`useState<ClockState>`) straight into `src/App.jsx`. A `.jsx` file cannot
+hold TS syntax → esbuild `Unexpected token, expected "from"` → 2 failed repairs → one-shot fallback →
+orphaned broken `.jsx` files → permanently broken in-browser preview.
+
+**Fix 1 — LanguageCoherence (DNA-level, deterministic):** new pure `LanguageCoherence.ts`
+(`hasTsOnlySyntax` + `reconcileLanguageExtensions`) renames any `.js`/`.jsx` file that contains
+TypeScript-only syntax to its `.ts`/`.tsx` sibling and rewrites explicit references (HTML `<script src>`
++ extension-carrying imports; extension-less imports resolve automatically). Wired into `SimpleBuilder`
+right beside the existing import self-heal — BEFORE the files are written/verified — so the file compiles
+on the FIRST pass and the whole cascade never starts. High-precision detection (interface/enum/import
+type/export type/declare, strings+comments stripped) → zero false positives on real JS. Kill:
+`AGENTV3_LANG_RECONCILE=off`.
+
+**Fix 2 — negation-aware feature detection:** the false "Requested feature not found: settings" came from
+a plain `\bsettings\b` keyword test matching the prompt's "**No** settings". New shared
+`featureRequest.isAffirmativelyRequested` requires at least one NON-negated mention; wired into BOTH
+`RequirementCoverage` and `FeaturePresence` (rule 3 — hunt siblings) so the two keyword detectors can't
+drift.
+
+Regression tests encode the exact failing inputs: LanguageCoherence (10 — the real App.jsx, rename +
+reference rewrite, .js-with-JSX→.tsx, no-op on all-JS, no-clobber), featureRequest (6), + negation cases
+in RequirementCoverage & FeaturePresence. Gate: server tsc 0, full suite 6202 green.
+
+Honestly deferred (noted, not silently patched): (a) orphan-file prune after a one-shot fallback — Fix 1
+prevents the fallback for this class, so orphans no longer arise here; a general prune is a separate
+follow-up. (b) The one-shot fallback leaving dead entry files is a latent issue only reached when the
+first pass fails for OTHER reasons.
+
+## 2026-07-13 — ABSOLUTE RULE: weak module ⇒ no Claude, ever (unbreakable guard)
+
+Admin (deep-test): App #1's report showed 4 `claude-sonnet-4-6` calls on the integrity heal of a
+free/weak build. Root cause: the "no Claude" guarantee was tied only to `cheapOnly`/`freeTierBuildActive`
+— a weak build whose heal gate didn't thread that flag still built a Claude runner.
+
+Fix (unbreakable, by construction): new exported pure `enforceNoClaude(chain, noClaude)` strips every
+Claude runner (`CLAUDE` + forced-Haiku `CLAUDE_HAIKU`) from the FINAL provider chain in `buildTurnRunner`
+whenever the build is weak — regardless of claudeFirst/cheapOnly/env. `noClaude` is computed once
+(`noClaudeBuild = freeTierBuildActive || powerSpecResolved.cheapOnly`) and threaded into EVERY
+`buildTurnRunner` call site (fast-lane runner, main agentic client, all 8 heal/escalation gates). The
+Claude-only env shortcut is also guarded. A weak build now runs on GLM/Kimi (+ Vertex/Gemini last resort)
+ALONE — NavBharatAI never spends its Claude budget on a weak build. Honesty: the resolved `powerLevel` +
+`noClaude` now appear in every build report (billing block + rendered text) so weak-vs-normal is never
+ambiguous again. CLAUDE.md gains the 🔒 absolute rule. Tests: enforceNoClaude (4, exhaustive strip),
+full suite 6206 green.
+
+## 2026-07-13 — Deep-test App #2 (tip calculator) autopsy + observability fix
+
+App #2 (complexity ~3). Preview genuinely rendered, GLM-only (ZERO Claude — confirms App #1's Claude came
+from the integrity-heal gate, now covered by the no-Claude guard). Plan used `.tsx` (no language bug).
+BUT the per-file build FAILED (TYPECHECK_FAILED, 2/2 repairs failed) → SIMPLE_BUILD_FALLBACK → one-shot
+rebuild rescued it. Same fallback-struggle as App #1, different root. Suspected cause: plan↔contract
+mismatch — the plan listed only App.tsx while the contract declared 5 component prop-interfaces
+(ResultDisplay/SplitControl/PercentageSelector/InputField) with no matching planned files; the one-shot
+succeeded by splitting into 2 real component files.
+
+BLOCKER to root-causing: the report showed only "TYPECHECK_FAILED" — the ACTUAL compiler error text was
+never captured, so the exact cause could not be mined (rule 5). FIX (observability, shipped): SimpleBuild
+now carries `verifyErrors` (the real capped compiler error after repairs), and the route records a
+`SIMPLE_BUILD_VERIFY_ERROR` warning (first line in message, full text in detail) whenever the fast lane
+falls back on a verify failure. The NEXT tip-calc report will therefore show WHY it typecheck-failed, so
+the plan↔contract root can be fixed with evidence instead of a guess. Test: SimpleBuilder verify-fail path
+asserts verifyErrors carries the error. Gate: server tsc 0, full suite 6206 green.
+
+Open (evidence-gated, next): confirm + fix the plan↔contract coherence gap once a post-deploy report shows
+the real typecheck error.

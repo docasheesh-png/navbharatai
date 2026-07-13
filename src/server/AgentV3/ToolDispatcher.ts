@@ -38,7 +38,17 @@ import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } fr
 import { classifyCommandRisk, governanceNote } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
-import { ensureViteAllowedHosts } from './ViteConfigGuard';
+import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
+import { ensureTsconfigBaseUrl } from './TsconfigGuard';
+
+/**
+ * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
+ * Vite preview-host allowance, the dep-free `@`→/src alias, and tsconfig baseUrl/paths restoration — so a
+ * model rewrite of vite.config/tsconfig can never silently re-break the preview or baseUrl-"src" resolution.
+ */
+function guardConfigContent(path: string, content: string): string {
+  return ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content)));
+}
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
@@ -801,7 +811,7 @@ export class ToolDispatcher {
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        const content = ensureViteAllowedHosts(path, reqStr(input, 'content'));
+        const content = guardConfigContent(path, reqStr(input, 'content'));
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -870,7 +880,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: ensureViteAllowedHosts(p, reqStr(obj, 'content')) };
+          return { path: p, content: guardConfigContent(p, reqStr(obj, 'content')) };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -942,8 +952,8 @@ export class ToolDispatcher {
         // indentation/spacing is slightly off still applies (still required to be
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
-        // If an edit to a Vite config left it without allowedHosts, restore the preview-host backstop.
-        const updated = ensureViteAllowedHosts(path, edited);
+        // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
+        const updated = guardConfigContent(path, edited);
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);

@@ -72,6 +72,15 @@ describe('checkFeaturePresence — robustness + empty-state', () => {
     const r = checkFeaturePresence('add, delete, filter', '<input <<< <button');
     expect(Array.isArray(r.probes)).toBe(true);
   });
+
+  // Deep-test App #1: an explicitly-DECLINED feature must never be probed (else it false-flags missing).
+  it('does NOT probe a feature the user explicitly declined ("No settings")', () => {
+    const r = checkFeaturePresence('Build a clock. No settings, no other features — just add a display.', '<div>12:00</div>');
+    expect(r.probes.find((p) => p.feature === 'edit' || p.label.includes('Settings'))).toBeUndefined();
+    // "add" is negated too here ("no other features … just add a display" — the add mention is affirmative),
+    // but the declined-feature guard must at minimum keep declined features out of the missing list.
+    expect(r.missing.join(' ')).not.toMatch(/settings/i);
+  });
 });
 
 describe('summary + repair prompt', () => {

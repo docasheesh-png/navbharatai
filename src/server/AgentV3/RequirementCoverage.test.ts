@@ -40,6 +40,18 @@ describe('analyzeRequirementCoverage', () => {
     expect(r.findings.some((f) => f.feature === 'dashboard' && f.level === 'medium')).toBe(true);
   });
 
+  // Deep-test App #1: "No settings, no other features" must NOT produce a false
+  // "Requested feature not found: settings" — the user explicitly DECLINED settings.
+  it('does NOT flag an explicitly-declined feature as requested ("No settings")', () => {
+    const r = analyzeRequirementCoverage(
+      'Build a simple digital clock. No settings, no other features — just the live clock and date.',
+      graph({ components: ['Clock'], files: ['src/App.tsx'] }),
+    );
+    expect(r.requested).not.toContain('settings');
+    expect(r.missing).not.toContain('settings');
+    expect(r.findings.some((f) => f.feature === 'settings')).toBe(false);
+  });
+
   it('counts a feature as covered when a matching component exists', () => {
     const r = analyzeRequirementCoverage(
       'I need login and a dashboard',

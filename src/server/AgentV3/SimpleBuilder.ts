@@ -18,6 +18,7 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
+import { reconcileLanguageExtensions } from './LanguageCoherence';
 
 export interface SimpleFileSpec {
   path: string;
@@ -496,6 +497,25 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           if (changes > 0) {
             for (const f of written) { const nc = addd.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind or forgotten import) before preview.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
+      // DETERMINISTIC LANGUAGE-COHERENCE RECONCILE before write/preview (admin deep-test App #1,
+      // 2026-07-13): the shared-contract phase always emits TypeScript, and the per-file generator can
+      // paste that TS (enum/interface/import type/`: Type`) into a `.jsx` file — which esbuild cannot
+      // parse ("Unexpected token, expected from"), triggering failed repairs → one-shot fallback →
+      // orphaned broken files → a permanently broken preview, on the SIMPLEST app. Renaming such a file
+      // to its `.tsx`/`.ts` sibling (Vite parses TS fine) makes it compile on the FIRST pass. Extension-
+      // less imports resolve automatically; explicit refs (index.html `<script src>`) are rewritten.
+      // Best-effort; only ever turns a would-be-broken build into a working one. Kill: AGENTV3_LANG_RECONCILE=off.
+      if (process.env.AGENTV3_LANG_RECONCILE !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const lang = reconcileLanguageExtensions(before);
+          if (lang.renames.length > 0) {
+            written.length = 0;
+            for (const [path, content] of Object.entries(lang.files)) written.push({ path, content });
+            deps.log?.(`🔧 Renamed ${lang.renames.length} file(s) to a TypeScript extension (contained TS syntax in a JS file) so they compile.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }

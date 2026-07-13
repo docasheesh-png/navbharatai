@@ -15060,3 +15060,42 @@ stuck build lock — the Fix that killed the 100-retries loop), `/attach` + `/li
 path — throttling breaks resume), or `/queue/next` + `/queue/complete` (an executor drains these on a
 loop). The limiter keys off authed-uid / anon-IP (not workspace) and is VITEST-skipped, so no behaviour
 change in tests. Gate: server tsc 0, boot smoke green.
+
+## 2026-07-13 — Deep-test autopsy: App #1 (digital clock) → language-coherence + negation-aware feature detection
+
+Admin's 1000-app deep test, App #1 (complexity 1, "digital clock"). Report `aacff3a8`. The SIMPLEST app
+took 3.5 min, 13 LLM calls (9 GLM + 4 Claude), 2 failed GLM repairs, a full one-shot fallback, and STILL
+shipped with a broken in-browser preview + orphaned files. Full 5-bucket ledger: 1 self-heal (duplicate
+stylesheet — symptom-level), 2 workaround (one-shot fallback + GLM 429), 2 skip (orphan broken files +
+late preview error), 4 still-broken (App.jsx un-parseable, in-browser preview crash, false BUILD_SUCCESS,
+false "settings" warning), 1 big struggle (the whole build). ₹198 billed for a clock.
+
+**Root cause (seed of the entire cascade):** the shared-CONTRACT phase's prompt ALWAYS asks the model
+for "a single TypeScript code block", and the per-file generator pasted that TS (`enum`/`interface`/
+`import type`/`: ClockProps`/`useState<ClockState>`) straight into `src/App.jsx`. A `.jsx` file cannot
+hold TS syntax → esbuild `Unexpected token, expected "from"` → 2 failed repairs → one-shot fallback →
+orphaned broken `.jsx` files → permanently broken in-browser preview.
+
+**Fix 1 — LanguageCoherence (DNA-level, deterministic):** new pure `LanguageCoherence.ts`
+(`hasTsOnlySyntax` + `reconcileLanguageExtensions`) renames any `.js`/`.jsx` file that contains
+TypeScript-only syntax to its `.ts`/`.tsx` sibling and rewrites explicit references (HTML `<script src>`
++ extension-carrying imports; extension-less imports resolve automatically). Wired into `SimpleBuilder`
+right beside the existing import self-heal — BEFORE the files are written/verified — so the file compiles
+on the FIRST pass and the whole cascade never starts. High-precision detection (interface/enum/import
+type/export type/declare, strings+comments stripped) → zero false positives on real JS. Kill:
+`AGENTV3_LANG_RECONCILE=off`.
+
+**Fix 2 — negation-aware feature detection:** the false "Requested feature not found: settings" came from
+a plain `\bsettings\b` keyword test matching the prompt's "**No** settings". New shared
+`featureRequest.isAffirmativelyRequested` requires at least one NON-negated mention; wired into BOTH
+`RequirementCoverage` and `FeaturePresence` (rule 3 — hunt siblings) so the two keyword detectors can't
+drift.
+
+Regression tests encode the exact failing inputs: LanguageCoherence (10 — the real App.jsx, rename +
+reference rewrite, .js-with-JSX→.tsx, no-op on all-JS, no-clobber), featureRequest (6), + negation cases
+in RequirementCoverage & FeaturePresence. Gate: server tsc 0, full suite 6202 green.
+
+Honestly deferred (noted, not silently patched): (a) orphan-file prune after a one-shot fallback — Fix 1
+prevents the fallback for this class, so orphans no longer arise here; a general prune is a separate
+follow-up. (b) The one-shot fallback leaving dead entry files is a latent issue only reached when the
+first pass fails for OTHER reasons.

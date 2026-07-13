@@ -971,9 +971,16 @@ export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspa
  * `runningBuilds` but not the lock) or ABANDONED (its client dropped, so it has NO attached subscriber,
  * and it has been running past the stall window). A build with a live watcher, or a freshly-started one,
  * is genuinely active → keep the honest 409 (the client re-attaches, or the user Stops it). Pure + tested. */
-export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = 30_000): boolean {
+export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = 30_000, hardMaxMs = 0): boolean {
   if (!existing || existing.ended) return true;
-  return existing.subscribers.size === 0 && now - existing.startedTs > staleMs;
+  // Abandoned: no live watcher AND past the stall window.
+  if (existing.subscribers.size === 0 && now - existing.startedTs > staleMs) return true;
+  // ZOMBIE (GA-2 in-process reaper): a build grossly past the HARD max duration is definitively dead — the
+  // AgentRunner aborts at AGENTV3_MAX_BUILD_SECONDS, so a build still "running" well beyond that never fired
+  // its cleanup (a hung await / crashed heal gate). Reclaim it even with a lingering subscriber, so a single
+  // zombie can't trap the account's "one build at a time" slot forever. hardMaxMs=0 disables this check.
+  if (hardMaxMs > 0 && now - existing.startedTs > hardMaxMs) return true;
+  return false;
 }
 
 /**
@@ -3501,7 +3508,10 @@ export function registerAgentV3Routes(app: Express): void {
     const buildKey = buildLockKey(userId, lockWorkspaceId, perWorkspaceLock);
     if (activeBuilds.has(buildKey)) {
       const existing = runningBuilds.get(buildKey);
-      if (shouldReclaimBuildLock(existing, Date.now())) {
+      // A build past its hard max + a 2-min grace is a zombie (the run aborts at maxBuildSeconds) — reclaim
+      // it even if a stale subscriber lingers. 0 (max disabled) keeps only the abandoned-lock reclaim.
+      const hardMaxMs = maxBuildSeconds() > 0 ? maxBuildSeconds() * 1000 + 120_000 : 0;
+      if (shouldReclaimBuildLock(existing, Date.now(), 30_000, hardMaxMs)) {
         // Abandoned/zombie lock (its client dropped on a network blip and the build hung, or it crashed
         // without clearing the lock) — RECLAIM it so the account is never trapped until the wall-clock
         // deadline. Tear the old build down cleanly, then fall through to start the fresh one.

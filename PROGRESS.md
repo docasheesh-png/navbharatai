@@ -15006,3 +15006,31 @@ Remaining GA-3: Bun/UV engines + a live "apply the suggestion" action. The large
 read→run→observe→fix as the norm, large-project ceiling / Project Mode, mandatory tests-green gate,
 extensibility surface, cheap-model tool-use fidelity) carry real breakage risk and are architectural —
 per safeguard #3 they should be admin-directed, not shipped blind. Gate each PR: tsc fe+server 0, vitest green.
+
+## 2026-07-13 — Comparison gap-closing continued (autonomous): builds 5–7 (#1265–#1267)
+
+Admin said "continue autonomously" after builds 1–4. Kept the conveyor on the safest, genuinely-distinct
+ledger items (each real, root-caused, regression-tested, CI-gated before merge). Was honest that pure
+micro-analyzers hit diminishing returns, so build 7 stepped up into the repair loop — carefully, in a way
+that provably can't break a passing build.
+
+- **#1265 — package-health `script-missing-ref`.** `analyzePackageHealth` now flags a script that invokes
+  another script by name (`npm|pnpm|yarn|bun run X`) that doesn't exist → dies with "Missing script: X"
+  (the classic "build" → "npm run clean" after clean was renamed). Zero-false-positive: explicit `run`
+  only (bare `yarn X` excluded), one issue per (script, ref) pair. +6 tests. Wired via `check_package`.
+- **#1266 — GA-3 sibling-major skew.** `detectSiblingMajorSkew`: different-named packages bound by a hard
+  same-major contract pinned to different majors (react `^18` + react-dom `^17` → runtime crash; also the
+  `@angular/*` core group). Curated/conservative, non-intersecting-range signal, high severity, align
+  suggestion. Complements `detectVersionConflicts` (same package across sections). +7 tests.
+- **#1267 — GA-8 stuck-repair circuit-breaker.** The SimpleBuilder bounded tsc-repair loop ran the full
+  `maxRepairs` budget even when a repair made ZERO progress (byte-identical compiler errors). Now: after a
+  repair + re-verify, if the errors are identical to the set that prompted the attempt, stop and hand off
+  to the full builder immediately. Provably safe — only fires while `!verdict.ok`, so it can never turn a
+  passing build into a failing one; final verdict (ok:false → full builder, no fake success) unchanged,
+  only wasted model-call + verify rounds saved. Test updated to distinct-errors for the full-budget path
+  + new breaker test (maxRepairs 5, identical errors → stops after 1). Gate each: tsc fe+server 0, vitest green.
+
+Session tally: 7 gap-closing builds shipped + 2 doc records (#1260–#1267). Remaining ledger work is now
+either the architectural big-gaps (agentic-loop-as-norm, Project Mode ceiling, mandatory tests-green gate,
+extensibility) — admin-directed per safeguard #3 — or lower-value niche checks; flagged honestly rather
+than padded.

@@ -15289,3 +15289,32 @@ OUTCOME_MISSING_FILES (error) — never "fully functional" while a dangling impo
 creation pass is cheap-floor-first and no-Claude-safe on weak builds (rides the #1275 chokepoint). Kill:
 AGENTV3_MISSING_FILES_GATE=off. Tests (4): the exact App #4 case (`./hooks` dir + `./App.module.css`)
 flagged; dir-with-index + existing-css resolve with no false positive. Gate: server tsc 0, full suite 6247.
+
+## 2026-07-13 — Free-list exemption hardening: the admin's -1,22,330-token wallet (App #4 credit block)
+
+Alongside App #4's broken app, the admin's v3.0 panel showed a credit block ("Add credits to build") with a
+wallet at -1,22,330 tokens — on a FREE-LIST admin who must be billing-exempt. Investigation (subagent):
+the client block is 100% server-authoritative (402 + `billed` flag, both already call `isAgentV3FreeUser`),
+so the client is NOT the bug. The negative wallet PROVES `isAgentV3FreeUser(userId, email)` returned FALSE
+at debit time across many builds → the admin was actually debited.
+
+ROOT CAUSE: free-list exemption matches by EMAIL, and the build path uses the VERIFIED-token email ONLY
+(`entitlementEmail(verified)` → `verified.email | null`, T0-9 anti-spoof). When a verified token omits the
+email claim (some providers / custom tokens do), that is null → a free-list admin matched by uid only →
+not in the list (which holds emails) → treated as a paying user → debited into the deep negative → 402.
+`debitWalletForBuild` has no independent free-list guard; exemption lives only at the call site. So the
+guarantee silently depended on a token claim that isn't always present.
+
+FIX (rule 4 — depend on less; resolve identity robustly): `resolveVerifiedEmail(uid)` (authMiddleware) —
+when the verified token carries no email, resolve the account's REAL email from the already-VERIFIED uid via
+Firebase Admin `getUser(uid).email` (T0-9 safe — server-side account email, never client-claimed), then run
+the free-list check with it. Wired into the build path (`email = entitlementEmail(verified); if (!email &&
+verified?.uid) email = await resolveVerifiedEmail(verified.uid)`) BEFORE the enable/affordability/debit
+checks, so all three benefit. Best-effort: null on any failure → degrades to exactly today's behavior; only
+runs when the token lacked an email. Testable core `resolveVerifiedEmailWith(uid, getAuth)` (injected auth);
+5 tests (resolves / empty-uid-never-looks-up / provider-unavailable / no-email / lookup-throws→null).
+
+HONEST BOUNDARY (rule 6): this closes the null-email code fragility. If the admin's email/uid is simply not
+in the live `AGENTV3_FREE_LIST` env at all, that is infra — the admin adds their Firebase UID to the list
+(recorded in the session reply). Once exemption is restored, the negative wallet is irrelevant (free-list
+skips BOTH the affordability gate and the debit — routes/agentv3.ts:3442/6830). Gate: server tsc 0, suite 6252.

@@ -343,6 +343,150 @@ export async function addMissingProjectImports(files: Record<string, string>): P
   return { files: out, added };
 }
 
+export interface WrongSourceFix {
+  file: string;
+  name: string;
+  /** The alias the import used locally, if any (`import { X as Y }` → 'Y'); undefined when unaliased. */
+  alias?: string;
+  from: string;
+  to: string;
+}
+
+export interface WrongSourceResult {
+  files: Record<string, string>;
+  fixes: WrongSourceFix[];
+}
+
+/**
+ * Deterministically repair a NAMED import that points at the WRONG module: the name is imported from
+ * module A, A does NOT export it, and EXACTLY ONE other project module DOES export it (a named export).
+ *
+ * WHY (root cause, Kanban build report 2026-07-13): the readiness gate found "broken import(s) — a name is
+ * imported that the module does not export" (e.g. `formatDueDate` from `../utils/dateUtils`). A subset of
+ * these are simply the wrong source file — the symbol really lives in a sibling module — and that subset is
+ * mechanically fixable with zero guessing. This is the third member of the reconciler family, alongside the
+ * named<->default kind reconciler and the forgotten-import adder, and shares their paranoid safety posture:
+ *
+ * Paranoid-safe: acts ONLY when the name is exported by EXACTLY ONE module (ambiguous → never guess), only
+ * on NAMED specifiers of a LOCAL import whose current target genuinely lacks the export, never on default/
+ * namespace imports, never when the target has a wildcard re-export (`export *` — the name COULD be there),
+ * and it preserves any local alias. It can only turn a build-breaking import into a resolvable one. Pure;
+ * never throws — any parse/mutation problem returns the input unchanged.
+ */
+export async function fixWrongSourceImports(files: Record<string, string>): Promise<WrongSourceResult> {
+  const unchanged: WrongSourceResult = { files, fixes: [] };
+  const mod = await loadTsMorph();
+  if (!mod) return unchanged;
+
+  let project: any;
+  try {
+    project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2 } });
+  } catch { return unchanged; }
+
+  const sources = new Map<string, any>();
+  const fileSet = new Set<string>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!CODE_FILE.test(path) || typeof content !== 'string') continue;
+    fileSet.add(path);
+    try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
+  }
+  if (sources.size === 0) return unchanged;
+
+  // name -> set of modules that export it as a NAMED export. 2+ owners is ambiguous → never acted on.
+  const exportIndex = new Map<string, Set<string>>();
+  const wildcardModules = new Set<string>(); // modules with `export *` — their named surface is unknowable
+  for (const [path, sf] of sources) {
+    try {
+      for (const ed of sf.getExportDeclarations?.() ?? []) {
+        if (ed.isNamespaceExport?.()) wildcardModules.add(path);
+      }
+      const decls: Map<string, any[]> = sf.getExportedDeclarations?.() ?? new Map();
+      for (const name of decls.keys()) {
+        if (name === 'default') continue;
+        if (!exportIndex.has(name)) exportIndex.set(name, new Set());
+        exportIndex.get(name)!.add(path);
+      }
+    } catch { /* skip a file we can't read exports from */ }
+  }
+  if (exportIndex.size === 0) return unchanged;
+
+  const fixes: WrongSourceFix[] = [];
+  const touched = new Set<string>();
+
+  for (const [path, sf] of sources) {
+    let imports: any[];
+    try { imports = sf.getImportDeclarations(); } catch { continue; }
+    // Group every wrong specifier in this file by the CORRECT owner module, so we emit one tidy import
+    // per owner. Each entry keeps the export name and any local alias.
+    const moveToOwner = new Map<string, Array<{ name: string; alias?: string }>>();
+    for (const imp of imports) {
+      let spec = '';
+      try { spec = imp.getModuleSpecifierValue?.() ?? ''; } catch { continue; }
+      const target = resolveLocalTarget(path, spec, fileSet);
+      if (!target) continue;                                   // bare package / unresolved — not our job here
+      // Never touch a namespace import; and if the target re-exports with `export *`, the name might be
+      // present transitively — stay out of it.
+      let hasNamespace = false;
+      try { hasNamespace = !!imp.getNamespaceImport?.(); } catch { /* ignore */ }
+      if (hasNamespace || wildcardModules.has(target)) continue;
+
+      let targetExports: Set<string>;
+      try {
+        const decls: Map<string, any[]> = sources.get(target)?.getExportedDeclarations?.() ?? new Map();
+        targetExports = new Set([...decls.keys()].filter((k) => k !== 'default'));
+      } catch { continue; }
+
+      let named: any[];
+      try { named = imp.getNamedImports?.() ?? []; } catch { continue; }
+      for (const ni of named) {
+        let name = '';
+        try { name = ni.getName?.() ?? ''; } catch { continue; }
+        if (!name || targetExports.has(name)) continue;         // correct source already — leave it
+        const owners = exportIndex.get(name);
+        if (!owners) continue;                                   // exported nowhere → genuinely missing (LLM's job)
+        const candidates = [...owners].filter((o) => o !== target && o !== path);
+        if (candidates.length !== 1) continue;                   // ambiguous or self → never guess
+        const owner = candidates[0];
+        let alias: string | undefined;
+        try { alias = ni.getAliasNode?.()?.getText?.() || undefined; } catch { alias = undefined; }
+        try { ni.remove(); } catch { continue; }                 // drop the wrong specifier
+        if (!moveToOwner.has(owner)) moveToOwner.set(owner, []);
+        moveToOwner.get(owner)!.push({ name, alias });
+        fixes.push({ file: path, name, alias, from: spec, to: relImportSpecifier(path, owner) });
+        touched.add(path);
+      }
+    }
+    if (moveToOwner.size === 0) continue;
+    // Clean up any import declaration left with no named imports AND no default/namespace binding.
+    try {
+      for (const imp of sf.getImportDeclarations()) {
+        const hasNamed = (imp.getNamedImports?.() ?? []).length > 0;
+        const hasDefault = !!imp.getDefaultImport?.();
+        const hasNs = !!imp.getNamespaceImport?.();
+        if (!hasNamed && !hasDefault && !hasNs) imp.remove();
+      }
+    } catch { /* leave the empty import if cleanup fails — harmless */ }
+    // Add one grouped import per correct owner.
+    for (const [owner, names] of moveToOwner) {
+      try {
+        sf.addImportDeclaration({
+          moduleSpecifier: relImportSpecifier(path, owner),
+          namedImports: names.map((n) => (n.alias ? { name: n.name, alias: n.alias } : { name: n.name })),
+        });
+      } catch { /* if we can't add it, the removed specifier is lost — but tsc/readiness will re-flag it honestly */ }
+    }
+  }
+
+  if (fixes.length === 0) return unchanged;
+  const out: Record<string, string> = { ...files };
+  for (const path of touched) {
+    const sf = sources.get(path);
+    if (!sf) continue;
+    try { out[path] = sf.getFullText(); } catch { /* keep original on serialization error */ }
+  }
+  return { files: out, fixes };
+}
+
 /**
  * Convenience: reconcile, then re-analyze so the caller sees exactly which mismatches survived (i.e.
  * were NOT safely auto-fixable and still need real attention). Never throws.

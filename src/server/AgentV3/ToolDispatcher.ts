@@ -52,7 +52,7 @@ import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
 import { analyzeImportExports } from './ImportExportAnalysis';
-import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -1294,6 +1294,24 @@ export class ToolDispatcher {
                 try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
               }
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${addRes.added.length} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`, ts: Date.now() });
+            }
+          } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // WRONG-SOURCE SELF-HEAL (Kanban build 2026-07-13): a NAMED import points at a module that does
+          // NOT export it, while exactly one OTHER project module DOES — the import is simply the wrong
+          // source. Deterministically re-point it (unique-owner only; never a guess). Same durable write path.
+          try {
+            const wrongRes = await fixWrongSourceImports(astFiles);
+            if (wrongRes.fixes.length) {
+              const changedFiles = new Set(wrongRes.fixes.map((f) => f.file));
+              for (const file of changedFiles) {
+                const content = wrongRes.files[file];
+                if (typeof content !== 'string') continue;
+                astFiles[file] = content;
+                try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
+                try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
+                try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+              }
+              this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
         }

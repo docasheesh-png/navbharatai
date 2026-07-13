@@ -6055,6 +6055,81 @@ export function registerAgentV3Routes(app: Express): void {
         }
       }
 
+      // MISSING-FILES GATE for the AGENTIC path (deep-test App #4 — Instagram, 2026-07-13). The fast
+      // lane already runs findUnresolvedLocalImports before verify (Fix 38c), but the AGENTIC build (the
+      // path that builds COMPLEX apps — this Instagram clone was 101 steps) never did. So src/App.tsx
+      // importing ./hooks (useAuth) + ./App.module.css that were NEVER written shipped as "✓ Done"; the
+      // preview STUBBED the missing modules, useAuth() came back undefined, and the app crashed at runtime
+      // ("Cannot read properties of undefined (reading 'isAuthenticated')"). Same defect CLASS the fast-
+      // lane gate catches — missing on the path that builds the biggest apps (root cause: the gate lived
+      // at ONE call site). Deterministic + free: every LOCAL import must resolve to a real written/scaffold
+      // file; a gap triggers ONE bounded creation pass grounded in the importing files, then re-checks and
+      // records the HONEST end-state (never "fully functional" while a dangling import guarantees a crash).
+      // Kill: AGENTV3_MISSING_FILES_GATE=off.
+      if (
+        process.env.AGENTV3_MISSING_FILES_GATE !== 'off' && !fastLaneGated
+        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+      ) {
+        try {
+          const scaffoldPaths = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
+            .filter((p) => !/^(node_modules|\.git)\//.test(p));
+          const findMissing = (): Array<{ missing: string; importedBy: string }> => {
+            const writtenMap = Object.fromEntries(writtenFiles);
+            const fileMap: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...writtenMap };
+            // Judge only OUR writes — a pre-existing scaffold file's own imports are not this build's gap.
+            return findUnresolvedLocalImports(fileMap).filter((u) => writtenMap[u.importedBy] !== undefined);
+          };
+          let missing = findMissing();
+          if (missing.length > 0) {
+            const fmt = (arr: typeof missing) => arr.slice(0, 15).map((u) => `${u.missing} (imported by ${u.importedBy})`).join('\n  ');
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_FILES_DETECTED', message: `${missing.length} local module(s) imported but never created (the app crashes at runtime; the preview stubs them):\n  ${fmt(missing)}`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${missing.length} referenced file(s) were never created — generating them so the app doesn't crash…`, ts: Date.now() });
+            try {
+              // Ground the creation pass in the files that DO the importing, so each new module matches its
+              // real usage (correct named/default exports, hook/prop shapes) instead of a blind stub.
+              const importerPaths = Array.from(new Set(missing.map((m) => m.importedBy)));
+              const importerFiles = importerPaths
+                .map((p) => ({ path: p, content: writtenFiles.get(p) || '' }))
+                .filter((f) => f.content);
+              const missingList = missing.map((m) => `- ${m.missing} (imported by ${m.importedBy})`).join('\n');
+              const t = await makeFastTextRunner().runTurn({
+                model: fastBuildModel(), system: repairSystemPrompt(framework),
+                messages: [{ role: 'user', content:
+                  `The app was built for this request:\n${prompt}\n\n` +
+                  `These LOCAL modules are imported but were NEVER created, so the app crashes at runtime. ` +
+                  `CREATE each missing file with REAL, working content that satisfies EXACTLY how the ` +
+                  `importing file uses it — correct named/default exports, correct hook return shapes, real ` +
+                  `logic (no TODOs, no empty stubs). For a *.module.css import, create the stylesheet with the ` +
+                  `class names the component references. Change NOTHING else.\n\nMISSING FILES:\n${missingList}\n\n` +
+                  `The files that import them (match their usage precisely):\n` +
+                  importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n') },
+                ],
+                tools: [], maxTokens: 8000,
+              });
+              const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              for (let i = 0; i < created.length; i++) {
+                await dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend');
+              }
+            } catch (e) {
+              console.log(`[AGENTV3] missing-files gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            missing = findMissing();
+            if (missing.length === 0) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'MISSING_FILES_HEALED', message: 'All previously-missing local modules were created — the app no longer has dangling imports.', autoResolved: true });
+              events.emit({ type: 'narration', agent: 'architect', text: '✅ Created the missing files — the app is now complete.', ts: Date.now() });
+              if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save best-effort */ } }
+            } else {
+              // Still missing after one pass → HONEST end-state. Do NOT flip result.ok (the app is saved —
+              // ship-with-warning, like OUTCOME_TYPECHECK_FAILED); the PREVIEW_VERIFY gate below is the
+              // render-truth judge that can zero billing if the crash is confirmed on screen.
+              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_FILES', message: `After one creation pass, ${missing.length} local module(s) are STILL missing — the app will crash at runtime:\n  ${fmt(missing)}`, autoResolved: false });
+              events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some referenced files could not be auto-created. Your files are saved — send a follow-up and I\'ll finish them.', ts: Date.now() });
+            }
+          }
+        } catch { /* missing-files gate is best-effort — never blocks a build */ }
+      }
+
       // PROJECT INTEGRITY (autopsy 2026-07-11, Todo + Notes reports) — two real defect CLASSES the
       // deterministic analyzer suite (ArchitectureAnalysis / WorkspaceHealth / deadCode) does not cover
       // and that shipped in both apps: (1) MULTIPLE mount-focus owners — the Notes build had NoteEditor

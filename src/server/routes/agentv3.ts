@@ -1168,11 +1168,18 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
   // backstops any real timeout). The env can RE-impose a positive limit if timeouts ever return.
   const floorMaxRaw = (process.env.AGENTV3_CHEAP_FLOOR_MAX_PROMPT_CHARS ?? '').trim();
   const floorMaxPromptChars = floorMaxRaw !== '' && Number.isFinite(Number(floorMaxRaw)) ? Number(floorMaxRaw) : 0;
-  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}): void => {
+  // KIMI-specific timeout (admin 2026-07-13, "kimi ka time badhao — 120 sec"): KIMI (Moonshot) is
+  // measurably SLOWER than GLM on the LARGEST prompts (a 39-file full-stack build turn) — the real App #7
+  // "Request timed out" failures were KIMI not finishing within the 60s floor, so the turn fell to Vertex
+  // which then TRUNCATED. Giving KIMI 120s lets it finish the big turn instead of prematurely cascading to
+  // the truncating fallback. GLM keeps the shorter floor timeout (fast fallback when a GLM key is throttled
+  // is desirable). Env-tunable; a positive AGENTV3_CHEAP_FLOOR_TIMEOUT_MS still floors KIMI no lower than GLM.
+  const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
+  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}, timeoutMs: number = floorTimeoutMs): void => {
     if (!apiKey) return; // no key → a second, independent off-switch
     for (const model of models) {
       try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: floorTimeoutMs, maxRetries: 0 });
+        const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
         runners.push({ name, runner: sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars) });
       } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
     }
@@ -1205,7 +1212,7 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
     add('GLM', process.env.GLM_API_KEY, process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4', parseModelLadder(glmEnv, glmDefault), { thinkingControl: true });
   }
   if (floor === 'kimi' || floor === 'both' || floor === 'on') {
-    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(kimiEnv, kimiDefault));
+    add('KIMI', process.env.KIMI_API_KEY, process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1', parseModelLadder(kimiEnv, kimiDefault), {}, kimiTimeoutMs);
   }
   // Amazon Bedrock — Z.AI GLM 5 as a cheap-floor rung (admin 2026-07-08). Bedrock exposes its
   // SERVERLESS models via an OpenAI-COMPATIBLE endpoint, so the SAME OpenAiToolRunner the GLM/KIMI

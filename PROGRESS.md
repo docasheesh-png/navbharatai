@@ -15049,3 +15049,14 @@ diminishing returns, and the remaining real value is the architectural BIG-gaps 
 Project Mode ceiling, mandatory tests-green gate, extensibility surface, cheap-model tool-use fidelity),
 which carry live-app breakage risk and per safeguard #3 must be admin-directed with a plan first — not
 shipped blind. Stopped here and handed the direction choice back to the admin rather than padding the count.
+## 2026-07-12 — T1-ratelimit-all completed: rate-limit /ship, /revert, /respond
+
+The named-scope routes already carried limiters (`/restore`, `/import-files`, `/inbrowser-preview`,
+`/workspace-files` → `workspaceRateLimiter`; `/chat` → `buildRateLimiter`). Closed the ⚠️ by extending
+the same 60/30-per-hour workspace ceiling to the remaining expensive state-changers: `/ship` (real
+deploy — build + provider push), `/revert` (git + sandbox checkpoint restore), and `/respond` (resolves a
+pending approval). Deliberately NOT applied to `/stop` (must stay lock-free so a user can always free a
+stuck build lock — the Fix that killed the 100-retries loop), `/attach` + `/live` (reconnect critical
+path — throttling breaks resume), or `/queue/next` + `/queue/complete` (an executor drains these on a
+loop). The limiter keys off authed-uid / anon-IP (not workspace) and is VITEST-skipped, so no behaviour
+change in tests. Gate: server tsc 0, boot smoke green.

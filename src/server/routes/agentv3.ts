@@ -2346,7 +2346,9 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // Approve/reject a pending gate (plan mode / permission prompt, P4).
-  app.post('/api/agentv3/respond', (req: Request, res: Response) => {
+  // T1-ratelimit-all: /respond resolves a pending approval (a state change) — capped like the other
+  // workspace endpoints so it can't be hammered.
+  app.post('/api/agentv3/respond', workspaceRateLimiter(), (req: Request, res: Response) => {
     const requestId = typeof req.body?.requestId === 'string' ? req.body.requestId : '';
     const approved = req.body?.approved === true;
     if (!requestId) {
@@ -2474,7 +2476,11 @@ export function registerAgentV3Routes(app: Express): void {
   // checks). Honest: a red/pending PR is left OPEN with a clear note, never force-merged. The user's
   // OWN GitHub token is the authority (only their own repos are writable), so this can never touch
   // another account's repo. `main` changes ONLY here, on the user's explicit click.
-  app.post('/api/agentv3/ship', async (req: Request, res: Response) => {
+  // T1-ratelimit-all: /ship publishes a real deploy (build + provider push) — an expensive,
+  // sandbox+external-hitting state change, so it gets the same 60/30-per-hour workspace ceiling as
+  // the other workspace endpoints. (NOT applied to /stop, /attach, /live — the lock-free + reconnect
+  // critical paths must never be throttled — nor to /queue/next|complete, which an executor drains.)
+  app.post('/api/agentv3/ship', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
@@ -2527,7 +2533,9 @@ export function registerAgentV3Routes(app: Express): void {
   // is preserved and the revert is itself revertible). Only a single-parent head (the shape a squash
   // "Ship to main" produces) is auto-revertible; a true merge / root commit is refused honestly and the
   // user is pointed at GitHub's own Revert. The user's own token is the authority (own repos only).
-  app.post('/api/agentv3/revert', async (req: Request, res: Response) => {
+  // T1-ratelimit-all: /revert restores a checkpoint (hits git + the sandbox) — a real state change,
+  // rate-limited like the other workspace endpoints.
+  app.post('/api/agentv3/revert', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {

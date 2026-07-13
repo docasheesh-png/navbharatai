@@ -15481,3 +15481,46 @@ identical. Gate: server tsc 0, all server suites pass (6314 individual; the 2 "f
 
 NOTE: committed onto the App #5 honesty-fix branch (#1296) because the GitHub MCP token expired mid-session
 (PR/merge ops blocked until re-auth; `git push` still works). Both App #5 fixes ship together in #1296.
+
+
+---
+
+## 2026-07-13 — Forensic autopsy: Kanban board build (NavBharatAI Pro v3.0) — 3 root-cause fixes
+
+Admin sent a real v3.0 build-diagnostics report for a Kanban board app. Verdict: `ok:false`, score
+**0/100**, `TYPECHECK_FAILED`, step-limit(80) hit, model claude-sonnet-4-6. Full forensic autopsy per the
+5th absolute rule.
+
+**5-bucket ledger:** ✅ self-healed 4 (malformed npm install → clean re-install; tsc@2.0.4 → typescript
+install recovery; GLM fail → provider fallback; GA-8 circuit-breaker fired correctly). 🔀 worked-around 2
+(GLM 429 storm → fallback; `npx tsc` → tsc@2.0.4 squatter → recover). ⏭️ skipped 0 major. ❌ still-broken
+(baseUrl imports 401'd type-check though files existed; 12+ genuinely-missing `.module.css`/`Icons` barrel/
+`Button`; 4 broken named imports; PREVIEW_ERROR; 0/100). 🥵 struggle 3 (GLM 429 storm; step-limit-80
+exhaustion; fast-lane missed imported local modules).
+
+**Missing subsystem:** the vite-react scaffold rejected the single most common import convention LLMs emit —
+baseUrl-"src" (`from 'stores/useBoardStore'`). One gap cascaded into two failures: tsc called an
+already-written file "Cannot find module" (TYPECHECK_FAILED), and the completeness gate told the repair pass
+to re-CREATE files already on disk (wrong verdict → burned bounded repair steps → step-limit exhaustion).
+
+**Root-cause fixes shipped (branch → CI green → merge):**
+- **#1305** — scaffold now supports baseUrl-"src" end-to-end: tsconfig `baseUrl:"src"` + `@/*` paths, and
+  Vite mirrors it via the `vite-tsconfig-paths` plugin (so a type-clean app also renders — no fake-pass).
+  Fixed in BOTH scaffold copies (v3.0 + Engineer AI, rule-3 siblings). Locked with a REAL TypeScript-resolver
+  regression test (`stores/useBoardStore` → `src/stores/useBoardStore.ts`; `react` not hijacked).
+- **#1306** — every executable `npx tsc` instruction is now `npx --no-install tsc` (systemPrompt,
+  crossLangCheck, EngineerAgentLoop). `--no-install` uses the project's LOCAL typescript and fails honestly
+  if absent, instead of downloading the `tsc@2.0.4` squatter ("This is not the tsc command…"). Supply-chain +
+  correctness fix. Locked in crossLangCheck + systemPrompt tests.
+- **#1307** — MultiProviderTurnRunner benches a 429-throttled cheap-floor provider after 2 consecutive 429s
+  (symmetric with the existing timeout bench; success resets the streak). Stops the GLM 429 storm: 2 failed
+  calls → benched → rest of the build goes straight to the next provider. Locked with classifier + bench +
+  reset tests.
+
+**Open root causes (rule 6 — honestly recorded, not cosmetically patched):**
+- Genuinely-missing `.module.css`/barrel files: the completeness gate detects them but the repair ran out of
+  steps (step-limit-80). The #1305 baseUrl fix stops the repair budget being wasted re-creating existing
+  files, so this should ease — to be MEASURED on the next build report before any further change (rule 4: no
+  fix from guesses).
+- 4 broken NAMED imports (`ID←../types`, `formatDueDate←../utils/dateUtils`): a contract-drift class (target
+  file exists, named export missing) — separate from the path-resolution class fixed here; next candidate.

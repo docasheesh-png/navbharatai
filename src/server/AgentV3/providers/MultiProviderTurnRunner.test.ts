@@ -218,6 +218,39 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     expect(glm.runTurn).toHaveBeenCalledTimes(2);
   });
 
+  it('classifies a 429 as a rate-limit (but NOT a size-gate skip or a plain error)', async () => {
+    const { isRateLimitProviderError } = await import('./MultiProviderTurnRunner');
+    expect(isRateLimitProviderError(new Error('429 Rate limit reached'))).toBe(true);
+    expect(isRateLimitProviderError(new Error('Too Many Requests'))).toBe(true);
+    expect(isRateLimitProviderError(new Error('rate_limit_error'))).toBe(true);
+    expect(isRateLimitProviderError(new Error('skipped: prompt 999 chars exceeds the cheap-floor limit 100 (routed to the next provider)'))).toBe(false);
+    expect(isRateLimitProviderError(new Error('some other 500 error'))).toBe(false);
+  });
+
+  it('2 CONSECUTIVE 429s bench a provider for the rest of the run (no 429 storm); a success resets the streak', async () => {
+    const { makeMultiProviderTurnRunner: make } = await import('./MultiProviderTurnRunner');
+    const glm = runnerFail('429 Rate limit reached');
+    const runner = make([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('from claude') }]);
+    await runner.runTurn(PARAMS); // 429 #1
+    await runner.runTurn(PARAMS); // 429 #2 → benched
+    await runner.runTurn(PARAMS); // benched — GLM NOT called a third time (the storm is stopped)
+    expect(glm.runTurn).toHaveBeenCalledTimes(2);
+
+    // A provider that recovers (one success) has its 429 streak reset — it leads again next turn.
+    const flaky = { runTurn: vi.fn() };
+    flaky.runTurn
+      .mockRejectedValueOnce(new Error('429 Rate limit reached'))
+      .mockResolvedValueOnce({ text: 'recovered', usage: { inputTokens: 1, outputTokens: 1 } })
+      .mockRejectedValueOnce(new Error('429 Rate limit reached'))
+      .mockResolvedValue({ text: 'recovered again', usage: { inputTokens: 1, outputTokens: 1 } });
+    const r2 = make([{ name: 'KIMI', runner: flaky as never }, { name: 'CLAUDE', runner: runnerOk('from claude') }]);
+    await r2.runTurn(PARAMS); // 429 #1 → falls to Claude
+    expect((await r2.runTurn(PARAMS)).text).toBe('recovered'); // success resets the streak
+    await r2.runTurn(PARAMS); // 429 #1 again (streak was reset) → falls to Claude, NOT benched
+    expect((await r2.runTurn(PARAMS)).text).toBe('recovered again'); // still reachable — proves reset
+    expect(flaky.runTurn).toHaveBeenCalledTimes(4);
+  });
+
   it('a size-gate skip does NOT count toward the timeout bench (skips are free, not failures)', async () => {
     const { makeMultiProviderTurnRunner: make, sizeGatedRunner: gate, isTimeoutProviderError } = await import('./MultiProviderTurnRunner');
     expect(isTimeoutProviderError(new Error('skipped: prompt 999 chars exceeds the cheap-floor limit 100 (routed to the next provider)'))).toBe(false);

@@ -1971,6 +1971,7 @@ export class ToolDispatcher {
         const artifacts = generateDeployArtifacts(genInput);
         const toWrite: Array<{ path: string; content: string }> = [];
         if (artifacts.dockerfile) toWrite.push({ path: 'Dockerfile', content: artifacts.dockerfile });
+        if (artifacts.dockerignore) toWrite.push({ path: '.dockerignore', content: artifacts.dockerignore });
         if (artifacts.dockerCompose) toWrite.push({ path: 'docker-compose.yml', content: artifacts.dockerCompose });
         if (artifacts.ciWorkflow) toWrite.push({ path: '.github/workflows/ci.yml', content: artifacts.ciWorkflow });
         if (toWrite.length === 0) return 'generate_deploy_artifacts: nothing to write — pass include: ["docker","compose","ci"].';

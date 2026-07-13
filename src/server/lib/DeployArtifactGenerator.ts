@@ -110,14 +110,16 @@ interface DbService {
   env?: Record<string, string>;
   /** [namedVolume, mountPath] for durable data. */
   volume?: [string, string];
+  /** The healthcheck test command, so the app can wait for the service to be READY (not just started). */
+  healthcheck: string;
 }
 
 /** Map a dependency (npm driver) to the backing service its app needs. First match per service key wins. */
 const DB_MATCHERS: Array<{ re: RegExp; make: () => DbService }> = [
-  { re: /^(mongoose|mongodb)$/, make: () => ({ key: 'mongo', image: 'mongo:7', port: 27017, appEnv: 'MONGO_URL=mongodb://mongo:27017/app', volume: ['mongo-data', '/data/db'] }) },
-  { re: /^(pg|postgres|postgresql)$/, make: () => ({ key: 'postgres', image: 'postgres:16-alpine', port: 5432, appEnv: 'DATABASE_URL=postgres://postgres:postgres@postgres:5432/app', env: { POSTGRES_PASSWORD: 'postgres', POSTGRES_DB: 'app' }, volume: ['postgres-data', '/var/lib/postgresql/data'] }) },
-  { re: /^(mysql|mysql2)$/, make: () => ({ key: 'mysql', image: 'mysql:8', port: 3306, appEnv: 'DATABASE_URL=mysql://root:root@mysql:3306/app', env: { MYSQL_ROOT_PASSWORD: 'root', MYSQL_DATABASE: 'app' }, volume: ['mysql-data', '/var/lib/mysql'] }) },
-  { re: /^(redis|ioredis)$/, make: () => ({ key: 'redis', image: 'redis:7-alpine', port: 6379, appEnv: 'REDIS_URL=redis://redis:6379' }) },
+  { re: /^(mongoose|mongodb)$/, make: () => ({ key: 'mongo', image: 'mongo:7', port: 27017, appEnv: 'MONGO_URL=mongodb://mongo:27017/app', volume: ['mongo-data', '/data/db'], healthcheck: `mongosh --quiet --eval "db.adminCommand('ping')"` }) },
+  { re: /^(pg|postgres|postgresql)$/, make: () => ({ key: 'postgres', image: 'postgres:16-alpine', port: 5432, appEnv: 'DATABASE_URL=postgres://postgres:postgres@postgres:5432/app', env: { POSTGRES_PASSWORD: 'postgres', POSTGRES_DB: 'app' }, volume: ['postgres-data', '/var/lib/postgresql/data'], healthcheck: 'pg_isready -U postgres' }) },
+  { re: /^(mysql|mysql2)$/, make: () => ({ key: 'mysql', image: 'mysql:8', port: 3306, appEnv: 'DATABASE_URL=mysql://root:root@mysql:3306/app', env: { MYSQL_ROOT_PASSWORD: 'root', MYSQL_DATABASE: 'app' }, volume: ['mysql-data', '/var/lib/mysql'], healthcheck: 'mysqladmin ping -h localhost -uroot -proot' }) },
+  { re: /^(redis|ioredis)$/, make: () => ({ key: 'redis', image: 'redis:7-alpine', port: 6379, appEnv: 'REDIS_URL=redis://redis:6379', healthcheck: 'redis-cli ping' }) },
 ];
 
 /** The distinct backing services the dependency list implies (deduped by service key). Pure. */
@@ -153,8 +155,10 @@ export function generateDockerCompose(opts: ComposeOptions = {}): string {
     for (const e of env) lines.push(`      - ${e}`);
   }
   if (dbs.length) {
+    // Condition form so the app waits for each service to be HEALTHY (accepting connections), not just
+    // started — otherwise the app boots first and crashes with "connection refused".
     lines.push(`    depends_on:`);
-    for (const d of dbs) lines.push(`      - ${d.key}`);
+    for (const d of dbs) lines.push(`      ${d.key}:`, `        condition: service_healthy`);
   }
   lines.push(`    restart: unless-stopped`);
 
@@ -166,6 +170,13 @@ export function generateDockerCompose(opts: ComposeOptions = {}): string {
       for (const [k, v] of Object.entries(d.env)) lines.push(`      ${k}: ${v}`);
     }
     if (d.volume) lines.push(`    volumes:`, `      - ${d.volume[0]}:${d.volume[1]}`);
+    lines.push(
+      `    healthcheck:`,
+      `      test: ["CMD-SHELL", ${JSON.stringify(d.healthcheck)}]`,
+      `      interval: 10s`,
+      `      timeout: 5s`,
+      `      retries: 5`,
+    );
     lines.push(`    restart: unless-stopped`);
   }
 
@@ -252,8 +263,40 @@ export interface DeployArtifactInput {
   ci?: CiOptions;
 }
 
+/**
+ * Generate a `.dockerignore`. Without it, the Dockerfile's `COPY . .` ships node_modules (huge, and
+ * host-built native modules break in the image), .git, build output AND .env secrets into the image —
+ * bloated, slow, and a secret-leak. `.env.example` is kept (it's a safe template). Pure + deterministic.
+ */
+export function generateDockerignore(): string {
+  return [
+    'node_modules',
+    '.git',
+    '.gitignore',
+    'dist',
+    'build',
+    '.env',
+    '.env.*',
+    '!.env.example',
+    '*.log',
+    'npm-debug.log*',
+    'coverage',
+    '.DS_Store',
+    '.vscode',
+    '.idea',
+    '.next',
+    '.turbo',
+    '*.tsbuildinfo',
+    'Dockerfile',
+    '.dockerignore',
+    'docker-compose.yml',
+    '',
+  ].join('\n');
+}
+
 export interface DeployArtifactOutput {
   dockerfile?: string;
+  dockerignore?: string;
   dockerCompose?: string;
   ciWorkflow?: string;
 }
@@ -261,7 +304,8 @@ export interface DeployArtifactOutput {
 /** Generate whatever deployment artifacts the input requests. Pure. */
 export function generateDeployArtifacts(input: DeployArtifactInput): DeployArtifactOutput {
   const out: DeployArtifactOutput = {};
-  if (input.docker) out.dockerfile = generateDockerfile(input.docker);
+  // A Dockerfile without a .dockerignore copies node_modules/.git/.env into the image — always pair them.
+  if (input.docker) { out.dockerfile = generateDockerfile(input.docker); out.dockerignore = generateDockerignore(); }
   if (input.compose) out.dockerCompose = generateDockerCompose(input.compose);
   if (input.ci) out.ciWorkflow = generateCiWorkflow(input.ci);
   return out;

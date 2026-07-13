@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1397,6 +1397,28 @@ describe('zeroBillForUnrenderedPreview (Fix 35) — "preview theek chala to hi p
   });
   it('never zeroes a chat/analysis turn (no artifacts expected)', () => {
     expect(zeroBillForUnrenderedPreview(false, true)).toBe(false);
+  });
+});
+
+describe('emptyBuildFailureSummary (deep-test App #7) — an empty build is never "✓ Done"', () => {
+  it('fails an artifact build that produced 0 files because the sandbox was unavailable', () => {
+    const s = emptyBuildFailureSummary(true, 0, true);
+    expect(s).toBeTruthy();
+    expect(s).toContain('sandbox was unavailable');
+    expect(s).toContain('not been charged');
+  });
+  it('fails an artifact build that produced 0 files for any other reason', () => {
+    const s = emptyBuildFailureSummary(true, 0, false);
+    expect(s).toBeTruthy();
+    expect(s).toContain('no files');
+    expect(s).not.toContain('sandbox was unavailable');
+  });
+  it('does NOT fail a build that produced files (a real app shipped)', () => {
+    expect(emptyBuildFailureSummary(true, 12, true)).toBeNull();
+    expect(emptyBuildFailureSummary(true, 1, false)).toBeNull();
+  });
+  it('does NOT fail a chat/analysis/import turn (no artifacts expected)', () => {
+    expect(emptyBuildFailureSummary(false, 0, true)).toBeNull();
   });
 });
 

@@ -97,7 +97,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -4898,9 +4898,21 @@ export function registerAgentV3Routes(app: Express): void {
             // files were actually on disk. So we measure the workspace BEFORE and AFTER: if the clone
             // added real files, the import SUCCEEDED regardless of what the echo said, and we land them.
             const beforePaths = new Set(Object.keys((await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files));
-            const h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
-            const after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-            const addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            let h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
+            let after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            let addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            // ANONYMOUS-CLONE FALLBACK (deep-test App #5, 2026-07-13): a token-authenticated clone can FAIL
+            // on a PUBLIC repo the token's scope doesn't cover (a GitHub App installation token, or a token
+            // for a different account) — while an anonymous clone of that same public repo succeeds. The
+            // report showed hydrateFromRepo say "couldn't clone .../mitrify" while the model's own plain
+            // `git clone` of the identical URL exited 0. Retry once WITHOUT the token before giving up (a
+            // private repo still needs it, so the authed attempt runs first).
+            if (shouldRetryImportAnonymously({ hydrated: h.hydrated, addedFileCount: addedReal.length, hadToken: !!githubToken, urlsDiffer: cloneUrl !== cleanImportUrl })) {
+              events.emit({ type: 'narration', agent: 'architect', text: 'Retrying the import without credentials (it looks like a public repo)…', ts: Date.now() });
+              h = await importSync.hydrateFromRepo(cleanImportUrl, { overlayAnyContent: true });
+              after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+              addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            }
             if (h.hydrated || addedReal.length > 0) {
               // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX only.
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,

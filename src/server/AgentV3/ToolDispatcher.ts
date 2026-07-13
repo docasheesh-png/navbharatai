@@ -81,6 +81,7 @@ import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCo
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
+import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2101,6 +2102,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('iac artifacts');
         return `Generated ${iacWritten.length} IaC artifact(s) (kubectl apply / helm install / terraform apply):\n${iacWritten.join('\n')}`;
+      }
+
+      case 'scan_vulnerabilities': {
+        // GA-13 — real CVE/OSV supply-chain scan of the declared dependencies against OSV.dev. Honest:
+        // an unreachable API reports "scan unavailable", NEVER a fake clean bill of health. Logic + parsing
+        // in VulnScanner.ts (unit-tested with an injected fetch); the live HTTP call runs in the sandbox.
+        let pkgJson: string | undefined;
+        try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
+        if (typeof pkgJson !== 'string') return 'scan_vulnerabilities: no package.json in the workspace — nothing to scan.';
+        let lockJson: string | undefined;
+        try { lockJson = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockJson = undefined; }
+        const deps = resolveDependencies(pkgJson, lockJson);
+        const result = await scanVulnerabilities(deps);
+        if (result.ok && result.findings.length > 0) {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`scan_vulnerabilities: ${result.findings.length} vulnerable dep(s) (e.g. ${result.findings[0].package}).`);
+        }
+        return vulnScanSummary(result);
       }
 
       case 'replace_symbol': {

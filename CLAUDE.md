@@ -566,8 +566,18 @@ A graduated ladder (start cheapest; only climb when the judge still finds a real
   (`glm-4.7`/`kimi-k2.5`) and re-judge; still failing ⇒ climb to the flagship rung; flagship fails ⇒ Vertex.
 - **Claude/Sonnet/Opus NEVER run for a free user — anywhere.** This includes the post-build heal gates
   (integrity / preview / C9 reviewer-autofix / runtime): on a free build they MUST run on the **non-flagship
-  cheap coders (`glm-4.7` / `kimi-k2.5`)** — NOT flash (too weak to repair), NOT flagship, NOT Claude. (This
-  closes the current leak where those gates build a `claudeFirst` runner regardless of tier.)
+  cheap coders (`glm-4.7` / `kimi-k2.5`)** — NOT flash (too weak to repair), NOT flagship, NOT Claude.
+- **🔒 ABSOLUTE RULE — WEAK MODULE ⇒ NO CLAUDE, EVER (admin-mandated 2026-07-13, unbreakable):** if a build
+  runs in the **WEAK module** (the free/cheap power tier), Claude must **NEVER** be called — not the builder,
+  not ANY post-build heal/escalation gate, no matter what any flag says. This is enforced by construction, not
+  convention: `enforceNoClaude(chain, noClaude)` (`routes/agentv3.ts`) strips every Claude runner (`CLAUDE` +
+  the forced-Haiku backstop `CLAUDE_HAIKU`) from the FINAL provider chain of `buildTurnRunner` whenever the
+  build is weak, and `noClaude` is threaded from `powerSpecResolved.cheapOnly || freeTierBuildActive` into
+  EVERY `buildTurnRunner` call site. A weak build therefore runs on GLM/Kimi (+ Vertex/Gemini last resort)
+  ALONE. ROOT CAUSE this closed (deep-test App #1): the "no Claude" guarantee was tied only to `cheapOnly`, so
+  a weak build whose heal gate didn't thread that flag ran 4 Sonnet calls on a free build. The resolved
+  `powerLevel` + `noClaude` now appear in every build report so the tier is never ambiguous. Do NOT weaken or
+  bypass this guard without explicit admin sign-off.
 
 ### 2) PAID user (bought tokens with real ₹) — flagship first, Claude only as last resort
 1. Every 1st build: **flagship `glm-5.2` / `kimi-k2.7`**.

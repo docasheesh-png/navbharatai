@@ -1375,7 +1375,23 @@ export function healRunnerRoutingOpts(freeTierBuildActive: boolean): { claudeFir
   return freeTierBuildActive ? { claudeFirst: false, cheapOnly: true } : { claudeFirst: true, cheapOnly: false };
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
+/**
+ * UNBREAKABLE WEAK-MODULE GUARD (admin-mandated absolute rule, 2026-07-13). When a build runs in the
+ * WEAK module (the free/cheap tier), **Claude must NEVER be called — not the builder, not ANY post-build
+ * heal gate.** This is the single chokepoint that enforces it: it strips every Claude runner (`CLAUDE`
+ * plus the forced-Haiku backstop `CLAUDE_HAIKU`) from the final provider chain whenever `noClaude` is
+ * set, regardless of what claudeFirst / cheapOnly / env produced. A weak build therefore runs on the
+ * cheap floor (GLM/Kimi) + Vertex/Gemini last resort ALONE — NavBharatAI never spends its Claude budget
+ * on a weak build. ROOT CAUSE it closes (deep-test App #1, 2026-07-13): the "no Claude" guarantee was
+ * tied only to `cheapOnly`/`freeTierBuildActive`; a weak build whose heal gate did not thread that flag
+ * still built a Claude runner and ran 4 Sonnet calls on a free build. Pure + exported for unit testing.
+ */
+export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude: boolean): T[] {
+  if (!noClaude) return chain;
+  return chain.filter((r) => r.name !== 'CLAUDE' && r.name !== 'CLAUDE_HAIKU');
+}
+
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -1408,7 +1424,9 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // Claude. Computed before the Claude-only early-return so the floor still applies in a Claude-only
   // env (no Vertex/Gemini configured).
   const floorRunners = opts?.allowCheapFloor ? cheapBuildFloorRunners({ free: opts?.free }) : [];
-  if (cheap.length === 0 && floorRunners.length === 0) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
+  // Claude-only env shortcut — but NEVER for a weak/noClaude build (the guarded chain below handles it;
+  // a weak build with no non-Claude provider was already refused upstream as WEAK_ENGINE_UNAVAILABLE).
+  if (cheap.length === 0 && floorRunners.length === 0 && opts?.noClaude !== true) return makeResilientTurnRunner(new ClaudeClient(undefined, buildRetry)); // Claude-only env
   const claude: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, buildRetry) };
   // P7 failover hardening: a final Claude-HAIKU backstop that FORCES the Haiku model
   // regardless of the turn's requested model. It only ever runs after every prior provider
@@ -1456,7 +1474,12 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   const chain = cheapOnly
     ? (opts?.free ? [...floorRunners, ...cheap] : [...floorRunners])
     : [...floorRunners, ...baseChain];
-  return makeMultiProviderTurnRunner(chain, {
+  // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13): a weak/noClaude build can NEVER
+  // touch Claude. Strip CLAUDE + the forced-Haiku backstop from the FINAL chain no matter how it was
+  // assembled — so even a heal gate that forgot to set cheapOnly cannot leak a Sonnet/Haiku call onto a
+  // free build. For a weak build this leaves the cheap floor (+ Vertex/Gemini last resort) — never Claude.
+  const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
+  return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
       if (from.length) console.log(`[AGENTV3] build turn via ${used} (after ${from.join(' → ')})`);
       // PR4 — surface EVERY delivered turn's provider (even with no fallback) so the caller can
@@ -3509,6 +3532,14 @@ export function registerAgentV3Routes(app: Express): void {
       freeTierBuildActive = true;
       audit('AGENTV3_WEAK_TIER_CHEAP_BUILD', { userId }, 'info');
     }
+    // UNBREAKABLE no-Claude signal (admin absolute rule, 2026-07-13): TRUE whenever this build is on the
+    // cheap/weak tier — either the resolved WEAK power level (`powerSpecResolved.cheapOnly`) OR the
+    // cost-routing free tier (`freeTierBuildActive`). Threaded as `noClaude` into EVERY buildTurnRunner
+    // call (builder + all heal gates) so the enforceNoClaude chokepoint strips Claude by construction.
+    // Independent of any single flag path, so no forgotten call site can leak a Claude call onto a weak
+    // build. (`powerSpecResolved.cheapOnly` is redundant here since the block above already promotes it
+    // into freeTierBuildActive, but kept explicit so the intent survives future edits to that block.)
+    const noClaudeBuild = freeTierBuildActive || powerSpecResolved.cheapOnly === true;
 
     // Smart planning gate: skip for simple apps (todo, calculator, etc.) to save
     // 2-3 min. planFirst=false from the client always wins (explicit user skip).
@@ -4504,6 +4535,7 @@ export function registerAgentV3Routes(app: Express): void {
         allowCheapFloor,
         cheapOnly: freeTierBuildActive,
         free: freeTierBuildActive,
+        noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
         onProviderError: recordProviderFallback,
       });
@@ -4518,6 +4550,7 @@ export function registerAgentV3Routes(app: Express): void {
         allowCheapFloor,
         cheapOnly: freeTierBuildActive,
         free: freeTierBuildActive,
+        noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         onProviderUsed: captureProvider,
         onTurnComplete: captureTurnUsage,
         onProviderError: recordProviderFallback,
@@ -5779,7 +5812,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: repairing ? 'Escalating to Sonnet to fix the issues found in review…' : 'Escalating to a stronger model to finish the build…', ts: Date.now() });
             const escRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name) => { try { buildDiag.recordProviderFailure(name); } catch { /* best-effort */ } } }),
+              client: buildTurnRunner({ geminiModel: tierToGeminiBuildModel(tier), claudeFirst: true, noClaude: noClaudeBuild, onProviderUsed: captureProvider, onTurnComplete: captureTurnUsage, onProviderError: (name) => { try { buildDiag.recordProviderFailure(name); } catch { /* best-effort */ } } }),
               // Opus ONLY in power mode — a power-off escalation caps at Sonnet, never Opus
               // (admin rule 2026-06-28). Escalation only runs in normal mode anyway.
               model: resolveModel(tier === 'opus' && onlyOpus),
@@ -5894,7 +5927,7 @@ export function registerAgentV3Routes(app: Express): void {
         // build from ever burning the most-expensive model (the "$26 failed todo" driver).
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
-          client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+          client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
           model: resolveModel(onlyOpus), // Opus only in power mode; Sonnet in normal mode
           effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
           persistence: {
@@ -6001,7 +6034,7 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
                 model: resolveModel(onlyOpus),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -6075,7 +6108,7 @@ export function registerAgentV3Routes(app: Express): void {
                 try {
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
-                    client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                    client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
                     model: resolveModel(onlyOpus),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
@@ -6116,7 +6149,7 @@ export function registerAgentV3Routes(app: Express): void {
           try {
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
               model: resolveModel(onlyOpus),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -6167,7 +6200,7 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const vaxRunner = new AgentRunner({
                 ...baseRunnerOpts,
-                client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
                 model: resolveModel(onlyOpus),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -6229,7 +6262,7 @@ export function registerAgentV3Routes(app: Express): void {
               try {
                 const rtRunner = new AgentRunner({
                   ...baseRunnerOpts,
-                  client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+                  client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
                   model: resolveModel(onlyOpus),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
@@ -6263,7 +6296,7 @@ export function registerAgentV3Routes(app: Express): void {
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
             ...baseRunnerOpts,
-            client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+            client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
             model: resolveModel(onlyOpus),
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
@@ -6503,7 +6536,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Reviewer found ${label} — fixing them now…`, ts: Date.now() });
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,
-              client: buildTurnRunner(healRunnerRoutingOpts(freeTierBuildActive)),
+              client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
               model: resolveModel(onlyOpus),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -6846,6 +6879,8 @@ export function registerAgentV3Routes(app: Express): void {
             ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited } : {}),
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,
+            powerLevel: powerLevelReqEffective,
+            noClaude: noClaudeBuild,
           });
           buildDiag.setProviderTokens(reconciledProviderUsage);
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }

@@ -15099,3 +15099,20 @@ Honestly deferred (noted, not silently patched): (a) orphan-file prune after a o
 prevents the fallback for this class, so orphans no longer arise here; a general prune is a separate
 follow-up. (b) The one-shot fallback leaving dead entry files is a latent issue only reached when the
 first pass fails for OTHER reasons.
+
+## 2026-07-13 — ABSOLUTE RULE: weak module ⇒ no Claude, ever (unbreakable guard)
+
+Admin (deep-test): App #1's report showed 4 `claude-sonnet-4-6` calls on the integrity heal of a
+free/weak build. Root cause: the "no Claude" guarantee was tied only to `cheapOnly`/`freeTierBuildActive`
+— a weak build whose heal gate didn't thread that flag still built a Claude runner.
+
+Fix (unbreakable, by construction): new exported pure `enforceNoClaude(chain, noClaude)` strips every
+Claude runner (`CLAUDE` + forced-Haiku `CLAUDE_HAIKU`) from the FINAL provider chain in `buildTurnRunner`
+whenever the build is weak — regardless of claudeFirst/cheapOnly/env. `noClaude` is computed once
+(`noClaudeBuild = freeTierBuildActive || powerSpecResolved.cheapOnly`) and threaded into EVERY
+`buildTurnRunner` call site (fast-lane runner, main agentic client, all 8 heal/escalation gates). The
+Claude-only env shortcut is also guarded. A weak build now runs on GLM/Kimi (+ Vertex/Gemini last resort)
+ALONE — NavBharatAI never spends its Claude budget on a weak build. Honesty: the resolved `powerLevel` +
+`noClaude` now appear in every build report (billing block + rendered text) so weak-vs-normal is never
+ambiguous again. CLAUDE.md gains the 🔒 absolute rule. Tests: enforceNoClaude (4, exhaustive strip),
+full suite 6206 green.

@@ -98,6 +98,7 @@ import {
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
+import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -6289,6 +6290,25 @@ export function registerAgentV3Routes(app: Express): void {
             return findUnresolvedLocalImports(fileMap).filter((u) => writtenMap[u.importedBy] !== undefined);
           };
           let missing = findMissing();
+          // DETERMINISTIC CSS-MODULE STUBS (Kanban autopsy 2026-07-13): a missing *.module.css is 100%
+          // generatable from the importer's own `styles.X` usage — no LLM step needed. Create these FIRST so
+          // the bounded repair pass below only spends its budget on the genuinely-hard missing files
+          // (barrels/components). This was the report's single biggest struggle (12+ missing .module.css that
+          // exhausted the step-limit). Kill: AGENTV3_CSS_MODULE_GEN=off.
+          if (missing.length > 0 && process.env.AGENTV3_CSS_MODULE_GEN !== 'off') {
+            try {
+              const fileMapForCss: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
+              const cssStubs = generateMissingCssModules(fileMapForCss);
+              if (cssStubs.length > 0) {
+                for (let i = 0; i < cssStubs.length; i++) {
+                  await dispatcher.dispatch({ id: `cssmod-w${i}`, name: 'write_file', input: { path: cssStubs[i].path, content: cssStubs[i].content } }, 'frontend');
+                }
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'CSS_MODULES_GENERATED', message: `${cssStubs.length} missing CSS module(s) generated deterministically from component class usage (no repair step spent): ${cssStubs.map((s) => s.path).join(', ')}`, autoResolved: true });
+                events.emit({ type: 'narration', agent: 'architect', text: `🎨 Generated ${cssStubs.length} missing stylesheet(s) from the components' class usage.`, ts: Date.now() });
+                missing = findMissing(); // re-check: CSS modules now resolve — only the hard files remain for the LLM pass
+              }
+            } catch { /* deterministic CSS gen is best-effort — the LLM pass below still handles them */ }
+          }
           if (missing.length > 0) {
             // Split mispaths (the module EXISTS at existsAt — fix the import) from truly-missing (create it).
             // Without this the repair wrote a DUPLICATE of an already-written file (Kanban build 2026-07-13).

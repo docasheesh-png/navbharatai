@@ -20,6 +20,7 @@ import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
 import { installNativeShellPolish } from './lib/nativeShell';
+import { SonicChat } from './components/sonic/SonicChat';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -215,16 +216,26 @@ function initWebVitals() {
 initWebVitals();
 window.addEventListener(CONSENT_EVENT, () => initWebVitals());
 
+// ISOLATED EXPERIMENT ROUTE (admin 2026-07-13): /sonic renders ONLY the Nova Sonic voice
+// surface — the main NavBharatAI app tree is never mounted for this path, so the experiment
+// can be tested and kept-or-deleted without touching anything else. Remove this branch (and
+// the src/components/sonic + src/server/sonic folders) to delete the experiment entirely.
+const isSonicRoute = typeof window !== 'undefined' && window.location.pathname === '/sonic';
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary fallback={RootFallback}>
-      <BuildProvider>
-        <App />
-        <ConsentBanner />
-        <InviteAcceptGate />
-        <SharePortal />
-        <MobileEngagementGate />
-      </BuildProvider>
+      {isSonicRoute ? (
+        <SonicChat />
+      ) : (
+        <BuildProvider>
+          <App />
+          <ConsentBanner />
+          <InviteAcceptGate />
+          <SharePortal />
+          <MobileEngagementGate />
+        </BuildProvider>
+      )}
     </ErrorBoundary>
   </StrictMode>,
 );

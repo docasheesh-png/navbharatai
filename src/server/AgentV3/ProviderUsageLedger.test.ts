@@ -101,6 +101,23 @@ describe('perTierBilledUsd — the FLAG-ON per-tier billing math', () => {
     expect(perTierBilledUsd(usage, 'max')).toBeCloseTo(billedAmountUsd(total, 'max'), 10);
     expect(perTierBilledUsd(usage, true)).toBeCloseTo(billedAmountUsd(total, true), 10);
   });
+
+  it("Strong ('mini') and 'weak' are NOT Opus-priced (admin 2026-07-13) — they use the per-provider split", () => {
+    const usage = {
+      GLM: { inputTokens: 500_000, outputTokens: 80_000 },
+      CLAUDE: { inputTokens: 100_000, outputTokens: 30_000 },
+    };
+    const split =
+      billedForTier({ inputTokens: 500_000, outputTokens: 80_000 }, 'cheap') +
+      billedForTier({ inputTokens: 100_000, outputTokens: 30_000 }, 'sonnet');
+    // mini pins Sonnet — its Claude work prices at Sonnet ×3 via the split, never real-Opus ×2.
+    expect(perTierBilledUsd(usage, 'mini')).toBeCloseTo(split, 10);
+    // weak (GLM/Kimi only in practice) was the sibling bug: it hit the old power branch and was
+    // priced at real-Opus rates under the per-tier flag. It must use the split too.
+    expect(perTierBilledUsd(usage, 'weak')).toBeCloseTo(split, 10);
+    const opusPriced = billedForTier({ inputTokens: 600_000, outputTokens: 110_000 }, 'opus');
+    expect(perTierBilledUsd(usage, 'mini')).toBeLessThan(opusPriced);
+  });
 });
 
 describe('providerBaselineCostUsd — the admin usage-report cost column (Sonnet-equivalent)', () => {

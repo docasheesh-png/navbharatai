@@ -126,9 +126,10 @@ export function reconcileWithSink(
 
 /**
  * PER-TIER billing (the FLAG-ON path). Sum the reconciled per-provider tokens into their billing tier
- * and price each tier at its own multiplier via billedForTier. Power mode overrides everything to the
- * Opus tier (real Opus × 2) — same as billedAmountUsd's power branch — because in power mode Opus
- * actually runs the whole build regardless of the cheap labels. Returns the total USD to bill.
+ * and price each tier at its own multiplier via billedForTier. The real OPUS tiers ('medium'/'max',
+ * legacy boolean true) override everything to the Opus tier (real Opus × 2) — same as
+ * billedAmountUsd's opus branch — because on those tiers Opus actually runs the whole build
+ * regardless of the cheap labels. Returns the total USD to bill.
  *
  * With the flag OFF the caller uses billedAmountUsd(sinkTotal, power) instead, so this function is
  * never on the default money path; it exists so the switch is a one-line, measured change later.
@@ -137,9 +138,13 @@ export function perTierBilledUsd(
   byProvider: Record<string, ProviderTokens>,
   power: BillingPowerLevel | boolean = false,
 ): number {
-  const isPower = !(power === false || power === 'off');
-  if (isPower) {
-    // Power mode: the whole build is Opus-priced (real Opus × 2), same as billedAmountUsd.
+  // Admin tier→model redefinition (2026-07-13): ONLY the real Opus tiers are Opus-priced as a whole.
+  // 'mini' (Strong pins Sonnet 100%) and 'weak' (GLM/Kimi, never Claude) fall through to the honest
+  // per-provider split below — Sonnet work prices at Sonnet × 3, cheap work at × 1.2. This also fixes
+  // the sibling bug where a WEAK build under the per-tier flag was priced at real-Opus rates.
+  const isOpusTier = power === true || power === 'medium' || power === 'max';
+  if (isOpusTier) {
+    // Opus tiers: the whole build is Opus-priced (real Opus × 2), same as billedAmountUsd.
     const total = tierSum(Object.values(byProvider));
     return billedForTier(total, 'opus');
   }

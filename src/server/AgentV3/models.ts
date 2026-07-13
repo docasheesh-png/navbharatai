@@ -47,13 +47,19 @@ export function opusModel(): string {
 }
 
 /**
- * Resolve the model to run with. Any power-on level (boolean true, or a
- * 'mini'/'medium'/'max' power level) → Opus; normal mode (false / 'off') → Sonnet.
- * The Opus reasoning EFFORT for each power level lives in powerLevel.ts.
+ * Resolve the Claude model a power level PINS its Claude calls to (admin tier→model
+ * redefinition 2026-07-13 — the user's selected tier is what the backend calls):
+ *   'mini' (Strong)              → SONNET 100% (was Opus). Never Opus on this tier.
+ *   'medium'/'max' (Powerful/FT) → Opus (effort per powerLevel.ts).
+ *   legacy boolean `true`        → Opus (old "Only Opus" toggle semantics, kept for
+ *                                  the escalation call site's `tier==='opus' && …`).
+ *   'off'/'weak'/false           → Sonnet (normal-mode strong model; weak builds
+ *                                  never reach a Claude call anyway — enforceNoClaude).
+ * The Claude reasoning EFFORT for each power level lives in powerLevel.ts.
  */
-export function resolveModel(power: boolean | 'off' | 'mini' | 'medium' | 'max'): string {
-  const isPowerOn = power === true || power === 'mini' || power === 'medium' || power === 'max';
-  return isPowerOn ? opusModel() : sonnetModel();
+export function resolveModel(power: boolean | 'weak' | 'off' | 'mini' | 'medium' | 'max'): string {
+  const isOpusTier = power === true || power === 'medium' || power === 'max';
+  return isOpusTier ? opusModel() : sonnetModel();
 }
 
 /**

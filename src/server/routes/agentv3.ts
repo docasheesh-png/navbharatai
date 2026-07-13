@@ -21,6 +21,7 @@ import {
   resolveModel,
   toPowerLevel,
   powerSpec,
+  type PowerLevel,
   haikuModel,
   sonnetModel,
   fastBuildModel,
@@ -993,8 +994,11 @@ export function tierToGeminiBuildModel(tier: StartTier): string {
  * D5/D6) regardless of which model runs — margin only widens on the cheaper tiers.
  * Pure + exported for unit testing.
  */
-export function selectBuildModel(tier: StartTier | undefined, powerOn: boolean, largeProject = false): string {
-  if (powerOn) return opusModel();
+export function selectBuildModel(tier: StartTier | undefined, power: boolean | PowerLevel, largeProject = false): string {
+  // Admin tier→model redefinition (2026-07-13): a PAID PINNED tier runs exactly its model —
+  // Strong ('mini') → Sonnet 100%; Powerful/Full Team ('medium'/'max', legacy boolean true) → Opus.
+  if (power === 'mini') return sonnetModel();
+  if (power === true || power === 'medium' || power === 'max') return opusModel();
   // LARGE existing project → Sonnet DIRECTLY (admin decision 2026-07-05: "badi apps direct Sonnet").
   // The analyser tiers by the PROMPT's complexity — but on a big imported app even a simple ask
   // ("survey my app") carries a huge context, which Haiku + the cheap floor handled by timing out
@@ -1512,7 +1516,18 @@ export function planGrokEnabled(apiKey: string | undefined, disableFlag: string 
   return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
 }
 
-function grokPlanRunner(): TurnRunner | null {
+/**
+ * The provider NAMES the Grok plan chain may contain (pure — the unit-testable invariant behind
+ * grokPlanRunner). WEAK ⇒ NO CLAUDE, EVER: on a noClaude build the plan chain is Grok ALONE — the
+ * Claude fallback rung is not merely deprioritised, it does not exist. Audit 2026-07-13 confirmed
+ * the leak this kills: this chain is assembled OUTSIDE buildTurnRunner, so enforceNoClaude never
+ * saw it, and one Grok timeout ran a weak (free) build's plan turn on a real Claude call.
+ */
+export function planRunnerChainNames(noClaude: boolean): string[] {
+  return noClaude ? ['GROK'] : ['GROK', 'CLAUDE'];
+}
+
+function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
   const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
   try {
@@ -1525,8 +1540,14 @@ function grokPlanRunner(): TurnRunner | null {
     // Overridable via AGENTV3_GROK_PLAN_MODEL; the Claude-Haiku fallback guards any model regression.
     const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-4-fast-non-reasoning';
     const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
-    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) };
-    return makeMultiProviderTurnRunner([grok, claudeFallback], {
+    // Chain membership comes from planRunnerChainNames (the pure, tested invariant): on a noClaude
+    // build the chain is Grok ALONE — a Grok failure surfaces as a plan error handled best-effort by
+    // the caller, never a Claude call.
+    const chain: NamedRunner[] = [grok];
+    if (planRunnerChainNames(opts?.noClaude === true).includes('CLAUDE')) {
+      chain.push({ name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) });
+    }
+    return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
     });
   } catch {
@@ -3400,10 +3421,10 @@ export function registerAgentV3Routes(app: Express): void {
       return;
     }
     activeBuilds.add(buildKey);
-    // Power level (admin override 2026-06-27): 'off' | 'mini' (5×) | 'medium' (10×) |
-    // 'max' (20×). Accepts the new `powerLevel` field; falls back to the legacy `onlyOpus`
-    // boolean (→ 'mini'). `onlyOpus` below stays a boolean (true for any Opus power level)
-    // so every existing boolean call site — vision, cost-ladder, escalation — is unchanged.
+    // Power level (admin tier→model redefinition 2026-07-13): 'weak' (GLM/Kimi, never Claude) |
+    // 'off' (Normal, adaptive) | 'mini' (Strong → Sonnet 100%) | 'medium' (Powerful → Opus medium
+    // effort) | 'max' (Full Team → Opus max/ultracode). Accepts the new `powerLevel` field; falls
+    // back to the legacy `onlyOpus` boolean (→ 'mini').
     const powerLevelReq = toPowerLevel(req.body?.powerLevel ?? (req.body?.onlyOpus === true));
     // POWER-TIER GATING (admin 2026-07-12): a FREE user (logged in, never purchased, NOT free-list) may use
     // ONLY the cheap 'weak' tier (GLM/Kimi, never Claude). Clamp it SERVER-SIDE — the UI only shows 'weak'
@@ -3422,6 +3443,12 @@ export function registerAgentV3Routes(app: Express): void {
     }
     const powerSpecResolved = powerSpec(powerLevelReqEffective);
     const onlyOpus = powerSpecResolved.powerMode;
+    // Admin tier→model redefinition (2026-07-13): `onlyOpus` (kept name for the ~30 existing call
+    // sites) now means "a PAID PINNED tier is selected" (mini/medium/max) — gating, no cheap floor,
+    // no ladder. `pinnedOpus` is true ONLY for the real Opus tiers (medium/max): everything that
+    // must run Opus-side (plan-on-Claude, Claude vision, Opus judge) keys on THIS, so a Strong
+    // ('mini' → Sonnet 100%) build can never trigger an Opus call anywhere.
+    const pinnedOpus = powerSpecResolved.pinnedModel === 'opus';
     // Honest guard (rule 6): if a build is forced onto the cheap 'weak' tier but NO cheap floor is
     // configured (AGENTV3_CHEAP_FLOOR unset / keyless), there is nothing to run it on — and it must NOT
     // silently fall back to Claude (that is the exact free-user money leak). Refuse honestly instead.
@@ -3644,7 +3671,7 @@ export function registerAgentV3Routes(app: Express): void {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus, noClaude: noClaudeBuild }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: pinnedOpus, noClaude: noClaudeBuild }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
         // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content
@@ -4394,7 +4421,7 @@ export function registerAgentV3Routes(app: Express): void {
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt, powerMode: onlyOpus })
+        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel })
         : undefined;
       if (analysis) {
         console.log(
@@ -4430,9 +4457,11 @@ export function registerAgentV3Routes(app: Express): void {
       // timed out 6× on the huge grounding prompt). Any import operates on a real existing app with a
       // large prompt, so treat it like a large edit: strong model, no cheap floor.
       const routeStrong = shouldRouteStrongModel(largeProject, hasImportIntent);
-      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project / import → Sonnet,
-      // power → Opus (was always Sonnet). Gemini/Vertex remain the fallback in buildTurnRunner.
-      const model = selectBuildModel(analysis?.startTier, onlyOpus, routeStrong);
+      // Admin routing policy: small app → Haiku, complex app → Sonnet, large project / import → Sonnet.
+      // PAID PINNED tiers (admin 2026-07-13): Strong → Sonnet 100%, Powerful/Full Team → Opus — the
+      // LEVEL is passed (not a boolean) so the pinned model is exact. Gemini/Vertex remain the
+      // error-only fallback in buildTurnRunner.
+      const model = selectBuildModel(analysis?.startTier, powerLevelReqEffective, routeStrong);
       if (routeStrong && !onlyOpus) {
         // Honest + visible: the user sees WHY this build routes to the strong model.
         events.emit({
@@ -4534,7 +4563,11 @@ export function registerAgentV3Routes(app: Express): void {
       // fast lane is governed by the SAME policy as everything else — no divergent "direct Sonnet" path.
       const cheapTierAllowed = cheapFloorAllowedForTier(analysis?.startTier, workspaceId);
       const cheapUserAllowed = cheapFloorAllowedForUser(userId, email);
-      const allowCheapFloor = freeTierBuildActive || (!routeStrong && cheapTierAllowed && cheapUserAllowed);
+      // PAID PINNED tiers (admin fidelity rule 2026-07-13): the floor must NEVER lead a mini/medium/max
+      // build — the user selected an exact model (Sonnet or Opus) and that model leads 100%. Before this
+      // guard, escalation-on made cheapFloorAllowedForTier() return true for EVERY tier, so GLM/Kimi
+      // could lead even a paid Opus build — the exact substitution the admin forbade.
+      const allowCheapFloor = freeTierBuildActive || (!onlyOpus && !routeStrong && cheapTierAllowed && cheapUserAllowed);
       // HONEST ROUTING RECORD (autopsy fae70e42): state in the build report EXACTLY why the cheap
       // GLM/Kimi floor did or did not lead — so "1st call claude kyun?" is answered by the report
       // itself, never a guess. Best-effort; never affects the build.
@@ -4896,6 +4929,10 @@ export function registerAgentV3Routes(app: Express): void {
       // The Architect can delegate to specialist sub-agents via the task tool.
       const spawnSubAgent = makeSubAgentSpawn({
         client, actuator, workspaceId, state, events, model, onlyOpus,
+        // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
+        // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
+        // at the tier's effort, same as the top-level runner.
+        powerLevel: powerLevelReqEffective, effort: powerSpecResolved.effort,
         maxBudgetUsd: maxBudgetUsdForRunner, maxSteps: subAgentMaxSteps, checkpointer: git,
         // Pass the SAME 32000-token per-turn cap the top-level runner uses (below). Without it a
         // sub-agent falls back to 8192 and truncates large files — the top cause of incomplete apps.
@@ -5406,10 +5443,12 @@ export function registerAgentV3Routes(app: Express): void {
         // fallback if Grok is down. When no Grok key is set, use the normal build client.
         // The plan's Claude fallback model stays cheap (Haiku) — Grok ignores it (forces
         // grok-3); only the fallback path uses it.
-        // POWER MODE (Model Routing Policy, admin 2026-07-12): "power mode = sab kuch Opus" — the
-        // plan phase too. In power mode we do NOT route planning to Grok; `planGrok = null` falls the
-        // plan runner to the normal build `client` + `model`, which in power mode is Opus.
-        const planGrok = onlyOpus ? null : grokPlanRunner();
+        // OPUS TIERS (Model Routing Policy, admin 2026-07-12): "power mode = sab kuch Opus" — the
+        // plan phase too. On Powerful/Full Team we do NOT route planning to Grok; `planGrok = null`
+        // falls the plan runner to the normal build `client` + `model`, which there is Opus.
+        // Strong ('mini' → Sonnet 100%, admin 2026-07-13) plans on Grok like Normal — planning on
+        // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
+        const planGrok = pinnedOpus ? null : grokPlanRunner({ noClaude: noClaudeBuild });
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),
@@ -5556,7 +5595,7 @@ export function registerAgentV3Routes(app: Express): void {
       // the objective gate (build completed?) fails — the last tier is always delivered as a
       // best-effort backstop, so the build never "breaks". `deliveredTier` feeds telemetry.
       let result: Awaited<ReturnType<typeof runner.run>> | undefined;
-      let deliveredTier: StartTier = analysis?.startTier ?? (onlyOpus ? 'opus' : 'gemini');
+      let deliveredTier: StartTier = analysis?.startTier ?? (pinnedOpus ? 'opus' : onlyOpus ? 'sonnet' : 'gemini');
       // T1-escalation-on — how many ladder escalations this build actually performed (0 = first tier
       // delivered). Set by the escalation lane below; feeds the canary-measurement telemetry.
       let escalationsCount = 0;
@@ -5576,7 +5615,13 @@ export function registerAgentV3Routes(app: Express): void {
       // on real builds (98 steps/10min, 148 steps/29min, both died incomplete) while this lane plans the
       // COMPLETE file list up front, builds every file on Sonnet, and tsc-verifies. The agentic loop
       // remains the automatic fallback below when this lane fails — never worse than before.
-      if (oneShotEnabled() && intent === 'new_build' && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
+      // PAID PINNED tiers skip the fast lane (admin fidelity rule 2026-07-13): the lane's per-file
+      // generator leads with the cheap floor and runs fastBuildModel — neither is the tier's pinned
+      // model. mini/medium/max take the agentic loop on their exact model instead. (Before the 'mini'
+      // redefinition this was implicit — the analyzer's 'opus' start tier failed classifyForSimpleLane;
+      // 'mini' now resolves to the 'sonnet' start tier, which the lane WOULD accept, so the guard is
+      // explicit.)
+      if (oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
@@ -5982,8 +6027,8 @@ export function registerAgentV3Routes(app: Express): void {
         const retryRunner = new AgentRunner({
           ...baseRunnerOpts,
           client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-          model: resolveModel(onlyOpus), // Opus only in power mode; Sonnet in normal mode
-          effort: onlyOpus ? (powerSpecResolved.effort ?? powerSpecResolved.ceilingEffort) : undefined,
+          model: resolveModel(powerLevelReqEffective), // the tier's pinned model (Strong → Sonnet; Powerful/FT → Opus; Normal → Sonnet)
+          effort: powerSpecResolved.effort,
           persistence: {
             store: getConversationStore(),
             conversationId: mainConversationId, // same session conversation — append, don't fork
@@ -6164,7 +6209,7 @@ export function registerAgentV3Routes(app: Express): void {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-                model: resolveModel(onlyOpus),
+                model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
               const healed = await integrityRunner.run(
@@ -6238,7 +6283,7 @@ export function registerAgentV3Routes(app: Express): void {
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
                     client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-                    model: resolveModel(onlyOpus),
+                    model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
                   const healed = await featureRunner.run(featurePresenceRepairPrompt(coverage));
@@ -6279,7 +6324,7 @@ export function registerAgentV3Routes(app: Express): void {
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-              model: resolveModel(onlyOpus),
+              model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             const healed = await healRunner.run(buildPreviewRepairPrompt(verdict.problems, consoleErrs));
@@ -6330,7 +6375,7 @@ export function registerAgentV3Routes(app: Express): void {
               const vaxRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-                model: resolveModel(onlyOpus),
+                model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
               const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
@@ -6392,7 +6437,7 @@ export function registerAgentV3Routes(app: Express): void {
                 const rtRunner = new AgentRunner({
                   ...baseRunnerOpts,
                   client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-                  model: resolveModel(onlyOpus),
+                  model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
                 const healed = await rtRunner.run(fuzzRepairPrompt(findings));
@@ -6426,7 +6471,7 @@ export function registerAgentV3Routes(app: Express): void {
           const fixRunner = new AgentRunner({
             ...baseRunnerOpts,
             client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-            model: resolveModel(onlyOpus),
+            model: resolveModel(powerLevelReqEffective),
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
@@ -6666,7 +6711,7 @@ export function registerAgentV3Routes(app: Express): void {
             const critFixRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner({ ...healRunnerRoutingOpts(freeTierBuildActive), noClaude: noClaudeBuild }),
-              model: resolveModel(onlyOpus),
+              model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             try {
@@ -7068,7 +7113,7 @@ export function registerAgentV3Routes(app: Express): void {
       // P-AI.9 — record the final model/tier and outcome decisions, then persist the trace. Best-effort.
       try {
         const nowIso = new Date().toISOString();
-        decisionTrace.record('model', `${deliveredTier} (${model})`, onlyOpus ? 'Only-Opus toggle on' : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
+        decisionTrace.record('model', `${deliveredTier} (${model})`, onlyOpus ? `pinned tier '${powerLevelReqEffective}' selected` : `analyzer chose ${analysis?.startTier ?? 'default'} start tier`, nowIso);
         decisionTrace.record('outcome', result.ok ? 'success' : 'incomplete', `${writtenFiles.size} file(s) written in ${Math.max(0, Date.now() - buildStartedAt)}ms`, nowIso);
         await persistDecisionTrace(decisionTrace, nowIso);
         // Surface the trace in chat when provider-debug is on (same gate as the trace-id tag), so the

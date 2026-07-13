@@ -31,6 +31,15 @@ export interface SubAgentDeps {
   events: AgentEventStream;
   model: string;
   onlyOpus?: boolean;
+  /**
+   * The build's power level (admin tier→model redefinition 2026-07-13). MUST be threaded: sub-agents
+   * spend the bulk of a build's tokens, and AgentRunner bills by `powerLevel ?? onlyOpus` — without
+   * this a Strong ('mini' → Sonnet 100%) build's sub-agents fell back to the boolean and were billed
+   * at real-Opus rates for Sonnet work.
+   */
+  powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max';
+  /** Claude reasoning effort for the tier (Opus tiers only) — same lever the top-level runner gets. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Per-sub-agent caps (defaults: 40 steps; budget inherited from parent if unset). */
   maxSteps?: number;
   maxBudgetUsd?: number;
@@ -81,6 +90,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       system: cfg.system,
       tools: catalogForTools(cfg.tools),
       onlyOpus: deps.onlyOpus,
+      powerLevel: deps.powerLevel,
+      effort: deps.effort,
       maxSteps: deps.maxSteps ?? 40,
       maxBudgetUsd: deps.maxBudgetUsd,
       maxTokensPerTurn: deps.maxTokensPerTurn,

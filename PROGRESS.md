@@ -15343,3 +15343,28 @@ Also confirmed via redundancy-check (no rebuild): T1-ratelimit-all already done.
 vitest green, CI-gated before merge. Roadmap reconciled (GA-3 slices 1–8, GA-12 slice, GA-14 → 🟡).
 Honest remaining high-value work stays: Tier-0 live defects (need the admin's real build report — deferred,
 not guess-fixed) and the risky "wire non-npm into the live install path" half of GA-3.
+## 2026-07-13 — Fix 59: power-tier → model FIDELITY redefined (admin order: "jo select kiya wahi provider, koi aur nahi")
+
+Admin redefined the 5 tiers (supersedes "Strong/Powerful/Full Team = Opus low/high/max"):
+- **Weak** = GLM/Kimi ONLY, Claude never (unchanged; enforceNoClaude stands).
+- **Normal** ('off') = unchanged adaptive routing (Sonnet ladder).
+- **Strong** ('mini') = **SONNET pinned 100%** (was Opus low). No Opus anywhere on this tier: build,
+  sub-agents, heal gates, judge (paid, not power), plan (Grok, not Opus), vision (cheap). Bills **Sonnet ×3**
+  (was real-Opus ×2 — that billed Opus rates for Sonnet work; honest-billing fix).
+- **Powerful** ('medium') = Opus, effort **'medium'** (was 'high'). Bills real Opus ×2.
+- **Full Team** ('max') = Opus, effort 'max' (ultracode). Unchanged.
+
+Mechanics: `PowerSpec.pinnedModel` ('sonnet'|'opus') is the single source of truth; `resolveModel()` +
+`selectBuildModel()` are level-aware (boolean call sites eliminated on the route); analyzer returns the
+pinned startTier honestly ("STRONG tier → Sonnet pinned 100%"). FIDELITY GUARDS: paid pinned tiers never
+let the GLM/Kimi cheap floor lead (before: escalation-on made `cheapFloorAllowedForTier` return true for
+EVERY tier — GLM could lead a paid Opus build) and never take the fast lane. SUB-AGENT BILLING FIX:
+`powerLevel`+`effort` now thread into `makeSubAgentSpawn` → sub-agents (the bulk of tokens) bill at the
+tier's rate — before, a mini build's sub-agents fell back to the boolean and billed real-Opus ×2.
+SIBLING FIX: `perTierBilledUsd` Opus-priced 'weak'/'mini' under the per-tier flag → now only medium/max.
+Error-only last-resort backstops (Vertex/Gemini/forced-Haiku AFTER the pinned model threw) intentionally
+kept — "never break" insurance; they never lead. UI hints, AppKnowledgeBase Power entry, and CLAUDE.md
+Routing Policy §3 updated to the new table. Verified by a 6-dimension adversarial audit workflow
+(mini-no-opus / weak-no-claude / opus-effort / billing / normal-unchanged / ui-consistency).
+Gate: tsc ×2 = 0, vitest 6221/6221 (new: pinnedModel specs, resolveModel fidelity, billedAmountUsd mini→×3,
+perTierBilledUsd weak/mini split, analyzer pinned-sonnet, selectBuildModel fidelity), build PASS.

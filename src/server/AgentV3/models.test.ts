@@ -18,6 +18,15 @@ describe('model resolution (D5/D6)', () => {
     expect(resolveModel(false)).not.toBe(resolveModel(true));
   });
 
+  it('tier→model fidelity (admin 2026-07-13): mini/Strong → SONNET (never Opus); medium/max → Opus', () => {
+    expect(resolveModel('mini')).toBe(sonnetModel());   // Strong pins Sonnet 100% — the exact regression
+    expect(resolveModel('mini')).not.toBe(opusModel()); // an Opus id here would re-open the tier leak
+    expect(resolveModel('medium')).toBe(opusModel());
+    expect(resolveModel('max')).toBe(opusModel());
+    expect(resolveModel('off')).toBe(sonnetModel());
+    expect(resolveModel('weak')).toBe(sonnetModel());   // weak never reaches Claude anyway (enforceNoClaude)
+  });
+
   it('honours env overrides', () => {
     process.env.AGENTV3_SONNET_MODEL = 'sonnet-x';
     process.env.AGENTV3_OPUS_MODEL = 'opus-y';

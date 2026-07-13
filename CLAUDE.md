@@ -602,10 +602,20 @@ A graduated ladder (start cheapest; only climb when the judge still finds a real
 3. Still error after that ⇒ **Claude fixes it itself** (Sonnet repair).
 - **Judge = Grok OR Sonnet — either is fine** (admin: "koi na, dono chalne do, chalega").
 
-### 3) POWER mode ("Only Opus", paid users only) — everything on Opus
-- Builder + all repair/heal gates + **the judge** + **the plan phase** ⇒ **Opus** (`claude-opus-4-8`).
-  (Today the builder/repair are Opus but the judge is Grok/Sonnet and the plan phase is Grok — those two
-  must become Opus in power mode.)
+### 3) The 5 selectable power tiers — TIER→MODEL redefined by the admin 2026-07-13 (supersedes the old "power = Opus at low/high/max")
+**The user's selected tier is EXACTLY the model the backend calls — no substitution** (admin: "user ne
+jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced in code (Fix 59):
+| Tier (UI) | Internal | Model | Notes |
+|---|---|---|---|
+| Weak | `weak` | GLM/Kimi only — **Claude NEVER, in any circumstance** | free tier; `enforceNoClaude` strips Claude from every chain |
+| Normal | `off` | Sonnet (adaptive routing, unchanged) | today's behaviour stays |
+| Strong | `mini` | **SONNET pinned 100%** (was Opus low) | never Opus anywhere on this tier — build, sub-agents, heal gates, plan (Grok), judge (paid), vision (cheap). Bills Sonnet-equivalent × 3 |
+| Powerful | `medium` | **Opus, effort `medium`** (was high) | bills real Opus × 2 |
+| Full Team | `max` | **Opus, effort `max` (ultracode)** | bills real Opus × 2 |
+- On the two OPUS tiers: builder + repair/heal gates + **judge** + **plan phase** ⇒ **Opus** (`claude-opus-4-8`).
+- Paid pinned tiers (`mini`/`medium`/`max`) never let the GLM/Kimi cheap floor lead and never take the
+  fast lane — the pinned model leads 100%; Vertex/Gemini/Haiku remain error-only last-resort backstops
+  (the "never break" insurance), used only after the pinned model itself has failed.
 
 ### Judge (reviewer) per mode — must become MODE-AWARE (today it is a single global setting)
 | Mode | Judge |

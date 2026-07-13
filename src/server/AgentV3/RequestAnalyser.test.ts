@@ -57,6 +57,15 @@ describe('analyzeRequest — task classification & tiering', () => {
     // Even a greeting goes to Opus under Power.
     expect(analyzeRequest({ prompt: 'hi', powerMode: true }).startTier).toBe('opus');
   });
+
+  it("Strong tier (pinnedModel 'sonnet', admin 2026-07-13) bypasses the ladder → Sonnet pinned, no escalation", () => {
+    const a = analyzeRequest({ prompt: 'make a calculator', powerMode: true, pinnedModel: 'sonnet' });
+    expect(a.startTier).toBe('sonnet');
+    expect(a.escalationPath).toEqual(['sonnet']);   // never climbs to Opus
+    expect(a.reasoning).toContain('STRONG');
+    // Explicit 'opus' pin keeps the Opus path (Powerful / Full Team).
+    expect(analyzeRequest({ prompt: 'hi', powerMode: true, pinnedModel: 'opus' }).startTier).toBe('opus');
+  });
 });
 
 describe('analyzeRequest — feature adjustments', () => {

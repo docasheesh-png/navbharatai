@@ -38,10 +38,17 @@ export interface AnalyserInput {
   /** Whether the request includes image attachments. */
   hasImages?: boolean;
   /**
-   * POWER mode (admin: Opus is power-only). When true the ladder is bypassed — every
-   * request runs on Opus 4.8 with no escalation. NORMAL mode tops out at Sonnet.
+   * PAID pinned tier (admin: mini/medium/max pin their model). When true the ladder is
+   * bypassed — no cheap start, no escalation; the build runs on the tier's pinned model.
+   * NORMAL mode tops out at Sonnet.
    */
   powerMode?: boolean;
+  /**
+   * WHICH model the tier pins (admin tier→model redefinition 2026-07-13): 'sonnet' for
+   * Strong ('mini'), 'opus' for Powerful/Full Team. Only read when powerMode is true;
+   * absent (legacy callers) falls back to 'opus' — the old power semantics.
+   */
+  pinnedModel?: 'sonnet' | 'opus';
 }
 
 export type FeaturePriority = 'CORE' | 'IMPORTANT' | 'NICE';
@@ -218,15 +225,20 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   const p = prompt.toLowerCase();
   const taskType = detectTaskType(p);
 
-  // POWER mode bypasses the ladder entirely: everything runs on Opus 4.8, no escalation.
+  // A PAID pinned tier bypasses the ladder entirely: the build runs on the tier's pinned model,
+  // no cheap start, no escalation. Strong ('mini') pins SONNET (admin 2026-07-13); Powerful/Full
+  // Team pin Opus. Legacy callers that pass powerMode without pinnedModel keep the old Opus path.
   if (input?.powerMode) {
+    const pinned = input.pinnedModel === 'sonnet' ? 'sonnet' : 'opus';
     return {
       complexityScore: 100,
       taskType,
-      startTier: 'opus',
-      escalationPath: ['opus'],
+      startTier: pinned,
+      escalationPath: [pinned],
       ambiguous: false,
-      reasoning: `POWER mode → Opus 4.8 (task=${taskType}, ladder bypassed)`,
+      reasoning: pinned === 'sonnet'
+        ? `STRONG tier → Sonnet pinned 100% (task=${taskType}, ladder bypassed)`
+        : `POWER tier → Opus 4.8 pinned (task=${taskType}, ladder bypassed)`,
     };
   }
 

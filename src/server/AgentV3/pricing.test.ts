@@ -63,12 +63,15 @@ describe('pricing — billed amount (the admin model, 2026-07-05)', () => {
     expect(billedAmountUsd(usage)).toBeCloseTo(21.6, 6); // defaults to normal
   });
 
-  it('POWER mode bills real Opus 4.8 cost × 2 — FLAT at every power level', () => {
-    expect(billedAmountUsd(usage, true)).toBeCloseTo(90 * 2, 6);   // 180
-    expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(180, 6);
-    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(180, 6);  // level changes tokens, not the ×2
-    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(180, 6);
+  it('billing follows the pinned model (admin 2026-07-13): Opus tiers × 2, Strong = Sonnet × 3, off/weak = cheap', () => {
+    expect(billedAmountUsd(usage, true)).toBeCloseTo(90 * 2, 6);   // legacy boolean → Opus tier (180)
+    expect(billedAmountUsd(usage, 'medium')).toBeCloseTo(180, 6);  // Powerful → real Opus × 2
+    expect(billedAmountUsd(usage, 'max')).toBeCloseTo(180, 6);     // Full Team → real Opus × 2
+    // Strong ('mini') pins SONNET 100% — it must bill Sonnet-equivalent × 3 (54), NEVER Opus rates
+    // for Sonnet work (the old mapping billed 180 here: a ~3.3× overcharge).
+    expect(billedAmountUsd(usage, 'mini')).toBeCloseTo(18 * 3, 6); // 54
     expect(billedAmountUsd(usage, 'off')).toBeCloseTo(21.6, 6);    // off → cheap tier
+    expect(billedAmountUsd(usage, 'weak')).toBeCloseTo(21.6, 6);   // weak → cheap tier
   });
 
   it('power costs more in absolute terms (Opus base) than the cheap normal tier', () => {

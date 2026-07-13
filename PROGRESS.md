@@ -15754,3 +15754,19 @@ the old detect-only behaviour). Gate: server tsc clean, SecretLeakAnalysis 17/17
 `deleteMany`/`upsert` + order FK parents before children so it never needs the force-reset self-heal;
 (b) the celebratory summary lead sentence should be gated on the readiness verdict so it can't say "running!"
 on a NOT-READY build. Both are struggle/honesty debt for a follow-up autopsy slice.
+
+---
+
+## 2026-07-13 — Deep-test App #8 follow-up FIX: NOT-READY summary leads with the honest verdict
+
+**Root cause (App #7 + #8 honesty defect):** on a build that FAILED the readiness gate, the final
+summary was composed as `${model turn text}\n\n⚠️ Readiness gate: NOT READY …` — i.e. it OPENED with the
+model's celebratory prose ("… is now fully built and running!") and only APPENDED the NOT-READY verdict
+below. At a glance the user read a false success on a build that scored 0/100.
+
+**Fix (`AgentRunner.ts`):** when NOT READY, the summary now LEADS with the honest verdict
+(`⚠️ Readiness gate: NOT READY — score N/100. This build is not production-ready yet. Must fix: …`) and
+demotes the model's prose beneath a clear label ("What the agent reported (may overstate — the readiness
+verdict above is the real status)"). The very first line the user reads is now the truth. Regression test
+added asserting the verdict precedes the model's "Build complete." prose and the "may overstate" label is
+present. Gate: server tsc clean, AgentRunner 39/39. No behaviour change for READY builds.

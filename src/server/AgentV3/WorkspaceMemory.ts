@@ -47,6 +47,9 @@ export interface ProjectGraph {
   imports: Record<string, string[]>;
   /** External (bare) dependencies seen across imports. */
   dependencies: string[];
+  /** file → the symbol NAMES it references (named-import bindings + JSX tags + call callees) — the
+   *  A1 "where-used / who-calls" layer: which files USE a symbol, not just where it is defined. */
+  references: Record<string, string[]>;
 }
 
 export type EpisodeKind = 'request' | 'error' | 'fix' | 'note' | 'audit';
@@ -80,6 +83,8 @@ interface FileFacts {
   routes: string[];
   imports: string[];
   dependencies: string[];
+  /** Symbol names this file references (named-import bindings, JSX tags, call callees). */
+  references: string[];
   security: SecurityFinding[];
 }
 
@@ -95,6 +100,40 @@ function depRoot(spec: string): string | null {
   if (spec.startsWith('.') || spec.startsWith('/')) return null; // local import, not a dependency
   const parts = spec.split('/');
   return spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+// JS/TS keywords that appear in call position (`kw(`) but are NOT symbol references.
+const CALL_NON_REFERENCES = new Set<string>([
+  'if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'await', 'typeof', 'super', 'void',
+  'delete', 'new', 'yield', 'in', 'of', 'do', 'else', 'case', 'throw', 'require', 'import',
+]);
+
+/**
+ * Symbol NAMES a file references — the A1 "where-used / who-calls" signal. Bounded to the meaningful
+ * cross-file uses (not every local identifier): named-import bindings (the imported EXPORT name, alias
+ * ignored), JSX component tags, and identifier-position call callees. Deterministic; capped. Exported for
+ * unit testing.
+ */
+export function extractReferences(content: string): string[] {
+  const refs = new Set<string>();
+  const add = (n: string) => { if (n && refs.size < 300) refs.add(n); };
+  // Named imports: `import { A, B as C } from '…'` → A, B (the exported name, before `as`).
+  const named = /import\s*(?:type\s+)?\{([^}]*)\}\s*from/g;
+  for (let m = named.exec(content); m; m = named.exec(content)) {
+    for (const part of m[1].split(',')) {
+      const name = part.trim().split(/\s+as\s+/)[0].trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) add(name);
+    }
+  }
+  // JSX component tags: `<CalendarIcon` / `<CalendarIcon/>` (PascalCase only — a component, not a div).
+  const jsx = /<([A-Z][\w]*)[\s/>]/g;
+  for (let m = jsx.exec(content); m; m = jsx.exec(content)) add(m[1]);
+  // Call callees in identifier position: `foo(` but NOT `obj.foo(` (a method, captured as `.foo`).
+  const call = /(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+  for (let m = call.exec(content); m; m = call.exec(content)) {
+    if (!CALL_NON_REFERENCES.has(m[2])) add(m[2]);
+  }
+  return [...refs];
 }
 
 /** Extract real facts from a source file. Heuristic but grounded in the actual text. */
@@ -149,6 +188,7 @@ export function extractFacts(file: string, content: string): FileFacts {
     routes: [...routes],
     imports: [...new Set(imports)],
     dependencies: [...depSet],
+    references: isCode(file) ? extractReferences(content) : [],
     // Security scanning runs on ALL files (secrets live in config/.env too).
     security: scanSecurity(file, content),
   };
@@ -237,12 +277,14 @@ export class WorkspaceMemory {
     const components = new Set<string>();
     const routes = new Set<string>();
     const imports: Record<string, string[]> = {};
+    const references: Record<string, string[]> = {};
     const deps = new Set<string>();
     for (const [file, facts] of this.fileFacts) {
       symbols.push(...facts.symbols);
       facts.components.forEach((c) => components.add(c));
       facts.routes.forEach((r) => routes.add(r));
       if (facts.imports.length) imports[file] = facts.imports;
+      if (facts.references?.length) references[file] = facts.references;
       facts.dependencies.forEach((d) => deps.add(d));
     }
     return {
@@ -252,6 +294,7 @@ export class WorkspaceMemory {
       routes: [...routes].sort(),
       imports,
       dependencies: [...deps].sort(),
+      references,
     };
   }
 

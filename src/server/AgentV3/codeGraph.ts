@@ -84,3 +84,20 @@ export function definitionsOf(graph: ProjectGraph, symbolName: string): SymbolIn
   const name = symbolName.trim();
   return (graph.symbols ?? []).filter(s => s.name === name);
 }
+
+/**
+ * A1 "where-used / who-calls": every file that REFERENCES a symbol (named-import binding, JSX tag, or
+ * call callee), sorted. The definition file(s) are excluded — a definition is not a use. Deterministic.
+ */
+export function referencesOf(graph: ProjectGraph, symbolName: string): string[] {
+  const name = symbolName.trim();
+  if (!name) return [];
+  const defFiles = new Set(definitionsOf(graph, name).map(d => d.file));
+  const refs = graph.references ?? {};
+  const out: string[] = [];
+  for (const file of Object.keys(refs)) {
+    if (defFiles.has(file)) continue;              // the definition site is not a usage
+    if ((refs[file] ?? []).includes(name)) out.push(file);
+  }
+  return out.sort();
+}

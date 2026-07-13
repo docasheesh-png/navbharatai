@@ -46,6 +46,7 @@ const EMPTY_GRAPH: ProjectGraph = {
   routes: [],
   imports: {},
   dependencies: [],
+  references: {},
 };
 
 /** Save a WorkspaceMemory snapshot to Firestore. Best-effort — never throws. Retries a TRANSIENT

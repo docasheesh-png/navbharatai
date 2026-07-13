@@ -5,6 +5,7 @@ import {
   dependenciesOf,
   impactOf,
   definitionsOf,
+  referencesOf,
   resolveGraphFile,
 } from './codeGraph';
 import type { ProjectGraph } from './WorkspaceMemory';
@@ -29,6 +30,11 @@ const graph: ProjectGraph = {
     'src/components/Button.tsx': ['react'],
   },
   dependencies: ['react'],
+  references: {
+    'src/main.tsx': ['App'],
+    'src/App.tsx': ['Button'],                 // App renders <Button/>
+    'src/Header.tsx': ['Button', 'formatDate'], // Header renders <Button/> and calls formatDate()
+  },
 };
 
 describe('buildImportEdges', () => {
@@ -87,5 +93,25 @@ describe('definitionsOf', () => {
   it('finds where a symbol is defined by exact name', () => {
     expect(definitionsOf(graph, 'Button')).toEqual([{ name: 'Button', kind: 'component', file: 'src/components/Button.tsx' }]);
     expect(definitionsOf(graph, 'Missing')).toEqual([]);
+  });
+});
+
+describe('referencesOf (A1 where-used / who-calls)', () => {
+  it('lists every file that USES a symbol, excluding the definition site', () => {
+    // Button is defined in components/Button.tsx and used by App + Header.
+    expect(referencesOf(graph, 'Button')).toEqual(['src/App.tsx', 'src/Header.tsx']);
+  });
+
+  it('finds the callers of a function (formatDate is defined in App, called in Header)', () => {
+    expect(referencesOf(graph, 'formatDate')).toEqual(['src/Header.tsx']); // App (the def site) is excluded
+  });
+
+  it('excludes the definition file even if it self-references (App defines App, used only by main)', () => {
+    expect(referencesOf(graph, 'App')).toEqual(['src/main.tsx']);
+  });
+
+  it('returns [] for an unused or unknown symbol', () => {
+    expect(referencesOf(graph, 'Nowhere')).toEqual([]);
+    expect(referencesOf(graph, '')).toEqual([]);
   });
 });

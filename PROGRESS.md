@@ -15524,3 +15524,35 @@ to re-CREATE files already on disk (wrong verdict → burned bounded repair step
   fix from guesses).
 - 4 broken NAMED imports (`ID←../types`, `formatDueDate←../utils/dateUtils`): a contract-drift class (target
   file exists, named export missing) — separate from the path-resolution class fixed here; next candidate.
+## 2026-07-13 — App #6 (Expense Tracker) autopsy: syntax-broken file shipped as READY → esbuild parse gate
+
+Deep-test App #6 (Expense Tracker, weak/GLM, ran 12:15 UTC — after #1296 deployed). TWO of my prior fixes
+CONFIRMED working on this build: (1) `billing.noClaude: true` with NO false NO_CLAUDE_VIOLATION even though 2
+llmCalls carried the nominal 'claude-sonnet-4-6' label — the #1296 provider-truth detector read
+`providerDelivery {GLM:41}` correctly; (2) `userTier: "free-list (admin/tester)"` — the admin is now exempt
+(no wallet debit). Good.
+
+THE REAL FAILURE: the in-browser preview died with `Compile src/App.tsx: Unexpected token (31:13)` — a
+truncated GLM response (`LLM_TRUNCATED`, finish=max_tokens) produced a corrupt App.tsx: a CSS declaration
+(`-side: border-radius: 0.5rem;`) injected INTO a JSX <button>'s attributes. The file does not PARSE → the
+app never compiled → "Closed Port" / no preview. YET the build shipped "Build health: READY 60/100".
+
+ROOT CAUSE of the miss: no deterministic SYNTAX check runs on generated JS/TS/JSX/TSX. The sandbox `tsc`
+couldn't run (the recurring VERIFY_DID_NOT_RUN), so a genuinely-unparseable file sailed through and was
+scored READY. Missing SUBSYSTEM: a parse gate that does NOT depend on the sandbox.
+
+FIX: new `SyntaxCheck.ts` — `findSyntaxErrors(files)` parses every JS/TS/JSX/TSX file with **esbuild IN THE
+SERVER PROCESS** (esbuild is the SAME parser Vite builds with, and it's already a dep). It is IMMUNE to the
+sandbox-tsc failures, reports ONLY syntax/parse errors (never type errors → no false blocks), and skips
+.d.ts/empty/non-code. Wired into BOTH lanes: the fast lane (`fastVerifyOnce` fails verify → the existing
+repair rewrites the file) and the AGENTIC post-build sequence (a bounded repair pass rewrites the broken
+file, re-checks, and on a STILL-unparseable file records `OUTCOME_SYNTAX_ERROR` at severity ERROR — an
+unresolved ERROR is a blocker in buildHealthFromDiagnostics, so the app is honestly reported **NOT READY**,
+never "READY" while it won't compile). Kill: `AGENTV3_SYNTAX_GATE=off`. Tests (5): the exact App #6
+CSS-in-JSX corruption flagged; clean TSX/TS/JSX pass; unclosed brace caught; .d.ts/empty skipped; repair
+instruction formatting. Gate: server tsc 0, full suite 6341.
+
+OPEN (recorded, follow-up): the ORIGIN was `LLM_TRUNCATED` (GLM max_tokens). The parse gate catches the
+SYMPTOM deterministically; a deeper fix is to detect a truncated response and continue/re-request the file
+before writing it. Also App #6's FEATURE_COVERAGE flagged 5 CRUD controls missing — the C9 reviewer caught
+all 4 and was auto-fixing (immune system working as designed).

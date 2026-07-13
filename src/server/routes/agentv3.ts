@@ -3577,7 +3577,8 @@ export function registerAgentV3Routes(app: Express): void {
     }
     // Weak-tier welcome notice (admin final spec 2026-07-12): a FREE user on the weak tier is told — in
     // their own language, right at the top of the reply — that they are on the free Weak engine, where the
-    // 🎚️ tier selector lives (just left of the message box), and that any recharge unlocks all tiers.
+    // 🎛️ tier selector lives (the options/sliders button just left of the message box), and that the first
+    // recharge unlocks all tiers.
     // Shown once per user per server instance (a gentle reminder may repeat after a cold start — fine);
     // the phrasing rotates by seed so repeats never read identically.
     if (callerIsFreeTier === true && powerSpecResolved.cheapOnly && userId && !weakNoticeShownFor.has(userId)) {

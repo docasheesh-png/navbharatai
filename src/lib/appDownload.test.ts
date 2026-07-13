@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeShowDownloadApp, PLAY_LISTING_URL } from './appDownload';
+import { computeShowDownloadApp, DEFAULT_LISTING_URL, PUBLIC_LISTING_URL, INTERNAL_TEST_URL } from './appDownload';
 
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Mobile Safari/537.36';
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Safari/537.36';
@@ -30,7 +30,10 @@ describe('computeShowDownloadApp — mobile web on navbharatai.com only', () => 
     expect(computeShowDownloadApp({ native: false, userAgent: DESKTOP_UA, innerWidth: 600, hostname: 'navbharatai.com' })).toBe(true);
   });
 
-  it('exposes the honest Play-listing fallback URL for the real app id', () => {
-    expect(PLAY_LISTING_URL).toContain('com.navbharat.ai');
+  it('the default fallback is the internal-test link (the working link while in internal testing)', () => {
+    expect(DEFAULT_LISTING_URL).toBe(INTERNAL_TEST_URL);
+    expect(DEFAULT_LISTING_URL).toContain('internaltest');
+    // The public listing constant is kept for when the app goes to production.
+    expect(PUBLIC_LISTING_URL).toContain('com.navbharat.ai');
   });
 });

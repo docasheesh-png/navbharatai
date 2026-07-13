@@ -77,7 +77,7 @@ jobs:
       - name: Decode the release keystore from the secret
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
 
-      - name: Build the SIGNED release bundle (.aab)
+      - name: Build the SIGNED release bundle (.aab) + universal APK
         working-directory: android
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/upload-keystore.jks
@@ -88,7 +88,10 @@ jobs:
           # build is uploadable without editing build.gradle. versionName stays human-readable.
           ANDROID_VERSION_CODE: ${{ github.run_number }}
           ANDROID_VERSION_NAME: 1.0.${{ github.run_number }}
-        run: ./gradlew bundleRelease --no-daemon
+        # bundleRelease → the .aab for Play. assembleRelease → a SIGNED universal .apk for the website's
+        # "Download app" button (a direct sideload — Play only accepts the .aab). Both use the same
+        # release signingConfig, so the APK is genuinely installable.
+        run: ./gradlew bundleRelease assembleRelease --no-daemon
 
       - name: Always remove the decoded keystore (never leaves the runner)
         if: always()
@@ -99,6 +102,16 @@ jobs:
         with:
           name: navbharatai-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
+
+      # The SIGNED universal APK for the website's "Download app" button. Download it, host it at a
+      # stable URL (GitHub release asset / Firebase Hosting / any CDN), and set VITE_APK_DOWNLOAD_URL to
+      # that URL so the button downloads it directly. (Until set, the button falls back to the Play listing.)
+      - name: Upload the .apk artifact (direct-download / sideload)
+        uses: actions/upload-artifact@v4
+        with:
+          name: navbharatai-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
       - name: Summary

@@ -75,6 +75,15 @@ export const MobileEngagementGate: React.FC = () => {
             >
               {busy ? '…' : 'Update'}
             </button>
+            {/* Remind me later — dismiss for now; the check runs again on the next app open, so a still-
+                pending update re-surfaces. Never nags within a session. */}
+            <button
+              onClick={() => setShowUpdate(false)}
+              disabled={busy}
+              className="px-2.5 py-2 rounded-xl text-[11px] font-bold text-[#8b949e] hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 whitespace-nowrap"
+            >
+              Later
+            </button>
             <button
               onClick={() => setShowUpdate(false)}
               aria-label="Dismiss update notice"

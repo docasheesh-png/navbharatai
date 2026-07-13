@@ -1946,7 +1946,7 @@ export class ToolDispatcher {
         // best-effort probe (first lockfile found wins, pnpm→yarn→bun→npm); an explicit installCmd from
         // the caller still overrides. Defaults to npm when no lockfile is present.
         let packageManager: PackageManager | undefined;
-        if (include.has('ci')) {
+        if (include.has('ci') || include.has('docker')) {
           const probes: Array<[string, PackageManager]> = [
             ['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'],
             ['bun.lockb', 'bun'], ['bun.lock', 'bun'], ['package-lock.json', 'npm'],
@@ -1956,7 +1956,7 @@ export class ToolDispatcher {
           }
         }
         const genInput: DeployArtifactInput = {};
-        if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage };
+        if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage, packageManager };
         if (include.has('compose')) genInput.compose = { port };
         if (include.has('ci')) genInput.ci = { nodeVersion, installCmd, lintCmd, testCmd, buildCmd, packageManager };
         const artifacts = generateDeployArtifacts(genInput);

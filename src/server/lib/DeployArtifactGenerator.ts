@@ -11,23 +11,47 @@
 const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
 
 export interface DockerOptions {
-  nodeVersion?: string;     // e.g. '20'
+  nodeVersion?: string;     // e.g. '20' (ignored for bun, which uses the oven/bun image)
   port?: number;            // exposed port
-  installCmd?: string;      // default: npm ci
+  installCmd?: string;      // default: the manager's frozen-lockfile install
   buildCmd?: string;        // e.g. npm run build (omitted if empty)
-  startCmd?: string;        // default: npm start
+  startCmd?: string;        // default: `<manager> start`
   /** Multi-stage build (build stage + slim runtime). Default true. */
   multiStage?: boolean;
+  /** Project package manager (default 'npm') — drives base image, lockfile COPY, install + start. */
+  packageManager?: PackageManager;
 }
 
-/** Generate a production Dockerfile (alpine, non-root, optional multi-stage). */
+/** Default `<manager> start` runtime command per package manager. */
+const PM_START: Record<PackageManager, string> = {
+  npm: 'npm start', yarn: 'yarn start', pnpm: 'pnpm start', bun: 'bun start',
+};
+
+/** The COPY line that brings in the manifest + the manager's lockfile (glob-tolerant so a missing lock still builds). */
+function pmLockCopy(pm: PackageManager): string {
+  switch (pm) {
+    case 'yarn': return 'COPY package.json yarn.lock* ./';
+    case 'pnpm': return 'COPY package.json pnpm-lock.yaml* ./';
+    case 'bun': return 'COPY package.json bun.lock* bun.lockb* ./';
+    default: return 'COPY package*.json ./';
+  }
+}
+
+/** Generate a production Dockerfile (alpine, non-root, optional multi-stage), correct for the manager. */
 export function generateDockerfile(opts: DockerOptions = {}): string {
+  const pm: PackageManager = opts.packageManager && opts.packageManager in PM_INSTALL ? opts.packageManager : 'npm';
   const node = clean(opts.nodeVersion) || '20';
   const port = typeof opts.port === 'number' && opts.port > 0 ? opts.port : 8080;
-  const install = clean(opts.installCmd) || 'npm ci';
+  const install = clean(opts.installCmd) || PM_INSTALL[pm];
   const build = clean(opts.buildCmd);
-  const start = clean(opts.startCmd) || 'npm start';
-  const base = `node:${node}-alpine`;
+  const start = clean(opts.startCmd) || PM_START[pm];
+  // Bun ships its own runtime image; npm/yarn/pnpm run on node. pnpm & yarn are provided via corepack
+  // (bundled with node) which must be enabled in EACH stage that uses the manager.
+  const base = pm === 'bun' ? `oven/bun:1-alpine` : `node:${node}-alpine`;
+  const user = pm === 'bun' ? 'bun' : 'node';
+  const corepack = pm === 'pnpm' || pm === 'yarn';
+  const lockCopy = pmLockCopy(pm);
+  const installRun = corepack ? `RUN corepack enable && ${install}` : `RUN ${install}`;
   const lines: string[] = [];
 
   if (opts.multiStage !== false) {
@@ -35,8 +59,8 @@ export function generateDockerfile(opts: DockerOptions = {}): string {
       `# syntax=docker/dockerfile:1`,
       `FROM ${base} AS build`,
       `WORKDIR /app`,
-      `COPY package*.json ./`,
-      `RUN ${install}`,
+      lockCopy,
+      installRun,
       `COPY . .`,
       ...(build ? [`RUN ${build}`] : []),
       ``,
@@ -44,8 +68,10 @@ export function generateDockerfile(opts: DockerOptions = {}): string {
       `WORKDIR /app`,
       `ENV NODE_ENV=production`,
       `COPY --from=build /app ./`,
+      // The runtime CMD is `<manager> start`, so pnpm/yarn must be available here too.
+      ...(corepack ? [`RUN corepack enable`] : []),
       `# Run as a non-root user for security`,
-      `USER node`,
+      `USER ${user}`,
       `EXPOSE ${port}`,
       `CMD ${JSON.stringify(start.split(/\s+/))}`,
     );
@@ -54,11 +80,11 @@ export function generateDockerfile(opts: DockerOptions = {}): string {
       `FROM ${base}`,
       `WORKDIR /app`,
       `ENV NODE_ENV=production`,
-      `COPY package*.json ./`,
-      `RUN ${install}`,
+      lockCopy,
+      installRun,
       `COPY . .`,
       ...(build ? [`RUN ${build}`] : []),
-      `USER node`,
+      `USER ${user}`,
       `EXPOSE ${port}`,
       `CMD ${JSON.stringify(start.split(/\s+/))}`,
     );

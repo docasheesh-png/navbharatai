@@ -21,6 +21,47 @@ describe('DeployArtifactGenerator (P-CGE.9)', () => {
       expect(df).toContain('USER node');
       expect(df).toContain('EXPOSE 8080'); // default port
     });
+
+    it('npm (default): node base, npm ci, node user, npm start', () => {
+      const df = generateDockerfile({ packageManager: 'npm' });
+      expect(df).toContain('FROM node:20-alpine');
+      expect(df).toContain('RUN npm ci');
+      expect(df).toContain('CMD ["npm","start"]');
+      expect(df).not.toContain('corepack');
+    });
+
+    it('pnpm: corepack enable in BOTH stages, frozen install, pnpm-lock COPY, pnpm start', () => {
+      const df = generateDockerfile({ packageManager: 'pnpm' });
+      expect(df).toContain('COPY package.json pnpm-lock.yaml* ./');
+      expect(df).toContain('RUN corepack enable && pnpm install --frozen-lockfile');
+      expect(df).toContain('CMD ["pnpm","start"]');
+      // runtime stage also enables corepack so `pnpm start` resolves.
+      expect(df.match(/corepack enable/g)?.length).toBe(2);
+      expect(df).not.toContain('npm ci');
+    });
+
+    it('yarn: corepack + yarn frozen install + yarn.lock COPY', () => {
+      const df = generateDockerfile({ packageManager: 'yarn' });
+      expect(df).toContain('COPY package.json yarn.lock* ./');
+      expect(df).toContain('RUN corepack enable && yarn install --frozen-lockfile');
+      expect(df).toContain('CMD ["yarn","start"]');
+    });
+
+    it('bun: oven/bun base image, bun user, bun install, no corepack/node', () => {
+      const df = generateDockerfile({ packageManager: 'bun' });
+      expect(df).toContain('FROM oven/bun:1-alpine');
+      expect(df).not.toContain('node:20-alpine');
+      expect(df).toContain('USER bun');
+      expect(df).toContain('RUN bun install --frozen-lockfile');
+      expect(df).toContain('CMD ["bun","start"]');
+      expect(df).not.toContain('corepack');
+    });
+
+    it('an explicit installCmd/startCmd still overrides the manager defaults', () => {
+      const df = generateDockerfile({ packageManager: 'pnpm', installCmd: 'pnpm i', startCmd: 'node dist/main.js' });
+      expect(df).toContain('RUN corepack enable && pnpm i');
+      expect(df).toContain('CMD ["node","dist/main.js"]');
+    });
   });
 
   describe('generateDockerCompose', () => {

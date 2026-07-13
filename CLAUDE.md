@@ -284,6 +284,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   `AGENTV3_COST_ROUTING` + `AGENTV3_COST_ROUTING_USERS` (set `on`, canary → `aashishcpmt09@gmail.com`, by the
   admin 2026-07-12 — the free-tier cheap-routing master switch, live for the admin's account only for now),
   `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below)
+- **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
+  `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
+  plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is
+  OFF unless `SONIC_CHAT_ENABLED=true` AND both AWS keys are present. FULLY ISOLATED — code lives only
+  in `src/server/sonic/` + `src/components/sonic/` + a `/sonic` branch in `src/main.tsx`; deleting those
+  removes it entirely. NOTE: the AWS keys belong to a dedicated IAM user (`navbharatai-sonic`, Bedrock
+  scope) and are NOT the AWS Activate/Free-tier billing account — this is a separate, revocable credential.
 
 **Known valid VALUES (from the code, for the admin to cross-check):**
 - `AGENTV3_CHEAP_FLOOR` accepts exactly: `off` | `glm` (GLM only) | `kimi` (Kimi only) | `on`/`both`

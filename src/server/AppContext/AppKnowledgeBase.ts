@@ -33,6 +33,21 @@ export interface AppFeature {
 export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   // ─── DOWNLOAD APP (mobile web → Android app) ─────────────────────────────
   {
+    id: 'sonic_voice_chat',
+    name: 'Sonic Voice Chat (experimental)',
+    path: 'Floating 🎙️ button (bottom-right) — appears only for signed-in users when voice is enabled. Also at the direct URL /sonic.',
+    description:
+      'A real-time, talk-back-and-forth VOICE assistant powered by Amazon Nova Sonic. Speak naturally in Hindi, Hinglish, English or a regional language and hear a spoken reply — like a phone call. It transcribes what you say and what it answers on screen. Experimental and available to SIGNED-IN users only (voice uses a paid AI model). It is a general conversational voice assistant, not an app builder — for building apps use NavBharatAI Pro v3.0.',
+    howToUse:
+      'Sign in, then tap the floating microphone button at the bottom-right (or open navbharatai.com/sonic). Tap "Start talking", allow the microphone when the browser asks, and just speak. Tap "Stop" to end. If the button is not visible, voice is either not enabled on the server or you are not signed in.',
+    relatedFeatures: ['nbi_chat', 'agentv3_builder'],
+    keywords: [
+      'voice', 'voice chat', 'talk', 'speak', 'microphone', 'mic', 'sonic', 'nova sonic', 'awaaz',
+      'bol kar baat', 'voice se baat', 'audio chat', 'speak to ai', 'voice assistant', 'baat karo',
+    ],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'download_app',
     name: 'Download app (Android)',
     path: 'Sidebar menu → "Download app" (shows only on a mobile browser on navbharatai.com)',

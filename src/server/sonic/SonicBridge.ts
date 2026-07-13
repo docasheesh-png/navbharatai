@@ -33,10 +33,25 @@ export interface SonicCallbacks {
   onClose: () => void;
 }
 
-const DEFAULT_SYSTEM_PROMPT =
-  'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users. ' +
-  'Reply naturally in the language the user speaks (Hindi, Hinglish, English or a regional language). ' +
-  'Keep answers short and conversational, as if speaking on a phone call.';
+// Built per-session so "today's date" is always current — Nova Sonic has no clock and
+// otherwise guesses a stale training-cutoff date (it answered "15 July 2024" on a 2026 run).
+function defaultSystemPrompt(): string {
+  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' });
+  return (
+    'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users. ' +
+    'Reply naturally in the language the user speaks (Hindi, Hinglish, English or a regional language). ' +
+    'Keep answers short and conversational, as if speaking on a phone call. ' +
+    `Today's date is ${today} (India time). Use it whenever the user asks about the date, day or time.`
+  );
+}
+
+/** Nova Sonic emits some control/tool signals (e.g. {"interrupted":true}) as textOutput content —
+ *  these are NOT speech and must never be shown as a chat line. True when the text is a JSON object. */
+export function isControlJson(text: string): boolean {
+  const t = text.trim();
+  if (!t.startsWith('{') || !t.endsWith('}')) return false;
+  try { return typeof JSON.parse(t) === 'object'; } catch { return false; }
+}
 
 /**
  * A queue that turns discrete pushes into an async-iterable of Bedrock input chunks. The
@@ -82,7 +97,10 @@ export class SonicSession {
   private started = false;
   private closed = false;
 
-  constructor(private readonly cb: SonicCallbacks, private readonly systemPrompt = DEFAULT_SYSTEM_PROMPT) {
+  private lastText = '';
+  private lastTextRole = '';
+
+  constructor(private readonly cb: SonicCallbacks, private readonly systemPrompt = defaultSystemPrompt()) {
     this.client = new BedrockRuntimeClient({
       region: sonicRegion(),
       credentials: {
@@ -164,7 +182,15 @@ export class SonicSession {
           if (c) this.cb.onAudioOutput(c);
         } else if (event.textOutput) {
           const t = event.textOutput as { content?: string; role?: string };
-          if (t.content) this.cb.onText(t.content, t.role || 'ASSISTANT');
+          const content = (t.content || '').trim();
+          if (!content || isControlJson(content)) continue; // drop empties + control JSON ({"interrupted":true})
+          const role = t.role || 'ASSISTANT';
+          // Nova Sonic emits a speculative AND a final textOutput for the same turn (identical text)
+          // → collapse exact consecutive repeats so each line shows once.
+          if (role === this.lastTextRole && content === this.lastText) continue;
+          this.lastText = content;
+          this.lastTextRole = role;
+          this.cb.onText(content, role);
         } else if (event.contentEnd) {
           const ce = event.contentEnd as { type?: string };
           if (ce.type === 'AUDIO') this.cb.onTurnComplete();

@@ -3634,7 +3634,7 @@ export function registerAgentV3Routes(app: Express): void {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus, noClaude: noClaudeBuild }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
         // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content

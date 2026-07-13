@@ -15222,3 +15222,20 @@ ClaudeClient guard (2 — throws-without-calling-API in-zone / runs-normally out
 claudeModelUsed (3). Gate: server tsc 0, frontend tsc 0 (mobile-native dep gap is local-only; CI `npm ci`
 installs it), suite 2740 passed. Files: new `noClaudeZone.ts`; `ClaudeClient.ts` guard; `BuildDiagnostics.ts`
 detector; `routes/agentv3.ts` zone-entry + honest billing.
+
+## 2026-07-13 — Sibling hunt (rule 3): weak-module Claude leak in VISION, closed
+
+After the ClaudeClient chokepoint (App #3 fix), swept the repo for OTHER Claude entry points a weak build
+could reach. Found one live sibling: `lib/visionDescribe.ts`. Its default chain was
+`Gemini → Grok → describeWithClaude` (Claude as last resort) via the RAW Anthropic SDK — so a weak build
+that attached a screenshot, with Gemini+Grok unavailable, would make a real Claude vision call (routing
+policy pins free/weak vision to Gemini/Grok, never Claude). The ClaudeClient zone guard can't catch it (raw
+SDK, and vision runs before the build zone is entered).
+
+Fix: `describeVisionAttachments` takes `noClaude` and drops the Claude rung entirely for weak/free builds
+(cheap providers ONLY); the route passes `noClaude: noClaudeBuild`. Belt-and-suspenders: `describeWithClaude`
+also short-circuits when `noClaudeZoneActive()`, covering any future in-zone caller. Tests (4): no-Claude
+returns the honest "could not be read" placeholder without ever constructing Anthropic; in-zone caller same;
+default (paid) still falls back to Claude; empty input touches nothing. Gate: server tsc 0, lib suite 356.
+Other Anthropic entry points (sda.ts/pro.ts/AI Router/AppEngine/AppMakerLab) are separate features (Doctor
+AI / Pro Chat / Engineer AI), NOT the v3.0 weak build — out of scope for this rule.

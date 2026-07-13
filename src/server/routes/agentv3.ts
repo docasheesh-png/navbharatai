@@ -122,6 +122,7 @@ import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/Op
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
+import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -6366,6 +6367,68 @@ export function registerAgentV3Routes(app: Express): void {
             }
           }
         } catch { /* syntax gate is best-effort — never blocks a build */ }
+      }
+
+      // MISSING-EXPORT GATE (deep-test App #7 — Trello full-stack, 2026-07-13). Truncated file-generations
+      // (`LLM_TRUNCATED` on Vertex, hit under heavy GLM rate-limiting) cut off a module's export — e.g.
+      // server/routes/cards.ts lost `export … cardRoutes`, breaking server/index.ts's `import { cardRoutes }`.
+      // The readiness gate DETECTED 18 such broken imports but the app still shipped NOT READY; the existing
+      // reconcileImportExports only fixes named↔default KIND mismatches, so it can't restore an export that a
+      // truncation deleted. This gate finds every "name imported but not exported" mismatch, REGENERATES the
+      // target file(s) so the missing export exists again, re-checks, and records the honest end-state. Same
+      // proven shape as the missing-files/syntax gates. Kill: AGENTV3_MISSING_EXPORT_GATE=off.
+      if (
+        process.env.AGENTV3_MISSING_EXPORT_GATE !== 'off' && !fastLaneGated
+        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+      ) {
+        try {
+          const analyzeTargets = async (): Promise<ExportRegenTarget[]> => {
+            const map = Object.fromEntries(writtenFiles);
+            const rep = await analyzeImportExports(map);
+            // Regenerate only OUR written targets (never a scaffold/read-only file).
+            return exportRegenTargets(rep, new Set(Object.keys(map))).filter((t) => writtenFiles.has(t.target));
+          };
+          let targets = await analyzeTargets();
+          if (targets.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_EXPORT_DETECTED', message: `${targets.length} file(s) are missing exports that other files import (the build fails):\n${exportRegenInstruction(targets)}`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length} file(s) are missing an export another file needs — regenerating them…`, ts: Date.now() });
+            try {
+              const targetFiles = targets
+                .map((t) => ({ path: t.target, content: writtenFiles.get(t.target) || '' }))
+                .filter((f) => f.content);
+              const t = await makeFastTextRunner().runTurn({
+                model: fastBuildModel(), system: repairSystemPrompt(framework),
+                messages: [{ role: 'user', content:
+                  `The app was built for this request:\n${prompt}\n\n` +
+                  `These files are imported by other modules for specific bindings, but they DO NOT export those ` +
+                  `bindings (usually a generation that was cut off before the export). Rewrite EACH file in full ` +
+                  `so it exports EXACTLY the required names, keeping all its existing logic/UI and adding the ` +
+                  `missing export(s) with real implementations (no stubs). Change nothing else.\n\n` +
+                  `REQUIRED EXPORTS:\n${exportRegenInstruction(targets)}\n\n` +
+                  `The files to rewrite (complete each one, exports included):\n` +
+                  targetFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
+                ],
+                tools: [], maxTokens: 8000,
+              });
+              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              for (let i = 0; i < fixed.length; i++) {
+                await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+              }
+            } catch (e) {
+              console.log(`[AGENTV3] missing-export gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            targets = await analyzeTargets();
+            if (targets.length === 0) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'MISSING_EXPORT_HEALED', message: 'All previously-missing exports were restored — every local import now resolves to a real binding.', autoResolved: true });
+              events.emit({ type: 'narration', agent: 'architect', text: '✅ Restored the missing exports — the imports resolve now.', ts: Date.now() });
+              if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save best-effort */ } }
+            } else {
+              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_MISSING_EXPORT', message: `After one repair pass, ${targets.length} file(s) STILL miss an imported export — the build will fail:\n${exportRegenInstruction(targets)}`, autoResolved: false });
+              events.emit({ type: 'narration', agent: 'architect', text: '⚠️ Some imports still reference exports that could not be restored. Your files are saved — send a follow-up and I\'ll finish the fix.', ts: Date.now() });
+            }
+          }
+        } catch { /* missing-export gate is best-effort — never blocks a build */ }
       }
 
       // PROJECT INTEGRITY (autopsy 2026-07-11, Todo + Notes reports) — two real defect CLASSES the

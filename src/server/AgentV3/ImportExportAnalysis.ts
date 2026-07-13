@@ -162,3 +162,54 @@ export async function analyzeImportExports(files: Record<string, string>): Promi
 
   return { mismatches, filesScanned: sources.size, counts, ok: mismatches.length === 0 };
 }
+
+export interface ExportRegenTarget {
+  /** The file that is missing exports (the one to regenerate). */
+  target: string;
+  /** The named bindings other files import from it but it does not export. */
+  missingNamed: string[];
+  /** True when a default export is imported but missing. */
+  missingDefault: boolean;
+  /** The importer files (path:line) that need each name — context for the repair. */
+  neededBy: string[];
+}
+
+/**
+ * Group an ImportExportReport's mismatches by the TARGET module that is missing the export, so a heal
+ * can REGENERATE each such file with the bindings its consumers expect.
+ *
+ * ROOT CAUSE this serves (deep-test App #7 — Trello, 2026-07-13): a truncated file-generation
+ * (`LLM_TRUNCATED` on Vertex under GLM rate-limiting) cut off a module's export — e.g. server/routes/cards.ts
+ * lost its `export … cardRoutes` — so server/index.ts's `import { cardRoutes }` broke. `reconcileImportExports`
+ * only fixes named↔default KIND mismatches; it cannot restore an export that isn't there. The fix is to
+ * regenerate the target file so the missing export exists again. Pure; resolves each `from` spec to a real
+ * file in `fileSet` (unresolvable specs are skipped — that's the missing-FILE gate's job, not this one).
+ */
+export function exportRegenTargets(report: ImportExportReport, fileSet: Set<string>): ExportRegenTarget[] {
+  const byTarget = new Map<string, { named: Set<string>; def: boolean; neededBy: Set<string> }>();
+  for (const m of report.mismatches) {
+    const target = resolveLocalTarget(m.file, m.from, fileSet);
+    if (!target) continue; // unresolved file → not this gate's job
+    let e = byTarget.get(target);
+    if (!e) { e = { named: new Set(), def: false, neededBy: new Set() }; byTarget.set(target, e); }
+    if (m.kind === 'named-import-not-exported') e.named.add(m.imported);
+    else if (m.kind === 'default-import-missing') e.def = true;
+    e.neededBy.add(`${m.file}:${m.line}`);
+  }
+  return [...byTarget.entries()].map(([target, e]) => ({
+    target,
+    missingNamed: [...e.named].sort(),
+    missingDefault: e.def,
+    neededBy: [...e.neededBy].sort(),
+  }));
+}
+
+/** A compact repair instruction naming each file that must be regenerated and the exports it must provide. */
+export function exportRegenInstruction(targets: readonly ExportRegenTarget[]): string {
+  return targets.slice(0, 15).map((t) => {
+    const parts: string[] = [];
+    if (t.missingNamed.length) parts.push(`named export(s): ${t.missingNamed.join(', ')}`);
+    if (t.missingDefault) parts.push('a default export');
+    return `- ${t.target} MUST provide ${parts.join(' and ')} (imported by ${t.neededBy.slice(0, 4).join(', ')}${t.neededBy.length > 4 ? ', …' : ''})`;
+  }).join('\n');
+}

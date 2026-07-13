@@ -685,6 +685,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'scan_vulnerabilities',
+      description:
+        'Scan the app\'s dependencies for known security vulnerabilities against the OSV.dev database ' +
+        '(CVEs + GitHub advisories). Reads package.json (+ package-lock.json for exact versions) and reports ' +
+        'each vulnerable package with its advisory IDs. HONEST: if OSV.dev is unreachable it says the scan ' +
+        'could not run — it never reports a fake clean result. Run before shipping a real app. No arguments.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -870,6 +879,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_migration',
   'generate_deploy_artifacts',
   'generate_iac',
+  'scan_vulnerabilities',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

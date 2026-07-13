@@ -1516,7 +1516,18 @@ export function planGrokEnabled(apiKey: string | undefined, disableFlag: string 
   return !!apiKey && disableFlag !== '0' && disableFlag !== 'off';
 }
 
-function grokPlanRunner(): TurnRunner | null {
+/**
+ * The provider NAMES the Grok plan chain may contain (pure — the unit-testable invariant behind
+ * grokPlanRunner). WEAK ⇒ NO CLAUDE, EVER: on a noClaude build the plan chain is Grok ALONE — the
+ * Claude fallback rung is not merely deprioritised, it does not exist. Audit 2026-07-13 confirmed
+ * the leak this kills: this chain is assembled OUTSIDE buildTurnRunner, so enforceNoClaude never
+ * saw it, and one Grok timeout ran a weak (free) build's plan turn on a real Claude call.
+ */
+export function planRunnerChainNames(noClaude: boolean): string[] {
+  return noClaude ? ['GROK'] : ['GROK', 'CLAUDE'];
+}
+
+function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
   const apiKey = process.env.GROK_API_KEY || process.env.XAI_API_KEY;
   if (!planGrokEnabled(apiKey, process.env.AGENTV3_PLAN_GROK)) return null;
   try {
@@ -1529,8 +1540,14 @@ function grokPlanRunner(): TurnRunner | null {
     // Overridable via AGENTV3_GROK_PLAN_MODEL; the Claude-Haiku fallback guards any model regression.
     const model = process.env.AGENTV3_GROK_PLAN_MODEL || 'grok-4-fast-non-reasoning';
     const grok: NamedRunner = { name: 'GROK', runner: new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model }) };
-    const claudeFallback: NamedRunner = { name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) };
-    return makeMultiProviderTurnRunner([grok, claudeFallback], {
+    // Chain membership comes from planRunnerChainNames (the pure, tested invariant): on a noClaude
+    // build the chain is Grok ALONE — a Grok failure surfaces as a plan error handled best-effort by
+    // the caller, never a Claude call.
+    const chain: NamedRunner[] = [grok];
+    if (planRunnerChainNames(opts?.noClaude === true).includes('CLAUDE')) {
+      chain.push({ name: 'CLAUDE', runner: new ClaudeClient(undefined, { maxRetries: 2 }) });
+    }
+    return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
     });
   } catch {
@@ -5431,7 +5448,7 @@ export function registerAgentV3Routes(app: Express): void {
         // falls the plan runner to the normal build `client` + `model`, which there is Opus.
         // Strong ('mini' → Sonnet 100%, admin 2026-07-13) plans on Grok like Normal — planning on
         // Opus for a Sonnet-pinned tier would be exactly the cross-tier call the admin forbade.
-        const planGrok = pinnedOpus ? null : grokPlanRunner();
+        const planGrok = pinnedOpus ? null : grokPlanRunner({ noClaude: noClaudeBuild });
         const planRunner = new AgentRunner({
           client: planGrok ?? client,
           dispatcher: new ToolDispatcher(actuator, workspaceId, state, events),

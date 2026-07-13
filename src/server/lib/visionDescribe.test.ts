@@ -11,10 +11,32 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 
-import { describeVisionAttachments } from './visionDescribe';
+import { describeVisionAttachments, visionProviderChain } from './visionDescribe';
 import { runInNoClaudeZone } from '../AgentV3/noClaudeZone';
 
 const IMG = { type: 'image/png', name: 'shot.png', base64: 'aGVsbG8=' } as any;
+
+describe('visionProviderChain — which models may read an attachment, per tier (audit fix 2026-07-13)', () => {
+  it('WEAK tier (noClaude): Gemini → Grok, Claude NEVER — the exact confirmed leak', () => {
+    // Before this fix a weak (free) build with an image + one Gemini failure fell through to a
+    // REAL Anthropic vision call (outside enforceNoClaude). The chain itself must exclude Claude.
+    expect(visionProviderChain({ noClaude: true })).toEqual(['gemini', 'grok']);
+    expect(visionProviderChain({ noClaude: true })).not.toContain('claude');
+  });
+
+  it('noClaude WINS over useClaude (belt & braces — a mis-threaded flag pair can never re-open the leak)', () => {
+    expect(visionProviderChain({ noClaude: true, useClaude: true })).toEqual(['gemini', 'grok']);
+  });
+
+  it('Opus tiers (useClaude): Claude first for the highest-fidelity read', () => {
+    expect(visionProviderChain({ useClaude: true })).toEqual(['claude', 'gemini', 'grok']);
+  });
+
+  it('default (Normal/Strong): cheap first, Claude only as last resort', () => {
+    expect(visionProviderChain({})).toEqual(['gemini', 'grok', 'claude']);
+    expect(visionProviderChain()).toEqual(['gemini', 'grok', 'claude']);
+  });
+});
 
 describe('describeVisionAttachments — weak-module no-Claude guard', () => {
   const saved = { ...process.env };
@@ -36,6 +58,12 @@ describe('describeVisionAttachments — weak-module no-Claude guard', () => {
     const out = await describeVisionAttachments([IMG], { noClaude: true });
     expect(anthropicCtor).not.toHaveBeenCalled();
     expect(messagesCreate).not.toHaveBeenCalled();
+    expect(out).toContain('could not be read');
+  });
+
+  it('never touches Claude even when useClaude is ALSO set (noClaude wins at runtime too)', async () => {
+    const out = await describeVisionAttachments([IMG], { noClaude: true, useClaude: true });
+    expect(anthropicCtor).not.toHaveBeenCalled();
     expect(out).toContain('could not be read');
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, enforceNoClaude, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1443,5 +1443,19 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin absolute 
   it('is exhaustive — no Claude-named runner survives, in any position', () => {
     const weird = [{ name: 'CLAUDE' }, { name: 'GLM' }, { name: 'CLAUDE_HAIKU' }, { name: 'CLAUDE' }];
     expect(enforceNoClaude(weird, true).every((r) => !r.name.startsWith('CLAUDE'))).toBe(true);
+  });
+});
+
+describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (audit fix 2026-07-13)', () => {
+  // THE exact confirmed leak: grokPlanRunner hardwired [GROK → CLAUDE] OUTSIDE buildTurnRunner, so
+  // enforceNoClaude never saw it — one Grok timeout ran a weak (free) build's plan turn on a real
+  // Claude call. The chain membership is now this pure function, so the invariant is locked here.
+  it('a noClaude (weak) build plans on Grok ALONE — no Claude fallback rung exists', () => {
+    expect(planRunnerChainNames(true)).toEqual(['GROK']);
+    expect(planRunnerChainNames(true)).not.toContain('CLAUDE');
+  });
+
+  it('a normal/paid build keeps the Grok → Claude fallback (resilience unchanged)', () => {
+    expect(planRunnerChainNames(false)).toEqual(['GROK', 'CLAUDE']);
   });
 });

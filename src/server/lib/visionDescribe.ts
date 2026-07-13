@@ -100,11 +100,30 @@ async function describeWithClaude(att: RawAttachment): Promise<string> {
   } catch { return ''; }
 }
 
+export type VisionProvider = 'gemini' | 'grok' | 'claude';
+
 /**
- * Describe all image/PDF attachments as text. By default uses the cheap providers
- * (Gemini → Grok) and only falls back to Claude if those are unavailable. When
- * `useClaude` is true (v3.0 Power / Only-Opus mode), Claude is used first for the
- * highest-fidelity read. Never throws; returns '' when nothing could be described.
+ * The ORDERED provider rungs a vision describe may use — the single source of truth for which
+ * models are allowed to read an attachment, per tier. Pure + exported so the invariant is
+ * unit-testable:
+ *   noClaude (WEAK tier)   → Gemini → Grok. Claude NEVER — this helper calls Anthropic directly
+ *                            (outside buildTurnRunner/enforceNoClaude), so the weak tier must
+ *                            exclude the Claude rung HERE. Audit 2026-07-13 confirmed the leak:
+ *                            a free build with an image + one Gemini failure landed on a real
+ *                            Claude vision call. `noClaude` wins over `useClaude` by design.
+ *   useClaude (Opus tiers) → Claude → Gemini → Grok (highest-fidelity read first).
+ *   default                → Gemini → Grok → Claude (cheap first, Claude last resort).
+ */
+export function visionProviderChain(opts: { useClaude?: boolean; noClaude?: boolean } = {}): VisionProvider[] {
+  if (opts.noClaude) return ['gemini', 'grok'];
+  if (opts.useClaude) return ['claude', 'gemini', 'grok'];
+  return ['gemini', 'grok', 'claude'];
+}
+
+/**
+ * Describe all image/PDF attachments as text. The provider order comes from
+ * visionProviderChain() (see its doc for the per-tier rules). Never throws;
+ * returns '' when nothing could be described.
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
@@ -113,23 +132,21 @@ export async function describeVisionAttachments(
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
 
-  // UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13): a weak/free build must never spend
-  // Claude anywhere — including vision. The routing policy pins free/weak vision to Gemini/Grok; drop the
-  // Claude rung entirely (the raw-SDK sibling of the ClaudeClient chokepoint; the zone check in
-  // describeWithClaude is the same rule for in-zone callers, since vision runs before the build zone).
-  const noClaude = opts.noClaude === true;
+  // The rung order comes from visionProviderChain (pure, tested): a weak/free (noClaude) build never
+  // even lists the Claude rung. Belt & braces: the noClaudeZone check inside describeWithClaude is the
+  // same rule for in-zone callers that forget the flag.
+  const describers: Record<VisionProvider, (att: RawAttachment) => Promise<string>> = {
+    gemini: describeWithGemini,
+    grok: describeWithGrok,
+    claude: describeWithClaude,
+  };
+  const chain = visionProviderChain(opts);
   const blocks: string[] = [];
   for (const att of vision) {
     let desc = '';
-    if (opts.useClaude && !noClaude) {
-      // Power mode: Claude first, cheap providers as fallback.
-      desc = (await describeWithClaude(att)) || (await describeWithGemini(att)) || (await describeWithGrok(att));
-    } else if (noClaude) {
-      // Weak/free build: cheap providers ONLY — Claude is never touched.
-      desc = (await describeWithGemini(att)) || (await describeWithGrok(att));
-    } else {
-      // Default: cheap first, Claude only as last resort.
-      desc = (await describeWithGemini(att)) || (await describeWithGrok(att)) || (await describeWithClaude(att));
+    for (const provider of chain) {
+      desc = await describers[provider](att);
+      if (desc) break;
     }
     const label = att.type === 'application/pdf' ? 'PDF' : 'Image';
     blocks.push(desc

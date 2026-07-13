@@ -15585,3 +15585,35 @@ status all agree the build did NOT succeed. Tests (4). Gate: server tsc 0, full 
 HONEST BOUNDARY (rule 6): the ROOT of the 0-file build is the E2B sandbox being unavailable — likely infra
 (E2B outage / quota / template), which a retry usually clears. This fix does not resurrect the sandbox; it
 makes v3.0 tell the truth (FAIL + retry) instead of faking "Done", and never charges for it.
+
+## 2026-07-13 — App #7 (Trello full-stack) autopsy: truncation → missing exports → broken imports; missing-export heal
+
+Deep-test App #7 (full-stack Trello, weak/GLM, 39 files, ~12 min). The build HONESTLY FAILED — `ok: false`,
+readiness NOT READY 0/100, and it caught EVERYTHING (22 unresolved imports, 18 broken imports, a secret leak,
+.env not gitignored, prisma migrate/seed failed). All three of my honesty fixes CONFIRMED live: `noClaude:
+true` correct despite nominal 'claude-sonnet-4-6' labels (providerDelivery `{GLM:33, KIMI:7, VERTEX:27}`, no
+CLAUDE — #1296); `userTier: free-list` (#1281); and the honest FAIL verdict (#1309 + readiness gate).
+
+CONFIRMED ROOT-CAUSE CHAIN (the deep-test's real prize): 74 provider fallbacks — GLM got 429-RATE-LIMITED
+(repeatCount 12-14) and KIMI timed out, so 27/67 turns fell to VERTEX, which TRUNCATED (`LLM_TRUNCATED`
+×3, all Vertex, finish=max_tokens) exactly on 3 files: useAuth.ts (13/39), cards.ts (38/39), BoardView.tsx
+(39/39). Each truncation CUT OFF that file's export → the 18 "name imported but not exported" broken imports
+(cardRoutes←./routes/cards, etc.). Same truncation root cause as App #6's syntax error. `reconcileImportExports`
+only fixes named↔default KIND mismatches, so it healed 10 but could not restore an export a truncation deleted.
+
+FIX — MISSING-EXPORT HEAL (same proven shape as the #1279 missing-files + #1308 syntax gates): new
+`exportRegenTargets(report, fileSet)` + `exportRegenInstruction()` (ImportExportAnalysis) group every
+"named-import-not-exported"/"default-import-missing" mismatch by the TARGET file missing the export. The
+agentic post-build now runs `analyzeImportExports`, and on a gap REGENERATES each target file (telling the
+model the exact exports its consumers need — real implementations, no stubs), re-checks, and records the
+honest end-state: healed → MISSING_EXPORT_HEALED; still broken → OUTCOME_MISSING_EXPORT (ERROR blocker → NOT
+READY). Kill: AGENTV3_MISSING_EXPORT_GATE=off. Tests (3): the exact cards.ts↔cardRoutes case; multi-name
+grouping; no false regen. Gate: server tsc 0, full suite 6370.
+
+OPEN ROOT CAUSES (recorded, rule 6):
+1. The DEEPER origin is TRUNCATION under provider pressure. This heal REGENERATES the truncated files (a real
+   fix for the symptom), but the truest fix is truncation-continuation at generation time (finish=max_tokens →
+   continue/re-request the file before writing) — a larger, careful change for a dedicated pass.
+2. GLM 429 RATE-LIMITING (repeatCount 12-14) forced the Vertex fallback that truncated. Partly infra (the GLM
+   key's rate-limit tier); better backoff/spacing on big builds would cut the Vertex fallback that causes the
+   truncation. Worth a routing/backoff pass.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeImportExports, resolveLocalTarget } from './ImportExportAnalysis';
+import { analyzeImportExports, resolveLocalTarget, exportRegenTargets, exportRegenInstruction } from './ImportExportAnalysis';
 
 describe('resolveLocalTarget', () => {
   const set = new Set(['src/lib/util.ts', 'src/components/Button.tsx', 'src/api/index.ts']);
@@ -115,5 +115,43 @@ describe('analyzeImportExports — robustness', () => {
   it('does not throw on unparseable content', async () => {
     const r = await analyzeImportExports({ 'src/broken.tsx': 'import { <<< from ./', 'src/ok.ts': 'export const a = 1;' });
     expect(Array.isArray(r.mismatches)).toBe(true);
+  });
+});
+
+describe('exportRegenTargets (deep-test App #7) — group missing exports by the file to regenerate', () => {
+  it('maps the exact Trello case: cards.ts must export cardRoutes (truncated export)', async () => {
+    // server/index.ts imports { cardRoutes } from './routes/cards', but cards.ts (truncated) doesn't export it.
+    const files = {
+      'server/index.ts': "import { cardRoutes } from './routes/cards';\nimport { authRoutes } from './routes/auth';\ncardRoutes; authRoutes;",
+      'server/routes/cards.ts': 'export const router = 1;', // cardRoutes cut off by truncation
+      'server/routes/auth.ts': 'export const authRoutes = 1;', // this one is fine
+    };
+    const rep = await analyzeImportExports(files);
+    const targets = exportRegenTargets(rep, new Set(Object.keys(files)));
+    expect(targets).toHaveLength(1);
+    expect(targets[0].target).toBe('server/routes/cards.ts');
+    expect(targets[0].missingNamed).toEqual(['cardRoutes']);
+    expect(targets[0].neededBy[0]).toContain('server/index.ts');
+    expect(exportRegenInstruction(targets)).toContain('server/routes/cards.ts MUST provide named export(s): cardRoutes');
+  });
+
+  it('groups multiple missing names on the same target file into one regen entry', async () => {
+    const files = {
+      'a.ts': "import { x, y } from './lib';\nx; y;",
+      'b.ts': "import { z } from './lib';\nz;",
+      'lib.ts': 'export const w = 1;',
+    };
+    const targets = exportRegenTargets(await analyzeImportExports(files), new Set(Object.keys(files)));
+    expect(targets).toHaveLength(1);
+    expect(targets[0].target).toBe('lib.ts');
+    expect(targets[0].missingNamed).toEqual(['x', 'y', 'z']);
+  });
+
+  it('is empty when every import resolves to a real export (no false regen)', async () => {
+    const files = {
+      'a.ts': "import { ok } from './lib';\nok;",
+      'lib.ts': 'export const ok = 1;',
+    };
+    expect(exportRegenTargets(await analyzeImportExports(files), new Set(Object.keys(files)))).toEqual([]);
   });
 });

@@ -15785,3 +15785,30 @@ burning ~3 steps. Prevent it upstream (5th-rule: a self-heal still gets its bug 
 SCRIPT must be (a) idempotent — clear tables with deleteMany() in reverse-dependency order OR use upsert()
 so a re-run never hits P2002 — and (b) foreign-key-ordered — create parent rows before child rows or a
 child create() throws P2003. Test asserts the guidance names both P2002 and P2003. Gate: systemPrompt suite green.
+
+---
+
+## 2026-07-13 — Sonic Chat (Amazon Nova Sonic voice) shipped as an isolated OFF-by-default experiment (#1320)
+
+Admin wants to try real-time voice (Nova Sonic on Bedrock) in NavBharatAI. Built as an ISOLATED,
+env-gated experiment so it can be tested on a deploy and kept-or-deleted without touching anything else:
+- Route `/sonic` renders ONLY the voice surface (main app tree never mounts there).
+- Server `src/server/sonic/`: SonicBridge (Bedrock bidirectional stream, 16kHz in / 24kHz out via
+  `@aws-sdk/client-bedrock-runtime`), sonicWs (browser↔Sonic WS at `/api/sonic/stream`), sonicRoute
+  (`GET /api/sonic/status`, registered before the SPA catch-all), featureFlag (two off-switches:
+  `SONIC_CHAT_ENABLED=true` AND AWS keys). Region us-east-1, model `amazon.nova-2-sonic-v1:0`.
+- Client `src/components/sonic/`: pure PCM helpers (unit-tested) + SonicChat.tsx (mic capture + playback).
+- `scripts/sonic-test.mjs`: standalone Bedrock connection check to run with AWS keys before the UI.
+
+HONEST STATUS: the live mic/speaker round-trip could NOT be verified in CI (no AWS creds/audio there) —
+only structure/tsc/boot/gating + the PCM math are verified. Ships OFF, so it's an honest experiment, not
+a shipped user feature. Env (SONIC_CHAT_ENABLED + AWS_ACCESS_KEY_ID/SECRET + AWS_REGION=us-east-1) set in
+Cloud Run by the admin 2026-07-13 (names recorded in CLAUDE.md's env registry). NEXT: admin tests `/sonic`
+on the deploy — if voice works, wire a proper voice entry into NavBharatAI Free; if not, delete the two
+sonic folders + the main.tsx `/sonic` branch.
+
+Also this session (earlier): AWS Activate Founders application — first rejected for an email-domain
+mismatch (account email icloud.com vs application navbharatai.com); fixed by moving the AWS account root
+email AND the AWS Builder ID email to `info@navbharatai.com` (all domains now navbharatai.com) and
+reapplied (pending 3–5 business days). A dedicated IAM user `navbharatai-sonic` (AmazonBedrockFullAccess)
+was created for the Sonic keys.

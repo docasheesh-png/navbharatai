@@ -30,16 +30,17 @@ function pick<T>(arr: T[], i: number): T {
   return arr[i % arr.length];
 }
 
-/** A short deterministic hex id from a seed. */
+/**
+ * A short deterministic 8-hex-char id from a seed. Uses an int32-safe integer hash (fmix-style with
+ * Math.imul) so distinct seeds map to distinct ids — the previous LCG overflowed 2^53 on `x * k`,
+ * losing low-bit precision and COLLIDING for small consecutive seeds (duplicate primary keys). Pure.
+ */
 function hexId(seed: number): string {
-  // Simple LCG → hex; deterministic and dependency-free.
-  let x = (seed + 1) * 2654435761;
-  let out = '';
-  for (let i = 0; i < 8; i++) {
-    x = (x * 1103515245 + 12345) & 0x7fffffff;
-    out += (x % 16).toString(16);
-  }
-  return out;
+  let x = ((seed + 1) * 2654435761) >>> 0;
+  x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0;
+  x ^= x >>> 13; x = Math.imul(x, 3266489917) >>> 0;
+  x ^= x >>> 16;
+  return (x >>> 0).toString(16).padStart(8, '0');
 }
 
 function lorem(i: number, words: number): string {
@@ -108,15 +109,64 @@ export interface SeedDataResult {
   summary: string;
 }
 
+/** Normalized comparison key for an entity/reference name (lowercased, alphanumerics only). */
+function normKey(name: string): string {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** A naive singular form of a normalized key (`users`→`user`, `categories`→`category`). */
+function singular(k: string): string {
+  if (k.endsWith('ies')) return `${k.slice(0, -3)}y`;
+  if (k.endsWith('ses')) return k.slice(0, -2);
+  if (k.endsWith('s') && !k.endsWith('ss')) return k.slice(0, -1);
+  return k;
+}
+
+/** The foreign-key reference name of a field, or null. `author_id`/`authorId` → 'author'; 'id' → null. */
+function fkRef(fieldName: string): string | null {
+  const m = String(fieldName || '').match(/^(.+?)(?:_id|Id|_ID)$/);
+  return m && m[1] ? m[1] : null;
+}
+
 /**
- * Generate seed data for a set of entities. `count` rows per entity (default 10). Returns the data,
- * a pretty JSON string for fixtures/seed.json, and a summary. Pure; never throws.
+ * Generate seed data for a set of entities. `count` rows per entity (default 10). Foreign-key fields
+ * (`<entity>_id` / `<entity>Id`) are linked to REAL ids of the referenced entity so the seed loads into
+ * a DB with FK constraints (an unmatched FK keeps its generated value). Returns the data, a pretty JSON
+ * string for fixtures/seed.json, and a summary. Pure; never throws.
  */
 export function generateSeedData(entities: EntitySpec[], count = 10): SeedDataResult {
   const list = Array.isArray(entities) ? entities.filter((e) => e && e.name && Array.isArray(e.fields)) : [];
   const n = Math.min(Math.max(1, count), 1000);
   const data: Record<string, Array<Record<string, unknown>>> = {};
   for (const e of list) data[e.name] = mockRows(e, n);
+
+  // Referential integrity: index each entity that has an `id` field by its id values (under both its
+  // own key and singular form), then point every foreign-key field at a real referenced id.
+  const idsByKey = new Map<string, unknown[]>();
+  const idFieldByEntity = new Map<string, string>();
+  for (const e of list) {
+    const idF = e.fields.find((f) => f && f.name && normKey(f.name) === 'id');
+    if (!idF) continue;
+    idFieldByEntity.set(e.name, idF.name);
+    const ids = data[e.name].map((r) => r[idF.name]);
+    const key = normKey(e.name);
+    idsByKey.set(key, ids);
+    if (!idsByKey.has(singular(key))) idsByKey.set(singular(key), ids);
+  }
+  for (const e of list) {
+    const pk = idFieldByEntity.get(e.name);
+    for (const f of e.fields) {
+      if (!f || !f.name || f.name === pk) continue; // never rewrite the primary key
+      const ref = fkRef(f.name);
+      if (!ref) continue;
+      const refKey = normKey(ref);
+      const targetIds = idsByKey.get(refKey) || idsByKey.get(singular(refKey));
+      if (!targetIds || !targetIds.length) continue; // no matching entity → keep the generated value
+      const rows = data[e.name];
+      for (let i = 0; i < rows.length; i++) rows[i][f.name] = targetIds[i % targetIds.length];
+    }
+  }
+
   const json = JSON.stringify(data, null, 2) + '\n';
   const summary = list.length
     ? `Generated ${n} seed row(s) each for ${list.length} entit${list.length > 1 ? 'ies' : 'y'}: ${list.map((e) => e.name).join(', ')}.`

@@ -573,28 +573,41 @@ routing — the ladders, the judge-per-mode, the co-agent mapping, or the "no Cl
 without first confirming the exact change with the admin.** (Same discipline as the absolute rules.)
 Model ids are env-tunable (defaults below); the STRUCTURE is the policy.
 
-### 1) FREE user (the 50,000 gift-token / never-paid user) — cheapest first, NEVER Claude
+### 1) FREE user (the 50,000 gift-token / never-paid user) — cheapest first; Sonnet/Opus NEVER; Haiku = last resort (amended 2026-07-13)
 A graduated ladder (start cheapest; only climb when the judge still finds a real mistake):
 1. **`glm-4.7-flash`** / **cheapest Kimi** (flash rung — sasta)
 2. **`glm-4.7`** / **`kimi-k2.5`** (cheap coders)
 3. **flagship `glm-5.2` / `kimi-k2.7`** (only as the LAST model rung)
-4. **Vertex** — allowed ONLY as the absolute last resort, after the flagship rung also fails (admin: "agar sab failed ho to vertex use bhi kar sakte hai, but last me").
+4. **Vertex** — after the flagship rung also fails (admin: "agar sab failed ho to vertex use bhi kar sakte hai, but last me").
+5. **Claude HAIKU** — the ABSOLUTE last rung (HAIKU AMENDMENT, admin 2026-07-13: "weak module me claude haiku
+   add kar de? to last me") — model-pinned by construction; see the 🔒 rule below.
 - **Judge = Grok.** After a build, Grok judges → OK ⇒ done; "repair" ⇒ fix on the cheap coders
   (`glm-4.7`/`kimi-k2.5`) and re-judge; still failing ⇒ climb to the flagship rung; flagship fails ⇒ Vertex.
-- **Claude/Sonnet/Opus NEVER run for a free user — anywhere.** This includes the post-build heal gates
-  (integrity / preview / C9 reviewer-autofix / runtime): on a free build they MUST run on the **non-flagship
-  cheap coders (`glm-4.7` / `kimi-k2.5`)** — NOT flash (too weak to repair), NOT flagship, NOT Claude.
-- **🔒 ABSOLUTE RULE — WEAK MODULE ⇒ NO CLAUDE, EVER (admin-mandated 2026-07-13, unbreakable):** if a build
-  runs in the **WEAK module** (the free/cheap power tier), Claude must **NEVER** be called — not the builder,
-  not ANY post-build heal/escalation gate, no matter what any flag says. This is enforced by construction, not
-  convention: `enforceNoClaude(chain, noClaude)` (`routes/agentv3.ts`) strips every Claude runner (`CLAUDE` +
-  the forced-Haiku backstop `CLAUDE_HAIKU`) from the FINAL provider chain of `buildTurnRunner` whenever the
-  build is weak, and `noClaude` is threaded from `powerSpecResolved.cheapOnly || freeTierBuildActive` into
-  EVERY `buildTurnRunner` call site. A weak build therefore runs on GLM/Kimi (+ Vertex/Gemini last resort)
-  ALONE. ROOT CAUSE this closed (deep-test App #1): the "no Claude" guarantee was tied only to `cheapOnly`, so
-  a weak build whose heal gate didn't thread that flag ran 4 Sonnet calls on a free build. The resolved
-  `powerLevel` + `noClaude` now appear in every build report so the tier is never ambiguous. Do NOT weaken or
-  bypass this guard without explicit admin sign-off.
+- **Sonnet/Opus NEVER run for a free user — anywhere** (amended: Claude **HAIKU** alone is authorized, and
+  only as the final rung). This includes the post-build heal gates (integrity / preview / C9
+  reviewer-autofix / runtime): on a free build they MUST run on the **non-flagship cheap coders
+  (`glm-4.7` / `kimi-k2.5`)** — NOT flash (too weak to repair), NOT flagship, NOT Sonnet/Opus (the heal
+  chains inherit the same Haiku-last backstop).
+- **🔒 ABSOLUTE RULE — WEAK MODULE ⇒ NO SONNET/OPUS, EVER; HAIKU = the ONE authorized last resort
+  (admin-mandated 2026-07-13, AMENDED by the admin the same day, unbreakable):** original rule: weak module
+  never calls Claude. **HAIKU AMENDMENT (admin verbatim: "agar ham, weak module me claude haiku add kar de?
+  to last me. par sart yeh hai, weak module me claude ka haiku ke alawa kuch aur nahi chalna chahiye, matlab
+  sonnet ya opus never never!!!"):** the weak module may now use **Claude HAIKU as the absolute LAST rung**
+  (after GLM/Kimi → Vertex/Gemini) — and ONLY Haiku; **Sonnet/Opus never run on weak, ever**. Enforced by
+  construction at THREE layers, not convention: (1) `enforceNoClaude(chain, noClaude)` (`routes/agentv3.ts`)
+  strips the `CLAUDE` (Sonnet/Opus) runner from the FINAL `buildTurnRunner` chain and keeps ONLY the
+  model-pinned `CLAUDE_HAIKU` backstop, MOVED to the chain's END ("to last me") — the backstop is
+  `forceModelRunner(…, haikuModel())`, so it physically cannot execute any non-Haiku model; (2) the
+  `ClaudeClient.runTurn` no-Claude-zone chokepoint (`noClaudeZone.ts`) refuses any NON-HAIKU Claude id inside
+  a weak build's async context — a raw/forgotten Sonnet path is refused before a token is spent; (3) the
+  report's honesty detector (`claudeProviderDelivered`) flags a Sonnet/Opus-class delivery as
+  `NO_CLAUDE_VIOLATION` while an authorized Haiku delivery is clean. `noClaude` is threaded from
+  `powerSpecResolved.cheapOnly || freeTierBuildActive` into EVERY `buildTurnRunner` call site, and the weak
+  chain is `GLM/Kimi → Vertex/Gemini → HAIKU (last)`. ROOT CAUSE the original rule closed (deep-test App #1):
+  the "no Claude" guarantee was tied only to `cheapOnly`, so a weak build whose heal gate didn't thread that
+  flag ran 4 Sonnet calls on a free build. The resolved `powerLevel` + `noClaude` appear in every build report
+  (with the amendment, `noClaude: true` means "no unauthorized Sonnet/Opus ran"; Haiku may have). Do NOT
+  weaken or bypass this guard — or extend weak beyond Haiku — without explicit admin sign-off.
 
 ### 2) PAID user (bought tokens with real ₹) — flagship first, Claude only as last resort
 1. Every 1st build: **flagship `glm-5.2` / `kimi-k2.7`**.
@@ -607,7 +620,7 @@ A graduated ladder (start cheapest; only climb when the judge still finds a real
 jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced in code (Fix 59):
 | Tier (UI) | Internal | Model | Notes |
 |---|---|---|---|
-| Weak | `weak` | GLM/Kimi only — **Claude NEVER, in any circumstance** | free tier; `enforceNoClaude` strips Claude from every chain |
+| Weak | `weak` | GLM/Kimi → Vertex/Gemini → **HAIKU last resort ONLY** — **Sonnet/Opus NEVER, in any circumstance** (Haiku amendment 2026-07-13) | free tier; `enforceNoClaude` strips Sonnet/Opus from every chain, keeps the model-pinned Haiku backstop last |
 | Normal | `off` | Sonnet (adaptive routing, unchanged) | today's behaviour stays |
 | Strong | `mini` | **SONNET pinned 100%** (was Opus low) | never Opus anywhere on this tier — build, sub-agents, heal gates, plan (Grok), judge (paid), vision (cheap). Bills Sonnet-equivalent × 3 |
 | Powerful | `medium` | **Opus, effort `medium`** (was high) | bills real Opus × 2 |

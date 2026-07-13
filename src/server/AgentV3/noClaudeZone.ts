@@ -39,15 +39,29 @@ export interface NoClaudeZoneState {
 const storage = new AsyncLocalStorage<NoClaudeZoneState>();
 
 /**
- * Thrown by `ClaudeClient.runTurn` when a Claude call is attempted inside an active no-Claude zone.
- * Carries the attempted model id. A distinct class so callers/tests can identify the refusal precisely
- * and a provider chain can treat it as a normal fall-through error.
+ * HAIKU AMENDMENT (admin-mandated 2026-07-13, verbatim: "weak module me claude haiku add kar de? to
+ * last me. par sart yeh hai, weak module me claude ka haiku ke alawa kuch aur nahi chalna chahiye,
+ * matlab sonnet ya opus never never!!!"): inside a weak build's no-Claude zone, a Claude call is
+ * allowed if and ONLY if the requested model is a HAIKU id — the cheap, admin-authorized last resort.
+ * Sonnet/Opus (and any other Claude id) remain refused at this chokepoint, by construction. The chain's
+ * CLAUDE_HAIKU backstop is forceModelRunner-pinned to haikuModel(), which rewrites params.model BEFORE
+ * ClaudeClient.runTurn — so a legitimate Haiku backstop turn always presents a haiku id here, while any
+ * raw/forgotten Sonnet path presents a sonnet/opus id and is refused. Pure.
+ */
+export function isHaikuModelId(model: string | undefined | null): boolean {
+  return typeof model === 'string' && /haiku/i.test(model);
+}
+
+/**
+ * Thrown by `ClaudeClient.runTurn` when a NON-HAIKU Claude call is attempted inside an active no-Claude
+ * zone. Carries the attempted model id. A distinct class so callers/tests can identify the refusal
+ * precisely and a provider chain can treat it as a normal fall-through error.
  */
 export class NoClaudeInWeakBuildError extends Error {
   readonly attemptedModel: string | undefined;
   constructor(model: string | undefined) {
     super(
-      `Weak-module no-Claude guard: refused a Claude call (${model ?? 'claude'}) — a weak/free build must never run Claude (admin absolute rule).`,
+      `Weak-module no-Claude guard: refused a Claude call (${model ?? 'claude'}) — a weak/free build may only use the Haiku last resort; Sonnet/Opus never run on weak (admin absolute rule, Haiku amendment 2026-07-13).`,
     );
     this.name = 'NoClaudeInWeakBuildError';
     this.attemptedModel = model;
@@ -81,13 +95,16 @@ export function noClaudeZoneActive(): boolean {
 }
 
 /**
- * The guard `ClaudeClient.runTurn` calls at its first line. When a no-Claude zone is active it notifies
- * the observer (best-effort) and returns true — the caller MUST then refuse the Claude call. Returns
- * false (call is allowed) when no zone is active. Never throws.
+ * The guard `ClaudeClient.runTurn` calls at its first line. When a no-Claude zone is active AND the
+ * requested model is NOT a Haiku id, it notifies the observer (best-effort) and returns true — the
+ * caller MUST then refuse the Claude call. A HAIKU model id is allowed through (the admin-authorized
+ * weak-tier last resort — see isHaikuModelId). Returns false (call is allowed) when no zone is active.
+ * Never throws.
  */
 export function claudeBlockedInZone(model: string | undefined): boolean {
   const s = storage.getStore();
   if (s?.active) {
+    if (isHaikuModelId(model)) return false; // Haiku amendment: the ONE authorized Claude on weak
     try {
       s.onBlocked?.(model);
     } catch {

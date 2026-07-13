@@ -64,6 +64,24 @@ describe('ClaudeClient.runTurn — UNBREAKABLE weak-module no-Claude guard', () 
     });
     expect(create).toHaveBeenCalledTimes(1);
   });
+
+  // HAIKU AMENDMENT (admin 2026-07-13): Haiku is the ONE authorized Claude on a weak build — the chain's
+  // CLAUDE_HAIKU backstop is forceModelRunner-pinned to haikuModel(), so a legit backstop turn presents a
+  // haiku id here and must RUN; Sonnet/Opus stay refused ("never never").
+  it('allows a HAIKU call inside an active zone (the authorized weak-tier last resort)', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'haiku ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const client = new ClaudeClient({ messages: { create } } as MessagesCreateClient);
+    await runInNoClaudeZone({ active: true }, async () => {
+      const res = await client.runTurn({ model: 'claude-haiku-4-5-20251001', messages: [{ role: 'user', content: 'fix' }] });
+      expect(res.text).toBe('haiku ok');
+      await expect(
+        client.runTurn({ model: 'claude-opus-4-8', messages: [] }),
+      ).rejects.toBeInstanceOf(NoClaudeInWeakBuildError); // opus: never never
+    });
+    expect(create).toHaveBeenCalledTimes(1); // only the haiku call reached the API
+  });
 });
 
 describe('ClaudeClient.runTurn (injected mock client)', () => {

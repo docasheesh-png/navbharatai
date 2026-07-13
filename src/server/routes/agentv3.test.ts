@@ -1437,34 +1437,37 @@ describe('failedImportPromptNote (Fix 41) — a failed GitHub import must never 
   });
 });
 
-describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13)', () => {
+describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026-07-13, HAIKU amendment same day)', () => {
   const chain = [
     { name: 'GLM' }, { name: 'KIMI' }, { name: 'CLAUDE' },
     { name: 'CLAUDE_HAIKU' }, { name: 'VERTEX' }, { name: 'GEMINI' },
   ];
 
   // THE exact leak (deep-test App #1): a weak/free build ran 4 claude-sonnet-4-6 calls on the heal gate
-  // because the "no Claude" guarantee was tied only to cheapOnly. This chokepoint strips Claude no matter
-  // how the chain was assembled, so a weak build can NEVER touch Claude — builder or heal.
-  it('strips CLAUDE and the forced-Haiku backstop when noClaude is set', () => {
+  // because the "no Claude" guarantee was tied only to cheapOnly. HAIKU AMENDMENT (admin verbatim:
+  // "weak module me claude haiku add kar de? to last me … sonnet ya opus never never"): CLAUDE
+  // (Sonnet/Opus) is still stripped no matter how the chain was assembled; the model-pinned
+  // CLAUDE_HAIKU backstop is KEPT and moved to the END ("to last me").
+  it('strips CLAUDE (Sonnet/Opus) and keeps the model-pinned Haiku backstop LAST', () => {
     const out = enforceNoClaude(chain, true).map((r) => r.name);
-    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI']);
+    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
     expect(out).not.toContain('CLAUDE');
-    expect(out).not.toContain('CLAUDE_HAIKU');
+    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // haiku — to last me
   });
 
   it('leaves the chain untouched for a non-weak build (noClaude false)', () => {
     expect(enforceNoClaude(chain, false)).toBe(chain);
   });
 
-  it('a weak build with only cheap providers is unchanged (no Claude to strip)', () => {
+  it('a weak build with only cheap providers is unchanged (nothing to strip or move)', () => {
     const cheapOnly = [{ name: 'GLM' }, { name: 'KIMI' }];
     expect(enforceNoClaude(cheapOnly, true).map((r) => r.name)).toEqual(['GLM', 'KIMI']);
   });
 
-  it('is exhaustive — no Claude-named runner survives, in any position', () => {
-    const weird = [{ name: 'CLAUDE' }, { name: 'GLM' }, { name: 'CLAUDE_HAIKU' }, { name: 'CLAUDE' }];
-    expect(enforceNoClaude(weird, true).every((r) => !r.name.startsWith('CLAUDE'))).toBe(true);
+  it('is exhaustive — no Sonnet/Opus runner survives in any position; Haiku always lands last', () => {
+    const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
+    const out = enforceNoClaude(weird, true).map((r) => r.name);
+    expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
   });
 });
 

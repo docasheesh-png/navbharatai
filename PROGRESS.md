@@ -15633,3 +15633,36 @@ Also answered the admin's scaling question honestly: a SINGLE GLM key cannot ser
 RPM), but the app never BREAKS — it degrades GLM→KIMI→Vertex→Claude backstop (build always completes, COGS
 rises when the cheap floor saturates). Real scale needs an enterprise GLM tier and/or a key POOL (round-robin
 across N keys) — an infra + a future code item (key rotation), not a bug.
+
+## 2026-07-13 — HAIKU AMENDMENT (admin-mandated): weak module gets Claude HAIKU as the last rung; Sonnet/Opus NEVER
+
+Admin amended the weak-module absolute rule (verbatim: "agar ham, weak module me claude haiku add kar de? to
+last me. par sart yeh hai, weak module me claude ka haiku ke alawa kuch aur nahi chalna chahiye, matlab
+sonnet ya opus never never!!!"). Rationale: the weak chain's current last resort (Vertex/Gemini) is the rung
+that TRUNCATES (App #6/#7 root cause); Haiku is a cheap, tool-loop-reliable final rung that completes a turn
+instead of corrupting it. Cost exposure is bounded: Haiku only ever runs after GLM ladder + Vertex/Gemini
+have ALL failed.
+
+Enforced BY CONSTRUCTION at three layers (never convention):
+1. `enforceNoClaude` now strips only `CLAUDE` (Sonnet/Opus) and KEEPS the model-pinned `CLAUDE_HAIKU`
+   backstop, MOVED to the chain's END ("to last me") — the backstop is `forceModelRunner(…, haikuModel())`,
+   physically incapable of running any non-Haiku model. Weak chain: GLM/Kimi → Vertex/Gemini → HAIKU last
+   (cheapOnly assembly now appends `withBackstop`).
+2. The `ClaudeClient.runTurn` no-Claude-zone chokepoint allows a HAIKU model id through and refuses every
+   other Claude id (`isHaikuModelId`, noClaudeZone.ts) — a raw/forgotten Sonnet path is refused before a
+   token is spent. forceModelRunner rewrites params.model BEFORE runTurn, so the legit backstop always
+   presents a haiku id here.
+3. The report honesty detector `claudeProviderDelivered` flags only a Sonnet/Opus-class delivery
+   (`CLAUDE` / non-haiku Claude id) as NO_CLAUDE_VIOLATION; an authorized Haiku delivery is clean. The
+   ambiguous generic 'anthropic' label is deliberately no longer matched (it cannot distinguish authorized
+   Haiku from a Sonnet leak, and a false violation defames clean builds — the App #5 lesson).
+`billing.noClaude: true` now means "no unauthorized Sonnet/Opus ran" (Haiku may have — visible in
+providerDelivery as CLAUDE_HAIKU). Vision on weak stays entirely Claude-free (its Claude rung is
+Sonnet-class, which remains banned; there is no Haiku vision rung). The WEAK_ENGINE_UNAVAILABLE refusal
+(no GLM/KIMI keys → refuse weak) is unchanged — Haiku is a BACKSTOP, not the engine. CLAUDE.md (the 🔒 rule,
+free ladder §1, tier table) updated so no future session "fixes" Haiku back out. Tests: enforceNoClaude
+(keep+move-last), zone haiku-pass/sonnet-refuse/observer, ClaudeClient haiku-runs/opus-throws,
+BuildDiagnostics haiku-not-a-violation. 
+
+ALSO (admin): GLM KEY POOL / ROTATION recorded in ROADMAP.md (Tier 4 → Platform infra) as the future fix for
+per-key 429 saturation at scale ("isko future me karna hai — aisa roadmap me daal do").

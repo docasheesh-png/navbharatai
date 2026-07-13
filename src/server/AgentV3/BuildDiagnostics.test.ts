@@ -36,16 +36,20 @@ describe('claudeProviderDelivered (weak-module no-Claude honesty — provider tr
     expect(d.claudeProviderDelivered()).toBe('CLAUDE');
   });
 
-  it('detects the forced-Haiku backstop too, and via the token ledger', () => {
+  it('HAIKU AMENDMENT: a CLAUDE_HAIKU delivery is AUTHORIZED on weak — never a violation', () => {
+    // Admin 2026-07-13: "weak module me claude ka haiku ke alawa kuch aur nahi chalna chahiye" — the
+    // model-pinned Haiku backstop is the one allowed Claude, so its delivery must not be flagged.
     const clk = { t: 1000 };
     const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
-    d.recordProviderTurn('CLAUDE_HAIKU');
-    expect(d.claudeProviderDelivered()).toBe('CLAUDE_HAIKU');
+    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('CLAUDE_HAIKU'); // the authorized last resort actually delivered a turn
+    d.setProviderTokens({ GLM: { inputTokens: 5, outputTokens: 5 }, CLAUDE_HAIKU: { inputTokens: 2, outputTokens: 1 } });
+    expect(d.claudeProviderDelivered()).toBeNull(); // no violation
 
     const d2 = new BuildDiagnostics({ now: () => (clk.t += 10) });
     d2.recordProviderTurn('GLM');
     d2.setProviderTokens({ GLM: { inputTokens: 5, outputTokens: 5 }, CLAUDE: { inputTokens: 10, outputTokens: 3 } });
-    expect(d2.claudeProviderDelivered()).toBe('CLAUDE'); // token-ledger corroboration
+    expect(d2.claudeProviderDelivered()).toBe('CLAUDE'); // Sonnet/Opus via the token ledger → still a violation
   });
 
   it('stays null for an all-cheap weak build (GLM + Kimi only)', () => {

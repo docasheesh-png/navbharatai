@@ -121,6 +121,7 @@ import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type Na
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
+import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -5833,6 +5834,17 @@ export function registerAgentV3Routes(app: Express): void {
                 return { ok: false, errors: `MISSING FILES — these local modules are imported but were never written. CREATE each of them fully:\n  ${list}${unresolved.length > 12 ? `\n  …and ${unresolved.length - 12} more` : ''}` };
               }
             } catch { /* the missing-files gate is best-effort — tsc below still runs */ }
+            // JS/TS SYNTAX GATE (deep-test App #6, 2026-07-13): a truncated/corrupt generated file (e.g. a
+            // stray CSS declaration inside JSX) does not PARSE, so the app never compiles — but the sandbox
+            // tsc often can't run to catch it (VERIFY_DID_NOT_RUN). esbuild parses IN-PROCESS (immune to
+            // that), so a real parse error fails verify HERE with the exact file+message and the SAME repair
+            // pass rewrites it — instead of shipping an app that won't compile as "verified".
+            try {
+              const syntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
+              if (syntaxErrors.length > 0) {
+                return { ok: false, errors: `SYNTAX ERRORS — these generated files do not parse and the app cannot compile. Rewrite each one so it parses cleanly:\n${syntaxRepairInstruction(syntaxErrors)}` };
+              }
+            } catch { /* the syntax gate is best-effort — tsc below still runs */ }
             // CSS SYNTAX GATE (Fix 38d): tsc never reads CSS — an unclosed block makes postcss/vite
             // reject the whole stylesheet at runtime (the exact "Unclosed block" overlay from the
             // report) while every other check stays green. Deterministic brace balance per css file.
@@ -6270,6 +6282,66 @@ export function registerAgentV3Routes(app: Express): void {
             }
           }
         } catch { /* missing-files gate is best-effort — never blocks a build */ }
+      }
+
+      // SYNTAX GATE (deep-test App #6 — Expense Tracker, 2026-07-13). A GLM response hit max_tokens
+      // (LLM_TRUNCATED) and produced a corrupt src/App.tsx — a CSS declaration (`-side: border-radius:
+      // 0.5rem;`) injected INTO a JSX <button>. The file does not PARSE, so the app never compiled and the
+      // preview died with "Unexpected token (31:13)" — yet the build shipped "READY 60/100" because the
+      // sandbox `tsc` could not run (VERIFY_DID_NOT_RUN). This gate parses every generated JS/TS/JSX/TSX
+      // file with esbuild IN THE SERVER PROCESS (immune to the sandbox tsc failures) and, on a real parse
+      // error, runs ONE bounded repair pass, re-checks, and records the HONEST end-state: an unhealed
+      // syntax error is an ERROR blocker → buildHealth becomes NOT READY (never a "READY" app that won't
+      // compile). Kill: AGENTV3_SYNTAX_GATE=off.
+      if (
+        process.env.AGENTV3_SYNTAX_GATE !== 'off' && !fastLaneGated
+        && result.ok && writtenFiles.size > 0 && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
+      ) {
+        try {
+          let syntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
+          if (syntaxErrors.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'SYNTAX_ERROR_DETECTED', message: `${syntaxErrors.length} generated file(s) do not parse (the app cannot compile):\n${syntaxRepairInstruction(syntaxErrors)}`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${syntaxErrors.length} file(s) have a syntax error (the app won't compile) — fixing them…`, ts: Date.now() });
+            try {
+              const brokenPaths = Array.from(new Set(syntaxErrors.map((e) => e.path)));
+              const brokenFiles = brokenPaths
+                .map((p) => ({ path: p, content: writtenFiles.get(p) || '' }))
+                .filter((f) => f.content);
+              const t = await makeFastTextRunner().runTurn({
+                model: fastBuildModel(), system: repairSystemPrompt(framework),
+                messages: [{ role: 'user', content:
+                  `The app was built for this request:\n${prompt}\n\n` +
+                  `These files have a SYNTAX ERROR and the app will NOT compile. Rewrite EACH broken file in ` +
+                  `full so it parses cleanly — fix ONLY the syntax (a truncated/corrupted region, a stray CSS ` +
+                  `declaration inside JSX, an unclosed brace/tag), keep all the real logic and UI. Change ` +
+                  `nothing else.\n\nSYNTAX ERRORS:\n${syntaxRepairInstruction(syntaxErrors)}\n\n` +
+                  `The broken files (rewrite each one completely and correctly):\n` +
+                  brokenFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 6000)}`).join('\n') },
+                ],
+                tools: [], maxTokens: 8000,
+              });
+              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              for (let i = 0; i < fixed.length; i++) {
+                await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
+              }
+            } catch (e) {
+              console.log(`[AGENTV3] syntax gate repair failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            syntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
+            if (syntaxErrors.length === 0) {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SYNTAX_HEALED', message: 'All syntax errors fixed — every generated file now parses.', autoResolved: true });
+              events.emit({ type: 'narration', agent: 'architect', text: '✅ Fixed the syntax errors — the app compiles now.', ts: Date.now() });
+              if (writtenFiles.size > 0) { try { await saveWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* durable save best-effort */ } }
+            } else {
+              // Still broken after one pass → HONEST end-state. An unparseable file is an ERROR blocker, so
+              // buildHealthFromDiagnostics makes the build NOT READY (a syntax error means it cannot run —
+              // never report a "READY" app that won't compile, the exact App #6 dishonesty).
+              buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_SYNTAX_ERROR', message: `After one repair pass, ${syntaxErrors.length} file(s) STILL do not parse — the app cannot compile:\n${syntaxRepairInstruction(syntaxErrors)}`, autoResolved: false });
+              events.emit({ type: 'narration', agent: 'architect', text: '⚠️ A syntax error remains — the app won\'t compile yet. Your files are saved; send a follow-up and I\'ll finish the fix.', ts: Date.now() });
+            }
+          }
+        } catch { /* syntax gate is best-effort — never blocks a build */ }
       }
 
       // PROJECT INTEGRITY (autopsy 2026-07-11, Todo + Notes reports) — two real defect CLASSES the

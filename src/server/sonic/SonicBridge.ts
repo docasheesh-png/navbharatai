@@ -38,14 +38,28 @@ export interface SonicCallbacks {
   onClose: () => void;
 }
 
+/** The two selectable voices (admin 2026-07-14). Nova Sonic's polyglot voices speak Hindi +
+ *  English + Hinglish; matthew is masculine, tiffany is feminine. Env can override each id. */
+export type SonicVoice = 'male' | 'female';
+export function voiceIdFor(voice: SonicVoice): string {
+  if (voice === 'male') return (process.env.SONIC_MALE_VOICE_ID || 'matthew').trim();
+  return (process.env.SONIC_FEMALE_VOICE_ID || 'tiffany').trim();
+}
+
 // Built per-session so "today's date" is always current — Nova Sonic has no clock and
 // otherwise guesses a stale training-cutoff date (it answered "15 July 2024" on a 2026 run).
-function defaultSystemPrompt(): string {
+// The gender clause fixes the "मैं कर रही / कर रहा" flip-flop: a voice must self-refer with ONE
+// consistent Hindi grammatical gender that matches how it sounds.
+function defaultSystemPrompt(voice: SonicVoice): string {
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' });
+  const gender = voice === 'male'
+    ? 'You speak with a MALE voice. When you speak Hindi, ALWAYS refer to yourself with MASCULINE grammatical forms (e.g. "मैं कर रहा हूँ", "मैं बता रहा हूँ", "मैं समझ गया") — NEVER feminine forms.'
+    : 'You speak with a FEMALE voice. When you speak Hindi, ALWAYS refer to yourself with FEMININE grammatical forms (e.g. "मैं कर रही हूँ", "मैं बता रही हूँ", "मैं समझ गई") — NEVER masculine forms.';
   return (
     'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users. ' +
     'Reply naturally in the language the user speaks (Hindi, Hinglish, English or a regional language). ' +
     'Keep answers short and conversational, as if speaking on a phone call. ' +
+    gender + ' ' +
     // Identity guard (admin 2026-07-14): never disclose the underlying provider/model. To the user
     // you are simply "NavBharatAI Voice" — a NavBharatAI product.
     'You are a NavBharatAI product. NEVER mention or reveal any underlying model, provider, company, ' +
@@ -104,7 +118,10 @@ export class SonicSession {
   private readonly gate = new SonicTranscriptGate();
   private readonly textStage = new Map<string, string>();
 
-  constructor(private readonly cb: SonicCallbacks, private readonly systemPrompt = defaultSystemPrompt()) {
+  private readonly systemPrompt: string;
+
+  constructor(private readonly cb: SonicCallbacks, private readonly voice: SonicVoice = 'female') {
+    this.systemPrompt = defaultSystemPrompt(voice);
     this.client = new BedrockRuntimeClient({
       region: sonicRegion(),
       credentials: {
@@ -128,7 +145,7 @@ export class SonicSession {
         textOutputConfiguration: { mediaType: 'text/plain' },
         audioOutputConfiguration: {
           mediaType: 'audio/lpcm', sampleRateHertz: 24000, sampleSizeBits: 16,
-          channelCount: 1, voiceId: process.env.SONIC_VOICE_ID || 'matthew', encoding: 'base64', audioType: 'SPEECH',
+          channelCount: 1, voiceId: voiceIdFor(this.voice), encoding: 'base64', audioType: 'SPEECH',
         },
       },
     });

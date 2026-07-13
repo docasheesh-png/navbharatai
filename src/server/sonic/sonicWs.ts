@@ -15,7 +15,7 @@
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { SonicSession } from './SonicBridge';
+import { SonicSession, type SonicVoice } from './SonicBridge';
 import { isSonicEnabled } from './featureFlag';
 import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
 import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
@@ -44,14 +44,17 @@ function send(ws: WebSocket, msg: Record<string, unknown>): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-wss.on('connection', (ws: WebSocket) => {
+wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+  // The chosen voice (male → matthew, female → tiffany) rides the WS query; default female.
+  const voiceParam = new URLSearchParams((req.url || '').split('?')[1] || '').get('voice');
+  const voice: SonicVoice = voiceParam === 'male' ? 'male' : 'female';
   const session = new SonicSession({
     onAudioOutput: (b64) => send(ws, { type: 'audio', data: b64 }),
     onText: (text, role) => send(ws, { type: 'text', text, role }),
     onTurnComplete: () => send(ws, { type: 'turn_complete' }),
     onError: (message) => send(ws, { type: 'error', message }),
     onClose: () => { try { ws.close(); } catch { /* already closed */ } },
-  });
+  }, voice);
 
   session.start()
     .then(() => send(ws, { type: 'ready' }))

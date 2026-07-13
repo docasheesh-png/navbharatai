@@ -23,10 +23,36 @@ function parseExisting(raw?: string | null): Map<string, string> {
   return m;
 }
 
+/** Variable NAMES whose value is a secret and must never appear in a committed `.env.example`. */
+const SECRET_KEY_RE = /(SECRET|PASSWORD|PASSWD|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIAL|CONNECTION[_-]?STRING|DSN)/i;
+
 /**
- * Build a `.env.example` from the variable names the code references, merged with
- * any existing file (existing values are preserved; existing keys are kept even if
- * no longer referenced, so nothing is silently dropped). PURE & deterministic.
+ * Whether a VALUE looks like a real secret (opaque high-entropy string or a URL with embedded
+ * credentials) — as opposed to a safe config default (PORT=3000, NODE_ENV=development, a plain URL).
+ */
+function looksSecretValue(v: string): boolean {
+  if (!v) return false;
+  if (/^https?:\/\//i.test(v) && !v.includes('@')) return false; // plain URL, no embedded creds → not a secret
+  if (/\s/.test(v)) return false;                                  // has spaces → a prose default, not an opaque token
+  return v.length >= 24 && /[A-Za-z]/.test(v) && /[0-9]/.test(v);  // long mixed alphanumeric → a key/token/creds URL
+}
+
+/**
+ * The value to emit for a key in `.env.example` — a COMMITTED file, so it must NEVER carry a real
+ * secret. A secret-named variable or a secret-looking value is blanked (the user fills it in); safe,
+ * short config defaults (ports, NODE_ENV, plain URLs) are preserved as helpful hints.
+ */
+function safeExampleValue(key: string, val: string): string {
+  if (!val) return '';
+  if (SECRET_KEY_RE.test(key) || looksSecretValue(val)) return '';
+  return val;
+}
+
+/**
+ * Build a `.env.example` from the variable names the code references, merged with any existing file
+ * (existing keys are kept even if no longer referenced, so nothing is silently dropped). Values are
+ * emitted only when they are SAFE (secret-named vars and secret-looking values are blanked) because
+ * `.env.example` is committed to version control. PURE & deterministic.
  */
 export function generateEnvExample(refs: string[], existing?: string | null): string {
   const existingMap = parseExisting(existing);
@@ -43,8 +69,7 @@ export function generateEnvExample(refs: string[], existing?: string | null): st
     '',
   ];
   for (const k of sorted) {
-    const val = existingMap.get(k);
-    lines.push(`${k}=${val ?? ''}`);
+    lines.push(`${k}=${safeExampleValue(k, existingMap.get(k) ?? '')}`);
   }
   return lines.join('\n') + '\n';
 }

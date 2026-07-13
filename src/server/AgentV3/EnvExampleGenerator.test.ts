@@ -19,6 +19,43 @@ describe('generateEnvExample', () => {
     expect(out).toContain('UNUSED=keepme');
   });
 
+  it('NEVER emits a real secret value into the committed .env.example (blanks secret-named vars)', () => {
+    const existing = [
+      'API_KEY=sk-live-abcdef0123456789ABCDEF',
+      'DATABASE_PASSWORD=sup3rSecretP@ss',
+      'JWT_SECRET=xyz789longsecrettoken0000',
+      'GITHUB_TOKEN=ghp_realtokenvalue123456',
+    ].join('\n');
+    const out = generateEnvExample(['API_KEY', 'DATABASE_PASSWORD', 'JWT_SECRET', 'GITHUB_TOKEN'], existing);
+    // keys are present, but their secret values are blanked.
+    for (const k of ['API_KEY', 'DATABASE_PASSWORD', 'JWT_SECRET', 'GITHUB_TOKEN']) {
+      expect(out).toContain(`${k}=\n`);
+    }
+    expect(out).not.toContain('sk-live-abcdef0123456789ABCDEF');
+    expect(out).not.toContain('sup3rSecretP@ss');
+    expect(out).not.toContain('ghp_realtokenvalue123456');
+  });
+
+  it('redacts a secret-LOOKING value even under a non-secret key name (opaque token, creds URL)', () => {
+    const existing = [
+      'SESSION_ID=A1b2C3d4E5f6G7h8I9j0KLmn',                 // long opaque alphanumeric → redacted
+      'DATABASE_URL=postgres://user:pass@db.host:5432/app',   // embedded creds → redacted
+    ].join('\n');
+    const out = generateEnvExample(['SESSION_ID', 'DATABASE_URL'], existing);
+    expect(out).toContain('SESSION_ID=\n');
+    expect(out).toContain('DATABASE_URL=\n');
+    expect(out).not.toContain('A1b2C3d4E5f6G7h8I9j0KLmn');
+    expect(out).not.toContain('user:pass@db.host');
+  });
+
+  it('keeps safe, short config defaults (ports, NODE_ENV, plain URLs)', () => {
+    const existing = 'PORT=3000\nNODE_ENV=development\nAPI_URL=https://api.example.com\n';
+    const out = generateEnvExample(['PORT', 'NODE_ENV', 'API_URL'], existing);
+    expect(out).toContain('PORT=3000');
+    expect(out).toContain('NODE_ENV=development');
+    expect(out).toContain('API_URL=https://api.example.com');
+  });
+
   it('ignores invalid variable names', () => {
     const out = generateEnvExample(['GOOD_ONE', '123bad', 'has-dash', '']);
     expect(out).toContain('GOOD_ONE=');

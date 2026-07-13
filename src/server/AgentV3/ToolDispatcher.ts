@@ -82,6 +82,7 @@ import { generateMigration, type MigrationEntity, type MigrationDialect, type Sq
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
+import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2119,6 +2120,34 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(`scan_vulnerabilities: ${result.findings.length} vulnerable dep(s) (e.g. ${result.findings[0].package}).`);
         }
         return vulnScanSummary(result);
+      }
+
+      case 'run_migrations': {
+        // GA-10 — apply the database schema before the app runs. Detects the migration tool (Prisma/Knex/
+        // Drizzle/TypeORM/Sequelize/Flyway/Alembic) deterministically, then RUNS each command in the sandbox
+        // and reports the REAL exit code + output — never a fake "migrated ✓". Detection is pure + tested;
+        // execution rides the actuator. `dryRun: true` reports the plan without running it.
+        const dryRun = (input as Record<string, unknown>)?.dryRun === true;
+        let pkgJson: string | undefined;
+        try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        const plans = detectMigrationPlan(files.filter((p) => !/^(node_modules|\.git)\//.test(p)), pkgJson);
+        if (plans.length === 0 || dryRun) return migrationPlanSummary(plans);
+        const out: string[] = [];
+        let allOk = true;
+        for (const plan of plans) {
+          for (const cmd of plan.commands) {
+            let r: { exitCode: number; stdout: string; stderr: string };
+            try { r = await this.actuator.runCommand(this.workspaceId, cmd); }
+            catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
+            const ok = r.exitCode === 0;
+            allOk = allOk && ok;
+            out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${(r.stderr || r.stdout || '').slice(-600)}`}`);
+            if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
+          }
+        }
+        if (!allOk) getWorkspaceMemory(this.workspaceId).recordAudit('run_migrations: a migration command failed.');
+        return `${allOk ? '✅ Migrations applied.' : '⚠️ Migration FAILED (schema may be incomplete — fix before relying on the DB).'}\n${out.join('\n')}`;
       }
 
       case 'replace_symbol': {

@@ -694,6 +694,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'run_migrations',
+      description:
+        'Apply the database schema before the app runs. Detects the migration tool the project uses ' +
+        '(Prisma, Knex, Drizzle, TypeORM, Sequelize, Flyway, Alembic) from its config files + dependencies, ' +
+        'then runs the migration command(s) in the sandbox and reports the REAL exit code + output — never a ' +
+        'fake "migrated". Pass dryRun:true to see the detected plan without running it. Run for a fullstack ' +
+        'app with a database, so it does not boot against an empty schema and crash.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          dryRun: { type: 'boolean', description: 'Report the detected migration plan without executing it.' },
+        },
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -880,6 +895,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',
+  'run_migrations',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

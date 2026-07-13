@@ -187,6 +187,26 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(verifies).toBe(1); // verified exactly once
   });
 
+  // Deep-test root cause (clock re-run, 2026-07-13): a verify that COULD NOT RUN (tsc missing — every
+  // vite-react JS app) must return ok:true + ran:false, NOT ok:false. ok:false forced a wasteful
+  // per-file→one-shot fallback on every simple JS build. ran:false must SHIP on the fast path (no
+  // repair, no fallback) and NEVER claim "verified ✓".
+  it('verify that could-not-run (ran:false) SHIPS on the fast path — no repair, no fallback', async () => {
+    let verifies = 0;
+    let repairs = 0;
+    const logs: string[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      verify: async () => { verifies++; return { ok: true, errors: '', ran: false }; },
+      repair: async () => { repairs++; return []; },
+      log: (m) => logs.push(m),
+    }));
+    expect(r.ok).toBe(true);            // ships (no fallback)
+    expect(repairs).toBe(0);            // never tried to "repair" code that was fine
+    expect(verifies).toBe(1);           // verified once, accepted the can't-run verdict
+    expect(r.typecheckRan).toBe(false); // honest: the check did not actually run
+    expect(logs.join('\n')).not.toMatch(/compiles\. ✓/); // never a fake "verified ✓"
+  });
+
   it('verify fails then repair fixes it → re-verify passes → ok:true', async () => {
     let verifies = 0;
     let repairs = 0;

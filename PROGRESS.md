@@ -15137,3 +15137,32 @@ asserts verifyErrors carries the error. Gate: server tsc 0, full suite 6206 gree
 
 Open (evidence-gated, next): confirm + fix the plan↔contract coherence gap once a post-deploy report shows
 the real typecheck error.
+
+## 2026-07-13 — THE per-file→one-shot fallback tax, root-caused (deep-test clock re-run, report 39977ccf)
+
+Fresh clock build on the LIVE deploy CONFIRMED the #1272 fixes: report shows `billing.powerLevel: "weak",
+noClaude: true` (tier visibility + no-Claude guard live), GLM-only (ZERO Claude), and — crucially — the new
+`SIMPLE_BUILD_VERIFY_ERROR` captured the real cause. That evidence overturned my earlier App #2 guess
+(plan↔contract mismatch was WRONG) and revealed the actual root cause behind the fallback struggle across
+App #1, #2, AND the clock.
+
+ROOT CAUSE: the fast-lane verify (`fastVerifyOnce`) runs `npx --no-install tsc`. A vite-react JS app's
+scaffold has NO `typescript` dependency, so tsc simply isn't there → no `__TSC_CLEAN__` marker and no
+`error TS`. The code returned `{ ok: false, "VERIFICATION DID NOT RUN" }` — SimpleBuilder read ok:false as
+a COMPILE FAILURE → wasteful repairs → per-file→one-shot fallback on EVERY simple JS build (≈4 min, extra
+tokens, the one-shot's own bugs), even though the identical code compiled+rendered perfectly.
+
+FIX 1 — can't-run tsc → `ran:false`, not `ok:false`. This is exactly what `VerifyResult.ran` was designed
+for (an un-runnable check is "unknown", ship honestly as unverified — never a fake "verified ✓"). The files
+now SHIP on the fast per-file path and the REAL gate — the live browser preview-verify — earns success.
+tsc that genuinely RAN and found errors still returns ok:false (unchanged).
+
+FIX 2 — HtmlEntryGuard (deterministic, pre-write). Shipping the per-file build directly exposed a second
+defect the fallback had been masking: the model rewrote index.html and DROPPED the
+`<script type="module" src="/src/main.jsx">` → blank page (React never mounts). New pure
+`ensureHtmlEntryScript` re-attaches the entry script + a `#root` mount when the HTML lost them, pointing at
+the entry module that actually exists. Wired into SimpleBuilder beside the language/import reconciles.
+Kill: AGENTV3_HTML_ENTRY_GUARD=off. So a per-file JS build now ships a BOOTING app on the fast path.
+
+Net: simple JS apps build in ONE fast per-file pass instead of always paying the one-shot fallback tax.
+Tests: HtmlEntryGuard (7), SimpleBuilder ran:false-ships-no-fallback (1). Gate: server tsc 0, suite 6214.

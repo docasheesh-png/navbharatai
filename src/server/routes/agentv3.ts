@@ -5707,11 +5707,21 @@ export function registerAgentV3Routes(app: Express): void {
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
             if (!out.includes('__TSC_CLEAN__')) {
-              // No compile errors AND no clean marker = the compiler never actually ran (tsc not
-              // installed / npx failed). NEVER report "verified" for a check that didn't happen.
-              return { ok: false, errors: 'VERIFICATION DID NOT RUN — the TypeScript compiler could not be executed in the sandbox (tsc missing or npx failed). Ensure typescript is in devDependencies and package.json installs cleanly.' };
+              // The compiler could not EXECUTE — no compile errors AND no clean marker. The common case
+              // is a vite-react JS app whose scaffold has no `typescript` dependency, so `npx --no-install
+              // tsc` simply isn't there (or npx failed). This is NOT a compile failure.
+              //
+              // ROOT CAUSE this fixes (deep-test App #1/#2 + the clock re-run, 2026-07-13): returning
+              // ok:false here made SimpleBuilder treat "tsc couldn't run" as a BUILD FAILURE → wasteful
+              // repair attempts → a per-file→one-shot fallback on EVERY simple JS build (4 min / extra
+              // tokens), even though the identical code compiled and rendered perfectly via the one-shot.
+              // Report ran:false instead — an HONEST "unverified" (Fix 38b's goal: never a fake
+              // "verified ✓") that lets the files SHIP on the fast path, with the REAL gate — the live
+              // browser preview-verify — doing the earning. tsc that genuinely RAN and found errors still
+              // returns ok:false above (unchanged); only the un-runnable case is downgraded to ran:false.
+              return { ok: true, errors: '', ran: false };
             }
-            return { ok: true, errors: '' };
+            return { ok: true, errors: '', ran: true };
           }
           // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
           // (one retry, then an honest ran:false), never be silently converted into a pass.

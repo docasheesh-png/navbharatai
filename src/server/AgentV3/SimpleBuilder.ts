@@ -19,6 +19,7 @@ import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
+import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 
 export interface SimpleFileSpec {
   path: string;
@@ -525,6 +526,21 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             deps.log?.(`🔧 Renamed ${lang.renames.length} file(s) to a TypeScript extension (contained TS syntax in a JS file) so they compile.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
+      }
+      // DETERMINISTIC HTML-ENTRY GUARD before write/preview (admin deep-test clock re-run, 2026-07-13):
+      // the per-file builder can let the model rewrite index.html and DROP the `<script src="/src/main…">`
+      // that boots the app → a blank page (React never mounts). Now that JS builds ship on the fast path
+      // (verify tsc-can't-run → ran:false), a per-file app MUST be guaranteed to boot — so re-attach the
+      // entry script + `#root` mount when the HTML lost them. Best-effort. Kill: AGENTV3_HTML_ENTRY_GUARD=off.
+      if (process.env.AGENTV3_HTML_ENTRY_GUARD !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const guarded = ensureHtmlEntryScript(before);
+          if (guarded.injected) {
+            for (const f of written) { const nc = guarded.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.('🔧 Re-attached the entry script to index.html so the app actually boots.');
+          }
+        } catch { /* best-effort — a failure just leaves the HTML as generated */ }
       }
       await deps.writeFiles(written);
       return written;

@@ -15239,3 +15239,28 @@ returns the honest "could not be read" placeholder without ever constructing Ant
 default (paid) still falls back to Claude; empty input touches nothing. Gate: server tsc 0, lib suite 356.
 Other Anthropic entry points (sda.ts/pro.ts/AI Router/AppEngine/AppMakerLab) are separate features (Doctor
 AI / Pro Chat / Engineer AI), NOT the v3.0 weak build — out of scope for this rule.
+## 2026-07-13 — 100%-automatic roadmap conveyor: content-loss batch + maintainability + reconciliation (#1271, #1277)
+
+Admin: "bina ruke pura roadmap follow karte hui build karte raho, 100% automatic." Running the autonomous
+conveyor with strict safeguard-#6 redundancy-checks (grep live code before building — the roadmap has stale
+markers). Each build real, root-caused, regression-tested, advisory/non-blocking where it touches the report
+surface, CI-gated before merge.
+
+- **#1271 — content-loss honesty for `write_files_batch`** (hunt-the-siblings of #1261): the batch write path
+  now runs `assessFullRewrite` per overwritten file and escalates to a "LIKELY CONTENT LOSS" line naming the
+  files that shrank sharply (reusing the create-vs-modify probe — no extra round-trip). Result text only,
+  never blocks. +1 test.
+- **#1277 — GA-12 maintainability analyzer**: `maintainabilityAnalysis` flags the oversized God file/component
+  (≥1500 lines medium / ≥800 low, deterministic line-count → zero FP; test/spec/.d.ts + non-source excluded;
+  sorted+capped). Wired ADVISORY-only into `evaluate` (NOT fed to the readiness gate → never blocks a working
+  app over a quality smell). +10 tests (incl. a malformed-input null-safety case the test caught pre-merge).
+- **Redundancy-check win (no rebuild):** T1-ratelimit-all was already DONE — every real route carries a limiter
+  (`buildRateLimiter`/`workspaceRateLimiter`/`inbrowserPreviewRateLimiter`); `/pro-build` is a retired stub. Left
+  as-is (safeguard #6 preventing the #1/#4 redundant-work trap).
+- **ROADMAP.md reconciled** for this session's shipped work: GA-3 (slices 1–6 ✅, remaining Bun/UV), GA-8
+  (circuit-breaker slice ✅, remaining ordered-fallback/backoff/regression-capture), GA-12 (maintainability slice
+  ✅ + noted LintGate/deadCode already exist, remaining Prettier-engine/coupling).
+
+Honest state: still a small fraction of the code-tractable roadmap. Tier-0 live defects (T0-1/2/4/5/6/7/8) need a
+real repro/build-report to root-cause (rule 4 forbids guess-fixes) — deferred to the admin's test report, not
+touched blind. Conveyor continues on safe, code-tractable, no-repro gaps.

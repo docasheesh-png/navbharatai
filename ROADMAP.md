@@ -186,16 +186,23 @@ safely edit, or truly verify it).
 - **GA-1** ⚠️ — Multi-Workspace Manager (unified orchestrator: list/switch/quota/cleanup).
 - **GA-2** ❌ — Runtime Supervisor + Background Task Manager + durable Job Queue (long-run
   process tracking, restart-on-crash). *(Out-of-process half is infra → Tier 4 / V4-4.)*
-- **GA-3** 🟡 — Dependency Intelligence. **Slice 1 ✅ (2026-07-12):** semver-backed version-CONFLICT detector in `DependencyAnalysis.detectVersionConflicts` — flags the same package pinned to non-intersecting ranges across dependencies/devDependencies/optionalDependencies (npm resolves ONE version → one section wrong) + a dep/devDep version that violates the project's OWN peerDependencies range. Wired into `analyzeDependencies` (the `evaluate` dependency dimension), so conflicts surface to the agent to fix. Non-semver specifiers skipped (no false positives). **Remaining ❌:** an auto-resolver (pick a satisfying version) + Bun & UV package-manager engines.
+- **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269). **Remaining ❌:** Bun & UV package-manager engines (multi-PM detection = P-PIPE-runtime).
 - **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
 - **GA-5** ❌ — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
 - **GA-6** ❌ — Persistent Engineering Memory (ADR, tech-debt register, bug DB, deploy/migration history).
 - **GA-7** ❌ — Project Coordinator agent (milestone/task-board/resource coordination role).
-- **GA-8** ❌ — Multi-Strategy Repair (ordered fallback + backoff + circuit-breaker +
-  regression-capture) — replaces the hardcoded 3-try loop.
+- **GA-8** 🟡 — Multi-Strategy Repair (ordered fallback + backoff + circuit-breaker +
+  regression-capture) — replaces the hardcoded 3-try loop. **Circuit-breaker slice ✅ (#1267, 2026-07-13):**
+  the SimpleBuilder bounded tsc-repair loop now stops the moment a repair returns byte-identical compiler
+  errors (zero progress → stuck) and hands off, instead of burning the whole `maxRepairs` budget. Provably
+  safe (fires only while `!verdict.ok`). **Remaining ❌:** ordered multi-strategy fallback + backoff +
+  regression-capture (store the failing scenario for cross-build learning).
 - **GA-10** ⚠️ — DB Migration runner + Schema Intelligence (Prisma/Knex/Drizzle/Flyway/Alembic +
   schema inference/type-gen). Also D9.
-- **GA-12** ⚠️ — Static-quality engines: wire ESLint + Prettier as engines + dead-code / code-smell / coupling detectors.
+- **GA-12** 🟡 — Static-quality engines: ESLint gate (`LintGate`, `AGENTV3_LINT_GATE`) + dead-code (`deadCode.ts` unwired-files)
+  already exist; **maintainability code-smell slice ✅ (#1277, 2026-07-13):** `maintainabilityAnalysis` flags the oversized
+  "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
+  `evaluate` (never blocks a build). **Remaining ❌:** Prettier-as-engine + coupling/fan-in hotspot + more code-smell detectors.
 - **GA-13** ❌ — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
 - **GA-14** ⚠️ — CI/CD intelligence: generate + repair pipelines (GitHub Actions first, GitLab/Jenkins later).
 - **GA-15** ❌ — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.

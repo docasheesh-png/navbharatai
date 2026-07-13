@@ -12,7 +12,9 @@ export interface GitignoreInput {
 
 const BASE: Array<[string, string[]]> = [
   ['Dependencies', ['node_modules/']],
-  ['Build output', ['dist/', 'build/']],
+  // `*.tsbuildinfo` is the TypeScript incremental-build cache — regenerated on every build and never
+  // meant to be committed (a very common accidental commit in TS projects; harmless no-op for plain JS).
+  ['Build output', ['dist/', 'build/', '*.tsbuildinfo']],
   ['Environment & secrets', ['.env', '.env.local', '.env.*.local', '*.pem']],
   ['Logs', ['*.log', 'npm-debug.log*', 'yarn-debug.log*', 'pnpm-debug.log*']],
   ['Test coverage', ['coverage/']],
@@ -28,6 +30,7 @@ const FRAMEWORK: Array<[RegExp, string[]]> = [
   [/^@sveltejs\/kit$/, ['.svelte-kit/']],
   [/^astro$/, ['.astro/']],
   [/^vite$/, ['*.local']],
+  [/^turbo$/, ['.turbo/']],
 ];
 
 /** Generate a stack-aware .gitignore. PURE & deterministic. */

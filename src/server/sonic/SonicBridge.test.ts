@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { isControlJson } from './SonicBridge';
+// isControlJson now lives in its own pure module (shared by SonicBridge + the transcript gate). Import
+// it directly so this pure test never drags in the Bedrock SDK that SonicBridge pulls at module load.
+import { isControlJson } from './isControlJson';
 
 describe('isControlJson — filters Nova Sonic control events out of the transcript', () => {
   it('flags JSON control objects (the leak the user saw)', () => {

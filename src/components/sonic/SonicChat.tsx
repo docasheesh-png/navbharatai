@@ -1,13 +1,13 @@
-// Sonic Chat — an ISOLATED, experimental voice surface backed by Amazon Nova Sonic.
+// NavBharatAI Voice — a full-screen, immersive voice surface (ChatGPT/Grok-style).
 //
-// Self-contained: it probes /api/sonic/status and renders nothing but an honest "not
-// available" note unless the server says the feature is enabled (flag + AWS creds). When
-// live, it captures the mic as 16 kHz PCM, streams it over the Sonic WebSocket, and plays
-// back the 24 kHz PCM the model returns. Delete this folder + the server sonic/ folder to
-// remove the experiment entirely.
+// Self-contained: it probes /api/sonic/status and renders nothing but an honest "not available" note
+// unless the server says voice is enabled. When live it captures the mic as 16 kHz PCM, streams it over
+// the Voice WebSocket, and plays back the 24 kHz PCM the model returns. A live animated orb reacts to
+// REAL audio levels — the mic (you speaking) and the playback (the assistant speaking) — so the motion
+// is never faked. NO underlying provider/model name is ever shown: to the user this is NavBharatAI Voice.
 //
-// The real voice round-trip can only be verified in a browser on a deploy; the PCM math is
-// unit-tested in sonicAudio.test.ts.
+// Delete this folder + the server sonic/ folder to remove the feature entirely. The real voice
+// round-trip is only verifiable in a browser on a deploy; the PCM math is unit-tested in sonicAudio.test.ts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
@@ -23,13 +23,23 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  const [speaking, setSpeaking] = useState(false); // assistant is talking (from real playback level)
+  const [showTranscript, setShowTranscript] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const micCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const playCtxRef = useRef<AudioContext | null>(null);
+  const playAnalyserRef = useRef<AnalyserNode | null>(null);
   const nextPlayRef = useRef(0);
+
+  // Real audio-reactive orb: mic RMS (you) + playback analyser (assistant). A single rAF reads both,
+  // smooths, and writes straight to the orb DOM node (no per-frame React re-render).
+  const orbRef = useRef<HTMLDivElement | null>(null);
+  const micLevelRef = useRef(0);
+  const playLevelRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +56,11 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
       ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({ sampleRate: OUT_RATE });
       playCtxRef.current = ctx;
       nextPlayRef.current = ctx.currentTime;
+      // Tap the output through an analyser so the orb reacts to the ASSISTANT's voice in real time.
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.connect(ctx.destination);
+      playAnalyserRef.current = analyser;
     }
     const float = base64PCM16ToFloat32(b64);
     if (float.length === 0) return;
@@ -53,11 +68,44 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
     buffer.copyToChannel(float, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(ctx.destination);
+    src.connect(playAnalyserRef.current ?? ctx.destination);
     const now = ctx.currentTime;
     const startAt = Math.max(now, nextPlayRef.current);
     src.start(startAt);
     nextPlayRef.current = startAt + buffer.duration;
+  }, []);
+
+  // The orb animation loop — reads REAL levels, smooths, applies scale + glow, and flips the
+  // "speaking" label when the assistant's playback is the louder source. Runs only while mounted.
+  useEffect(() => {
+    const freq = new Uint8Array(128);
+    let level = 0;
+    let lastSpeaking = false;
+    const tick = () => {
+      let play = 0;
+      const an = playAnalyserRef.current;
+      if (an) {
+        an.getByteFrequencyData(freq);
+        let sum = 0;
+        for (let i = 0; i < freq.length; i++) sum += freq[i];
+        play = Math.min(1, sum / freq.length / 128);
+      }
+      playLevelRef.current = play;
+      const target = Math.max(micLevelRef.current, play);
+      level += (target - level) * 0.25;               // smooth
+      const el = orbRef.current;
+      if (el) {
+        const scale = 1 + level * 0.45;
+        const glow = 24 + level * 90;
+        el.style.transform = `scale(${scale.toFixed(3)})`;
+        el.style.boxShadow = `0 0 ${glow.toFixed(0)}px ${(glow / 2).toFixed(0)}px rgba(124,58,237,${(0.35 + level * 0.5).toFixed(2)})`;
+      }
+      const nowSpeaking = play > 0.06;
+      if (nowSpeaking !== lastSpeaking) { lastSpeaking = nowSpeaking; setSpeaking(nowSpeaking); }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); };
   }, []);
 
   const stop = useCallback(() => {
@@ -70,6 +118,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
     streamRef.current = null;
     micCtxRef.current?.close().catch(() => {});
     micCtxRef.current = null;
+    micLevelRef.current = 0;
     setStatus((s) => (s === 'error' ? 'error' : 'idle'));
   }, []);
 
@@ -80,7 +129,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
     try {
       // Logged-in users only — the server verifies this token before opening a (paid) stream.
       const token = await auth.currentUser?.getIdToken().catch(() => null);
-      if (!token) { setError('Please sign in to use voice chat.'); setStatus('error'); return; }
+      if (!token) { setError('Please sign in to use voice.'); setStatus('error'); return; }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       streamRef.current = stream;
@@ -102,12 +151,16 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
         try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === 'audio' && msg.data) playChunk(msg.data);
         else if (msg.type === 'text' && msg.text) setLines((l) => [...l, { role: msg.role || 'ASSISTANT', text: msg.text! }]);
-        else if (msg.type === 'error') { setError(msg.message || 'Sonic error.'); setStatus('error'); }
+        else if (msg.type === 'error') { setError(msg.message || 'Voice error.'); setStatus('error'); }
       };
 
       proc.onaudioprocess = (e) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
         const input = e.inputBuffer.getChannelData(0);
+        // Real mic level (RMS) → drives the orb while YOU speak.
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+        micLevelRef.current = Math.min(1, Math.sqrt(sum / input.length) * 3);
+        if (ws.readyState !== WebSocket.OPEN) return;
         const down = downsampleFloat32(new Float32Array(input), micCtx.sampleRate, MIC_RATE);
         if (down.length === 0) return;
         ws.send(JSON.stringify({ type: 'audio', data: float32ToBase64PCM16(down) }));
@@ -124,43 +177,139 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
 
   useEffect(() => () => stop(), [stop]);
 
-  if (status === 'loading') return <div style={wrap}>Loading…</div>;
-  if (status === 'disabled') {
-    return (
-      <div style={wrap}>
-        <h2 style={{ margin: 0 }}>🎙️ Sonic Voice Chat</h2>
-        <p style={{ opacity: 0.8 }}>This experimental voice mode isn’t available right now. (The server needs Nova Sonic enabled and AWS credentials configured.)</p>
-      </div>
-    );
-  }
-
   const live = status === 'live' || status === 'connecting';
+  const stateLabel = status === 'connecting' ? 'Connecting…'
+    : status === 'live' ? (speaking ? 'Speaking…' : 'Listening…')
+    : status === 'error' ? 'Something went wrong'
+    : 'Tap the mic to start';
+
+  const lastLine = lines.length ? lines[lines.length - 1] : null;
+
   return (
-    <div style={wrap}>
-      {onClose && (
-        <button onClick={() => { stop(); onClose(); }} aria-label="Close" style={closeBtn}>✕</button>
-      )}
-      <h2 style={{ margin: 0 }}>🎙️ Sonic Voice Chat <span style={{ fontSize: 12, opacity: 0.6 }}>(experimental)</span></h2>
-      <p style={{ opacity: 0.8, marginTop: 4 }}>Talk naturally — powered by Amazon Nova Sonic. Speak in Hindi, English or Hinglish.</p>
-      <button
-        onClick={live ? stop : start}
-        style={{ ...btn, background: live ? '#c0392b' : '#5b3df5' }}
-      >
-        {status === 'connecting' ? 'Connecting…' : live ? '⏹ Stop' : '🎤 Start talking'}
-      </button>
-      {status === 'live' && <span style={{ marginLeft: 12, color: '#2ecc71' }}>● Live</span>}
-      {error && <p style={{ color: '#e74c3c' }}>⚠️ {error}</p>}
-      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {lines.map((l, i) => (
-          <div key={i} style={{ opacity: l.role === 'USER' ? 0.7 : 1 }}>
-            <strong>{l.role === 'USER' ? 'You' : 'AI'}:</strong> {l.text}
-          </div>
-        ))}
+    <div style={screen}>
+      <style>{ORB_KEYFRAMES}</style>
+
+      {/* Top bar: brand + close. NO provider/model name anywhere. */}
+      <div style={topBar}>
+        <span style={brand}>NavBharatAI <span style={{ opacity: 0.6, fontWeight: 500 }}>Voice</span></span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowTranscript((v) => !v)} aria-label="Transcript" title="Transcript" style={iconBtn}>
+            {showTranscript ? '🗨' : '💬'}
+          </button>
+          {onClose && (
+            <button onClick={() => { stop(); onClose(); }} aria-label="Close" title="Close" style={iconBtn}>✕</button>
+          )}
+        </div>
       </div>
+
+      {status === 'disabled' ? (
+        <div style={centerCol}>
+          <div style={{ ...orb, animation: 'none', opacity: 0.5 }} />
+          <p style={{ opacity: 0.75, maxWidth: 320, textAlign: 'center', marginTop: 28 }}>
+            Voice isn’t available right now. Please try again later.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div style={centerCol}>
+            {/* Live animated orb — scale + glow come from REAL audio levels (rAF above). */}
+            <div ref={orbRef} style={{ ...orb, animation: live ? 'nbv-breathe 4s ease-in-out infinite' : 'nbv-breathe 6s ease-in-out infinite' }} />
+            <p style={stateText}>{stateLabel}</p>
+            {status === 'live' && (
+              <span style={{ marginTop: 6, fontSize: 12, letterSpacing: 1, color: speaking ? '#a78bfa' : '#34d399' }}>
+                ● {speaking ? 'AI' : 'You'}
+              </span>
+            )}
+            {error && <p style={{ color: '#f87171', marginTop: 14, maxWidth: 340, textAlign: 'center' }}>⚠️ {error}</p>}
+
+            {/* Minimal live caption (last line) when the transcript panel is closed. */}
+            {!showTranscript && lastLine && (
+              <p style={caption}>
+                <span style={{ opacity: 0.5 }}>{lastLine.role === 'USER' ? 'You: ' : ''}</span>{lastLine.text}
+              </p>
+            )}
+          </div>
+
+          {/* Optional full transcript, slides up above the controls. */}
+          {showTranscript && (
+            <div style={transcriptPanel}>
+              {lines.length === 0
+                ? <p style={{ opacity: 0.5, textAlign: 'center', margin: 'auto' }}>Your conversation will appear here.</p>
+                : lines.map((l, i) => (
+                  <div key={i} style={{ marginBottom: 10, opacity: l.role === 'USER' ? 0.7 : 1 }}>
+                    <strong style={{ color: l.role === 'USER' ? '#9ca3af' : '#c4b5fd' }}>{l.role === 'USER' ? 'You' : 'AI'}: </strong>
+                    <span>{l.text}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* Bottom control: one big mic/stop button, like ChatGPT/Grok voice mode. */}
+          <div style={controls}>
+            <button
+              onClick={live ? stop : start}
+              aria-label={live ? 'Stop' : 'Start talking'}
+              style={{ ...micBtn, background: live ? '#dc2626' : 'linear-gradient(135deg,#6d28d9,#7c3aed)' }}
+            >
+              {status === 'connecting'
+                ? <span style={{ fontSize: 15, fontWeight: 700 }}>…</span>
+                : live ? <span style={{ fontSize: 20 }}>◼</span> : <span style={{ fontSize: 26 }}>🎤</span>}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-const wrap: React.CSSProperties = { padding: 20, maxWidth: 640, margin: '0 auto', fontFamily: 'system-ui, sans-serif', position: 'relative' };
-const btn: React.CSSProperties = { color: '#fff', border: 'none', borderRadius: 999, padding: '12px 24px', fontSize: 16, cursor: 'pointer' };
-const closeBtn: React.CSSProperties = { position: 'absolute', top: 8, right: 8, background: 'transparent', border: 'none', fontSize: 18, cursor: 'pointer', opacity: 0.6, lineHeight: 1 };
+const ORB_KEYFRAMES = `
+@keyframes nbv-breathe { 0%,100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(24deg); } }
+`;
+
+const screen: React.CSSProperties = {
+  position: 'fixed', inset: 0, zIndex: 2147483001,
+  background: 'radial-gradient(120% 120% at 50% 20%, #14082e 0%, #06040f 60%, #000 100%)',
+  color: '#f5f3ff', display: 'flex', flexDirection: 'column',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+};
+const topBar: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  padding: '16px 18px', flexShrink: 0,
+};
+const brand: React.CSSProperties = { fontSize: 16, fontWeight: 800, letterSpacing: 0.2 };
+const iconBtn: React.CSSProperties = {
+  width: 40, height: 40, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.06)', color: '#f5f3ff', fontSize: 16, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
+const centerCol: React.CSSProperties = {
+  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  padding: 20, minHeight: 0,
+};
+const orb: React.CSSProperties = {
+  width: 200, height: 200, borderRadius: '50%',
+  background: 'radial-gradient(circle at 35% 30%, #c4b5fd 0%, #7c3aed 45%, #4c1d95 100%)',
+  boxShadow: '0 0 40px 20px rgba(124,58,237,0.4)',
+  willChange: 'transform, box-shadow', transition: 'box-shadow 0.08s linear',
+};
+const stateText: React.CSSProperties = { marginTop: 34, fontSize: 17, fontWeight: 600, opacity: 0.9 };
+const caption: React.CSSProperties = {
+  marginTop: 18, maxWidth: 460, textAlign: 'center', fontSize: 15, lineHeight: 1.5,
+  opacity: 0.9, padding: '0 8px',
+};
+const transcriptPanel: React.CSSProperties = {
+  flexShrink: 0, maxHeight: '38vh', overflowY: 'auto', margin: '0 16px',
+  padding: 16, borderRadius: 16, background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(255,255,255,0.08)', fontSize: 14, lineHeight: 1.5,
+  display: 'flex', flexDirection: 'column',
+};
+const controls: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  padding: '20px 0 30px', flexShrink: 0,
+};
+const micBtn: React.CSSProperties = {
+  width: 72, height: 72, borderRadius: '50%', border: 'none', cursor: 'pointer',
+  color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  boxShadow: '0 8px 30px rgba(124,58,237,0.5)',
+};

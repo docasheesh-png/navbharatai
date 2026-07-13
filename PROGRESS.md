@@ -15852,3 +15852,26 @@ owned by the long-running path). Recurring across App #7/#8/#9. Tests: 4 cap + 6
 cause of THIS failure (the 45s cap saves ~8.5 min but wouldn't alone have saved this build). Real lever =
 GLM key-pool (ROADMAP Tier-4) + deprioritise Vertex as a floor rung. Also open: `tsx`/`ts-node` runner
 absent when the start script first ran; the in-browser preview `import.meta` limit for full-stack apps.
+## 2026-07-14 — Fix 61: NavBharatAI Voice — double-response killed + full-screen orb UI + no provider reveal
+
+Admin's 3 real-run complaints on the new voice feature (NavBharatAI Free):
+1. Every reply typed TWICE. 2. Opens as a small popup. 3. Reveals the underlying provider name.
+
+ROOT CAUSES + fixes (all real, tested):
+1. DOUBLE LINE — Nova Sonic emits each line as SPECULATIVE (interim) + FINAL, and a multi-sentence
+   reply interleaves A,B,A,B (not A,A,B,B), so the old CONSECUTIVE-only dedup let the 2nd pass through.
+   New pure `SonicTranscriptGate` (sonicTranscript.ts): keep only FINAL generationStage (fail-OPEN when
+   unknown) + per-turn A,B,A,B dedup that resets each turn. Wired into SonicBridge (reads generationStage
+   from each text contentStart; gate.endTurn() on assistant-audio contentEnd). `isControlJson` centralized
+   into its own module (shared, no drift). 6 regression tests encode the exact A,B,A,B failure.
+2. POPUP → FULL SCREEN — SonicChat rewritten as a ChatGPT/Grok-style immersive surface: dark radial
+   backdrop, a live animated ORB whose scale+glow come from REAL audio levels (mic RMS + a playback
+   AnalyserNode — never faked), honest Connecting/Listening/Speaking states, a minimal live caption, a
+   toggleable full transcript, and one big mic/stop control. Launcher opens it full-screen (no modal
+   sheet); the /sonic route already renders it full-screen. Safe-area padded.
+3. NO REVEAL — removed "Amazon Nova Sonic"/"powered by" from all UI; status route no longer returns the
+   model id; system prompt now forbids disclosing any provider/model (Amazon/AWS/Nova/Sonic/Bedrock/…) —
+   "you are NavBharatAI Voice, built by NavBharatAI". AppKnowledgeBase entry renamed + de-branded.
+
+Gate: tsc (frontend+server) 0, vitest 6459/6459, build PASS. (The audio round-trip itself is browser/
+deploy-verified as before; the transcript gate + PCM math are unit-tested.)

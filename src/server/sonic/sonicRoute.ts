@@ -3,12 +3,13 @@
 // point only when this returns enabled:true (flag + AWS creds present on the server).
 
 import type { Express, Request, Response } from 'express';
-import { isSonicEnabled, sonicModelId } from './featureFlag';
+import { isSonicEnabled } from './featureFlag';
 import { SONIC_WS_PATH } from './sonicWs';
 
 export function registerSonicRoutes(app: Express): void {
   app.get('/api/sonic/status', (_req: Request, res: Response) => {
-    const enabled = isSonicEnabled();
-    res.json({ enabled, wsPath: SONIC_WS_PATH, model: enabled ? sonicModelId() : null });
+    // NO-REVEAL (admin 2026-07-14): never expose the underlying model id to the client — Voice is a
+    // NavBharatAI product, the provider stays server-side. The client only needs enabled + wsPath.
+    res.json({ enabled: isSonicEnabled(), wsPath: SONIC_WS_PATH });
   });
 }

@@ -15395,3 +15395,33 @@ Client (everything driven by REAL engine state — no scripted animation):
 AppKnowledgeBase Power entry updated (every AI can now explain the premium + why lower tiers can't
 send mid-build). Gate: tsc ×2 = 0, AgentRunner steering tests (injection reaches the FIRST model call,
 zero change without steerPoll), full vitest suite green, build PASS.
+
+## 2026-07-13 — Generator-audit sweep + GA-16 heavy-import analyzer (#1292–#1299)
+
+Autonomous conveyor. Systematically audited EVERY generator module for real bugs (the productive vein) and
+added one analyzer. Each: tsc fe+server 0, vitest green, CI-gated before merge. Build-ahead pipelining used
+during CI (build the next fix while the current PR's CI runs) to cut idle time within the one-branch limit.
+
+Genuine bugs FOUND + FIXED (8 across the audit):
+- **#1284/#1285/#1286 — package-manager correctness** (earlier batch): CI workflow, Dockerfile, README all
+  assumed npm → broken for pnpm/yarn/bun. Now detect the manager from the root lockfile.
+- **#1292 — SECURITY**: `.env.example` generator copied existing values verbatim; a secret-named var or a
+  secret-looking value could be committed. Now blanked (secrets never emitted into a committed file).
+- **#1294 — GA-10**: SQL migration DDL omitted `DEFAULT CURRENT_TIMESTAMP` on created/_at (Prisma had now()).
+  Now portable default across Postgres/MySQL/SQLite. Added the module's first test file.
+- **#1298 — OpenAPI**: emitted raw type hints (`int`/`bool`/`datetime`) as `schema.type` → INVALID OpenAPI.
+  Now `toOpenApiSchema` maps to valid types (+ formats for date/uuid/email; array gets items).
+- **#1299 — API docs**: Markdown route table dropped cells raw → a `|` or newline in a description corrupted
+  the whole table. Now escaped.
+
+Analyzer added:
+- **#1293 — GA-16 heavy-import**: source-level bundle-weight detector (moment/lodash whole-library imports),
+  advisory in `evaluate` (never blocks a build).
+
+Audited CLEAN (no bug — honest result): AuthCodeGenerator (solid JWT: timing-safe compare, expiry, no
+alg-confusion), MockDataGenerator, ObservabilityGenerator, BundleOptimizationGenerator, ReleaseNotesGenerator,
+TestSkeletonGenerator. Roadmap reconciled: GA-16 → 🟡, GA-10 note.
+
+Honest state: the generator-audit + safe-analyzer lanes are now genuinely exhausted (remaining generators are
+well-built). Highest-value remaining work needs the admin's real build report (Tier-0 live defects — deferred,
+never guess-fixed) or a decision on bigger/behavior-changing items (live install-path PM wiring, escalation-on).

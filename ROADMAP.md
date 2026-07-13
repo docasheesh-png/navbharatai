@@ -198,7 +198,8 @@ safely edit, or truly verify it).
   safe (fires only while `!verdict.ok`). **Remaining ❌:** ordered multi-strategy fallback + backoff +
   regression-capture (store the failing scenario for cross-build learning).
 - **GA-10** ⚠️ — DB Migration runner + Schema Intelligence (Prisma/Knex/Drizzle/Flyway/Alembic +
-  schema inference/type-gen). Also D9.
+  schema inference/type-gen). Also D9. (Generator hardened #1294: SQL DDL now emits `DEFAULT CURRENT_TIMESTAMP`
+  on created/_at columns for Prisma parity; the RUNNER + broader dialects/schema-inference remain.)
 - **GA-12** 🟡 — Static-quality engines: ESLint gate (`LintGate`, `AGENTV3_LINT_GATE`) + dead-code (`deadCode.ts` unwired-files)
   already exist; **maintainability code-smell slice ✅ (#1277, 2026-07-13):** `maintainabilityAnalysis` flags the oversized
   "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
@@ -210,7 +211,10 @@ safely edit, or truly verify it).
   (npm/yarn/pnpm/bun, detected from its root lockfile via a shared probe) instead of a broken hardcoded
   `npm ci`. **Remaining ❌:** pipeline REPAIR (fix a failing/misconfigured existing workflow) + GitLab/Jenkins.
 - **GA-15** ❌ — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.
-- **GA-16** ❌ — Performance intelligence: runtime profiler, bundle analyzer, memory-leak, query optimizer.
+- **GA-16** 🟡 — Performance intelligence. Built: `BundleSize` (real built-dist size) + `generate_bundle_optimization`
+  (lazyWithRetry + manualChunks); **source-level heavy-import analyzer ✅ (#1293, 2026-07-13)** — `analyzeHeavyImports`
+  flags heavy deps with lighter alts (moment→dayjs) + whole-library imports (`import _ from 'lodash'`), advisory in
+  `evaluate`. **Remaining ❌:** runtime profiler, memory-leak, query optimizer.
 - **GA-17** ✅ — SHIPPED (#1249, 2026-07-12, Immune System Phase 3 "Red-team"): `FuzzProbe.generateFuzzPlan`
   finds the running app's inputs and builds a bounded adversarial catalog (empty/oversized/injection-shaped/
   unicode/malformed numbers/emails/urls); the post-build pass drives a real browser to type each hostile

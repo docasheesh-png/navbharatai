@@ -51,7 +51,9 @@ export function detectChecks(files: string[], packageJsonRaw?: string): CheckPla
     if (hasScript(packageJsonRaw, 'typecheck')) {
       plans.push({ language: 'ts', command: 'npm run typecheck', reason: 'package.json defines a typecheck script.' });
     } else {
-      plans.push({ language: 'ts', command: 'npx tsc --noEmit', reason: 'tsconfig present — type-checking the TS/TSX sources.' });
+      // `--no-install` forces the project's LOCAL typescript; bare `npx tsc` downloads an unrelated
+      // squatter package ("This is not the tsc command…") when typescript isn't installed yet.
+      plans.push({ language: 'ts', command: 'npx --no-install tsc --noEmit', reason: 'tsconfig present — type-checking the TS/TSX sources.' });
     }
   }
 

@@ -7,7 +7,10 @@ describe('detectChecks', () => {
   it('detects TS via tsconfig + tsx sources (tsc --noEmit by default)', () => {
     const plans = detectChecks(['tsconfig.json', 'src/App.tsx']);
     expect(plans.map(p => p.language)).toEqual(['ts']);
-    expect(plans[0].command).toBe('npx tsc --noEmit');
+    // MUST be the --no-install form: bare `npx tsc` downloads an unrelated squatter package
+    // ("This is not the tsc command you are looking for") when typescript isn't installed yet
+    // — the exact tsc@2.0.4 trap the Kanban build hit (2026-07-13 autopsy).
+    expect(plans[0].command).toBe('npx --no-install tsc --noEmit');
   });
 
   it('prefers the project\'s own typecheck script when present', () => {

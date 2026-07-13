@@ -72,6 +72,38 @@ describe('DeployArtifactGenerator (P-CGE.9)', () => {
       expect(c).toContain('- NODE_ENV=production');
       expect(c).toContain('restart: unless-stopped');
     });
+
+    it('adds a mongo service (image + port + volume), depends_on, and a MONGO_URL for a mongoose app', () => {
+      const c = generateDockerCompose({ dependencies: ['react', 'mongoose', 'express'] });
+      expect(c).toContain('mongo:');
+      expect(c).toContain('image: mongo:7');
+      expect(c).toContain('- "27017:27017"');
+      expect(c).toContain('- MONGO_URL=mongodb://mongo:27017/app'); // app can reach it on the network
+      expect(c).toContain('depends_on:');
+      expect(c).toContain('mongo-data:/data/db');
+      expect(c).toMatch(/volumes:\n {2}mongo-data:/); // top-level named volume declared
+    });
+
+    it('adds postgres with credentials env for a pg app', () => {
+      const c = generateDockerCompose({ dependencies: ['pg'] });
+      expect(c).toContain('image: postgres:16-alpine');
+      expect(c).toContain('POSTGRES_PASSWORD: postgres');
+      expect(c).toContain('- DATABASE_URL=postgres://postgres:postgres@postgres:5432/app');
+    });
+
+    it('adds redis (no volume) alongside a DB, deduped', () => {
+      const c = generateDockerCompose({ dependencies: ['ioredis', 'redis', 'pg'] });
+      expect((c.match(/^ {2}redis:$/gm) || []).length).toBe(1); // redis + ioredis → ONE redis service
+      expect(c).toContain('image: redis:7-alpine');
+      expect(c).toContain('- REDIS_URL=redis://redis:6379');
+    });
+
+    it('adds NO backing services for a purely frontend app', () => {
+      const c = generateDockerCompose({ dependencies: ['react', 'react-dom', 'vite'] });
+      expect(c).not.toContain('depends_on:');
+      expect(c).not.toContain('volumes:');
+      expect(c).not.toContain('image:');
+    });
   });
 
   describe('generateCiWorkflow', () => {

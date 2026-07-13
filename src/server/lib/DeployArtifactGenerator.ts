@@ -96,13 +96,51 @@ export interface ComposeOptions {
   serviceName?: string;
   port?: number;
   env?: string[];
+  /** Project dependency names — used to add the backing DB/cache services the app actually needs. */
+  dependencies?: string[];
 }
 
-/** Generate a docker-compose.yml for local run. */
+interface DbService {
+  key: string;
+  image: string;
+  port: number;
+  /** Connection env var the APP service gets so it can reach this service on the compose network. */
+  appEnv: string;
+  /** Env vars the DB service itself needs (credentials/db name). */
+  env?: Record<string, string>;
+  /** [namedVolume, mountPath] for durable data. */
+  volume?: [string, string];
+}
+
+/** Map a dependency (npm driver) to the backing service its app needs. First match per service key wins. */
+const DB_MATCHERS: Array<{ re: RegExp; make: () => DbService }> = [
+  { re: /^(mongoose|mongodb)$/, make: () => ({ key: 'mongo', image: 'mongo:7', port: 27017, appEnv: 'MONGO_URL=mongodb://mongo:27017/app', volume: ['mongo-data', '/data/db'] }) },
+  { re: /^(pg|postgres|postgresql)$/, make: () => ({ key: 'postgres', image: 'postgres:16-alpine', port: 5432, appEnv: 'DATABASE_URL=postgres://postgres:postgres@postgres:5432/app', env: { POSTGRES_PASSWORD: 'postgres', POSTGRES_DB: 'app' }, volume: ['postgres-data', '/var/lib/postgresql/data'] }) },
+  { re: /^(mysql|mysql2)$/, make: () => ({ key: 'mysql', image: 'mysql:8', port: 3306, appEnv: 'DATABASE_URL=mysql://root:root@mysql:3306/app', env: { MYSQL_ROOT_PASSWORD: 'root', MYSQL_DATABASE: 'app' }, volume: ['mysql-data', '/var/lib/mysql'] }) },
+  { re: /^(redis|ioredis)$/, make: () => ({ key: 'redis', image: 'redis:7-alpine', port: 6379, appEnv: 'REDIS_URL=redis://redis:6379' }) },
+];
+
+/** The distinct backing services the dependency list implies (deduped by service key). Pure. */
+function detectDbServices(deps: ReadonlyArray<string>): DbService[] {
+  const seen = new Set<string>();
+  const out: DbService[] = [];
+  for (const d of deps || []) {
+    const name = clean(d).toLowerCase();
+    for (const m of DB_MATCHERS) {
+      if (m.re.test(name)) { const s = m.make(); if (!seen.has(s.key)) { seen.add(s.key); out.push(s); } }
+    }
+  }
+  return out;
+}
+
+/** Generate a docker-compose.yml for local run — including the backing DB/cache services the app needs. */
 export function generateDockerCompose(opts: ComposeOptions = {}): string {
   const name = (clean(opts.serviceName) || 'app').replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'app';
   const port = typeof opts.port === 'number' && opts.port > 0 ? opts.port : 8080;
-  const env = (opts.env || []).map(clean).filter(Boolean);
+  const dbs = detectDbServices(opts.dependencies || []);
+  // The app's env: its declared env + a connection string for each detected backing service.
+  const env = [...dbs.map((d) => d.appEnv), ...(opts.env || []).map(clean).filter(Boolean)];
+
   const lines: string[] = [
     `services:`,
     `  ${name}:`,
@@ -114,7 +152,30 @@ export function generateDockerCompose(opts: ComposeOptions = {}): string {
     lines.push(`    environment:`);
     for (const e of env) lines.push(`      - ${e}`);
   }
+  if (dbs.length) {
+    lines.push(`    depends_on:`);
+    for (const d of dbs) lines.push(`      - ${d.key}`);
+  }
   lines.push(`    restart: unless-stopped`);
+
+  // Each backing service.
+  for (const d of dbs) {
+    lines.push(`  ${d.key}:`, `    image: ${d.image}`, `    ports:`, `      - "${d.port}:${d.port}"`);
+    if (d.env) {
+      lines.push(`    environment:`);
+      for (const [k, v] of Object.entries(d.env)) lines.push(`      ${k}: ${v}`);
+    }
+    if (d.volume) lines.push(`    volumes:`, `      - ${d.volume[0]}:${d.volume[1]}`);
+    lines.push(`    restart: unless-stopped`);
+  }
+
+  // Top-level named volumes for the DBs that declared one.
+  const volumes = dbs.map((d) => d.volume?.[0]).filter((v): v is string => !!v);
+  if (volumes.length) {
+    lines.push(`volumes:`);
+    for (const v of volumes) lines.push(`  ${v}:`);
+  }
+
   return lines.join('\n') + '\n';
 }
 

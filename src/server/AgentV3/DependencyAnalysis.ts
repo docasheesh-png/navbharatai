@@ -20,7 +20,7 @@ import { validRange, intersects, minVersion, gt } from 'semver';
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
 export interface DependencyIssue {
-  kind: 'missing' | 'unused' | 'unpinned' | 'version-conflict' | 'peer-violation' | 'types-mismatch';
+  kind: 'missing' | 'unused' | 'unpinned' | 'version-conflict' | 'peer-violation' | 'types-mismatch' | 'misplaced-dev-tool';
   package: string;
   severity: DependencySeverity;
   detail: string;
@@ -244,6 +244,9 @@ export function analyzeDependencies(
 
   // Sibling major skew (high, GA-3): react/react-dom (etc.) on different majors → runtime break.
   issues.push(...detectSiblingMajorSkew(packageJsonContent));
+
+  // Misplaced dev tools (low, GA-3): build-only/type-only packages in dependencies → prod bloat.
+  issues.push(...detectMisplacedDevTools(packageJsonContent));
 
   return issues.slice(0, MAX_ISSUES);
 }
@@ -573,6 +576,52 @@ export function detectUnpinnedGitDeps(packageJsonContent: string | null): Depend
       severity: 'medium',
       detail: `'${name}' points at a git source "${version}" with no ref — it resolves to the default branch HEAD and changes over time; installs are not reproducible`,
       suggestion: `Append a "#<commit-sha-or-tag>" to "${version}" so the install is reproducible.`,
+    });
+  }
+  return issues;
+}
+
+/**
+ * Unambiguous BUILD-ONLY / dev-time packages that never belong in `dependencies` (they bloat the
+ * production install and ship dev tooling to end users). Curated + conservative — only packages with
+ * no legitimate runtime import — plus every `@types/*` (type-only, stripped at build). This is distinct
+ * from the `unused` check, which deliberately SKIPS these implicit-toolchain names entirely.
+ */
+const DEV_ONLY_TOOLS = new Set<string>([
+  'vite', 'eslint', 'prettier', 'typescript', 'webpack', 'webpack-cli', 'rollup', 'esbuild', 'parcel',
+  'vitest', 'jest', 'mocha', 'karma', '@playwright/test', 'cypress', 'ts-node', 'tsx', 'nodemon',
+  'rimraf', 'cross-env', 'concurrently', 'npm-run-all', '@biomejs/biome', 'tailwindcss', 'postcss',
+  'autoprefixer', 'storybook', 'turbo',
+]);
+
+/**
+ * GA-3 (Tier-2 dependency intelligence) — flag a build-only tool declared in `dependencies` instead of
+ * `devDependencies`. It ships dev tooling into the production install (bigger, slower, larger attack
+ * surface) with no runtime benefit. Low severity (best-practice, not a break). Conservative: only the
+ * curated DEV_ONLY_TOOLS set + every `@types/*` are flagged, so a real runtime library is never
+ * mislabelled. Pure. Exported for tests.
+ */
+export function detectMisplacedDevTools(packageJsonContent: string | null): DependencyIssue[] {
+  if (packageJsonContent == null) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+    pkg = parsed as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  const issues: DependencyIssue[] = [];
+  for (const name of collectNames(pkg.dependencies)) {
+    if (!DEV_ONLY_TOOLS.has(name) && !name.startsWith('@types/')) continue;
+    const kindLabel = name.startsWith('@types/') ? 'type-only package' : 'build-only tool';
+    issues.push({
+      kind: 'misplaced-dev-tool',
+      package: name,
+      severity: 'low',
+      detail: `'${name}' is a ${kindLabel} declared in dependencies — it ships to the production install with no runtime benefit`,
+      suggestion: `Move "${name}" from dependencies to devDependencies.`,
     });
   }
   return issues;

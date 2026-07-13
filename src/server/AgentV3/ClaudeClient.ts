@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { modelSupportsAdaptiveThinking } from './models';
+import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
 
 /**
  * ClaudeClient — the v3.0 engine's wrapper over the Anthropic SDK for native
@@ -263,6 +264,16 @@ export class ClaudeClient implements TurnRunner {
 
   /** Run one assistant turn with optional native tools. */
   async runTurn(params: RunTurnParams): Promise<TurnResult> {
+    // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13). This is the ONE chokepoint where
+    // every Claude call — builder, judge, plan, any heal gate, whether or not the call site remembered to
+    // thread a flag — must pass. When a weak/free build is in progress a no-Claude zone is active, and
+    // Claude is refused here BEFORE a single token is spent. See noClaudeZone.ts for why this lives at the
+    // invocation point rather than at N call sites (root cause of the App #3 leak: a raw ClaudeClient that
+    // bypassed the enforceNoClaude chain guard). The refusal is a normal error: a provider chain falls
+    // through to the next (non-Claude) provider; a best-effort heal gate simply skips.
+    if (claudeBlockedInZone(params.model)) {
+      throw new NoClaudeInWeakBuildError(params.model);
+    }
     const cache = params.cache !== false; // default ON
     const createParams: Record<string, unknown> = {
       model: params.model,

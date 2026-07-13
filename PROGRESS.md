@@ -15184,3 +15184,41 @@ Wired into all three composers, replacing each direct file-input+button (handler
 - `AIChat` (NavBharatAI Free) — refactored `handleFileSelect`→`addPickedFiles(FileList)` (10 MB guard kept).
 
 Gate: frontend tsc 0, vitest 6069/6069, `npm run build` PASS. Client-only (no server touched).
+
+## 2026-07-13 — App #3 (Pomodoro) autopsy: weak-module Claude LEAK + report dishonesty, root-caused with an UNBREAKABLE chokepoint
+
+Deep-test App #3 (Pomodoro timer, report d055c7ec). The build ran WEAK (`billing.powerLevel: "weak"`), the
+fast lane produced the app on GLM (15 GLM one-shot calls, tools=0), preview rendered — BUT a post-build heal
+gate then ran **9 real `claude-sonnet-4-6` tool calls** (grep → read_file×4 → edit_file → rm → typecheck)
+with `provider: None` (a RAW ClaudeClient, not a chain runner), while the report claimed `billing.noClaude:
+true`. Two failures at once: (1) the absolute rule VIOLATED — a weak build spent NavBharatAI's Claude budget;
+(2) the report LIED about it.
+
+Deploy-timing ruled out "old code": the build ran 03:53–04:00 UTC, well after #1272 (02:49 UTC, added the
+`enforceNoClaude` chain guard + threaded `noClaude` to all 12 buildTurnRunner sites) and #1273 deployed.
+Exhaustive read confirmed EVERY `buildTurnRunner` gate (builder, escalation, integrity/feature/preview/vax/
+runtime/reviewer-autofix heals) threads `noClaude: noClaudeBuild`, and `enforceNoClaude` strips CLAUDE +
+CLAUDE_HAIKU from the chain. So the leak was a raw ClaudeClient created OUTSIDE any chain (a judge/plan
+fallback, or a heal path that never went through the chain) — exactly the failure mode that threading a flag
+through N call sites can never close: one forgotten site = one silent leak.
+
+ROOT-CAUSE FIX (rule 2 — enforce the invariant where the data ENTERS, not at N call sites): a request-scoped
+**no-Claude zone** (`AgentV3/noClaudeZone.ts`, AsyncLocalStorage). The route enters it the instant it knows
+the build is weak (`enterNoClaudeZone({active: noClaudeBuild})`, right after `buildDiag` is created); every
+awaited descendant — builder, plan, every heal gate, judge, sub-agents — inherits it. `ClaudeClient.runTurn`
+checks the zone at its FIRST line and REFUSES (`NoClaudeInWeakBuildError`) before spending a token. This is
+the ONE chokepoint every Claude call must pass, so no present or future call site can leak, flag or no flag.
+A best-effort heal gate simply skips on the throw; a provider chain falls through to the next non-Claude
+provider. `onBlocked` records an honest `NO_CLAUDE_BLOCKED` diagnostic naming the refused model.
+
+HONESTY FIX (rule 5 — fix the system's honesty too): `BuildDiagnostics.isClaudeModel()` +
+`claudeModelUsed()` scan the recorded llmCalls; at billing time the route reports `noClaude:
+noClaudeBuild && !leakedClaudeModel` (the TRUTH, never the intent) and records a loud `NO_CLAUDE_VIOLATION`
+error naming the model if any Claude call slipped through. The report can never again claim a weak build was
+Claude-free while Claude ran.
+
+Tests: noClaudeZone (9 — activate/propagate-across-await/no-sibling-leak/onBlocked-safe/error-carries-model),
+ClaudeClient guard (2 — throws-without-calling-API in-zone / runs-normally out-of-zone), isClaudeModel +
+claudeModelUsed (3). Gate: server tsc 0, frontend tsc 0 (mobile-native dep gap is local-only; CI `npm ci`
+installs it), suite 2740 passed. Files: new `noClaudeZone.ts`; `ClaudeClient.ts` guard; `BuildDiagnostics.ts`
+detector; `routes/agentv3.ts` zone-entry + honest billing.

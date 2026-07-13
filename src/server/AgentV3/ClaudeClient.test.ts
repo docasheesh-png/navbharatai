@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ClaudeClient, parseMessage, isRetryableError, type MessagesCreateClient } from './ClaudeClient';
+import { runInNoClaudeZone, NoClaudeInWeakBuildError } from './noClaudeZone';
 
 describe('parseMessage', () => {
   it('extracts text, tool_use blocks, stop reason and usage', () => {
@@ -35,6 +36,33 @@ describe('parseMessage', () => {
     expect(result.text).toBe('done');
     expect(result.toolUses).toHaveLength(0);
     expect(result.usage.inputTokens).toBe(0);
+  });
+});
+
+describe('ClaudeClient.runTurn — UNBREAKABLE weak-module no-Claude guard', () => {
+  // Admin absolute rule (2026-07-13) + App #3 leak: a weak/free build must NEVER run Claude, even a
+  // raw ClaudeClient that bypassed the chain guard. The chokepoint refuses BEFORE touching the client.
+  it('throws NoClaudeInWeakBuildError inside an active zone, without calling the API', async () => {
+    const create = vi.fn(); // must NEVER be called
+    const client = new ClaudeClient({ messages: { create } } as MessagesCreateClient);
+    await runInNoClaudeZone({ active: true }, async () => {
+      await expect(
+        client.runTurn({ model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'fix it' }] }),
+      ).rejects.toBeInstanceOf(NoClaudeInWeakBuildError);
+    });
+    expect(create).not.toHaveBeenCalled(); // no tokens spent
+  });
+
+  it('runs normally when the zone is inactive (paid/power build)', async () => {
+    const create = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    const client = new ClaudeClient({ messages: { create } } as MessagesCreateClient);
+    await runInNoClaudeZone({ active: false }, async () => {
+      const res = await client.runTurn({ model: 'claude-sonnet-4-6', messages: [] });
+      expect(res.text).toBe('ok');
+    });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });
 

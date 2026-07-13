@@ -426,6 +426,40 @@ describe('findUnresolvedLocalImports — the agentic missing-files gate (deep-te
     };
     expect(findUnresolvedLocalImports(files)).toEqual([]);
   });
+
+  // Kanban build (2026-07-13): src/stores/useBoardStore.ts WAS written, but Dashboard imported it with an
+  // over-relative path that escaped src/, so the gate said "missing" and the repair wrote a DUPLICATE.
+  it('flags a MISPATH (file exists elsewhere) with existsAt, so the repair fixes the path not duplicates it', () => {
+    const files = {
+      'src/components/Dashboard.tsx': "import { useBoardStore } from '../../stores/useBoardStore';\nuseBoardStore;", // one ../ too many → escapes src/
+      'src/stores/useBoardStore.ts': 'export const useBoardStore = () => ({});',
+    };
+    const out = findUnresolvedLocalImports(files);
+    expect(out).toHaveLength(1);
+    expect(out[0].missing).toBe('stores/useBoardStore'); // normalized target that doesn't exist at repo root
+    expect(out[0].existsAt).toBe('src/stores/useBoardStore.ts'); // …but the module DOES exist here
+  });
+
+  it('does NOT set existsAt for a genuinely-missing file (no same-tail file anywhere → create it)', () => {
+    const files = {
+      'src/components/ui/Select.tsx': "import s from './Select.module.css';\ns;",
+    };
+    const out = findUnresolvedLocalImports(files);
+    expect(out).toHaveLength(1);
+    expect(out[0].missing).toBe('src/components/ui/Select.module.css');
+    expect(out[0].existsAt).toBeUndefined(); // truly missing — the repair must CREATE it
+  });
+
+  it('does NOT suggest existsAt when the tail is AMBIGUOUS (two files match → never a guess)', () => {
+    const files = {
+      'src/pages/Dashboard.tsx': "import x from '../../widgets/Chart';\nx;", // escapes to widgets/Chart
+      'src/a/widgets/Chart.tsx': 'export default 1;',
+      'src/b/widgets/Chart.tsx': 'export default 1;', // two files share the /widgets/Chart tail
+    };
+    const out = findUnresolvedLocalImports(files);
+    expect(out).toHaveLength(1);
+    expect(out[0].existsAt).toBeUndefined(); // ambiguous → no suggestion, falls back to "create"
+  });
 });
 
 describe('shouldRetryImportAnonymously (deep-test App #5 — public repo, token-authed clone failed)', () => {

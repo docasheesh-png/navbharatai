@@ -415,10 +415,30 @@ function normalizeRel(path: string): string {
  * can repair it immediately instead of hitting a silent dead-end. PURE + unit-tested; bare npm
  * packages and builtins are ignored (they are dependency territory, not missing files).
  */
-export function findUnresolvedLocalImports(files: Record<string, string>): Array<{ missing: string; importedBy: string }> {
+/** The importable forms of a real file path: itself, extension-stripped, and /index-stripped. */
+const RESOLVE_EXT_RE = /\.(?:tsx?|jsx?|mjs|cjs|vue|svelte|json|css)$/i;
+const RESOLVE_INDEX_RE = /\/index\.(?:tsx?|jsx?|mjs|cjs)$/i;
+
+/**
+ * When a local import resolves to NO file, is the SAME module actually present at a DIFFERENT path?
+ * (real case, Kanban build 2026-07-13: `src/stores/useBoardStore.ts` WAS written, but Dashboard imported
+ * `stores/useBoardStore` — a bare/over-relative path that escaped `src/` — so the gate called it "missing"
+ * and told the repair pass to CREATE a duplicate.) Returns the existing file iff EXACTLY ONE file matches
+ * the imported tail — never a guess. Lets the repair FIX THE PATH instead of writing a second copy. Pure.
+ */
+function existingModuleByTail(base: string, paths: Set<string>): string | undefined {
+  const found = new Set<string>();
+  for (const p of paths) {
+    const forms = [p, p.replace(RESOLVE_EXT_RE, ''), p.replace(RESOLVE_INDEX_RE, '')];
+    if (forms.some((f) => f === base || f.endsWith(`/${base}`))) found.add(p);
+  }
+  return found.size === 1 ? [...found][0] : undefined;
+}
+
+export function findUnresolvedLocalImports(files: Record<string, string>): Array<{ missing: string; importedBy: string; existsAt?: string }> {
   const paths = new Set(Object.keys(files));
   const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
-  const out: Array<{ missing: string; importedBy: string }> = [];
+  const out: Array<{ missing: string; importedBy: string; existsAt?: string }> = [];
   const seen = new Set<string>();
   const importRe = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"]([^'"\n]+)['"]/g;
   for (const [path, content] of Object.entries(files)) {
@@ -437,7 +457,10 @@ export function findUnresolvedLocalImports(files: Record<string, string>): Array
       const resolves = LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s));
       if (!resolves && !seen.has(base)) {
         seen.add(base);
-        out.push({ missing: base, importedBy: path });
+        // If the SAME module exists at another path, this is a MISPATH (fix the import), not a
+        // truly-missing file (create it) — surfacing existsAt keeps the repair from writing a duplicate.
+        const existsAt = existingModuleByTail(base, paths);
+        out.push(existsAt ? { missing: base, importedBy: path, existsAt } : { missing: base, importedBy: path });
         if (out.length >= 20) return out; // bounded — 20 named misses is already the full story
       }
     }

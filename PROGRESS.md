@@ -15875,3 +15875,37 @@ ROOT CAUSES + fixes (all real, tested):
 
 Gate: tsc (frontend+server) 0, vitest 6459/6459, build PASS. (The audio round-trip itself is browser/
 deploy-verified as before; the transcript gate + PCM math are unit-tested.)
+
+---
+
+## 2026-07-13 — "pura karo" roadmap sweep: 8 of 10 big items done, 2 honestly infra-blocked
+
+The admin asked to complete 10 remaining "big" roadmap items (A1, A2, C7/C8, GA-2, GA-10, GA-13, GA-15,
+GA-18, T1-auth-scaffold, T1-db-provision-ui). Verified each against the ACTUAL code first (safeguard #1) —
+the ROADMAP ❌/⚠️ marks were badly stale. Outcome:
+
+**Already built (stale ❌ corrected in ROADMAP.md this session):**
+- A2 — `architecture_map` tool (entry-points/hubs/areas/reading-order).
+- C7 — `replace_symbol` + `codemod_add_prop` + `codemod_move_file`.
+- C8 — `codemod_rename` (AST-safe cross-file rename).
+- GA-18 — `FeatureCoverage` + `RequirementCoverage` reusable engines.
+- T1-auth-scaffold — `generate_auth` (`AuthCodeGenerator`).
+
+**Completed this session (real, tested, wired, merged/CI):**
+- **A1 #1326** — filled the genuine gap: symbol-level `references` (where-used/who-calls) — a reference index
+  in WorkspaceMemory + `codeGraph.referencesOf` + `code_graph query="references"`.
+- **GA-15 #1329** — `IaCGenerator` + `generate_iac`: K8s manifests + Helm chart + Cloud Run Terraform.
+- **GA-13 #1330** — `VulnScanner` + `scan_vulnerabilities`: OSV.dev CVE scan, honest "unavailable" never a
+  fake all-clear.
+- **GA-10 #1331** — `MigrationPlanner` + `run_migrations`: detect the migration tool + apply the schema in the
+  sandbox with honest real-exit-code reporting.
+
+**OPEN ROOT CAUSES — genuinely infra-blocked (rule 6, NOT faked):**
+- **GA-2 (runtime supervisor + job queue):** a real supervisor for zombie sandbox processes must run
+  OUT-OF-PROCESS (a separate deployed worker/queue) — the roadmap's own Tier-4/V4-4 gate. An in-process
+  "supervisor" that doesn't actually supervise would be a fake (rule 2). Needs deployment infra to build+verify.
+- **T1-db-provision-ui (one-click Supabase/Neon):** needs an external provisioning BROKER (provider management
+  API + user OAuth) + credentials. Without it a "Provision" button cannot actually provision, so it can only
+  ship as an honest "not available / connect your provider" state, not a working feature. Needs the broker infra.
+
+Honest tally reported to the admin: 8/10 done, 2/10 infra-blocked — no "sab done" claim.

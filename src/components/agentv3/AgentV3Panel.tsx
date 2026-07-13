@@ -135,8 +135,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setReverting(false);
     }
   }, [state.ownRepo, reverting, revertLastMerge, userId, email]);
-  // Power level (admin UI redesign 2026-07-12): weak (free tier, GLM/Kimi) / off="Normal" (Sonnet) /
-  // mini="Strong" (Opus low) / medium="Powerful" (Opus high) / max="Full Team" (Opus max). A FREE user
+  // Power level (admin tier→model redefinition 2026-07-13): weak (free tier, GLM/Kimi — never Claude) /
+  // off="Normal" (Sonnet, adaptive) / mini="Strong" (Sonnet 100%) / medium="Powerful" (Opus medium
+  // effort) / max="Full Team" (Opus max — ultracode). A FREE user
   // (server `powerUnlocked:false`) may pick ONLY 'weak'; a paid/free-list user gets all five, default Normal.
   // The server clamps free→weak regardless, so this is purely presentation.
   const [powerUnlocked, setPowerUnlocked] = useState<boolean>(false); // false until /status confirms paid
@@ -2608,8 +2609,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-1.5 space-y-0.5">
                       <ToggleRow label="Planning" hint="Plan-first: the AI writes a step-by-step plan and waits for your approval before building" checked={planFirst} disabled={running} onClick={() => setPlanFirst((v) => !v)} />
                       <ToggleRow label="Thinking" hint="Deeper reasoning on build/edit/plan turns — a live reasoning summary streams in the chat (plain chat replies stay instant)" checked={thinking} disabled={running} onClick={() => setThinking((v) => !v)} />
-                      {/* Power tiers (admin final spec 2026-07-12): Weak (free — GLM/Kimi) / Normal (Sonnet)
-                          / Strong (Opus low) / Powerful (Opus high) / Full Team (Opus max). ALL FIVE are
+                      {/* Power tiers (admin tier→model redefinition 2026-07-13): Weak (free — GLM/Kimi, never
+                          Claude) / Normal (Sonnet, adaptive) / Strong (Sonnet 100%) / Powerful (Opus medium
+                          effort) / Full Team (Opus max — ultracode). ALL FIVE are
                           always VISIBLE; a FREE user (powerUnlocked=false) sees the paid four LOCKED (🔒,
                           not selectable) until they recharge — and the server clamps free→weak regardless,
                           so a UI/API bypass can never reach a paid engine. Paid default = Normal. */}
@@ -2653,9 +2655,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                             : powerLevel === 'off'
                             ? 'Normal — balanced (Sonnet)'
                             : powerLevel === 'mini'
-                            ? 'Opus · low effort'
+                            ? 'Sonnet · 100%'
                             : powerLevel === 'medium'
-                            ? 'Opus · high effort'
+                            ? 'Opus · medium effort'
                             : 'Opus · ultracode (max effort)'}
                           {!powerUnlocked && ' · 🔒 recharge (any amount) to unlock all tiers'}
                         </div>

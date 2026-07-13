@@ -10,10 +10,9 @@
 // naturally; the multiplier stays 2× at EVERY power level. Margin is structurally positive in every tier
 // (billed ≥ real cost). Rates are env-overridable so ops can track live Anthropic prices without a deploy.
 //
-// Mode → tier mapping: the engine currently reports a power LEVEL, not per-model token counts, so
-// billedAmountUsd() maps Power OFF → CHEAP tier (normal builds run on the cheap-floor models) and any
-// Power level → OPUS. The SONNET tier (× 3) is applied by billedForTier() where the actual model is
-// known — used once per-model token accounting lands (follow-up).
+// Mode → tier mapping (admin tier→model redefinition 2026-07-13): billedAmountUsd() maps
+// weak/off → CHEAP, 'mini' (Strong, pins Sonnet 100%) → SONNET (× 3), and 'medium'/'max'
+// (the real Opus tiers) → OPUS (× 2). Billing always follows the model the tier pins.
 
 /** CHEAP/normal-tier markup: Sonnet-equivalent cost × 1.2 (Haiku/GLM/Grok/Gemini/Vertex work). */
 export const NORMAL_MULTIPLIER = 1.2;
@@ -93,15 +92,19 @@ export function billedForTier(usage: BilledUsage, tier: BillingTier): number {
 
 /**
  * The USD amount to bill the user, keyed by the request's power LEVEL (what the engine currently
- * reports). Power OFF → CHEAP tier (Sonnet-equivalent × 1.2 — normal builds run on cheap-floor models);
- * any power level ('mini'/'medium'/'max') or the legacy boolean `true` → OPUS tier (real Opus × 2, flat
- * at every level — the effort selector only changes how many real tokens are spent). The per-model
- * SONNET tier (× 3) is reached via billedForTier() once per-model token accounting is wired.
+ * reports). Admin tier→model redefinition (2026-07-13) — billing follows the model the tier actually
+ * PINS, never a different model's rates:
+ *   'weak'/'off'/false → CHEAP tier (Sonnet-equivalent × 1.2 — normal builds run on cheap-floor models)
+ *   'mini' (Strong)    → SONNET tier (Sonnet-equivalent × 3 — Strong pins Sonnet 100%, so charging the
+ *                        old "real Opus × 2" would bill Opus rates for Sonnet work: dishonest + ~3×
+ *                        overcharge on input tokens)
+ *   'medium'/'max'/true → OPUS tier (real Opus × 2, flat — effort only changes real tokens spent)
  */
 export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
-  // 'weak' (free tier, GLM/Kimi) bills at the CHEAP tier exactly like 'off'/normal — the difference is
-  // routing (weak = cheap-floor only), not price. Any Opus power level → opus tier.
-  const tier: BillingTier = (power === false || power === 'off' || power === 'weak') ? 'cheap' : 'opus';
+  const tier: BillingTier =
+    (power === false || power === 'off' || power === 'weak') ? 'cheap'
+    : power === 'mini' ? 'sonnet'
+    : 'opus';
   return billedForTier(usage, tier);
 }
 

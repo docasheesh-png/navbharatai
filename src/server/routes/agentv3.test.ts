@@ -756,6 +756,14 @@ describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, 
     expect(selectBuildModel('gemini', true)).toBe(opusModel());
     expect(selectBuildModel('sonnet', true)).toBe(opusModel());
   });
+  it('tier→model fidelity (admin 2026-07-13): Strong pins Sonnet, Powerful/Full Team pin Opus — regardless of analyser tier', () => {
+    expect(selectBuildModel('gemini', 'mini')).toBe(sonnetModel());  // Strong = Sonnet 100%, never Opus
+    expect(selectBuildModel('opus', 'mini')).toBe(sonnetModel());
+    expect(selectBuildModel('gemini', 'medium')).toBe(opusModel());
+    expect(selectBuildModel('haiku', 'max')).toBe(opusModel());
+    expect(selectBuildModel('gemini', 'weak')).toBe(haikuModel());   // weak/off keep the adaptive routing
+    expect(selectBuildModel('gemini', 'off')).toBe(haikuModel());
+  });
   it('maps real analyser verdicts: a calculator stays cheap (Haiku), an auth+DB app uses Sonnet', () => {
     const calc = analyzeRequest({ prompt: 'build me a calculator' });
     expect(selectBuildModel(calc.startTier, false)).toBe(haikuModel());

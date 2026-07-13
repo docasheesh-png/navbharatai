@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileImportExports, reconcileAndReanalyze, addMissingProjectImports } from './ImportExportReconcile';
+import { reconcileImportExports, reconcileAndReanalyze, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 
 describe('reconcileImportExports — the reported bug (named import of a default export)', () => {
   it('rewrites `import { App } from "./App"` to a default import when App is the default export', async () => {
@@ -191,5 +191,94 @@ describe('addMissingProjectImports — the jungle-game bug (uses a shared const 
     const files = { 'src/broken.tsx': 'const <<< =', 'src/c.ts': 'export const X = 1;' };
     const r = await addMissingProjectImports(files);
     expect(Array.isArray(r.added)).toBe(true);
+  });
+})
+
+describe('fixWrongSourceImports — a named import pointing at the WRONG module (Kanban build 2026-07-13)', () => {
+  it('rewrites the import source when the symbol lives in exactly one OTHER module', async () => {
+    const r = await fixWrongSourceImports({
+      'src/utils/dateUtils.ts': `export function formatDate(d: Date) { return d.toISOString(); }`,
+      'src/utils/formatters.ts': `export function formatDueDate(d: Date) { return d.toDateString(); }`,
+      'src/components/Card.tsx': `import { formatDueDate } from '../utils/dateUtils';\nexport const Card = () => formatDueDate(new Date());`,
+    });
+    expect(r.fixes).toHaveLength(1);
+    expect(r.fixes[0]).toMatchObject({ name: 'formatDueDate', file: 'src/components/Card.tsx' });
+    const out = r.files['src/components/Card.tsx'];
+    expect(out).toContain('formatDueDate'); // still imported…
+    expect(out).toContain('../utils/formatters'); // …but now from the RIGHT module
+    expect(out).not.toMatch(/import\s*\{\s*formatDueDate\s*\}\s*from\s*['"]\.\.\/utils\/dateUtils['"]/); // not the wrong one
+  });
+
+  it('moves ONLY the wrong name out of a multi-name import; the correctly-sourced name stays put', async () => {
+    const r = await fixWrongSourceImports({
+      'src/utils/dateUtils.ts': `export function formatDate(d: Date) { return ''; }`,
+      'src/utils/formatters.ts': `export function formatDueDate(d: Date) { return ''; }`,
+      'src/components/Card.tsx': `import { formatDate, formatDueDate } from '../utils/dateUtils';\nexport const Card = () => formatDate(new Date()) + formatDueDate(new Date());`,
+    });
+    expect(r.fixes).toHaveLength(1);
+    const out = r.files['src/components/Card.tsx'];
+    expect(out).toMatch(/import\s*\{\s*formatDate\s*\}\s*from\s*['"]\.\.\/utils\/dateUtils['"]/); // formatDate stays on dateUtils
+    expect(out).toMatch(/formatDueDate.*from\s*['"]\.\.\/utils\/formatters['"]/); // formatDueDate moved to formatters
+  });
+
+  it('preserves a local alias when moving the import', async () => {
+    const r = await fixWrongSourceImports({
+      'src/a.ts': `export const realThing = 1;`,
+      'src/wrong.ts': `export const other = 2;`,
+      'src/use.ts': `import { realThing as rt } from './wrong';\nexport const y = rt;`,
+    });
+    expect(r.fixes).toHaveLength(1);
+    expect(r.fixes[0].alias).toBe('rt');
+    expect(r.files['src/use.ts']).toMatch(/realThing as rt.*from\s*['"]\.\/a['"]/);
+  });
+
+  it('does NOT act when the name is exported by 2+ modules (ambiguous → never guess)', async () => {
+    const r = await fixWrongSourceImports({
+      'src/a.ts': `export const DUP = 1;`,
+      'src/b.ts': `export const DUP = 2;`,
+      'src/wrong.ts': `export const filler = 0;`,
+      'src/use.ts': `import { DUP } from './wrong';\nexport const y = DUP;`,
+    });
+    expect(r.fixes).toHaveLength(0);
+    expect(r.files['src/use.ts']).toContain("from './wrong'"); // untouched
+  });
+
+  it('does NOT act when the name is exported NOWHERE (genuinely missing → the LLM must add it)', async () => {
+    const r = await fixWrongSourceImports({
+      'src/types.ts': `export interface Board { id: string }`,
+      'src/BoardView.tsx': `import { ID } from './types';\nexport const v: ID = '1' as any;`,
+    });
+    expect(r.fixes).toHaveLength(0);
+  });
+
+  it('does NOT act when the current module already exports the name (correct source, left alone)', async () => {
+    const r = await fixWrongSourceImports({
+      'src/a.ts': `export const X = 1;`,
+      'src/use.ts': `import { X } from './a';\nexport const y = X;`,
+    });
+    expect(r.fixes).toHaveLength(0);
+  });
+
+  it('stays out when the target uses a wildcard re-export (`export *` — the name could be there)', async () => {
+    const r = await fixWrongSourceImports({
+      'src/real.ts': `export const thing = 1;`,
+      'src/barrel.ts': `export * from './real';`, // barrel MIGHT surface `thing`
+      'src/use.ts': `import { thing } from './barrel';\nexport const y = thing;`,
+    });
+    expect(r.fixes).toHaveLength(0); // conservative — don't rewrite past a wildcard
+  });
+
+  it('never touches a default or namespace import', async () => {
+    const r = await fixWrongSourceImports({
+      'src/a.ts': `const A = 1; export default A;`,
+      'src/other.ts': `export const A = 9;`,
+      'src/use.ts': `import A from './a';\nimport * as NS from './a';\nexport const y = A + (NS as any).x;`,
+    });
+    expect(r.fixes).toHaveLength(0);
+  });
+
+  it('never throws on unparseable content', async () => {
+    const r = await fixWrongSourceImports({ 'src/broken.tsx': 'import { <<< } from', 'src/c.ts': 'export const X = 1;' });
+    expect(Array.isArray(r.fixes)).toBe(true);
   });
 })

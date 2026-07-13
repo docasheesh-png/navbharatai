@@ -17,7 +17,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
-import { reconcileImportExports, addMissingProjectImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 
@@ -501,10 +501,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
           const recd = await reconcileImportExports(before);
           const addd = await addMissingProjectImports(recd.files);
-          const changes = recd.fixes.length + addd.added.length;
+          // (3) re-point a NAMED import at the correct module when the symbol lives in exactly one OTHER
+          // module (Kanban build 2026-07-13 — the wrong source file). Unique-owner only; never a guess.
+          const wrong = await fixWrongSourceImports(addd.files);
+          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length;
           if (changes > 0) {
-            for (const f of written) { const nc = addd.files[f.path]; if (typeof nc === 'string') f.content = nc; }
-            deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind or forgotten import) before preview.`);
+            for (const f of written) { const nc = wrong.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind, forgotten, or wrong-source) before preview.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }

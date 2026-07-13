@@ -99,6 +99,7 @@ import {
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
 import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
+import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -6308,6 +6309,24 @@ export function registerAgentV3Routes(app: Express): void {
                 missing = findMissing(); // re-check: CSS modules now resolve — only the hard files remain for the LLM pass
               }
             } catch { /* deterministic CSS gen is best-effort — the LLM pass below still handles them */ }
+          }
+          // DETERMINISTIC BARREL (index) GENERATION (Kanban autopsy 2026-07-13): a folder-barrel import
+          // (`import { Icon } from '.../Icons'`) whose leaf files already export the names but whose index
+          // was never written is 100% generatable — re-export each name from its unique leaf, no LLM step.
+          // Runs before the repair pass so the budget goes to real gaps. Kill: AGENTV3_BARREL_GEN=off.
+          if (missing.length > 0 && process.env.AGENTV3_BARREL_GEN !== 'off') {
+            try {
+              const fileMapForBarrel: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...Object.fromEntries(writtenFiles) };
+              const barrels = await generateMissingBarrels(fileMapForBarrel);
+              if (barrels.length > 0) {
+                for (let i = 0; i < barrels.length; i++) {
+                  await dispatcher.dispatch({ id: `barrel-w${i}`, name: 'write_file', input: { path: barrels[i].path, content: barrels[i].content } }, 'frontend');
+                }
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'BARRELS_GENERATED', message: `${barrels.length} missing barrel(s) generated deterministically from existing leaf modules (no repair step spent): ${barrels.map((b) => b.path).join(', ')}`, autoResolved: true });
+                events.emit({ type: 'narration', agent: 'architect', text: `📦 Generated ${barrels.length} missing index barrel(s) re-exporting existing modules.`, ts: Date.now() });
+                missing = findMissing(); // re-check: barrels now resolve — only the hard files remain
+              }
+            } catch { /* deterministic barrel gen is best-effort — the LLM pass below still handles them */ }
           }
           if (missing.length > 0) {
             // Split mispaths (the module EXISTS at existsAt — fix the import) from truly-missing (create it).

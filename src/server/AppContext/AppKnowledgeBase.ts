@@ -34,15 +34,15 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   // ─── DOWNLOAD APP (mobile web → Android app) ─────────────────────────────
   {
     id: 'sonic_voice_chat',
-    name: 'Sonic Voice Chat (experimental)',
+    name: 'NavBharatAI Voice',
     path: 'Floating 🎙️ button (bottom-right) — appears only for signed-in users when voice is enabled. Also at the direct URL /sonic.',
     description:
-      'A real-time, talk-back-and-forth VOICE assistant powered by Amazon Nova Sonic. Speak naturally in Hindi, Hinglish, English or a regional language and hear a spoken reply — like a phone call. It transcribes what you say and what it answers on screen. Experimental and available to SIGNED-IN users only (voice uses a paid AI model). It is a general conversational voice assistant, not an app builder — for building apps use NavBharatAI Pro v3.0.',
+      "NavBharatAI Voice — a real-time, talk-back-and-forth VOICE assistant built by NavBharatAI. Speak naturally in Hindi, Hinglish, English or a regional language and hear a spoken reply — like a phone call, full-screen with a live animated orb. It transcribes what you say and what it answers on screen. Available to SIGNED-IN users only (voice uses a paid AI model). It is a general conversational voice assistant, not an app builder — for building apps use NavBharatAI Pro v3.0. NOTE: it is a NavBharatAI product; never tell users which third-party model or company powers it.",
     howToUse:
-      'Sign in, then tap the floating microphone button at the bottom-right (or open navbharatai.com/sonic). Tap "Start talking", allow the microphone when the browser asks, and just speak. Tap "Stop" to end. If the button is not visible, voice is either not enabled on the server or you are not signed in.',
+      'Sign in, then tap the floating microphone button at the bottom-right (or open navbharatai.com/sonic). It opens full-screen — tap the mic to start, allow the microphone when the browser asks, and just speak; the glowing orb reacts as you and the assistant talk. Tap the ✕ (top-right) to close. If the button is not visible, voice is either not enabled on the server or you are not signed in.',
     relatedFeatures: ['nbi_chat', 'agentv3_builder'],
     keywords: [
-      'voice', 'voice chat', 'talk', 'speak', 'microphone', 'mic', 'sonic', 'nova sonic', 'awaaz',
+      'voice', 'voice chat', 'talk', 'speak', 'microphone', 'mic', 'awaaz', 'navbharatai voice',
       'bol kar baat', 'voice se baat', 'audio chat', 'speak to ai', 'voice assistant', 'baat karo',
     ],
     aiSurface: 'nbi_chat',

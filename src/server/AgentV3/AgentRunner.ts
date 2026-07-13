@@ -44,6 +44,13 @@ export interface AgentRunnerOptions {
   powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max';
   /** Opus reasoning effort (output_config.effort) for every turn. Omitted → model default. */
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /**
+   * Full Team mid-build steering (Fix 60, admin 2026-07-13). Polled at every step boundary; returns
+   * (and drains) the user messages sent WHILE the build runs. Each is injected as a REAL user turn so
+   * the very next model call acts on it — the Claude-Code-style "talk to the team while it builds".
+   * The route wires this only for the FULL TEAM ('max') tier; omitted elsewhere (no behavior change).
+   */
+  steerPoll?: () => string[];
   /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */
   thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
@@ -371,6 +378,15 @@ export class AgentRunner {
           await persist(builtSomething ? 'complete' : 'stopped');
           events.emit({ type: 'done', ok: builtSomething, summary, ts: Date.now() });
           return { ok: builtSomething, summary, steps, usage, billedUsd: billed() };
+        }
+
+        // Full Team mid-build steering (Fix 60): drain the messages the user sent while the team was
+        // working and inject each as a REAL user turn, so this very model call acts on them. The
+        // narration ack is the honest "picked up" signal (the route already acked "queued" instantly).
+        const steered = this.opts.steerPoll?.() ?? [];
+        for (const sm of steered) {
+          messages.push({ role: 'user', content: `[USER MESSAGE — sent live during the build. Fold this into the current work without discarding progress.]\n${sm}` });
+          events.emit({ type: 'narration', agent: agentRole, text: `📨 The team picked up your message: “${sm.slice(0, 160)}${sm.length > 160 ? '…' : ''}”`, ts: Date.now() });
         }
 
         // A unique id for this turn — ties the streamed deltas to their final

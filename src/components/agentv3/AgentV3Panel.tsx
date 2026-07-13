@@ -29,6 +29,7 @@ import { deliverTextFile } from '../../lib/downloadFile';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
 import { db, sanitizeFirestoreData, auth } from '../../App';
 
 /** Best-effort Firebase ID-token header so the server can verify workspace ownership (IDOR guard).
@@ -207,6 +208,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
+  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build starts; ticks every
+  // second while the premium card is visible. Reset when the build ends so the next starts at 0s.
+  const buildStartRef = useRef<number>(0);
+  const [teamElapsedMs, setTeamElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!running) { buildStartRef.current = 0; setTeamElapsedMs(0); return; }
+    if (buildStartRef.current === 0) buildStartRef.current = Date.now();
+    if (powerLevel !== 'max') return;
+    const t = setInterval(() => setTeamElapsedMs(Date.now() - buildStartRef.current), 1000);
+    return () => clearInterval(t);
+  }, [running, powerLevel]);
   // Touch-primary devices (phones) → Enter inserts a newline; only the Send button sends. A laptop
   // (fine pointer / physical keyboard) → Enter sends. Reactive to device/orientation changes.
   const [isTouchDevice, setIsTouchDevice] = useState(false);
@@ -833,6 +845,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
       chatRole: chatMode === 'build' ? undefined : chatMode,
     });
+  };
+
+  // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
+  // LIVE during a build — a sent message is queued server-side (/steer) and the AgentRunner injects
+  // it as a real user turn at the next step boundary, Claude-Code style. The user's bubble appears
+  // instantly; the server's "queued" + the runner's "picked up" narrations confirm honestly.
+  const sendSteer = async () => {
+    const text = prompt.trim();
+    if (!text || !canSteerMidBuild(running, powerLevel, chatMode)) return;
+    setUserMsgs((c) => [...c, { role: 'user', text, ts: Date.now() }]);
+    setPrompt('');
+    setComposerExpanded(false);
+    try {
+      const res = await fetch('/api/agentv3/steer', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId, email, workspaceId: state.workspaceId ?? null, message: text }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as { error?: string }));
+        // Honest failure: the message did NOT reach the team (e.g. the build just finished). Keep the
+        // user's bubble (it's their words) and say exactly what happened next to it.
+        setUserMsgs((c) => [...c, { role: 'agent', text: `⚠️ ${data?.error || 'Your message could not reach the team — the build may have just finished. Send it again as a normal message.'}`, ts: Date.now() }]);
+      }
+    } catch {
+      setUserMsgs((c) => [...c, { role: 'agent', text: '⚠️ Network error — your message did not reach the team. Send it again.', ts: Date.now() }]);
+    }
   };
 
   // PLAN / ADVISE send (read-only lanes) — a DEDICATED request, decoupled from the build stream.
@@ -2537,7 +2576,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
               </div>
             )}
-            {agents.length > 0 && (
+            {/* FULL TEAM HQ (Fix 60): on the 'max' tier a live build gets the premium team card —
+                real roster, real plan progress squares, live clock, and the "message the team"
+                affordance. Lower tiers keep the plain agent-chip strip (unchanged). */}
+            {showTeamHq(running, powerLevel) ? (
+              <TeamHqCard agents={state.agents} todos={state.todos} elapsedMs={teamElapsedMs} />
+            ) : agents.length > 0 && (
               <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {agents.map((a) => <AgentChip key={a.agent} card={a} running={running} />)}
               </div>
@@ -2710,6 +2754,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       ? '🧠 Plan mode (read-only) — describe a goal; I plan it with you, then you queue it for the build…'
                       : chatMode === 'advisor'
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
+                      : canSteerMidBuild(running, powerLevel, chatMode)
+                      ? '⚡ Message the team while they build — they will act on it at the next step…'
                       : 'Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)'
                   }
                   value={prompt}
@@ -2724,27 +2770,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   onKeyDown={(e) => {
                     // U7 (audit): Esc stops a running build from the composer.
                     if (e.key === 'Escape' && running) { e.preventDefault(); stop(); return; }
+                    // Fix 60 — Full Team steering: while a 'max'-tier build runs, Enter sends the
+                    // message TO THE WORKING TEAM (never a new turn — the build lock stays untouched).
+                    const steering = canSteerMidBuild(running, powerLevel, chatMode);
                     // U7: Cmd/Ctrl+Enter ALWAYS sends — even on touch or in the expanded editor — so a
                     // finished multiline message ships without reaching for the button.
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); if (chatMode === 'build') send(); else sendRole(chatMode); return; }
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && prompt.trim()) { e.preventDefault(); if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode); return; }
                     // Laptop (physical keyboard) → Enter sends. Phone (touch) → Enter inserts a newline
                     // (send only via the button). In the expanded editor Enter always inserts a newline
                     // so a long message can be edited freely. Shift+Enter is always a newline.
                     if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && !composerExpanded) {
                       e.preventDefault();
-                      if (chatMode === 'build') send(); else sendRole(chatMode);
+                      if (steering) sendSteer(); else if (chatMode === 'build') send(); else sendRole(chatMode);
                     }
                   }}
                 />
-                {/* Expand / minimize the composer so a long message can be read & edited. */}
-                <button
-                  type="button"
-                  onClick={() => setComposerExpanded((v) => !v)}
-                  title={composerExpanded ? 'Minimize' : 'Expand'}
-                  className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
-                >
-                  {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </button>
+                {/* Expand / minimize the composer so a long message can be read & edited.
+                    Hidden while Full Team steering is live — Stop takes this slot then (Fix 60). */}
+                {!canSteerMidBuild(running, powerLevel, chatMode) && (
+                  <button
+                    type="button"
+                    onClick={() => setComposerExpanded((v) => !v)}
+                    title={composerExpanded ? 'Minimize' : 'Expand'}
+                    className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                  >
+                    {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                  </button>
+                )}
                 {chatMode !== 'build' ? (
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
@@ -2752,6 +2804,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     {roleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </button>
+                ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
+                  // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
+                  // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
+                  <>
+                    <button onClick={stop} title="Stop the build" className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
+                      <Square className="w-4 h-4" />
+                    </button>
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </>
                 ) : running ? (
                   <button onClick={stop} title="Stop" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
                     <Square className="w-4 h-4" />
@@ -3563,6 +3626,62 @@ function TodoList({ todos, hideHeader }: { todos: TodoItem[]; hideHeader?: boole
   );
 }
 
+
+/**
+ * FULL TEAM HQ (Fix 60) — the 'max' tier's premium live-team card, shown above the composer while
+ * a build runs. Everything on it is REAL engine state (admin rule: no scripted animation):
+ *   • roster = the Architect + every spawned specialist (agent_spawned/agent_done events),
+ *   • the working pulse = each agent's live `active` flag,
+ *   • progress squares = the REAL plan (todos done / in-progress / pending),
+ *   • the clock = real elapsed wall time.
+ * Visual language mirrors the Claude-Code background-task card (name · N agents · elapsed · squares).
+ */
+function TeamHqCard({ agents, todos, elapsedMs }: { agents: Record<string, AgentCard>; todos: TodoItem[]; elapsedMs: number }) {
+  const m = teamHqModel(agents, todos);
+  const squares = m.progress.total > 0 ? todos.slice(0, 24) : [];
+  return (
+    <div className="mx-2 mt-2 rounded-xl p-[1px] bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 shadow-[0_0_18px_rgba(129,80,255,0.25)]">
+      <div className="rounded-[11px] bg-zinc-950/95 px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-bold tracking-wide">
+            <span className="bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">⚡ FULL TEAM</span>
+            <span className="text-zinc-500 font-normal">
+              {m.roster.length > 0 ? `${m.roster.length} agent${m.roster.length > 1 ? 's' : ''}` : 'assembling…'}
+              {m.activeCount > 0 && ` · ${m.activeCount} working`}
+            </span>
+          </span>
+          <span className="text-[11px] font-mono text-zinc-400 tabular-nums">{formatElapsed(elapsedMs)}</span>
+        </div>
+        {squares.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-[3px]" title={`Plan: ${m.progress.done}/${m.progress.total} steps done`}>
+            {squares.map((t) => (
+              <span
+                key={t.id}
+                className={`h-2 w-2 rounded-[2px] ${
+                  t.status === 'done' ? 'bg-emerald-500'
+                  : t.status === 'in_progress' ? 'bg-indigo-400 animate-pulse'
+                  : 'bg-zinc-700'
+                }`}
+              />
+            ))}
+            <span className="ml-1.5 text-[10px] text-zinc-500 tabular-nums">{m.progress.done}/{m.progress.total}</span>
+          </div>
+        )}
+        {m.roster.length > 0 && (
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
+            {m.roster.map((a) => (
+              <span key={a.agent} title={a.lastAction} className={`flex items-center gap-1 shrink-0 text-[10px] rounded-full px-2 py-0.5 border ${a.active ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-200' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${a.active ? 'bg-indigo-400 animate-pulse' : 'bg-emerald-500'}`} />
+                <span className="capitalize font-medium">{a.agent}</span>
+                <span className="max-w-[120px] truncate text-zinc-500">{a.lastAction}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AgentChip({ card, running }: { card: AgentCard; running: boolean }) {
   // While the build is running, every team member shows a spinning ring (work in

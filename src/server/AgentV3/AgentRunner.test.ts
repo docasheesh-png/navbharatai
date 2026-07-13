@@ -773,3 +773,54 @@ describe('AgentRunner — E4 hard timeouts (no hung call blocks the build)', () 
     expect(result.steps).toBe(2);
   });
 });
+
+describe('AgentRunner — Full Team mid-build steering (Fix 60)', () => {
+  it('drains steerPoll at the step boundary: injects the message as a REAL user turn + emits the pickup ack', async () => {
+    // Capture every model call's messages so we can PROVE the steered text reached the model.
+    const seenCalls: Array<Array<{ role: string; content: unknown }>> = [];
+    const client = new ClaudeClient({
+      messages: {
+        create: async (args: { messages: Array<{ role: string; content: unknown }> }) => {
+          seenCalls.push(args.messages);
+          return { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' } as never;
+        },
+      },
+    } as unknown as MessagesCreateClient);
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const events: AgentEvent[] = [];
+    stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const dispatcher = new ToolDispatcher(actuator, 'ws-steer', state, stream);
+    let drained = 0;
+    const runner = new AgentRunner({
+      client,
+      dispatcher,
+      state,
+      events: stream,
+      model: 'claude-opus-test',
+      system: 'You are the Architect.',
+      tools: defaultToolCatalog(),
+      maxSteps: 2,
+      // First boundary delivers one live message; afterwards the queue is empty (drained).
+      steerPoll: () => (drained++ === 0 ? ['make the header red'] : []),
+    });
+    const result = await runner.run('build a notes app');
+    expect(result.ok).toBe(true);
+    // The steered text reached the FIRST model call as a user turn (not lost, not delayed a turn).
+    const firstCall = seenCalls[0] ?? [];
+    const steeredTurn = firstCall.find((m) => m.role === 'user' && JSON.stringify(m.content).includes('make the header red'));
+    expect(steeredTurn).toBeTruthy();
+    // And the user saw the honest "picked up" ack.
+    const ack = events.find((e) => e.type === 'narration' && 'text' in e && String((e as { text: string }).text).includes('picked up your message'));
+    expect(ack).toBeTruthy();
+  });
+
+  it('no steerPoll (every non-max tier) → zero behavior change (no ack, transcript untouched)', async () => {
+    const { runner, events } = buildRunner([
+      { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' },
+    ]);
+    await runner.run('build a notes app');
+    expect(events.some((e) => e.type === 'narration' && 'text' in e && String((e as { text: string }).text).includes('picked up your message'))).toBe(false);
+  });
+});

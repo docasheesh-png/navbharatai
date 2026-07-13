@@ -831,6 +831,12 @@ export interface RunningBuild {
   subscribers: Set<BuildSubscriber>;
   ended: boolean;
   startedTs: number;
+  /** Full Team steering (Fix 60): user messages sent MID-BUILD ('max' tier only). The AgentRunner
+   *  drains this between turns and injects each as a REAL user turn, so the very next model call
+   *  acts on it — the Claude-Code-style "talk to the team while it builds" experience. */
+  steerQueue?: string[];
+  /** The build's resolved power level — gates mid-build steering to the Full Team ('max') tier. */
+  powerLevel?: string;
   /** The channel key (userId) — used to mirror events to the cross-device LiveChannel. Stays the
    *  ACCOUNT key even under per-workspace locking, so the cross-device mirror is unchanged. */
   key?: string;
@@ -1525,6 +1531,24 @@ export function planGrokEnabled(apiKey: string | undefined, disableFlag: string 
  */
 export function planRunnerChainNames(noClaude: boolean): string[] {
   return noClaude ? ['GROK'] : ['GROK', 'CLAUDE'];
+}
+
+/**
+ * Full Team mid-build steering (Fix 60) — pure gates, exported for unit tests.
+ * Steering is the FULL TEAM ('max') tier's premium capability: the gate runs on the BUILD's
+ * resolved power level (what the engine actually runs), so a hand-crafted request from a
+ * lower tier can never reach it.
+ */
+export function steerAllowedForBuild(powerLevel: string | undefined | null): boolean {
+  return powerLevel === 'max';
+}
+
+/** Normalise a steering message: trim, refuse empty/non-string, cap at 2000 chars. */
+export function sanitizeSteerMessage(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const t = raw.trim();
+  if (!t) return null;
+  return t.length > 2000 ? t.slice(0, 2000) : t;
 }
 
 function grokPlanRunner(opts?: { noClaude?: boolean }): TurnRunner | null {
@@ -2445,6 +2469,51 @@ export function registerAgentV3Routes(app: Express): void {
     }
     activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
     res.json({ stopped: wasRunning });
+  });
+
+  // ── Full Team mid-build steering (Fix 60, admin 2026-07-13) ──
+  // The Claude-Code-style "message the team while it builds": a user on the FULL TEAM ('max') tier can
+  // send a message DURING a running build; it is queued on the RunningBuild and the AgentRunner injects
+  // it as a REAL user turn between steps, so the very next model call acts on it. Server-enforced tier
+  // gate (the premium feature can't be reached by a hand-crafted request from a lower tier), the same
+  // verified-identity matching as /stop (never the claimed body id), and rate-limited like every other
+  // workspace state change.
+  app.post('/api/agentv3/steer', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      return;
+    }
+    const message = sanitizeSteerMessage(req.body?.message);
+    if (!message) {
+      res.status(400).json({ error: 'A non-empty message is required.' });
+      return;
+    }
+    const steerWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    // SECURITY: match the running build under the VERIFIED identity (same discipline as /stop) —
+    // a caller must never be able to steer ANOTHER account's build by passing its uid.
+    const verifiedSteerUid = (await verifiedIdentity(req))?.uid ?? null;
+    const candidates = buildKeyCandidates(verifiedSteerUid, steerWorkspaceId, perWorkspaceLockEnabled());
+    for (const key of candidates) {
+      const rb = runningBuilds.get(key);
+      if (!rb || rb.ended) continue;
+      if (key === 'anon' && userId && steerWorkspaceId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, steerWorkspaceId)) continue;
+      // TIER GATE: mid-build steering is the Full Team tier's premium capability — enforced on the
+      // BUILD's resolved tier (what the engine is actually running), never the client's claim.
+      if (!steerAllowedForBuild(rb.powerLevel)) {
+        res.status(403).json({ error: 'Mid-build team messages are a Full Team tier feature. Switch to Full Team before starting the build.', code: 'FULL_TEAM_ONLY' });
+        return;
+      }
+      (rb.steerQueue ??= []).push(message);
+      // Instant, honest feedback to EVERY attached device: the message is queued (the runner emits
+      // its own "picked up" narration when it actually injects it at the next step boundary).
+      broadcastBuild(rb, { type: 'narration', agent: 'system', text: `📨 Message to the team queued — it will be picked up at the next step: “${message.slice(0, 140)}${message.length > 140 ? '…' : ''}”`, ts: Date.now() });
+      audit('AGENTV3_STEER_QUEUED', { userId, workspaceId: rb.workspaceId }, 'info');
+      res.json({ ok: true, queued: rb.steerQueue.length });
+      return;
+    }
+    res.status(404).json({ error: 'No running build to message — the team is idle. Just send normally.', code: 'NO_RUNNING_BUILD' });
   });
 
   // ── Command QUEUE (FIX #4.2): durable per-app queue the serial executor drains one at a time ──
@@ -3922,7 +3991,7 @@ export function registerAgentV3Routes(app: Express): void {
     // `key` stays the ACCOUNT key (userId ?? 'anon') for the cross-device LiveChannel (readers already
     // filter by workspaceId), while the registry Map is keyed by `buildKey` (per-workspace when enabled).
     // `userId` lets the per-account cap count this account's live builds across workspaces.
-    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId };
+    const rb: RunningBuild = { abort, buffer: [], subscribers: new Set(), ended: false, startedTs: Date.now(), key: userId ?? 'anon', userId, workspaceId: intentWorkspaceId, steerQueue: [], powerLevel: powerLevelReqEffective };
     const primary: BuildSubscriber = {
       write: (e) => { if (!res.writableEnded) res.write(JSON.stringify(e) + '\n'); },
       end: () => { if (!res.writableEnded) res.end(); },
@@ -5256,6 +5325,13 @@ export function registerAgentV3Routes(app: Express): void {
         maxBudgetUsd: maxBudgetUsdForRunner,
         maxSteps,
         toolConcurrency,
+        // Full Team mid-build steering (Fix 60): ONLY the 'max' tier drains the /steer queue — the
+        // premium capability is tier-gated at BOTH ends (the route refuses non-max queues; the runner
+        // simply has no poll elsewhere). Spread into every top-level/heal runner via baseRunnerOpts,
+        // so the team keeps listening through repair phases too.
+        ...(steerAllowedForBuild(powerLevelReqEffective)
+          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []) }
+          : {}),
         agentRole: 'architect' as const,
         signal: abort.signal,
         expectsArtifacts,

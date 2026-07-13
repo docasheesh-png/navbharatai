@@ -15666,3 +15666,45 @@ BuildDiagnostics haiku-not-a-violation.
 
 ALSO (admin): GLM KEY POOL / ROTATION recorded in ROADMAP.md (Tier 4 → Platform infra) as the future fix for
 per-key 429 saturation at scale ("isko future me karna hai — aisa roadmap me daal do").
+
+---
+
+## 2026-07-13 — Forensic autopsy: Kanban board build (NavBharatAI Pro v3.0) — 6 root-cause fixes shipped
+
+Admin ran a Kanban board build in v3.0 and sent the build-diagnostics JSON. Verdict: `ok:false`, score
+**0/100**, `TYPECHECK_FAILED`, step-limit(80) hit, model claude-sonnet-4-6. Full forensic autopsy per the
+5th absolute rule.
+
+**5-bucket ledger:** ✅ self-healed 4 (malformed npm install → clean re-install; `tsc@2.0.4` squatter →
+typescript-install recovery; GLM fail → provider fallback; GA-8 circuit-breaker fired correctly). 🔀 worked-
+around 2 (GLM 429 storm → fallback; `npx tsc` → tsc@2.0.4 squatter → recover). ⏭️ skipped 0 major.
+❌ still-broken (baseUrl imports failed type-check though the files existed; 12+ genuinely-missing
+`.module.css`/`Icons` barrel/`Button`; 4 broken NAMED imports; PREVIEW_ERROR; 0/100). 🥵 struggle 3 (GLM 429
+storm; step-limit-80 exhaustion; fast-lane missed imported local modules).
+
+**Missing subsystem:** the import/dependency RESOLUTION layer rejected the conventions LLMs actually emit,
+and the completeness gate gave wrong verdicts (told the repair to re-create files that already existed),
+wasting the bounded repair budget → step-limit exhaustion. Hardened the whole layer end-to-end:
+
+**Root-cause fixes (branch → CI green → merge, all deterministic + regression-tested):**
+- **#1305** — vite-react scaffold resolves baseUrl-"src" imports end-to-end (tsconfig `baseUrl:"src"`+`@/*`
+  paths + `vite-tsconfig-paths` plugin so tsc AND Vite agree). Fixed in BOTH scaffold copies (v3.0 +
+  Engineer AI). Locked with a REAL TypeScript-resolver test.
+- **#1306** — every executable `npx tsc` instruction → `npx --no-install tsc` (systemPrompt, crossLangCheck,
+  EngineerAgentLoop). Kills the `tsc@2.0.4` squatter/supply-chain trap; uses the project's local typescript.
+- **#1307** — MultiProviderTurnRunner benches a 429-throttled cheap-floor provider after 2 consecutive 429s
+  (symmetric with the timeout bench; success resets the streak). Stops the GLM 429 storm.
+- **#1313** — completeness gate distinguishes a MISPATH (file exists elsewhere → `existsAt`, fix the import)
+  from a truly-missing file (create it) — stops the repair writing a duplicate of an existing module.
+- **#1314** — `fixWrongSourceImports`: a NAMED import whose module doesn't export the name, when exactly one
+  OTHER module does, is re-pointed at the right source (unique-owner only; the third import-reconciler).
+- **#1315** — `applyWellKnownMissingDeps`: an undeclared npm import on the curated allowlist is deterministically
+  added to package.json so the app installs (P-PIPE reconciler item, was ❌). Paranoid allowlist-only + idempotent.
+
+**Open root causes (rule 6 — honestly recorded, NOT cosmetically patched):**
+- A NAMED import of a symbol that exists NOWHERE in the project is genuinely ambiguous to auto-fix (rule 4
+  forbids guessing) — left honestly reported for the LLM to author.
+- Whether these six fixes let the repair finish inside the step-limit-80 is MEASUREMENT-GATED: needs a
+  re-run of the same Kanban build to compare. No further build-loop change should be made from guesses.
+- GLM per-key 429 saturation at scale → key-pool/rotation, already recorded in ROADMAP.md (Tier 4) by a
+  parallel session as the future infra fix (#1307's bench is the per-build mitigation).

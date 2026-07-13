@@ -15034,3 +15034,18 @@ Session tally: 7 gap-closing builds shipped + 2 doc records (#1260–#1267). Rem
 either the architectural big-gaps (agentic-loop-as-norm, Project Mode ceiling, mandatory tests-green gate,
 extensibility) — admin-directed per safeguard #3 — or lower-value niche checks; flagged honestly rather
 than padded.
+
+## 2026-07-13 — Autonomous gap-closing: build 8 (#1269) + honest stop
+
+- **#1269 — GA-3 misplaced dev-tools.** `detectMisplacedDevTools`: a build-only tool (vite/eslint/webpack/
+  vitest/…) or any `@types/*` declared in `dependencies` instead of `devDependencies` ships dev tooling into
+  the production install (bloat + attack surface, no runtime benefit). The `unused` check deliberately skips
+  these implicit names, so it was invisible. Curated/conservative set, low severity, "move to devDependencies"
+  suggestion; runtime libs never touched. +6 tests. The pre-existing "unused" test narrowed to kind==='unused'.
+
+Session close (8 gap-closing builds + 3 doc records, #1260–#1269): the clearly-safe, high-value, distinct
+ledger items are now closed. Honest call per the anti-sycophancy rule — further pure micro-analyzers are
+diminishing returns, and the remaining real value is the architectural BIG-gaps (agentic-loop-as-norm,
+Project Mode ceiling, mandatory tests-green gate, extensibility surface, cheap-model tool-use fidelity),
+which carry live-app breakage risk and per safeguard #3 must be admin-directed with a plan first — not
+shipped blind. Stopped here and handed the direction choice back to the admin rather than padding the count.

@@ -826,15 +826,22 @@ describe('ToolDispatcher — evaluate integration (new dimensions)', () => {
   const write = (dd: ToolDispatcher, path: string, content: string) =>
     dd.dispatch(call('write_file', { path, content }));
 
-  it('flags a secret leak (.env not gitignored) and blocks readiness', async () => {
-    const dd = makeDispatcher('ws-eval-leak-1');
+  it('AUTO-HEALS a secret leak (.env not gitignored) — writes .gitignore, no longer blocks (App #7/#8)', async () => {
+    // Deep-test regression: evaluate used to only DETECT the leak and block at 0/100,
+    // so the same blocker recurred every build. Now it deterministically heals .gitignore
+    // to cover .env, and the leak clears in the same pass.
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    const dd = new ToolDispatcher(a, 'ws-eval-leak-1', new WorkspaceState(s), s);
     await write(dd, '.env', 'API_KEY=secret123');
     await write(dd, '.gitignore', 'node_modules/\ndist/');
     await write(dd, 'src/App.tsx', 'export const App = () => null;');
     const out = await evalText(dd);
-    expect(out).toContain('Secret leak');
-    expect(out).toContain('not covered by .gitignore');
-    expect(out).toContain('NOT READY');
+    // the .gitignore on disk now covers .env …
+    expect(a.files.get('.gitignore')).toContain('.env');
+    expect(a.files.get('.gitignore')).toContain('node_modules/'); // original rules preserved
+    // … and the readiness output no longer reports the leak as a blocker.
+    expect(out).not.toContain('not covered by .gitignore');
   });
 
   it('passes the secret-leak check when .env is gitignored', async () => {

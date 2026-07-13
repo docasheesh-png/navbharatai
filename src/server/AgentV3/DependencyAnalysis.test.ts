@@ -7,6 +7,7 @@ import {
   detectTypesMajorMismatch,
   detectUnpinnedGitDeps,
   detectSiblingMajorSkew,
+  detectMisplacedDevTools,
 } from './DependencyAnalysis';
 
 describe('normalizeImportToPackage', () => {
@@ -70,10 +71,11 @@ describe('analyzeDependencies', () => {
     const unused = issues.find((x) => x.kind === 'unused' && x.package === 'left-pad');
     expect(unused).toBeTruthy();
     expect(unused!.severity).toBe('low');
-    // Implicit toolchain + @types/* are never flagged unused.
-    expect(issues.some((x) => x.package === 'typescript')).toBe(false);
-    expect(issues.some((x) => x.package === '@types/node')).toBe(false);
-    expect(issues.some((x) => x.package === 'eslint')).toBe(false);
+    // Implicit toolchain + @types/* are never flagged UNUSED (they may still be flagged by other
+    // checks, e.g. misplaced-dev-tool for a build tool sitting in dependencies — see that suite).
+    expect(issues.some((x) => x.kind === 'unused' && x.package === 'typescript')).toBe(false);
+    expect(issues.some((x) => x.kind === 'unused' && x.package === '@types/node')).toBe(false);
+    expect(issues.some((x) => x.kind === 'unused' && x.package === 'eslint')).toBe(false);
   });
 
   it('only considers dependencies (not dev/peer/optional) for unused', () => {
@@ -522,5 +524,52 @@ describe('detectSiblingMajorSkew (GA-3 — sibling packages that must share a ma
     expect(detectSiblingMajorSkew(null)).toEqual([]);
     expect(detectSiblingMajorSkew('{ not json')).toEqual([]);
     expect(detectSiblingMajorSkew('[]')).toEqual([]);
+  });
+});
+
+describe('detectMisplacedDevTools (GA-3 — build-only/type-only packages in dependencies)', () => {
+  const pkg = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it('flags a build-only tool in dependencies (low) with a move suggestion', () => {
+    const issues = detectMisplacedDevTools(pkg({ dependencies: { react: '^18.0.0', vite: '^5.0.0' } }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].kind).toBe('misplaced-dev-tool');
+    expect(issues[0].package).toBe('vite');
+    expect(issues[0].severity).toBe('low');
+    expect(issues[0].detail).toContain('build-only tool');
+    expect(issues[0].suggestion).toBe('Move "vite" from dependencies to devDependencies.');
+  });
+
+  it('flags any @types/* in dependencies as a type-only package', () => {
+    const issues = detectMisplacedDevTools(pkg({ dependencies: { '@types/react': '^18.0.0' } }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].detail).toContain('type-only package');
+    expect(issues[0].suggestion).toBe('Move "@types/react" from dependencies to devDependencies.');
+  });
+
+  it('does NOT flag a build tool correctly placed in devDependencies', () => {
+    expect(detectMisplacedDevTools(pkg({
+      dependencies: { react: '^18.0.0' },
+      devDependencies: { vite: '^5.0.0', '@types/react': '^18.0.0', eslint: '^9.0.0' },
+    }))).toEqual([]);
+  });
+
+  it('does NOT flag ordinary runtime libraries in dependencies', () => {
+    expect(detectMisplacedDevTools(pkg({
+      dependencies: { react: '^18.0.0', axios: '^1.6.0', zustand: '^4.0.0' },
+    }))).toEqual([]);
+  });
+
+  it('is wired into analyzeDependencies (surfaces in the main scan)', () => {
+    const issues = analyzeDependencies(['react', 'vite'], pkg({
+      dependencies: { react: '^18.0.0', vite: '^5.0.0' },
+    }));
+    expect(issues.some((i) => i.kind === 'misplaced-dev-tool' && i.package === 'vite')).toBe(true);
+  });
+
+  it('returns [] for null / unparseable manifests', () => {
+    expect(detectMisplacedDevTools(null)).toEqual([]);
+    expect(detectMisplacedDevTools('{ not json')).toEqual([]);
+    expect(detectMisplacedDevTools('[]')).toEqual([]);
   });
 });

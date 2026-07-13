@@ -411,6 +411,23 @@ admin to "kick off" the next phase, never park a finished phase waiting for a no
 let CI polling stall forward progress — while one phase's CI is going green you may already
 be building the next. The cycle is a continuous conveyor, not a request-response loop.
 
+**🔵 CI RUNS IN THE BACKGROUND — NEVER BLOCK ON IT, ALWAYS ADVANCE (admin-mandated, 2026-07-13):**
+When the work is large or spans many PRs, MANY CI runs will queue up — that is expected and fine.
+Do NOT sit and watch any single CI run. The rule, every time you push:
+- **Push → then IMMEDIATELY move to the next unit of work** (investigate, design, or start the next
+  fix/phase). Never idle-wait for a check to turn green.
+- **Poll CI with a BACKGROUND timer/task, never a foreground `sleep`, never idle waiting.** A background
+  wait fires a notification when it's time to re-check; between fires you are building the next thing.
+- **Several PRs may be "in CI" at once.** That is normal for big work — the conveyor never stalls on a
+  single green check. When one goes green, merge it and keep moving; the others keep baking meanwhile.
+- **The ONLY hard wait is the merge gate itself:** CI MUST be green BEFORE you merge (never merge red).
+  But you "wait" for it by doing OTHER work + polling in the background — not by blocking. Watching a
+  progress bar is wasted time; the whole point of background CI is that your attention is elsewhere.
+- If a background CI check comes back RED, THEN it becomes the next unit of work: diagnose, fix, re-push
+  (which re-arms its background CI), and go back to advancing the next thing.
+This applies to the deep-test autopsy loop too: after pushing a root-cause fix, don't watch its CI —
+start the next autopsy / next fix, and let the background timer bring you back to merge when it's green.
+
 **The cycle (repeat for every phase):**
 
 1. **Complete the next phase** — real, fully-wired work (the two absolute rules apply:

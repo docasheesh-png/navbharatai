@@ -15909,3 +15909,50 @@ the ROADMAP ❌/⚠️ marks were badly stale. Outcome:
   ship as an honest "not available / connect your provider" state, not a working feature. Needs the broker infra.
 
 Honest tally reported to the admin: 8/10 done, 2/10 infra-blocked — no "sab done" claim.
+
+---
+
+## 2026-07-13 — Deep-test App #10 (Community Marketplace) autopsy + FIX: Prisma multi-relation + SQLite-enum guidance
+
+**Build:** WEAK / free tier (`powerLevel: weak`, `noClaude: true`, `builtBy: GLM`, providerDelivery
+GLM:106 / KIMI:13 / VERTEX:3, providerFailures GLM:43 / KIMI:6). `ok: false`, step limit (80) reached,
+readiness 0/100.
+
+**HONESTY CHECK FIRST (avoided an App #5-style false alarm):** the `llmCalls` array shows ~45
+`model: claude-sonnet-4-6` architect turns — which LOOKS like a Sonnet leak on a weak build. It is NOT.
+Per the documented App #5 lesson (`BuildDiagnostics.ts:444`), the AgentRunner stamps every llmCall with
+the NOMINAL model id regardless of which provider answered; the authoritative signal is `providerDelivery`,
+which shows **zero CLAUDE** (GLM/KIMI/VERTEX only). So `noClaude:true` is accurate and the weak-module
+rule held. Reported no violation (would have defamed a clean build).
+
+**5-bucket ledger:**
+- ✅ Self-healed: eventually fixed the Prisma schema, seed enums, and missing bcrypt after many retries;
+  tsc reached clean; 3 imports + missing deps (clsx, tailwind-merge) auto-added.
+- 🔀 Workaround: GLM 429 (43 failures) → GLM still carried 106 turns; Vertex truncated ×2.
+- ⏭️ Skipped/recurring: in-browser preview `import.meta outside a module` (3rd+ build); 8 orphan
+  components created but never wired; wildcard-CORS + 15 hardcoded-localhost warnings.
+- ❌ Still broken (0/100): **Prisma self/multi-relation schema** burned **7 `prisma generate` P1012
+  attempts** (Message.sender+receiver→User ambiguous; missing opposite relation fields) — the single
+  biggest time-sink. **seed.ts imported non-existent Prisma enums** (`ListingCategory` — SQLite has no
+  enums) → crash. **bcrypt not installed** when seed ran. Final readiness: 5 broken exports from
+  ../types, 2 undefined `<Link>` (react-router not imported), 1 Rules-of-Hooks (useId), 2 hardcoded
+  secrets in seed.ts.
+- 🥵 Struggle: hit the **80-step limit** — ~40 steps burned on Prisma trial-and-error + dep-install
+  churn (three 58s `npm install --save-dev` retries, one mangled by a stray `--host`), so it ran out of
+  budget mid-repair of the frontend import errors.
+
+**Missing subsystem:** correct-first-time Prisma schema generation for multi/self relations + the SQLite
+`enum` gotcha. The engine has no relation-aware schema help, so a messaging/marketplace model (two FKs to
+User) is trial-and-error every time.
+
+**Root-cause fix (this PR):** architect-prompt guidance — (a) two relations to the SAME model must be
+NAMED `@relation("X")` on BOTH sides with matching names; (b) every relation needs its opposite field;
+(c) SQLite does NOT support Prisma enums — use String, never `import { Enum } from '@prisma/client'`.
+Tests assert the guidance names "Ambiguous relation", "@relation", "opposite relation field", and the
+SQLite-enum rule. Gate: server tsc clean, systemPrompt 37/37.
+
+**Honestly open (not code-fixable now):** GLM 429 saturation persists (43 failures — ROADMAP Tier-4 key
+pool). The recurring in-browser-preview `import.meta` limitation for full-stack apps deserves its own fix
+(the preview harness needs to treat modules as ES modules). The 80-step limit cutting off a
+near-finished build suggests either a higher weak-tier step budget or (better) fewer wasted steps —
+this PR reduces the Prisma waste; dep-install churn is a separate future item.

@@ -25,6 +25,20 @@ describe('hand-written seed script guidance (deep-test App #8 — Prisma seed P2
   });
 });
 
+describe('Prisma relation guidance (deep-test App #10 — 7 wasted `prisma generate` attempts)', () => {
+  it('tells the architect to name two-relations-to-the-same-model and add both-side back-refs', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('Ambiguous relation');
+    expect(p).toContain('@relation');
+    expect(p).toContain('opposite relation field');
+  });
+  it('warns that SQLite does not support Prisma enums (the seed-import crash)', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('SQLite does NOT support Prisma');
+    expect(p.toLowerCase()).toContain('enum');
+  });
+});
+
 describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
   it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
     const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);

@@ -15116,3 +15116,24 @@ ALONE — NavBharatAI never spends its Claude budget on a weak build. Honesty: t
 `noClaude` now appear in every build report (billing block + rendered text) so weak-vs-normal is never
 ambiguous again. CLAUDE.md gains the 🔒 absolute rule. Tests: enforceNoClaude (4, exhaustive strip),
 full suite 6206 green.
+
+## 2026-07-13 — Deep-test App #2 (tip calculator) autopsy + observability fix
+
+App #2 (complexity ~3). Preview genuinely rendered, GLM-only (ZERO Claude — confirms App #1's Claude came
+from the integrity-heal gate, now covered by the no-Claude guard). Plan used `.tsx` (no language bug).
+BUT the per-file build FAILED (TYPECHECK_FAILED, 2/2 repairs failed) → SIMPLE_BUILD_FALLBACK → one-shot
+rebuild rescued it. Same fallback-struggle as App #1, different root. Suspected cause: plan↔contract
+mismatch — the plan listed only App.tsx while the contract declared 5 component prop-interfaces
+(ResultDisplay/SplitControl/PercentageSelector/InputField) with no matching planned files; the one-shot
+succeeded by splitting into 2 real component files.
+
+BLOCKER to root-causing: the report showed only "TYPECHECK_FAILED" — the ACTUAL compiler error text was
+never captured, so the exact cause could not be mined (rule 5). FIX (observability, shipped): SimpleBuild
+now carries `verifyErrors` (the real capped compiler error after repairs), and the route records a
+`SIMPLE_BUILD_VERIFY_ERROR` warning (first line in message, full text in detail) whenever the fast lane
+falls back on a verify failure. The NEXT tip-calc report will therefore show WHY it typecheck-failed, so
+the plan↔contract root can be fixed with evidence instead of a guess. Test: SimpleBuilder verify-fail path
+asserts verifyErrors carries the error. Gate: server tsc 0, full suite 6206 green.
+
+Open (evidence-gated, next): confirm + fix the plan↔contract coherence gap once a post-deploy report shows
+the real typecheck error.

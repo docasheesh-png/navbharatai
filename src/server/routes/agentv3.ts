@@ -5735,6 +5735,14 @@ export function registerAgentV3Routes(app: Express): void {
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
         const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off' });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
+        // failure, record the ACTUAL compiler error text so the report can be mined for the true cause
+        // (the tip-calc report showed only "TYPECHECK_FAILED" with no error → the plan↔contract mismatch
+        // was un-diagnosable). Warning severity + full message in `detail`; never blocks (the full builder
+        // still finishes the app).
+        if (!sb.ok && sb.verifyErrors) {
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'SIMPLE_BUILD_VERIFY_ERROR', message: `Fast-lane verify failed: ${sb.verifyErrors.split('\n')[0].slice(0, 200)}`, autoResolved: true, detail: sb.verifyErrors });
+        }
         // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
         if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });

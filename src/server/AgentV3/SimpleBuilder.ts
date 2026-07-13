@@ -409,6 +409,13 @@ export interface SimpleBuildResult {
    * and passed; undefined = verify was not wired at all.
    */
   typecheckRan?: boolean;
+  /**
+   * The ACTUAL compiler/verify error text that made the per-file build fail (after repairs) — so the
+   * build report can show WHY the fast lane fell back to the full builder, not just the outcome code.
+   * Deep-test App #2 (2026-07-13): the report said only "TYPECHECK_FAILED" with no error, so the real
+   * cause (a plan↔contract mismatch) could not be mined. Capped; only set on the ok:false verify path.
+   */
+  verifyErrors?: string;
 }
 
 /**
@@ -580,6 +587,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
         typecheckRan: verdict.ran !== false,
+        // Capture the REAL compiler error (capped) so the build report can be mined for the true cause.
+        verifyErrors: (verdict.errors || '').trim().slice(0, 2000) || undefined,
       };
     }
     files = [...byPath.values()];

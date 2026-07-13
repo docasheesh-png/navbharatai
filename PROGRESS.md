@@ -15264,3 +15264,28 @@ surface, CI-gated before merge.
 Honest state: still a small fraction of the code-tractable roadmap. Tier-0 live defects (T0-1/2/4/5/6/7/8) need a
 real repro/build-report to root-cause (rule 4 forbids guess-fixes) — deferred to the admin's test report, not
 touched blind. Conveyor continues on safe, code-tractable, no-repro gaps.
+
+## 2026-07-13 — App #4 (Instagram) autopsy: broken app shipped as "fully functional" — agentic missing-files gate
+
+Deep-test App #4 (Instagram clone). The engine reported "✓ Done · 101 steps · 12m38s" and narrated "App
+fully functional hai!" — but the PREVIEW crashed: `Cannot read properties of undefined (reading
+'isAuthenticated')`, with the banner "Missing files (stubbed so the preview still renders): src/hooks
+(imported by src/App.tsx); src/App.module.css". A ❌ still-broken + a rule-5 FAKE-SUCCESS honesty violation.
+
+ROOT CAUSE (evidence-based): src/App.tsx imported `./hooks` (useAuth) and `./App.module.css` that were
+NEVER written. The preview's dangling-import RESILIENCE stubs missing local modules so *something* renders
+(ReactPreview.ts:472) → useAuth() returned an empty stub → `.isAuthenticated` on undefined → crash. The
+deterministic MISSING-FILES gate that catches EXACTLY this (`findUnresolvedLocalImports`, Fix 38c) existed
+ONLY in the fast lane (`fastVerifyOnce`) — the AGENTIC path (which builds the COMPLEX apps; this was 101
+steps) never ran it. So the gate lived at ONE call site and the general case (big apps) was unguarded.
+
+FIX (rule 3 — the gate belongs on EVERY build path): added the same deterministic gate to the agentic
+post-build sequence (routes/agentv3.ts, right after the agentic tsc-gate). After a successful agentic
+build it runs `findUnresolvedLocalImports` over the final written+scaffold files (judging only OUR writes);
+on a gap it (1) records a loud MISSING_FILES_DETECTED, (2) runs ONE bounded creation pass grounded in the
+importing files (so the new module matches its real usage — correct exports / hook shapes / CSS classes;
+no stubs), (3) re-checks: all-resolved → MISSING_FILES_HEALED + durable save; still-missing → HONEST
+OUTCOME_MISSING_FILES (error) — never "fully functional" while a dangling import guarantees a crash. The
+creation pass is cheap-floor-first and no-Claude-safe on weak builds (rides the #1275 chokepoint). Kill:
+AGENTV3_MISSING_FILES_GATE=off. Tests (4): the exact App #4 case (`./hooks` dir + `./App.module.css`)
+flagged; dir-with-index + existing-css resolve with no false positive. Gate: server tsc 0, full suite 6247.

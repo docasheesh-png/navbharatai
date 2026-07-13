@@ -13,7 +13,7 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES, devScriptRunsNodeServer } from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -392,6 +392,39 @@ describe('chooseMonorepoAppRoot', () => {
       { path: 'plain/package.json', content: '{"name":"meta-only"}' },
     ])).toBeNull();
     expect(chooseMonorepoAppRoot([])).toBeNull();
+  });
+});
+
+describe('findUnresolvedLocalImports — the agentic missing-files gate (deep-test App #4)', () => {
+  // THE exact App #4 (Instagram) failure: App.tsx imported ./hooks (a DIRECTORY module — useAuth) and
+  // ./App.module.css, neither ever written → preview stubbed them → useAuth() undefined → runtime crash.
+  it('flags a missing directory-import (./hooks) and a missing CSS-module (./App.module.css)', () => {
+    const files = {
+      'package.json': '{}',
+      'src/App.tsx': "import { useAuth } from './hooks';\nimport styles from './App.module.css';\nexport default function App(){ const { isAuthenticated } = useAuth(); return <div className={styles.app}>{String(isAuthenticated)}</div>; }",
+      'src/main.tsx': "import App from './App';\nApp;",
+    };
+    const missing = findUnresolvedLocalImports(files);
+    const bases = missing.map((m) => m.missing).sort();
+    expect(bases).toContain('src/hooks');
+    expect(bases).toContain('src/App.module.css');
+    expect(missing.every((m) => m.importedBy === 'src/App.tsx')).toBe(true);
+  });
+
+  it('resolves a directory-import when its index file exists (no false positive)', () => {
+    const files = {
+      'src/App.tsx': "import { useAuth } from './hooks';\nuseAuth;",
+      'src/hooks/index.ts': 'export function useAuth(){ return { isAuthenticated: false }; }',
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+
+  it('resolves a CSS-module when the stylesheet exists (no false positive)', () => {
+    const files = {
+      'src/App.tsx': "import styles from './App.module.css';\nstyles;",
+      'src/App.module.css': '.app { color: red; }',
+    };
+    expect(findUnresolvedLocalImports(files)).toEqual([]);
   });
 });
 

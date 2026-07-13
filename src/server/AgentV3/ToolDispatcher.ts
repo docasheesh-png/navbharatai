@@ -45,7 +45,7 @@ import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { analyzeMaintainability, maintainabilitySummary } from './maintainabilityAnalysis';
 import { analyzeLockfiles, lockfileSummary, detectPackageManager, packageManagerSummary } from './lockfileAnalysis';
 import { analyzeHeavyImports, heavyImportSummary } from './heavyImportAnalysis';
-import { planDependencyAutoFix, dependencyAutoFixSummary } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps } from './DependencyAutoFix';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1314,6 +1314,27 @@ export class ToolDispatcher {
               this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Re-pointed ${wrongRes.fixes.length} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`, ts: Date.now() });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // DEPENDENCY RECONCILE (P-PIPE): a package imported but not in package.json fails install/runtime
+          // with "Cannot find module". For the curated well-known allowlist (real npm packages, version-
+          // pinned; alias-colliding names excluded) add it to package.json deterministically so the app
+          // installs. The existing `package.json -nt node_modules` reinstall gate picks it up before preview;
+          // if for any reason it doesn't, the readiness gate still flags it honestly (no regression). Kill
+          // switch: AGENTV3_DEP_RECONCILE=off.
+          if (process.env.AGENTV3_DEP_RECONCILE !== 'off') {
+            try {
+              let pkgJson: string | undefined;
+              try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
+              if (typeof pkgJson === 'string') {
+                const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
+                if (depRes.added.length) {
+                  const newPkg = depRes.files['package.json'];
+                  try { await this.actuator.writeFile(this.workspaceId, 'package.json', newPkg); } catch { /* best-effort */ }
+                  try { this.onFileWrite?.('package.json', newPkg); } catch { /* best-effort */ }
+                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${depRes.added.length} missing dependency(ies) to package.json (${depRes.added.map((d) => d.package).join(', ')}) so the app installs and runs.`, ts: Date.now() });
+                }
+              }
+            } catch { /* best-effort — a failure just leaves the honest 'missing dependency' finding below */ }
+          }
         }
         const [hooksRep, importRep, jsxRep, undefHookRep] = await Promise.all([
           analyzeHooksRules(astFiles),

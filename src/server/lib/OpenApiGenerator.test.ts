@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  expressPathToOpenApi, extractPathParams, generateOpenApi, type RouteSpec,
+  expressPathToOpenApi, extractPathParams, generateOpenApi, toOpenApiSchema, type RouteSpec,
 } from './OpenApiGenerator';
 
 describe('OpenApiGenerator (P-CGE.5)', () => {
@@ -10,6 +10,34 @@ describe('OpenApiGenerator (P-CGE.5)', () => {
     });
     it('extracts path param names', () => {
       expect(extractPathParams('/users/{id}/posts/{postId}')).toEqual(['id', 'postId']);
+    });
+  });
+
+  describe('toOpenApiSchema — valid OpenAPI types only', () => {
+    it('maps loose type hints to valid OpenAPI types (never invalid int/bool/float/datetime)', () => {
+      expect(toOpenApiSchema('int')).toEqual({ type: 'integer' });
+      expect(toOpenApiSchema('bool')).toEqual({ type: 'boolean' });
+      expect(toOpenApiSchema('float')).toEqual({ type: 'number' });
+      expect(toOpenApiSchema('datetime')).toEqual({ type: 'string', format: 'date-time' });
+      expect(toOpenApiSchema('uuid')).toEqual({ type: 'string', format: 'uuid' });
+      expect(toOpenApiSchema('email')).toEqual({ type: 'string', format: 'email' });
+      expect(toOpenApiSchema('array')).toEqual({ type: 'array', items: {} });
+      expect(toOpenApiSchema(undefined)).toEqual({ type: 'string' });
+      expect(toOpenApiSchema('CustomThing')).toEqual({ type: 'string' });
+    });
+
+    it('normalizes an int path param + a datetime body field to valid schema in the full document', () => {
+      const doc = generateOpenApi([{
+        method: 'post',
+        path: '/items/:id',
+        params: [{ name: 'id', in: 'path', type: 'int' }],
+        requestBody: { properties: { createdAt: { type: 'datetime' }, count: { type: 'int' } } },
+      }]);
+      const op = doc.paths['/items/{id}'].post as Record<string, any>;
+      expect(op.parameters[0].schema).toEqual({ type: 'integer' });
+      const props = op.requestBody.content['application/json'].schema.properties;
+      expect(props.createdAt).toEqual({ type: 'string', format: 'date-time' });
+      expect(props.count).toEqual({ type: 'integer' });
     });
   });
 

@@ -36,6 +36,27 @@ export interface OpenApiInfo {
 
 const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
 
+/**
+ * Map a loose field/param type hint to a VALID OpenAPI 3.0 schema. OpenAPI allows only
+ * string/number/integer/boolean/array/object as `type`; a raw hint like `int`, `bool`, `float`,
+ * `datetime` or `uuid` would otherwise produce a spec that fails validation. Date/uuid/email are
+ * strings with a `format`. Unknown hints fall back to `string`. Pure.
+ */
+export function toOpenApiSchema(hint?: string): { type: string; format?: string; items?: Record<string, unknown> } {
+  switch (clean(hint).toLowerCase()) {
+    case 'int': case 'integer': case 'long': case 'bigint': return { type: 'integer' };
+    case 'float': case 'double': case 'decimal': case 'number': return { type: 'number' };
+    case 'bool': case 'boolean': return { type: 'boolean' };
+    case 'array': case 'list': return { type: 'array', items: {} };
+    case 'object': case 'json': case 'map': return { type: 'object' };
+    case 'date': return { type: 'string', format: 'date' };
+    case 'datetime': case 'timestamp': return { type: 'string', format: 'date-time' };
+    case 'uuid': case 'guid': return { type: 'string', format: 'uuid' };
+    case 'email': return { type: 'string', format: 'email' };
+    default: return { type: 'string' };
+  }
+}
+
 /** Convert an Express path (`/users/:id`) to an OpenAPI path (`/users/{id}`). */
 export function expressPathToOpenApi(path: string): string {
   return clean(path).replace(/:([A-Za-z0-9_]+)/g, '{$1}');
@@ -55,7 +76,7 @@ function paramObject(p: RouteParam): Record<string, unknown> {
     name: p.name,
     in: p.in,
     required: p.in === 'path' ? true : !!p.required,
-    schema: { type: clean(p.type) || 'string' },
+    schema: toOpenApiSchema(p.type),
     ...(clean(p.description) ? { description: clean(p.description) } : {}),
   };
 }
@@ -81,7 +102,7 @@ function operationObject(r: RouteSpec, openApiPath: string): Record<string, unkn
   if (parameters.length) op.parameters = parameters;
   if (r.requestBody && r.requestBody.properties && Object.keys(r.requestBody.properties).length) {
     const props: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(r.requestBody.properties)) props[k] = { type: clean(v?.type) || 'string' };
+    for (const [k, v] of Object.entries(r.requestBody.properties)) props[k] = toOpenApiSchema(v?.type);
     op.requestBody = {
       required: true,
       content: {

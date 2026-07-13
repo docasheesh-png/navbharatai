@@ -351,7 +351,7 @@ export const AIChat: React.FC<AIChatProps> = ({
   // Fix 1: reset textarea height when input is cleared after send
   useEffect(() => {
     if (!input && textareaRef.current) {
-      textareaRef.current.style.height = '48px';
+      textareaRef.current.style.height = '40px';
     }
   }, [input]);
 
@@ -1629,7 +1629,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                     placeholder="Ask NavBharatAI..."
                     rows={1}
                     className={cn(
-                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-3.5 text-xs outline-none transition-all resize-none min-h-[48px] leading-relaxed text-[16px]",
+                      // Admin 2026-07-12: composer was py-3.5 + min-h-48px (~2 lines) and felt oversized on
+                      // phones — trim to a single comfortable line; it still auto-grows up to 240px as you type.
+                      "w-full bg-transparent text-[var(--theme-text)] pr-24 py-2.5 text-xs outline-none transition-all resize-none min-h-[40px] leading-relaxed text-[16px]",
                       onModeChange && activeAgent === 'navbharatai-pro' ? "pl-32" : "pl-5"
                     )}
                     style={{ maxHeight: '240px', overflowY: 'auto' }}

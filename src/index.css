@@ -26,6 +26,18 @@ html, body {
     --theme-text: #c9d1d9;
     --theme-border: rgba(255, 255, 255, 0.1);
     --theme-card: #161b22;
+
+    /* Native safe-area insets (Capacitor bundled app, admin 2026-07-13). The WebView draws
+       edge-to-edge (viewport-fit=cover + black-translucent iOS status bar / Android cutout mode),
+       so the top notch / dynamic island was CROPPING the app header and the bottom gesture bar was
+       overlapping the footer. Exposing the device-reported insets as vars lets the layout reserve
+       exactly that much space (see App.tsx root padding + content calc). On desktop/browser these
+       env() values resolve to 0 → a true no-op there. The `0px` fallback covers engines that don't
+       define the env() variable at all. */
+    --nb-safe-top: env(safe-area-inset-top, 0px);
+    --nb-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --nb-safe-left: env(safe-area-inset-left, 0px);
+    --nb-safe-right: env(safe-area-inset-right, 0px);
   }
 
   /* P-DESIGN.3 — user font-scaling (Settings → General → Text Size). `--nb-font-scale` is set on

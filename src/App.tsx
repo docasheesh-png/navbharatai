@@ -2326,6 +2326,15 @@ export default function App() {
     <div
       className={cn("h-screen supports-[height:100dvh]:h-[100dvh] w-screen flex flex-col overflow-hidden transition-colors duration-500", themeClasses.bg, themeClasses.text)}
       style={{
+        // Native safe-area (admin 2026-07-13): pad the whole app in from the device's top notch /
+        // dynamic island and the left/right rounded-corner insets so the header is never cropped.
+        // The root's own themeClasses.bg fills the reserved strip, so it reads as a normal status-bar
+        // area. Bottom is handled by the fixed mobile nav (its own env padding), so no bottom pad here.
+        // On the web these vars are 0 → no visual change. box-sizing:border-box (Tailwind preflight)
+        // means the padding shrinks the content box, so the header + content calc below stay exact.
+        paddingTop: 'var(--nb-safe-top)',
+        paddingLeft: 'var(--nb-safe-left)',
+        paddingRight: 'var(--nb-safe-right)',
         // @ts-ignore
         '--theme-bg': themeClasses.raw.bg,
         '--theme-text': themeClasses.raw.text,
@@ -2410,7 +2419,7 @@ export default function App() {
           </div>
         }>
         <div className={cn("flex-1 flex flex-col min-h-0 min-w-0 transition-all",
-          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem)] supports-[height:100dvh]:h-[calc(100dvh-3.5rem)] max-h-[calc(100vh-3.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem)]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
+          ['chat', 'nbi_chat', 'asc_chat', 'studio', 'preview', 'shell'].includes(activeView) ? "overflow-hidden h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:h-[calc(100dvh-3.5rem-var(--nb-safe-top))] max-h-[calc(100vh-3.5rem-var(--nb-safe-top))] supports-[height:100dvh]:max-h-[calc(100dvh-3.5rem-var(--nb-safe-top))]" : "overflow-y-auto overflow-x-hidden custom-scrollbar",
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't

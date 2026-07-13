@@ -224,9 +224,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
-    // Admin 2026-07-06: the message box sits beside a 2-row left control column (Build on top,
-    // settings+attach below), so give it a matching minimum height — a bigger, balanced input box.
-    const minHeight = 82;
+    // Admin 2026-07-12: the empty box was 82px (~2.5 lines) and ate ~30% of a phone screen — shrink it to
+    // a single comfortable line; it still auto-grows as the user types (up to maxHeight).
+    const minHeight = 44;
     const maxHeight = 24 * 5 + 16; // ~5 lines (line-height 24) + vertical padding (py-2)
     el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
   }, [prompt, composerExpanded]);

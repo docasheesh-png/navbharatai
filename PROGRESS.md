@@ -15770,3 +15770,18 @@ demotes the model's prose beneath a clear label ("What the agent reported (may o
 verdict above is the real status)"). The very first line the user reads is now the truth. Regression test
 added asserting the verdict precedes the model's "Build complete." prose and the "may overstate" label is
 present. Gate: server tsc clean, AgentRunner 39/39. No behaviour change for READY builds.
+
+---
+
+## 2026-07-13 — Deep-test App #8 follow-up FIX: hand-written Prisma seed script must be idempotent + FK-ordered
+
+**Root cause (App #8 struggle):** the model hand-wrote a `prisma/seed.ts` and ran it with ts-node; it
+threw **P2003** (created a DoctorAvailability before its parent Doctor — wrong FK order) then, on retry,
+**P2002** (unique-constraint on Doctor.userId — the partial first run left rows, and the script used
+create() not upsert()). v3.0 self-healed via `rm dev.db && prisma db push --force-reset`, but only after
+burning ~3 steps. Prevent it upstream (5th-rule: a self-heal still gets its bug class killed at the source).
+
+**Fix (`systemPrompt.ts`, architect prompt):** explicit guidance that any hand-written executable seed
+SCRIPT must be (a) idempotent — clear tables with deleteMany() in reverse-dependency order OR use upsert()
+so a re-run never hits P2002 — and (b) foreign-key-ordered — create parent rows before child rows or a
+child create() throws P2003. Test asserts the guidance names both P2002 and P2003. Gate: systemPrompt suite green.

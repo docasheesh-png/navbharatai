@@ -13,6 +13,18 @@ describe('LANGUAGE_RULE (mirror the user, never default to Hindi)', () => {
   });
 });
 
+describe('hand-written seed script guidance (deep-test App #8 — Prisma seed P2002/P2003)', () => {
+  it('tells the architect to make an executable seed script idempotent AND foreign-key-ordered', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('idempotent');
+    expect(p).toContain('upsert');
+    expect(p).toContain('deleteMany');
+    // the two exact Prisma errors a bad seed throws, so the guidance is unmistakable
+    expect(p).toContain('P2002');
+    expect(p).toContain('P2003');
+  });
+});
+
 describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
   it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
     const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);

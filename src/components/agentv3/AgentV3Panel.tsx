@@ -237,10 +237,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
-    // Admin 2026-07-12: the empty box was 82px (~2.5 lines) and ate ~30% of a phone screen — shrink it to
-    // a single comfortable line; it still auto-grows as the user types (up to maxHeight).
-    const minHeight = 44;
-    const maxHeight = 24 * 5 + 16; // ~5 lines (line-height 24) + vertical padding (py-2)
+    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota"): a single tight line — the box
+    // still auto-grows as the user types (up to maxHeight).
+    const minHeight = 38;
+    const maxHeight = 24 * 5 + 12; // ~5 lines (line-height 24) + vertical padding (py-1.5)
     el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
   }, [prompt, composerExpanded]);
   // Framework selector + import
@@ -2600,7 +2600,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className="flex items-stretch gap-1.5 px-2 py-1">
+            <div className="flex items-end gap-1.5 px-2 py-0.5">
               {/* LEFT COLUMN (admin 2026-07-07 — back to the OLD position): the Build/Plan/Advise
                   MODE SELECTOR on TOP as a dropup ("pyramid" — opens upward above the input), with
                   settings + attach in a row BELOW it. Same function as the old top tab row: same
@@ -2633,7 +2633,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   type="button"
                   onClick={() => setModeMenuOpen((v) => !v)}
                   title="Chat mode — Build / Plan / Advise"
-                  className={`h-[26px] w-full min-w-[84px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white'}`}
+                  className={`h-6 w-full min-w-[84px] flex items-center justify-between gap-1 px-2 rounded border text-xs font-semibold ${modeMenuOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-300 hover:text-white'}`}
                 >
                   <span className="flex items-center gap-1">
                     <span>{chatMode === 'build' ? '🔨' : chatMode === 'planner' ? '🧠' : '🔍'}</span>
@@ -2728,7 +2728,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   type="button"
                   onClick={() => setSettingsOpen((v) => !v)}
                   title="Build options"
-                  className={`relative h-[42px] w-10 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
+                  className={`relative h-8 w-10 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
                 >
                   <SlidersHorizontal className="w-4 h-4" />
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
@@ -2740,14 +2740,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 disabled={running}
                 badge={files.length}
                 title="Attach (photo, gallery, or file — PDF, Word, Excel, PPT, ZIP, code…)"
-                buttonClassName="h-[42px] w-10 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
+                buttonClassName="h-8 w-10 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
               />
               </div>{/* /settings + attach row */}
               </div>{/* /left column (mode selector + settings/attach) */}
               <div className="relative flex-1" data-tour="chat">
                 <textarea
                   ref={composerRef}
-                  className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-20 py-2 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
+                  className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-20 py-1.5 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}
                   rows={1}
                   placeholder={
                     chatMode === 'planner'
@@ -2792,7 +2792,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    className="absolute right-11 bottom-1 h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -2801,26 +2801,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-1 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     {roleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
                   // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
                   <>
-                    <button onClick={stop} title="Stop the build" className="absolute right-11 bottom-2 h-8 w-8 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
+                    <button onClick={stop} title="Stop the build" className="absolute right-11 bottom-1 h-8 w-8 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-1 h-8 w-8 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
                       <Send className="w-4 h-4" />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
+                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-1 h-8 w-8 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-2 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-1 h-8 w-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     <Send className="w-4 h-4" />
                   </button>
                 )}

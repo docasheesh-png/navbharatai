@@ -174,8 +174,10 @@ describe('editModePrefix', () => {
   it('makes "never break the app" the #1 absolute edit rule and demands post-edit verification', () => {
     const p = editModePrefix(['src/App.tsx']);
     expect(p).toContain('YOUR EDIT MUST NEVER BREAK THE APP');
-    // It must demand actually proving the app still builds/runs after editing.
-    expect(p).toContain('npx tsc --noEmit');
+    // It must demand actually proving the app still builds/runs after editing — via the
+    // --no-install form (bare `npx tsc` fetches an unrelated squatter package; 2026-07-13 autopsy).
+    expect(p).toContain('npx --no-install tsc --noEmit');
+    expect(p).not.toContain('run `npx tsc --noEmit`'); // never the squatter-prone bare form
     expect(p).toContain('prove it still works');
   });
 

@@ -68,7 +68,7 @@ import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptim
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
-import { generateDeployArtifacts, type DeployArtifactInput } from '../lib/DeployArtifactGenerator';
+import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -1941,10 +1941,24 @@ export class ToolDispatcher {
         const lintCmd = optStr(input, 'lintCmd') || undefined;
         const testCmd = optStr(input, 'testCmd') || undefined;
         const multiStage = rec.multiStage === false ? false : undefined;
+        // Detect the project's package manager from its ROOT lockfile so the generated CI matches it —
+        // a pnpm/yarn/bun project otherwise gets a broken `npm ci` + `cache: 'npm'` workflow. Cheap
+        // best-effort probe (first lockfile found wins, pnpm→yarn→bun→npm); an explicit installCmd from
+        // the caller still overrides. Defaults to npm when no lockfile is present.
+        let packageManager: PackageManager | undefined;
+        if (include.has('ci')) {
+          const probes: Array<[string, PackageManager]> = [
+            ['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'],
+            ['bun.lockb', 'bun'], ['bun.lock', 'bun'], ['package-lock.json', 'npm'],
+          ];
+          for (const [file, pm] of probes) {
+            try { await this.actuator.readFile(this.workspaceId, file); packageManager = pm; break; } catch { /* absent */ }
+          }
+        }
         const genInput: DeployArtifactInput = {};
         if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage };
         if (include.has('compose')) genInput.compose = { port };
-        if (include.has('ci')) genInput.ci = { nodeVersion, installCmd, lintCmd, testCmd, buildCmd };
+        if (include.has('ci')) genInput.ci = { nodeVersion, installCmd, lintCmd, testCmd, buildCmd, packageManager };
         const artifacts = generateDeployArtifacts(genInput);
         const toWrite: Array<{ path: string; content: string }> = [];
         if (artifacts.dockerfile) toWrite.push({ path: 'Dockerfile', content: artifacts.dockerfile });

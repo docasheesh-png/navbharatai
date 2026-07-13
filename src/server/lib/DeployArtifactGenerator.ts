@@ -92,18 +92,35 @@ export function generateDockerCompose(opts: ComposeOptions = {}): string {
   return lines.join('\n') + '\n';
 }
 
+export type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
+
 export interface CiOptions {
   nodeVersion?: string;
   installCmd?: string;
   lintCmd?: string;
   testCmd?: string;
   buildCmd?: string;
+  /**
+   * The project's package manager (default 'npm'). Drives the install command, the setup action, and
+   * the dependency cache so the generated CI matches the project's lockfile — a pnpm/yarn/bun project no
+   * longer gets a broken `npm ci` + `cache: 'npm'` workflow.
+   */
+  packageManager?: PackageManager;
 }
+
+/** The reproducible (lockfile-frozen) install command per manager — used when no explicit installCmd is given. */
+const PM_INSTALL: Record<PackageManager, string> = {
+  npm: 'npm ci',
+  yarn: 'yarn install --frozen-lockfile',
+  pnpm: 'pnpm install --frozen-lockfile',
+  bun: 'bun install --frozen-lockfile',
+};
 
 /** Generate a GitHub Actions CI workflow (install → lint → test → build, steps as declared). */
 export function generateCiWorkflow(opts: CiOptions = {}): string {
+  const pm: PackageManager = opts.packageManager && opts.packageManager in PM_INSTALL ? opts.packageManager : 'npm';
   const node = clean(opts.nodeVersion) || '20';
-  const install = clean(opts.installCmd) || 'npm ci';
+  const install = clean(opts.installCmd) || PM_INSTALL[pm];
   const steps: Array<{ name: string; run: string }> = [{ name: 'Install', run: install }];
   if (clean(opts.lintCmd)) steps.push({ name: 'Lint', run: clean(opts.lintCmd) });
   if (clean(opts.testCmd)) steps.push({ name: 'Test', run: clean(opts.testCmd) });
@@ -120,11 +137,22 @@ export function generateCiWorkflow(opts: CiOptions = {}): string {
     `    runs-on: ubuntu-latest`,
     `    steps:`,
     `      - uses: actions/checkout@v4`,
-    `      - uses: actions/setup-node@v4`,
-    `        with:`,
-    `          node-version: '${node}'`,
-    `          cache: 'npm'`,
   ];
+  if (pm === 'bun') {
+    // Bun brings its own toolchain; setup-node's npm cache does not apply.
+    lines.push(`      - uses: oven-sh/setup-bun@v2`);
+  } else {
+    // pnpm must be installed BEFORE setup-node so its 'pnpm' cache can resolve the store.
+    if (pm === 'pnpm') {
+      lines.push(`      - uses: pnpm/action-setup@v4`, `        with:`, `          version: 9`);
+    }
+    lines.push(
+      `      - uses: actions/setup-node@v4`,
+      `        with:`,
+      `          node-version: '${node}'`,
+      `          cache: '${pm}'`,
+    );
+  }
   for (const s of steps) {
     lines.push(`      - name: ${s.name}`, `        run: ${s.run}`);
   }

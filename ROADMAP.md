@@ -143,8 +143,12 @@ build order after Tier 0.
   restored durably via `/api/agentv3/deployment` + `DeploymentStore`. Server side: `DeployProviders`
   (Vercel/Netlify/Cloudflare/Firebase) + `/api/agentv3/workspace-files` feeding the existing deploy backend.
   (Earlier ❌ was stale.) *(Consolidates the old 5.1 / Layer-75 / 6.5 / P-DEPLOY / Cap-5 / U-12 duplicates.)*
-- **T1-db-provision-ui** 🟢❌ — one-click Supabase/Firebase/Neon for the user's app, env written
-  back (BYO Provisioning Broker — old U-3 / Cap-1).
+- **T1-db-provision-ui** 🟡 — one-click Supabase/Firebase/Neon for the user's app, env written
+  back (BYO Provisioning Broker — old U-3 / Cap-1). **CONNECTION-WIRING SHIPPED (#1336, 2026-07-13):**
+  `DbConfigGenerator` + the `generate_db_config` tool wire the app to the user's own DB (Supabase/Neon/
+  Firebase/Postgres) — real client module + .env.example keys + dependency, credentials stay in the user's
+  env. **Remaining ❌ (infra):** one-click AUTO-CREATE of the DB needs an external provisioning broker
+  (provider management API + user OAuth) — cannot be built/verified without that infra.
 - **T1-auth-scaffold** 🟢 — built-in login/signup wired into the generated app.
   **VERIFIED-BUILT (2026-07-13):** the `generate_auth` tool (`AuthCodeGenerator.generateAuthCode`) generates
   login/signup code + dependencies into the app; earlier ❌ was stale. (Provider-specific end-to-end wiring
@@ -196,8 +200,12 @@ safely edit, or truly verify it).
 
 ### 2C · The GA engine suite (from the UCUE-v2 gap audit)
 - **GA-1** ⚠️ — Multi-Workspace Manager (unified orchestrator: list/switch/quota/cleanup).
-- **GA-2** ❌ — Runtime Supervisor + Background Task Manager + durable Job Queue (long-run
+- **GA-2** 🟡 — Runtime Supervisor + Background Task Manager + durable Job Queue (long-run
   process tracking, restart-on-crash). *(Out-of-process half is infra → Tier 4 / V4-4.)*
+  **IN-PROCESS REAPER SHIPPED (#1334, 2026-07-13):** `shouldReclaimBuildLock` now reclaims a build grossly
+  past its hard max (`AGENTV3_MAX_BUILD_SECONDS` + grace) even with a lingering subscriber — a zombie build
+  can no longer trap an account's "one build at a time" slot. **Remaining ❌ (infra):** the OUT-OF-PROCESS
+  supervisor/queue (kill zombie sandbox processes, restart-on-crash) needs a separate deployed worker.
 - **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269); (7) conflicting package-manager lockfiles in one directory — inconsistent installs dev-vs-CI (#1280); (8) package-manager DETECTION from the root lockfile (`detectPackageManager`, #1282) now driving the CI/Docker/README generators (#1284–#1286). **Remaining ❌:** actually WIRING the detected non-npm manager into the live install/build path (the risky half — detection + all generated artifacts are done; the sandbox still installs with npm). UV (Python) engine is separate (P-PIPE-runtime).
 - **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
 - **GA-5** ❌ — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).

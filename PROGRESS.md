@@ -15956,3 +15956,21 @@ pool). The recurring in-browser-preview `import.meta` limitation for full-stack 
 (the preview harness needs to treat modules as ES modules). The 80-step limit cutting off a
 near-finished build suggests either a higher weak-tier step budget or (better) fewer wasted steps —
 this PR reduces the Prisma waste; dep-install churn is a separate future item.
+
+---
+
+## 2026-07-13 (cont.) — pura-karo closeout: both "infra-blocked" items got their real buildable slices
+
+Continuing the sweep, the two items previously reported as fully infra-blocked each got their genuine
+deterministic/verifiable half shipped (the infra-only remainder stays honestly open):
+- **GA-2 #1334** — in-process zombie-build reaper: `shouldReclaimBuildLock` reclaims a build past its hard
+  max even with a lingering subscriber, so a hung build can't trap the account. Out-of-process supervisor
+  (kill sandbox process / restart-on-crash) still needs a deployed worker → OPEN infra.
+- **T1-db-provision #1336** — BYO connection wiring: `DbConfigGenerator` + `generate_db_config` emit a real
+  client module + .env.example keys + dependency for Supabase/Neon/Firebase/Postgres (credentials stay in the
+  user's env). One-click AUTO-CREATE of the DB still needs an external provisioning broker → OPEN infra.
+
+**Final pura-karo tally:** all 10 items have their buildable+verifiable parts shipped & merged (A1 references
+#1326, GA-15 #1329, GA-13 #1330, GA-10 #1331, GA-2 reaper #1334, db-provision wiring #1336, + A2/C7/C8/GA-18/
+auth verified-built + ROADMAP corrected #1332). TWO infra-only remainders are honestly OPEN: GA-2's
+out-of-process supervisor worker, and db-provision's auto-create broker. No fakes, no inflated "10/10 done".

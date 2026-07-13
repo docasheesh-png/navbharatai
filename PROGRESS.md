@@ -15556,3 +15556,32 @@ OPEN (recorded, follow-up): the ORIGIN was `LLM_TRUNCATED` (GLM max_tokens). The
 SYMPTOM deterministically; a deeper fix is to detect a truncated response and continue/re-request the file
 before writing it. Also App #6's FEATURE_COVERAGE flagged 5 CRUD controls missing — the C9 reviewer caught
 all 4 and was auto-fixing (immune system working as designed).
+
+## 2026-07-13 — App #7 (Trello task-board): empty sandbox-failed build reported "✓ Done" → empty-build honesty
+
+Deep-test App #7 (full-stack Trello task-board, weak/GLM, first backend+auth+DB test). CONFIRMED again from
+the data: `noClaude: true` correct despite 11 nominal 'claude-sonnet-4-6' llmCall labels (providerDelivery
+`{GLM:22, KIMI:5, VERTEX:2}`, no CLAUDE — #1296 holds), and `userTier: free-list (admin/tester)`, ₹0.
+
+THE FAILURE: the build produced ZERO files (`SANDBOX_UNAVAILABLE — the build sandbox could not be set up`),
+so the preview showed "Couldn't build the in-browser preview: No files to preview yet." YET the terminal
+event reported `ok: true` and the UI showed "✓ Done · 9 steps · 39s". A fake-success (rule 5): the build ran
+29 provider calls against a dead sandbox, wrote nothing, and still called itself Done. (Billing WAS honest —
+`zeroBillReason: "empty build (0 files produced) — never charged"`, ₹0 — but the STATUS lied.)
+
+ROOT CAUSE: on a sandbox-setup failure the route recorded SANDBOX_UNAVAILABLE (error) but did NOT abort or
+fail the build — it continued, and nothing forced `result.ok` to false for an artifact build that produced
+0 files. `buildHealthFromDiagnostics` would mark it NOT READY (the error is a blocker), but the client's
+"Done" comes from the terminal event's `result.ok`, not build health — so the two disagreed and the user saw
+"Done".
+
+FIX (rule 5 — the system must tell the truth): `emptyBuildFailureSummary(expectsArtifacts, fileCount,
+sandboxUnavailable)` (pure, exported) — an artifact build with 0 files is forced to `ok:false` with an
+honest, retry-able summary ("the sandbox was unavailable … not been charged" / "produced no files …"). A
+`sandboxUnavailable` flag is set in the sandbox-setup catch and threaded in. The override runs BEFORE the
+SPM settle / billing / finish, so the terminal event, build-health, billing, telemetry, and SPM module
+status all agree the build did NOT succeed. Tests (4). Gate: server tsc 0, full suite 6367.
+
+HONEST BOUNDARY (rule 6): the ROOT of the 0-file build is the E2B sandbox being unavailable — likely infra
+(E2B outage / quota / template), which a retry usually clears. This fix does not resurrect the sandbox; it
+makes v3.0 tell the truth (FAIL + retry) instead of faking "Done", and never charges for it.

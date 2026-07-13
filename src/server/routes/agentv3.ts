@@ -605,6 +605,25 @@ export function zeroBillForUnrenderedPreview(expectsArtifacts: boolean, previewV
 }
 
 /**
+ * EMPTY-BUILD HONESTY (deep-test App #7, 2026-07-13). A build that EXPECTED artifacts (a new build / edit)
+ * but produced ZERO files is a FAILURE — never "✓ Done". The App #7 report showed `ok: true` / "Done · 9
+ * steps" over an EMPTY preview because the sandbox could not be set up (SANDBOX_UNAVAILABLE), so no file
+ * could ever be written, yet the turn still ran the model 29× and reported success. Returns an honest,
+ * retry-able summary when the build must be forced to `ok:false`, or null when it produced files / didn't
+ * expect any. Pure + exported for testing.
+ */
+export function emptyBuildFailureSummary(
+  expectsArtifacts: boolean,
+  fileCount: number,
+  sandboxUnavailable: boolean,
+): string | null {
+  if (!expectsArtifacts || fileCount > 0) return null;
+  return sandboxUnavailable
+    ? 'The build could not run — the sandbox was unavailable, so no files were created. Please try again in a moment; you have not been charged.'
+    : 'The build produced no files. Please try again — you have not been charged.';
+}
+
+/**
  * The STABLE durable-conversation id for a session's workspace — one conversation record per session,
  * NOT per build/message.
  *
@@ -4740,6 +4759,10 @@ export function registerAgentV3Routes(app: Express): void {
       // the build tools will report the real sandbox error only if the user asks
       // to build. This is what makes v3.0 conversational like Claude Code.
       let git: GitManager | undefined;
+      // Deep-test App #7 (2026-07-13): true when the build sandbox could not be set up (E2B down / quota /
+      // template). No file can ever be written, so the build MUST end as a failure — not "✓ Done" over an
+      // empty preview. Threaded into the empty-build honesty override below.
+      let sandboxUnavailable = false;
       // Git-native storage (Phase 2, flag-gated OFF by default): when active, the user's project
       // lives in a real private repo in the platform GitHub org — the durable, ~free source of
       // truth. We clone it into the (empty) sandbox at start and push it back at end. These stay
@@ -4991,6 +5014,7 @@ export function registerAgentV3Routes(app: Express): void {
       } catch (setupErr) {
         const m = setupErr instanceof Error ? setupErr.message : String(setupErr);
         git = undefined;
+        sandboxUnavailable = true;
         buildDiag.record({
           phase: 'sandbox', severity: 'error', code: 'SANDBOX_UNAVAILABLE',
           message: 'The build sandbox could not be set up — the build cannot create files.',
@@ -6886,6 +6910,18 @@ export function registerAgentV3Routes(app: Express): void {
             } catch (e) { console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
+      }
+
+      // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED
+      // artifacts but produced ZERO files is a FAILURE — never "✓ Done". The report showed `ok: true` /
+      // "Done · 9 steps" over an EMPTY preview because the sandbox could not be set up (SANDBOX_UNAVAILABLE),
+      // so no file could ever be written, yet the turn still ran 29 provider calls and reported success.
+      // Force ok:false with an honest, retry-able summary so the terminal event, build health, billing
+      // (already ₹0 via zeroBillReason), and telemetry all agree the build did NOT succeed. This runs
+      // BEFORE the SPM settle / billing / finish below so every downstream consumer sees the truth.
+      if (result && result.ok) {
+        const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable);
+        if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
       }
 
       // ── SOFTWARE PROJECT MODE (SPM-2): settle this module's status from the REAL result ──────

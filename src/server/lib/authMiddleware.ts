@@ -127,6 +127,41 @@ export async function verifyFirebaseIdentity(req: Request): Promise<{ uid: strin
   }
 }
 
+/**
+ * Resolve a VERIFIED user's email from the Firebase Admin user record when the ID token itself omitted
+ * the email claim. Some providers / custom tokens don't carry `email`, and a null email silently drops a
+ * free-list user to BILLED (the exact cause of the admin's -1,22,330-token wallet, deep-test 2026-07-13:
+ * free-list exemption matches by email, so a token without one → uid-only match → not exempt → debited).
+ * The uid is ALREADY verified, so the account email returned here is trustworthy (T0-9 — it is the real
+ * account email from Firebase, never a client-claimed one). Best-effort: returns null on any failure so
+ * the caller degrades EXACTLY as before this fallback existed. VITEST-skipped.
+ */
+/** Minimal shape we depend on for the account-email lookup — injectable so the core is unit-testable. */
+export interface UserLookupAuth { getUser(uid: string): Promise<{ email?: string | null }>; }
+
+/** Testable CORE: resolve the account email for an ALREADY-verified uid via an injected auth provider.
+ *  Best-effort — returns null on a missing provider, a lookup throw, or an empty/absent email. Pure of
+ *  the process.env.VITEST short-circuit (the wrapper below owns that) so every branch can be exercised. */
+export async function resolveVerifiedEmailWith(
+  uid: string,
+  getAuth: () => Promise<UserLookupAuth | null>,
+): Promise<string | null> {
+  if (!uid) return null;
+  try {
+    const auth = await getAuth();
+    if (!auth) return null;
+    const user = await auth.getUser(uid);
+    return typeof user.email === 'string' && user.email ? user.email : null;
+  } catch {
+    return null; // admin SDK unavailable / user lookup failed → degrade to no-email (today's behavior)
+  }
+}
+
+export async function resolveVerifiedEmail(uid: string): Promise<string | null> {
+  if (process.env.VITEST || !uid) return null;
+  return resolveVerifiedEmailWith(uid, getAdminAuth as unknown as () => Promise<UserLookupAuth | null>);
+}
+
 export function requireUserMatch(paramName = 'userId') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // VITEST: skip auth checks entirely

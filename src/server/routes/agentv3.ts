@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity } from '../lib/identityPolicy';
 import {
   isAgentV3Enabled,
@@ -3198,7 +3198,16 @@ export function registerAgentV3Routes(app: Express): void {
     // body email grants nothing (see entitlementEmail). This closes a free-list spoof: an unverified
     // caller could previously claim the admin's free-list email and run billing-exempt FREE Opus builds.
     // A real admin's transient token blip self-heals (the client refreshes its token on the 401 below).
-    const email = entitlementEmail(verified);
+    let email = entitlementEmail(verified);
+    // FREE-LIST EXEMPTION HARDENING (deep-test 2026-07-13 — the admin's -1,22,330-token wallet). Free-list
+    // exemption matches by EMAIL; when the verified token omits the email claim (some providers / custom
+    // tokens do), `entitlementEmail` is null → a free-list admin matched uid-only → NOT exempt → billed and
+    // debited into the deep negative. Resolve the account's REAL email from the already-VERIFIED uid (T0-9
+    // safe — server-side account email, never client-claimed) so exemption holds regardless of token claims.
+    // Best-effort: null on failure → degrades to exactly today's behavior. Only runs when the token lacked one.
+    if (!email && verified?.uid) {
+      email = await resolveVerifiedEmail(verified.uid);
+    }
     if (!isAgentV3Enabled(userId, email)) {
       res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
       return;

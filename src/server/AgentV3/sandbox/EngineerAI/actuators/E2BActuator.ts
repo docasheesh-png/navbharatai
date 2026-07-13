@@ -3,7 +3,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, buildHttpLivenessCommand, DEV_SERVER_LOG_PATH } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH } from './devServerHost';
 import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
@@ -829,11 +829,17 @@ export class E2BActuator implements IEngineerActuator {
     // replays the cached source files onto the fresh sandbox) and retry — so a mid-build sandbox death
     // is invisible instead of a corpse grind. A normal nonzero program exit is returned as-is and NEVER
     // triggers a recreate (isDeadSandboxSignal distinguishes a dead sandbox from a failed command).
+    // A backgrounded long-lived-server smoke check (`npm run server & sleep; curl …`) holds the E2B
+    // pipe and would otherwise block the FULL 300s command timeout (deadline_exceeded) before returning
+    // — two of these burned ~10 min in deep-test App #7/#8/#9. Cap ONLY that narrow pattern so the held
+    // server is killed early and the agent moves on ~270s sooner; every other command keeps the normal
+    // timeout (the detector is deliberately narrow and never shortens a legit build/install/dev command).
+    const cmdTimeoutMs = backgroundedServerSmokeCheckMs(command) ?? COMMAND_TIMEOUT_MS;
     let sb = sandbox;
     for (let attempt = 0; attempt < 2; attempt++) {
       const t0 = Date.now();
       try {
-        const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS });
+        const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: cmdTimeoutMs });
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       } catch (err: any) {
         const dead = isDeadSandboxSignal({ exitCode: -1, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });

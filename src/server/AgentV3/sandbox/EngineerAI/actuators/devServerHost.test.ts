@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
 
 describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
@@ -231,6 +231,36 @@ describe('shouldReprobeBoundPort — re-verify a drifted port even when the assu
     expect(shouldReprobeBoundPort(5173, -1)).toBe(false);
     expect(shouldReprobeBoundPort(5173, NaN)).toBe(false);
     expect(shouldReprobeBoundPort(5173, 5173.5)).toBe(false);
+  });
+});
+
+describe('backgroundedServerSmokeCheckMs (deep-test App #7/#8/#9 — the 300s server-hang)', () => {
+  it('caps the exact failing smoke-check (npm run server & sleep; curl) instead of blocking 300s', () => {
+    // App #9's real command that hit `deadline_exceeded` (300s) TWICE.
+    expect(backgroundedServerSmokeCheckMs('npm run server 2>&1 &\nsleep 5\ncurl -s http://localhost:3001/health')).toBe(45_000);
+    expect(backgroundedServerSmokeCheckMs('npm start & sleep 3; curl localhost:3000')).toBe(45_000);
+    expect(backgroundedServerSmokeCheckMs('node server/index.js & sleep 2 && curl localhost:8080/health')).toBe(45_000);
+    expect(backgroundedServerSmokeCheckMs('tsx watch server/index.ts & sleep 4; curl localhost:3001')).toBe(45_000);
+  });
+
+  it('respects a custom cap', () => {
+    expect(backgroundedServerSmokeCheckMs('npm run server & sleep 5; curl x', 20_000)).toBe(20_000);
+  });
+
+  it('does NOT cap ordinary commands (never shortens a legit build/install/foreground server)', () => {
+    expect(backgroundedServerSmokeCheckMs('npm install')).toBeNull();
+    expect(backgroundedServerSmokeCheckMs('npm run build')).toBeNull();
+    expect(backgroundedServerSmokeCheckMs('npm run dev')).toBeNull();            // foreground; long-running path owns it
+    expect(backgroundedServerSmokeCheckMs('npm run server')).toBeNull();          // no backgrounding → not this pattern
+    expect(backgroundedServerSmokeCheckMs('npm run build && npm run server')).toBeNull(); // `&&` is not backgrounding
+    expect(backgroundedServerSmokeCheckMs('npx prisma migrate dev --name init')).toBeNull();
+    expect(backgroundedServerSmokeCheckMs('rm -rf node_modules && npm install')).toBeNull();
+  });
+
+  it('does NOT cap a bare trailing-& dev server (that is the long-running background path, not this)', () => {
+    // A trailing `&` with nothing after it is handled by stripDevServerBackgrounding + the bg launch.
+    expect(backgroundedServerSmokeCheckMs('npm run server &')).toBeNull();
+    expect(backgroundedServerSmokeCheckMs('npm run dev &')).toBeNull();
   });
 });
 

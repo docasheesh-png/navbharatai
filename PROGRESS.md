@@ -15812,3 +15812,43 @@ mismatch (account email icloud.com vs application navbharatai.com); fixed by mov
 email AND the AWS Builder ID email to `info@navbharatai.com` (all domains now navbharatai.com) and
 reapplied (pending 3–5 business days). A dedicated IAM user `navbharatai-sonic` (AmazonBedrockFullAccess)
 was created for the Sonic keys.
+
+---
+
+## 2026-07-13 — Deep-test App #9 (real-time collaborative Kanban) autopsy + FIX: bound the backgrounded-server smoke-check
+
+**Build:** normal tier (model claude-sonnet-4-6; cheap floor led, Sonnet backstop — NOT weak, so the
+#7/#8 weak-tier fixes weren't exercised). `BUILD_FAILED` after hitting the ~25-min wall. providerDelivery
+GLM:20 / KIMI:50 / VERTEX:2; providerFailures GLM:42 / KIMI:4.
+
+**5-bucket ledger:**
+- ✅ Self-healed: Prisma seed ran clean FIRST try (`npx prisma db seed → exit 0`) — the App #8
+  seed-idempotency guidance (#1324) HELD (no P2002/P2003). JSX TS1109 truncation errors auto-fixed;
+  import.meta.env errors recovered; 3 imports + 3 missing modules auto-fixed before preview.
+- 🔀 Workaround: GLM 429-saturated (42 failures) → KIMI carried 50 turns; Vertex twice (one truncated).
+  Vertex hallucinated deprecated `react-beautiful-dnd` in KanbanBoard.tsx though the installed lib was
+  `@hello-pangea/dnd` — cross-provider import mismatch.
+- ⏭️ Skipped: token-budget degradation parsed MY framing text ("CORE: Here's the App #9 prompt…") as
+  requirements because the admin pasted the whole chat message as the prompt (input artifact).
+- ❌ Still broken (caused BUILD_FAILED): `npm run server & sleep; curl` hit the **300s sandbox deadline
+  TWICE** (~10 min lost) — a backgrounded persistent server held the E2B pipe. `tsx: not found` then
+  `ts-node/esm not found` (server runner absent when the start script ran). Preview: `Cannot use
+  'import.meta' outside a module`.
+- 🥵 Struggle (DOMINANT cause): provider infra. GLM 429 saturation (42 failures) + Vertex catastrophic
+  latency (single calls of **323s and 412s**) + KIMI timeouts ate most of the 25-min budget.
+
+**Missing subsystem:** a bounded backgrounded-server smoke-check. The actuator backgrounds+port-polls
+the ONE designated dev command (`npm run dev`), but a full-stack app's SEPARATE backend (`npm run
+server`) run as `& sleep; curl` fell through to a 300s foreground block. Deeper/dominant: GLM key-pool /
+rate-limit relief (ROADMAP Tier-4) + Vertex latency — NOT code-fixable today.
+
+**Root-cause fix (this PR):** `backgroundedServerSmokeCheckMs(command)` — a PURE, narrow detector (a real
+mid-line backgrounding `&` + a server-start pattern). The fall-through bash path caps that command's
+timeout at 45s instead of 300s → the held server is killed early and the agent moves on ~255s sooner.
+ZERO command mutation → cannot shorten a legit build/install/foreground command (a bare `npm run dev` is
+owned by the long-running path). Recurring across App #7/#8/#9. Tests: 4 cap + 6 no-cap guards.
+
+**Honestly open (not code-fixable now):** GLM 429 saturation + Vertex 5–7-min latencies were the PRIMARY
+cause of THIS failure (the 45s cap saves ~8.5 min but wouldn't alone have saved this build). Real lever =
+GLM key-pool (ROADMAP Tier-4) + deprioritise Vertex as a floor rung. Also open: `tsx`/`ts-node` runner
+absent when the start script first ran; the in-browser preview `import.meta` limit for full-stack apps.

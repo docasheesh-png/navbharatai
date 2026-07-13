@@ -234,6 +234,37 @@ export function stripDevServerBackgrounding(command: string): string {
 }
 
 /**
+ * A backgrounded long-lived-server "smoke check": the agent starts a persistent server with a
+ * MID-LINE `&` and then probes it, e.g. `npm run server 2>&1 & sleep 5; curl .../health`. The
+ * backgrounded server never exits and HOLDS the E2B command pipe, so `commands.run` blocks for the
+ * FULL command timeout (300s = deadline_exceeded) before returning — this alone burned ~10 min
+ * (two 300s hangs) in deep-test App #7/#8/#9 and helped push a build past its wall-clock into
+ * BUILD_FAILED. Its USEFUL work (boot + probe) finishes in seconds, so cap such a command's timeout
+ * hard: the held server is killed early instead of hanging out the whole 300s, and the agent gets its
+ * (failed-or-not) result ~270s sooner and moves on.
+ *
+ * Deliberately NARROW so it can never shorten a legitimate command:
+ *  - requires a REAL backgrounding `&` (not `&&`) that is MID-LINE (more text after it) — a bare
+ *    trailing-`&` dev server is already handled by the long-running background path, not here;
+ *  - AND the command must start some kind of long-lived server (npm run server/start/dev/serve/
+ *    preview/backend/api, or node/tsx/ts-node/nodemon on a server entry).
+ * A plain `npm install`, `npm run build`, or a foreground dev server never matches. PURE +
+ * unit-testable. Returns the cap (ms) when it applies, else null (→ caller keeps the normal timeout).
+ */
+export function backgroundedServerSmokeCheckMs(command: string, capMs = 45_000): number | null {
+  if (!command) return null;
+  // A real backgrounding `&` (not part of `&&`) with MORE command text after it (mid-line).
+  const midBackground = /(?:^|[^&])&(?!&)\s*\S/.test(command);
+  if (!midBackground) return null;
+  const startsServer =
+    /(?:npm|pnpm|yarn)\s+run\s+(?:server|start|dev|serve|preview|backend|api)\b/i.test(command) ||
+    /\bnpm\s+start\b/i.test(command) ||
+    /\b(?:tsx|ts-node|nodemon)\b[^\n&|;]*\bserver\b/i.test(command) ||
+    /\bnode\b[^\n&|;]*\bserver(?:[/\\]index)?\.(?:ts|js|mjs|cjs)\b/i.test(command);
+  return startsServer ? capMs : null;
+}
+
+/**
  * Shell test that prints `STALE` when dependencies need (re)installing — node_modules is
  * missing, or package.json has been edited since the last install (a newly-declared dep like
  * `tailwindcss` is not yet on disk). Used to gate `npm install` before a build AND before a dev

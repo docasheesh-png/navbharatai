@@ -18,6 +18,8 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { generateMissingCssModules } from './CssModuleGenerator';
+import { generateMissingBarrels } from './BarrelGenerator';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 
@@ -511,6 +513,27 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
+      // DETERMINISTIC MISSING-MODULE GENERATION on the FAST LANE too (rule-3 sibling-hunt, Kanban autopsy
+      // 2026-07-13): the agentic path already generates a missing *.module.css from the importer's `styles.X`
+      // usage and a missing folder barrel from existing leaves — no LLM step. The fast lane (the SIMPLER,
+      // more common apps) had the SAME gap, so wire the same two pure generators here. Best-effort; only ever
+      // turns a broken build into a working one. Kill: AGENTV3_CSS_MODULE_GEN / AGENTV3_BARREL_GEN = off.
+      try {
+        const beforeGen = Object.fromEntries(written.map((f) => [f.path, f.content]));
+        const created: Array<{ path: string; content: string }> = [];
+        if (process.env.AGENTV3_CSS_MODULE_GEN !== 'off') {
+          for (const s of generateMissingCssModules(beforeGen)) created.push({ path: s.path, content: s.content });
+        }
+        if (process.env.AGENTV3_BARREL_GEN !== 'off') {
+          const withCss = { ...beforeGen, ...Object.fromEntries(created.map((c) => [c.path, c.content])) };
+          for (const b of await generateMissingBarrels(withCss)) created.push({ path: b.path, content: b.content });
+        }
+        if (created.length > 0) {
+          const have = new Set(written.map((f) => f.path));
+          for (const c of created) if (!have.has(c.path)) written.push(c);
+          deps.log?.(`🎨 Generated ${created.length} missing module(s) (stylesheets/barrels) deterministically from usage before preview.`);
+        }
+      } catch { /* best-effort — a failure just leaves the missing modules for the honest verify below */ }
       // DETERMINISTIC LANGUAGE-COHERENCE RECONCILE before write/preview (admin deep-test App #1,
       // 2026-07-13): the shared-contract phase always emits TypeScript, and the per-file generator can
       // paste that TS (enum/interface/import type/`: Type`) into a `.jsx` file — which esbuild cannot

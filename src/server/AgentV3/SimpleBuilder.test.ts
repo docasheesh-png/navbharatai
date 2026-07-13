@@ -146,6 +146,41 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(bg?.content).toContain('import { CANVAS_HEIGHT } from "./constants"'); // the forgotten import was added
   });
 
+  it('deterministically generates a missing *.module.css from the component usage (fast-lane sibling-hunt)', async () => {
+    let written: OneShotFile[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      writeFiles: async (f) => { written = f; },
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Card.tsx :: a card\nsrc/index.css :: styles';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        if (path === 'src/Card.tsx') return `<<<FILE ${path}>>>\nimport styles from './Card.module.css';\nexport const Card = () => <div className={styles.box}/>;\n<<<ENDFILE>>>`;
+        return `<<<FILE ${path}>>>\nexport default function App(){return null}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    const css = written.find((f) => f.path === 'src/Card.module.css'); // never in the manifest — generated deterministically
+    expect(css).toBeDefined();
+    expect(css!.content).toContain('.box {');
+  });
+
+  it('deterministically generates a missing barrel index from existing leaves (fast-lane sibling-hunt)', async () => {
+    let written: OneShotFile[] = [];
+    const r = await runSimpleBuild(baseDeps({
+      writeFiles: async (f) => { written = f; },
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/icons/Star.tsx :: an icon\nsrc/index.css :: styles';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        if (path === 'src/App.tsx') return `<<<FILE ${path}>>>\nimport { Star } from './icons';\nexport default () => <Star/>;\n<<<ENDFILE>>>`;
+        if (path === 'src/icons/Star.tsx') return `<<<FILE ${path}>>>\nexport const Star = () => null;\n<<<ENDFILE>>>`;
+        return `<<<FILE ${path}>>>\nbody{}\n<<<ENDFILE>>>`;
+      },
+    }));
+    expect(r.ok).toBe(true);
+    const barrel = written.find((f) => f.path === 'src/icons/index.ts'); // the forgotten barrel, generated from the leaf
+    expect(barrel).toBeDefined();
+    expect(barrel!.content).toContain(`export { Star } from './Star';`);
+  });
+
   it('falls back (ok:false) when the manifest is too small', async () => {
     const r = await runSimpleBuild(baseDeps({ generate: async () => 'src/App.tsx :: only one' }));
     expect(r.ok).toBe(false);

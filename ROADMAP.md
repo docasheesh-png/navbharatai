@@ -301,6 +301,13 @@ decision or spend outside the code session (no `gcloud`/tokens from here).
 - **Browser-QA gates (P-TQA.11)** 🔒 — axe-core AA + Lighthouse over the LIVE preview in CI
   (needs prod E2B key / Docker host).
 - **Multi-target deploy tokens · Sentry account** 🔒 — external accounts/keys.
+- **GLM KEY POOL / ROTATION (admin-mandated future item, 2026-07-13)** 🔒🟡 — a single GLM key's
+  account-level RPM cannot serve real user volume (deep-test App #7: 429 storms → GLM benched → Vertex
+  fallback → truncation → broken imports). Build a key POOL: N `GLM_API_KEY`s (env `GLM_API_KEYS`,
+  comma-separated), round-robin/least-recently-throttled rotation inside `cheapBuildFloorRunners`, a
+  per-key 429 cooldown, and pool-level telemetry (which key throttled, rotation rate). Code-tractable
+  once the admin buys the extra keys (that part is 🔒 infra); same pattern extends to KIMI later.
+  Admin verbatim: "isko future me karna hai — aisa roadmap me daal do."
 
 ### Admin / monetization decisions
 - **Pro tier-gating** 👤 — `/api/pro-chat`, `/api/pro-build`, `/api/build` are open to everyone;

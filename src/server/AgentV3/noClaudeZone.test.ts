@@ -4,6 +4,7 @@ import {
   enterNoClaudeZone,
   noClaudeZoneActive,
   claudeBlockedInZone,
+  isHaikuModelId,
   NoClaudeInWeakBuildError,
 } from './noClaudeZone';
 
@@ -36,10 +37,41 @@ describe('noClaudeZone', () => {
       await Promise.resolve();
       await new Promise((r) => setTimeout(r, 1));
       sawActive = noClaudeZoneActive();
-      sawBlocked = claudeBlockedInZone('claude-3-5-haiku-latest');
+      sawBlocked = claudeBlockedInZone('claude-sonnet-4-6');
     });
     expect(sawActive).toBe(true);
     expect(sawBlocked).toBe(true);
+  });
+
+  // HAIKU AMENDMENT (admin 2026-07-13): "weak module me claude ka haiku ke alawa kuch aur nahi chalna
+  // chahiye, matlab sonnet ya opus never never" — Haiku is the ONE authorized Claude on weak.
+  it('allows a HAIKU model through an active zone; Sonnet/Opus stay refused', () => {
+    runInNoClaudeZone({ active: true }, () => {
+      expect(claudeBlockedInZone('claude-haiku-4-5-20251001')).toBe(false);
+      expect(claudeBlockedInZone('claude-3-5-haiku-latest')).toBe(false);
+      expect(claudeBlockedInZone('claude-sonnet-4-6')).toBe(true);   // never
+      expect(claudeBlockedInZone('claude-opus-4-8')).toBe(true);     // never never
+      expect(claudeBlockedInZone(undefined)).toBe(true);             // unknown model → refuse (safe default)
+    });
+  });
+
+  it('a Haiku pass-through never fires the onBlocked observer', () => {
+    const blocked: (string | undefined)[] = [];
+    runInNoClaudeZone({ active: true, onBlocked: (m) => blocked.push(m) }, () => {
+      claudeBlockedInZone('claude-haiku-4-5-20251001');
+      claudeBlockedInZone('claude-sonnet-4-6');
+    });
+    expect(blocked).toEqual(['claude-sonnet-4-6']); // only the refused Sonnet is reported
+  });
+
+  it('isHaikuModelId matches haiku ids only', () => {
+    expect(isHaikuModelId('claude-haiku-4-5-20251001')).toBe(true);
+    expect(isHaikuModelId('claude-3-5-haiku-latest')).toBe(true);
+    expect(isHaikuModelId('claude-sonnet-4-6')).toBe(false);
+    expect(isHaikuModelId('claude-opus-4-8')).toBe(false);
+    expect(isHaikuModelId('glm-5.2')).toBe(false);
+    expect(isHaikuModelId(undefined)).toBe(false);
+    expect(isHaikuModelId(null)).toBe(false);
   });
 
   it('the zone does not leak to sibling async contexts', async () => {

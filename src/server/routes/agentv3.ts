@@ -1427,7 +1427,18 @@ export function healRunnerRoutingOpts(freeTierBuildActive: boolean): { claudeFir
  */
 export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude: boolean): T[] {
   if (!noClaude) return chain;
-  return chain.filter((r) => r.name !== 'CLAUDE' && r.name !== 'CLAUDE_HAIKU');
+  // AMENDMENT (admin-mandated 2026-07-13, verbatim: "weak module me claude haiku add kar de? to last me.
+  // par sart yeh hai … haiku ke alawa kuch aur nahi chalna chahiye, matlab sonnet ya opus never never"):
+  // the WEAK module may now use Claude **HAIKU** as the absolute LAST resort — and ONLY Haiku. So:
+  //   • 'CLAUDE' (the Sonnet/Opus runner) is STILL stripped — Sonnet/Opus never run on weak, ever.
+  //   • 'CLAUDE_HAIKU' is KEPT — it is safe BY CONSTRUCTION: forceModelRunner pins it to haikuModel()
+  //     (it rewrites params.model), so it can never execute anything but Haiku. The ClaudeClient
+  //     no-Claude-zone chokepoint independently enforces the same (haiku ids allowed, all else refused).
+  //   • Every kept CLAUDE_HAIKU is MOVED TO THE END of the chain ("to last me") — even on a defensive
+  //     path where the chain was assembled with Haiku mid-chain, weak order stays cheap → … → Haiku last.
+  const kept = chain.filter((r) => r.name !== 'CLAUDE');
+  const haiku = kept.filter((r) => r.name === 'CLAUDE_HAIKU');
+  return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
 function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
@@ -1496,27 +1507,33 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // branch is a DIFFERENT, separately-opted-into cost strategy (try the cheap model before Claude) —
   // left unchanged; the admin's chain applies to the default (claudeFirst===true) path.
   const baseChain = claudeFirst ? [claude, ...withBackstop, ...fallback] : [...fallback, claude, ...withBackstop];
-  // FREE-TIER cheap-only (admin 2026-07-10): a not-yet-paying user's build runs on the cheap floor
-  // ALONE — no Claude, no Haiku backstop, no Vertex/Gemini last resort — so NavBharatAI never spends
-  // its Claude budget on a free build. Guarded so it can only take effect when a floor actually exists
-  // (floorRunners non-empty); if the caller asks for cheapOnly with no floor configured we fall back
-  // to the normal chain rather than build an empty (always-failing) chain. When the cheap build can't
-  // deliver, the route converts the user to paid (upsell) instead of rescuing on Claude.
+  // FREE-TIER cheap-only (admin 2026-07-10, amended 2026-07-13): a not-yet-paying user's build runs on
+  // the cheap floor first — Sonnet/Opus NEVER — with Vertex/Gemini and (since the 2026-07-13 Haiku
+  // amendment) the model-pinned Claude-HAIKU backstop as the graduated last resorts, so NavBharatAI's
+  // premium Claude budget is never spent on a free build (Haiku is the one authorized, cheap exception).
+  // Guarded so it can only take effect when a floor actually exists (floorRunners non-empty); if the
+  // caller asks for cheapOnly with no floor configured we fall back to the normal chain rather than
+  // build an empty (always-failing) chain. When the cheap build can't deliver, the route converts the
+  // user to paid (upsell) instead of rescuing on Sonnet.
   const cheapOnly = opts?.cheapOnly === true && floorRunners.length > 0;
   // Cheap floor LEADS when active; [] → `[...[], ...baseChain]` is byte-for-byte today's chain.
   // Claude + Haiku backstop remain inside baseChain, so failures always fall back safely.
   //
-  // FREE-TIER last resort (Model Routing Policy, admin 2026-07-12: "agar sab failed ho to vertex use bhi
-  // kar sakte hai, but last me"): a free cheap-only build appends Vertex/Gemini as the ABSOLUTE last rung
-  // — still NEVER Claude — so a free build has a final non-Claude attempt after the whole GLM/Kimi ladder
-  // fails, instead of failing outright. Non-free cheap-only stays floor-only (unchanged).
+  // FREE-TIER last resort ladder (Model Routing Policy, admin 2026-07-12 + HAIKU AMENDMENT 2026-07-13):
+  // a free/weak cheap-only build climbs GLM/Kimi → Vertex/Gemini → **Claude HAIKU as the absolute LAST
+  // rung** (admin verbatim: "weak module me claude haiku add kar de? to last me. par sart yeh hai …
+  // haiku ke alawa kuch aur nahi chalna chahiye, matlab sonnet ya opus never never"). The Haiku rung is
+  // the forced-Haiku backstop — model-pinned by forceModelRunner, so it can never run Sonnet/Opus — and
+  // enforceNoClaude + the ClaudeClient zone chokepoint below independently guarantee the "never never".
+  // Non-free cheap-only gets floor → Haiku (no Vertex/Gemini — unchanged policy for that path).
   const chain = cheapOnly
-    ? (opts?.free ? [...floorRunners, ...cheap] : [...floorRunners])
+    ? (opts?.free ? [...floorRunners, ...cheap, ...withBackstop] : [...floorRunners, ...withBackstop])
     : [...floorRunners, ...baseChain];
-  // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule, 2026-07-13): a weak/noClaude build can NEVER
-  // touch Claude. Strip CLAUDE + the forced-Haiku backstop from the FINAL chain no matter how it was
-  // assembled — so even a heal gate that forgot to set cheapOnly cannot leak a Sonnet/Haiku call onto a
-  // free build. For a weak build this leaves the cheap floor (+ Vertex/Gemini last resort) — never Claude.
+  // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule 2026-07-13, HAIKU AMENDMENT same day): a
+  // weak/noClaude build can NEVER touch Sonnet/Opus. enforceNoClaude strips 'CLAUDE' from the FINAL
+  // chain no matter how it was assembled — so even a heal gate that forgot to set cheapOnly cannot leak
+  // a Sonnet call onto a free build — and keeps ONLY the model-pinned 'CLAUDE_HAIKU' backstop, moved to
+  // the END ("haiku … to last me"). Weak order: cheap floor → Vertex/Gemini → Haiku last.
   const guardedChain = enforceNoClaude(chain, opts?.noClaude === true);
   return makeMultiProviderTurnRunner(guardedChain, {
     onProviderUsed: (used, from) => {
@@ -4621,7 +4638,7 @@ export function registerAgentV3Routes(app: Express): void {
               phase: 'provider',
               severity: 'warning',
               code: 'NO_CLAUDE_BLOCKED',
-              message: `Weak-module guard refused a Claude call (${model ?? 'claude'}) — a weak/free build must never run Claude. The call was blocked (no tokens spent); routing stays on the cheap floor (GLM/Kimi) + Vertex/Gemini.`,
+              message: `Weak-module guard refused a Sonnet/Opus-class Claude call (${model ?? 'claude'}) — on a weak/free build only the Haiku last resort is authorized (admin amendment 2026-07-13). The call was blocked (no tokens spent); routing stays on the cheap floor (GLM/Kimi) → Vertex/Gemini → Haiku.`,
               autoResolved: true,
             });
           } catch {
@@ -7322,7 +7339,7 @@ export function registerAgentV3Routes(app: Express): void {
               phase: 'provider',
               severity: 'error',
               code: 'NO_CLAUDE_VIOLATION',
-              message: `Weak-module absolute rule VIOLATED: this weak/free build was delivered by Claude (${leakedClaudeProvider}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
+              message: `Weak-module absolute rule VIOLATED: this weak/free build was delivered by a Sonnet/Opus-class Claude (${leakedClaudeProvider}) despite the guarantee (only the Haiku last resort is authorized on weak — admin amendment 2026-07-13). Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's premium Claude budget.`,
               autoResolved: false,
             });
           }

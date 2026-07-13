@@ -450,15 +450,23 @@ export class BuildDiagnostics {
    * populated from the chain's real onProviderUsed, so a cheap-provider turn is never mislabelled Claude;
    * the token ledger is the corroborating cost signal (a real Claude turn burns Claude tokens).
    *
-   * Returns the Claude provider name that delivered a turn (or null when Claude genuinely never ran).
-   * Pure; never throws. (A raw Claude call that bypasses provider tracking cannot occur on a weak build:
+   * HAIKU AMENDMENT (admin-mandated 2026-07-13): the weak module may use Claude **HAIKU** as its
+   * authorized last resort ("haiku ke alawa kuch aur nahi — sonnet ya opus never never"), so a
+   * 'CLAUDE_HAIKU' / haiku-id delivery is NOT a violation anymore — only a Sonnet/Opus-class delivery
+   * ('CLAUDE', or a non-haiku Claude model id) is. The generic 'anthropic' label is deliberately NOT
+   * matched: fastLaneProviderLabel maps BOTH CLAUDE and CLAUDE_HAIKU to 'anthropic', so it cannot
+   * distinguish the authorized Haiku from a real Sonnet leak — and a false NO_CLAUDE_VIOLATION defames
+   * a clean build (the exact App #5 lesson). Chain-delivered Sonnet is always named 'CLAUDE' here.
+   *
+   * Returns the violating Claude provider name (or null when no unauthorized Claude ran). Pure; never
+   * throws. (A raw non-Haiku Claude call that bypasses provider tracking cannot occur on a weak build:
    * ClaudeClient.runTurn's no-Claude-zone guard refuses it before it runs — see noClaudeZone.ts.)
    */
   claudeProviderDelivered(): string | null {
-    const isClaudeProvider = (name: string): boolean =>
-      name === 'CLAUDE' || name === 'CLAUDE_HAIKU' || name.toLowerCase() === 'anthropic' || isClaudeModel(name);
-    for (const name of this.providerDelivery.keys()) if (isClaudeProvider(name)) return name;
-    if (this.providerTokens) for (const name of Object.keys(this.providerTokens)) if (isClaudeProvider(name)) return name;
+    const isViolatingClaude = (name: string): boolean =>
+      name === 'CLAUDE' || (isClaudeModel(name) && !/haiku/i.test(name));
+    for (const name of this.providerDelivery.keys()) if (isViolatingClaude(name)) return name;
+    if (this.providerTokens) for (const name of Object.keys(this.providerTokens)) if (isViolatingClaude(name)) return name;
     return null;
   }
 

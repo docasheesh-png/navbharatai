@@ -387,6 +387,22 @@ export class ToolDispatcher {
    * cuts that to one pass — much less sandbox I/O (faster + cheaper evaluate). Returns
    * the full file list too (for the name-only dimensions: hygiene, secret-leak).
    */
+  /**
+   * Detect the project's package manager from its ROOT lockfile (pnpm → yarn → bun → npm; undefined when
+   * none present). Shared by the deploy-artifact + README generators so their commands match the project
+   * instead of always assuming npm. Cheap best-effort probe; a read error just means "not present".
+   */
+  private async detectWorkspacePackageManager(): Promise<PackageManager | undefined> {
+    const probes: Array<[string, PackageManager]> = [
+      ['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'],
+      ['bun.lockb', 'bun'], ['bun.lock', 'bun'], ['package-lock.json', 'npm'],
+    ];
+    for (const [file, pm] of probes) {
+      try { await this.actuator.readFile(this.workspaceId, file); return pm; } catch { /* absent */ }
+    }
+    return undefined;
+  }
+
   private async readEvalSnapshot(): Promise<{ files: string[]; sources: EvalSourceFile[] }> {
     const SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|py|rb|java|php|go)$/i;
     const SKIP_DIR = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)/i;
@@ -1351,7 +1367,8 @@ export class ToolDispatcher {
           pkg = null; // no manifest — generateReadme still produces an honest minimal README
         }
         const graph = getWorkspaceMemory(this.workspaceId).graph();
-        const content = generateReadme({ projectName, graph, packageJson: pkg });
+        const packageManager = await this.detectWorkspacePackageManager();
+        const content = generateReadme({ projectName, graph, packageJson: pkg, packageManager });
         let kind: 'create' | 'modify' = 'create';
         try {
           await this.actuator.readFile(this.workspaceId, path);
@@ -1941,20 +1958,11 @@ export class ToolDispatcher {
         const lintCmd = optStr(input, 'lintCmd') || undefined;
         const testCmd = optStr(input, 'testCmd') || undefined;
         const multiStage = rec.multiStage === false ? false : undefined;
-        // Detect the project's package manager from its ROOT lockfile so the generated CI matches it —
-        // a pnpm/yarn/bun project otherwise gets a broken `npm ci` + `cache: 'npm'` workflow. Cheap
-        // best-effort probe (first lockfile found wins, pnpm→yarn→bun→npm); an explicit installCmd from
-        // the caller still overrides. Defaults to npm when no lockfile is present.
-        let packageManager: PackageManager | undefined;
-        if (include.has('ci') || include.has('docker')) {
-          const probes: Array<[string, PackageManager]> = [
-            ['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'],
-            ['bun.lockb', 'bun'], ['bun.lock', 'bun'], ['package-lock.json', 'npm'],
-          ];
-          for (const [file, pm] of probes) {
-            try { await this.actuator.readFile(this.workspaceId, file); packageManager = pm; break; } catch { /* absent */ }
-          }
-        }
+        // Match the generated artifacts to the project's package manager (a pnpm/yarn/bun project
+        // otherwise gets a broken `npm ci` workflow/Dockerfile). An explicit installCmd still overrides.
+        const packageManager = (include.has('ci') || include.has('docker'))
+          ? await this.detectWorkspacePackageManager()
+          : undefined;
         const genInput: DeployArtifactInput = {};
         if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage, packageManager };
         if (include.has('compose')) genInput.compose = { port };

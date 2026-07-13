@@ -8,12 +8,35 @@
 // tool calls this and writes the result to README.md.
 
 import type { ProjectGraph } from './WorkspaceMemory';
+import type { PackageManager } from '../lib/DeployArtifactGenerator';
 
 export interface ReadmeInput {
   projectName?: string;
   graph: ProjectGraph;
   /** Raw package.json contents, if available. */
   packageJson?: string | null;
+  /**
+   * The project's package manager (detected from its lockfile by the caller). When absent, it is read
+   * from package.json's `packageManager` (Corepack) field, else defaults to npm — so the README's
+   * install/run commands match a pnpm/yarn/bun project instead of always saying npm.
+   */
+  packageManager?: PackageManager;
+}
+
+/** Parse package.json's Corepack `packageManager` field ("pnpm@9.0.0" → "pnpm"). */
+function pmFromField(field?: string): PackageManager | null {
+  const name = (field || '').split('@')[0].trim().toLowerCase();
+  return name === 'npm' || name === 'yarn' || name === 'pnpm' || name === 'bun' ? name : null;
+}
+
+/** The install command a developer runs after cloning (plain install, not lockfile-frozen). */
+function pmInstall(pm: PackageManager): string {
+  return pm === 'yarn' ? 'yarn' : pm === 'pnpm' ? 'pnpm install' : pm === 'bun' ? 'bun install' : 'npm install';
+}
+
+/** Run a named script (`npm run dev` / `yarn dev` / `pnpm dev` / `bun run dev`). */
+function pmScript(pm: PackageManager, script: string): string {
+  return pm === 'yarn' ? `yarn ${script}` : pm === 'pnpm' ? `pnpm ${script}` : pm === 'bun' ? `bun run ${script}` : `npm run ${script}`;
 }
 
 interface Pkg {
@@ -22,6 +45,7 @@ interface Pkg {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  packageManager?: string;
 }
 
 function parsePkg(raw?: string | null): Pkg | null {
@@ -84,15 +108,18 @@ export function generateReadme(input: ReadmeInput): string {
   const manifestDeps = pkg ? [...Object.keys(pkg.dependencies || {}), ...Object.keys(pkg.devDependencies || {})] : [];
   const stack = detectStack([...new Set([...manifestDeps, ...(graph.dependencies || [])])]);
 
-  // How to run — prefer a real dev/start script from package.json.
+  // Package manager: caller-detected (lockfile) → package.json packageManager field → npm.
+  const pm: PackageManager = input.packageManager || pmFromField(pkg?.packageManager) || 'npm';
+
+  // How to run — prefer a real dev/start script from package.json, in the project's own manager.
   const scripts = pkg?.scripts || {};
   const devCmd = scripts.dev
-    ? 'npm run dev'
+    ? pmScript(pm, 'dev')
     : scripts.start
-      ? 'npm start'
+      ? `${pm} start`
       : scripts.serve
-        ? 'npm run serve'
-        : 'npm run dev';
+        ? pmScript(pm, 'serve')
+        : pmScript(pm, 'dev');
 
   const components = graph.components || [];
   const routes = graph.routes || [];
@@ -106,7 +133,7 @@ export function generateReadme(input: ReadmeInput): string {
   else lines.push('- (not detected yet)');
   lines.push('');
 
-  lines.push('## Getting Started', '', '```bash', 'npm install', devCmd, '```', '');
+  lines.push('## Getting Started', '', '```bash', pmInstall(pm), devCmd, '```', '');
 
   lines.push('## Project Structure', '');
   lines.push(`- ${fileCount} file(s), ${components.length} component(s), ${routes.length} route(s).`);
@@ -121,7 +148,7 @@ export function generateReadme(input: ReadmeInput): string {
   const scriptNames = Object.keys(scripts);
   if (scriptNames.length) {
     lines.push('## Available Scripts', '');
-    for (const s of scriptNames.slice(0, 12)) lines.push(`- \`npm run ${s}\` — ${scripts[s]}`);
+    for (const s of scriptNames.slice(0, 12)) lines.push(`- \`${pmScript(pm, s)}\` — ${scripts[s]}`);
     lines.push('');
   }
 

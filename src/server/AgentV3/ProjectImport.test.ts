@@ -13,7 +13,7 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports } from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, shouldRetryImportAnonymously } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -425,6 +425,27 @@ describe('findUnresolvedLocalImports — the agentic missing-files gate (deep-te
       'src/App.module.css': '.app { color: red; }',
     };
     expect(findUnresolvedLocalImports(files)).toEqual([]);
+  });
+});
+
+describe('shouldRetryImportAnonymously (deep-test App #5 — public repo, token-authed clone failed)', () => {
+  // THE App #5 case: a token-authenticated clone of a PUBLIC repo brought in 0 files (the token's scope
+  // didn't cover it), so retry anonymously.
+  it('retries when an authed clone added nothing and a token was used', () => {
+    expect(shouldRetryImportAnonymously({ hydrated: false, addedFileCount: 0, hadToken: true, urlsDiffer: true })).toBe(true);
+  });
+
+  it('does NOT retry when the authed clone already landed files', () => {
+    expect(shouldRetryImportAnonymously({ hydrated: true, addedFileCount: 0, hadToken: true, urlsDiffer: true })).toBe(false);
+    expect(shouldRetryImportAnonymously({ hydrated: false, addedFileCount: 12, hadToken: true, urlsDiffer: true })).toBe(false);
+  });
+
+  it('does NOT retry when there was no token (anonymous was already the first attempt)', () => {
+    expect(shouldRetryImportAnonymously({ hydrated: false, addedFileCount: 0, hadToken: false, urlsDiffer: false })).toBe(false);
+  });
+
+  it('does NOT retry when the anonymous URL is identical to the authed one (nothing to change)', () => {
+    expect(shouldRetryImportAnonymously({ hydrated: false, addedFileCount: 0, hadToken: true, urlsDiffer: false })).toBe(false);
   });
 });
 

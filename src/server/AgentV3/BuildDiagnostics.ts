@@ -437,14 +437,28 @@ export class BuildDiagnostics {
   }
 
   /**
-   * WEAK-TIER NO-CLAUDE honesty check (admin deep-test Pomodoro report, 2026-07-13): a weak build
-   * reported `noClaude: true` while 9 Claude-Sonnet calls actually ran (a heal/judge gate that bypassed
-   * the enforceNoClaude chain guard). Returns the FIRST Claude model that really ran, or null — so the
-   * route can (a) record a loud NO_CLAUDE_VIOLATION and (b) correct billing.noClaude to the truth, never
-   * claiming a build was Claude-free when it wasn't. Reads only the recorded llmCalls; pure; never throws.
+   * WEAK-TIER NO-CLAUDE honesty check — the TRUTH of "did Claude actually DELIVER a build turn," read
+   * from the PROVIDER DELIVERY / per-provider token ledger (the real runner the multi-provider chain
+   * used: 'CLAUDE' / 'CLAUDE_HAIKU'), NOT from an llmCall's nominal `model` label.
+   *
+   * ROOT CAUSE this corrects (deep-test App #5, 2026-07-13): a 100%-GLM build recorded every llmCall with
+   * the REQUESTED model id ('claude-sonnet-4-6') even though GLM answered every turn (providerDelivery
+   * {GLM:14}, ZERO Claude tokens). The AgentRunner stamps the llmCall with its nominal `this.model`, while
+   * the ACTUAL provider is tracked separately via onProviderUsed. The earlier model-label check
+   * (`claudeModelUsed`, now removed) therefore FALSE-flagged that clean build as a no-Claude VIOLATION and
+   * wrongly set billing.noClaude=false — defaming a build that never touched Claude. Provider delivery is
+   * populated from the chain's real onProviderUsed, so a cheap-provider turn is never mislabelled Claude;
+   * the token ledger is the corroborating cost signal (a real Claude turn burns Claude tokens).
+   *
+   * Returns the Claude provider name that delivered a turn (or null when Claude genuinely never ran).
+   * Pure; never throws. (A raw Claude call that bypasses provider tracking cannot occur on a weak build:
+   * ClaudeClient.runTurn's no-Claude-zone guard refuses it before it runs — see noClaudeZone.ts.)
    */
-  claudeModelUsed(): string | null {
-    for (const c of this.llmCalls) if (isClaudeModel(c.model)) return c.model ?? 'claude';
+  claudeProviderDelivered(): string | null {
+    const isClaudeProvider = (name: string): boolean =>
+      name === 'CLAUDE' || name === 'CLAUDE_HAIKU' || name.toLowerCase() === 'anthropic' || isClaudeModel(name);
+    for (const name of this.providerDelivery.keys()) if (isClaudeProvider(name)) return name;
+    if (this.providerTokens) for (const name of Object.keys(this.providerTokens)) if (isClaudeProvider(name)) return name;
     return null;
   }
 

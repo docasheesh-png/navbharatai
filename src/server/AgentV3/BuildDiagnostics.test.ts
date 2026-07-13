@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
-describe('isClaudeModel + claudeModelUsed (weak-module no-Claude honesty)', () => {
-  it('isClaudeModel matches every Claude id form and rejects cheap-floor models', () => {
+describe('isClaudeModel (pure helper)', () => {
+  it('matches every Claude id form and rejects cheap-floor models', () => {
     for (const m of ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-3-5-haiku-latest', 'Sonnet', 'OPUS']) {
       expect(isClaudeModel(m)).toBe(true);
     }
@@ -11,23 +11,50 @@ describe('isClaudeModel + claudeModelUsed (weak-module no-Claude honesty)', () =
       expect(isClaudeModel(m as string)).toBe(false);
     }
   });
+});
 
-  it('claudeModelUsed returns the first Claude model that actually ran (the App #3 leak)', () => {
+describe('claudeProviderDelivered (weak-module no-Claude honesty — provider truth, not model label)', () => {
+  // THE App #5 false positive: a 100%-GLM build recorded every llmCall with the REQUESTED model id
+  // 'claude-sonnet-4-6', while GLM actually delivered every turn. The verdict must read the provider
+  // DELIVERY, not the nominal model label, so a clean cheap build is never defamed as a Claude violation.
+  it('returns null when GLM delivered every turn despite llmCalls labelled claude-sonnet-4-6 (App #5)', () => {
     const clk = { t: 1000 };
     const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
-    d.recordLlmCall({ provider: 'glm', model: 'glm-4.7', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
-    expect(d.claudeModelUsed()).toBeNull();
-    // A raw ClaudeClient call with NO provider — exactly the leaking gate signature.
-    d.recordLlmCall({ model: 'claude-sonnet-4-6', finishReason: 'end_turn', toolCalls: 1, inputTokens: 10, outputTokens: 20, latencyMs: 100, ok: true });
-    expect(d.claudeModelUsed()).toBe('claude-sonnet-4-6');
+    for (let i = 0; i < 14; i++) {
+      d.recordProviderTurn('GLM'); // the TRUTH: GLM answered
+      d.recordLlmCall({ model: 'claude-sonnet-4-6', finishReason: 'end_turn', toolCalls: 1, inputTokens: 100, outputTokens: 20, latencyMs: 100, ok: true }); // nominal label lies
+    }
+    d.setProviderTokens({ GLM: { inputTokens: 254441, outputTokens: 2088 } });
+    expect(d.claudeProviderDelivered()).toBeNull(); // no false positive
   });
 
-  it('claudeModelUsed stays null for an all-cheap weak build', () => {
+  it('returns the Claude provider name when Claude ACTUALLY delivered a turn (a real chain leak)', () => {
     const clk = { t: 1000 };
     const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
-    d.recordLlmCall({ provider: 'glm', model: 'glm-5.2', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
-    d.recordLlmCall({ provider: 'kimi', model: 'kimi-k2.6', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
-    expect(d.claudeModelUsed()).toBeNull();
+    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('CLAUDE'); // a real Claude delivery
+    expect(d.claudeProviderDelivered()).toBe('CLAUDE');
+  });
+
+  it('detects the forced-Haiku backstop too, and via the token ledger', () => {
+    const clk = { t: 1000 };
+    const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
+    d.recordProviderTurn('CLAUDE_HAIKU');
+    expect(d.claudeProviderDelivered()).toBe('CLAUDE_HAIKU');
+
+    const d2 = new BuildDiagnostics({ now: () => (clk.t += 10) });
+    d2.recordProviderTurn('GLM');
+    d2.setProviderTokens({ GLM: { inputTokens: 5, outputTokens: 5 }, CLAUDE: { inputTokens: 10, outputTokens: 3 } });
+    expect(d2.claudeProviderDelivered()).toBe('CLAUDE'); // token-ledger corroboration
+  });
+
+  it('stays null for an all-cheap weak build (GLM + Kimi only)', () => {
+    const clk = { t: 1000 };
+    const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
+    d.recordProviderTurn('GLM');
+    d.recordProviderTurn('KIMI');
+    d.setProviderTokens({ GLM: { inputTokens: 1, outputTokens: 1 }, KIMI: { inputTokens: 1, outputTokens: 1 } });
+    expect(d.claudeProviderDelivered()).toBeNull();
   });
 });
 

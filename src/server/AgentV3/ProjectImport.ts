@@ -445,6 +445,28 @@ export function findUnresolvedLocalImports(files: Record<string, string>): Array
   return out;
 }
 
+/**
+ * Should a GitHub import RETRY the clone anonymously (without the user's token)? True only when a
+ * TOKEN-authenticated clone brought in NOTHING (`!hydrated && addedFileCount === 0`) AND a token was
+ * actually used (`hadToken`) AND the anonymous URL differs from the authed one (`urlsDiffer`).
+ *
+ * ROOT CAUSE (deep-test App #5, 2026-07-13): the structured import injects the user's GitHub token into
+ * the clone URL. For a PUBLIC repo the token's scope does NOT cover — a GitHub App installation token, or
+ * a token for a different account — the authenticated clone FAILS (403/404), even though an ANONYMOUS
+ * clone of that same public repo succeeds. The report proved it: `hydrateFromRepo` said "couldn't clone
+ * .../mitrify" while the model's own plain `git clone` of the identical URL exited 0. Retrying without the
+ * token recovers exactly that case (a private repo still needs the token, so we try authed FIRST). Pure +
+ * unit-tested.
+ */
+export function shouldRetryImportAnonymously(opts: {
+  hydrated: boolean;
+  addedFileCount: number;
+  hadToken: boolean;
+  urlsDiffer: boolean;
+}): boolean {
+  return !opts.hydrated && opts.addedFileCount === 0 && opts.hadToken && opts.urlsDiffer;
+}
+
 /** The honest "— skipped …" tail explaining every entry an extraction dropped, or ''. Pure. */
 export function droppedDetailNote(extracted: ExtractedProject): string {
   const d = extracted.dropped;

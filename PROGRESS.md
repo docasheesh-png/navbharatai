@@ -15425,3 +15425,59 @@ TestSkeletonGenerator. Roadmap reconciled: GA-16 → 🟡, GA-10 note.
 Honest state: the generator-audit + safe-analyzer lanes are now genuinely exhausted (remaining generators are
 well-built). Highest-value remaining work needs the admin's real build report (Tier-0 live defects — deferred,
 never guess-fixed) or a decision on bigger/behavior-changing items (live install-path PM wiring, escalation-on).
+## 2026-07-13 — App #5 (GitHub import survey): FALSE-POSITIVE no-Claude violation — my #1275 detector was wrong
+
+Deep-test App #5 (prompt: "Import this app from GitHub + short survey, don't change files"; Mitrify repo).
+The report showed `NO_CLAUDE_VIOLATION` + `billing.noClaude: false` on a weak/free build — implying my #1275
+chokepoint had leaked. FORENSICS proved the opposite: `builtBy: "GLM"`, `providerDelivery: {GLM:14}`,
+`providerTokens: {GLM only}` — ZERO Claude tokens. GLM actually delivered all 14 turns. The chokepoint WORKED.
+
+ROOT CAUSE (my own regression in #1275): the honesty detector `claudeModelUsed()` keyed on each llmCall's
+`model` field — but the AgentRunner stamps that field with the NOMINAL REQUESTED model (`resolveModel` →
+'claude-sonnet-4-6'), NOT the provider that actually answered. The real provider is tracked separately via
+onProviderUsed (→ providerDelivery). So a 100%-GLM build whose llmCalls were labelled 'claude-sonnet-4-6'
+was FALSE-flagged as a Claude violation, and billing.noClaude was wrongly set false — defaming a clean build
+and (worse) it would have masked/mislabelled real spend analysis. A detector that cries wolf is as harmful as
+one that stays silent (rule 5 — the system must tell the TRUTH).
+
+FIX: replaced `claudeModelUsed()` with `claudeProviderDelivered()` — the verdict now reads the PROVIDER
+DELIVERY + per-provider TOKEN LEDGER (the runner that actually answered: 'CLAUDE' / 'CLAUDE_HAIKU'), never
+the nominal model label. Route sets provider tokens BEFORE the check so both signals are visible. A real
+chain-delivered Claude turn still trips NO_CLAUDE_VIOLATION; a cheap-provider turn mislabelled with a Claude
+model id never does. (A raw Claude call can't occur on a weak build at all — the ClaudeClient zone chokepoint
+refuses it before it runs.) Tests: the exact App #5 case (14 GLM turns labelled claude-sonnet-4-6 → null),
+real CLAUDE/CLAUDE_HAIKU delivery → flagged, token-ledger corroboration, all-cheap → null. Gate: server tsc
+0, full suite 6254.
+
+OPEN (separate, not yet fixed — recorded honestly per rule 6): (a) the GitHub URL import itself FAILED —
+`cp -r /tmp/mitrify-temp/{client,server,shared,migrations} → exit 1` → only 2 files imported → "No
+package.json found" preview. A real import-robustness bug (a source subdir the repo didn't have, or an
+incomplete clone) to autopsy next. (b) The admin was billed ₹758.83 on this build because the login email is
+not in `AGENTV3_FREE_LIST` (infra — the admin reduced the list to one iCloud email); adding the admin's
+login email/uid restores exemption.
+
+## 2026-07-13 — App #5 import: token-authed clone failed on a PUBLIC repo → anonymous-clone fallback
+
+Second fix from the App #5 (Mitrify GitHub import) autopsy. Admin confirmed the repo URL was given via the
+"Import from GitHub" FIELD (so `importUrl` was set and the structured import DID run). The report timeline
+proved the failure precisely: "Importing your project from …/mitrify…" → **"I couldn't clone …/mitrify"**
+(hydrateFromRepo skipped) → then the model's OWN plain `git clone https://github.com/.../mitrify` exited 0.
+
+ROOT CAUSE: the structured import injects the user's GitHub token into the clone URL
+(`https://<token>@github.com/owner/repo`). For a PUBLIC repo the token's scope does NOT cover — a GitHub
+App INSTALLATION token (scoped to the per-project mirror only), or a token for a DIFFERENT account — the
+authenticated clone fails 403/404, even though an ANONYMOUS clone of that same public repo succeeds (exactly
+what the model's tokenless `git clone` did). So a user importing a public repo they don't own, while their
+GitHub is connected, always failed the structured import and fell back to the agent's fragile hand-rolled
+`cp` (which then dropped the root package.json → "No package.json found").
+
+FIX (rule 4): `shouldRetryImportAnonymously({hydrated, addedFileCount, hadToken, urlsDiffer})` — when a
+token-authed clone brings in ZERO files, retry ONCE without the token (a private repo still needs it, so
+authed runs first). Wired at the importUrl clone site (routes/agentv3.ts): on an empty authed clone it
+re-runs `hydrateFromRepo` with the clean tokenless URL, re-measures, and lands the files through the normal
+pipeline. Tests (4): retry when authed-empty+token+urls-differ; no retry when files landed / no token / URLs
+identical. Gate: server tsc 0, all server suites pass (6314 individual; the 2 "failed files" are the local
+`@capawesome/capacitor-app-update` dep gap — CI `npm ci` installs it).
+
+NOTE: committed onto the App #5 honesty-fix branch (#1296) because the GitHub MCP token expired mid-session
+(PR/merge ops blocked until re-auth; `git push` still works). Both App #5 fixes ship together in #1296.

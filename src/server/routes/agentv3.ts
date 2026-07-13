@@ -97,7 +97,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -4898,9 +4898,21 @@ export function registerAgentV3Routes(app: Express): void {
             // files were actually on disk. So we measure the workspace BEFORE and AFTER: if the clone
             // added real files, the import SUCCEEDED regardless of what the echo said, and we land them.
             const beforePaths = new Set(Object.keys((await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files));
-            const h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
-            const after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
-            const addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            let h = await importSync.hydrateFromRepo(cloneUrl, { overlayAnyContent: true });
+            let after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+            let addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            // ANONYMOUS-CLONE FALLBACK (deep-test App #5, 2026-07-13): a token-authenticated clone can FAIL
+            // on a PUBLIC repo the token's scope doesn't cover (a GitHub App installation token, or a token
+            // for a different account) — while an anonymous clone of that same public repo succeeds. The
+            // report showed hydrateFromRepo say "couldn't clone .../mitrify" while the model's own plain
+            // `git clone` of the identical URL exited 0. Retry once WITHOUT the token before giving up (a
+            // private repo still needs it, so the authed attempt runs first).
+            if (shouldRetryImportAnonymously({ hydrated: h.hydrated, addedFileCount: addedReal.length, hadToken: !!githubToken, urlsDiffer: cloneUrl !== cleanImportUrl })) {
+              events.emit({ type: 'narration', agent: 'architect', text: 'Retrying the import without credentials (it looks like a public repo)…', ts: Date.now() });
+              h = await importSync.hydrateFromRepo(cleanImportUrl, { overlayAnyContent: true });
+              after = await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string>, skipped: [] }));
+              addedReal = Object.keys(after.files).filter((p) => !beforePaths.has(p));
+            }
             if (h.hydrated || addedReal.length > 0) {
               // LANDING PIPELINE (same as a zip import): the clone put files in the SANDBOX only.
               // Land them properly — durable store (Files/IDE/reopen), files_restored event,
@@ -7117,19 +7129,22 @@ export function registerAgentV3Routes(app: Express): void {
         // split — written from the SAME values the user was billed on, never re-derived.
         try {
           // WEAK-MODULE NO-CLAUDE HONESTY (admin absolute rule + rule 5 "fix the system's honesty too",
-          // 2026-07-13). The report's `noClaude` must state the TRUTH, never the intent: the App #3
-          // Pomodoro report claimed `noClaude: true` while 9 real Claude-Sonnet calls ran. The runtime
-          // chokepoint (ClaudeClient's zone guard) now blocks such calls before they spend a token, so
-          // this should always agree — but if a Claude call still slipped through (a path that swallowed
-          // the guard's throw), report `noClaude: false` AND record a LOUD NO_CLAUDE_VIOLATION naming the
-          // model, so the report can never lie about a weak build having run Claude.
-          const leakedClaudeModel = noClaudeBuild ? buildDiag.claudeModelUsed() : null;
-          if (leakedClaudeModel) {
+          // 2026-07-13). The report's `noClaude` must state the TRUTH, never the intent. The verdict reads
+          // the PROVIDER DELIVERY / token ledger (the runner that ACTUALLY answered each turn), NOT an
+          // llmCall's nominal `model` label — App #5 proved the label lies: a 100%-GLM build recorded every
+          // turn as 'claude-sonnet-4-6' (the requested model) while GLM delivered them all, which the old
+          // label check false-flagged as a violation. The runtime chokepoint (ClaudeClient's zone guard)
+          // blocks a real Claude call on a weak build before it runs, so this should read clean; if Claude
+          // still DELIVERED a turn (a genuine chain leak), report noClaude:false + a loud NO_CLAUDE_VIOLATION.
+          // Provider tokens must be set FIRST so the detector can see the corroborating cost signal.
+          buildDiag.setProviderTokens(reconciledProviderUsage);
+          const leakedClaudeProvider = noClaudeBuild ? buildDiag.claudeProviderDelivered() : null;
+          if (leakedClaudeProvider) {
             buildDiag.record({
               phase: 'provider',
               severity: 'error',
               code: 'NO_CLAUDE_VIOLATION',
-              message: `Weak-module absolute rule VIOLATED: this weak/free build ran Claude (${leakedClaudeModel}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
+              message: `Weak-module absolute rule VIOLATED: this weak/free build was delivered by Claude (${leakedClaudeProvider}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
               autoResolved: false,
             });
           }
@@ -7148,10 +7163,9 @@ export function registerAgentV3Routes(app: Express): void {
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
             // The TRUTH, not the intent: only `true` when the build was meant to be Claude-free AND no
-            // Claude call was actually recorded. A real leak flips this to false (+ the violation above).
-            noClaude: noClaudeBuild && !leakedClaudeModel,
+            // Claude provider actually delivered a turn. A real leak flips this to false (+ the violation above).
+            noClaude: noClaudeBuild && !leakedClaudeProvider,
           });
-          buildDiag.setProviderTokens(reconciledProviderUsage);
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }
         buildDiag.finish(result.ok, result.summary);
         diagnostics = buildDiag.report();

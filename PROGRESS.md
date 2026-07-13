@@ -15617,3 +15617,19 @@ OPEN ROOT CAUSES (recorded, rule 6):
 2. GLM 429 RATE-LIMITING (repeatCount 12-14) forced the Vertex fallback that truncated. Partly infra (the GLM
    key's rate-limit tier); better backoff/spacing on big builds would cut the Vertex fallback that causes the
    truncation. Worth a routing/backoff pass.
+
+## 2026-07-13 — KIMI floor timeout 60s → 120s (admin request, App #7 KIMI timeouts)
+
+Admin ("kimi ka time badhao, 120 sec karo") after the App #7 autopsy showed KIMI's real failures were
+"Request timed out" on the LARGEST prompts (a 39-file full-stack build turn), not crashes — KIMI (Moonshot,
+kimi-k2.7-code) is measurably slower than GLM on big prompts and didn't finish within the 60s floor timeout,
+so the turn fell to Vertex which then truncated. Gave KIMI its own timeout (`AGENTV3_KIMI_TIMEOUT_MS`,
+default 120_000, floored at ≥ the GLM floor timeout) so a big turn can finish on KIMI instead of prematurely
+cascading to the truncating fallback. GLM keeps the shorter floor timeout (fast fallback when a GLM key is
+throttled is desirable). `add()` gained a per-provider `timeoutMs` param (default = floorTimeoutMs); only the
+KIMI rung passes the longer value. Gate: server tsc 0, full suite 6370. Env-tunable.
+
+Also answered the admin's scaling question honestly: a SINGLE GLM key cannot serve 1M users (per-key account
+RPM), but the app never BREAKS — it degrades GLM→KIMI→Vertex→Claude backstop (build always completes, COGS
+rises when the cheap floor saturates). Real scale needs an enterprise GLM tier and/or a key POOL (round-robin
+across N keys) — an infra + a future code item (key rotation), not a bug.

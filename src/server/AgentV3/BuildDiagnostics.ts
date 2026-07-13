@@ -78,6 +78,17 @@ export interface LlmCallRecord {
 }
 
 /**
+ * True when `model` names an Anthropic Claude model (any Claude/Sonnet/Opus/Haiku id). Pure + total —
+ * the single source of truth for "did Claude run" used by the weak-tier no-Claude honesty check
+ * (`claudeModelUsed`). Kept here (not scattered per call site) so the two detectors can never drift
+ * (rule 2 — one shared implementation). Matches on the id substring so a versioned id
+ * (`claude-sonnet-4-6`, `claude-opus-4-8`, `claude-3-5-haiku-…`) is caught regardless of suffix.
+ */
+export function isClaudeModel(model: string | undefined | null): boolean {
+  return typeof model === 'string' && /\b(claude|sonnet|opus|haiku)\b/i.test(model);
+}
+
+/**
  * AI Diagnosis Bundle — gap #1 (full errors). The timeline truncates an error to a short line; this
  * keeps the FULL message + stack so the real root cause (the actual throwing frame) is preserved.
  */
@@ -423,6 +434,18 @@ export class BuildDiagnostics {
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
       });
     }
+  }
+
+  /**
+   * WEAK-TIER NO-CLAUDE honesty check (admin deep-test Pomodoro report, 2026-07-13): a weak build
+   * reported `noClaude: true` while 9 Claude-Sonnet calls actually ran (a heal/judge gate that bypassed
+   * the enforceNoClaude chain guard). Returns the FIRST Claude model that really ran, or null — so the
+   * route can (a) record a loud NO_CLAUDE_VIOLATION and (b) correct billing.noClaude to the truth, never
+   * claiming a build was Claude-free when it wasn't. Reads only the recorded llmCalls; pure; never throws.
+   */
+  claudeModelUsed(): string | null {
+    for (const c of this.llmCalls) if (isClaudeModel(c.model)) return c.model ?? 'claude';
+    return null;
   }
 
   /**

@@ -1,6 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
+
+describe('isClaudeModel + claudeModelUsed (weak-module no-Claude honesty)', () => {
+  it('isClaudeModel matches every Claude id form and rejects cheap-floor models', () => {
+    for (const m of ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-3-5-haiku-latest', 'Sonnet', 'OPUS']) {
+      expect(isClaudeModel(m)).toBe(true);
+    }
+    for (const m of ['glm-4.7', 'glm-5.2', 'kimi-k2.6', 'grok-3', 'gemini-2.5-pro', undefined, null, '']) {
+      expect(isClaudeModel(m as string)).toBe(false);
+    }
+  });
+
+  it('claudeModelUsed returns the first Claude model that actually ran (the App #3 leak)', () => {
+    const clk = { t: 1000 };
+    const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
+    d.recordLlmCall({ provider: 'glm', model: 'glm-4.7', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
+    expect(d.claudeModelUsed()).toBeNull();
+    // A raw ClaudeClient call with NO provider — exactly the leaking gate signature.
+    d.recordLlmCall({ model: 'claude-sonnet-4-6', finishReason: 'end_turn', toolCalls: 1, inputTokens: 10, outputTokens: 20, latencyMs: 100, ok: true });
+    expect(d.claudeModelUsed()).toBe('claude-sonnet-4-6');
+  });
+
+  it('claudeModelUsed stays null for an all-cheap weak build', () => {
+    const clk = { t: 1000 };
+    const d = new BuildDiagnostics({ now: () => (clk.t += 10) });
+    d.recordLlmCall({ provider: 'glm', model: 'glm-5.2', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
+    d.recordLlmCall({ provider: 'kimi', model: 'kimi-k2.6', finishReason: 'end_turn', toolCalls: 0, inputTokens: 1, outputTokens: 1, latencyMs: 1, ok: true });
+    expect(d.claudeModelUsed()).toBeNull();
+  });
+});
 
 let clock = 1000;
 const now = () => (clock += 10);

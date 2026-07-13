@@ -119,6 +119,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -3634,7 +3635,7 @@ export function registerAgentV3Routes(app: Express): void {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus }), 8_000, 'describeVisionAttachments')
+        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: onlyOpus, noClaude: noClaudeBuild }), 8_000, 'describeVisionAttachments')
           .catch(() => '');
         const extractedRaw = [docs, vis].filter(Boolean).join('\n\n');
         // P-AI.6 — mask personal data (Aadhaar/PAN/phone/email/IFSC) in user-uploaded content
@@ -4468,6 +4469,31 @@ export function registerAgentV3Routes(app: Express): void {
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+
+      // UNBREAKABLE weak-module no-Claude chokepoint (admin absolute rule, 2026-07-13). Bind a no-Claude
+      // zone to THIS build's async context now that we know its tier (nothing calls Claude before here).
+      // Every awaited descendant — the builder, the plan phase, every heal gate, the judge, any sub-agent
+      // — inherits it, and `ClaudeClient.runTurn` REFUSES a Claude call inside it before a token is spent.
+      // This backstops `enforceNoClaude` (which only strips Claude from provider CHAINS): a raw
+      // ClaudeClient created outside any chain (a judge/plan fallback, or a gate that forgot to thread the
+      // flag — the exact App #3 Pomodoro leak) is now caught at the invocation point, not at N fragile
+      // call sites. `onBlocked` records an honest, loud diagnostic naming the model that was refused.
+      enterNoClaudeZone({
+        active: noClaudeBuild,
+        onBlocked: (model) => {
+          try {
+            buildDiag.record({
+              phase: 'provider',
+              severity: 'warning',
+              code: 'NO_CLAUDE_BLOCKED',
+              message: `Weak-module guard refused a Claude call (${model ?? 'claude'}) — a weak/free build must never run Claude. The call was blocked (no tokens spent); routing stays on the cheap floor (GLM/Kimi) + Vertex/Gemini.`,
+              autoResolved: true,
+            });
+          } catch {
+            /* diagnostics is best-effort — never let it break the guard */
+          }
+        },
+      });
       events.subscribe((e) => buildDiag.ingestEvent(e), false);
       // Fix 37a (admin: "app kitni baar fail hui yeh bhi likho"): stamp how many earlier builds in
       // THIS workspace's durable history ended not-ok, so a repeat failure is visible in every
@@ -6885,6 +6911,23 @@ export function registerAgentV3Routes(app: Express): void {
         // the REAL settled charge + wallet debit, why a ₹0 build was free, and the per-provider token
         // split — written from the SAME values the user was billed on, never re-derived.
         try {
+          // WEAK-MODULE NO-CLAUDE HONESTY (admin absolute rule + rule 5 "fix the system's honesty too",
+          // 2026-07-13). The report's `noClaude` must state the TRUTH, never the intent: the App #3
+          // Pomodoro report claimed `noClaude: true` while 9 real Claude-Sonnet calls ran. The runtime
+          // chokepoint (ClaudeClient's zone guard) now blocks such calls before they spend a token, so
+          // this should always agree — but if a Claude call still slipped through (a path that swallowed
+          // the guard's throw), report `noClaude: false` AND record a LOUD NO_CLAUDE_VIOLATION naming the
+          // model, so the report can never lie about a weak build having run Claude.
+          const leakedClaudeModel = noClaudeBuild ? buildDiag.claudeModelUsed() : null;
+          if (leakedClaudeModel) {
+            buildDiag.record({
+              phase: 'provider',
+              severity: 'error',
+              code: 'NO_CLAUDE_VIOLATION',
+              message: `Weak-module absolute rule VIOLATED: this weak/free build ran Claude (${leakedClaudeModel}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
+              autoResolved: false,
+            });
+          }
           buildDiag.setBilling({
             userTier: isAgentV3FreeUser(userId, email)
               ? 'free-list (admin/tester)'
@@ -6899,7 +6942,9 @@ export function registerAgentV3Routes(app: Express): void {
             ...(zeroBillReason ? { zeroBillReason } : {}),
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
-            noClaude: noClaudeBuild,
+            // The TRUTH, not the intent: only `true` when the build was meant to be Claude-free AND no
+            // Claude call was actually recorded. A real leak flips this to false (+ the violation above).
+            noClaude: noClaudeBuild && !leakedClaudeModel,
           });
           buildDiag.setProviderTokens(reconciledProviderUsage);
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }

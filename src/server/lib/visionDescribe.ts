@@ -9,6 +9,7 @@
 
 import { isVisionAttachment } from './attachmentText';
 import { claudeVisionModel, grokVisionModels, geminiVisionModels } from './visionModels';
+import { noClaudeZoneActive } from '../AgentV3/noClaudeZone';
 
 export interface RawAttachment {
   name: string;
@@ -77,6 +78,12 @@ async function describeWithGrok(att: RawAttachment): Promise<string> {
 
 /** Describe one image/PDF via Claude (used only in Power mode, or as last resort). */
 async function describeWithClaude(att: RawAttachment): Promise<string> {
+  // UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13): if a weak/free build is in progress
+  // (a no-Claude zone is active), vision must stay on the cheap providers (Gemini/Grok) — never Claude,
+  // even as a last resort. This is the raw-SDK sibling of the ClaudeClient chokepoint (rule 3 — hunt the
+  // siblings): the routing policy pins free/weak vision to Gemini/Grok. Returns '' so the caller records
+  // an honest "could not be read" rather than silently spending NavBharatAI's Claude budget.
+  if (noClaudeZoneActive()) return '';
   const key = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
   if (!key) return '';
   try {
@@ -101,17 +108,25 @@ async function describeWithClaude(att: RawAttachment): Promise<string> {
  */
 export async function describeVisionAttachments(
   atts: RawAttachment[],
-  opts: { useClaude?: boolean } = {},
+  opts: { useClaude?: boolean; noClaude?: boolean } = {},
 ): Promise<string> {
   const vision = (atts || []).filter((a) => a && a.base64 && isVisionAttachment(a.type, a.name));
   if (vision.length === 0) return '';
 
+  // UNBREAKABLE weak-module guard (admin absolute rule, 2026-07-13): a weak/free build must never spend
+  // Claude anywhere — including vision. The routing policy pins free/weak vision to Gemini/Grok; drop the
+  // Claude rung entirely (the raw-SDK sibling of the ClaudeClient chokepoint; the zone check in
+  // describeWithClaude is the same rule for in-zone callers, since vision runs before the build zone).
+  const noClaude = opts.noClaude === true;
   const blocks: string[] = [];
   for (const att of vision) {
     let desc = '';
-    if (opts.useClaude) {
+    if (opts.useClaude && !noClaude) {
       // Power mode: Claude first, cheap providers as fallback.
       desc = (await describeWithClaude(att)) || (await describeWithGemini(att)) || (await describeWithGrok(att));
+    } else if (noClaude) {
+      // Weak/free build: cheap providers ONLY — Claude is never touched.
+      desc = (await describeWithGemini(att)) || (await describeWithGrok(att));
     } else {
       // Default: cheap first, Claude only as last resort.
       desc = (await describeWithGemini(att)) || (await describeWithGrok(att)) || (await describeWithClaude(att));

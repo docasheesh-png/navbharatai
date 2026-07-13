@@ -136,6 +136,9 @@ export function generateSqlDdl(entities: MigrationEntity[], provider: SqlProvide
       let col = `  ${wrap(f.name)} ${sqlType(kind, provider)}`;
       if (kind === 'id') col += ' PRIMARY KEY';
       else if (/^email$/.test(name)) col += ' UNIQUE NOT NULL';
+      // Parity with the Prisma schema's @default(now()) on created/_at datetime columns.
+      // CURRENT_TIMESTAMP is portable across Postgres, MySQL and SQLite.
+      else if (kind === 'datetime' && /created|_at$/.test(name)) col += ' DEFAULT CURRENT_TIMESTAMP';
       cols.push(col);
     }
     blocks.push(`CREATE TABLE ${wrap(table)} (`, cols.join(',\n'), ');', '');

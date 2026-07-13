@@ -145,7 +145,10 @@ build order after Tier 0.
   (Earlier ❌ was stale.) *(Consolidates the old 5.1 / Layer-75 / 6.5 / P-DEPLOY / Cap-5 / U-12 duplicates.)*
 - **T1-db-provision-ui** 🟢❌ — one-click Supabase/Firebase/Neon for the user's app, env written
   back (BYO Provisioning Broker — old U-3 / Cap-1).
-- **T1-auth-scaffold** 🟢❌ — built-in login/signup wired into the generated app.
+- **T1-auth-scaffold** 🟢 — built-in login/signup wired into the generated app.
+  **VERIFIED-BUILT (2026-07-13):** the `generate_auth` tool (`AuthCodeGenerator.generateAuthCode`) generates
+  login/signup code + dependencies into the app; earlier ❌ was stale. (Provider-specific end-to-end wiring
+  still depends on the user's chosen auth backend.)
 - **T1-version-timeline** 🟢✅ — SHIPPED: the AgentV3 `history` tab renders the deduped checkpoint
   timeline across turns (`allCheckpoints`) with a per-checkpoint restore wired to the real
   `/api/agentv3/restore`, and honest "sandbox recycled" feedback when a SHA isn't live this session.
@@ -164,10 +167,15 @@ Each is a dedicated PR + tests. Ordered by leverage (the roadmap's own call:
 safely edit, or truly verify it).
 
 ### 2A · Understanding & verification (highest leverage)
-- **A1** 🟢❌ — Semantic code-retrieval + code-graph + symbol index (agent *queries*
+- **A1** 🟢✅ — Semantic code-retrieval + code-graph + symbol index (agent *queries*
   who-defines/who-calls/where-used instead of prompt-stuffing). Lexical BM25 core exists;
   this is the query/graph layer. *(Embeddings half is infra-gated → Tier 4.)*
-- **A2** 🟢❌ — Auto architecture-onboarding pass: map services/data-flow/entry-points before editing.
+  **VERIFIED-BUILT + COMPLETED (2026-07-13):** the `code_graph` tool already answered impact/who_imports/
+  depends_on/defines; the remaining **who-calls / where-used** gap shipped as `code_graph query="references"`
+  (symbol reference index in WorkspaceMemory + `referencesOf`) in **#1326**. Earlier ❌ was stale.
+- **A2** 🟢✅ — Auto architecture-onboarding pass: map services/data-flow/entry-points before editing.
+  **VERIFIED-BUILT (2026-07-13):** the `architecture_map` tool (entry-points/hubs/areas/reading-order) is live;
+  earlier ❌ was stale. (Deeper service/data-flow mapping remains a future enhancement.)
 - **A3** 🟢⚠️ — Long-horizon persistent decision-log the agent re-reads across turns
   (overlaps GA-6 engineering memory).
 - **B4** 🟢✅ — SHIPPED (#1249, 2026-07-12, Immune System Phase 2 "Vaccine"): `testRunner.detectTestPlan`
@@ -178,9 +186,13 @@ safely edit, or truly verify it).
 - **B6** 🟢❌ — Cross-language typecheck/lint (Java + Python + TS together).
 
 ### 2B · Precise editing at scale
-- **C7** 🟢⚠️ — AST / surgical multi-file edits + codemods (whole-file rewrite still dominates
+- **C7** 🟢✅ — AST / surgical multi-file edits + codemods (whole-file rewrite still dominates
   and breaks big files). Also P-DEV.6 Extract-Method/Variable/Move-Symbol.
-- **C8** 🟢❌ — Coordinated cross-file refactor / rename at scale (safe repo-wide renames/moves).
+  **VERIFIED-BUILT (2026-07-13):** `replace_symbol` (AST symbol replace) + `codemod_add_prop` +
+  `codemod_move_file` are live tools; earlier ⚠️ understated it.
+- **C8** 🟢✅ — Coordinated cross-file refactor / rename at scale (safe repo-wide renames/moves).
+  **VERIFIED-BUILT (2026-07-13):** `codemod_rename` (AST-safe cross-file symbol rename) is a live tool;
+  earlier ❌ was stale. (Now backed by A1's `references` query for pre-rename blast-radius.)
 
 ### 2C · The GA engine suite (from the UCUE-v2 gap audit)
 - **GA-1** ⚠️ — Multi-Workspace Manager (unified orchestrator: list/switch/quota/cleanup).
@@ -197,20 +209,29 @@ safely edit, or truly verify it).
   errors (zero progress → stuck) and hands off, instead of burning the whole `maxRepairs` budget. Provably
   safe (fires only while `!verdict.ok`). **Remaining ❌:** ordered multi-strategy fallback + backoff +
   regression-capture (store the failing scenario for cross-build learning).
-- **GA-10** ⚠️ — DB Migration runner + Schema Intelligence (Prisma/Knex/Drizzle/Flyway/Alembic +
+- **GA-10** 🟡 — DB Migration runner + Schema Intelligence (Prisma/Knex/Drizzle/Flyway/Alembic +
   schema inference/type-gen). Also D9. (Generator hardened #1294: SQL DDL now emits `DEFAULT CURRENT_TIMESTAMP`
-  on created/_at columns for Prisma parity; the RUNNER + broader dialects/schema-inference remain.)
+  on created/_at columns for Prisma parity.) **RUNNER SHIPPED (#1331, 2026-07-13):** `MigrationPlanner`
+  detects the tool (Prisma/Knex/Drizzle/TypeORM/Sequelize/Flyway/Alembic) + command, and the `run_migrations`
+  tool applies migrations in the sandbox with honest real-exit-code reporting (never a fake "migrated").
+  **Remaining ❌:** schema inference/type-gen + broader SQL dialects.
 - **GA-12** 🟡 — Static-quality engines: ESLint gate (`LintGate`, `AGENTV3_LINT_GATE`) + dead-code (`deadCode.ts` unwired-files)
   already exist; **maintainability code-smell slice ✅ (#1277, 2026-07-13):** `maintainabilityAnalysis` flags the oversized
   "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
   `evaluate` (never blocks a build). **Remaining ❌:** Prettier-as-engine + coupling/fan-in hotspot + more code-smell detectors.
-- **GA-13** ❌ — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
+- **GA-13** 🟡 — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
+  **SCANNER SHIPPED (#1330, 2026-07-13):** `VulnScanner` + the `scan_vulnerabilities` tool scan deps against
+  OSV.dev (exact lockfile versions or approx ranges) and report vulnerable packages + advisory IDs — honest
+  "scan unavailable" when OSV is unreachable, never a fake all-clear. **Remaining ❌:** threat-modeling.
 - **GA-14** 🟡 — CI/CD intelligence. GENERATION exists: `generate_deploy_artifacts` writes a GitHub Actions
   `ci.yml` + Dockerfile + docker-compose, and (#1284/#1285/#1286, 2026-07-13) all three are now
   **package-manager-correct** — the CI workflow, Dockerfile, and README use the project's real manager
   (npm/yarn/pnpm/bun, detected from its root lockfile via a shared probe) instead of a broken hardcoded
   `npm ci`. **Remaining ❌:** pipeline REPAIR (fix a failing/misconfigured existing workflow) + GitLab/Jenkins.
-- **GA-15** ❌ — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.
+- **GA-15** 🟡 — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.
+  **SHIPPED (#1329, 2026-07-13):** Dockerfile/compose already existed; `IaCGenerator` + the `generate_iac`
+  tool now emit real Kubernetes manifests (non-root Deployment + probes + resource limits + Service + HPA +
+  Ingress), a values-parameterized Helm chart, and Cloud Run Terraform. **Remaining ❌:** infra optimizer.
 - **GA-16** 🟡 — Performance intelligence. Built: `BundleSize` (real built-dist size) + `generate_bundle_optimization`
   (lazyWithRetry + manualChunks); **source-level heavy-import analyzer ✅ (#1293, 2026-07-13)** — `analyzeHeavyImports`
   flags heavy deps with lighter alts (moment→dayjs) + whole-library imports (`import _ from 'lodash'`), advisory in
@@ -220,7 +241,10 @@ safely edit, or truly verify it).
   unicode/malformed numbers/emails/urls); the post-build pass drives a real browser to type each hostile
   value + submit, and `interpretFuzzErrors` records a `FUZZ_ROBUSTNESS` warning per input that crashes.
   Opt-in `AGENTV3_REDTEAM=on`, hard-capped (≤12 cases / ≤90s), heals source validation when enabled.
-- **GA-18** ❌ — Feature-gap analyzer: generalize the PRESENT/PARTIAL/ABSENT audit into a reusable engine for Pro Chat.
+- **GA-18** 🟢 — Feature-gap analyzer: generalize the PRESENT/PARTIAL/ABSENT audit into a reusable engine for Pro Chat.
+  **VERIFIED-BUILT (2026-07-13):** reusable engines already exist — `FeatureCoverage.computeFeatureCoverage`
+  (requested-vs-implemented) + `RequirementCoverage` (requested/covered/missing/findings), wired into the
+  readiness gate. Earlier ❌ was stale. (A dedicated Pro-Chat surface for it remains a future wiring task.)
 
 ### 2D · Quality-by-default scaffolding
 - **U-1** 🟢❌ — Deterministic build harness (pin model/seed, signed manifest) + `LintGate` beside `TscGate`.

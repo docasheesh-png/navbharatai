@@ -81,7 +81,7 @@ import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
-import { analyzeSecretLeak, secretLeakSummary } from './SecretLeakAnalysis';
+import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
 import { scanPortBinding, portBindingSummary, type PortBindingIssue } from './PortBindingAnalysis';
 import { scanViteEnvExposure, hasCustomEnvPrefix, viteEnvSummary, type ViteEnvIssue } from './ViteEnvAnalysis';
@@ -1170,7 +1170,25 @@ export class ToolDispatcher {
         // Best-effort security-config pass (Section I #4): insecure TLS/CORS config.
         const securityConfig = this.collectSecurityConfigIssues(snap.sources);
         // Best-effort secret-leak pass (Section I #4): a real .env not gitignored.
-        const secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+        let secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+        // DETERMINISTIC ROOT-CAUSE HEAL (deep-test App #7 + #8): don't just DETECT the leak
+        // and block at 0/100 — actually FIX it. When a real .env is exposed, deterministically
+        // add it to .gitignore (creating the file when absent), then re-assess so the readiness
+        // blocker clears in the same pass. Never throws, never breaks evaluate; a gitignore rule
+        // has zero runtime effect, it only stops secrets reaching git.
+        if (secretLeak.findings.length) {
+          const healed = gitignoreWithEnvCoverage(gitignoreContent, secretLeak.exposed);
+          if (healed) {
+            try {
+              await this.actuator.writeFile(this.workspaceId, '.gitignore', healed);
+              gitignoreContent = healed;
+              secretLeak = analyzeSecretLeak(hygieneFiles, gitignoreContent);
+            } catch {
+              // Couldn't write .gitignore (read-only FS / sandbox gone) — keep the honest
+              // detection so the blocker still surfaces rather than silently vanishing.
+            }
+          }
+        }
         // Best-effort env-template-secret pass (Section I #4 v7): a REAL secret left in a
         // committed .env.example/.sample/.template is a permanent git-history leak.
         const envTemplateSecrets: EnvTemplateSecretIssue[] = [];

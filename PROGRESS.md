@@ -15708,3 +15708,49 @@ wasting the bounded repair budget → step-limit exhaustion. Hardened the whole 
   re-run of the same Kanban build to compare. No further build-loop change should be made from guesses.
 - GLM per-key 429 saturation at scale → key-pool/rotation, already recorded in ROADMAP.md (Tier 4) by a
   parallel session as the future infra fix (#1307's bench is the per-build mitigation).
+## 2026-07-13 — Deep-test App #8 (Clinic Appointment Booking) autopsy + FIX: deterministic .env-gitignore heal
+
+**Build:** free-list weak tier, `noClaude:true`, builtBy=KIMI, providerDelivery GLM:26 / KIMI:80 / VERTEX:3.
+`ok:false`, readiness NOT READY 0/100. Started 16:52 UTC (AFTER the Haiku amendment #1312 merged) —
+so this build validated three just-shipped fixes LIVE.
+
+**5-bucket ledger:**
+- ✅ **Self-healed (570 autoResolved):** the Prisma **seed failure** — `prisma/seed.ts` exit -1 TWICE
+  (P2003 foreign-key on `doctorAvailability.create`, then P2002 unique-constraint on `doctor.userId`
+  from the partial first run) → engine ran `rm -f prisma/dev.db && npx prisma db push --force-reset`
+  → re-seeded → **exit 0 "Seeding completed!"**. Also: JSX-unclosed errors in AvailabilityEditor →
+  deleted+rewrote; PostCSS/tailwind config crash → removed configs; port-3000-in-use → freed+restarted;
+  `tsconfig.node.json not found` → resolved. `tsc --noEmit` eventually clean; dev server served
+  `{"status":"ok"}` on :3005.
+- 🔀 **Workaround:** GLM 429 (repeatCount 5) → fell to KIMI (why KIMI carried 80 turns); Vertex
+  truncation (finish=max_tokens) continued past; heavy `rm -rf src/components src/hooks …` to escape
+  a TS-error thicket then rebuild.
+- ⏭️ **Skipped:** `edit_file: old_string not found in tsconfig.json` — edit abandoned (tsc later passed).
+- ❌ **Still-broken (shipped imperfect):** **Secret leak — a real `.env` not gitignored** (READINESS_BLOCKER,
+  recurring App #7 + #8) → score 0/100. Plus "1 serious privacy/compliance issue". Plus the celebratory
+  summary "fully built and running!" while the gate honestly appended NOT READY 0/100 (honesty tension —
+  gate line is honest; the lead sentence is not).
+- 🥵 **Struggle:** GLM 32 failures / KIMI 6; 3 seed attempts; ~9 min build; one `npm run server &` hit the
+  300s deadline before dev-mode succeeded on a different port.
+
+**Fixes SHIPPED THIS BUILD were confirmed working:** KIMI 120s timeout (#1311) → KIMI delivered 80 turns
+instead of timing out; `noClaude:true` correctly recorded (no false violation); free-list recognized
+(#1296) — billing tier = "free-list (admin/tester)".
+
+**Missing subsystem diagnosed:** a **deterministic secret-hygiene auto-heal**. The secret-leak analyser
+(`SecretLeakAnalysis.ts`) only DETECTED an exposed `.env` and turned it into a hard 0/100 blocker — it
+never FIXED it, so the identical blocker recurred build after build even though the fix is one line.
+
+**Root-cause fix (this PR):** `gitignoreWithEnvCoverage(gitignore, exposed)` — a PURE helper that returns
+the healed `.gitignore` (covering `.env` / `.env.local` / `.env.*.local` + any specifically-exposed real
+env file; idempotent → null when already covered; never gitignores a template/example). Wired into
+`evaluate` (ToolDispatcher) at the detection point: when a leak is found, deterministically write the
+healed `.gitignore` via the actuator, then re-assess so the blocker clears in the SAME pass. No LLM, zero
+cost, cannot break a build (a gitignore rule has no runtime effect). Regression tests: 5 new heal cases in
+`SecretLeakAnalysis.test.ts` + the `evaluate` integration test rewritten to assert the heal (was asserting
+the old detect-only behaviour). Gate: server tsc clean, SecretLeakAnalysis 17/17, ToolDispatcher 128/128.
+
+**Open (recorded, not yet fixed):** (a) generated **Prisma seed idempotency** — the seed should
+`deleteMany`/`upsert` + order FK parents before children so it never needs the force-reset self-heal;
+(b) the celebratory summary lead sentence should be gated on the readiness verdict so it can't say "running!"
+on a NOT-READY build. Both are struggle/honesty debt for a follow-up autopsy slice.

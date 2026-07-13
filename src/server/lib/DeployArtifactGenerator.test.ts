@@ -50,6 +50,43 @@ describe('DeployArtifactGenerator (P-CGE.9)', () => {
       expect(yml).toContain('actions/setup-node@v4');
       expect(yml).toContain('run: npm ci');
     });
+
+    it('npm (default): npm ci + npm cache', () => {
+      const yml = generateCiWorkflow({ packageManager: 'npm' });
+      expect(yml).toContain('run: npm ci');
+      expect(yml).toContain("cache: 'npm'");
+    });
+
+    it('pnpm: pnpm/action-setup BEFORE setup-node, pnpm cache, frozen install', () => {
+      const yml = generateCiWorkflow({ packageManager: 'pnpm' });
+      expect(yml).toContain('pnpm/action-setup@v4');
+      expect(yml).toContain("cache: 'pnpm'");
+      expect(yml).toContain('run: pnpm install --frozen-lockfile');
+      // action-setup must precede setup-node so the pnpm store cache resolves.
+      expect(yml.indexOf('pnpm/action-setup')).toBeLessThan(yml.indexOf('actions/setup-node@v4'));
+      expect(yml).not.toContain('npm ci');
+    });
+
+    it('yarn: yarn cache + frozen install, no pnpm/bun setup', () => {
+      const yml = generateCiWorkflow({ packageManager: 'yarn' });
+      expect(yml).toContain("cache: 'yarn'");
+      expect(yml).toContain('run: yarn install --frozen-lockfile');
+      expect(yml).not.toContain('pnpm/action-setup');
+      expect(yml).not.toContain('oven-sh/setup-bun');
+    });
+
+    it('bun: uses setup-bun instead of setup-node (bun brings its own toolchain)', () => {
+      const yml = generateCiWorkflow({ packageManager: 'bun' });
+      expect(yml).toContain('oven-sh/setup-bun@v2');
+      expect(yml).not.toContain('actions/setup-node@v4');
+      expect(yml).toContain('run: bun install --frozen-lockfile');
+    });
+
+    it('an explicit installCmd overrides the manager default', () => {
+      const yml = generateCiWorkflow({ packageManager: 'pnpm', installCmd: 'pnpm i --offline' });
+      expect(yml).toContain('run: pnpm i --offline');
+      expect(yml).not.toContain('pnpm install --frozen-lockfile');
+    });
   });
 
   describe('generateDeployArtifacts', () => {

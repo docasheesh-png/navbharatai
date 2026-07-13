@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
+import { auth } from '../../lib/firebase';
 
 type Status = 'loading' | 'disabled' | 'idle' | 'connecting' | 'live' | 'error';
 interface Line { role: string; text: string }
@@ -18,7 +19,7 @@ interface Line { role: string; text: string }
 const MIC_RATE = 16000;
 const OUT_RATE = 24000;
 
-export function SonicChat() {
+export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -77,6 +78,10 @@ export function SonicChat() {
     setLines([]);
     setStatus('connecting');
     try {
+      // Logged-in users only — the server verifies this token before opening a (paid) stream.
+      const token = await auth.currentUser?.getIdToken().catch(() => null);
+      if (!token) { setError('Please sign in to use voice chat.'); setStatus('error'); return; }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       streamRef.current = stream;
       const micCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -86,7 +91,7 @@ export function SonicChat() {
       procRef.current = proc;
 
       const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream`);
+      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
       ws.onopen = () => setStatus('live');
@@ -132,6 +137,9 @@ export function SonicChat() {
   const live = status === 'live' || status === 'connecting';
   return (
     <div style={wrap}>
+      {onClose && (
+        <button onClick={() => { stop(); onClose(); }} aria-label="Close" style={closeBtn}>✕</button>
+      )}
       <h2 style={{ margin: 0 }}>🎙️ Sonic Voice Chat <span style={{ fontSize: 12, opacity: 0.6 }}>(experimental)</span></h2>
       <p style={{ opacity: 0.8, marginTop: 4 }}>Talk naturally — powered by Amazon Nova Sonic. Speak in Hindi, English or Hinglish.</p>
       <button
@@ -153,5 +161,6 @@ export function SonicChat() {
   );
 }
 
-const wrap: React.CSSProperties = { padding: 20, maxWidth: 640, margin: '0 auto', fontFamily: 'system-ui, sans-serif' };
+const wrap: React.CSSProperties = { padding: 20, maxWidth: 640, margin: '0 auto', fontFamily: 'system-ui, sans-serif', position: 'relative' };
 const btn: React.CSSProperties = { color: '#fff', border: 'none', borderRadius: 999, padding: '12px 24px', fontSize: 16, cursor: 'pointer' };
+const closeBtn: React.CSSProperties = { position: 'absolute', top: 8, right: 8, background: 'transparent', border: 'none', fontSize: 18, cursor: 'pointer', opacity: 0.6, lineHeight: 1 };

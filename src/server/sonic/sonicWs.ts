@@ -17,8 +17,26 @@ import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { SonicSession } from './SonicBridge';
 import { isSonicEnabled } from './featureFlag';
+import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
+import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
 
 export const SONIC_WS_PATH = '/api/sonic/stream';
+
+/**
+ * Verify the Firebase ID token passed as the `token` query param. Sonic Chat is LOGGED-IN
+ * USERS ONLY (admin 2026-07-13) — Nova Sonic is paid, so an anonymous caller must never be
+ * able to open a stream. Reuses the tested verify path (with its cold-start retry). Under
+ * VITEST there is no admin SDK, so it resolves to null and the gate refuses (safe default).
+ */
+async function verifySonicUser(token: string | null): Promise<boolean> {
+  if (!token) return false;
+  const res = await verifyIdentityWithReason(`Bearer ${token}`, async () => {
+    const admin = await loadFirebaseAdmin();
+    if (!admin.apps || admin.apps.length === 0) admin.initializeApp(adminAppOptions());
+    return admin.auth();
+  });
+  return !!res.identity;
+}
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -53,12 +71,20 @@ wss.on('connection', (ws: WebSocket) => {
 /**
  * Handle a raw HTTP upgrade for the Sonic WS path. Returns true when this handler owns the
  * upgrade (matched the path) — the caller must then stop. Refuses (and destroys) the socket
- * when the feature is disabled, so a stray connection can never open a paid Bedrock stream.
+ * when the feature is disabled OR the caller is not a verified signed-in user, so a stray or
+ * anonymous connection can never open a paid Bedrock stream. Verification is async; the
+ * return value just says "I own this path" — the accept/reject happens on the promise.
  */
 export function handleSonicUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-  const path = (req.url || '').split('?')[0];
+  const [path, query] = (req.url || '').split('?');
   if (path !== SONIC_WS_PATH) return false;
   if (!isSonicEnabled()) { socket.destroy(); return true; }
-  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  const token = new URLSearchParams(query || '').get('token');
+  verifySonicUser(token)
+    .then((ok) => {
+      if (!ok) { socket.destroy(); return; } // logged-in users only
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    })
+    .catch(() => socket.destroy());
   return true;
 }

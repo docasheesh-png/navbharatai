@@ -25,6 +25,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
   const [lines, setLines] = useState<Line[]>([]);
   const [speaking, setSpeaking] = useState(false); // assistant is talking (from real playback level)
   const [showTranscript, setShowTranscript] = useState(false);
+  const [voice, setVoice] = useState<'male' | 'female'>('female'); // chosen before a call starts
 
   const wsRef = useRef<WebSocket | null>(null);
   const micCtxRef = useRef<AudioContext | null>(null);
@@ -140,7 +141,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
       procRef.current = proc;
 
       const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}`);
+      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}`);
       wsRef.current = ws;
 
       ws.onopen = () => setStatus('live');
@@ -173,7 +174,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
       setStatus('error');
       stop();
     }
-  }, [playChunk, stop]);
+  }, [playChunk, stop, voice]);
 
   useEffect(() => () => stop(), [stop]);
 
@@ -246,6 +247,21 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
 
           {/* Bottom control: one big mic/stop button, like ChatGPT/Grok voice mode. */}
           <div style={controls}>
+            {/* Voice picker — choose male/female before starting; locked once a call is live. */}
+            {!live && (
+              <div style={voiceToggle} role="group" aria-label="Voice">
+                <button
+                  onClick={() => setVoice('female')}
+                  aria-pressed={voice === 'female'}
+                  style={{ ...voicePill, ...(voice === 'female' ? voicePillOn : {}) }}
+                >♀ Female</button>
+                <button
+                  onClick={() => setVoice('male')}
+                  aria-pressed={voice === 'male'}
+                  style={{ ...voicePill, ...(voice === 'male' ? voicePillOn : {}) }}
+                >♂ Male</button>
+              </div>
+            )}
             <button
               onClick={live ? stop : start}
               aria-label={live ? 'Stop' : 'Start talking'}
@@ -305,9 +321,18 @@ const transcriptPanel: React.CSSProperties = {
   display: 'flex', flexDirection: 'column',
 };
 const controls: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
   padding: '20px 0 30px', flexShrink: 0,
 };
+const voiceToggle: React.CSSProperties = {
+  display: 'inline-flex', padding: 4, borderRadius: 999, gap: 4,
+  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+};
+const voicePill: React.CSSProperties = {
+  border: 'none', background: 'transparent', color: '#c4b5fd', cursor: 'pointer',
+  fontSize: 13, fontWeight: 700, padding: '7px 16px', borderRadius: 999,
+};
+const voicePillOn: React.CSSProperties = { background: 'linear-gradient(135deg,#6d28d9,#7c3aed)', color: '#fff' };
 const micBtn: React.CSSProperties = {
   width: 72, height: 72, borderRadius: '50%', border: 'none', cursor: 'pointer',
   color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',

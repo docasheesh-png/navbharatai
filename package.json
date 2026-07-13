@@ -60,7 +60,7 @@
     "firebase-admin": "^13.10.0",
     "helmet": "^8.2.0",
     "jszip": "^3.10.1",
-    "lighthouse": "^13.3.0",
+    "lighthouse": "^13.4.0",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.12.0",
     "motion": "^12.38.0",

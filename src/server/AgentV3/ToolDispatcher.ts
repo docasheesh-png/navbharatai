@@ -1966,7 +1966,7 @@ export class ToolDispatcher {
           : undefined;
         const genInput: DeployArtifactInput = {};
         if (include.has('docker')) genInput.docker = { nodeVersion, port, installCmd, buildCmd, startCmd, multiStage, packageManager };
-        if (include.has('compose')) genInput.compose = { port };
+        if (include.has('compose')) genInput.compose = { port, dependencies: getWorkspaceMemory(this.workspaceId).graph().dependencies };
         if (include.has('ci')) genInput.ci = { nodeVersion, installCmd, lintCmd, testCmd, buildCmd, packageManager };
         const artifacts = generateDeployArtifacts(genInput);
         const toWrite: Array<{ path: string; content: string }> = [];

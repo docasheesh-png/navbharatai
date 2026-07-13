@@ -80,6 +80,7 @@ import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/Mock
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
+import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2066,6 +2067,40 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('deploy artifacts');
         return `Generated ${written.length} deployment artifact(s):\n${written.join('\n')}`;
+      }
+
+      case 'generate_iac': {
+        // GA-15 — Infrastructure-as-Code: real Kubernetes manifests + a Helm chart + Cloud Run Terraform,
+        // generated deterministically from the app's image/port/env. Pure builders in IaCGenerator.ts.
+        const rec = (input as Record<string, unknown>) || {};
+        const includeRaw = Array.isArray(rec.include) ? rec.include.filter((x): x is string => typeof x === 'string') : [];
+        const include = new Set(includeRaw.length ? includeRaw : ['k8s', 'helm', 'terraform']);
+        const port = typeof rec.port === 'number' && rec.port > 0 ? rec.port : undefined;
+        const replicas = typeof rec.replicas === 'number' && rec.replicas > 0 ? rec.replicas : undefined;
+        const env = Array.isArray(rec.env) ? rec.env.filter((x): x is string => typeof x === 'string') : undefined;
+        const iacOpts: IaCOptions = {
+          appName: optStr(input, 'appName') || undefined,
+          image: optStr(input, 'image') || undefined,
+          port, replicas, env,
+          host: optStr(input, 'host') || undefined,
+          healthPath: optStr(input, 'healthPath') || undefined,
+        };
+        const all: Record<string, string> = {};
+        if (include.has('k8s')) all['k8s/manifests.yaml'] = generateK8sManifests(iacOpts);
+        if (include.has('helm')) Object.assign(all, generateHelmChart(iacOpts));
+        if (include.has('terraform')) Object.assign(all, generateTerraformCloudRun(iacOpts));
+        const iacPaths = Object.keys(all);
+        if (iacPaths.length === 0) return 'generate_iac: nothing to write — pass include: ["k8s","helm","terraform"].';
+        const iacWritten: string[] = [];
+        for (const p of iacPaths) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, p); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, p, all[p]);
+          this.state?.recordFileChange({ path: p, kind }, agent);
+          iacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${p}`);
+        }
+        this.scheduleCheckpoint('iac artifacts');
+        return `Generated ${iacWritten.length} IaC artifact(s) (kubectl apply / helm install / terraform apply):\n${iacWritten.join('\n')}`;
       }
 
       case 'replace_symbol': {

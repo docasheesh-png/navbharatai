@@ -659,6 +659,32 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_iac',
+      description:
+        'Generate Infrastructure-as-Code to deploy the app to a cluster or cloud: Kubernetes manifests ' +
+        '(k8s/manifests.yaml — a non-root Deployment with health probes + resource limits, a Service, an ' +
+        'HPA, and an Ingress when a host is given), a Helm chart (values-parameterized), and Terraform for ' +
+        'Google Cloud Run (terraform/*.tf). By default all three are written; pass "include" to pick a ' +
+        'subset. Deterministic; the operator runs `kubectl apply` / `helm install` / `terraform apply`.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            description: "Which IaC to write. Any of 'k8s', 'helm', 'terraform'. Defaults to all three.",
+            items: { type: 'string', enum: ['k8s', 'helm', 'terraform'] },
+          },
+          appName: { type: 'string', description: 'Service name (sanitised to a DNS-1123 label; default "app").' },
+          image: { type: 'string', description: 'Container image reference, e.g. ghcr.io/acme/app:1.2.3 (default app:latest).' },
+          port: { type: 'number', description: 'Container port the app listens on (default 8080).' },
+          replicas: { type: 'number', description: 'Desired replicas (default 2).' },
+          env: { type: 'array', description: "Env vars as 'KEY=value' or 'KEY' strings.", items: { type: 'string' } },
+          host: { type: 'string', description: 'Ingress host, e.g. app.example.com (omit to skip the Ingress).' },
+          healthPath: { type: 'string', description: 'HTTP path for liveness/readiness probes (default /health).' },
+        },
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -843,6 +869,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_deploy_artifacts',
+  'generate_iac',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

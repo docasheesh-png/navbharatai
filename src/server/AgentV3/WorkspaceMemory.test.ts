@@ -1,5 +1,39 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { WorkspaceMemory, extractFacts, getWorkspaceMemory, _clearWorkspaceMemory, warmIndexFiles } from './WorkspaceMemory';
+import { WorkspaceMemory, extractFacts, extractReferences, getWorkspaceMemory, _clearWorkspaceMemory, warmIndexFiles } from './WorkspaceMemory';
+
+describe('extractReferences (A1 where-used index)', () => {
+  it('collects named-import bindings (alias-stripped), JSX component tags, and call callees', () => {
+    const refs = extractReferences([
+      "import { formatDate, clsx as cx } from '../utils';",
+      'export function Card() {',
+      '  const d = formatDate(new Date());',
+      '  return <div className={cx()}><CalendarIcon/><span>{d}</span></div>;',
+      '}',
+    ].join('\n'));
+    expect(refs).toContain('formatDate');    // named import + call callee
+    expect(refs).toContain('clsx');          // the EXPORTED name, not the alias `cx`
+    expect(refs).toContain('CalendarIcon');  // JSX tag
+    expect(refs).not.toContain('div');       // lowercase JSX (host element) is not a symbol
+    // The IMPORTED export name is captured (`clsx`), so cross-file lookups resolve even when a file
+    // aliases it; the local alias `cx` also appears (it's called `cx()`) but that's harmless — no other
+    // module exports `cx`, so referencesOf('cx') stays empty.
+  });
+
+  it('does not capture method calls (obj.foo) or control-flow keywords (if/for/return)', () => {
+    const refs = extractReferences('if (x) { return arr.map(fn); } for (const a of b) { doThing(a); }');
+    expect(refs).not.toContain('if');
+    expect(refs).not.toContain('for');
+    expect(refs).not.toContain('return');
+    expect(refs).not.toContain('map');   // arr.map is a method call, not a symbol reference
+    expect(refs).toContain('doThing');   // a real identifier-position call
+  });
+
+  it('feeds the project graph — graph().references maps a file to what it uses', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/Card.tsx', "import { formatDate } from './utils';\nexport const Card = () => <b>{formatDate()}</b>;");
+    expect(mem.graph().references['src/Card.tsx']).toContain('formatDate');
+  });
+});
 
 describe('extractFacts (artifact indexer)', () => {
   it('extracts exported symbols and React components from a tsx file', () => {

@@ -446,18 +446,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         "Query the project's structure from the indexed code graph instead of guessing or grepping. " +
         'Answers, for a file: who imports it ("who_imports"), what it imports locally ("depends_on"), and ' +
         'the full set of files a change to it would affect directly or transitively ("impact"); and for a ' +
-        'symbol name: where it is defined ("defines"). Use "impact" BEFORE editing a shared file to see ' +
-        'the blast radius, and "who_imports" to find every call site to update — safer than editing blind. ' +
-        'Deterministic and read-only.',
+        'symbol name: where it is defined ("defines") and every file that USES/CALLS it ("references"). Use ' +
+        '"impact" BEFORE editing a shared file to see the blast radius, "who_imports" to find every call ' +
+        'site to update, and "references" to find every place a function/component is used before renaming ' +
+        'or changing its signature — safer than editing blind. Deterministic and read-only.',
       input_schema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            enum: ['impact', 'who_imports', 'depends_on', 'defines'],
-            description: 'impact/who_imports/depends_on take a FILE target; defines takes a SYMBOL name. Default: impact.',
+            enum: ['impact', 'who_imports', 'depends_on', 'defines', 'references'],
+            description: 'impact/who_imports/depends_on take a FILE target; defines and references take a SYMBOL name. Default: impact.',
           },
-          target: { type: 'string', description: 'A workspace file path (e.g. src/App.tsx) or, for "defines", an exported symbol name.' },
+          target: { type: 'string', description: 'A workspace file path (e.g. src/App.tsx) or, for "defines"/"references", a symbol name.' },
         },
         required: ['target'],
       },

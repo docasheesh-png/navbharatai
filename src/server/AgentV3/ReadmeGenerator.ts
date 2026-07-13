@@ -98,7 +98,7 @@ function detectStack(deps: string[]): string[] {
 
 /** Generate a README markdown string from the real project graph + package.json. */
 export function generateReadme(input: ReadmeInput): string {
-  const graph = input.graph || ({ files: [], symbols: [], components: [], routes: [], imports: {}, dependencies: [] } as ProjectGraph);
+  const graph = input.graph || ({ files: [], symbols: [], components: [], routes: [], imports: {}, dependencies: [], references: {} } as ProjectGraph);
   const pkg = parsePkg(input.packageJson);
 
   const name = (input.projectName || pkg?.name || 'My App').trim() || 'My App';

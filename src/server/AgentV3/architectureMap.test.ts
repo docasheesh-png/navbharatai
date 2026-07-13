@@ -22,6 +22,7 @@ const graph: ProjectGraph = {
     'src/lib/api.ts': ['axios'],
   },
   dependencies: ['axios', 'react'],
+  references: {},
 };
 
 describe('buildArchitectureMap', () => {
@@ -69,7 +70,7 @@ describe('renderArchitectureMap', () => {
   });
 
   it('is honest when nothing is indexed', () => {
-    const empty: ProjectGraph = { files: [], symbols: [], components: [], routes: [], imports: {}, dependencies: [] };
+    const empty: ProjectGraph = { files: [], symbols: [], components: [], routes: [], imports: {}, dependencies: [], references: {} };
     expect(renderArchitectureMap(buildArchitectureMap(empty))).toContain('nothing to map');
   });
 });

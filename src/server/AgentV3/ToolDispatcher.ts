@@ -6,7 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
-import { whoImports, dependenciesOf, impactOf, definitionsOf, resolveGraphFile } from './codeGraph';
+import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
@@ -1679,6 +1679,14 @@ export class ToolDispatcher {
           return defs.length
             ? `"${target}" is defined in:\n` + defs.map(d => `  ${d.file} (${d.kind})`).join('\n')
             : `No exported symbol named "${target}" in the index. Use grep for a non-exported/local name.`;
+        }
+        if (q === 'references' || q === 'who_calls' || q === 'where_used') {
+          const users = referencesOf(graph, target);
+          const defs = definitionsOf(graph, target);
+          const defNote = defs.length ? ` (defined in ${defs.map(d => d.file).join(', ')})` : '';
+          return users.length
+            ? `"${target}"${defNote} is used in ${users.length} file(s):\n` + users.map(f => `  ${f}`).join('\n')
+            : `"${target}"${defNote} is not referenced by any indexed file (unused, or referenced only where it is defined).`;
         }
         const file = resolveGraphFile(graph, target);
         if (!file) {

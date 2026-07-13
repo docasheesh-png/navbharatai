@@ -15368,3 +15368,30 @@ Routing Policy §3 updated to the new table. Verified by a 6-dimension adversari
 (mini-no-opus / weak-no-claude / opus-effort / billing / normal-unchanged / ui-consistency).
 Gate: tsc ×2 = 0, vitest 6221/6221 (new: pinnedModel specs, resolveModel fidelity, billedAmountUsd mini→×3,
 perTierBilledUsd weak/mini split, analyzer pinned-sonnet, selectBuildModel fidelity), build PASS.
+
+## 2026-07-13 — Fix 60: FULL TEAM premium experience (live Team HQ + mid-build steering, 'max' tier only)
+
+Admin: "Full Team par switch karne par premium feel aani chahiye — background tasks dikhen (Claude-Code
+jaisa card), team ek saath kaam karti dikhe, aur build ke beech me team ko message bhejna allow ho."
+
+Server (all REAL, tier-gated at the build's RESOLVED level — a hand-crafted request can't reach it):
+- `POST /api/agentv3/steer` — queue a live message onto the RUNNING build (verified-identity matching
+  like /stop, rate-limited, 403 FULL_TEAM_ONLY on any non-max build, honest 404 when idle). Queued ack
+  broadcast to every attached device instantly.
+- `AgentRunner.steerPoll` — drained at every step boundary; each message injected as a REAL user turn
+  (so the very next model call acts on it) + "picked up" narration. Wired via baseRunnerOpts ONLY when
+  `steerAllowedForBuild(powerLevel)` — every other tier byte-identical.
+- Pure gates exported + tested: `steerAllowedForBuild` (max only), `sanitizeSteerMessage` (trim/cap 2000).
+
+Client (everything driven by REAL engine state — no scripted animation):
+- ⚡ FULL TEAM HQ card above the composer while a max build runs: gradient premium frame, real roster
+  (agent_spawned/agent_done → live working pulse per specialist + what each is doing), real plan
+  progress squares (todos done/in-progress/pending, Claude-Code-card style), live elapsed clock.
+- Composer stays LIVE mid-build on max: Enter/Send messages the working team (user bubble instant,
+  server "queued" ack, runner "picked up" ack); Stop stays one tap away (slot swap); honest error
+  bubble if the message couldn't reach the team. Lower tiers: unchanged Stop-only composer.
+- Pure model `fullTeam.ts` (canSteerMidBuild / showTeamHq / teamHqModel / formatElapsed) + tests.
+
+AppKnowledgeBase Power entry updated (every AI can now explain the premium + why lower tiers can't
+send mid-build). Gate: tsc ×2 = 0, AgentRunner steering tests (injection reaches the FIRST model call,
+zero change without steerPoll), full vitest suite green, build PASS.

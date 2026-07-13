@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeLockfiles, lockfileSummary } from './lockfileAnalysis';
+import { analyzeLockfiles, lockfileSummary, detectPackageManager, packageManagerSummary } from './lockfileAnalysis';
 
 describe('analyzeLockfiles', () => {
   it('flags two different managers in the same directory (npm + yarn at root)', () => {
@@ -65,5 +65,51 @@ describe('lockfileSummary', () => {
     const out = lockfileSummary(analyzeLockfiles(['package-lock.json', 'yarn.lock']));
     expect(out).toContain('1 directory(ies) with conflicting lockfiles');
     expect(out).toContain('[medium]');
+  });
+});
+
+describe('detectPackageManager', () => {
+  it('detects pnpm from a root pnpm-lock.yaml with its commands', () => {
+    const pm = detectPackageManager(['package.json', 'pnpm-lock.yaml', 'src/App.tsx']);
+    expect(pm).toEqual({ manager: 'pnpm', lockfile: 'pnpm-lock.yaml', installCmd: 'pnpm install', runCmd: 'pnpm run' });
+  });
+
+  it('detects yarn and bun', () => {
+    expect(detectPackageManager(['yarn.lock'])?.manager).toBe('yarn');
+    expect(detectPackageManager(['bun.lockb'])?.manager).toBe('bun');
+  });
+
+  it('detects npm and reports its commands', () => {
+    expect(detectPackageManager(['package-lock.json'])).toEqual({
+      manager: 'npm', lockfile: 'package-lock.json', installCmd: 'npm install', runCmd: 'npm run',
+    });
+  });
+
+  it('returns null when the root is ambiguous (multiple managers → left to the conflict check)', () => {
+    expect(detectPackageManager(['package-lock.json', 'yarn.lock'])).toBeNull();
+  });
+
+  it('returns null when there is no root lockfile (a nested lockfile does not define the build)', () => {
+    expect(detectPackageManager(['apps/web/pnpm-lock.yaml', 'package.json'])).toBeNull();
+  });
+
+  it('returns null for empty / nullish input', () => {
+    expect(detectPackageManager([])).toBeNull();
+    // @ts-expect-error — nullish
+    expect(detectPackageManager(null)).toBeNull();
+  });
+});
+
+describe('packageManagerSummary', () => {
+  it('advises the non-npm manager and its commands', () => {
+    const out = packageManagerSummary(detectPackageManager(['pnpm-lock.yaml']));
+    expect(out).toContain('pnpm');
+    expect(out).toContain('pnpm install');
+    expect(out).toContain('NOT npm');
+  });
+
+  it('is SILENT for npm (the default) and for no detection', () => {
+    expect(packageManagerSummary(detectPackageManager(['package-lock.json']))).toBe('');
+    expect(packageManagerSummary(null)).toBe('');
   });
 });

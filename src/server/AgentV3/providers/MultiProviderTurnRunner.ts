@@ -67,6 +67,18 @@ export function isTimeoutProviderError(error: unknown): boolean {
   return /timed? ?out|timeout/i.test(text);
 }
 
+/**
+ * A RATE-LIMIT (429) failure — transient, but STORM-prone. Real case (Kanban build report 2026-07-13):
+ * a 59-file build hammered GLM, which returned "429 Rate limit reached" on turn after turn (repeatCount
+ * up to 12), and because a 429 is neither fatal nor a timeout it fell through to the next provider EVERY
+ * time — so GLM was re-tried on every single file and 429'd every single time (a wasteful storm that also
+ * defeats the cheap floor). Benched like a timeout so one throttled provider can't grind the whole run.
+ * A size-gate skip ("skipped: prompt … exceeds the cheap-floor limit") is deliberately NOT matched. Pure. */
+export function isRateLimitProviderError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return /\b429\b|rate[ _-]?limit|too many requests/i.test(text);
+}
+
 /** The largest context window any provider in the fleet offers (Claude/Vertex/Gemini ≈ 1M tokens). */
 const MAX_FLEET_CONTEXT_TOKENS = 1_048_576;
 
@@ -206,7 +218,9 @@ export function makeMultiProviderTurnRunner(
   // the provider for the rest of the run, so a degraded GLM/KIMI evening can't grind every turn.
   const deadForRun = new Map<string, string>(); // name → the fatal reason
   const timeoutStreak = new Map<string, number>(); // name → consecutive timeout count
+  const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
+  const RATE_LIMIT_BENCH_AFTER = 2; // 2 consecutive 429s → stop hammering a throttled provider this run
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -216,6 +230,10 @@ export function makeMultiProviderTurnRunner(
         const { name, runner } = chain[i];
         if ((timeoutStreak.get(name) ?? 0) >= TIMEOUT_BENCH_AFTER) {
           fellBackFrom.push(name); // benched — skip without spending its timeout again this run
+          continue;
+        }
+        if ((rateLimitStreak.get(name) ?? 0) >= RATE_LIMIT_BENCH_AFTER) {
+          fellBackFrom.push(name); // rate-limited — skip so we don't 429-storm it every remaining turn
           continue;
         }
         const fatalReason = deadForRun.get(name);
@@ -230,6 +248,7 @@ export function makeMultiProviderTurnRunner(
         try {
           const result = await runner.runTurn(params);
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
+          rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           opts.onProviderUsed?.(name, [...fellBackFrom]);
           // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
           // Best-effort + observational: a throw here must never break a delivered turn.
@@ -248,6 +267,8 @@ export function makeMultiProviderTurnRunner(
             deadForRun.set(name, err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
             timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
+          } else if (isRateLimitProviderError(err)) {
+            rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
           } else if (isHopelesslyOversizedError(err)) {
             // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
             // Abort now instead of replaying the same doomed multi-megabyte request down the chain.

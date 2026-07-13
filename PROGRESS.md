@@ -15425,3 +15425,33 @@ TestSkeletonGenerator. Roadmap reconciled: GA-16 → 🟡, GA-10 note.
 Honest state: the generator-audit + safe-analyzer lanes are now genuinely exhausted (remaining generators are
 well-built). Highest-value remaining work needs the admin's real build report (Tier-0 live defects — deferred,
 never guess-fixed) or a decision on bigger/behavior-changing items (live install-path PM wiring, escalation-on).
+## 2026-07-13 — App #5 (GitHub import survey): FALSE-POSITIVE no-Claude violation — my #1275 detector was wrong
+
+Deep-test App #5 (prompt: "Import this app from GitHub + short survey, don't change files"; Mitrify repo).
+The report showed `NO_CLAUDE_VIOLATION` + `billing.noClaude: false` on a weak/free build — implying my #1275
+chokepoint had leaked. FORENSICS proved the opposite: `builtBy: "GLM"`, `providerDelivery: {GLM:14}`,
+`providerTokens: {GLM only}` — ZERO Claude tokens. GLM actually delivered all 14 turns. The chokepoint WORKED.
+
+ROOT CAUSE (my own regression in #1275): the honesty detector `claudeModelUsed()` keyed on each llmCall's
+`model` field — but the AgentRunner stamps that field with the NOMINAL REQUESTED model (`resolveModel` →
+'claude-sonnet-4-6'), NOT the provider that actually answered. The real provider is tracked separately via
+onProviderUsed (→ providerDelivery). So a 100%-GLM build whose llmCalls were labelled 'claude-sonnet-4-6'
+was FALSE-flagged as a Claude violation, and billing.noClaude was wrongly set false — defaming a clean build
+and (worse) it would have masked/mislabelled real spend analysis. A detector that cries wolf is as harmful as
+one that stays silent (rule 5 — the system must tell the TRUTH).
+
+FIX: replaced `claudeModelUsed()` with `claudeProviderDelivered()` — the verdict now reads the PROVIDER
+DELIVERY + per-provider TOKEN LEDGER (the runner that actually answered: 'CLAUDE' / 'CLAUDE_HAIKU'), never
+the nominal model label. Route sets provider tokens BEFORE the check so both signals are visible. A real
+chain-delivered Claude turn still trips NO_CLAUDE_VIOLATION; a cheap-provider turn mislabelled with a Claude
+model id never does. (A raw Claude call can't occur on a weak build at all — the ClaudeClient zone chokepoint
+refuses it before it runs.) Tests: the exact App #5 case (14 GLM turns labelled claude-sonnet-4-6 → null),
+real CLAUDE/CLAUDE_HAIKU delivery → flagged, token-ledger corroboration, all-cheap → null. Gate: server tsc
+0, full suite 6254.
+
+OPEN (separate, not yet fixed — recorded honestly per rule 6): (a) the GitHub URL import itself FAILED —
+`cp -r /tmp/mitrify-temp/{client,server,shared,migrations} → exit 1` → only 2 files imported → "No
+package.json found" preview. A real import-robustness bug (a source subdir the repo didn't have, or an
+incomplete clone) to autopsy next. (b) The admin was billed ₹758.83 on this build because the login email is
+not in `AGENTV3_FREE_LIST` (infra — the admin reduced the list to one iCloud email); adding the admin's
+login email/uid restores exemption.

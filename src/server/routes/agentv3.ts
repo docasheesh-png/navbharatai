@@ -7117,19 +7117,22 @@ export function registerAgentV3Routes(app: Express): void {
         // split — written from the SAME values the user was billed on, never re-derived.
         try {
           // WEAK-MODULE NO-CLAUDE HONESTY (admin absolute rule + rule 5 "fix the system's honesty too",
-          // 2026-07-13). The report's `noClaude` must state the TRUTH, never the intent: the App #3
-          // Pomodoro report claimed `noClaude: true` while 9 real Claude-Sonnet calls ran. The runtime
-          // chokepoint (ClaudeClient's zone guard) now blocks such calls before they spend a token, so
-          // this should always agree — but if a Claude call still slipped through (a path that swallowed
-          // the guard's throw), report `noClaude: false` AND record a LOUD NO_CLAUDE_VIOLATION naming the
-          // model, so the report can never lie about a weak build having run Claude.
-          const leakedClaudeModel = noClaudeBuild ? buildDiag.claudeModelUsed() : null;
-          if (leakedClaudeModel) {
+          // 2026-07-13). The report's `noClaude` must state the TRUTH, never the intent. The verdict reads
+          // the PROVIDER DELIVERY / token ledger (the runner that ACTUALLY answered each turn), NOT an
+          // llmCall's nominal `model` label — App #5 proved the label lies: a 100%-GLM build recorded every
+          // turn as 'claude-sonnet-4-6' (the requested model) while GLM delivered them all, which the old
+          // label check false-flagged as a violation. The runtime chokepoint (ClaudeClient's zone guard)
+          // blocks a real Claude call on a weak build before it runs, so this should read clean; if Claude
+          // still DELIVERED a turn (a genuine chain leak), report noClaude:false + a loud NO_CLAUDE_VIOLATION.
+          // Provider tokens must be set FIRST so the detector can see the corroborating cost signal.
+          buildDiag.setProviderTokens(reconciledProviderUsage);
+          const leakedClaudeProvider = noClaudeBuild ? buildDiag.claudeProviderDelivered() : null;
+          if (leakedClaudeProvider) {
             buildDiag.record({
               phase: 'provider',
               severity: 'error',
               code: 'NO_CLAUDE_VIOLATION',
-              message: `Weak-module absolute rule VIOLATED: this weak/free build ran Claude (${leakedClaudeModel}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
+              message: `Weak-module absolute rule VIOLATED: this weak/free build was delivered by Claude (${leakedClaudeProvider}) despite the no-Claude guarantee. Billing.noClaude is reported as false (the truth). Investigate the leaking gate — a weak build must never spend NavBharatAI's Claude budget.`,
               autoResolved: false,
             });
           }
@@ -7148,10 +7151,9 @@ export function registerAgentV3Routes(app: Express): void {
             powerMode: onlyOpus,
             powerLevel: powerLevelReqEffective,
             // The TRUTH, not the intent: only `true` when the build was meant to be Claude-free AND no
-            // Claude call was actually recorded. A real leak flips this to false (+ the violation above).
-            noClaude: noClaudeBuild && !leakedClaudeModel,
+            // Claude provider actually delivered a turn. A real leak flips this to false (+ the violation above).
+            noClaude: noClaudeBuild && !leakedClaudeProvider,
           });
-          buildDiag.setProviderTokens(reconciledProviderUsage);
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }
         buildDiag.finish(result.ok, result.summary);
         diagnostics = buildDiag.report();

@@ -876,6 +876,9 @@ export class ToolDispatcher {
           let kind: 'create' | 'modify' = 'create';
           let priorContent = '';
           try { priorContent = await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
+          // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
+          // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
+          const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
           await this.actuator.writeFile(this.workspaceId, file.path, file.content);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
@@ -890,10 +893,11 @@ export class ToolDispatcher {
           });
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          return { path: file.path, kind };
+          return { path: file.path, kind, shrink };
         });
         const written: string[] = perFile.map((r) => r.path);
         const overwritten: string[] = perFile.filter((r) => r.kind === 'modify').map((r) => r.path); // existing files this batch REPLACED wholesale
+        const shrunk: string[] = perFile.filter((r) => r.shrink).map((r) => r.path); // rewrites that likely DROPPED code
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
         // what pushed builds past the wall-clock cap. One commit per batch is both correct (the batch
@@ -902,7 +906,12 @@ export class ToolDispatcher {
         const overwriteWarning = overwritten.length
           ? `\n⚠️  FULL-REWRITE WARNING: ${overwritten.length} of these already existed and were REPLACED wholesale (${overwritten.slice(0, 8).join(', ')}${overwritten.length > 8 ? '…' : ''}). Unless a full rewrite was intended, use edit_file (old_string → new_string) for surgical changes so unrelated code isn't dropped.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}`;
+        // Escalate the honest verdict for files that shrank sharply — the classic "regenerated from memory
+        // and dropped code" signature (parity with the single-file write_file path).
+        const contentLossWarning = shrunk.length
+          ? `\n⚠️  LIKELY CONTENT LOSS: ${shrunk.length} of these rewrites came back much smaller than the file they replaced (${shrunk.slice(0, 8).join(', ')}${shrunk.length > 8 ? '…' : ''}) — a wholesale write commonly drops code the model forgot. Re-read those files and restore anything you did not intend to delete.`
+          : '';
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}`;
       }
 
       case 'edit_file': {

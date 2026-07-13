@@ -83,6 +83,7 @@ import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager 
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
+import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2148,6 +2149,31 @@ export class ToolDispatcher {
         }
         if (!allOk) getWorkspaceMemory(this.workspaceId).recordAudit('run_migrations: a migration command failed.');
         return `${allOk ? '✅ Migrations applied.' : '⚠️ Migration FAILED (schema may be incomplete — fix before relying on the DB).'}\n${out.join('\n')}`;
+      }
+
+      case 'generate_db_config': {
+        // db-provision (BYO half): wire the app to CONNECT to the user's own database (Supabase/Neon/
+        // Firebase/Postgres) — a real client module + .env.example keys + the dependency. The user pastes
+        // their credentials (NavBharatAI never stores them); one-click AUTO-CREATE of the DB needs an
+        // external broker and is not this tool. Pure generator in DbConfigGenerator.ts.
+        const provider = optStr(input, 'provider');
+        if (!isDbProvider(provider)) return 'generate_db_config: pass provider = "supabase" | "neon" | "firebase" | "postgres".';
+        const cfg = generateDbConfig(provider);
+        const dbWritten: string[] = [];
+        for (const [path, content] of Object.entries(cfg.files)) {
+          // Never clobber an existing .env.example the user may have filled — only create it if absent.
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); dbWritten.push(`Kept existing ${path} (add: ${cfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('db config');
+        return `Wired ${provider} database connection:\n${dbWritten.join('\n')}\nAdd the dependency: ${cfg.dependency.name}@${cfg.dependency.version}\n\n${cfg.instructions}`;
       }
 
       case 'replace_symbol': {

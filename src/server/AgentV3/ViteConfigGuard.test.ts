@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isViteConfigPath, ensureViteAllowedHosts } from './ViteConfigGuard';
+import { isViteConfigPath, ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 
 describe('isViteConfigPath', () => {
   it('matches every vite.config extension, in any directory', () => {
@@ -61,5 +61,35 @@ describe('ensureViteAllowedHosts — the "Blocked request … is not allowed" ba
     const src = `export default defineConfig(({ mode }) => ({ plugins: [] }))`;
     // No `server: {`, no `defineConfig({`, no `export default {` object anchor → safe no-op.
     expect(ensureViteAllowedHosts('vite.config.ts', src)).toBe(src);
+  });
+});
+
+describe('ensureViteResolveAlias — dep-free @→/src alias backstop (protects #1305 in Vite)', () => {
+  it('injects a resolve.alias mapping @ to /src into a defineConfig object', () => {
+    const src = `import { defineConfig } from 'vite';\nexport default defineConfig({\n  plugins: [react()],\n});\n`;
+    const out = ensureViteResolveAlias('vite.config.ts', src);
+    expect(out).toContain("resolve: { alias: { '@': '/src' } }");
+    expect(out).toContain('plugins: [react()]'); // original preserved
+  });
+
+  it('handles a bare export-default object literal', () => {
+    const out = ensureViteResolveAlias('vite.config.js', `export default {\n  plugins: [],\n}\n`);
+    expect(out).toMatch(/export default \{ resolve: \{ alias: \{ '@': '\/src' \} \},/);
+  });
+
+  it('is a NO-OP when an @ alias already exists', () => {
+    const src = `export default defineConfig({ resolve: { alias: { '@': '/src' } } })`;
+    expect(ensureViteResolveAlias('vite.config.ts', src)).toBe(src);
+  });
+
+  it('is a NO-OP when a resolve block already exists (never mangle a nested object)', () => {
+    const src = `export default defineConfig({ resolve: { dedupe: ['react'] } })`;
+    expect(ensureViteResolveAlias('vite.config.ts', src)).toBe(src);
+  });
+
+  it('leaves non-vite-config files and function-form configs untouched', () => {
+    expect(ensureViteResolveAlias('src/App.tsx', `export default {}`)).toBe(`export default {}`);
+    const fn = `export default defineConfig(() => ({ plugins: [] }))`;
+    expect(ensureViteResolveAlias('vite.config.ts', fn)).toBe(fn);
   });
 });

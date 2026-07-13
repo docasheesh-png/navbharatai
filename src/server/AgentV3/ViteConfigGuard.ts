@@ -52,3 +52,24 @@ export function ensureViteAllowedHosts(path: string, content: string): string {
   // Case 3: no safe anchor — leave the file untouched (the system prompt still guides the agent).
   return src;
 }
+
+/**
+ * Return `content` with a guaranteed `resolve.alias` `'@' -> '/src'` for a Vite config — the DEP-FREE half
+ * of the baseUrl-"src" protection (TsconfigGuard covers tsc; the scaffold's vite-tsconfig-paths plugin covers
+ * the rest at build time). If a build rewrites vite.config and drops the plugin, `@/…` imports would fail at
+ * Vite even while tsc resolves them; a plain `@` alias needs no dependency and keeps the dominant convention
+ * working. Conservative: NO-OP if it is not a Vite config, an `@` alias already exists, a `resolve:` block
+ * already exists (never mangle a nested object), or there is no safe anchor. PURE & deterministic.
+ */
+export function ensureViteResolveAlias(path: string, content: string): string {
+  if (!isViteConfigPath(path)) return content;
+  const src = content ?? '';
+  if (/['"]@['"]\s*:/.test(src)) return src;   // an '@' alias is already mapped somewhere — never double-map
+  if (/\bresolve\s*:\s*\{/.test(src)) return src; // an existing resolve block — don't risk editing a nested object
+  const inject = "resolve: { alias: { '@': '/src' } },";
+  const defineConfigObj = /(defineConfig\s*\(\s*\{)/;
+  if (defineConfigObj.test(src)) return src.replace(defineConfigObj, `$1 ${inject}`);
+  const defaultObj = /(export\s+default\s*\{)/;
+  if (defaultObj.test(src)) return src.replace(defaultObj, `$1 ${inject}`);
+  return src; // no safe anchor (function-form config etc.) — leave untouched
+}

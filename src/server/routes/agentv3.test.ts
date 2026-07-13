@@ -1216,6 +1216,25 @@ describe('shouldReclaimBuildLock — never trap the account behind a dead/hung b
     const build = rb({ startedTs: NOW, subscribers: new Set() });
     expect(shouldReclaimBuildLock(build, NOW + 5_000)).toBe(false);
   });
+
+  // GA-2 in-process reaper: a build grossly past the HARD max is a zombie (the run aborts at maxBuildSeconds),
+  // so reclaim it even WITH a lingering subscriber — a single zombie must not trap the account forever.
+  it('ZOMBIE: a build WITH a watcher but past the hard-max duration → reclaim (cleanup never fired)', () => {
+    const hardMaxMs = 15 * 60_000; // e.g. 13-min max + 2-min grace
+    const build = rb({ startedTs: NOW, subscribers: new Set([{ write() {}, end() {} }]) });
+    expect(shouldReclaimBuildLock(build, NOW + hardMaxMs + 1_000, 30_000, hardMaxMs)).toBe(true);
+  });
+
+  it('a build WITH a watcher UNDER the hard max → NOT reclaimed (still genuinely active)', () => {
+    const hardMaxMs = 15 * 60_000;
+    const build = rb({ startedTs: NOW, subscribers: new Set([{ write() {}, end() {} }]) });
+    expect(shouldReclaimBuildLock(build, NOW + 10 * 60_000, 30_000, hardMaxMs)).toBe(false);
+  });
+
+  it('hardMaxMs = 0 (max disabled) keeps only the abandoned-lock reclaim — a watched build is never duration-reaped', () => {
+    const build = rb({ startedTs: NOW, subscribers: new Set([{ write() {}, end() {} }]) });
+    expect(shouldReclaimBuildLock(build, NOW + 60 * 60_000, 30_000, 0)).toBe(false);
+  });
 });
 
 describe('buildSandboxUnavailableInProd — A2 prod sandbox guard (defense-in-depth for C2 host RCE)', () => {

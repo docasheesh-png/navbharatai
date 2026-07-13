@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, Paperclip, X, FileText } from 'lucide-react';
+import { Send, Loader2, Sparkles, X, FileText } from 'lucide-react';
+import { AttachMenu } from '../AttachMenu';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -56,7 +57,6 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-50))); } catch { /* ignore */ }
@@ -147,22 +147,14 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       )}
 
       <div className="p-3 border-t border-white/5 flex items-end gap-2 shrink-0">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ACCEPTED_TYPES}
-          className="hidden"
-          onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
+        <AttachMenu
+          onFiles={(fl) => addFiles(fl)}
+          fileAccept={ACCEPTED_TYPES}
           disabled={loading || files.length >= MAX_FILES}
-          title="Attach files (images, PDFs, documents)"
-          className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[#c9d1d9] flex items-center justify-center shrink-0"
-        >
-          <Paperclip className="w-4 h-4" />
-        </button>
+          badge={files.length}
+          title="Attach (photo, gallery, or file)"
+          buttonClassName="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[#c9d1d9] flex items-center justify-center"
+        />
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}

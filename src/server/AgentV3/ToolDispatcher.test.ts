@@ -151,6 +151,25 @@ describe('ToolDispatcher', () => {
     expect(res.content).not.toContain('FULL-REWRITE WARNING');
   });
 
+  it('write_files_batch flags LIKELY CONTENT LOSS when a batched rewrite shrinks a substantial file', async () => {
+    // A ≥400-byte file rewritten to <50% of its size in a batch → the forensic content-loss verdict
+    // (parity with the single-file write_file path), while a modest edit stays a plain overwrite.
+    act.files.set('src/Big.tsx', 'x'.repeat(2000));
+    act.files.set('src/Small.tsx', 'y'.repeat(1000));
+    const res = await d.dispatch(
+      call('write_files_batch', { files: [
+        { path: 'src/Big.tsx', content: 'x'.repeat(200) },   // 90% smaller → content-loss
+        { path: 'src/Small.tsx', content: 'y'.repeat(900) }, // barely changed → just a rewrite
+      ] }),
+      'frontend',
+    );
+    expect(res.is_error).toBe(false);
+    expect(res.content).toContain('LIKELY CONTENT LOSS');
+    expect(res.content).toContain('src/Big.tsx');
+    // Only the shrunk file is counted — the barely-changed Small.tsx is NOT flagged as content loss.
+    expect(res.content).toContain('1 of these rewrites came back much smaller');
+  });
+
   // E2 (audit Batch 3): the batch writes files in bounded PARALLEL. Every distinct file must still
   // land with its exact content, be recorded as a change, and appear in the summary — no file lost
   // or overwritten by a racing worker — regardless of write completion order.

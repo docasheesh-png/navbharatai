@@ -22,6 +22,32 @@ describe('analyzePreviewHtml — v3.0 sees whether its preview really rendered',
     expect(analyzePreviewHtml(html).problems.join(' ')).toMatch(/build-error overlay/i);
   });
 
+  it('T0-5: flags React / webpack / Next / Parcel overlays too (not just Vite)', () => {
+    for (const host of [
+      '<react-error-overlay></react-error-overlay>',
+      '<div id="webpack-dev-server-client-overlay"></div>',
+      '<nextjs-portal></nextjs-portal>',
+      '<parcel-error-overlay></parcel-error-overlay>',
+    ]) {
+      const html = `<html><body>${host}<div id="root">something</div></body></html>`;
+      expect(analyzePreviewHtml(html).rendered).toBe(false);
+      expect(analyzePreviewHtml(html).problems.join(' ')).toMatch(/build-error overlay/i);
+    }
+  });
+
+  it('T0-5: flags a bundler resolve/compile error surfaced on the page', () => {
+    for (const err of ['Could not resolve "./Missing"', 'Module not found: Error', 'Build failed with 1 error']) {
+      const html = `<html><body><pre>${err}</pre></body></html>`;
+      expect(analyzePreviewHtml(html).rendered).toBe(false);
+    }
+  });
+
+  it('T0-5 non-regression: a real app is NOT falsely failed by the broader check', () => {
+    const html = '<html><body><div id="root"><h1>My Todo App</h1><button>Add task</button><ul><li>Buy milk</li></ul></div></body></html>';
+    expect(analyzePreviewHtml(html).rendered).toBe(true);
+    expect(analyzePreviewHtml(html).problems).toHaveLength(0);
+  });
+
   it('flags a dev-server 404 / "Cannot GET"', () => {
     expect(analyzePreviewHtml('<pre>Cannot GET /</pre>').rendered).toBe(false);
     expect(analyzePreviewHtml('<pre>Cannot GET /</pre>').problems.join(' ')).toMatch(/404|Cannot GET/i);

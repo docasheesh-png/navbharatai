@@ -42,8 +42,25 @@ export function analyzePreviewHtml(html: string): PreviewVerdict {
   if (problems.length === 0 && h.length < 40) {
     return { rendered: false, problems: ['the preview returned an empty/blank page (the dev server may not be serving the app)'] };
   }
-  // Vite / bundler error overlays surfaced into the DOM.
-  if (lower.includes('vite-error-overlay') || lower.includes('plugin:vite') || lower.includes('failed to compile') || lower.includes('[plugin:')) {
+  // Build-error overlays surfaced into the DOM. T0-5 fix: the old check only knew Vite's overlay, so a
+  // React / Next.js / webpack / Parcel overlay (or a bundler module-resolution error) that had crashed
+  // the screen was NOT recognised → verify falsely reported "renders correctly" (a fake success). These
+  // markers are error-overlay HOST elements (never legitimate app content) plus compile/resolve failures
+  // of the same class as the existing "failed to compile" signal, so precision stays high.
+  const overlayHost =
+    lower.includes('vite-error-overlay') ||       // Vite
+    lower.includes('react-error-overlay') ||      // CRA / react dev overlay
+    lower.includes('webpack-dev-server-client-overlay') || // webpack-dev-server
+    lower.includes('nextjs-portal') ||            // Next.js dev overlay host
+    lower.includes('parcel-error-overlay');       // Parcel
+  const compileError =
+    lower.includes('plugin:vite') || lower.includes('[plugin:') ||
+    lower.includes('failed to compile') ||        // CRA / Next
+    lower.includes('could not resolve') ||        // esbuild
+    lower.includes('module not found') ||         // webpack / Next
+    lower.includes('build failed') ||             // esbuild / generic bundler
+    lower.includes('pre-transform error');        // Vite
+  if (overlayHost || compileError) {
     problems.push('the dev server is showing a build-error overlay (the app failed to compile)');
   }
   // An uncaught runtime error printed onto the page.

@@ -5829,8 +5829,13 @@ export function registerAgentV3Routes(app: Express): void {
               const unresolved = findUnresolvedLocalImports(withScaffold)
                 .filter((u) => writtenMap[u.importedBy] !== undefined); // judge only OUR writes
               if (unresolved.length > 0) {
-                const list = unresolved.slice(0, 12).map((u) => `${u.missing} (imported by ${u.importedBy})`).join('\n  ');
-                return { ok: false, errors: `MISSING FILES — these local modules are imported but were never written. CREATE each of them fully:\n  ${list}${unresolved.length > 12 ? `\n  …and ${unresolved.length - 12} more` : ''}` };
+                // A mispath (the file EXISTS at existsAt) must be fixed by correcting the import path,
+                // NOT by creating a duplicate file — say so precisely so the repair does the right thing.
+                const list = unresolved.slice(0, 12).map((u) => u.existsAt
+                  ? `${u.missing} (imported by ${u.importedBy}) — WRONG PATH: this module already exists at ${u.existsAt}; FIX THE IMPORT PATH to point at it (do NOT create a new file)`
+                  : `${u.missing} (imported by ${u.importedBy}) — CREATE this file`).join('\n  ');
+                const anyMispath = unresolved.some((u) => u.existsAt);
+                return { ok: false, errors: `UNRESOLVED IMPORTS — these local modules don't resolve.${anyMispath ? ' Some are WRONG PATHS to files that already exist (fix the path); others must be created.' : ' CREATE each of them fully.'}\n  ${list}${unresolved.length > 12 ? `\n  …and ${unresolved.length - 12} more` : ''}` };
               }
             } catch { /* the missing-files gate is best-effort — tsc below still runs */ }
             // CSS SYNTAX GATE (Fix 38d): tsc never reads CSS — an unclosed block makes postcss/vite
@@ -6216,7 +6221,7 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           const scaffoldPaths = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
             .filter((p) => !/^(node_modules|\.git)\//.test(p));
-          const findMissing = (): Array<{ missing: string; importedBy: string }> => {
+          const findMissing = (): Array<{ missing: string; importedBy: string; existsAt?: string }> => {
             const writtenMap = Object.fromEntries(writtenFiles);
             const fileMap: Record<string, string> = { ...Object.fromEntries(scaffoldPaths.map((p) => [p, ''])), ...writtenMap };
             // Judge only OUR writes — a pre-existing scaffold file's own imports are not this build's gap.
@@ -6224,9 +6229,14 @@ export function registerAgentV3Routes(app: Express): void {
           };
           let missing = findMissing();
           if (missing.length > 0) {
-            const fmt = (arr: typeof missing) => arr.slice(0, 15).map((u) => `${u.missing} (imported by ${u.importedBy})`).join('\n  ');
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_FILES_DETECTED', message: `${missing.length} local module(s) imported but never created (the app crashes at runtime; the preview stubs them):\n  ${fmt(missing)}`, autoResolved: false });
-            events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${missing.length} referenced file(s) were never created — generating them so the app doesn't crash…`, ts: Date.now() });
+            // Split mispaths (the module EXISTS at existsAt — fix the import) from truly-missing (create it).
+            // Without this the repair wrote a DUPLICATE of an already-written file (Kanban build 2026-07-13).
+            const mispaths = missing.filter((m) => m.existsAt);
+            const trulyMissing = missing.filter((m) => !m.existsAt);
+            const fmt = (arr: typeof missing) => arr.slice(0, 15).map((u) => u.existsAt
+              ? `${u.missing} (imported by ${u.importedBy}) → exists at ${u.existsAt}` : `${u.missing} (imported by ${u.importedBy})`).join('\n  ');
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'MISSING_FILES_DETECTED', message: `${missing.length} local import(s) don't resolve — ${trulyMissing.length} missing file(s), ${mispaths.length} wrong path(s) (the app crashes at runtime; the preview stubs them):\n  ${fmt(missing)}`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${missing.length} import(s) don't resolve — ${mispaths.length > 0 ? `fixing ${mispaths.length} wrong path(s) and ` : ''}creating ${trulyMissing.length} missing file(s)…`, ts: Date.now() });
             try {
               // Ground the creation pass in the files that DO the importing, so each new module matches its
               // real usage (correct named/default exports, hook/prop shapes) instead of a blind stub.
@@ -6234,17 +6244,18 @@ export function registerAgentV3Routes(app: Express): void {
               const importerFiles = importerPaths
                 .map((p) => ({ path: p, content: writtenFiles.get(p) || '' }))
                 .filter((f) => f.content);
-              const missingList = missing.map((m) => `- ${m.missing} (imported by ${m.importedBy})`).join('\n');
+              const createList = trulyMissing.map((m) => `- ${m.missing} (imported by ${m.importedBy})`).join('\n');
+              const mispathList = mispaths.map((m) => `- in ${m.importedBy}: the import of "${m.missing}" is a WRONG PATH — that module already exists at ${m.existsAt}; correct the import path to point at it`).join('\n');
               const t = await makeFastTextRunner().runTurn({
                 model: fastBuildModel(), system: repairSystemPrompt(framework),
                 messages: [{ role: 'user', content:
                   `The app was built for this request:\n${prompt}\n\n` +
-                  `These LOCAL modules are imported but were NEVER created, so the app crashes at runtime. ` +
-                  `CREATE each missing file with REAL, working content that satisfies EXACTLY how the ` +
-                  `importing file uses it — correct named/default exports, correct hook return shapes, real ` +
-                  `logic (no TODOs, no empty stubs). For a *.module.css import, create the stylesheet with the ` +
-                  `class names the component references. Change NOTHING else.\n\nMISSING FILES:\n${missingList}\n\n` +
-                  `The files that import them (match their usage precisely):\n` +
+                  `Some LOCAL imports don't resolve, so the app crashes at runtime. Fix EXACTLY these, changing NOTHING else:\n` +
+                  (mispathList ? `\nWRONG IMPORT PATHS — the target file ALREADY EXISTS; do NOT create a new file, just correct the import path in the importing file:\n${mispathList}\n` : '') +
+                  (createList ? `\nMISSING FILES — these were NEVER created; CREATE each with REAL, working content that satisfies EXACTLY how the ` +
+                  `importing file uses it (correct named/default exports, correct hook return shapes, real logic — no TODOs, no empty stubs; ` +
+                  `for a *.module.css import, create the stylesheet with the class names the component references):\n${createList}\n` : '') +
+                  `\nThe files that import them (match their usage precisely):\n` +
                   importerFiles.map((f) => `\n=== ${f.path} ===\n${f.content.slice(0, 4000)}`).join('\n') },
                 ],
                 tools: [], maxTokens: 8000,

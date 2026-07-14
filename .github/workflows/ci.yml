@@ -1,8 +1,11 @@
 name: CI
 
+# De-duplicated (2026-07-14): `push: ['**']` + `pull_request` ran CI TWICE on every PR branch
+# (once for the branch push, once for the PR event). Now: `main` runs via push; every other branch
+# runs via its pull_request (open/synchronize) — one CI run per change instead of two.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 jobs:

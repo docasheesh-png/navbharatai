@@ -16061,3 +16061,22 @@ input the old test asserted as null). Gate: server tsc clean; agentv3 suite gree
 platform can create files until a payment method is added at e2b.dev. This is why App #11 (and any build
 right now) produces nothing; it is not an engine defect. The engine now reports that state HONESTLY
 (FAILED, not charged) instead of faking success.
+## 2026-07-14 — Fix 62: never leak a raw provider/infra error into the user's chat
+
+Admin real run: a v3.0 build showed "the build sandbox isn't available right now (403: team is blocked:
+missing payment method)" — the raw E2B billing error surfaced VERBATIM to the end user. Root cause: two
+narration sites echoed the raw provider error `${m}` (sandbox setup failure + repo-import failure). This
+leaks the infra vendor, alarms the user ("missing payment method" reads as THEIR problem), and — for a
+clone error — can echo a token-embedded remote URL (a real secret leak).
+
+Fix (root cause, whole class): pure `sandboxUnavailableNotice()` (clean, carries NO raw text — an infra/
+billing issue isn't user-actionable) for the sandbox site, and `redactProviderError()` (strips URLs,
+x-access-token, bearer/token/key/secret/password values, the "E2B" vendor name; caps 200 chars) for the
+import site. The RAW reason still goes to buildDiag.detail / logs for the admin — honesty preserved, just
+not leaked to users. 3 regression tests (the exact 403 string, a token-embedded clone URL, length/junk).
+
+NOTE (infra, not code): the 403 itself = the E2B account is BLOCKED (no payment method + free credits
+exhausted, ~$111.80 used). Admin action: add a payment method in the E2B dashboard to unblock; decide
+Free-pay-as-you-go vs Professional per the plan advice on 2026-07-14.
+
+Gate: server tsc 0, vitest (full) green, build PASS.

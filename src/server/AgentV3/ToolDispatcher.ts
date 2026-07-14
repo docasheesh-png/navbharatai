@@ -89,6 +89,7 @@ import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
+import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2249,6 +2250,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('storage integration');
         const deps = scfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${sProvider} file uploads:\n${stWritten.join('\n')}\nAdd the dependencies: ${deps}\n\n${scfg.instructions}`;
+      }
+
+      case 'generate_realtime': {
+        // U-4 recipe — real BYO realtime pub/sub (Pusher/Ably): server publish() + client subscribe() that
+        // returns an unsubscribe cleanup. Pure generator in RealtimeGenerator.ts.
+        const rtProvider = optStr(input, 'provider');
+        if (!isRealtimeProvider(rtProvider)) return 'generate_realtime: pass provider = "pusher" | "ably".';
+        const rcfg = generateRealtimeIntegration(rtProvider);
+        const rtWritten: string[] = [];
+        for (const [path, content] of Object.entries(rcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); rtWritten.push(`Kept existing ${path} (add: ${rcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('realtime integration');
+        const rtDeps = rcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${rtProvider} realtime:\n${rtWritten.join('\n')}\nAdd the dependencies: ${rtDeps}\n\n${rcfg.instructions}`;
       }
 
       case 'replace_symbol': {

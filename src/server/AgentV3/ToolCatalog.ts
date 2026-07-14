@@ -769,6 +769,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_realtime',
+      description:
+        'Add real realtime pub/sub to the app for live features (chat, notifications, presence, collaborative ' +
+        'updates): a server publish() helper + a client subscribe() that returns an unsubscribe cleanup, for ' +
+        '"pusher" or "ably". The user pastes their keys into .env (the secret stays server-side); NavBharatAI ' +
+        'never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['pusher', 'ably'], description: 'The realtime provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -960,6 +975,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_payment',
   'generate_email',
   'generate_storage',
+  'generate_realtime',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

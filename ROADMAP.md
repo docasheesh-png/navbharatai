@@ -346,13 +346,18 @@ decision or spend outside the code session (no `gcloud`/tokens from here).
 - **Browser-QA gates (P-TQA.11)** 🔒 — axe-core AA + Lighthouse over the LIVE preview in CI
   (needs prod E2B key / Docker host).
 - **Multi-target deploy tokens · Sentry account** 🔒 — external accounts/keys.
-- **GLM KEY POOL / ROTATION (admin-mandated future item, 2026-07-13)** 🔒🟡 — a single GLM key's
-  account-level RPM cannot serve real user volume (deep-test App #7: 429 storms → GLM benched → Vertex
-  fallback → truncation → broken imports). Build a key POOL: N `GLM_API_KEY`s (env `GLM_API_KEYS`,
-  comma-separated), round-robin/least-recently-throttled rotation inside `cheapBuildFloorRunners`, a
-  per-key 429 cooldown, and pool-level telemetry (which key throttled, rotation rate). Code-tractable
-  once the admin buys the extra keys (that part is 🔒 infra); same pattern extends to KIMI later.
-  Admin verbatim: "isko future me karna hai — aisa roadmap me daal do."
+- **GLM KEY POOL / ROTATION (admin-mandated 2026-07-13)** ✅ CODE DONE (2026-07-13, PR pending) — a single
+  GLM key's account-level RPM cannot serve real user volume (deep-test App #7/#9/#10: 429 storms → GLM
+  benched → Vertex fallback → truncation → broken imports). **Implemented:** `GLM_API_KEY` **and**
+  `KIMI_API_KEY` now accept a COMMA- (or whitespace-) separated POOL of keys. `cheapBuildFloorRunners`
+  emits a rung per (model × key) in MODEL-MAJOR / KEY-MINOR order — the flagship model is tried on ALL
+  keys before dropping a tier, so a 429 on one key fails over to the SAME model on the next key (quality
+  preserved, no Claude/Vertex drop). Each key gets a distinct BENCH name ('GLM', 'GLM#2', …) so the
+  2-consecutive-429 bench sidelines only the throttled key, not the pool; every rung `reportAs` the base
+  provider so deliveredVia / the per-provider token ledger / the no-Claude honesty detector keep one clean
+  label. Pure helper `parseKeyPool` (de-dupes, drops blanks); a single key = byte-for-byte today's behaviour.
+  🔒 REMAINING (infra, admin): buy/add the extra keys and set `GLM_API_KEY=key1,key2,…` in Cloud Run — the
+  code is inert with one key until then. Admin verbatim: "isko future me karna hai — aisa roadmap me daal do."
 
 ### Admin / monetization decisions
 - **Pro tier-gating** 👤 — `/api/pro-chat`, `/api/pro-build`, `/api/build` are open to everyone;

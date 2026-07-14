@@ -1105,6 +1105,23 @@ export function parseModelLadder(env: string | undefined, fallback: string[]): s
 }
 
 /**
+ * Parse a provider API-key env into a POOL of keys for rotation (ROADMAP Tier-4). Accepts a comma- or
+ * whitespace-separated list (`key1,key2 key3`) so the cheap floor can fail over from a 429-throttled
+ * key to a fresh one on the SAME model — the deep-test App #9/#10 GLM-saturation lever. A single key
+ * stays valid (a list of one → today's exact behaviour). Blanks are dropped and duplicates de-duped
+ * (a copy-paste repeat never doubles a rung). Pure + exported for testing.
+ */
+export function parseKeyPool(env: string | undefined): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of (env || '').split(/[\s,]+/)) {
+    const key = k.trim();
+    if (key && !seen.has(key)) { seen.add(key); out.push(key); }
+  }
+  return out;
+}
+
+/**
  * NavBharatAI Pro v3.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
  *
  * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
@@ -1184,13 +1201,27 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
   // the truncating fallback. GLM keeps the shorter floor timeout (fast fallback when a GLM key is throttled
   // is desirable). Env-tunable; a positive AGENTV3_CHEAP_FLOOR_TIMEOUT_MS still floors KIMI no lower than GLM.
   const kimiTimeoutMs = Math.max(floorTimeoutMs, Number(process.env.AGENTV3_KIMI_TIMEOUT_MS) || 120_000);
-  const add = (name: string, apiKey: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}, timeoutMs: number = floorTimeoutMs): void => {
-    if (!apiKey) return; // no key → a second, independent off-switch
+  // KEY POOL / ROTATION (ROADMAP Tier-4, deep-test App #9/#10: GLM 429-saturation dominated failures).
+  // GLM_API_KEY / KIMI_API_KEY may hold a COMMA- (or whitespace-) separated LIST of keys. Each key
+  // becomes its own rung, so a 429 on one key immediately fails over to the SAME model on the NEXT key
+  // (see model-major/key-minor ordering below) instead of dropping model quality or falling to Claude.
+  // A single key → a list of one → byte-for-byte today's behaviour (fully backward-compatible).
+  const add = (name: string, apiKeyRaw: string | undefined, baseURL: string, models: string[], runnerOpts: { thinkingControl?: boolean } = {}, timeoutMs: number = floorTimeoutMs): void => {
+    const keys = parseKeyPool(apiKeyRaw);
+    if (keys.length === 0) return; // no key → a second, independent off-switch
+    // MODEL-MAJOR, KEY-MINOR: try the BEST model across ALL keys before dropping a tier. So a throttled
+    // key #1 fails over to the same flagship model on key #2 (quality preserved); only when every key is
+    // exhausted for that model does the chain drop to a weaker one. Each KEY gets a distinct bench name
+    // ('GLM', 'GLM#2', …) so the 2-consecutive-429 bench sidelines only the throttled key, not the pool;
+    // every rung still reports as the base provider (reportAs) → one clean telemetry/no-Claude label.
     for (const model of models) {
-      try {
-        const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-        runners.push({ name, runner: sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars) });
-      } catch { /* misconfigured model rung — skip; the next rung / Claude still backstops */ }
+      keys.forEach((apiKey, k) => {
+        try {
+          const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
+          const runner = sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars);
+          runners.push(k === 0 ? { name, runner } : { name: `${name}#${k + 1}`, runner, reportAs: name });
+        } catch { /* misconfigured model/key rung — skip; the next rung / Claude still backstops */ }
+      });
     }
   };
   // Explicit ALLOWLIST (not just "anything but off") so a stray/unrecognized value (a typo, an old

@@ -270,6 +270,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   `FIRESTORE_DATABASE_ID`, `SECRET_ENCRYPTION_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
 - **AI providers:** `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY` (code also accepts `XAI_API_KEY`
   — same thing, set only one), `GLM_API_KEY`, `GLM_MODEL`, `KIMI_API_KEY`, `KIMI_MODEL`
+  (⚡ KEY POOL, 2026-07-13: `GLM_API_KEY` and `KIMI_API_KEY` now accept a COMMA-separated LIST of keys —
+  `GLM_API_KEY=key1,key2,key3` — for 429-rotation. A 429 on one key fails over to the same model on the
+  next key before dropping quality. A single key = today's behaviour. Buy the extra keys, then just set the
+  comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`

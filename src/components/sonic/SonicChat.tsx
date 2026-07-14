@@ -10,6 +10,7 @@
 // round-trip is only verifiable in a browser on a deploy; the PCM math is unit-tested in sonicAudio.test.ts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
 import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
@@ -225,7 +226,14 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
 
   const lastLine = lines.length ? lines[lines.length - 1] : null;
 
-  return (
+  // ROOT-CAUSE FIX (admin 2026-07-14, "sonic voice kaam nahi kar raha"): this is a full-screen
+  // `position: fixed; inset: 0` surface, but when it is opened from inside a chat whose ancestor has a
+  // CSS `transform`/`filter`/`will-change` (framer-motion panels, the SDA/professional chat), that
+  // ancestor becomes the containing block for `position: fixed` — so the "full-screen" surface was
+  // TRAPPED inside a tiny box (it rendered as a thin strip over the input row and was unusable). Portaling
+  // to <body> escapes every transformed ancestor, so the surface is ALWAYS truly viewport-full-screen.
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <div style={screen}>
       <style>{ORB_KEYFRAMES}</style>
 
@@ -347,7 +355,8 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
           </div>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

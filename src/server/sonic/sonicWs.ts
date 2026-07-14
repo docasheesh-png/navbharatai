@@ -19,8 +19,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { SonicSession, type SonicVoice, type SonicTurn } from './SonicBridge';
 import { parseBoli, type SonicBoli } from './sonicBoli';
 import { isSonicEnabled } from './featureFlag';
-import { getProfessional } from '../professionals/registry';
-import { buildProfessionalSystemPrompt } from '../professionals/engine';
+import { sonicPersonaFor } from './sonicPersona';
 import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
 import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
 
@@ -80,10 +79,10 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     let msg: { type?: string; data?: string; professionalId?: string; history?: SonicTurn[] };
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (msg.type === 'init') {
-      // Server-side persona lookup — the client only names WHICH professional; a raw prompt is
-      // never trusted from the client (prompt-injection guard). Unknown/absent id → default voice.
-      const cfg = typeof msg.professionalId === 'string' ? getProfessional(msg.professionalId) : undefined;
-      const persona = cfg ? buildProfessionalSystemPrompt(cfg) : undefined;
+      // Server-side persona lookup — the client only names WHICH professional; a raw prompt is never
+      // trusted from the client (prompt-injection guard). Resolves the config-driven professionals AND
+      // the bespoke Doctor AI (SDA) clinical voice persona. Unknown/absent id → default voice.
+      const persona = sonicPersonaFor(msg.professionalId);
       startSession(persona, Array.isArray(msg.history) ? msg.history : undefined);
     } else if (msg.type === 'audio' && typeof msg.data === 'string') { if (!session) startSession(); session?.sendAudio(msg.data); }
     else if (msg.type === 'stop') session?.close();

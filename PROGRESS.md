@@ -16080,3 +16080,30 @@ exhausted, ~$111.80 used). Admin action: add a payment method in the E2B dashboa
 Free-pay-as-you-go vs Professional per the plan advice on 2026-07-14.
 
 Gate: server tsc 0, vitest (full) green, build PASS.
+
+## 2026-07-14 — Fix 63: Doctor AI (SDA) voice assistant — clinical spoken persona (rural-doctor emergency help)
+
+Admin: Doctor AI (SDA) me abhi tak Sonic voice assistant nahi tha — sabse important. Voice ko DOCTOR jaise
+baat karni chahiye (jaise SDA chat me), real diagnosis + emergency me gaon/PHC ke doctor ki madad.
+
+Honest stance (rule 3): NO "jailbreak". A clinical DECISION-SUPPORT persona for a licensed doctor is the
+right, safe, and more powerful tool — stripping safety would make the model confidently wrong on doses and
+kill patients. Built exactly that.
+
+- NEW `sdaVoiceSystemPrompt()` (src/server/lib/clinical/sdaVoicePrompt.ts): the SPOKEN counterpart of the
+  text SDA_SYSTEM. Same clinical safety invariants — assist-never-replace, RED-FLAGS-first, explicit
+  MANAGE-HERE-vs-REFER-NOW with criteria, never-fake-certainty, dose safety (confirm weight-based/scored
+  doses in the app's calculator, never arithmetic aloud), ranked differentials, India NLEM/WHO + PHC
+  context, ABCDE emergencies, pre-transfer stabilisation — but drops every text-only machine signal
+  ([CLINICAL_JSON]/[CASE_COMPLETE]/markdown tables) that would be read aloud, and speaks briefly, one
+  high-yield question at a time.
+- NEW `sonicPersonaFor(professionalId)` (src/server/sonic/sonicPersona.ts): ONE resolver for voice persona —
+  'sda'/'doctor' → the SDA clinical voice persona; any registry professional → its own persona; unknown →
+  default voice. sonicWs `init` now uses it (was registry-only, so SDA voice had no doctor persona).
+- SDAChat: a distinct "Talk to SDA by voice" button (Volume2 icon, emerald) beside the existing dictation
+  mic; opens the full-screen voice surface with professionalId='sda' and CONTINUES the current case
+  (getHistory maps doctor→user / sda→assistant, strips clinical markers so nothing is spoken back).
+- ProfessionalVoiceButton extended (optional className/icon/title) so surfaces can theme the trigger.
+
+Tests: sonicPersona.test.ts (sda/doctor resolve, unknown→undefined, safety-keyword + no-text-signal
+assertions). Gate: tsc (frontend+server) 0, sonic suite green, full vitest + build pending.

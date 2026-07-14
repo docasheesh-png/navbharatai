@@ -13,9 +13,12 @@ name: Deploy to Cloud Run
 # If these secrets are absent the job is skipped (no failed runs), so it is safe
 # to merge before the secrets are configured.
 
+# MANUAL-ONLY (2026-07-14). Auto-deploy on push to main is owned by the Cloud Build TRIGGER
+# (75443609-…, see CLAUDE.md), which already runs cloudbuild.yaml on every merge. Running BOTH
+# meant EVERY commit built TWICE in Cloud Build (the admin's "double double") — one run from the
+# trigger, one from this workflow's `gcloud builds submit`. This workflow stays as a manual
+# fallback (Actions → Run workflow) for when the trigger is unavailable; it no longer auto-fires.
 on:
-  push:
-    branches: [main]
   workflow_dispatch: {}
 
 jobs:

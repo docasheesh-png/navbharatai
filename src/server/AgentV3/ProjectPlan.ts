@@ -363,8 +363,12 @@ export function moduleBuildContext(plan: ProjectPlan, mod: ProjectModule): strin
   const doneContracts = plan.modules
     .filter((m) => m.status === 'done' && m.contracts)
     .map((m) => `// ── module ${m.id} (${m.name}) — already built, import against these EXACT names ──\n${m.contracts}`);
+  // GA-7 coordination: where this module sits in the delivery plan + its specialist role.
+  const ms = moduleMilestone(plan, mod.id);
+  const role = assignModuleRole(mod);
   const lines = [
     `SOFTWARE PROJECT MODE — you are building ONE module of a larger project (${p.done}/${p.total} modules already done).`,
+    ...(ms ? [`COORDINATION: milestone ${ms.index}/${ms.total} · role: ${role}. Stay within this module's role and milestone scope.`] : []),
     '',
     `PROJECT GOAL:\n${plan.goal}`,
     '',
@@ -386,6 +390,104 @@ export function moduleBuildContext(plan: ProjectPlan, mod: ProjectModule): strin
     '- Real, complete code — no TODOs, no placeholders. The module must compile when you finish.',
   ];
   return lines.join('\n');
+}
+
+// ── GA-7 (project coordinator) — milestones + role coordination projections ─────────────────────
+//
+// The module DAG already schedules work (nextBuildableModule) and projects progress (planProgress).
+// GA-7 adds the coordination LAYER on top of that same DAG, all pure: group modules into
+// dependency-ordered MILESTONES (deliverable phases), assign each module a specialist ROLE, and
+// render a coordinator digest. These are surfaced into the per-module build context (below) so the
+// builder knows where its module sits — no new client surface, no orchestration change.
+
+export type ModuleRole = 'frontend' | 'backend' | 'data' | 'devops' | 'test' | 'general';
+
+export interface Milestone {
+  /** 1-based position in the delivery order. */
+  index: number;
+  total: number;
+  /** Modules in this milestone (same dependency depth — buildable in parallel). */
+  moduleIds: string[];
+}
+
+/** Dependency depth of every module: 0 = no deps, else 1 + max(dep depth). Cycle-safe (bounded). PURE. */
+function moduleDepths(plan: ProjectPlan): Map<string, number> {
+  const byId = new Map(plan.modules.map((m) => [m.id, m]));
+  const depth = new Map<string, number>();
+  const computing = new Set<string>();
+  const of = (id: string): number => {
+    if (depth.has(id)) return depth.get(id)!;
+    const m = byId.get(id);
+    if (!m || m.dependsOn.length === 0) { depth.set(id, 0); return 0; }
+    if (computing.has(id)) return 0; // a cycle — break it deterministically at depth 0
+    computing.add(id);
+    let d = 0;
+    for (const dep of m.dependsOn) if (byId.has(dep)) d = Math.max(d, of(dep) + 1);
+    computing.delete(id);
+    depth.set(id, d);
+    return d;
+  };
+  for (const m of plan.modules) of(m.id);
+  return depth;
+}
+
+/** Group modules into dependency-ordered milestones (one per distinct depth). PURE. */
+export function computeMilestones(plan: ProjectPlan): Milestone[] {
+  if (!plan.modules.length) return [];
+  const depth = moduleDepths(plan);
+  const byDepth = new Map<number, string[]>();
+  for (const m of plan.modules) {
+    const d = depth.get(m.id) ?? 0;
+    (byDepth.get(d) ?? byDepth.set(d, []).get(d)!).push(m.id);
+  }
+  const depths = [...byDepth.keys()].sort((a, b) => a - b);
+  return depths.map((d, i) => ({ index: i + 1, total: depths.length, moduleIds: byDepth.get(d)!.slice() }));
+}
+
+const ROLE_FILE_RULES: Array<{ role: ModuleRole; re: RegExp }> = [
+  { role: 'test', re: /\.(test|spec)\.[jt]sx?$|(^|\/)(tests?|__tests__)\//i },
+  { role: 'data', re: /\.(prisma|sql)$|(^|\/)(migrations?|schema|models?|entities)\//i },
+  { role: 'devops', re: /dockerfile|\.ya?ml$|(^|\/)(\.github|deploy|infra|k8s|helm)\//i },
+  { role: 'backend', re: /(^|\/)(server|api|routes?|controllers?|services?|backend)\/|\.(controller|service|route)\.[jt]s$/i },
+  { role: 'frontend', re: /\.(tsx|jsx|vue|svelte|css|scss|html?)$|(^|\/)(components?|pages?|views?|ui|client)\//i },
+];
+const ROLE_KEYWORDS: Array<{ role: ModuleRole; re: RegExp }> = [
+  { role: 'data', re: /\b(database|schema|migration|model|prisma|entity|orm)\b/i },
+  { role: 'backend', re: /\b(api|endpoint|server|route|auth|controller|service|webhook)\b/i },
+  { role: 'frontend', re: /\b(ui|component|page|screen|form|dashboard|layout|styl)\b/i },
+  { role: 'devops', re: /\b(deploy|docker|ci\/cd|pipeline|infrastructure|kubernetes)\b/i },
+  { role: 'test', re: /\b(test|spec|coverage|e2e)\b/i },
+];
+
+/** Heuristically assign a module to a specialist role, by its files first, then its description. PURE. */
+export function assignModuleRole(mod: ProjectModule): ModuleRole {
+  const votes = new Map<ModuleRole, number>();
+  for (const f of mod.files || []) for (const r of ROLE_FILE_RULES) if (r.re.test(f)) votes.set(r.role, (votes.get(r.role) ?? 0) + 1);
+  if (votes.size > 0) return [...votes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const text = `${mod.name} ${mod.description || ''}`;
+  for (const r of ROLE_KEYWORDS) if (r.re.test(text)) return r.role;
+  return 'general';
+}
+
+/** The milestone (1-based index + total) a module belongs to, or null if not in the plan. PURE. */
+export function moduleMilestone(plan: ProjectPlan, moduleId: string): { index: number; total: number } | null {
+  const milestones = computeMilestones(plan);
+  const m = milestones.find((ms) => ms.moduleIds.includes(moduleId));
+  return m ? { index: m.index, total: m.total } : null;
+}
+
+/** A coordinator's status digest: milestone progress + what's building + any block. PURE; '' for an empty plan. */
+export function coordinatorDigest(plan: ProjectPlan): string {
+  if (!plan.modules.length) return '';
+  const milestones = computeMilestones(plan);
+  const done = new Set(plan.modules.filter((m) => m.status === 'done').map((m) => m.id));
+  const doneMilestones = milestones.filter((ms) => ms.moduleIds.every((id) => done.has(id))).length;
+  const current = plan.modules.find((m) => m.status === 'in_progress');
+  const parts = [`Coordinator: milestone ${Math.min(doneMilestones + 1, milestones.length)}/${milestones.length}`];
+  if (current) parts.push(`building "${current.name}" [${assignModuleRole(current)}]`);
+  const blocked = planBlockedReason(plan);
+  if (blocked) parts.push(`BLOCKED — ${blocked}`);
+  return parts.join(' — ');
 }
 
 // ── Durable serialization ─────────────────────────────────────────────────────────────────────

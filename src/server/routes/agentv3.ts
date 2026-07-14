@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail } from '../lib/authMiddleware';
-import { SESSION_ID_RE, verifiedIdentity } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -109,7 +109,7 @@ import { E2BActuator } from '../AgentV3/sandbox/EngineerAI/actuators/E2BActuator
 import { DockerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/DockerActuator';
 import { userCostStore } from '../lib/UserCostStore';
 import { debitWalletForBuild } from '../lib/walletDebit';
-import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage } from '../AgentV3/FreeTierBuildRouting';
+import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice } from '../AgentV3/weakTierNotice';
 import { inrToWalletTokens } from '../lib/payments';
@@ -439,7 +439,7 @@ export function candidateConversationIds(id: string, verifiedUid: string | null)
     const sid = id.slice(3);
     if (sid) {
       if (verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid)) out.push(`agentv3-${verifiedUid}-${sid}`);
-      out.push(`agentv3-anon-${sid}`);
+      out.push(`${ANON_WORKSPACE_PREFIX}${sid}`);
     }
   }
   return out;
@@ -496,7 +496,7 @@ export function needsFallbackConversationPersist(
 export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: string | null, workspaceId: string): boolean {
   if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
   // The shared-anon bucket carries no real identity to protect (sessionId-scoped only).
-  if (workspaceId.startsWith('agentv3-anon-')) return true;
+  if (workspaceId.startsWith(ANON_WORKSPACE_PREFIX)) return true;
   // The verified token always takes precedence over the claimed id (only widens the token-less
   // admin/anon fallback). A real workspace requires the resolved uid to match its id.
   const id = verifiedUid ?? claimedUid;
@@ -517,7 +517,7 @@ export function workspaceOwnershipOk(verifiedUid: string | null, claimedUid: str
  */
 export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId: string): boolean {
   if (!workspaceId || !workspaceId.startsWith('agentv3-')) return false;
-  if (workspaceId.startsWith('agentv3-anon-')) return true; // unguessable-sid capability (anon reads)
+  if (workspaceId.startsWith(ANON_WORKSPACE_PREFIX)) return true; // unguessable-sid capability (anon reads)
   return !!verifiedUid && /^[A-Za-z0-9_-]{1,64}$/.test(verifiedUid) && workspaceId.startsWith(`agentv3-${verifiedUid}-`);
 }
 
@@ -994,6 +994,24 @@ export function sweepZombieBuilds(now: number = Date.now()): number {
 if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
   const watchdogTimer = setInterval(() => { try { sweepZombieBuilds(); } catch { /* watchdog is best-effort */ } }, 60_000);
   watchdogTimer.unref?.();
+}
+
+/**
+ * T0-9 — the money/entitlement facts of `/api/agentv3/status`, keyed off the VERIFIED identity ONLY (never a
+ * claimed `?userId`). `billed` = paid-public is on AND the user is not free-listed. `powerUnlocked` = a
+ * free-list admin/tester, OR a verified user whose wallet shows a past purchase. A null `verified` degrades
+ * to billed=false/powerUnlocked=false (the client self-heals on its next token-refresh poll). Pure over its
+ * inputs (config flags + the already-read wallet) — unit-testable.
+ */
+export function statusEntitlement(
+  verified: { uid: string; email: string | null } | null,
+  wallet: FreeTierWallet | null,
+): { billed: boolean; powerUnlocked: boolean } {
+  const uid = verified?.uid ?? null;
+  const email = verified?.email ?? null;
+  const billed = isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(uid, email);
+  const powerUnlocked = isAgentV3FreeUser(uid, email) || (!!uid && !isFreeTierUser(wallet));
+  return { billed, powerUnlocked };
 }
 /** Is a build running for this account AND does it belong to `workspaceId`? Use this (not
  *  `isBuildRunning`) for any path that might auto-attach to a build the caller didn't itself start —
@@ -1920,23 +1938,18 @@ export function registerAgentV3Routes(app: Express): void {
       if (!rb.workspaceId) return true;       // legacy build without a stamped workspace (back-compat)
       return workspaceSessionsMatch(rb.workspaceId, workspaceId);
     });
+    // T0-9 SECURITY (2026-07-14): `billed`/`powerUnlocked` are MONEY/entitlement facts and were computed
+    // from the CLAIMED `?userId`/`?email` — so `?userId=<victim>` leaked whether that account had ever
+    // purchased (its wallet's paid status). They are now derived from the VERIFIED token only (the client
+    // already sends its Bearer token here); an unverified caller gets billed=false/powerUnlocked=false and
+    // self-heals on the next token-refresh poll. `enabled`/`buildRunning`/`buildRunningHere` deliberately
+    // STAY on the claimed identity — tokenless auto-resume pollers depend on them and they leak nothing
+    // cross-user (build presence under a key the caller already supplies), so this never breaks resume.
+    const verified = await verifiedIdentity(req);
+    const wallet = verified?.uid ? await firestoreWalletReader(getDb())(verified.uid).catch(() => null) : null;
     res.json({
       enabled: isAgentV3Enabled(userId, email),
-      // BILLED: is this user actually on paid-public billing right now? True only when the paid-public
-      // flag is ON and the user is NOT on the free-list. The client shows the wallet-balance chip and the
-      // add-credits block screen only when this is true — so nothing money-related is visible while the
-      // flag is off (today) or for admin/tester free-list accounts.
-      billed: isAgentV3PaidPublicEnabled() && !isAgentV3FreeUser(userId, email),
-      // POWER-TIER GATING (admin 2026-07-12) — is this account allowed the PAID power tiers (normal/strong/
-      // powerful/full team)? True for a free-list admin/tester OR a user who has EVER purchased. A free user
-      // (never purchased) gets false → the UI shows ONLY 'weak'. The build route enforces the same clamp
-      // server-side, so this is purely which tiers to SHOW. Computed via the same wallet read the UI uses.
-      powerUnlocked: await (async () => {
-        if (isAgentV3FreeUser(userId, email)) return true; // free-list admin/tester → all tiers
-        if (!userId) return false;
-        const w = await firestoreWalletReader(getDb())(userId).catch(() => null);
-        return !isFreeTierUser(w); // has ever purchased (totalMoneySpent > 0) → paid → all tiers
-      })(),
+      ...statusEntitlement(verified, wallet),
       buildRunning,
       buildRunningHere,
       ...agentV3Status(),

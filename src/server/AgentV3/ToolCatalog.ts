@@ -855,6 +855,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'optimize_infra',
+      description:
+        'Scan the app\'s infrastructure files (Dockerfile, Kubernetes manifests, Terraform) for real security ' +
+        'and reliability anti-patterns: a base image on :latest, a container running as root, a secret baked ' +
+        'into an image layer, a K8s pod with no resource limits or running privileged, a public (allUsers) ' +
+        'Cloud Run binding, an unpinned Terraform provider, and more. Reports each finding with a concrete ' +
+        'fix. Use before deploying, or when the user asks to harden/optimize their Docker/K8s/Terraform.',
+      input_schema: { type: 'object', properties: {}, required: [] },
+    },
+    {
       name: 'schema_graph',
       description:
         'Show the database schema relationship graph (Prisma models / SQL tables and how they reference each ' +
@@ -1077,6 +1087,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',
+  'optimize_infra',
   'schema_graph',
   'generate_extension_export',
   'replace_symbol',

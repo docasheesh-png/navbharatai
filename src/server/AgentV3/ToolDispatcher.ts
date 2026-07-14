@@ -61,6 +61,7 @@ import { analyzeQueryPatterns, queryPatternSummary } from './queryPatternAnalysi
 import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnalysis';
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
+import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps } from './DependencyAutoFix';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
@@ -2448,6 +2449,22 @@ export class ToolDispatcher {
         const manual = issues.filter((i) => !i.autoFixable).map((i) => `  • ${i.file}:${i.line} — ${i.message}`);
         if (applied.length === 0 && manual.length === 0) return 'repair_ci_workflow: no CI-workflow problems detected — the workflows look runnable.';
         return `CI workflow repair:\n${applied.length ? applied.join('\n') : 'No auto-fixable issues.'}${manual.length ? `\n\nNeeds a manual fix (cannot auto-repair):\n${manual.join('\n')}` : ''}`;
+      }
+
+      case 'optimize_infra': {
+        // GA-15 — static infra optimizer: scan the workspace's Dockerfile / K8s / Terraform for real
+        // anti-patterns. Pure logic in InfraOptimizer.ts.
+        let ioFiles: string[] = [];
+        try { ioFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'optimize_infra: could not list workspace files.'; }
+        const candidates = ioFiles.filter((p) => {
+          const b = p.slice(p.lastIndexOf('/') + 1).toLowerCase();
+          return (b === 'dockerfile' || b.endsWith('.dockerfile') || b.startsWith('dockerfile.') || /\.(tf|ya?ml)$/i.test(p)) && !/(^|\/)node_modules(\/|$)/.test(p);
+        }).slice(0, 40);
+        const contents: Array<{ path: string; content: string }> = [];
+        for (const p of candidates) {
+          try { contents.push({ path: p, content: await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile') }); } catch { /* skip */ }
+        }
+        return infraOptimizeSummary(optimizeInfra(contents));
       }
 
       case 'schema_graph': {

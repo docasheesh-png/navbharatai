@@ -5532,6 +5532,9 @@ export function registerAgentV3Routes(app: Express): void {
         tools: catalogForTools(roleConfig('architect').tools),
         onlyOpus,
         powerLevel: powerLevelReqEffective,
+        // Slice 2 — weak-tier mid-build checkpoint scope. Same signal Slice 1 uses: a weak/cheap-only
+        // build (no Claude). Inert unless AGENTV3_WEAK_CHECKPOINT=on; non-weak builds never run it.
+        weakBuild: noClaudeBuild,
         effort: powerSpecResolved.effort,
         thinking,
         maxBudgetUsd: maxBudgetUsdForRunner,

@@ -16393,3 +16393,31 @@ unchanged. Does NOT touch `systemPrompt.ts`, so the prompt-regression suite is u
 
 **Gate:** server tsc clean (only the pre-existing `ws`/sonicWs types gap); `weakBuildDiscipline.test.ts` 4/4;
 full AgentV3 suite 201 files / 2789 tests green.
+
+---
+
+## 2026-07-14 — Weak-tier EVIDENCE checkpoint (Slice 2 of the weak-module reliability fix)
+
+**Companion to Slice 1.** Slice 1 tells the weak model HOW to build (core-first, prompt). Slice 2 adds an
+EVIDENCE-based safety net inside the build loop: on a weak build, every N steps run the FREE deterministic
+readiness scan and inject ONE corrective steer — but ONLY for a build-breaker that is real regardless of how
+complete the app is.
+
+**The critical correctness rule — NO false alarms.** A mid-build app is legitimately incomplete, so most
+readiness blockers ("unresolved import", "readiness score below floor") are NORMAL and would be WRONG to
+steer on (the imported file is simply the next one to be written); steering on them would waste the weak
+model's scarce steps — the opposite of the goal. So the classifier (`weakBuildCheckpoint.ts`) steers ONLY on
+COMPLETENESS-INDEPENDENT blockers: a server-only Node builtin imported by browser code (the App #12 class) and
+a high-severity security finding (leaked secret). Everything else is left to the mandatory END-of-build
+readiness gate + escalation. A CONTRACT TEST runs the real `assessReadiness` producer and asserts its blocker
+strings still match the classifier patterns, so a wording change in `Readiness.ts` can never silently disable
+the filter (rule-4 regression lock).
+
+**Wiring:** new `AgentRunner` opt `weakBuild` (threaded from the route's `noClaudeBuild`); an in-loop block
+after the per-step persist calls `dispatcher.assessBuildReadiness()` (already bounded to 45s, best-effort) and
+pushes the steer as a user turn. Bounded to `maxNudges` (default 2) per build so a checkpoint can never itself
+burn the step budget. Flag-gated **default-OFF** (`AGENTV3_WEAK_CHECKPOINT=on`), cadence env-tunable
+(`_EVERY`=20, `_MIN_STEP`=15, `_MAX_NUDGES`=2). Off / non-weak builds are byte-for-byte unchanged.
+
+**Gate:** server tsc clean (only the pre-existing `ws`/sonicWs gap); `weakBuildCheckpoint.test.ts` 14/14
+(incl. the Readiness.ts contract test); `AgentRunner.test.ts` 39/39.

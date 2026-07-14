@@ -72,6 +72,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // AgentV3 cost-ladder telemetry (revenue tab) — real per-tier cost & success rate.
   const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
   const [costLoading, setCostLoading] = useState(false);
+  // T1-admin-dashboard — build-failure analytics (overall failure rate + spike dates).
+  const [failureReport, setFailureReport] = useState<{ overall: { totalBuilds: number; failedBuilds: number; failureRate: number }; spikeDates: string[] } | null>(null);
 
   // P-MON.6 — FinOps recommendations (real, from /api/admin/finops).
   const [finops, setFinops] = useState<any>(null);
@@ -142,6 +144,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await fetch('/api/admin/agentv3/cost-telemetry?days=30', { headers });
       const d = await r.json();
       setCostSummary(summarizeCostTelemetry(Array.isArray(d?.history) ? d.history : []));
+      try {
+        const fr = await fetch('/api/admin/agentv3/build-analytics?days=30', { headers });
+        const fd = await fr.json();
+        setFailureReport(fd && fd.overall ? fd : null);
+      } catch { setFailureReport(null); }
     } catch (e) {
       console.error(e);
       setCostSummary(summarizeCostTelemetry([]));
@@ -915,6 +922,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500', TrendingUp)}
                       {statCard('Billed (v3.0)', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
                     </div>
+
+                    {/* T1-admin-dashboard — build-failure analytics: overall failure rate + spike-day alert. */}
+                    {failureReport && failureReport.overall.totalBuilds > 0 && (
+                      <div className={`rounded-xl border p-4 ${failureReport.spikeDates.length > 0 ? 'border-red-500/40 bg-red-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-[#8b949e]">Build Failure Rate (30d)</span>
+                          <span className={`text-sm font-black ${failureReport.overall.failureRate > 0.2 ? 'text-red-400' : 'text-emerald-400'}`}>
+                            {(failureReport.overall.failureRate * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[#8b949e] mt-1">
+                          {failureReport.overall.failedBuilds.toLocaleString()} failed of {failureReport.overall.totalBuilds.toLocaleString()} builds
+                        </div>
+                        {failureReport.spikeDates.length > 0 && (
+                          <div className="text-[10px] text-red-400 font-bold mt-2">
+                            ⚠️ Failure-rate spike on: {failureReport.spikeDates.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">

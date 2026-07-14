@@ -114,6 +114,58 @@ export function impactedFiles(changed: string[], dependents: Record<string, stri
   return [...impacted].sort();
 }
 
+// ── GA-4 (incremental builds) — the unified build plan ──────────────────────────────────────────
+//
+// The primitives above (diff + reverse import graph + impact BFS) existed but were only used to emit a
+// thin "N/M unchanged" line. computeBuildPlan connects them into ONE structured plan — the changed set, the
+// IMPACTED set (changed files + everything that transitively imports them = the minimal correct re-check
+// scope), and whether DEPENDENCIES changed (a lockfile was added/changed → a reinstall is genuinely needed).
+// This is the honest, deterministic core of incremental builds. (Actually SKIPPING work in the sandbox based
+// on this plan, and a persistent artifact/node_modules cache across cold sandboxes, remain infra-blocked —
+// they need real E2B sandbox/volume control, not pure logic.) PURE; unit-tested.
+
+/** Lockfiles whose change means dependencies must be reinstalled. */
+const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock', 'npm-shrinkwrap.json'];
+
+export interface BuildPlan {
+  total: number;
+  unchanged: string[];
+  changed: string[];
+  added: string[];
+  removed: string[];
+  /** changed+added PLUS everything that transitively imports them — the minimal correct re-check scope. */
+  impacted: string[];
+  /** A lockfile was added/changed → dependencies must be reinstalled (a `node_modules` cache is stale). */
+  depsChanged: boolean;
+  /** Whether there was a previous build to diff against (false = first build, everything is "new"). */
+  hadPrevious: boolean;
+}
+
+/** Build the unified incremental plan from the previous build's hashes + the current files. PURE. */
+export function computeBuildPlan(prev: HashMap | null | undefined, files: Record<string, string>): BuildPlan {
+  const curr = hashFiles(files);
+  const diff = diffHashes(prev, curr);
+  const graph = buildImportGraph(files);
+  const impacted = impactedFiles([...diff.added, ...diff.changed], graph);
+  const changedSet = new Set([...diff.added, ...diff.changed]);
+  const depsChanged = LOCKFILES.some((l) => changedSet.has(l));
+  return {
+    total: Object.keys(curr).length,
+    unchanged: diff.unchanged, changed: diff.changed, added: diff.added, removed: diff.removed,
+    impacted, depsChanged,
+    hadPrevious: !!prev && Object.keys(prev).length > 0,
+  };
+}
+
+/** A one-line incremental narration from a plan, or '' on the first build (nothing to compare). PURE. */
+export function buildPlanNarration(plan: BuildPlan): string {
+  if (!plan.hadPrevious || plan.unchanged.length === 0) return '';
+  const parts = [`♻️ Incremental: ${plan.unchanged.length}/${plan.total} file(s) unchanged since the last build (${plan.changed.length} changed, ${plan.added.length} new)`];
+  if (plan.impacted.length > 0) parts.push(`~${plan.impacted.length} file(s) impacted by the change`);
+  parts.push(plan.depsChanged ? 'dependencies changed → reinstall needed' : 'dependencies unchanged');
+  return parts.join(' · ') + '.';
+}
+
 /** Firestore-backed per-workspace hash cache. VITEST-skip, best-effort, never throws. */
 class IncrementalBuildCache {
   private db: admin.firestore.Firestore | null = null;

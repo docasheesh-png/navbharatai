@@ -169,7 +169,7 @@ import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective } from '../lib/BuildRetrospectiveEngine';
 import { estimateBuildTime, complexityFromPrompt, formatEta } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { incrementalBuildCache, hashFiles, diffHashes } from '../AppMakerLab/IncrementalBuildCache';
+import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
@@ -7230,15 +7230,11 @@ export function registerAgentV3Routes(app: Express): void {
           // hashes for next time. Best-effort — never affects the build or the save above.
           try {
             const prevHashes = await incrementalBuildCache.getHashes(workspaceId);
-            const currHashes = hashFiles(toSave);
-            if (prevHashes) {
-              const diff = diffHashes(prevHashes, currHashes);
-              if (diff.unchanged.length > 0) {
-                const total = Object.keys(currHashes).length;
-                events.emit({ type: 'narration', agent: 'architect', text: `♻️ Incremental: ${diff.unchanged.length}/${total} file(s) unchanged since the last build (${diff.changed.length} changed, ${diff.added.length} new).`, ts: Date.now() });
-              }
-            }
-            incrementalBuildCache.setHashes(workspaceId, currHashes, new Date().toISOString()).catch(() => {});
+            // GA-4 — unified incremental plan: unchanged + IMPACTED (blast radius) + deps-changed signal.
+            const plan = computeBuildPlan(prevHashes, toSave);
+            const line = buildPlanNarration(plan);
+            if (line) events.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
+            incrementalBuildCache.setHashes(workspaceId, hashFiles(toSave), new Date().toISOString()).catch(() => {});
           } catch { /* incremental signal is best-effort */ }
         }
       } catch { /* file persist is best-effort */ }

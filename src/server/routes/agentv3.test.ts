@@ -1472,12 +1472,20 @@ describe('emptyBuildFailureSummary (deep-test App #7) — an empty build is neve
     expect(s).toContain('no files');
     expect(s).not.toContain('sandbox was unavailable');
   });
-  it('does NOT fail a build that produced files (a real app shipped)', () => {
-    expect(emptyBuildFailureSummary(true, 12, true)).toBeNull();
+  it('FAILS even a "produced files" build when the sandbox was unavailable (App #11: 0 file par 100/100)', () => {
+    // The 23 in-memory files never reached the 403-blocked sandbox — nothing was installed/compiled/run,
+    // so the app cannot be "READY". A dead sandbox is a failure regardless of the phantom file count.
+    const s = emptyBuildFailureSummary(true, 23, true);
+    expect(s).toBeTruthy();
+    expect(s).toContain('sandbox was unavailable');
+  });
+  it('does NOT fail a build that produced files when the sandbox WAS available (a real app shipped)', () => {
+    expect(emptyBuildFailureSummary(true, 12, false)).toBeNull();
     expect(emptyBuildFailureSummary(true, 1, false)).toBeNull();
   });
-  it('does NOT fail a chat/analysis/import turn (no artifacts expected)', () => {
+  it('does NOT fail a chat/analysis/import turn (no artifacts expected), even if the sandbox was down', () => {
     expect(emptyBuildFailureSummary(false, 0, true)).toBeNull();
+    expect(emptyBuildFailureSummary(false, 5, true)).toBeNull();
   });
 });
 

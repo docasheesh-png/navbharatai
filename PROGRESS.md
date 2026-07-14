@@ -16030,3 +16030,34 @@ Gate: server tsc clean; MultiProviderTurnRunner + agentv3 suites 253/253.
 
 🔒 **Remaining (infra, admin):** buy/add the extra GLM (and later KIMI) keys and set
 `GLM_API_KEY=key1,key2,…` in Cloud Run. Until then the code runs with one key (no behaviour change).
+
+---
+
+## 2026-07-14 — Deep-test App #11 (Habit Tracker) autopsy + FIX: sandbox-unavailable is a FAILURE, never READY 100/100
+
+**Build:** normal tier, framework vite-react. The E2B sandbox was DOWN — `SANDBOX_UNAVAILABLE: 403 "team is
+blocked: missing payment method"` — so EVERY write_file/bash 403'd and NOTHING reached the sandbox.
+providerDelivery GLM:26 / KIMI:6 / VERTEX:1 (+ a Sonnet empty-build retry); GLM 27 failures (429).
+
+**THE BUG (admin caught it: "0 file par build health 100%"):** the report showed `ok:true` and
+"Build health: READY 100/100" over a preview with ZERO files ("No files to preview yet"). A fake success
+— the exact thing the absolute rules forbid.
+
+**Root cause:** the per-file generator recorded 23 files in the in-memory `writtenFiles` map (flushed
+only to the durable Firestore store, NEVER to the 403'd sandbox), so `writtenFiles.size > 0` was true.
+The App #7 empty-build honesty guard (`emptyBuildFailureSummary`) bailed on `fileCount > 0`, so it never
+fired — and because `ok` stayed true, `buildHealthFromDiagnostics(diag, ok=true)` scored the phantom
+in-memory app READY. Nothing was ever installed, compiled, or run: a dead sandbox cannot produce a real,
+verified app.
+
+**Fix (`emptyBuildFailureSummary`, agentv3.ts):** when `sandboxUnavailable` is true, the build FAILS
+UNCONDITIONALLY regardless of file count. This flips `result.ok=false` (route L7070), which cascades to
+`buildHealthFromDiagnostics(diag, false)` → `ready=false` + low score (the SANDBOX_UNAVAILABLE error is
+itself an unresolved blocker). One line fixes both the fake `ok:true` AND the READY 100/100 card.
+Regression test updated: `(true, 23, true)` — the App #11 case — now returns a failure (it was the exact
+input the old test asserted as null). Gate: server tsc clean; agentv3 suite green.
+
+**Honestly open (INFRA, admin — the real trigger):** the E2B account is payment-blocked — NO build on the
+platform can create files until a payment method is added at e2b.dev. This is why App #11 (and any build
+right now) produces nothing; it is not an engine defect. The engine now reports that state HONESTLY
+(FAILED, not charged) instead of faking success.

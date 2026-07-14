@@ -8,6 +8,7 @@ import { compactMessagesForPersist, compactTranscriptForModel } from './SessionT
 import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
+import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -86,6 +87,15 @@ export interface AgentRunnerOptions {
    * stops the "model replied instead of building, but it was billed as done" fake-success bug.
    */
   expectsArtifacts?: boolean;
+  /**
+   * Slice 2 (weak-tier checkpoint) — true on a WEAK / cheap-only build (the route threads its
+   * `noClaudeBuild` signal here). When set AND AGENTV3_WEAK_CHECKPOINT=on, the loop runs the free
+   * deterministic readiness scan every N steps and injects ONE corrective steer for a
+   * completeness-independent build-breaker (server-only Node lib in the browser, high-severity
+   * security) so the weak model fixes it mid-build instead of drifting to the step cap. Off / non-weak
+   * builds never run it, so behaviour is unchanged. See weakBuildCheckpoint.ts.
+   */
+  weakBuild?: boolean;
   /**
    * R2 §1.1 — when true (top-level build only, never sub-agents), the loop runs the objective
    * `evaluate` readiness scan before reporting a successful build, and DOWNGRADES ok:true →
@@ -356,6 +366,12 @@ export class AgentRunner {
       }
     };
     await persistCreate();
+
+    // Slice 2 — weak-tier mid-build checkpoint state. Config is read once (env is stable per build);
+    // the counters advance in the loop. Inert unless this is a weak build AND AGENTV3_WEAK_CHECKPOINT=on.
+    const weakBuild = this.opts.weakBuild === true;
+    const weakCkptCfg = weakCheckpointConfig();
+    let checkpointNudges = 0;
 
     let steps = 0;
     try {
@@ -635,6 +651,25 @@ export class AgentRunner {
         // Mid-build checkpoint: the turn (assistant + tool results) is persisted so a reconnect
         // resumes from here, not from the start.
         await persist('running');
+
+        // Slice 2 — weak-tier EVIDENCE checkpoint. On a weak build (flag on), every N steps run the
+        // FREE deterministic readiness scan and, ONLY for a completeness-independent build-breaker
+        // (server-only Node lib in the browser, high-severity security), inject ONE corrective steer
+        // so the weak model fixes it now instead of drifting to the step cap with a broken app. The
+        // false-alarm filter (weakBuildCheckpoint.ts) deliberately IGNORES "unresolved import" /
+        // low-score blockers — those are normal for an incomplete app. Bounded, best-effort: a scan
+        // error or a slow scan never blocks or fails the build.
+        if (shouldRunWeakCheckpoint({ isWeakBuild: weakBuild, cfg: weakCkptCfg, step: steps, toolUses: totalToolUses, nudgesUsed: checkpointNudges })) {
+          try {
+            const readiness = await dispatcher.assessBuildReadiness();
+            const steer = weakCheckpointSteer(readiness);
+            if (steer) {
+              messages.push({ role: 'user', content: steer });
+              checkpointNudges++;
+              events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: fixing a build-breaker before adding more…', ts: Date.now() });
+            }
+          } catch { /* checkpoint is best-effort — a scan error never blocks a build */ }
+        }
       }
 
       // Step cap — judge by EVIDENCE, not by how the loop ended. The old unconditional ok:false

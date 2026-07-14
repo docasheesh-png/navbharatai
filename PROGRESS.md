@@ -16362,3 +16362,62 @@ Verification: tsc (frontend) 0; vitest 6704/6704 (new tests/themeSystem.test.ts 
 npm run build PASS; built CSS confirmed to contain all 5 data-theme palette blocks + the compat remaps.
 Note: v3.0/SDA also theme now (admin wanted the WHOLE app); if any branded surface should stay dark, add
 data-fixed-dark to its root (one attribute). The Sonic voice widget uses inline styles → already immune.
+## 2026-07-14 — Weak-tier "keep-it-running" build discipline (Slice 1 of the weak-module reliability fix)
+
+**Admin question:** weak module ek saath sab file banata hai aur fail ho jata hai — ek-ek/bundle me banaye to?
+
+**Honest diagnosis (grounded in code + App #7/#9/#10/#12 autopsies):** the premise is partly wrong — the
+weak build is ALREADY incremental (one `write_file` per loop step, `maxSteps=80`), not one-shot. It fails
+because (a) **GLM 429 saturation** eats the step budget (the biggest lever — needs the GLM key pool, admin's
+keys) and (b) the **weak model DRIFTS** over the long horizon and ends NOT-ready — it keeps adding features
+instead of finishing a running core. Pure per-file splitting would make (a) WORSE (more calls → more 429s);
+the right shape is **core-first + keep-it-compiling**, which is what this slice adds.
+
+**Slice 1 (this change) — `weakBuildDiscipline.ts`:** a focused build-order instruction PREPENDED to the
+architect prompt ONLY on a weak/cheap-only build (`noClaudeBuild`), via the same additive best-effort idiom
+as every other per-build context block. It tells the weak model: (1) skeleton that compiles first, (2) ONE
+core feature end-to-end, keep it compiling, (3) only then nice-to-haves; prefer a smaller fully-working app
+over a larger half-broken one; don't accumulate unresolved imports; never import server-only Node libs into
+browser code (reinforces the App #12 class at the tier that needs it most); stop adding features when low on
+steps. Pure guidance — it CANNOT break a build (worst case the model ignores a line), so it is ON by default
+for weak builds with kill switch `AGENTV3_WEAK_DISCIPLINE=off`. Non-weak (paid/power) builds get '' → byte-for-byte
+unchanged. Does NOT touch `systemPrompt.ts`, so the prompt-regression suite is untouched.
+
+**Deliberately NOT in this slice (honest scope):**
+- The biggest lever — **GLM 429** — is fixed by the key pool (code live); admin must add extra `GLM_API_KEY`s.
+- **Slice 2 (next):** an evidence-based mid-build checkpoint that runs the free deterministic readiness scan
+  every N steps and steers the model ONLY on completeness-independent blockers (server-only-Node-in-frontend,
+  high-severity security) — explicitly IGNORING "unresolved import"/score-floor blockers, which are normal
+  mid-build false alarms (verified against `Readiness.ts` blocker taxonomy). Bounded nudges, weak-scoped,
+  flag-gated default-off.
+
+**Gate:** server tsc clean (only the pre-existing `ws`/sonicWs types gap); `weakBuildDiscipline.test.ts` 4/4;
+full AgentV3 suite 201 files / 2789 tests green.
+
+---
+
+## 2026-07-14 — Weak-tier EVIDENCE checkpoint (Slice 2 of the weak-module reliability fix)
+
+**Companion to Slice 1.** Slice 1 tells the weak model HOW to build (core-first, prompt). Slice 2 adds an
+EVIDENCE-based safety net inside the build loop: on a weak build, every N steps run the FREE deterministic
+readiness scan and inject ONE corrective steer — but ONLY for a build-breaker that is real regardless of how
+complete the app is.
+
+**The critical correctness rule — NO false alarms.** A mid-build app is legitimately incomplete, so most
+readiness blockers ("unresolved import", "readiness score below floor") are NORMAL and would be WRONG to
+steer on (the imported file is simply the next one to be written); steering on them would waste the weak
+model's scarce steps — the opposite of the goal. So the classifier (`weakBuildCheckpoint.ts`) steers ONLY on
+COMPLETENESS-INDEPENDENT blockers: a server-only Node builtin imported by browser code (the App #12 class) and
+a high-severity security finding (leaked secret). Everything else is left to the mandatory END-of-build
+readiness gate + escalation. A CONTRACT TEST runs the real `assessReadiness` producer and asserts its blocker
+strings still match the classifier patterns, so a wording change in `Readiness.ts` can never silently disable
+the filter (rule-4 regression lock).
+
+**Wiring:** new `AgentRunner` opt `weakBuild` (threaded from the route's `noClaudeBuild`); an in-loop block
+after the per-step persist calls `dispatcher.assessBuildReadiness()` (already bounded to 45s, best-effort) and
+pushes the steer as a user turn. Bounded to `maxNudges` (default 2) per build so a checkpoint can never itself
+burn the step budget. Flag-gated **default-OFF** (`AGENTV3_WEAK_CHECKPOINT=on`), cadence env-tunable
+(`_EVERY`=20, `_MIN_STEP`=15, `_MAX_NUDGES`=2). Off / non-weak builds are byte-for-byte unchanged.
+
+**Gate:** server tsc clean (only the pre-existing `ws`/sonicWs gap); `weakBuildCheckpoint.test.ts` 14/14
+(incl. the Readiness.ts contract test); `AgentRunner.test.ts` 39/39.

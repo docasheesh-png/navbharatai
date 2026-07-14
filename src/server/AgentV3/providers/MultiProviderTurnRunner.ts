@@ -38,11 +38,13 @@ export interface MultiProviderOptions {
   /** Called when a provider throws before the next is tried (greppable diagnostics). */
   onProviderError?: (name: string, error: unknown) => void;
   /**
-   * Billing Phase 3 — called when a turn succeeds, with the provider that answered AND its measured
-   * token usage. Feeds the per-provider ProviderUsageLedger (admin usage-report + optional per-tier
-   * billing). Purely observational: it never changes which provider runs or how the turn is billed.
+   * Billing Phase 3 — called when a turn succeeds, with the provider that answered, its measured
+   * token usage, AND the exact model id that answered (TurnResult.model — used by REAL-cost billing
+   * to price a GLM-flash turn as free and a glm-5.2 turn at the flagship rate). Feeds the
+   * per-provider/model ProviderUsageLedger. Purely observational: it never changes which provider
+   * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
-  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void;
+  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void;
 }
 
 /**
@@ -264,7 +266,7 @@ export function makeMultiProviderTurnRunner(
             opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
               outputTokens: result.usage?.outputTokens ?? 0,
-            });
+            }, result.model);
           } catch { /* telemetry attribution must never disturb the build */ }
           return result;
         } catch (err) {

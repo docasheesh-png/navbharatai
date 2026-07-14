@@ -16421,3 +16421,42 @@ burn the step budget. Flag-gated **default-OFF** (`AGENTV3_WEAK_CHECKPOINT=on`),
 
 **Gate:** server tsc clean (only the pre-existing `ws`/sonicWs gap); `weakBuildCheckpoint.test.ts` 14/14
 (incl. the Readiness.ts contract test); `AgentRunner.test.ts` 39/39.
+
+---
+
+## 2026-07-14 — Fix 65: REAL-COST + tiered-markup billing for every non-Opus tier (Weak/Normal/Strong)
+
+WHY (admin autopsy, real evidence): the admin ran a weak-tier LedgerLite build and cross-checked the LIVE
+provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards:
+- We CHARGED the user ₹811.86 ($8.48).
+- Our REAL provider cost (dashboard-confirmed): KIMI $0.34135 + GLM $0.06 = ~$0.40 ≈ ₹38.
+- Effective markup was ~21× (not the "1.2×" the label claimed) AND the build had FAILED (readiness 0/100,
+  7 unresolved imports) yet was billed in full.
+ROOT CAUSE: pricing.ts billed every non-Opus build against SONNET rates × 1.2/×3, ignoring that the work
+actually ran on ultra-cheap GLM/Kimi (~1/20th of Sonnet). So the "markup" was really ~21× real cost.
+
+ADMIN-CONFIRMED NEW MODEL (2026-07-14): bill = tieredMarkup(REAL provider cost) for EVERY tier where Opus
+does NOT run (Weak, Normal, Strong). Opus tiers (Powerful/Full Team) keep real Opus × 2, unchanged.
+- REAL cost = exact per-provider/model tokens × each provider's own rate card (providerRates.ts). The exact
+  model that ran is now captured via TurnResult.model (Claude/GLM/Kimi/Gemini runners all report it), so a
+  glm-4.7-flash turn is FREE and a glm-5.2 turn is the flagship rate — not one blended provider rate.
+- tieredMarkup(C): C ≤ $1 → C×4 ; C > $1 → $4 + (C−$1)×3 (first $1 at 4×, excess at 3× so big builds don't
+  run away). Then × the live USD→INR rate.
+- On the same build this yields ~₹139 instead of ₹811 — user pays far less, we still keep ~₹100 margin.
+
+WHAT SHIPPED:
+- NEW src/server/AgentV3/providerRates.ts — real July-2026 rate cards (GLM 4.7/flash/5.2, Kimi k2.5/k2.7,
+  Sonnet/Haiku/Opus, Gemini/Vertex, Grok), realRateFor(provider, model), realProviderCostUsd(), the
+  tieredMarkupUsd() curve, explainRealCostBuild(). All pure + env-tunable (RATE_*, AGENTV3_MARKUP_*).
+- ProviderUsageLedger.ts — model-aware: add(provider, usage, model?) + entries() (per-provider/model
+  slices for exact pricing). byProvider()/total() unchanged (back-compat; all existing tests still pass).
+- MultiProviderTurnRunner.ts — onTurnComplete now forwards result.model. ClaudeClient/OpenAiToolAdapter/
+  GeminiToolAdapter parse + carry the actual model into TurnResult.model.
+- routes/agentv3.ts — non-Opus tiers bill via tieredMarkup(realProviderCost); aux remainder priced at
+  Sonnet (conservative). Fast lane feeds the ledger too (cheap fast-lane build priced cheap, not swept
+  into the Sonnet remainder). Cost-transparency card uses explainRealCostBuild for non-Opus. Kill switch
+  AGENTV3_REALCOST_BILLING (default ON). FAILED-BUILD GUARD: !result.ok → ₹0 (working app or free).
+- CLAUDE.md — new "Billing model — REAL-COST + tiered markup" subsection under the Model Routing Policy.
+
+Verification gate: tsc (frontend) 0; tsc -p tsconfig.server.json 0; vitest 6818/6818 (14 new providerRates
++ 2 new ledger model-aware + 1 new runner model-forward). Opus-tier billing untouched.

@@ -50,6 +50,12 @@ export interface TurnResult {
   usage: TurnUsage;
   /** Raw assistant content blocks, to append verbatim to the transcript (RC-2). */
   rawContent: unknown[];
+  /**
+   * The model id that ACTUALLY produced this turn, when the runner knows it (REAL-cost billing prices
+   * on the exact model — a GLM flash turn is free, a glm-5.2 turn is the flagship rate). Optional:
+   * runners that don't report it leave it undefined and billing falls back to the provider-label rate.
+   */
+  model?: string;
 }
 
 export interface RunTurnParams {
@@ -126,6 +132,8 @@ interface AnthropicContentBlock {
 interface AnthropicMessageLike {
   content: AnthropicContentBlock[];
   stop_reason: string | null;
+  /** The model that produced the message (Anthropic echoes it back) — carried into TurnResult.model. */
+  model?: string;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -463,5 +471,6 @@ export function parseMessage(resp: AnthropicMessageLike): TurnResult {
       cacheReadInputTokens: u.cache_read_input_tokens ?? 0,
     },
     rawContent: content,
+    ...(typeof resp.model === 'string' && resp.model ? { model: resp.model } : {}),
   };
 }

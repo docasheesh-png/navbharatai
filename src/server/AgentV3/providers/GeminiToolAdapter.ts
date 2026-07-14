@@ -38,6 +38,8 @@ export interface GeminiRequest {
 export interface GeminiResponseLike {
   candidates?: Array<{ content?: { parts?: GeminiPart[] }; finishReason?: string }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  /** The model that answered (Gemini returns it) — carried into TurnResult.model for REAL-cost billing. */
+  modelVersion?: string;
 }
 
 interface AnthropicBlock {
@@ -199,5 +201,5 @@ export function parseGeminiResponse(response: GeminiResponseLike): TurnResult {
   };
 
   const stopReason = mapGeminiFinish(response?.candidates?.[0]?.finishReason, toolUses.length > 0);
-  return { text, toolUses, stopReason, usage, rawContent };
+  return { text, toolUses, stopReason, usage, rawContent, ...(typeof response?.modelVersion === 'string' && response.modelVersion ? { model: response.modelVersion } : {}) };
 }

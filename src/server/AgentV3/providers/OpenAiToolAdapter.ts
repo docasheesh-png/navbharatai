@@ -36,6 +36,9 @@ export interface OpenAiMessage {
 }
 
 export interface OpenAiCompletionLike {
+  /** The model that answered (OpenAI-compatible APIs echo it) — carried into TurnResult.model so
+   *  REAL-cost billing prices the exact GLM/Kimi rung that ran (flash-free vs flagship). */
+  model?: string;
   choices: Array<{
     message: { role: string; content: string | null; tool_calls?: OpenAiToolCall[] };
     finish_reason: string | null;
@@ -204,5 +207,5 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
   // If the model returned tool calls, the agent loop must run them: force tool_use.
   const stopReason = toolUses.length ? 'tool_use' : mapFinishReason(choice?.finish_reason);
 
-  return { text, toolUses, stopReason, usage, rawContent };
+  return { text, toolUses, stopReason, usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
 }

@@ -4,8 +4,8 @@ import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
 
-function ok(text: string): TurnResult {
-  return { text, toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, rawContent: [{ type: 'text', text }] };
+function ok(text: string, model?: string): TurnResult {
+  return { text, toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, rawContent: [{ type: 'text', text }], ...(model ? { model } : {}) };
 }
 function runnerOk(text: string): TurnRunner {
   return { runTurn: vi.fn().mockResolvedValue(ok(text)) };
@@ -28,6 +28,19 @@ describe('makeMultiProviderTurnRunner', () => {
     expect(res.text).toBe('from grok');
     expect(used).toEqual(['GROK']);
     expect(claude.runTurn).not.toHaveBeenCalled();
+  });
+
+  it('onTurnComplete forwards the ACTUAL model id (REAL-cost billing needs the exact rung)', async () => {
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: { runTurn: vi.fn().mockResolvedValue(ok('built', 'glm-4.7-flash')) } },
+      { name: 'CLAUDE', runner: runnerOk('backstop') },
+    ];
+    const seen: Array<{ used: string; model?: string; input: number }> = [];
+    const runner = makeMultiProviderTurnRunner(chain, {
+      onTurnComplete: (used, usage, model) => seen.push({ used, model, input: usage.inputTokens }),
+    });
+    await runner.runTurn(PARAMS);
+    expect(seen).toEqual([{ used: 'GLM', model: 'glm-4.7-flash', input: 1 }]);
   });
 
   it('key-pool (reportAs) — a benched key fails over to the next key, reported under the base name', async () => {

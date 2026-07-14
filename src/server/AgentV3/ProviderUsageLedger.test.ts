@@ -29,6 +29,29 @@ describe('ProviderUsageLedger — per-provider token attribution', () => {
     expect(l.byProvider().GLM).toEqual({ inputTokens: 100, outputTokens: 0 });
   });
 
+  it('entries() splits by (provider, model) for REAL-cost pricing; byProvider() stays aggregated', () => {
+    const l = createProviderUsageLedger();
+    l.add('GLM', { inputTokens: 100, outputTokens: 10 }, 'glm-4.7-flash');
+    l.add('GLM', { inputTokens: 200, outputTokens: 20 }, 'glm-5.2');
+    l.add('GLM', { inputTokens: 50, outputTokens: 5 }, 'glm-4.7-flash'); // same model → merges
+    const entries = l.entries();
+    // Two distinct GLM models tracked separately.
+    const flash = entries.find((e) => e.model === 'glm-4.7-flash');
+    const flagship = entries.find((e) => e.model === 'glm-5.2');
+    expect(flash?.usage).toEqual({ inputTokens: 150, outputTokens: 15 });
+    expect(flagship?.usage).toEqual({ inputTokens: 200, outputTokens: 20 });
+    // The aggregate provider view is unchanged (back-compat).
+    expect(l.byProvider().GLM).toEqual({ inputTokens: 350, outputTokens: 35 });
+  });
+
+  it('a turn added WITHOUT a model id collapses to a single model-less slice (back-compat path)', () => {
+    const l = createProviderUsageLedger();
+    l.add('KIMI', { inputTokens: 300, outputTokens: 30 });
+    const e = l.entries();
+    expect(e).toHaveLength(1);
+    expect(e[0]).toEqual({ provider: 'KIMI', model: undefined, usage: { inputTokens: 300, outputTokens: 30 } });
+  });
+
   it('buckets a blank provider label under the unattributed key', () => {
     const l = createProviderUsageLedger();
     l.add('', { inputTokens: 10, outputTokens: 5 });

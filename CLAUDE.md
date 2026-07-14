@@ -676,6 +676,32 @@ jo select kiya hai, wahi backend par provider call ho, koi aur nahi"). Enforced 
 ladder, mode-aware judge, free-tier heal-gate re-route to cheap coders, power-mode judge+plan→Opus), each
 tested + gated + merged. Until a slice ships, the current behaviour (audited 2026-07-12) still applies.
 
+### Billing model — REAL-COST + tiered markup for every non-Opus tier (admin-CONFIRMED 2026-07-14, Fix 65) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
+
+The admin verified the LIVE provider deductions on the GLM (Z.ai) + Kimi (Moonshot) dashboards and
+redefined how NavBharatAI bills v3.0 builds. **This supersedes the old "Sonnet-equivalent × 1.2 / × 3"
+billing for Weak/Normal/Strong** (which billed a cheap-led build ~21× its real cost — and once billed a
+FAILED build ₹811). The Opus tiers are untouched.
+
+- **Non-Opus tiers (Weak, Normal, Strong):** `bill = tieredMarkup( REAL provider cost )`.
+  - REAL provider cost = the EXACT per-provider/model token spend × each provider's own real rate card
+    (`src/server/AgentV3/providerRates.ts`), summed. The exact model that ran is captured via
+    `TurnResult.model` (Claude/GLM/Kimi/Gemini runners all report it) → a `glm-4.7-flash` turn is FREE,
+    a `glm-5.2` turn is the flagship rate. The unattributed aux remainder (plan/judge) is priced
+    conservatively at Sonnet rates (margin-safe upper bound).
+  - `tieredMarkup(C)`:  `C ≤ $1 → C × 4` ;  `C > $1 → $4 + (C − $1) × 3`  (first $1 at 4×, the excess at
+    3× — big builds don't run away). Then × the live USD→INR rate (`UsdInrRate`).
+- **Opus tiers (Powerful = medium, Full Team = max):** UNCHANGED — real Opus × 2 (`billedForTier 'opus'`).
+- **Failed-build guard:** a build that was expected to produce an app but did NOT succeed (`!result.ok`)
+  is NEVER charged — same "working app or free" law as the empty-build + unrendered-preview rules.
+- **Kill switch:** `AGENTV3_REALCOST_BILLING=off` instantly reverts the non-Opus path to the legacy
+  flat/per-tier billing WITHOUT a deploy (default = ON, this IS the billing model now). Rate cards are
+  env-tunable (`RATE_GLM_IN`/`RATE_KIMI_OUT`/… ) and the markup curve too (`AGENTV3_MARKUP_SMALL` = 4,
+  `AGENTV3_MARKUP_LARGE` = 3, `AGENTV3_MARKUP_THRESHOLD_USD` = 1) — track live prices without a deploy.
+- HONESTY: cache-hit input tokens are not yet tracked separately, so cached input is priced at the full
+  cache-miss rate → real cost is a slight OVER-estimate (margin-safe). A later slice can capture
+  `cache_read` usage to bill even lower.
+
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 
 These were previously only stated inside `PROGRESS.md`. Because that file is

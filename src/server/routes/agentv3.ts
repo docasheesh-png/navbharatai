@@ -146,7 +146,8 @@ import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/Preview
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
-import { billedAmountUsd, sonnetEquivalentUsd, explainBuildCost } from '../AgentV3/pricing';
+import { billedAmountUsd, sonnetEquivalentUsd, explainBuildCost, powerToTier } from '../AgentV3/pricing';
+import { tieredMarkupUsd, realProviderCostUsd, explainRealCostBuild } from '../AgentV3/providerRates';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -727,6 +728,19 @@ export function lintGateEnabled(): boolean {
 export function perTierBillingEnabled(): boolean {
   const v = process.env.AGENTV3_PER_TIER_BILLING;
   return v === '1' || v === 'true';
+}
+
+/**
+ * REAL-COST + TIERED-MARKUP billing (admin model, 2026-07-14) — the money path for every NON-Opus
+ * tier (Weak, Normal, Strong): bill = tieredMarkup(exact per-provider/model real cost), not the old
+ * "Sonnet-equivalent × 1.2/×3". ON by DEFAULT (this IS the billing model now); the env is a kill
+ * switch so ops can instantly revert to the legacy flat/per-tier path WITHOUT a deploy if a live
+ * anomaly appears. The two Opus tiers (Powerful/Full Team) are unaffected either way (they keep real
+ * Opus × 2). Set `AGENTV3_REALCOST_BILLING=off` (or `0`/`false`) to disable.
+ */
+export function realCostBillingEnabled(): boolean {
+  const v = (process.env.AGENTV3_REALCOST_BILLING ?? '').toLowerCase();
+  return !(v === 'off' || v === '0' || v === 'false');
 }
 
 /**
@@ -1548,7 +1562,7 @@ export function enforceNoClaude<T extends { name: string }>(chain: T[], noClaude
   return [...kept.filter((r) => r.name !== 'CLAUDE_HAIKU'), ...haiku];
 }
 
-function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }) => void }): TurnRunner {
+function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; allowCheapFloor?: boolean; cheapOnly?: boolean; free?: boolean; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void }): TurnRunner {
   // Explicit env overrides always win; absent them the cost-ladder tier model
   // (when supplied) is preferred over the fixed gemini-2.5-pro default.
   const buildModel = (envName: string): string =>
@@ -4798,8 +4812,8 @@ export function registerAgentV3Routes(app: Express): void {
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }): void => {
-        providerLedger.add(used, usage);
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
+        providerLedger.add(used, usage, model);
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -5995,6 +6009,10 @@ export function registerAgentV3Routes(app: Express): void {
           // Billing accounting fix: the fast lane does not use AgentRunner, so feed the build-level
           // sink directly here (mirrors AgentRunner's own sink write).
           buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+          // REAL-cost billing (Fix 65): attribute this fast-lane call to the provider/model that ACTUALLY
+          // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
+          // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
+          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model);
           return t.text;
         };
         const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
@@ -7424,13 +7442,31 @@ export function registerAgentV3Routes(app: Express): void {
       // remainder lands in the 'other' bucket. Cost is unchanged unless per-tier billing is flipped ON.
       const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), buildUsage.total());
       const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReqEffective);
-      // With the flags OFF this is exactly flatBilledUsd (today's behavior). ON — the per-feature
-      // flag OR the Slice-G cost-routing master (same per-user canary as the routing, so a canary
-      // user's cheap-led build is billed on the same regime it ran on) — it prices each tier's share
-      // separately (Sonnet work at ×3). Both are recorded to telemetry so the flip is measured.
-      let effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
-        ? perTierBilledUsd(reconciledProviderUsage, powerLevelReqEffective)
-        : flatBilledUsd;
+      // The unattributed remainder (aux calls the per-provider ledger never saw: blueprint/plan/judge)
+      // for the REAL-cost path — priced conservatively at Sonnet rates inside realProviderCostUsd.
+      const ledgerAttributed = providerLedger.total();
+      const realCostRemainder = {
+        inputTokens: Math.max(0, (buildUsage.total().inputTokens || 0) - (ledgerAttributed.inputTokens || 0)),
+        outputTokens: Math.max(0, (buildUsage.total().outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
+      };
+      // BILLING (admin model 2026-07-14): the Opus tiers (Powerful/Full Team) keep "real Opus × 2"
+      // unchanged. EVERY non-Opus tier (Weak/Normal/Strong) now bills tieredMarkup(REAL provider
+      // cost) — exact per-provider/model tokens × each provider's own rate card, marked up ×4 under
+      // $1 / ×3 on the excess. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`);
+      // OFF falls back to the legacy flat/per-tier path so a live anomaly is a one-env revert, no deploy.
+      const isOpusTier = powerToTier(powerLevelReqEffective) === 'opus';
+      let effectiveBilledUsd: number;
+      if (isOpusTier) {
+        effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
+      } else if (realCostBillingEnabled()) {
+        effectiveBilledUsd = tieredMarkupUsd(realProviderCostUsd(providerLedger.entries(), realCostRemainder));
+      } else {
+        // Legacy path (kill-switch): the per-feature flag / cost-routing canary priced each tier's
+        // share separately (Sonnet work at ×3); otherwise the flat power-derived amount.
+        effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
+          ? perTierBilledUsd(reconciledProviderUsage, powerLevelReqEffective)
+          : flatBilledUsd;
+      }
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
       let zeroBillReason: string | undefined;
@@ -7454,6 +7490,16 @@ export function registerAgentV3Routes(app: Express): void {
         effectiveBilledUsd = 0;
         zeroBillReason = 'preview did not render on verification — "preview is EARNED", so free';
         events.emit({ type: 'narration', agent: 'architect', text: '🛡️ Because the preview did not fully render on my verification, this build is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
+      }
+      // FAILED-BUILD GUARD (admin 2026-07-14): a build that was expected to produce an app but did NOT
+      // succeed must never be charged in full. Real case that triggered this: a weak-tier build failed
+      // (readiness 0/100, 7 unresolved imports) yet was still billed ₹811. Same "working app or free"
+      // law as the empty-build + unrendered-preview rules above — extended to any unsuccessful build
+      // that slipped past them (files written but the build reported failure). Only ever REDUCES a charge.
+      if (expectsArtifacts && !result.ok && effectiveBilledUsd > 0) {
+        effectiveBilledUsd = 0;
+        zeroBillReason = 'build did not succeed — "working app or free", so no charge';
+        events.emit({ type: 'narration', agent: 'architect', text: '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.', ts: Date.now() });
       }
       if (userId && result.ok && effectiveBilledUsd > 0 && freeOnboardingLimit() > 0) {
         const isFree = await onboardingCreditStore
@@ -7704,7 +7750,14 @@ export function registerAgentV3Routes(app: Express): void {
       const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
       // T1-cost-transparency: the "why this build cost ₹X" breakdown — token split, tier, markup, base cost.
       // Only when the build was actually billed (>0); a free build has no charge to explain.
-      const costBreakdown = effectiveBilledUsd > 0 ? explainBuildCost(buildUsage.total(), powerLevelReqEffective, usdInrRate()) : null;
+      // Cost transparency — the "why this build cost ₹X" breakdown. For the two Opus tiers it is the
+      // real-Opus×2 explanation; for every non-Opus tier under the real-cost path it is the honest
+      // real-provider-cost + tiered-markup breakdown (billedUsd EQUALS what was charged either way).
+      const costBreakdown = effectiveBilledUsd <= 0
+        ? null
+        : (!isOpusTier && realCostBillingEnabled())
+          ? explainRealCostBuild(providerLedger.entries(), realCostRemainder, usdInrRate())
+          : explainBuildCost(buildUsage.total(), powerLevelReqEffective, usdInrRate());
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance

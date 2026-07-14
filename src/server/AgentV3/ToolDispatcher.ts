@@ -19,6 +19,7 @@ import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
 import { buildApiGraph, apiWiringSummary } from './apiGraph';
 import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary } from './schemaGraph';
+import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1453,7 +1454,24 @@ export class ToolDispatcher {
             return { schemaLine: schemaGraphSummary(analyzeSchemaGraph(contents)), sqlSchemaLine: sqlSchemaSummary(analyzeSqlSchema(contents)) };
           } catch { return { schemaLine: '', sqlSchemaLine: '' }; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        // GA-14 — CI workflow: a generated GitHub Actions workflow that will fail deterministically (npm ci
+        // with no lockfile, cache-manager mismatch, missing script). Read the workflows + package.json (not in
+        // the source snapshot) + lockfile presence, bounded. Advisory-only; the repair_ci_workflow tool fixes.
+        const ciWorkflowLine = await (async () => {
+          try {
+            const workflows = snap.files.filter((p) => /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i.test(p)).slice(0, 15);
+            if (workflows.length === 0) return '';
+            const map: Record<string, string> = {};
+            for (const lock of ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock']) {
+              if (snap.files.includes(lock)) map[lock] = '';
+            }
+            for (const p of [...workflows, ...(snap.files.includes('package.json') ? ['package.json'] : [])]) {
+              try { map[p] = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'readFile'); } catch { /* skip unreadable */ }
+            }
+            return ciWorkflowSummary(analyzeCiWorkflow(map));
+          } catch { return ''; }
+        })();
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
       }
 
       case 'update_todo': {
@@ -2371,6 +2389,37 @@ export class ToolDispatcher {
         const deDeps = deResult.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         const deScripts = Object.entries(deResult.scripts).map(([k, v]) => `"${k}": "${v}"`).join(', ');
         return `Desktop export (Electron):\n${deWritten.join('\n')}\nSet package.json "main": "${deResult.mainEntry}"\nAdd the devDependencies: ${deDeps}\nAdd the scripts: ${deScripts}\n\n${deResult.instructions}`;
+      }
+
+      case 'repair_ci_workflow': {
+        // GA-14 — detect + fix a generated GitHub Actions workflow that will fail deterministically. Pure
+        // logic in ciWorkflowAnalysis.ts; reads the project's workflows + package.json + lockfile presence.
+        let allFiles: string[] = [];
+        try { allFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'repair_ci_workflow: could not list workspace files.'; }
+        const workflows = allFiles.filter((p) => /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i.test(p)).slice(0, 15);
+        if (workflows.length === 0) return 'repair_ci_workflow: no .github/workflows/*.yml files found.';
+        const map: Record<string, string> = {};
+        for (const lock of ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock']) {
+          if (allFiles.includes(lock)) map[lock] = '';
+        }
+        for (const p of [...workflows, ...(allFiles.includes('package.json') ? ['package.json'] : [])]) {
+          try { map[p] = await this.actuator.readFile(this.workspaceId, p); } catch { /* skip unreadable */ }
+        }
+        const issues = analyzeCiWorkflow(map);
+        const applied: string[] = [];
+        for (const wf of workflows) {
+          const { content, fixes } = repairCiWorkflow(wf, map);
+          if (fixes.length > 0 && content && content !== map[wf]) {
+            await this.actuator.writeFile(this.workspaceId, wf, content);
+            this.state?.recordFileChange({ path: wf, kind: 'modify' }, agent);
+            getWorkspaceMemory(this.workspaceId).indexFile(wf, content);
+            applied.push(`Fixed ${wf}: ${fixes.join('; ')}`);
+          }
+        }
+        if (applied.length > 0) this.scheduleCheckpoint('ci workflow repair');
+        const manual = issues.filter((i) => !i.autoFixable).map((i) => `  • ${i.file}:${i.line} — ${i.message}`);
+        if (applied.length === 0 && manual.length === 0) return 'repair_ci_workflow: no CI-workflow problems detected — the workflows look runnable.';
+        return `CI workflow repair:\n${applied.length ? applied.join('\n') : 'No auto-fixable issues.'}${manual.length ? `\n\nNeeds a manual fix (cannot auto-repair):\n${manual.join('\n')}` : ''}`;
       }
 
       case 'replace_symbol': {

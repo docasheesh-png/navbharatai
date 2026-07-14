@@ -837,6 +837,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'repair_ci_workflow',
+      description:
+        'Detect and fix a generated GitHub Actions workflow (.github/workflows/*.yml) that will FAIL when it ' +
+        'runs: `npm ci` with no committed lockfile (auto-fixed to `npm install`), a setup-node cache keyed to ' +
+        'the wrong package manager (repointed to the real one), or an `npm run <script>` for a script ' +
+        'package.json does not define (reported for a manual fix). Use after generating a fullstack/CI app, ' +
+        'or when the user says CI is failing. Only changes workflows that are actually broken.',
+      input_schema: { type: 'object', properties: {}, required: [] },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -1032,6 +1042,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_search',
   'generate_mobile_export',
   'generate_desktop_export',
+  'repair_ci_workflow',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

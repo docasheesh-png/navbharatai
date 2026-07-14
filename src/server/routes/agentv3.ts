@@ -87,6 +87,7 @@ import { randomUUID } from 'crypto';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext } from '../AgentV3/RoleChats';
 import { summarizeFileTree } from '../AgentV3/systemPrompt';
+import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
 import { flushDecision } from '../AgentV3/DurableFlush';
 import { enqueue as enqueueCommand, cancelItem as cancelQueueItem, claimNext as claimNextQueued, completeRunning as completeQueuedRunning, pendingItems as pendingQueueItems, runningItem as runningQueueItem, queueSummary, type QueueItem, type QueueItemSource } from '../AgentV3/BuildQueue';
@@ -5326,6 +5327,15 @@ export function registerAgentV3Routes(app: Express): void {
         const dateBlock = dateContextBlock(new Date().toISOString());
         if (dateBlock) architectSystem = `${dateBlock}\n\n---\n\n${architectSystem}`;
       } catch { /* date context is best-effort */ }
+      // Weak-tier build discipline (admin 2026-07-14): a weak/cheap-only build (GLM/Kimi) drifts over
+      // the long tool-loop and ends half-broken — it keeps adding features instead of finishing a
+      // running core. Give it an explicit core-first, keep-it-compiling build order. Pure guidance
+      // (cannot break a build), scoped to noClaudeBuild, kill switch AGENTV3_WEAK_DISCIPLINE=off.
+      // Additive + best-effort: '' (no change) for any non-weak build, so paid/power builds are unchanged.
+      try {
+        const disciplineBlock = weakBuildDisciplineBlock(noClaudeBuild);
+        if (disciplineBlock) architectSystem = `${disciplineBlock}\n\n---\n\n${architectSystem}`;
+      } catch { /* weak-tier discipline is best-effort — never blocks a build */ }
       // Phase S2 — IDE↔v3.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.

@@ -16362,3 +16362,34 @@ Verification: tsc (frontend) 0; vitest 6704/6704 (new tests/themeSystem.test.ts 
 npm run build PASS; built CSS confirmed to contain all 5 data-theme palette blocks + the compat remaps.
 Note: v3.0/SDA also theme now (admin wanted the WHOLE app); if any branded surface should stay dark, add
 data-fixed-dark to its root (one attribute). The Sonic voice widget uses inline styles → already immune.
+## 2026-07-14 — Weak-tier "keep-it-running" build discipline (Slice 1 of the weak-module reliability fix)
+
+**Admin question:** weak module ek saath sab file banata hai aur fail ho jata hai — ek-ek/bundle me banaye to?
+
+**Honest diagnosis (grounded in code + App #7/#9/#10/#12 autopsies):** the premise is partly wrong — the
+weak build is ALREADY incremental (one `write_file` per loop step, `maxSteps=80`), not one-shot. It fails
+because (a) **GLM 429 saturation** eats the step budget (the biggest lever — needs the GLM key pool, admin's
+keys) and (b) the **weak model DRIFTS** over the long horizon and ends NOT-ready — it keeps adding features
+instead of finishing a running core. Pure per-file splitting would make (a) WORSE (more calls → more 429s);
+the right shape is **core-first + keep-it-compiling**, which is what this slice adds.
+
+**Slice 1 (this change) — `weakBuildDiscipline.ts`:** a focused build-order instruction PREPENDED to the
+architect prompt ONLY on a weak/cheap-only build (`noClaudeBuild`), via the same additive best-effort idiom
+as every other per-build context block. It tells the weak model: (1) skeleton that compiles first, (2) ONE
+core feature end-to-end, keep it compiling, (3) only then nice-to-haves; prefer a smaller fully-working app
+over a larger half-broken one; don't accumulate unresolved imports; never import server-only Node libs into
+browser code (reinforces the App #12 class at the tier that needs it most); stop adding features when low on
+steps. Pure guidance — it CANNOT break a build (worst case the model ignores a line), so it is ON by default
+for weak builds with kill switch `AGENTV3_WEAK_DISCIPLINE=off`. Non-weak (paid/power) builds get '' → byte-for-byte
+unchanged. Does NOT touch `systemPrompt.ts`, so the prompt-regression suite is untouched.
+
+**Deliberately NOT in this slice (honest scope):**
+- The biggest lever — **GLM 429** — is fixed by the key pool (code live); admin must add extra `GLM_API_KEY`s.
+- **Slice 2 (next):** an evidence-based mid-build checkpoint that runs the free deterministic readiness scan
+  every N steps and steers the model ONLY on completeness-independent blockers (server-only-Node-in-frontend,
+  high-severity security) — explicitly IGNORING "unresolved import"/score-floor blockers, which are normal
+  mid-build false alarms (verified against `Readiness.ts` blocker taxonomy). Bounded nudges, weak-scoped,
+  flag-gated default-off.
+
+**Gate:** server tsc clean (only the pre-existing `ws`/sonicWs types gap); `weakBuildDiscipline.test.ts` 4/4;
+full AgentV3 suite 201 files / 2789 tests green.

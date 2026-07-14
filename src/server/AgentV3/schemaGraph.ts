@@ -134,3 +134,117 @@ export function schemaGraphSummary(graph: SchemaGraph): string {
     `  ⚠️ ${r.file}:${r.line} — model '${r.from}'.${r.field} references '${r.to}', which no model defines`);
   return `Schema — ${graph.dangling.length} dangling relation(s) (a Prisma relation to a model the schema never defines; breaks \`prisma migrate\`):\n${shown.join('\n')}${graph.dangling.length > 8 ? `\n  …and ${graph.dangling.length - 8} more` : ''}`;
 }
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────────────
+// GA-5 (SQL-DDL slice) — foreign-key graph for plain SQL migration/schema files.
+//
+// The same dangling-reference bug exists in raw SQL apps: a `FOREIGN KEY (...) REFERENCES orders(id)` when no
+// `CREATE TABLE orders` exists anywhere → the migration fails at apply time. This parses `.sql` files for
+// CREATE TABLE definitions + foreign-key references (both table-level `FOREIGN KEY ... REFERENCES t(...)` and
+// inline column `... REFERENCES t(col)`) and flags FKs whose target table is never defined. Kept SEPARATE
+// from the Prisma path (a Prisma model and a SQL table are different namespaces — never cross-resolved).
+// Case-insensitive table matching (SQL identifiers are case-insensitive unquoted) so a `Users` FK matches a
+// `users` table — under-report a dangling FK rather than raise a false one (rule 1). PURE; never throws.
+
+const SQL_FILE = /(^|\/)[^/]*\.sql$/i;
+// CREATE TABLE [IF NOT EXISTS] [schema.]name ( — name may be quoted "x", `x`, [x], or bare.
+const CREATE_TABLE_RE = /\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)\s*\(/gi;
+// REFERENCES [schema.]table — the referenced table of a foreign key.
+const REFERENCES_RE = /\bREFERENCES\s+([`"[\]\w.]+)/gi;
+
+/** Normalize a SQL table identifier: drop quotes/backticks/brackets + schema prefix, lower-case. */
+function normSqlTable(raw: string): string {
+  let s = String(raw || '').trim().replace(/[`"[\]]/g, '');
+  const dot = s.lastIndexOf('.');
+  if (dot >= 0) s = s.slice(dot + 1); // strip schema qualifier (public.users → users)
+  return s.toLowerCase();
+}
+
+/** Line number (1-based) of a character offset within text. */
+function lineAt(text: string, index: number): number {
+  let line = 1;
+  for (let i = 0; i < index && i < text.length; i++) if (text[i] === '\n') line++;
+  return line;
+}
+
+/** Scan from the '(' at `openIdx` to its balanced ')'. Returns the end index (of the ')'), or text.length. */
+function matchParen(text: string, openIdx: number): number {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') { depth--; if (depth === 0) return i; }
+  }
+  return text.length;
+}
+
+/**
+ * Build the SQL table→foreign-key graph and flag dangling FKs (a FK to a table no CREATE TABLE defines).
+ * Deterministic; conservative; never throws. Table names aggregated across ALL .sql files first.
+ */
+export function analyzeSqlSchema(sources: ReadonlyArray<{ path: string; content: string }>): SchemaGraph {
+  const files: Array<{ path: string; content: string }> = [];
+  for (const src of sources || []) {
+    if (!src || typeof src !== 'object') continue;
+    const { path, content } = src as { path: unknown; content: unknown };
+    if (typeof path !== 'string' || typeof content !== 'string') continue;
+    if (!SQL_FILE.test(path)) continue;
+    files.push({ path, content });
+  }
+  if (files.length === 0) return { models: [], relations: [], dangling: [] };
+
+  // Pass 1 — collect every defined table name (normalized), across all files.
+  const models: SchemaModel[] = [];
+  const defined = new Set<string>();
+  for (const { path, content } of files) {
+    CREATE_TABLE_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = CREATE_TABLE_RE.exec(content)) !== null) {
+      const name = normSqlTable(m[1]);
+      if (name) { defined.add(name); models.push({ name, file: path }); }
+    }
+  }
+
+  // Pass 2 — for each CREATE TABLE block, collect its FK references and check against `defined`.
+  const relations: SchemaRelation[] = [];
+  const dangling: SchemaRelation[] = [];
+  const seen = new Set<string>();
+  for (const { path, content } of files) {
+    CREATE_TABLE_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = CREATE_TABLE_RE.exec(content)) !== null) {
+      const fromTable = normSqlTable(m[1]);
+      const openIdx = content.indexOf('(', m.index);
+      if (openIdx < 0) continue;
+      const closeIdx = matchParen(content, openIdx);
+      const body = content.slice(openIdx + 1, closeIdx);
+      CREATE_TABLE_RE.lastIndex = closeIdx; // resume scanning after this table's body
+      REFERENCES_RE.lastIndex = 0;
+      let r: RegExpExecArray | null;
+      while ((r = REFERENCES_RE.exec(body)) !== null) {
+        const toTable = normSqlTable(r[1]);
+        if (!toTable) continue;
+        const line = lineAt(content, openIdx + 1 + r.index);
+        const rel: SchemaRelation = { from: fromTable, to: toTable, field: 'FOREIGN KEY', file: path, line };
+        const key = `${path}:${line}:${fromTable}->${toTable}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        relations.push(rel);
+        if (!defined.has(toTable)) dangling.push(rel);
+      }
+    }
+  }
+
+  return {
+    models: models.sort((a, b) => a.name.localeCompare(b.name)),
+    relations,
+    dangling: dangling.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line),
+  };
+}
+
+/** Advisory `evaluate` line for dangling SQL foreign keys, or '' when clean / absent. Pure. */
+export function sqlSchemaSummary(graph: SchemaGraph): string {
+  if (!graph || !graph.dangling || graph.dangling.length === 0) return '';
+  const shown = graph.dangling.slice(0, 8).map((r) =>
+    `  ⚠️ ${r.file}:${r.line} — table '${r.from}' foreign key references '${r.to}', which no CREATE TABLE defines`);
+  return `Schema — ${graph.dangling.length} dangling foreign key(s) (a SQL FK to a table the schema never defines; breaks the migration):\n${shown.join('\n')}${graph.dangling.length > 8 ? `\n  …and ${graph.dangling.length - 8} more` : ''}`;
+}

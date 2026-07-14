@@ -818,6 +818,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_desktop_export',
+      description:
+        'Wrap the generated web app as a desktop app (Windows/.exe, macOS/.dmg, Linux/.AppImage) using ' +
+        'Electron: emits electron/main.cjs + electron-builder.yml + a DESKTOP_EXPORT.md runbook, and reports ' +
+        'the Electron devDependencies, package.json scripts, and the "main" entry to set. Use when the user ' +
+        'wants a desktop/installable/.exe version of their app. HONEST: this generates the wrapper config, NOT ' +
+        'a signed installer — electron-builder must run on the matching OS (Windows for .exe, macOS for .dmg). ' +
+        'Never overwrites an existing electron-builder.yml.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Human product name shown on the app/window (e.g. "My Shop").' },
+          appId: { type: 'string', description: 'Optional reverse-DNS app id (e.g. com.acme.myshop). Derived from appName when omitted.' },
+          webDir: { type: 'string', description: 'Build output dir Electron loads (Vite → "dist", CRA → "build", Next export → "out"). Default "dist".' },
+        },
+        required: [],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -1012,6 +1031,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_realtime',
   'generate_search',
   'generate_mobile_export',
+  'generate_desktop_export',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

@@ -94,6 +94,7 @@ import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGen
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { generateMobileExport } from '../lib/MobileExportGenerator';
+import { generateDesktopExport } from '../lib/DesktopExportGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2344,6 +2345,32 @@ export class ToolDispatcher {
         const meDeps = meResult.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         const meScripts = Object.entries(meResult.scripts).map(([k, v]) => `"${k}": "${v}"`).join(', ');
         return `Mobile export (Capacitor):\n${meWritten.join('\n')}\nAdd the dependencies: ${meDeps}\nAdd the scripts: ${meScripts}\n\n${meResult.instructions}`;
+      }
+
+      case 'generate_desktop_export': {
+        // UT-1 — wrap the generated web app as an Electron desktop project. Pure generator in
+        // DesktopExportGenerator.ts; emits main + builder config + runbook. Never clobbers electron-builder.yml.
+        const deResult = generateDesktopExport({
+          appName: optStr(input, 'appName'),
+          appId: optStr(input, 'appId'),
+          webDir: optStr(input, 'webDir'),
+        });
+        const deWritten: string[] = [];
+        for (const [path, content] of Object.entries(deResult.files)) {
+          if (path === 'electron-builder.yml') {
+            try { await this.actuator.readFile(this.workspaceId, path); deWritten.push(`Kept existing ${path}`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          deWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('desktop export');
+        const deDeps = deResult.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        const deScripts = Object.entries(deResult.scripts).map(([k, v]) => `"${k}": "${v}"`).join(', ');
+        return `Desktop export (Electron):\n${deWritten.join('\n')}\nSet package.json "main": "${deResult.mainEntry}"\nAdd the devDependencies: ${deDeps}\nAdd the scripts: ${deScripts}\n\n${deResult.instructions}`;
       }
 
       case 'replace_symbol': {

@@ -32,19 +32,12 @@ export interface MobileExportResult {
   instructions: string;
 }
 
+import { resolveAppId } from './appId';
+// Re-exported so existing importers keep a stable surface; the canonical impl lives in appId.ts (shared with
+// the desktop generator — rule 4, no drift).
+export { isValidAppId, deriveAppId } from './appId';
+
 const clean = (s: unknown): string => (typeof s === 'string' ? s.trim() : '');
-
-/** A valid Capacitor/Android application id: 2+ dot-separated segments, each starting with a letter, [a-z0-9_]. */
-export function isValidAppId(id: string): boolean {
-  return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(id);
-}
-
-/** Derive a valid reverse-DNS app id from an app name — `com.navbharat.<slug>` (safe fallback 'app'). */
-export function deriveAppId(appName: string): string {
-  let slug = clean(appName).toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!slug || !/^[a-z]/.test(slug)) slug = `app${slug}`; // must start with a letter
-  return `com.navbharat.${slug}`;
-}
 
 const CAP_CONFIG = (appId: string, appName: string, webDir: string): string => `import type { CapacitorConfig } from '@capacitor/cli';
 
@@ -88,8 +81,7 @@ native toolchain and your keystore. Never commit the keystore.
  */
 export function generateMobileExport(opts: MobileExportOptions = {}): MobileExportResult {
   const appName = clean(opts.appName) || 'My App';
-  const requested = clean(opts.appId).toLowerCase();
-  const appId = isValidAppId(requested) ? requested : deriveAppId(appName);
+  const appId = resolveAppId(opts.appId, appName);
   const webDir = clean(opts.webDir) || 'dist';
   const buildHint = 'npm run build';
 

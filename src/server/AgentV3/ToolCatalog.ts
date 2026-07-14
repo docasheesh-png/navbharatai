@@ -784,6 +784,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_search',
+      description:
+        'Add real full-text search to the app (Bring-Your-Own keys): a server indexer (indexRecords, uses the ' +
+        'admin/write key) + a client search() (uses a search-only key), for "algolia" or "meilisearch". The ' +
+        'admin key stays server-side; the browser uses the search-only key. The user pastes their keys into ' +
+        '.env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['algolia', 'meilisearch'], description: 'The search provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -976,6 +991,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_email',
   'generate_storage',
   'generate_realtime',
+  'generate_search',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

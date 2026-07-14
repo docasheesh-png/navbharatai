@@ -90,6 +90,7 @@ import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGen
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
+import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2273,6 +2274,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('realtime integration');
         const rtDeps = rcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${rtProvider} realtime:\n${rtWritten.join('\n')}\nAdd the dependencies: ${rtDeps}\n\n${rcfg.instructions}`;
+      }
+
+      case 'generate_search': {
+        // U-4 recipe — real BYO full-text search (Algolia/Meilisearch): server indexer (admin key) + client
+        // search (search-only key). Pure generator in SearchGenerator.ts.
+        const scProvider = optStr(input, 'provider');
+        if (!isSearchProvider(scProvider)) return 'generate_search: pass provider = "algolia" | "meilisearch".';
+        const sccfg = generateSearchIntegration(scProvider);
+        const scWritten: string[] = [];
+        for (const [path, content] of Object.entries(sccfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); scWritten.push(`Kept existing ${path} (add: ${sccfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          scWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('search integration');
+        const scDeps = sccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${scProvider} search:\n${scWritten.join('\n')}\nAdd the dependencies: ${scDeps}\n\n${sccfg.instructions}`;
       }
 
       case 'replace_symbol': {

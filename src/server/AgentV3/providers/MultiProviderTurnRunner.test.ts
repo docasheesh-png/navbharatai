@@ -30,6 +30,39 @@ describe('makeMultiProviderTurnRunner', () => {
     expect(claude.runTurn).not.toHaveBeenCalled();
   });
 
+  it('key-pool (reportAs) — a benched key fails over to the next key, reported under the base name', async () => {
+    // Two GLM keys: key #1 429s, key #2 (distinct bench name 'GLM#2') answers. Both report as 'GLM'.
+    const key1 = runnerFail('429 Rate limit reached for requests');
+    const key2 = runnerOk('from glm key2');
+    const used: string[] = [];
+    const errs: string[] = [];
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: key1 },
+      { name: 'GLM#2', runner: key2, reportAs: 'GLM' },
+      { name: 'CLAUDE', runner: runnerOk('backstop') },
+    ];
+    const runner = makeMultiProviderTurnRunner(chain, { onProviderUsed: (u) => used.push(u), onProviderError: (n) => errs.push(n) });
+    const res = await runner.runTurn(PARAMS);
+    expect(res.text).toBe('from glm key2'); // second key carried it, not Claude
+    expect(used).toEqual(['GLM']);            // reported as base 'GLM', not 'GLM#2'
+    expect(errs).toEqual(['GLM']);            // the failed key #1 also reports as 'GLM'
+  });
+
+  it('key-pool — the 429 bench is PER key (name), so one throttled key does not sideline the pool', async () => {
+    // key #1 429s twice in a row (would be benched), but key #2 keeps a distinct bench name and answers.
+    const key1 = runnerFail('429 Rate limit reached for requests');
+    const key2 = runnerOk('key2 ok');
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: key1 },
+      { name: 'GLM#2', runner: key2, reportAs: 'GLM' },
+    ];
+    const runner = makeMultiProviderTurnRunner(chain, {});
+    const r1 = await runner.runTurn(PARAMS);
+    const r2 = await runner.runTurn(PARAMS);
+    expect([r1.text, r2.text]).toEqual(['key2 ok', 'key2 ok']); // key #2 survives both turns
+    expect(key2.runTurn).toHaveBeenCalledTimes(2);
+  });
+
   it('Billing Phase 3 — onTurnComplete reports the winning provider AND its real token usage', async () => {
     const glm = { runTurn: vi.fn().mockResolvedValue({ ...ok('built'), usage: { inputTokens: 800, outputTokens: 140, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 } }) };
     const seen: Array<{ p: string; usage: { inputTokens: number; outputTokens: number } }> = [];

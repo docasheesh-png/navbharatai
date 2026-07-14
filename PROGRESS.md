@@ -16003,3 +16003,30 @@ where it is a quality signal (never blocks a working build — rule 1).
 genuinely high-value remaining roadmap work is larger-scope — GA-5's DB schema/FK graph + change-propagation,
 GA-4 incremental/cached builds, and the UT mobile/desktop output targets — not more small analyzers. Next
 autonomous steps should bite into one of those rather than manufacture marginal analyzer volume.
+## 2026-07-13 — GLM/KIMI KEY POOL / ROTATION (ROADMAP Tier-4) — the real fix for the 429 saturation
+
+**Why:** deep-test App #9 AND #10 (and #7) were dominated by GLM 429-saturation (42–43 provider failures
+per build) — a single account key's RPM cannot serve real build volume, so GLM got benched → Vertex
+truncated → broken builds. The autopsy fixes trimmed wasted steps but couldn't touch the infra cause.
+This is that cause's code half (the admin adds the extra keys).
+
+**Implemented (this PR):**
+- `parseKeyPool(env)` — pure helper: `GLM_API_KEY` / `KIMI_API_KEY` may now hold a COMMA- or
+  whitespace-separated LIST of keys. De-dupes, drops blanks. A single key → list of one → byte-identical
+  to today (fully backward-compatible; inert until the admin sets a list).
+- `cheapBuildFloorRunners.add()` emits a rung per (model × key) in MODEL-MAJOR / KEY-MINOR order: the
+  flagship model is tried on ALL keys before dropping a tier, so a 429 on key #1 fails over to the SAME
+  model on key #2 (quality preserved — no drop to a weaker model / Vertex / Claude).
+- `NamedRunner.reportAs` (MultiProviderTurnRunner) — each key gets a DISTINCT bench `name` ('GLM',
+  'GLM#2', …) so the 2-consecutive-429 bench sidelines only the throttled key, not the whole pool; every
+  rung reports as the base provider ('GLM') so deliveredVia, the per-provider token ledger, and the
+  no-Claude honesty detector keep one clean label. Reporting uses `reportAs ?? name`; bench keys on `name`.
+- Docs: ROADMAP Tier-4 item marked CODE DONE; CLAUDE.md AI-providers registry notes the comma-list syntax.
+
+**Tests:** `parseKeyPool` (split/trim/dedupe/empty); `cheapBuildFloorRunners` (pool → per-model×key rungs,
+model-major order, reportAs normalization, single-key byte-identical, dedupe); MultiProviderTurnRunner
+(a 429'd key fails over to the next key reported as base 'GLM'; per-key bench survives 2 turns).
+Gate: server tsc clean; MultiProviderTurnRunner + agentv3 suites 253/253.
+
+🔒 **Remaining (infra, admin):** buy/add the extra GLM (and later KIMI) keys and set
+`GLM_API_KEY=key1,key2,…` in Cloud Run. Until then the code runs with one key (no behaviour change).

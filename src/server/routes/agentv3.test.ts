@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -398,6 +398,21 @@ describe('cheapFloorDecision — honest routing reason for every build report', 
   });
 });
 
+describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {
+  it('splits a comma/whitespace list, trims, drops blanks, de-dupes', () => {
+    expect(parseKeyPool('k1,k2')).toEqual(['k1', 'k2']);
+    expect(parseKeyPool('k1, k2 , k3')).toEqual(['k1', 'k2', 'k3']);
+    expect(parseKeyPool('k1  k2\nk3')).toEqual(['k1', 'k2', 'k3']); // whitespace-separated
+    expect(parseKeyPool('k1,k1,k2')).toEqual(['k1', 'k2']); // de-dupe
+    expect(parseKeyPool('  solo  ')).toEqual(['solo']); // single key → list of one
+  });
+  it('an empty/undefined env → [] (a second, independent off-switch)', () => {
+    expect(parseKeyPool(undefined)).toEqual([]);
+    expect(parseKeyPool('')).toEqual([]);
+    expect(parseKeyPool('   , ,  ')).toEqual([]);
+  });
+});
+
 describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
   const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL'];
   let saved: Record<string, string | undefined>;
@@ -439,6 +454,31 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     process.env.AGENTV3_CHEAP_FLOOR = 'kimi';
     process.env.KIMI_API_KEY = 'kimi-test-key';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
+  });
+  // KEY POOL / ROTATION (ROADMAP Tier-4 — GLM 429-saturation lever from deep-test App #9/#10).
+  it('a comma-separated GLM_API_KEY pool emits a rung PER (model × key), model-major/key-minor', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'key1, key2'; // 2 keys
+    process.env.GLM_MODEL = 'glm-5.2,glm-4.7'; // 2 models
+    const runners = cheapBuildFloorRunners();
+    // model-major, key-minor: flagship tried on BOTH keys before dropping a tier.
+    expect(runners.map((r) => r.name)).toEqual(['GLM', 'GLM#2', 'GLM', 'GLM#2']);
+    // every rung reports as the base provider so telemetry/no-Claude stay one clean 'GLM' label.
+    expect(runners.map((r) => r.reportAs ?? r.name)).toEqual(['GLM', 'GLM', 'GLM', 'GLM']);
+  });
+  it('a SINGLE key stays byte-for-byte today (no #2 rung, no reportAs)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'only-key';
+    process.env.GLM_MODEL = 'glm-5.2';
+    const runners = cheapBuildFloorRunners();
+    expect(runners.map((r) => r.name)).toEqual(['GLM']);
+    expect(runners[0].reportAs).toBeUndefined();
+  });
+  it('de-dupes a repeated key in the pool (a copy-paste never doubles a rung)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'dupe, dupe';
+    process.env.GLM_MODEL = 'glm-5.2';
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM']);
   });
   // Amazon Bedrock GLM 5 cheap-floor rung (admin 2026-07-08) — reached via Bedrock's OpenAI-compatible
   // endpoint, same OpenAiToolRunner as GLM/KIMI. Off until BOTH the flag=bedrock AND BEDROCK_API_KEY.

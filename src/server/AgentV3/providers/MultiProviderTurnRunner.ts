@@ -16,9 +16,16 @@
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 export interface NamedRunner {
-  /** Display/telemetry name, e.g. 'GROK', 'CLAUDE'. */
+  /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
+   *  so two rungs that must fail INDEPENDENTLY (e.g. two GLM API keys in a rotation pool) MUST carry
+   *  distinct names, or a bench on one silently sidelines the other. */
   name: string;
   runner: TurnRunner;
+  /** Optional NORMALIZED name for telemetry/delivery reporting (onProviderUsed / onProviderError /
+   *  onTurnComplete). Lets a key-pool expose distinct bench `name`s ('GLM', 'GLM#2', …) while every
+   *  rung still reports as the base provider ('GLM') — so deliveredVia, the per-provider token ledger,
+   *  and the no-Claude honesty detector keep their clean single label. Defaults to `name`. */
+  reportAs?: string;
 }
 
 export interface MultiProviderOptions {
@@ -228,6 +235,7 @@ export function makeMultiProviderTurnRunner(
       let alive = 0;
       for (let i = 0; i < chain.length; i++) {
         const { name, runner } = chain[i];
+        const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
         if ((timeoutStreak.get(name) ?? 0) >= TIMEOUT_BENCH_AFTER) {
           fellBackFrom.push(name); // benched — skip without spending its timeout again this run
           continue;
@@ -249,11 +257,11 @@ export function makeMultiProviderTurnRunner(
           const result = await runner.runTurn(params);
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
-          opts.onProviderUsed?.(name, [...fellBackFrom]);
+          opts.onProviderUsed?.(reportName, [...fellBackFrom]);
           // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
           // Best-effort + observational: a throw here must never break a delivered turn.
           try {
-            opts.onTurnComplete?.(name, {
+            opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
               outputTokens: result.usage?.outputTokens ?? 0,
             });
@@ -261,8 +269,8 @@ export function makeMultiProviderTurnRunner(
           return result;
         } catch (err) {
           lastError = err;
-          fellBackFrom.push(name);
-          opts.onProviderError?.(name, err);
+          fellBackFrom.push(reportName);
+          opts.onProviderError?.(reportName, err);
           if (isFatalProviderError(err)) {
             deadForRun.set(name, err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {

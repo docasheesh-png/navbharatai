@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, Sparkles, X, FileText } from 'lucide-react';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
+import { auth } from '../../lib/firebase';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -85,9 +86,16 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     try {
       const fileAttachments = await Promise.all(sendFiles.map(fileToAttachment));
       const history = next.filter((m) => m.content !== config.welcome).slice(-10);
+      // Bearer token so the server can key persistent memory (e.g. Teacher AI's student
+      // profile) to the VERIFIED identity — the body userId alone is never trusted for that.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+      } catch { /* signed-out or token fetch failed — request proceeds anonymously */ }
       const res = await fetch(config.endpoint || `/api/professional/${config.id}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           message: content,
           history,

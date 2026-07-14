@@ -10,11 +10,11 @@ export const PROFESSIONAL_CHATS: Record<string, ProfessionalChatConfig> = {
     id: 'teacher_ai',
     name: 'Teacher AI',
     welcome:
-      "Namaste! I'm Teacher AI 👩‍🏫 — I can explain any concept simply, solve your doubts step by step, make lesson plans or quizzes, and build a study/exam plan (boards, NEET, JEE, UPSC…). Ask me anything, in any language.",
+      "Namaste! I'm Teacher AI 👩‍🏫 — your personal teacher. First time here? Introduce yourself — your name, what you're studying, which exam you're preparing for, and which subjects feel weak — and I'll remember you (when you're signed in) and teach you accordingly every time. Ask me any concept, doubt, quiz, or study plan — any topic, any language.",
     quickPrompts: [
-      'Explain photosynthesis simply',
+      'Hi! Let me introduce myself',
+      'Explain photosynthesis so I never forget it',
       'Make a 1-week study plan for class 10 maths',
-      'Quiz me on the French Revolution',
       'Help me solve a doubt step by step',
     ],
   },

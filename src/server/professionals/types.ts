@@ -26,4 +26,11 @@ export interface ProfessionalConfig {
   knowledge?: KnowledgeCard[];
   /** Short honest disclaimer appended to the persona. */
   disclaimer?: string;
+  /**
+   * Optional persistent per-user memory. 'student_profile' makes the engine load/save a
+   * cross-session student profile (name, college, exams, subjects, weak subjects, …) for
+   * signed-in users and instructs the persona to take a day-one introduction and use the
+   * remembered facts on every visit. See studentProfile.ts / StudentProfileStore.ts.
+   */
+  memory?: 'student_profile';
 }

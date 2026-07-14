@@ -11,6 +11,15 @@ describe('professional AI framework', () => {
     expect(listProfessionals().some((p) => p.id === 'teacher_ai')).toBe(true);
   });
 
+  it('Teacher AI has persistent student-profile memory and the concept-mastery method', () => {
+    const t = getProfessional('teacher_ai')!;
+    expect(t.memory).toBe('student_profile');
+    expect(t.systemPrompt).toMatch(/HOW YOU MAKE A CONCEPT STICK/);
+    expect(t.systemPrompt).toMatch(/Feynman/);
+    expect(t.systemPrompt).toMatch(/memory hook/i);
+    expect(t.systemPrompt).toMatch(/out-of-syllabus/);
+  });
+
   it('unknown professional returns undefined', () => {
     expect(getProfessional('nope_ai')).toBeUndefined();
   });

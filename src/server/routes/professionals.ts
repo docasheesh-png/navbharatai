@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
@@ -69,8 +69,12 @@ export function registerProfessionalsRoutes(app: Express): void {
           .filter((m: any) => m && typeof m.content === 'string')
           .map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) }))
       : [];
+    // Persistent memory (e.g. Teacher AI's student profile) is keyed by the VERIFIED
+    // token identity ONLY — the client-claimed body `userId` is never trusted for it
+    // (trusting it would let anyone read another user's remembered facts).
+    const verifiedUserId = await verifyFirebaseToken(req);
     try {
-      const reply = await runProfessionalChat(config, effectiveMessage, turns);
+      const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined);
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
       res.status(503).json({ error: err?.message || 'The assistant is busy. Please try again.' });

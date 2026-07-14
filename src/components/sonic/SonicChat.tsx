@@ -40,16 +40,15 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const playCtxRef = useRef<AudioContext | null>(null);
-  const playAnalyserRef = useRef<AnalyserNode | null>(null);
+  const playAnalyserRef = useRef<AnalyserNode | null>(null);   // REAL spectrum of the ASSISTANT's voice
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);    // REAL spectrum of YOUR voice
   const nextPlayRef = useRef(0);
   const mutedRef = useRef(false);                              // read in the audio callback (no re-bind)
   const playSourcesRef = useRef<AudioBufferSourceNode[]>([]);  // live scheduled buffers, for barge-in flush
 
-  // Real audio-reactive orb: mic RMS (you) + playback analyser (assistant). A single rAF reads both,
-  // smooths, and writes straight to the orb DOM node (no per-frame React re-render).
-  const barsRef = useRef<Array<HTMLDivElement | null>>([]); // waveform bars — heights driven by real audio
-  const micLevelRef = useRef(0);
-  const playLevelRef = useRef(0);
+  // Audio-reactive waveform: each bar's height is a REAL frequency-bin amplitude — from your mic while
+  // you speak, from the assistant's playback while it speaks. No scripted motion; silence → flat bars.
+  const barsRef = useRef<Array<HTMLDivElement | null>>([]);
   const rafRef = useRef<number | null>(null);
 
   const NBARS = 9;
@@ -101,40 +100,38 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     if (ctx) nextPlayRef.current = ctx.currentTime;
   }, []);
 
-  // The waveform animation loop (admin 2026-07-14: "realistic animation — feel like it's listening /
-  // speaking"). Reads REAL audio levels — the mic (you) and the playback analyser (the assistant) —
-  // smooths them, and drives a row of equaliser bars: they gently BREATHE when idle, JUMP with your
-  // voice while listening, and JUMP with the assistant's voice while it speaks. Never faked — the
-  // motion always comes from actual audio. Also flips the "speaking" flag from the playback level.
+  // The waveform loop (admin 2026-07-14: "real ho to banao!"). EVERY bar's height is a REAL
+  // frequency-bin amplitude — read straight from a Web Audio AnalyserNode: your MIC while you speak,
+  // the assistant's PLAYBACK while it speaks (whichever is louder wins per bar). Nothing is scripted:
+  // no sine wave, no idle animation — when the line is silent the bins are ~0 and the bars sit flat.
+  // The "speaking" flag also comes from the real playback energy. Per-bar smoothing only softens the
+  // motion; it never invents it.
   useEffect(() => {
-    const freq = new Uint8Array(128);
-    let level = 0;
+    const playFreq = new Uint8Array(128);   // playback analyser fftSize 256 → 128 bins
+    const micFreq = new Uint8Array(64);     // mic analyser     fftSize 128 → 64 bins
+    const barLevels = new Array(NBARS).fill(0);
     let lastSpeaking = false;
-    const tick = (ts: number) => {
-      let play = 0;
-      const an = playAnalyserRef.current;
-      if (an) {
-        an.getByteFrequencyData(freq);
-        let sum = 0;
-        for (let i = 0; i < freq.length; i++) sum += freq[i];
-        play = Math.min(1, sum / freq.length / 128);
-      }
-      playLevelRef.current = play;
-      const target = Math.max(micLevelRef.current, play);
-      level += (target - level) * 0.3;                 // smooth toward the live level
-      const t = ts / 1000;
+    const tick = () => {
+      const pa = playAnalyserRef.current;
+      const ma = micAnalyserRef.current;
+      if (pa) pa.getByteFrequencyData(playFreq);
+      if (ma) ma.getByteFrequencyData(micFreq);
+      // Speaking = real energy in the assistant's playback (average of the speech-band bins).
+      let playAvg = 0;
+      if (pa) { let s = 0; for (let i = 0; i < playFreq.length; i++) s += playFreq[i]; playAvg = s / playFreq.length / 255; }
       const bars = barsRef.current;
-      for (let i = 0; i < bars.length; i++) {
+      for (let i = 0; i < NBARS; i++) {
         const bar = bars[i];
         if (!bar) continue;
-        // Per-bar travelling wave (so the row looks alive, not a flat block) + a gentle always-on
-        // idle breath, with the REAL audio level scaling the height on top.
-        const wave = 0.4 + 0.6 * Math.abs(Math.sin(t * 7 + i * 0.6));
-        const idle = 0.10 + 0.06 * Math.sin(t * 2.2 + i * 0.9);
-        const amp = Math.max(idle, level * wave);
-        bar.style.height = `${(7 + amp * 40).toFixed(1)}px`;
+        // Map each bar to a real bin in the speech band of each source, take the louder one.
+        const pv = pa ? playFreq[3 + Math.round((i * 40) / (NBARS - 1))] / 255 : 0;
+        // Muted → your mic bars read flat (the assistant can't hear you, so show it honestly).
+        const mv = (ma && !mutedRef.current) ? micFreq[1 + Math.round((i * 20) / (NBARS - 1))] / 255 : 0;
+        const targetLvl = Math.max(pv, mv);
+        barLevels[i] += (targetLvl - barLevels[i]) * 0.4;   // soften only — never invent motion
+        bar.style.height = `${(5 + barLevels[i] * 44).toFixed(1)}px`;
       }
-      const nowSpeaking = play > 0.06;
+      const nowSpeaking = playAvg > 0.05;
       if (nowSpeaking !== lastSpeaking) { lastSpeaking = nowSpeaking; setSpeaking(nowSpeaking); }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -152,7 +149,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     streamRef.current = null;
     micCtxRef.current?.close().catch(() => {});
     micCtxRef.current = null;
-    micLevelRef.current = 0;
+    micAnalyserRef.current = null;
     // Stop any still-scheduled playback and clear mute so a fresh call starts clean.
     for (const s of playSourcesRef.current) { try { s.onended = null; s.stop(); } catch { /* ended */ } }
     playSourcesRef.current = [];
@@ -200,19 +197,21 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       };
 
       proc.onaudioprocess = (e) => {
-        // Muted: the mic keeps running (fast un-mute) but NOTHING leaves the device and the orb
-        // reads flat — the assistant genuinely cannot hear you until you un-mute.
-        if (mutedRef.current) { micLevelRef.current = 0; return; }
-        const input = e.inputBuffer.getChannelData(0);
-        // Real mic level (RMS) → drives the orb while YOU speak.
-        let sum = 0;
-        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-        micLevelRef.current = Math.min(1, Math.sqrt(sum / input.length) * 3);
+        // Muted: the mic keeps running (fast un-mute) but NOTHING leaves the device — the assistant
+        // genuinely cannot hear you until you un-mute (the waveform's mic bars are gated on mute too).
+        if (mutedRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
+        const input = e.inputBuffer.getChannelData(0);
         const down = downsampleFloat32(new Float32Array(input), micCtx.sampleRate, MIC_RATE);
         if (down.length === 0) return;
         ws.send(JSON.stringify({ type: 'audio', data: float32ToBase64PCM16(down) }));
       };
+
+      // REAL mic spectrum for the waveform — a tap on the same source (does not affect what is sent).
+      const micAnalyser = micCtx.createAnalyser();
+      micAnalyser.fftSize = 128;
+      source.connect(micAnalyser);
+      micAnalyserRef.current = micAnalyser;
 
       source.connect(proc);
       proc.connect(micCtx.destination);

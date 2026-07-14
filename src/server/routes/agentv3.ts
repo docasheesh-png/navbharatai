@@ -7611,6 +7611,9 @@ export function registerAgentV3Routes(app: Express): void {
       const projectContinue = projectPlanRef && result.ok && !planComplete(projectPlanRef) && nextBuildableModule(projectPlanRef)
         ? { resumable: true, planRemaining: projectPlanRef.modules.filter((m) => m.status !== 'done').length }
         : {};
+      // T1-budget-ux: a budget-cap stop is an honest PAUSE (budgetReached flows through `...result`). It is
+      // deliberately NOT marked `resumable` — the client must NOT silently auto-continue and keep spending;
+      // the user chooses "Continue" explicitly (each continue is a fresh run with a fresh budget window).
       // T1-health-card: derive the objective build-health verdict from the diagnostics the build already
       // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
       // render it. Additive: the field is optional and the client no-ops when it's absent.

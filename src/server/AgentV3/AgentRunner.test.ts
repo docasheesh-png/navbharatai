@@ -176,6 +176,9 @@ describe('AgentRunner (native tool-use loop)', () => {
     expect(result.ok).toBe(false);
     expect(result.summary).toContain('Budget reached');
     expect(result.billedUsd).toBeGreaterThanOrEqual(40);
+    // T1-budget-ux: a budget stop is flagged as a resumable pause (not a plain failure), so the client
+    // can offer an honest "Continue" instead of a red error.
+    expect(result.budgetReached).toBe(true);
   });
 });
 

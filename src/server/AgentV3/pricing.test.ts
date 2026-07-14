@@ -11,9 +11,50 @@ import {
   billedForTier,
   billedAmountUsd,
   billedAmountInr,
+  powerToTier,
+  explainBuildCost,
 } from './pricing';
 
 const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+
+describe('explainBuildCost — the honest cost breakdown', () => {
+  it('breaks down a cheap (weak/off) build and its billedUsd equals billedAmountUsd', () => {
+    const b = explainBuildCost(usage, 'off', 83);
+    expect(b.tier).toBe('cheap');
+    expect(b.tierLabel).toBe('Cheap');
+    expect(b.baseModel).toBe('Sonnet-equivalent');
+    expect(b.multiplier).toBe(NORMAL_MULTIPLIER);
+    expect(b.inputTokens).toBe(1_000_000);
+    expect(b.billedUsd).toBeCloseTo(billedAmountUsd(usage, 'off'), 9);
+    expect(b.billedInr).toBeCloseTo(b.billedUsd * 83, 6);
+  });
+
+  it('Strong (mini) bills at the Sonnet tier (×3), Powerful/Full-Team at Opus (×2)', () => {
+    expect(explainBuildCost(usage, 'mini', 83).tier).toBe('sonnet');
+    expect(explainBuildCost(usage, 'mini', 83).multiplier).toBe(SONNET_MULTIPLIER);
+    const opus = explainBuildCost(usage, 'max', 83);
+    expect(opus.tier).toBe('opus');
+    expect(opus.baseModel).toBe('real Opus');
+    expect(opus.multiplier).toBe(OPUS_MULTIPLIER);
+    expect(opus.billedUsd).toBeCloseTo(billedAmountUsd(usage, 'max'), 9);
+  });
+
+  it('powerToTier mirrors the billing tiers exactly', () => {
+    expect(powerToTier(false)).toBe('cheap');
+    expect(powerToTier('weak')).toBe('cheap');
+    expect(powerToTier('mini')).toBe('sonnet');
+    expect(powerToTier('medium')).toBe('opus');
+    expect(powerToTier('max')).toBe('opus');
+  });
+
+  it('clamps negative tokens and a negative rate to zero', () => {
+    const b = explainBuildCost({ inputTokens: -5, outputTokens: -9 }, 'off', -10);
+    expect(b.inputTokens).toBe(0);
+    expect(b.outputTokens).toBe(0);
+    expect(b.billedInr).toBe(0);
+    expect(b.usdInrRate).toBe(0);
+  });
+});
 
 describe('pricing — rates & equivalents', () => {
   const env = { ...process.env };

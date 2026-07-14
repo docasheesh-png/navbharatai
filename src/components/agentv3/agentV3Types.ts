@@ -5,6 +5,20 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
+/** T1-cost-transparency — mirrors the server's CostBreakdown (src/server/AgentV3/pricing.ts). */
+export interface CostBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  tier: 'cheap' | 'sonnet' | 'opus';
+  tierLabel: string;
+  baseModel: string;
+  baseUsd: number;
+  multiplier: number;
+  billedUsd: number;
+  billedInr: number;
+  usdInrRate: number;
+}
+
 // Mirrors the server roster (src/server/AgentV3/types.ts). The six-layer AI team.
 export type AgentRole =
   | 'architect'
@@ -66,7 +80,7 @@ export type AgentV3WireEvent =
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -157,6 +171,8 @@ export interface AgentV3ClientState {
   billedUsd?: number;
   /** Customer-facing bill in INR (billedUsd × the real-time USD→INR rate). */
   billedInr?: number;
+  /** T1-cost-transparency — the "why this build cost ₹X" breakdown (token split, tier, markup, base). */
+  costBreakdown?: CostBreakdown;
   /** R2 §4.6 — the objective readiness verdict for the finished build (build-health card). */
   buildHealth?: BuildHealth;
   /** The build's diagnostics report, delivered live with the `result` event. Kept so the

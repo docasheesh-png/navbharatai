@@ -100,12 +100,14 @@ export function billedForTier(usage: BilledUsage, tier: BillingTier): number {
  *                        overcharge on input tokens)
  *   'medium'/'max'/true → OPUS tier (real Opus × 2, flat — effort only changes real tokens spent)
  */
-export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
-  const tier: BillingTier =
-    (power === false || power === 'off' || power === 'weak') ? 'cheap'
+export function powerToTier(power: BillingPowerLevel | boolean): BillingTier {
+  return (power === false || power === 'off' || power === 'weak') ? 'cheap'
     : power === 'mini' ? 'sonnet'
     : 'opus';
-  return billedForTier(usage, tier);
+}
+
+export function billedAmountUsd(usage: BilledUsage, power: BillingPowerLevel | boolean = false): number {
+  return billedForTier(usage, powerToTier(power));
 }
 
 /**
@@ -118,4 +120,59 @@ export function billedAmountInr(
   usdInrRate: number,
 ): number {
   return billedAmountUsd(usage, power) * Math.max(0, usdInrRate);
+}
+
+/** The per-tier markup that billedForTier applies. Single source shared with explainBuildCost (rule 4). */
+export function tierMultiplier(tier: BillingTier): number {
+  return tier === 'opus' ? OPUS_MULTIPLIER : tier === 'sonnet' ? SONNET_MULTIPLIER : NORMAL_MULTIPLIER;
+}
+
+const TIER_LABEL: Record<BillingTier, string> = { cheap: 'Cheap', sonnet: 'Sonnet', opus: 'Opus' };
+
+/** T1-cost-transparency — the full, honest breakdown behind a build's ₹ charge. */
+export interface CostBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  tier: BillingTier;
+  /** Human tier label ("Cheap" / "Sonnet" / "Opus"). */
+  tierLabel: string;
+  /** What the base cost is measured against ("Sonnet-equivalent" / "real Opus"). */
+  baseModel: string;
+  /** The pre-markup base cost (USD). */
+  baseUsd: number;
+  /** The per-tier markup multiplier (×1.2 / ×3 / ×2). */
+  multiplier: number;
+  billedUsd: number;
+  billedInr: number;
+  usdInrRate: number;
+}
+
+/**
+ * Explain WHY a build costs what it does: the input/output token split, the tier that ran, the base
+ * (Sonnet-equivalent or real-Opus) cost, the markup applied, and the final USD + INR. Uses the SAME
+ * tier mapping + multiplier as billedAmountUsd/billedForTier, so the breakdown can never diverge from
+ * the amount actually charged (its billedUsd equals billedAmountUsd(usage, power)). Pure.
+ */
+export function explainBuildCost(
+  usage: BilledUsage,
+  power: BillingPowerLevel | boolean,
+  usdInrRate: number,
+): CostBreakdown {
+  const tier = powerToTier(power);
+  const baseUsd = tier === 'opus' ? opusEquivalentUsd(usage) : sonnetEquivalentUsd(usage);
+  const multiplier = tierMultiplier(tier);
+  const billedUsd = baseUsd * multiplier; // ≡ billedForTier(usage, tier)
+  const rate = Math.max(0, usdInrRate);
+  return {
+    inputTokens: Math.max(0, usage.inputTokens),
+    outputTokens: Math.max(0, usage.outputTokens),
+    tier,
+    tierLabel: TIER_LABEL[tier],
+    baseModel: tier === 'opus' ? 'real Opus' : 'Sonnet-equivalent',
+    baseUsd,
+    multiplier,
+    billedUsd,
+    billedInr: billedUsd * rate,
+    usdInrRate: rate,
+  };
 }

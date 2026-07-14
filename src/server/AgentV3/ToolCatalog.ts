@@ -754,6 +754,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_storage',
+      description:
+        'Add real file uploads to the app (Bring-Your-Own keys): a server route + a client uploadFile() helper ' +
+        'that uploads DIRECTLY to storage (never proxied through the server). "s3" (AWS S3 / Cloudflare R2 / ' +
+        'Supabase Storage / MinIO via a presigned URL) or "cloudinary" (image-focused, signed upload). The user ' +
+        'pastes their keys into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['s3', 'cloudinary'], description: 'The storage provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -944,6 +959,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_db_config',
   'generate_payment',
   'generate_email',
+  'generate_storage',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

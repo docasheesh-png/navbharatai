@@ -88,6 +88,7 @@ import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
+import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2226,6 +2227,28 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('email integration');
         return `Wired ${eProvider} email:\n${emWritten.join('\n')}\nAdd the dependency: ${ecfg.dependency.name}@${ecfg.dependency.version}\n\n${ecfg.instructions}`;
+      }
+
+      case 'generate_storage': {
+        // U-4 recipe — real BYO file uploads (S3-compatible presigned / Cloudinary signed). Pure generator.
+        const sProvider = optStr(input, 'provider');
+        if (!isStorageProvider(sProvider)) return 'generate_storage: pass provider = "s3" | "cloudinary".';
+        const scfg = generateStorageIntegration(sProvider);
+        const stWritten: string[] = [];
+        for (const [path, content] of Object.entries(scfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); stWritten.push(`Kept existing ${path} (add: ${scfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          stWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('storage integration');
+        const deps = scfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${sProvider} file uploads:\n${stWritten.join('\n')}\nAdd the dependencies: ${deps}\n\n${scfg.instructions}`;
       }
 
       case 'replace_symbol': {

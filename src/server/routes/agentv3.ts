@@ -174,6 +174,8 @@ import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+import { findingsToDebt } from '../AgentV3/engineeringMemory';
+import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
@@ -7373,6 +7375,15 @@ export function registerAgentV3Routes(app: Express): void {
       let walletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
       if (userId && effectiveBilledUsd > 0) {
         userCostStore.record(userId, effectiveBilledUsd).catch(() => {});
+      }
+      // GA-6 — persistent engineering memory: funnel this build's unfixed security findings into the
+      // cross-build tech-debt register (which had no automatic producer, so it stayed empty). Best-effort,
+      // deduped+aged by the store; never affects the build or the result.
+      if (userId) {
+        try {
+          const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).securityFindings() });
+          if (debtFindings.length) void recordDebt(userId, workspaceId, debtFindings, new Date().toISOString());
+        } catch { /* best-effort — never block the result */ }
       }
       if (userId && effectiveBilledUsd > 0 && billingActive) {
         try {

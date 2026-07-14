@@ -837,6 +837,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'schema_graph',
+      description:
+        'Show the database schema relationship graph (Prisma models / SQL tables and how they reference each ' +
+        'other) and the CHANGE-PROPAGATION blast radius. Call with a "model" to see exactly which other ' +
+        'models/tables reference it — review those BEFORE you rename, drop, or change the key of that model, ' +
+        'so a schema change does not silently break dependents. Call with no argument for the whole graph + ' +
+        'per-model dependent counts.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          model: { type: 'string', description: 'Optional model/table name to see its blast radius (who depends on it).' },
+        },
+        required: [],
+      },
+    },
+    {
       name: 'repair_ci_workflow',
       description:
         'Detect and fix a generated GitHub Actions workflow (.github/workflows/*.yml) that will FAIL when it ' +
@@ -1043,6 +1059,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',
+  'schema_graph',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

@@ -297,9 +297,53 @@ export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: S
   ].join('\n');
 }
 
+/**
+ * GA-8 — ORDERED MULTI-STRATEGY REPAIR LADDER. Before this, every auto-repair attempt fired the
+ * IDENTICAL prompt: if attempt 1's framing didn't unstick the model, attempt 2 (and the circuit-breaker
+ * fires on byte-identical errors) just burned another model call + verify round on the same approach.
+ * Now each attempt escalates to a DISTINCT strategy so a second/third try is a genuinely different push:
+ *  1. `contract-full`      — today's behaviour EXACTLY (full files + shared contract). Byte-identical to
+ *                            the pre-GA-8 prompt so attempt 1 never regresses.
+ *  2. `focus-offenders`    — narrow the model to ONLY the files the compiler named, with a stricter
+ *                            "rewrite these to satisfy the errors" instruction (stops it re-touching
+ *                            already-correct files and diluting the fix).
+ *  3. `contract-authority` — reframe the SHARED CONTRACT as the absolute source of truth: any file that
+ *                            disagrees is WRONG and must be rewritten to match, even for larger changes.
+ * The ladder is clamped, so attempts beyond the last strategy stay on `contract-authority`.
+ */
+export type RepairStrategy = 'contract-full' | 'focus-offenders' | 'contract-authority';
+
+export const REPAIR_LADDER: readonly RepairStrategy[] = ['contract-full', 'focus-offenders', 'contract-authority'];
+
+/** The strategy for a given 1-based repair attempt (clamped to the last rung). Pure. */
+export function repairStrategyForAttempt(attempt: number): RepairStrategy {
+  const i = Math.min(Math.max(attempt, 1), REPAIR_LADDER.length) - 1;
+  return REPAIR_LADDER[i];
+}
+
+/**
+ * The distinct source paths a compiler error blob names, restricted to files we actually generated.
+ * tsc/eslint errors lead with `relative/path.ext(line,col): ...` or `relative/path.ext:line:col`; we
+ * extract that leading path and keep only ones present in `known`. Pure; order follows first appearance.
+ */
+export function offendingFiles(errors: string, known: string[]): string[] {
+  if (!errors || typeof errors !== 'string') return [];
+  const knownSet = new Set(known);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // Match a path-like token (has a slash or a dotted extension) immediately before `(l,c)` or `:l:c`.
+  const re = /(^|\s)([\w./-]+\.[a-zA-Z]{1,5})(?=\s*[(:]\s*\d+)/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(errors)) !== null) {
+    const p = m[2];
+    if (knownSet.has(p) && !seen.has(p)) { seen.add(p); out.push(p); }
+  }
+  return out;
+}
+
 /** System prompt for the auto-repair pass — fixes real compiler errors in files just generated. */
-export function repairSystemPrompt(framework: string): string {
-  return [
+export function repairSystemPrompt(framework: string, strategy: RepairStrategy = 'contract-full'): string {
+  const base = [
     `You are an elite ${framework} engineer FIXING compiler/build errors in an app you just wrote.`,
     '',
     'You are given the EXACT compiler errors and the current file contents. Output the CORRECTED files.',
@@ -314,13 +358,34 @@ export function repairSystemPrompt(framework: string): string {
     '  — e.g. a hook that does NOT return a value its consumer destructures. Make the producer and the',
     '  consumer AGREE (add the missing return fields, or stop using ones that do not exist).',
     '- Real, complete code — no TODOs, no placeholders. Keep changes minimal and consistent across files.',
-    ...EXPORT_IMPORT_CONVENTION,
-  ].join('\n');
+  ];
+  if (strategy === 'focus-offenders') {
+    base.push(
+      '- ESCALATION: the previous fix attempt did NOT clear these errors. Focus ONLY on the files the',
+      '  compiler explicitly names below — rewrite each one in full so it strictly satisfies every error',
+      '  against it. Do NOT touch files the compiler did not name; re-editing already-correct files is',
+      '  what left the errors standing last time.',
+    );
+  } else if (strategy === 'contract-authority') {
+    base.push(
+      '- ESCALATION: earlier attempts failed. The SHARED CONTRACT is now the ABSOLUTE source of truth.',
+      '  Any file that disagrees with it is WRONG — rewrite that file to match the contract exactly, even',
+      '  if the change is large. Never bend the contract to a file; bend the file to the contract.',
+    );
+  }
+  base.push(...EXPORT_IMPORT_CONVENTION);
+  return base.join('\n');
 }
 
-export function repairUserPrompt(prompt: string, errors: string, files: OneShotFile[], contract?: string): string {
+export function repairUserPrompt(
+  prompt: string,
+  errors: string,
+  files: OneShotFile[],
+  contract?: string,
+  strategy: RepairStrategy = 'contract-full',
+): string {
   const dump = files.map((f) => `<<<FILE ${f.path}>>>\n${f.content}\n<<<ENDFILE>>>`).join('\n\n');
-  return [
+  const lines = [
     `App being built:\n${prompt}`,
     contractBlock(contract),
     '',
@@ -328,9 +393,16 @@ export function repairUserPrompt(prompt: string, errors: string, files: OneShotF
     '',
     `Current files:\n${dump.slice(0, 60_000)}`,
     '',
+  ];
+  if (strategy === 'focus-offenders') {
+    const offenders = offendingFiles(errors, files.map((f) => f.path));
+    if (offenders.length) lines.push(`Rewrite ONLY these files the compiler named: ${offenders.join(', ')}.`, '');
+  }
+  lines.push(
     'Output ONLY the corrected <<<FILE …>>> blocks for the files you need to change. When two files',
     'disagree, the SHARED CONTRACT above is the source of truth — make both sides match it.',
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 /** Result of the real compile/build check run in the sandbox. */
@@ -368,7 +440,7 @@ export interface SimpleBuildDeps {
    * when verify fails, up to `maxRepairs` times. A single isolated per-file generation often produces
    * a contract mismatch (hook vs consumer); this is what closes that gap automatically.
    */
-  repair?: (errors: string, files: OneShotFile[], contract?: string) => Promise<OneShotFile[]>;
+  repair?: (errors: string, files: OneShotFile[], contract?: string, strategy?: RepairStrategy) => Promise<OneShotFile[]>;
   /** Max auto-repair attempts before handing off to the full builder (default 2). */
   maxRepairs?: number;
   /**
@@ -599,7 +671,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair) {
       attempt++;
-      deps.log?.(`Found build errors — fixing them (attempt ${attempt}/${maxRepairs})…`);
+      // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
+      // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.
+      const strategy = repairStrategyForAttempt(attempt);
+      deps.log?.(`Found build errors — fixing them (attempt ${attempt}/${maxRepairs}, ${strategy})…`);
       // LENS C — prepend a COMPACT deterministic cross-file drift report so the precise mismatches
       // (missing exports, bad enum members) survive the repair prompt's error-slice truncation and the
       // repair model sees the full set. Best-effort, advisory; tsc verdict stays the hard gate.
@@ -609,7 +684,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (drift) repairErrors = `${drift}\n\n${verdict.errors}`;
       } catch { /* drift report is best-effort — never blocks repair */ }
       let fixed: OneShotFile[] = [];
-      try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract); } catch { fixed = []; }
+      try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy); } catch { fixed = []; }
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       for (const f of fixed) byPath.set(f.path, f);

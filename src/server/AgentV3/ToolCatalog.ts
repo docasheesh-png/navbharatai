@@ -799,6 +799,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_mobile_export',
+      description:
+        'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
+        'parameterized capacitor.config.ts + a MOBILE_EXPORT.md runbook, and reports the Capacitor ' +
+        'dependencies + package.json scripts to add. Use when the user wants a mobile/APK/Play-Store/app-store ' +
+        'version of their app. HONEST: this generates the wrapper config, NOT a signed .apk/.aab/.ipa binary — ' +
+        'that needs the native SDK + the user\'s keystore on a build runner. Never overwrites an existing ' +
+        'capacitor.config.ts.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Human app name shown on the device (e.g. "My Shop").' },
+          appId: { type: 'string', description: 'Optional reverse-DNS app id (e.g. com.acme.myshop). Derived from appName when omitted.' },
+          webDir: { type: 'string', description: 'Build output dir Capacitor packages (Vite → "dist", CRA → "build", Next export → "out"). Default "dist".' },
+        },
+        required: [],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -992,6 +1011,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_storage',
   'generate_realtime',
   'generate_search',
+  'generate_mobile_export',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

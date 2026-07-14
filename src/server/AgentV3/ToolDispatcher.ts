@@ -93,6 +93,7 @@ import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
+import { generateMobileExport } from '../lib/MobileExportGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2317,6 +2318,32 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('search integration');
         const scDeps = sccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${scProvider} search:\n${scWritten.join('\n')}\nAdd the dependencies: ${scDeps}\n\n${sccfg.instructions}`;
+      }
+
+      case 'generate_mobile_export': {
+        // UT-2 — wrap the generated web app as a native mobile project via Capacitor. Pure generator in
+        // MobileExportGenerator.ts; emits config + runbook. Never clobbers an existing capacitor.config.ts.
+        const meResult = generateMobileExport({
+          appName: optStr(input, 'appName'),
+          appId: optStr(input, 'appId'),
+          webDir: optStr(input, 'webDir'),
+        });
+        const meWritten: string[] = [];
+        for (const [path, content] of Object.entries(meResult.files)) {
+          if (path === 'capacitor.config.ts') {
+            try { await this.actuator.readFile(this.workspaceId, path); meWritten.push(`Kept existing ${path}`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          meWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('mobile export');
+        const meDeps = meResult.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        const meScripts = Object.entries(meResult.scripts).map(([k, v]) => `"${k}": "${v}"`).join(', ');
+        return `Mobile export (Capacitor):\n${meWritten.join('\n')}\nAdd the dependencies: ${meDeps}\nAdd the scripts: ${meScripts}\n\n${meResult.instructions}`;
       }
 
       case 'replace_symbol': {

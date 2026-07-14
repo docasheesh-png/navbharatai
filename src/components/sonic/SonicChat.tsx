@@ -28,6 +28,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const [speaking, setSpeaking] = useState(false); // assistant is talking (from real playback level)
   const [showTranscript, setShowTranscript] = useState(false);
   const [voice, setVoice] = useState<'male' | 'female'>('female'); // chosen before a call starts
+  const [muted, setMuted] = useState(false); // mic muted mid-call — mic audio stops leaving the device
 
   const wsRef = useRef<WebSocket | null>(null);
   const micCtxRef = useRef<AudioContext | null>(null);
@@ -36,6 +37,8 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const playCtxRef = useRef<AudioContext | null>(null);
   const playAnalyserRef = useRef<AnalyserNode | null>(null);
   const nextPlayRef = useRef(0);
+  const mutedRef = useRef(false);                              // read in the audio callback (no re-bind)
+  const playSourcesRef = useRef<AudioBufferSourceNode[]>([]);  // live scheduled buffers, for barge-in flush
 
   // Real audio-reactive orb: mic RMS (you) + playback analyser (assistant). A single rAF reads both,
   // smooths, and writes straight to the orb DOM node (no per-frame React re-render).
@@ -76,6 +79,19 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     const startAt = Math.max(now, nextPlayRef.current);
     src.start(startAt);
     nextPlayRef.current = startAt + buffer.duration;
+    // Keep a handle so a barge-in can stop this buffer even after it is scheduled; drop it when done.
+    playSourcesRef.current.push(src);
+    src.onended = () => { playSourcesRef.current = playSourcesRef.current.filter((s) => s !== src); };
+  }, []);
+
+  // Barge-in: the user spoke over the assistant → stop every queued/playing buffer at once and
+  // reset the schedule so the next reply starts immediately. This is what makes the assistant
+  // actually go quiet the instant you interrupt it (admin 2026-07-14).
+  const flushPlayback = useCallback(() => {
+    for (const s of playSourcesRef.current) { try { s.onended = null; s.stop(); } catch { /* already ended */ } }
+    playSourcesRef.current = [];
+    const ctx = playCtxRef.current;
+    if (ctx) nextPlayRef.current = ctx.currentTime;
   }, []);
 
   // The orb animation loop — reads REAL levels, smooths, applies scale + glow, and flips the
@@ -122,6 +138,11 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     micCtxRef.current?.close().catch(() => {});
     micCtxRef.current = null;
     micLevelRef.current = 0;
+    // Stop any still-scheduled playback and clear mute so a fresh call starts clean.
+    for (const s of playSourcesRef.current) { try { s.onended = null; s.stop(); } catch { /* ended */ } }
+    playSourcesRef.current = [];
+    mutedRef.current = false;
+    setMuted(false);
     setStatus((s) => (s === 'error' ? 'error' : 'idle'));
   }, []);
 
@@ -158,11 +179,15 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
         let msg: { type?: string; data?: string; text?: string; role?: string; message?: string };
         try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === 'audio' && msg.data) playChunk(msg.data);
+        else if (msg.type === 'interrupted') flushPlayback();
         else if (msg.type === 'text' && msg.text) setLines((l) => [...l, { role: msg.role || 'ASSISTANT', text: msg.text! }]);
         else if (msg.type === 'error') { setError(msg.message || 'Voice error.'); setStatus('error'); }
       };
 
       proc.onaudioprocess = (e) => {
+        // Muted: the mic keeps running (fast un-mute) but NOTHING leaves the device and the orb
+        // reads flat — the assistant genuinely cannot hear you until you un-mute.
+        if (mutedRef.current) { micLevelRef.current = 0; return; }
         const input = e.inputBuffer.getChannelData(0);
         // Real mic level (RMS) → drives the orb while YOU speak.
         let sum = 0;
@@ -181,13 +206,18 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       setStatus('error');
       stop();
     }
-  }, [playChunk, stop, voice, professionalId, history]);
+  }, [playChunk, flushPlayback, stop, voice, professionalId, history]);
+
+  // Toggle mic mute mid-call. Mirrored into a ref so the audio callback sees it without re-binding.
+  const toggleMute = useCallback(() => {
+    setMuted((m) => { const next = !m; mutedRef.current = next; return next; });
+  }, []);
 
   useEffect(() => () => stop(), [stop]);
 
   const live = status === 'live' || status === 'connecting';
   const stateLabel = status === 'connecting' ? 'Connecting…'
-    : status === 'live' ? (speaking ? 'Speaking…' : 'Listening…')
+    : status === 'live' ? (muted ? 'Muted — tap 🎙 to speak' : speaking ? 'Speaking…' : 'Listening…')
     : status === 'error' ? 'Something went wrong'
     : 'Tap the mic to start';
 
@@ -269,15 +299,32 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
                 >♂ Male</button>
               </div>
             )}
-            <button
-              onClick={live ? stop : start}
-              aria-label={live ? 'Stop' : 'Start talking'}
-              style={{ ...micBtn, background: live ? '#dc2626' : 'linear-gradient(135deg,#6d28d9,#7c3aed)' }}
-            >
-              {status === 'connecting'
-                ? <span style={{ fontSize: 15, fontWeight: 700 }}>…</span>
-                : live ? <span style={{ fontSize: 20 }}>◼</span> : <span style={{ fontSize: 26 }}>🎤</span>}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
+              {/* Mute — only while a call is live. Interrupt/barge-in is automatic (speak to cut in);
+                  mute is the explicit "assistant can't hear me" control. */}
+              {status === 'live' && (
+                <button
+                  onClick={toggleMute}
+                  aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+                  aria-pressed={muted}
+                  title={muted ? 'Unmute' : 'Mute'}
+                  style={{ ...sideBtn, ...(muted ? sideBtnOn : {}) }}
+                >
+                  <span style={{ fontSize: 22 }}>{muted ? '🔇' : '🎙'}</span>
+                </button>
+              )}
+              <button
+                onClick={live ? stop : start}
+                aria-label={live ? 'Stop' : 'Start talking'}
+                style={{ ...micBtn, background: live ? '#dc2626' : 'linear-gradient(135deg,#6d28d9,#7c3aed)' }}
+              >
+                {status === 'connecting'
+                  ? <span style={{ fontSize: 15, fontWeight: 700 }}>…</span>
+                  : live ? <span style={{ fontSize: 20 }}>◼</span> : <span style={{ fontSize: 26 }}>🎤</span>}
+              </button>
+              {/* Spacer keeps the main mic button centred when the mute button is present. */}
+              {status === 'live' && <div style={{ width: 56, height: 56 }} aria-hidden="true" />}
+            </div>
           </div>
         </>
       )}
@@ -344,4 +391,12 @@ const micBtn: React.CSSProperties = {
   width: 72, height: 72, borderRadius: '50%', border: 'none', cursor: 'pointer',
   color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
   boxShadow: '0 8px 30px rgba(124,58,237,0.5)',
+};
+const sideBtn: React.CSSProperties = {
+  width: 56, height: 56, borderRadius: '50%', cursor: 'pointer',
+  border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.07)', color: '#f5f3ff',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+};
+const sideBtnOn: React.CSSProperties = {
+  background: 'rgba(220,38,38,0.22)', border: '1px solid rgba(248,113,113,0.5)', color: '#fecaca',
 };

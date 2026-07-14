@@ -7,6 +7,7 @@
 //                      { type: 'audio', data: <base64 LPCM 24kHz mono> }   // play this
 //                      { type: 'text',  text, role }
 //                      { type: 'turn_complete' }
+//                      { type: 'interrupted' }               // user barged in — flush playback
 //                      { type: 'error', message }
 //
 // Isolated + gated: handleSonicUpgrade refuses the upgrade unless isSonicEnabled() (flag +
@@ -63,6 +64,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       onAudioOutput: (b64) => send(ws, { type: 'audio', data: b64 }),
       onText: (text, role) => send(ws, { type: 'text', text, role }),
       onTurnComplete: () => send(ws, { type: 'turn_complete' }),
+      onInterrupted: () => send(ws, { type: 'interrupted' }),
       onError: (message) => send(ws, { type: 'error', message }),
       onClose: () => { try { ws.close(); } catch { /* already closed */ } },
     }, { voice, persona, history });

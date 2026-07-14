@@ -740,6 +740,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_email',
+      description:
+        'Add real transactional email to the app (Bring-Your-Own key): a server-side sendEmail() helper for ' +
+        'resend or sendgrid — for signup confirmation, password reset, receipts, notifications. The user pastes ' +
+        'their API key + a verified sender into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['resend', 'sendgrid'], description: 'The email provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -929,6 +943,7 @@ export const CATALOG_TOOL_NAMES = [
   'run_migrations',
   'generate_db_config',
   'generate_payment',
+  'generate_email',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

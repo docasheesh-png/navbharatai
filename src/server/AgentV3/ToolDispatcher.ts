@@ -20,7 +20,7 @@ import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
 import { buildApiGraph, apiWiringSummary } from './apiGraph';
 import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary, schemaGraphReport } from './schemaGraph';
 import { generateSchemaTypes } from './schemaTypeGen';
-import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow } from './ciWorkflowAnalysis';
+import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
@@ -1465,7 +1465,7 @@ export class ToolDispatcher {
         // the source snapshot) + lockfile presence, bounded. Advisory-only; the repair_ci_workflow tool fixes.
         const ciWorkflowLine = await (async () => {
           try {
-            const workflows = snap.files.filter((p) => /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i.test(p)).slice(0, 15);
+            const workflows = snap.files.filter((p) => ciPlatform(p) !== null).slice(0, 15);
             if (workflows.length === 0) return '';
             const map: Record<string, string> = {};
             for (const lock of ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock']) {
@@ -2426,8 +2426,8 @@ export class ToolDispatcher {
         // logic in ciWorkflowAnalysis.ts; reads the project's workflows + package.json + lockfile presence.
         let allFiles: string[] = [];
         try { allFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'repair_ci_workflow: could not list workspace files.'; }
-        const workflows = allFiles.filter((p) => /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i.test(p)).slice(0, 15);
-        if (workflows.length === 0) return 'repair_ci_workflow: no .github/workflows/*.yml files found.';
+        const workflows = allFiles.filter((p) => ciPlatform(p) !== null).slice(0, 15);
+        if (workflows.length === 0) return 'repair_ci_workflow: no CI files found (.github/workflows/*.yml, .gitlab-ci.yml, or Jenkinsfile).';
         const map: Record<string, string> = {};
         for (const lock of ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock']) {
           if (allFiles.includes(lock)) map[lock] = '';

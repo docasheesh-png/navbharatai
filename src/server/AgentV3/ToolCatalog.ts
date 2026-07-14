@@ -896,7 +896,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'repair_ci_workflow',
       description:
-        'Detect and fix a generated GitHub Actions workflow (.github/workflows/*.yml) that will FAIL when it ' +
+        'Detect and fix a broken CI pipeline — GitHub Actions (.github/workflows/*.yml), GitLab CI (.gitlab-ci.yml), or Jenkins (Jenkinsfile) — that will FAIL when it ' +
         'runs: `npm ci` with no committed lockfile (auto-fixed to `npm install`), a setup-node cache keyed to ' +
         'the wrong package manager (repointed to the real one), or an `npm run <script>` for a script ' +
         'package.json does not define (reported for a manual fix). Use after generating a fullstack/CI app, ' +

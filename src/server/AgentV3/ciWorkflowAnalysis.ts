@@ -23,6 +23,17 @@ export interface CiWorkflowIssue {
 }
 
 const WORKFLOW_RE = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+const GITLAB_RE = /(^|\/)\.gitlab-ci\.ya?ml$/i;
+const JENKINS_RE = /(^|\/)Jenkinsfile(\.\w+)?$/;
+
+/** Which CI platform a file belongs to (for cross-platform + platform-specific rules), or null. */
+export function ciPlatform(path: string): 'github' | 'gitlab' | 'jenkins' | null {
+  if (typeof path !== 'string') return null;
+  if (WORKFLOW_RE.test(path)) return 'github';
+  if (GITLAB_RE.test(path)) return 'gitlab';
+  if (JENKINS_RE.test(path)) return 'jenkins';
+  return null;
+}
 const LOCKFILES: Record<string, string> = {
   npm: 'package-lock.json',
   yarn: 'yarn.lock',
@@ -63,20 +74,23 @@ export function analyzeCiWorkflow(files: Record<string, string>): CiWorkflowIssu
   const issues: CiWorkflowIssue[] = [];
 
   for (const [path, content] of Object.entries(files)) {
-    if (!WORKFLOW_RE.test(path) || typeof content !== 'string') continue;
+    const platform = ciPlatform(path);
+    if (!platform || typeof content !== 'string') continue;
     const lines = content.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const stripped = line.replace(/#.*$/, '');
+      // GitHub/GitLab use `#` comments; a Jenkinsfile (Groovy) uses `//`.
+      const stripped = line.replace(platform === 'jenkins' ? /\/\/.*$/ : /#.*$/, '');
 
       // (1) `npm ci` with NO committed lockfile → npm ci fails ("can only install with an existing lockfile").
+      //     Cross-platform (any CI running the shell command).
       if (/\bnpm\s+ci\b/.test(stripped) && !anyLockfile) {
         issues.push({ file: path, line: i + 1, kind: 'npm-ci-no-lockfile', autoFixable: true,
           message: `'npm ci' requires a committed package-lock.json, but none is in the project — CI will fail. Use 'npm install' (or commit the lockfile).` });
       }
 
-      // (2) setup-node cache keyed to a manager whose lockfile is absent while ANOTHER manager's is present.
-      const cacheM = stripped.match(/\bcache:\s*['"]?(npm|yarn|pnpm|bun)['"]?/);
+      // (2) setup-node cache keyed to a manager whose lockfile is absent — GitHub Actions only (setup-node).
+      const cacheM = platform === 'github' ? stripped.match(/\bcache:\s*['"]?(npm|yarn|pnpm|bun)['"]?/) : null;
       if (cacheM) {
         const mgr = cacheM[1];
         if (!managers.has(mgr) && anyLockfile) {

@@ -855,6 +855,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_types',
+      description:
+        'Generate TypeScript interface types from the app\'s database schema (Prisma models / SQL CREATE ' +
+        'TABLE) and write them to src/types/db.ts, so the frontend and backend share one typed shape of the ' +
+        'database instead of hand-written types that drift. Prisma enums become string-union types. Use after ' +
+        'defining or changing the schema.',
+      input_schema: {
+        type: 'object',
+        properties: { outPath: { type: 'string', description: 'Optional output path (default src/types/db.ts).' } },
+        required: [],
+      },
+    },
+    {
       name: 'optimize_infra',
       description:
         'Scan the app\'s infrastructure files (Dockerfile, Kubernetes manifests, Terraform) for real security ' +
@@ -1088,6 +1101,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_desktop_export',
   'repair_ci_workflow',
   'optimize_infra',
+  'generate_types',
   'schema_graph',
   'generate_extension_export',
   'replace_symbol',

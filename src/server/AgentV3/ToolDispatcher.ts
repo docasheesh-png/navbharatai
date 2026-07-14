@@ -19,6 +19,7 @@ import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
 import { buildApiGraph, apiWiringSummary } from './apiGraph';
 import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary, schemaGraphReport } from './schemaGraph';
+import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
@@ -2484,6 +2485,29 @@ export class ToolDispatcher {
         const parts = [prismaReport, sqlReport].filter(Boolean);
         if (parts.length === 0) return target ? `schema_graph: '${target}' is not a defined model/table.` : 'schema_graph: no models/tables detected in the schema files.';
         return parts.join('\n\n');
+      }
+
+      case 'generate_types': {
+        // GA-10 — generate TypeScript interfaces from the DB schema (.prisma models / SQL tables) so the
+        // frontend + backend share one typed shape. Pure logic in schemaTypeGen.ts.
+        let gtFiles: string[] = [];
+        try { gtFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'generate_types: could not list workspace files.'; }
+        const gtPaths = gtFiles.filter((p) => /\.(prisma|sql)$/i.test(p) && !/(^|[\\/])node_modules([\\/]|$)/.test(p)).slice(0, 30);
+        if (gtPaths.length === 0) return 'generate_types: no .prisma or .sql schema files found to generate types from.';
+        const gtSources: Array<{ path: string; content: string }> = [];
+        for (const p of gtPaths) {
+          try { gtSources.push({ path: p, content: await this.actuator.readFile(this.workspaceId, p) }); } catch { /* skip */ }
+        }
+        const gen = generateSchemaTypes(gtSources);
+        if (!gen) return 'generate_types: no models/tables were parseable from the schema — nothing to generate.';
+        const outPath = optStr(input, 'outPath') || 'src/types/db.ts';
+        let kind: 'create' | 'modify' = 'create';
+        try { await this.actuator.readFile(this.workspaceId, outPath); kind = 'modify'; } catch { kind = 'create'; }
+        await this.actuator.writeFile(this.workspaceId, outPath, gen.fileContent);
+        this.state?.recordFileChange({ path: outPath, kind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(outPath, gen.fileContent);
+        this.scheduleCheckpoint('schema types');
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${outPath} — ${gen.types.length} type(s) from your ${gen.source} schema (${gen.types.map((t) => t.name).slice(0, 12).join(', ')}${gen.types.length > 12 ? '…' : ''}). Import them in the frontend + backend for one shared typed shape.`;
       }
 
       case 'replace_symbol': {

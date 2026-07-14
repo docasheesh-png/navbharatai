@@ -87,6 +87,7 @@ import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../li
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
+import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2204,6 +2205,27 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('payment integration');
         return `Wired ${pProvider} payments:\n${payWritten.join('\n')}\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}\n\n${pcfg.instructions}`;
+      }
+
+      case 'generate_email': {
+        // U-4 recipe — a real BYO transactional-email helper (Resend/SendGrid). Pure generator in EmailGenerator.ts.
+        const eProvider = optStr(input, 'provider');
+        if (!isEmailProvider(eProvider)) return 'generate_email: pass provider = "resend" | "sendgrid".';
+        const ecfg = generateEmailIntegration(eProvider);
+        const emWritten: string[] = [];
+        for (const [path, content] of Object.entries(ecfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); emWritten.push(`Kept existing ${path} (add: ${ecfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          emWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('email integration');
+        return `Wired ${eProvider} email:\n${emWritten.join('\n')}\nAdd the dependency: ${ecfg.dependency.name}@${ecfg.dependency.version}\n\n${ecfg.instructions}`;
       }
 
       case 'replace_symbol': {

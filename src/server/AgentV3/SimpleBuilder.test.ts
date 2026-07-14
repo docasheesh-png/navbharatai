@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
 
 describe('parseFileManifest', () => {
@@ -351,6 +351,73 @@ describe('contractBlock (pure)', () => {
   it('per-file prompt with NO contract is unchanged (no SHARED CONTRACT header leaks in)', () => {
     const m = [{ path: 'src/App.tsx', purpose: 'root' }];
     expect(fileUserPrompt('app', m[0], m)).not.toContain('SHARED CONTRACT');
+  });
+});
+
+describe('GA-8 — ordered multi-strategy repair ladder', () => {
+  it('climbs the ladder by attempt and clamps past the last rung', () => {
+    expect(repairStrategyForAttempt(1)).toBe('contract-full');
+    expect(repairStrategyForAttempt(2)).toBe('focus-offenders');
+    expect(repairStrategyForAttempt(3)).toBe('contract-authority');
+    expect(repairStrategyForAttempt(4)).toBe('contract-authority'); // clamped
+    expect(repairStrategyForAttempt(0)).toBe('contract-full');      // guarded low
+    expect(REPAIR_LADDER).toEqual(['contract-full', 'focus-offenders', 'contract-authority']);
+  });
+
+  it('attempt-1 (contract-full) prompt is byte-identical to the default — no regression', () => {
+    expect(repairSystemPrompt('vite-react', 'contract-full')).toBe(repairSystemPrompt('vite-react'));
+    expect(repairUserPrompt('app', 'e', [{ path: 'a.ts', content: 'x' }], 'c', 'contract-full'))
+      .toBe(repairUserPrompt('app', 'e', [{ path: 'a.ts', content: 'x' }], 'c'));
+  });
+
+  it('focus-offenders escalation names ONLY the compiler-named files present in the set', () => {
+    const errors = 'src/hooks/useNotes.ts(12,5): error TS2613\nsrc/pages/Missing.tsx(1,1): error TS1000';
+    const files = [{ path: 'src/hooks/useNotes.ts', content: 'x' }, { path: 'src/App.tsx', content: 'y' }];
+    const sys = repairSystemPrompt('vite-react', 'focus-offenders');
+    const user = repairUserPrompt('app', errors, files, undefined, 'focus-offenders');
+    expect(sys).toContain('ESCALATION');
+    expect(sys).toContain('compiler explicitly names');
+    // useNotes.ts is in the set and named → listed; Missing.tsx is named but NOT generated → excluded
+    // from the instruction line (it still appears in the verbatim error dump above, which is expected).
+    const instruction = user.split('\n').find((l) => l.startsWith('Rewrite ONLY these files')) ?? '';
+    expect(instruction).toBe('Rewrite ONLY these files the compiler named: src/hooks/useNotes.ts.');
+    expect(instruction).not.toContain('Missing.tsx');
+  });
+
+  it('contract-authority escalation reframes the contract as the source of truth', () => {
+    const sys = repairSystemPrompt('vite-react', 'contract-authority');
+    expect(sys).toContain('ABSOLUTE source of truth');
+    expect(sys).not.toContain('compiler explicitly names'); // distinct from focus-offenders
+  });
+
+  it('offendingFiles extracts tsc/eslint paths, dedupes, and ignores unknown files', () => {
+    const errors = [
+      'src/a.ts(1,2): error TS1', 'src/a.ts(9,9): error TS2', // dup → once
+      'src/b.tsx:3:4 error', 'unknown/c.ts(1,1): error',       // unknown → dropped
+      'not a path here',
+    ].join('\n');
+    expect(offendingFiles(errors, ['src/a.ts', 'src/b.tsx'])).toEqual(['src/a.ts', 'src/b.tsx']);
+    expect(offendingFiles('', ['src/a.ts'])).toEqual([]);
+  });
+
+  it('runSimpleBuild passes an escalating strategy on each repair attempt', async () => {
+    const seenStrategies: (string | undefined)[] = [];
+    let verifyCall = 0;
+    const sb = await runSimpleBuild({
+      prompt: 'app', framework: 'vite-react', scaffoldPaths: ['src/App.tsx'], maxRepairs: 3,
+      shareContract: false, depOrder: false,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Foo.tsx :: foo';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'src/App.tsx';
+        return `<<<FILE ${path}>>>\nbad\n<<<ENDFILE>>>`;
+      },
+      writeFiles: async () => {},
+      // Always fail with DISTINCT errors so the circuit-breaker never short-circuits the ladder.
+      verify: async () => ({ ok: false, errors: `err ${verifyCall++}`, ran: true }),
+      repair: async (_e, _f, _c, strategy) => { seenStrategies.push(strategy); return [{ path: 'src/App.tsx', content: 'still' }]; },
+    });
+    expect(sb.ok).toBe(false); // never a fake success — hands to the full builder
+    expect(seenStrategies).toEqual(['contract-full', 'focus-offenders', 'contract-authority']);
   });
 });
 

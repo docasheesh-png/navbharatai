@@ -128,7 +128,7 @@ import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, type 
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction } from '../AgentV3/ProjectIntegrityChecks';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
@@ -6092,8 +6092,10 @@ export function registerAgentV3Routes(app: Express): void {
           // NOTE: no catch here on purpose — an infra THROW must reach fastVerify's retry wrapper
           // (one retry, then an honest ran:false), never be silently converted into a pass.
         };
-        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string): Promise<{ path: string; content: string }[]> => {
-          const text = await fastGenerate(repairSystemPrompt(framework), repairUserPrompt(prompt, errors, currentFiles, contract));
+        const fastRepair = async (errors: string, currentFiles: { path: string; content: string }[], contract?: string, strategy?: RepairStrategy): Promise<{ path: string; content: string }[]> => {
+          // GA-8: forward the ladder strategy so each attempt's prompt escalates (contract-full →
+          // focus-offenders → contract-authority) instead of re-firing the identical repair call.
+          const text = await fastGenerate(repairSystemPrompt(framework, strategy), repairUserPrompt(prompt, errors, currentFiles, contract, strategy));
           return parseFileBlocks(text).map((b) => ({ path: b.path, content: b.content }));
         };
         const fastLog = (msg: string) => events.emit({ type: 'narration', agent: 'architect', text: msg, ts: Date.now() });
@@ -6109,7 +6111,7 @@ export function registerAgentV3Routes(app: Express): void {
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
         //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off' });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause

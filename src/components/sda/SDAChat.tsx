@@ -955,30 +955,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
 
-                {/* Talk to SDA by VOICE — a full spoken back-and-forth with the doctor persona (distinct
-                    from dictation above). Renders nothing unless voice is enabled + the user is signed in.
-                    getHistory continues THIS case in voice (markers stripped so nothing is read aloud). */}
-                <ProfessionalVoiceButton
-                  professionalId="sda"
-                  title="Talk to SDA by voice"
-                  icon={<Volume2 className="w-4 h-4" />}
-                  className="text-[#484f58] hover:text-emerald-400 transition-colors pb-0.5 shrink-0"
-                  getHistory={() =>
-                    messages
-                      .filter((m) => m.text && m.text.trim())
-                      .slice(-20)
-                      .map((m) => ({
-                        role: (m.sender === 'doctor' ? 'user' : 'assistant') as 'user' | 'assistant',
-                        // Strip the text-only clinical machine signals so they are never spoken back.
-                        content: m.text
-                          .replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]/g, '')
-                          .replace(/\[CASE_COMPLETE\]/g, '')
-                          .trim(),
-                      }))
-                      .filter((t) => t.content)
-                  }
-                />
-
                 {/* Text input */}
                 <textarea
                   ref={inputRef}
@@ -992,6 +968,32 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 />
               </div>
             </div>
+
+            {/* Talk to SDA by VOICE — a PROMINENT, unmistakable voice button beside Send (was a dim inline
+                icon that was easy to miss). A full spoken back-and-forth with the doctor persona (distinct
+                from the dictation mic, which only turns speech → text). Renders nothing unless voice is
+                enabled + the user is signed in. getHistory continues THIS case in voice (clinical markers
+                stripped so nothing is read aloud). */}
+            <ProfessionalVoiceButton
+              professionalId="sda"
+              title="Talk to SDA by voice — start a live spoken consult"
+              icon={<Volume2 className="w-5 h-5" />}
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-300 hover:text-emerald-200 active:scale-95 transition-all shrink-0 shadow-lg shadow-emerald-900/30"
+              getHistory={() =>
+                messages
+                  .filter((m) => m.text && m.text.trim())
+                  .slice(-20)
+                  .map((m) => ({
+                    role: (m.sender === 'doctor' ? 'user' : 'assistant') as 'user' | 'assistant',
+                    // Strip the text-only clinical machine signals so they are never spoken back.
+                    content: m.text
+                      .replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]/g, '')
+                      .replace(/\[CASE_COMPLETE\]/g, '')
+                      .trim(),
+                  }))
+                  .filter((t) => t.content)
+              }
+            />
 
             {/* Send button */}
             <button

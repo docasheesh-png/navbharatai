@@ -2411,7 +2411,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 )}
               </div>
             )}
-            {state.done && state.ok === false && !state.error && state.summary && (
+            {/* T1-budget-ux: a budget-cap stop is an honest PAUSE, not a failure — calm state + a Continue that
+                the user chooses (never a silent auto-continue that would keep spending). Work is already saved. */}
+            {state.done && state.budgetReached && (
+              <div className="px-3 py-2 bg-sky-950/50 text-sky-100 text-xs rounded border border-sky-900/60">
+                <div className="flex items-start gap-2">
+                  <Wallet className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-pre-wrap break-words">This build reached its budget for now — your files are saved. Continue to keep building (uses more of your balance), or stop here.</span>
+                </div>
+                {!running && (
+                  <button
+                    onClick={() => fixWithAI('Continue building from where you left off and finish the app — I understand this uses more of my budget.')}
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-white bg-sky-600 hover:bg-sky-500 rounded px-2.5 py-1"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Continue building
+                  </button>
+                )}
+              </div>
+            )}
+            {state.done && state.ok === false && !state.error && !state.budgetReached && state.summary && (
               <div className="px-3 py-2 bg-amber-950/50 text-amber-200 text-xs rounded">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" /> <span className="whitespace-pre-wrap break-words">{state.summary}</span>

@@ -205,6 +205,10 @@ export interface AgentRunResult {
   usage: TurnUsage;
   /** Amount billed to the user (D5/D6) for the whole run. */
   billedUsd: number;
+  /** T1-budget-ux: the run stopped ONLY because it hit the per-build budget cap (work is saved and the
+   *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
+   *  "budget reached — continue" state instead of a hard failure. */
+  budgetReached?: boolean;
 }
 
 interface ToolResultBlock {
@@ -620,10 +624,12 @@ export class AgentRunner {
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
         if (maxBudgetUsd !== undefined && billed() >= maxBudgetUsd) {
-          const summary = `Budget reached ($${billed().toFixed(4)} of $${maxBudgetUsd.toFixed(2)}). Stopped.`;
+          const summary = `Budget reached ($${billed().toFixed(4)} of $${maxBudgetUsd.toFixed(2)}). Your work is saved — continue to keep building.`;
           await persist('stopped');
           events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-          return { ok: false, summary, steps, usage, billedUsd: billed() };
+          // T1-budget-ux: a budget stop is a resumable PAUSE, not a failure — flag it so the client offers
+          // an honest "continue" (each continue is a fresh run with a fresh budget window).
+          return { ok: false, summary, steps, usage, billedUsd: billed(), budgetReached: true };
         }
 
         // Mid-build checkpoint: the turn (assistant + tool results) is persisted so a reconnect

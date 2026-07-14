@@ -80,7 +80,7 @@ export type AgentV3WireEvent =
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -173,6 +173,8 @@ export interface AgentV3ClientState {
   billedInr?: number;
   /** T1-cost-transparency — the "why this build cost ₹X" breakdown (token split, tier, markup, base). */
   costBreakdown?: CostBreakdown;
+  /** T1-budget-ux — the build paused ONLY because it hit the per-build budget cap (work saved, resumable). */
+  budgetReached?: boolean;
   /** R2 §4.6 — the objective readiness verdict for the finished build (build-health card). */
   buildHealth?: BuildHealth;
   /** The build's diagnostics report, delivered live with the `result` event. Kept so the

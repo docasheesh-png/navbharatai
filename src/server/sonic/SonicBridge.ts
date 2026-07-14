@@ -22,6 +22,7 @@ import { sonicModelId, sonicRegion } from './featureFlag';
 import { isControlJson, isInterruptionSignal } from './isControlJson';
 import { boliClause, type SonicBoli } from './sonicBoli';
 import { SonicTranscriptGate } from './sonicTranscript';
+import { normalizeSeededHistory } from './sonicHistory';
 
 // Re-export so existing importers (and tests) keep `import { isControlJson } from './SonicBridge'`.
 export { isControlJson, isInterruptionSignal };
@@ -146,7 +147,11 @@ export class SonicSession {
 
   constructor(private readonly cb: SonicCallbacks, opts: { voice?: SonicVoice; persona?: string; history?: SonicTurn[]; boli?: SonicBoli } = {}) {
     this.voice = opts.voice ?? 'female';
-    this.history = Array.isArray(opts.history) ? opts.history.slice(-12) : []; // cap seeded context
+    // Cap + DROP any leading assistant turn(s): Nova Sonic rejects a seeded history that starts on the
+    // assistant ("First message in chat history should not be Assistant"). Every professional chat opens
+    // with an assistant welcome, so this is what broke the SDA voice call. normalizeSeededHistory
+    // guarantees the window starts with a user turn (or is empty → the session just starts fresh).
+    this.history = normalizeSeededHistory(opts.history);
     this.systemPrompt = buildSystemPrompt(this.voice, opts.persona, opts.boli ?? 'neutral');
     this.client = new BedrockRuntimeClient({
       region: sonicRegion(),

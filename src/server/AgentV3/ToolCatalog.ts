@@ -725,6 +725,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_payment',
+      description:
+        'Add a REAL payment checkout to the app (Bring-Your-Own keys): a server route (creates the order/' +
+        'session AND verifies the payment signature — never trusts the client) + a client checkout helper, ' +
+        'for razorpay (India-first) or stripe. The user pastes their provider keys into .env — NavBharatAI ' +
+        'never stores them. Use when the app needs to accept payments. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['razorpay', 'stripe'], description: 'The payment provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'replace_symbol',
       description:
         'AST-SAFELY replace ONE top-level symbol (a function, class, interface, type, enum, or const) ' +
@@ -913,6 +928,7 @@ export const CATALOG_TOOL_NAMES = [
   'scan_vulnerabilities',
   'run_migrations',
   'generate_db_config',
+  'generate_payment',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

@@ -86,6 +86,7 @@ import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, typ
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
+import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2180,6 +2181,29 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('db config');
         return `Wired ${provider} database connection:\n${dbWritten.join('\n')}\nAdd the dependency: ${cfg.dependency.name}@${cfg.dependency.version}\n\n${cfg.instructions}`;
+      }
+
+      case 'generate_payment': {
+        // U-4 recipe — a real Bring-Your-Own-keys payment integration (Razorpay/Stripe): a server route
+        // (order/session + signature verification) + a client checkout helper. The user pastes their keys
+        // into .env (NavBharatAI never stores them). Pure generator in PaymentGenerator.ts.
+        const pProvider = optStr(input, 'provider');
+        if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "razorpay" | "stripe".';
+        const pcfg = generatePaymentIntegration(pProvider);
+        const payWritten: string[] = [];
+        for (const [path, content] of Object.entries(pcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); payWritten.push(`Kept existing ${path} (add: ${pcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          payWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('payment integration');
+        return `Wired ${pProvider} payments:\n${payWritten.join('\n')}\nAdd the dependency: ${pcfg.dependency.name}@${pcfg.dependency.version}\n\n${pcfg.instructions}`;
       }
 
       case 'replace_symbol': {

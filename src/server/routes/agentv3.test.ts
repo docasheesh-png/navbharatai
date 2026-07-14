@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1592,5 +1592,37 @@ describe('Full Team mid-build steering gates (Fix 60)', () => {
     expect(sanitizeSteerMessage(42)).toBeNull();
     expect(sanitizeSteerMessage(undefined)).toBeNull();
     expect(sanitizeSteerMessage('x'.repeat(3000))).toHaveLength(2000);
+  });
+});
+
+describe('statusEntitlement (T0-9 — /status money facts from the VERIFIED identity only)', () => {
+  const prev = { ...process.env };
+  beforeEach(() => { delete process.env.AGENTV3_FREE_LIST; process.env.AGENTV3_PAID_PUBLIC = 'true'; });
+  afterEach(() => { process.env = { ...prev }; });
+
+  it('an UNVERIFIED caller (verified=null) gets powerUnlocked=false even when a paid wallet is passed — closes the cross-user wallet leak (billed only reflects the GLOBAL paid-public flag, not per-user data)', () => {
+    // The vulnerability was powerUnlocked reading a CLAIMED user's wallet; with verified=null it must never
+    // report a paid wallet. `billed` derives only from the global flag + (verified) free-list, so it stays
+    // true here — that is the global surface state, not a per-user secret.
+    expect(statusEntitlement(null, { totalMoneySpent: 999 }).powerUnlocked).toBe(false);
+    expect(statusEntitlement(null, null).powerUnlocked).toBe(false);
+  });
+
+  it('a verified user with NO purchase → powerUnlocked=false; WITH a purchase → true', () => {
+    expect(statusEntitlement({ uid: 'u1', email: null }, null).powerUnlocked).toBe(false);
+    expect(statusEntitlement({ uid: 'u1', email: null }, { totalMoneySpent: 100 }).powerUnlocked).toBe(true);
+  });
+
+  it('a free-list admin/tester (verified) → powerUnlocked=true regardless of wallet, billed=false', () => {
+    process.env.AGENTV3_FREE_LIST = 'admin@x.com';
+    const r = statusEntitlement({ uid: 'a', email: 'admin@x.com' }, null);
+    expect(r.powerUnlocked).toBe(true);
+    expect(r.billed).toBe(false);
+  });
+
+  it('billed=true only when paid-public is on AND the verified user is not free-listed', () => {
+    expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(true);
+    process.env.AGENTV3_PAID_PUBLIC = 'false';
+    expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(false);
   });
 });

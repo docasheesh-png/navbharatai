@@ -71,3 +71,28 @@ describe('ciWorkflowSummary', () => {
     expect(ciWorkflowSummary(issues)).toContain('CI workflow —');
   });
 });
+
+describe('analyzeCiWorkflow — GitLab CI + Jenkins (GA-14)', () => {
+  it('flags `npm ci` with no lockfile in a .gitlab-ci.yml', () => {
+    const files = { '.gitlab-ci.yml': 'build:\n  script:\n    - npm ci\n    - npm run build\n', 'package.json': '{"scripts":{"build":"vite build"}}' };
+    const issues = analyzeCiWorkflow(files);
+    expect(issues.some((i) => i.kind === 'npm-ci-no-lockfile' && i.file === '.gitlab-ci.yml')).toBe(true);
+  });
+
+  it('flags a missing npm script in a Jenkinsfile (// comments respected)', () => {
+    const files = { 'Jenkinsfile': "pipeline {\n  stages {\n    stage('build') {\n      steps {\n        sh 'npm run typecheck' // was: lint\n      }\n    }\n  }\n}\n", 'package.json': '{"scripts":{"build":"x"}}', 'package-lock.json': '{}' };
+    const issues = analyzeCiWorkflow(files);
+    expect(issues.some((i) => i.kind === 'missing-script' && i.file === 'Jenkinsfile' && i.message.includes('typecheck'))).toBe(true);
+  });
+
+  it('does NOT apply the setup-node cache rule to GitLab/Jenkins (GitHub-only)', () => {
+    const files = { '.gitlab-ci.yml': "job:\n  cache: 'npm'\n  script:\n    - echo hi\n", 'pnpm-lock.yaml': '' };
+    expect(analyzeCiWorkflow(files).filter((i) => i.kind === 'cache-manager-mismatch')).toEqual([]);
+  });
+
+  it('repairs `npm ci` → `npm install` in a .gitlab-ci.yml', () => {
+    const r = repairCiWorkflow('.gitlab-ci.yml', { '.gitlab-ci.yml': 'build:\n  script:\n    - npm ci\n' });
+    expect(r.content).toContain('npm install');
+    expect(r.fixes.length).toBe(1);
+  });
+});

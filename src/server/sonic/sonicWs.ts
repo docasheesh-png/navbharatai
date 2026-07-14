@@ -15,8 +15,10 @@
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { SonicSession, type SonicVoice } from './SonicBridge';
+import { SonicSession, type SonicVoice, type SonicTurn } from './SonicBridge';
 import { isSonicEnabled } from './featureFlag';
+import { getProfessional } from '../professionals/registry';
+import { buildProfessionalSystemPrompt } from '../professionals/engine';
 import { verifyIdentityWithReason, adminAppOptions } from '../lib/authMiddleware';
 import { loadFirebaseAdmin } from '../lib/firebaseAdminModule';
 
@@ -48,27 +50,42 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
   // The chosen voice (male → matthew, female → tiffany) rides the WS query; default female.
   const voiceParam = new URLSearchParams((req.url || '').split('?')[1] || '').get('voice');
   const voice: SonicVoice = voiceParam === 'male' ? 'male' : 'female';
-  const session = new SonicSession({
-    onAudioOutput: (b64) => send(ws, { type: 'audio', data: b64 }),
-    onText: (text, role) => send(ws, { type: 'text', text, role }),
-    onTurnComplete: () => send(ws, { type: 'turn_complete' }),
-    onError: (message) => send(ws, { type: 'error', message }),
-    onClose: () => { try { ws.close(); } catch { /* already closed */ } },
-  }, voice);
 
-  session.start()
-    .then(() => send(ws, { type: 'ready' }))
-    .catch((e) => send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) }));
+  // The session is created on the client's FIRST message (`init`), which carries the persona
+  // (a professional's own prompt) and the prior text conversation to continue. This lets the
+  // Doctor voice BE the doctor and resume a text chat from where it left off. The client always
+  // sends init before any audio, so ordering guarantees the session exists first.
+  let session: SonicSession | null = null;
+
+  const startSession = (persona?: string, history?: SonicTurn[]) => {
+    if (session) return;
+    session = new SonicSession({
+      onAudioOutput: (b64) => send(ws, { type: 'audio', data: b64 }),
+      onText: (text, role) => send(ws, { type: 'text', text, role }),
+      onTurnComplete: () => send(ws, { type: 'turn_complete' }),
+      onError: (message) => send(ws, { type: 'error', message }),
+      onClose: () => { try { ws.close(); } catch { /* already closed */ } },
+    }, { voice, persona, history });
+    session.start()
+      .then(() => send(ws, { type: 'ready' }))
+      .catch((e) => send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) }));
+  };
 
   ws.on('message', (raw) => {
-    let msg: { type?: string; data?: string };
+    let msg: { type?: string; data?: string; professionalId?: string; history?: SonicTurn[] };
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'audio' && typeof msg.data === 'string') session.sendAudio(msg.data);
-    else if (msg.type === 'stop') session.close();
+    if (msg.type === 'init') {
+      // Server-side persona lookup — the client only names WHICH professional; a raw prompt is
+      // never trusted from the client (prompt-injection guard). Unknown/absent id → default voice.
+      const cfg = typeof msg.professionalId === 'string' ? getProfessional(msg.professionalId) : undefined;
+      const persona = cfg ? buildProfessionalSystemPrompt(cfg) : undefined;
+      startSession(persona, Array.isArray(msg.history) ? msg.history : undefined);
+    } else if (msg.type === 'audio' && typeof msg.data === 'string') { if (!session) startSession(); session?.sendAudio(msg.data); }
+    else if (msg.type === 'stop') session?.close();
   });
 
-  ws.on('close', () => session.close());
-  ws.on('error', () => session.close());
+  ws.on('close', () => session?.close());
+  ws.on('error', () => session?.close());
 });
 
 /**

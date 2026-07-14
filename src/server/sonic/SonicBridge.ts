@@ -46,34 +46,43 @@ export function voiceIdFor(voice: SonicVoice): string {
   return (process.env.SONIC_FEMALE_VOICE_ID || 'tiffany').trim();
 }
 
-// Built per-session so "today's date" is always current — Nova Sonic has no clock and
-// otherwise guesses a stale training-cutoff date (it answered "15 July 2024" on a 2026 run).
-// The gender clause fixes the "मैं कर रही / कर रहा" flip-flop: a voice must self-refer with ONE
-// consistent Hindi grammatical gender that matches how it sounds.
-function defaultSystemPrompt(voice: SonicVoice): string {
+/** One prior conversation turn seeded into a voice session so it CONTINUES a text chat
+ *  (admin 2026-07-14: switch from text to voice → resume where it left off, not from zero). */
+export interface SonicTurn { role: 'user' | 'assistant'; content: string }
+
+// The voice-MODE clauses (expressiveness + gender + identity guard + date) — appended to whatever
+// persona is in front (default NavBharatAI Voice, or a professional's own persona). Built per session
+// so "today's date" is current — Nova Sonic has no clock (it once answered "15 July 2024" in 2026).
+// The gender clause fixes the "मैं कर रही / कर रहा" flip-flop: self-refer with ONE consistent gender.
+function voiceModeClauses(voice: SonicVoice): string {
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' });
   const gender = voice === 'male'
     ? 'You speak with a MALE voice. When you speak Hindi, ALWAYS refer to yourself with MASCULINE grammatical forms (e.g. "मैं कर रहा हूँ", "मैं बता रहा हूँ", "मैं समझ गया") — NEVER feminine forms.'
     : 'You speak with a FEMALE voice. When you speak Hindi, ALWAYS refer to yourself with FEMININE grammatical forms (e.g. "मैं कर रही हूँ", "मैं बता रही हूँ", "मैं समझ गई") — NEVER masculine forms.';
   return (
-    'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users. ' +
-    'Reply naturally in the language the user speaks (Hindi, Hinglish, English or a regional language). ' +
-    'Keep answers short and conversational, as if speaking on a phone call. ' +
-    // Expressiveness (admin 2026-07-14): Nova Sonic's tone is driven by the system prompt — instruct
-    // it to sound like a real human, not a machine reading text (natural pauses, emotion, varied pace).
+    'You are now speaking OUT LOUD on a live voice call. Reply naturally in the language the user speaks ' +
+    '(Hindi, Hinglish, English or a regional language). Keep answers short and conversational, as on a phone call. ' +
     'SPEAK LIKE A REAL HUMAN, never like a machine reading text. Be warm, expressive and emotional. ' +
     'Vary your pace and intonation naturally, take small natural pauses between thoughts, and let genuine ' +
     'feeling come through — sound happy, empathetic, curious, reassuring or excited as the moment calls for it. ' +
     'Use light, natural spoken fillers occasionally where a real person would (e.g. "hmm", "achha", "toh", "right"). ' +
     'Emphasise key words, react to what the user feels, and never sound flat, monotone or robotic. ' +
     gender + ' ' +
-    // Identity guard (admin 2026-07-14): never disclose the underlying provider/model. To the user
-    // you are simply "NavBharatAI Voice" — a NavBharatAI product.
     'You are a NavBharatAI product. NEVER mention or reveal any underlying model, provider, company, ' +
     'or technology (do not say Amazon, AWS, Nova, Sonic, Bedrock, Anthropic, OpenAI, or any model name). ' +
-    'If asked what model or company powers you, say only that you are NavBharatAI Voice, built by NavBharatAI. ' +
+    'If asked what model or company powers you, say only that you were built by NavBharatAI. ' +
     `Today's date is ${today} (India time). Use it whenever the user asks about the date, day or time.`
   );
+}
+
+/** Full system prompt: a persona (a professional's own prompt, or the default NavBharatAI Voice
+ *  assistant) followed by the voice-mode clauses. The professional's identity is preserved so the
+ *  Doctor voice sounds like the doctor, the Lawyer like the lawyer, etc. */
+export function buildSystemPrompt(voice: SonicVoice, persona?: string): string {
+  const base = (persona && persona.trim())
+    ? persona.trim()
+    : 'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users.';
+  return `${base}\n\n${voiceModeClauses(voice)}`;
 }
 
 /**
@@ -126,9 +135,13 @@ export class SonicSession {
   private readonly textStage = new Map<string, string>();
 
   private readonly systemPrompt: string;
+  private readonly voice: SonicVoice;
+  private readonly history: SonicTurn[];
 
-  constructor(private readonly cb: SonicCallbacks, private readonly voice: SonicVoice = 'female') {
-    this.systemPrompt = defaultSystemPrompt(voice);
+  constructor(private readonly cb: SonicCallbacks, opts: { voice?: SonicVoice; persona?: string; history?: SonicTurn[] } = {}) {
+    this.voice = opts.voice ?? 'female';
+    this.history = Array.isArray(opts.history) ? opts.history.slice(-12) : []; // cap seeded context
+    this.systemPrompt = buildSystemPrompt(this.voice, opts.persona);
     this.client = new BedrockRuntimeClient({
       region: sonicRegion(),
       credentials: {
@@ -162,6 +175,18 @@ export class SonicSession {
     this.queue.pushEvent({ contentStart: { promptName: this.promptName, contentName: sysContent, type: 'TEXT', interactive: true, role: 'SYSTEM', textInputConfiguration: { mediaType: 'text/plain' } } });
     this.queue.pushEvent({ textInput: { promptName: this.promptName, contentName: sysContent, content: this.systemPrompt } });
     this.queue.pushEvent({ contentEnd: { promptName: this.promptName, contentName: sysContent } });
+
+    // 2b) seed the prior TEXT conversation so voice CONTINUES the chat (text→voice continuity).
+    // Each earlier turn is replayed as a non-interactive TEXT block in its original role.
+    for (const turn of this.history) {
+      const c = (turn.content || '').trim();
+      if (!c) continue;
+      const name = randomUUID();
+      const role = turn.role === 'assistant' ? 'ASSISTANT' : 'USER';
+      this.queue.pushEvent({ contentStart: { promptName: this.promptName, contentName: name, type: 'TEXT', interactive: false, role, textInputConfiguration: { mediaType: 'text/plain' } } });
+      this.queue.pushEvent({ textInput: { promptName: this.promptName, contentName: name, content: c } });
+      this.queue.pushEvent({ contentEnd: { promptName: this.promptName, contentName: name } });
+    }
 
     // 3) open the USER audio content stream (16kHz mic in).
     this.queue.pushEvent({

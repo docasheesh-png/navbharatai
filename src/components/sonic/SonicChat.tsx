@@ -19,7 +19,9 @@ interface Line { role: string; text: string }
 const MIC_RATE = 16000;
 const OUT_RATE = 24000;
 
-export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
+export interface SonicTurn { role: 'user' | 'assistant'; content: string }
+
+export function SonicChat({ onClose, professionalId, history }: { onClose?: () => void; professionalId?: string; history?: SonicTurn[] } = {}) {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -144,7 +146,12 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
       const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}`);
       wsRef.current = ws;
 
-      ws.onopen = () => setStatus('live');
+      ws.onopen = () => {
+        // Send the persona + prior text conversation FIRST so the server starts the session as
+        // this professional and CONTINUES the chat (before any audio is streamed).
+        try { ws.send(JSON.stringify({ type: 'init', professionalId, history: history?.slice(-12) })); } catch { /* will retry via audio */ }
+        setStatus('live');
+      };
       ws.onerror = () => { setError('Connection error.'); setStatus('error'); };
       ws.onclose = () => setStatus((s) => (s === 'error' ? 'error' : 'idle'));
       ws.onmessage = (ev) => {
@@ -174,7 +181,7 @@ export function SonicChat({ onClose }: { onClose?: () => void } = {}) {
       setStatus('error');
       stop();
     }
-  }, [playChunk, stop, voice]);
+  }, [playChunk, stop, voice, professionalId, history]);
 
   useEffect(() => () => stop(), [stop]);
 

@@ -169,7 +169,13 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           rows={1}
           className="flex-1 resize-none bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/40 max-h-32"
         />
-        <ProfessionalVoiceButton />
+        <ProfessionalVoiceButton
+          professionalId={config.id}
+          getHistory={() => messages
+            .filter((m) => m.content !== config.welcome)
+            .slice(-12)
+            .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
+        />
         <button onClick={() => send()} disabled={(!input.trim() && files.length === 0) || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>

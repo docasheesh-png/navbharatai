@@ -41,6 +41,12 @@ export interface ProjectModule {
   status: ModuleStatus;
   /** Honest failure detail when status === 'failed' (e.g. the gate error that stopped it). */
   statusDetail?: string;
+  /**
+   * GA-7 — how many times this module's build turn has FAILED. Incremented by markModuleStatus on a
+   * 'failed' transition; drives the coordinator's live-replan threshold (repeated deterministic
+   * failure → an LLM plan revision). Absent/0 means it has not failed yet.
+   */
+  attempts?: number;
 }
 
 export interface ProjectPlan {
@@ -304,7 +310,9 @@ export function planBlockedReason(plan: ProjectPlan): string | null {
   return 'The plan has no buildable module left but is not complete.';
 }
 
-/** Immutable status update. Unknown id → the plan is returned unchanged. PURE. */
+/** Immutable status update. Unknown id → the plan is returned unchanged. PURE.
+ *  GA-7: a transition INTO 'failed' increments the module's attempts counter (the live-replan
+ *  threshold reads it across turns); other transitions leave attempts untouched. */
 export function markModuleStatus(plan: ProjectPlan, id: string, status: ModuleStatus, detail?: string): ProjectPlan {
   if (!plan.modules.some((m) => m.id === id)) return plan;
   return {
@@ -314,6 +322,7 @@ export function markModuleStatus(plan: ProjectPlan, id: string, status: ModuleSt
       const next: ProjectModule = { ...m, status };
       if (detail) next.statusDetail = detail.slice(0, 500);
       else delete next.statusDetail;
+      if (status === 'failed') next.attempts = (m.attempts ?? 0) + 1;
       return next;
     }),
   };
@@ -411,7 +420,7 @@ export interface Milestone {
 }
 
 /** Dependency depth of every module: 0 = no deps, else 1 + max(dep depth). Cycle-safe (bounded). PURE. */
-function moduleDepths(plan: ProjectPlan): Map<string, number> {
+export function moduleDepths(plan: ProjectPlan): Map<string, number> {
   const byId = new Map(plan.modules.map((m) => [m.id, m]));
   const depth = new Map<string, number>();
   const computing = new Set<string>();
@@ -529,6 +538,7 @@ export function parseStoredProjectPlan(text: string | null | undefined): Project
       contracts: typeof m.contracts === 'string' ? m.contracts : '',
       status: m.status as ModuleStatus,
       ...(typeof m.statusDetail === 'string' ? { statusDetail: m.statusDetail } : {}),
+      ...(typeof m.attempts === 'number' && m.attempts > 0 ? { attempts: m.attempts } : {}),
     });
   }
   return { version: 1, goal: p.goal, framework: p.framework, createdAt: p.createdAt, modules };

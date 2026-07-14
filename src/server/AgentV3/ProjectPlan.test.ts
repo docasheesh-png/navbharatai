@@ -293,6 +293,16 @@ describe('durable round-trip', () => {
     expect(parseStoredProjectPlan(serializeProjectPlan(p))).toEqual(p);
   });
 
+  it('GA-7: the attempts counter survives the round-trip (0/absent stays absent)', () => {
+    const p = plan([
+      mod({ id: 'a', status: 'done' }),                                  // no attempts → stays absent
+      mod({ id: 'b', status: 'failed', statusDetail: 'boom', attempts: 3 }),
+    ]);
+    const back = parseStoredProjectPlan(serializeProjectPlan(p))!;
+    expect(back.modules[0].attempts).toBeUndefined();
+    expect(back.modules[1].attempts).toBe(3);
+  });
+
   it('rejects corrupt storage instead of returning a half-valid plan', () => {
     expect(parseStoredProjectPlan(null)).toBeNull();
     expect(parseStoredProjectPlan('')).toBeNull();

@@ -137,7 +137,8 @@ import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
@@ -5804,27 +5805,28 @@ export function registerAgentV3Routes(app: Express): void {
         try {
           let pPlan = await loadProjectPlan(workspaceId);
           const planPreExisted = !!pPlan;
+          // A single bounded plan-generation LLM call (used by BOTH the initial decomposition and the
+          // GA-7 live-replan below). Cheap-floor-first like every other build text call; hard 60s
+          // timeout so a planner call can NEVER hang the build.
+          const ppGenerate = async (system: string, user: string): Promise<string> => {
+            const startedAt = Date.now();
+            let ppProvider = 'CLAUDE';
+            const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
+              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+            });
+            const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('project planner timed out')), 60_000));
+            const t = await Promise.race([call, timeout]);
+            try {
+              const lbl = fastLaneProviderLabel(ppProvider);
+              buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
+            } catch { /* diagnostics best-effort */ }
+            blueprintUsage.inputTokens += t.usage.inputTokens;
+            blueprintUsage.outputTokens += t.usage.outputTokens;
+            buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
+            return t.text;
+          };
           if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
-            const ppGenerate = async (system: string, user: string): Promise<string> => {
-              const startedAt = Date.now();
-              // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
-              let ppProvider = 'CLAUDE';
-              const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
-                model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
-              });
-              // Hard timeout so the up-front planner can NEVER hang the build (the losing call is ignored).
-              const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('project planner timed out')), 60_000));
-              const t = await Promise.race([call, timeout]);
-              try {
-                const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: lbl === 'anthropic' ? fastBuildModel() : ppProvider.toLowerCase(), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true });
-              } catch { /* diagnostics best-effort */ }
-              blueprintUsage.inputTokens += t.usage.inputTokens;
-              blueprintUsage.outputTokens += t.usage.outputTokens;
-              buildUsage.add({ inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens });
-              return t.text;
-            };
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(prompt, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
@@ -5836,6 +5838,32 @@ export function registerAgentV3Routes(app: Express): void {
             // build normally (honest fallback — never force a small app through module rounds).
           }
           if (pPlan && !planComplete(pPlan) && (!planPreExisted || isContinuationMessage(prompt))) {
+            // GA-7 — Project Coordinator: before scheduling, run the deterministic coordinator to break
+            // a blocking dependency cycle and arbitrate file-ownership conflicts, and (only when a
+            // module has repeatedly failed and the plan still can't advance) ask the model for a revised
+            // plan. Additive + best-effort: any failure leaves pPlan exactly as it was.
+            try {
+              const act = coordinateBeforeTurn(pPlan);
+              if (act.plan !== pPlan) {
+                pPlan = act.plan;
+                await saveProjectPlan(workspaceId, pPlan);
+              }
+              for (const note of act.notes) {
+                events.emit({ type: 'narration', agent: 'architect', text: `🧭 Coordinator: ${note}`, ts: Date.now() });
+              }
+              if (act.kind === 'needs-llm-replan') {
+                const stuck = pPlan.modules.find((m) => m.status !== 'done' && (m.attempts ?? 0) >= LLM_REPLAN_THRESHOLD);
+                if (stuck) {
+                  const revised = parsePlannedModules(await ppGenerate(replanSystemPrompt(framework), replanUserPrompt(pPlan, stuck.id)));
+                  const replanned = applyReplan(pPlan, revised);
+                  if (replanned !== pPlan) {
+                    pPlan = replanned;
+                    await saveProjectPlan(workspaceId, pPlan);
+                    events.emit({ type: 'narration', agent: 'architect', text: `🧭 Coordinator revised the plan around the stuck module "${stuck.name}" — resuming.`, ts: Date.now() });
+                  }
+                }
+              }
+            } catch { /* coordinator is additive — on ANY failure the plan proceeds unchanged */ }
             let nextMod = nextBuildableModule(pPlan);
             // RETRY a failed module on an EXPLICIT user continuation (auto-continue stops at a
             // failure by design — `resumable` is only emitted on ok results). Resetting it to
@@ -5855,7 +5883,10 @@ export function registerAgentV3Routes(app: Express): void {
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
-              events.emit({ type: 'narration', agent: 'architect', text: `🧩 ${planProgressLine(pPlan)}`, ts: Date.now() });
+              // GA-7 — surface the coordinator digest (milestone progress + current role) alongside the
+              // plain progress line, closing the previously built-but-unwired coordinatorDigest export.
+              const digest = coordinatorDigest(pPlan);
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 ${planProgressLine(pPlan)}${digest ? ` · ${digest}` : ''}`, ts: Date.now() });
             } else {
               const reason = planBlockedReason(pPlan);
               if (reason) events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Project plan is blocked: ${reason}`, ts: Date.now() });

@@ -233,24 +233,44 @@ safely edit, or truly verify it).
 - **GA-6** 🟡 — Persistent Engineering Memory. **Producer SHIPPED (#1363, 2026-07-14):** the tech-debt register
   (dedup + age + prioritize, Firestore-backed) had no automatic writer, so it stayed empty; `findingsToDebt`
   now funnels each build's unfixed security findings into it (`recordDebt`), + `engineeringMemoryDigest`.
-  **Remaining ❌:** ADR store wired into AgentV3 (exists only in AppMakerLab), append-across-builds decision
-  trace, real migration history.
+  **ADR + migration history SHIPPED (#1387, 2026-07-14):** `adrMemory.ts` captures each successful build's
+  REAL detected stack as a dated `docs/decisions/ADR-NNN.md`, persists it per-project (`adrDecisions/{uid__pid}`),
+  reads prior ADRs back into the Architect prompt, and never appends a duplicate on a no-change rebuild (honest:
+  no fabricated pattern scores — alternatives are marked "not ranked by this engine"). `migrationHistory.ts`
+  records every `run_migrations` outcome (tool/commands/exit codes/timestamp) and feeds it back so a follow-up
+  build sees what schema was already applied. **GA-6 COMPLETE.**
 - **GA-7** 🟡 — Project Coordinator. **SHIPPED (#1364, 2026-07-14):** `computeMilestones` (dependency-ordered
   delivery phases, cycle-safe) + `assignModuleRole` (specialist role per module) + `coordinatorDigest`, all
-  pure on the existing module DAG, surfaced into `moduleBuildContext` (zero new surface). **Remaining 🔒:** a
-  standing cross-session coordinator agent that live-replans/arbitrates — needs the out-of-process supervisor.
+  pure on the existing module DAG, surfaced into `moduleBuildContext` (zero new surface). **Live-replan +
+  arbitration SHIPPED (#1388, 2026-07-14):** `ProjectCoordinator.ts` (pure) now REPAIRS the plan at each turn —
+  `repairPlanCycles` deterministically cuts a blocking dependency-cycle back-edge, `resolveOwnershipConflicts`
+  arbitrates two-owner files to a single lowest-depth owner, `detectContractCollisions` flags duplicated exported
+  symbols, and `coordinateBeforeTurn` issues one bounded LLM `applyReplan` when a module has failed ≥2 times and
+  the plan still can't advance (done modules kept verbatim — never regress). A per-module `attempts` counter drives
+  the threshold; the previously built-but-unwired `coordinatorDigest` is now surfaced. **Remaining 🔒 (infra, honest
+  residue per rule 6):** ONLY the literal always-on background DAEMON (driving builds with no user turn in flight /
+  arbitrating parallel specialist VMs in real time) stays deferred — it needs an out-of-process supervisor. The
+  named coordinator VALUE (live-replan + arbitration) is now delivered synchronously at the turn points.
 - **GA-8** 🟡 — Multi-Strategy Repair (ordered fallback + backoff + circuit-breaker +
   regression-capture) — replaces the hardcoded 3-try loop. **Circuit-breaker slice ✅ (#1267, 2026-07-13):**
   the SimpleBuilder bounded tsc-repair loop now stops the moment a repair returns byte-identical compiler
   errors (zero progress → stuck) and hands off, instead of burning the whole `maxRepairs` budget. Provably
-  safe (fires only while `!verdict.ok`). **Remaining ❌:** ordered multi-strategy fallback + backoff +
-  regression-capture (store the failing scenario for cross-build learning).
+  safe (fires only while `!verdict.ok`). **Ordered multi-strategy fallback ✅ (#1386, 2026-07-14):** each
+  repair attempt now climbs a distinct-strategy ladder — `contract-full` (byte-identical to the old prompt →
+  no attempt-1 regression) → `focus-offenders` (rewrite ONLY the compiler-named files) → `contract-authority`
+  (the shared contract is the source of truth) — via `repairStrategyForAttempt`; `maxRepairs` 2→3 so the top
+  rung is reachable; the byte-identical circuit-breaker still short-circuits a stuck model. **GA-8 COMPLETE**
+  (backoff was assessed as low real correctness value and folded away; cross-build regression-capture is
+  covered by GA-6's engineering memory).
 - **GA-10** 🟡 — DB Migration runner + Schema Intelligence (Prisma/Knex/Drizzle/Flyway/Alembic +
   schema inference/type-gen). Also D9. (Generator hardened #1294: SQL DDL now emits `DEFAULT CURRENT_TIMESTAMP`
   on created/_at columns for Prisma parity.) **RUNNER SHIPPED (#1331, 2026-07-13):** `MigrationPlanner`
   detects the tool (Prisma/Knex/Drizzle/TypeORM/Sequelize/Flyway/Alembic) + command, and the `run_migrations`
   tool applies migrations in the sandbox with honest real-exit-code reporting (never a fake "migrated").
-  **Remaining ❌:** schema inference/type-gen + broader SQL dialects.
+  **Schema inference/type-gen SHIPPED (#1384, 2026-07-14):** `schemaTypeGen.ts` + the `generate_types` tool
+  turn a Prisma schema / SQL DDL into `src/types/db.ts` (scalar map, optionals→`| null`, arrays, Prisma
+  enums→string-unions, relations→interface refs), so frontend + backend share ONE typed DB shape. **GA-10
+  COMPLETE** (broader SQL dialects extend incrementally as needed).
 - **GA-12** 🟡 — Static-quality engines: ESLint gate (`LintGate`, `AGENTV3_LINT_GATE`) + dead-code (`deadCode.ts` unwired-files)
   already exist; **maintainability code-smell slice ✅ (#1277, 2026-07-13):** `maintainabilityAnalysis` flags the oversized
   "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
@@ -266,15 +286,26 @@ safely edit, or truly verify it).
   `ci.yml` + Dockerfile + docker-compose, and (#1284/#1285/#1286, 2026-07-13) all three are now
   **package-manager-correct** — the CI workflow, Dockerfile, and README use the project's real manager
   (npm/yarn/pnpm/bun, detected from its root lockfile via a shared probe) instead of a broken hardcoded
-  `npm ci`. **Remaining ❌:** pipeline REPAIR (fix a failing/misconfigured existing workflow) + GitLab/Jenkins.
+  `npm ci`. **Pipeline REPAIR SHIPPED (#1359-era `ciWorkflowAnalysis` + `repair_ci_workflow`) and EXTENDED to
+  GitLab CI + Jenkins (#1385, 2026-07-14):** `ciPlatform()` routes `.gitlab-ci.yml` / `Jenkinsfile` / GitHub
+  Actions; detects deterministic breakages (`npm ci` with no lockfile, cache-manager mismatch, missing script)
+  and auto-fixes the safe ones, with the setup-node cache rule correctly gated to GitHub only. **GA-14 COMPLETE.**
 - **GA-15** 🟡 — IaC engines: Dockerfile / Terraform / K8s-Helm manifest generation + infra optimizer.
   **SHIPPED (#1329, 2026-07-13):** Dockerfile/compose already existed; `IaCGenerator` + the `generate_iac`
   tool now emit real Kubernetes manifests (non-root Deployment + probes + resource limits + Service + HPA +
-  Ingress), a values-parameterized Helm chart, and Cloud Run Terraform. **Remaining ❌:** infra optimizer.
+  Ingress), a values-parameterized Helm chart, and Cloud Run Terraform. **Infra optimizer SHIPPED (#1382,
+  2026-07-14):** `InfraOptimizer.ts` + the `optimize_infra` tool statically scan Docker/K8s/Terraform for real
+  security + reliability anti-patterns (`:latest`/untagged base, root container, baked secret, ADD-over-COPY,
+  no HEALTHCHECK; privileged pod, no resource limits/probes, `runAsNonRoot`; public `allUsers` binding, unpinned
+  provider) and report each with a concrete fix. Pure regex, never throws. **GA-15 COMPLETE.**
 - **GA-16** 🟡 — Performance intelligence. Built: `BundleSize` (real built-dist size) + `generate_bundle_optimization`
   (lazyWithRetry + manualChunks); **source-level heavy-import analyzer ✅ (#1293, 2026-07-13)** — `analyzeHeavyImports`
   flags heavy deps with lighter alts (moment→dayjs) + whole-library imports (`import _ from 'lodash'`), advisory in
-  `evaluate`. **Remaining ❌:** runtime profiler, memory-leak, query optimizer.
+  `evaluate`. **Query optimizer SHIPPED (#1380, 2026-07-14):** `queryOptimizerAnalysis.ts` flags `SELECT *`,
+  unbounded `findMany`/`find` reads (no where/take/limit/cursor), and whole-table `deleteMany`/`updateMany` with
+  no/empty `where`, advisory in `evaluate`. **Remaining 🔒 (infra, honest residue per rule 6):** the runtime
+  profiler + memory-leak detector need a live-execution/instrumentation harness (real sandbox runtime control),
+  not a static pass — deferred until that infra exists.
 - **GA-17** ✅ — SHIPPED (#1249, 2026-07-12, Immune System Phase 3 "Red-team"): `FuzzProbe.generateFuzzPlan`
   finds the running app's inputs and builds a bounded adversarial catalog (empty/oversized/injection-shaped/
   unicode/malformed numbers/emails/urls); the post-build pass drives a real browser to type each hostile

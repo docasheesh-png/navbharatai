@@ -16258,3 +16258,28 @@ fresh **`.aab` build (android-aab.yml) + Play Store update** — a web deploy al
 
 **Gate:** `npx tsc --noEmit` clean for the changed files (only the pre-existing `mobileNative.ts` missing-dep
 errors remain, unrelated). No server code touched.
+
+---
+
+## 2026-07-14 — Category-2 "Done but needs final-touch" sweep: 8 GA/T items completed to root, infra residues recorded honestly
+
+**Trigger:** admin asked to complete the Category-2 ledger ("🟡 Done, final-touch chahiye … GA-4/6/7/8/10/12/14/15/16, UT-1/2/3, T0-9 re-audit — isko pura karo"). An ultracode 11-agent parallel audit produced evidence-based build specs + an honest tractability verdict per item, so the sweep fixed real gaps (not PROGRESS.md guesses) and did NOT rebuild already-working code.
+
+**Shipped this session (branch → gate → PR → CI green → squash-merge, each verified `tsc --noEmit` + `tsc -p tsconfig.server.json` + `vitest`):**
+- **T0-9 (#1378)** — closed a REAL `/api/agentv3/status` IDOR: the handler read the CLAIMED `?userId`'s wallet for the `billed`/`powerUnlocked` entitlement, so `?userId=<victim>` leaked their tier/paid state. Now VERIFIED-token only via a new pure `statusEntitlement(verified, wallet)` (unverified → never reads a wallet → `powerUnlocked:false`); converged 3 hardcoded `'agentv3-anon-'` literals onto `ANON_WORKSPACE_PREFIX`. Regression-tested.
+- **GA-16 (#1380)** — query optimizer (`SELECT *`, unbounded reads, whole-table mutations), advisory in `evaluate`.
+- **GA-15 (#1382)** — infra optimizer (Docker/K8s/Terraform static anti-pattern scan), `optimize_infra` tool.
+- **GA-10 (#1384)** — schema → TypeScript type generation (`generate_types` → `src/types/db.ts`).
+- **GA-14 (#1385)** — CI repair extended to GitLab CI + Jenkins (`ciPlatform` routing; cache rule gated to GitHub).
+- **GA-8 (#1386)** — ordered multi-strategy repair ladder (`contract-full` → `focus-offenders` → `contract-authority`); attempt-1 is byte-identical to the old prompt (no regression), circuit-breaker retained.
+- **GA-6 (#1387)** — persistent engineering memory: ADR capture (`docs/decisions/ADR-NNN.md`, per-project store, read-back into the Architect prompt, no fabricated scores, no duplicate on no-change rebuild) + migration-run history fed back into `run_migrations`.
+- **GA-7 (#1388)** — project coordinator live-replan + specialist arbitration: `repairPlanCycles` (deterministic cycle-break), `resolveOwnershipConflicts` (two-owner file arbitration), `detectContractCollisions`, bounded LLM `applyReplan` gated on an `attempts` counter (never regresses a done module), `coordinatorDigest` surfaced.
+
+**Open root causes / infra residues (rule 6 — recorded, NOT cosmetically patched):**
+- **GA-4** — sandbox-skip of tsc/lint/build from the build plan + a persistent artifact/`node_modules` cache across COLD E2B sandboxes. Needs real E2B sandbox/volume control (no API surface from the Claude session). The build PLAN itself already ships.
+- **GA-7 daemon** — ONLY the literal always-on background supervisor (drive builds with no user turn in flight / arbitrate parallel specialist VMs in real time) stays deferred; needs an out-of-process daemon. The named coordinator VALUE (live-replan + arbitration) now ships synchronously at the turn points.
+- **GA-16 runtime profiler + memory-leak** — need a live-execution/instrumentation harness (real sandbox runtime control), not a static pass.
+- **UT-1/2/3 signed binaries** — the generators (Electron/Capacitor/MV3 wrapper + runbooks) ship; producing the final SIGNED `.apk`/`.aab`/`.ipa`/`.exe`/`.dmg` needs the platform SDK + the admin's signing keystore on a build machine (already honestly stated in each export's UI + AppKnowledgeBase).
+- **GA-12 Prettier-as-engine** — marginal: Prettier already runs; a formatter-diff engine would be advisory noise on top of the live ESLint gate. Not built (honest "not worth it now" rather than a fake tick).
+
+**Discipline notes:** CI kept in the background throughout (push → advance to next item; a background wakeup merges each PR on green — never idle-blocked on a progress bar). The single deploy branch drained PRs in dependency order via cherry-pick-isolate. `AppKnowledgeBase.ts` updated for the user-visible surfaces (DATABASE TYPES, INFRA OPTIMIZER, ENGINEERING MEMORY, CI GitLab/Jenkins).

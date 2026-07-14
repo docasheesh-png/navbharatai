@@ -1,15 +1,18 @@
-// NavBharatAI Voice — a full-screen, immersive voice surface (ChatGPT/Grok-style).
+// NavBharatAI Voice — a COMPACT, bottom-docked voice widget (admin 2026-07-14: not a full-screen
+// takeover). Portaled to <body> so it escapes any CSS-transformed ancestor and docks correctly.
 //
 // Self-contained: it probes /api/sonic/status and renders nothing but an honest "not available" note
 // unless the server says voice is enabled. When live it captures the mic as 16 kHz PCM, streams it over
-// the Voice WebSocket, and plays back the 24 kHz PCM the model returns. A live animated orb reacts to
-// REAL audio levels — the mic (you speaking) and the playback (the assistant speaking) — so the motion
-// is never faked. NO underlying provider/model name is ever shown: to the user this is NavBharatAI Voice.
+// the Voice WebSocket, and plays back the 24 kHz PCM the model returns. A live audio-reactive WAVEFORM
+// (equaliser bars) reacts to REAL audio levels — the mic (you speaking) and the playback (the assistant
+// speaking) — so the "listening / speaking" motion is never faked. NO underlying provider/model name is
+// ever shown: to the user this is NavBharatAI Voice.
 //
 // Delete this folder + the server sonic/ folder to remove the feature entirely. The real voice
 // round-trip is only verifiable in a browser on a deploy; the PCM math is unit-tested in sonicAudio.test.ts.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
 import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
@@ -37,17 +40,18 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const streamRef = useRef<MediaStream | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
   const playCtxRef = useRef<AudioContext | null>(null);
-  const playAnalyserRef = useRef<AnalyserNode | null>(null);
+  const playAnalyserRef = useRef<AnalyserNode | null>(null);   // REAL spectrum of the ASSISTANT's voice
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);    // REAL spectrum of YOUR voice
   const nextPlayRef = useRef(0);
   const mutedRef = useRef(false);                              // read in the audio callback (no re-bind)
   const playSourcesRef = useRef<AudioBufferSourceNode[]>([]);  // live scheduled buffers, for barge-in flush
 
-  // Real audio-reactive orb: mic RMS (you) + playback analyser (assistant). A single rAF reads both,
-  // smooths, and writes straight to the orb DOM node (no per-frame React re-render).
-  const orbRef = useRef<HTMLDivElement | null>(null);
-  const micLevelRef = useRef(0);
-  const playLevelRef = useRef(0);
+  // Audio-reactive waveform: each bar's height is a REAL frequency-bin amplitude — from your mic while
+  // you speak, from the assistant's playback while it speaks. No scripted motion; silence → flat bars.
+  const barsRef = useRef<Array<HTMLDivElement | null>>([]);
   const rafRef = useRef<number | null>(null);
+
+  const NBARS = 9;
 
   useEffect(() => {
     let alive = true;
@@ -96,32 +100,38 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     if (ctx) nextPlayRef.current = ctx.currentTime;
   }, []);
 
-  // The orb animation loop — reads REAL levels, smooths, applies scale + glow, and flips the
-  // "speaking" label when the assistant's playback is the louder source. Runs only while mounted.
+  // The waveform loop (admin 2026-07-14: "real ho to banao!"). EVERY bar's height is a REAL
+  // frequency-bin amplitude — read straight from a Web Audio AnalyserNode: your MIC while you speak,
+  // the assistant's PLAYBACK while it speaks (whichever is louder wins per bar). Nothing is scripted:
+  // no sine wave, no idle animation — when the line is silent the bins are ~0 and the bars sit flat.
+  // The "speaking" flag also comes from the real playback energy. Per-bar smoothing only softens the
+  // motion; it never invents it.
   useEffect(() => {
-    const freq = new Uint8Array(128);
-    let level = 0;
+    const playFreq = new Uint8Array(128);   // playback analyser fftSize 256 → 128 bins
+    const micFreq = new Uint8Array(64);     // mic analyser     fftSize 128 → 64 bins
+    const barLevels = new Array(NBARS).fill(0);
     let lastSpeaking = false;
     const tick = () => {
-      let play = 0;
-      const an = playAnalyserRef.current;
-      if (an) {
-        an.getByteFrequencyData(freq);
-        let sum = 0;
-        for (let i = 0; i < freq.length; i++) sum += freq[i];
-        play = Math.min(1, sum / freq.length / 128);
+      const pa = playAnalyserRef.current;
+      const ma = micAnalyserRef.current;
+      if (pa) pa.getByteFrequencyData(playFreq);
+      if (ma) ma.getByteFrequencyData(micFreq);
+      // Speaking = real energy in the assistant's playback (average of the speech-band bins).
+      let playAvg = 0;
+      if (pa) { let s = 0; for (let i = 0; i < playFreq.length; i++) s += playFreq[i]; playAvg = s / playFreq.length / 255; }
+      const bars = barsRef.current;
+      for (let i = 0; i < NBARS; i++) {
+        const bar = bars[i];
+        if (!bar) continue;
+        // Map each bar to a real bin in the speech band of each source, take the louder one.
+        const pv = pa ? playFreq[3 + Math.round((i * 40) / (NBARS - 1))] / 255 : 0;
+        // Muted → your mic bars read flat (the assistant can't hear you, so show it honestly).
+        const mv = (ma && !mutedRef.current) ? micFreq[1 + Math.round((i * 20) / (NBARS - 1))] / 255 : 0;
+        const targetLvl = Math.max(pv, mv);
+        barLevels[i] += (targetLvl - barLevels[i]) * 0.4;   // soften only — never invent motion
+        bar.style.height = `${(5 + barLevels[i] * 44).toFixed(1)}px`;
       }
-      playLevelRef.current = play;
-      const target = Math.max(micLevelRef.current, play);
-      level += (target - level) * 0.25;               // smooth
-      const el = orbRef.current;
-      if (el) {
-        const scale = 1 + level * 0.45;
-        const glow = 24 + level * 90;
-        el.style.transform = `scale(${scale.toFixed(3)})`;
-        el.style.boxShadow = `0 0 ${glow.toFixed(0)}px ${(glow / 2).toFixed(0)}px rgba(124,58,237,${(0.35 + level * 0.5).toFixed(2)})`;
-      }
-      const nowSpeaking = play > 0.06;
+      const nowSpeaking = playAvg > 0.05;
       if (nowSpeaking !== lastSpeaking) { lastSpeaking = nowSpeaking; setSpeaking(nowSpeaking); }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -139,7 +149,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
     streamRef.current = null;
     micCtxRef.current?.close().catch(() => {});
     micCtxRef.current = null;
-    micLevelRef.current = 0;
+    micAnalyserRef.current = null;
     // Stop any still-scheduled playback and clear mute so a fresh call starts clean.
     for (const s of playSourcesRef.current) { try { s.onended = null; s.stop(); } catch { /* ended */ } }
     playSourcesRef.current = [];
@@ -187,19 +197,21 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       };
 
       proc.onaudioprocess = (e) => {
-        // Muted: the mic keeps running (fast un-mute) but NOTHING leaves the device and the orb
-        // reads flat — the assistant genuinely cannot hear you until you un-mute.
-        if (mutedRef.current) { micLevelRef.current = 0; return; }
-        const input = e.inputBuffer.getChannelData(0);
-        // Real mic level (RMS) → drives the orb while YOU speak.
-        let sum = 0;
-        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-        micLevelRef.current = Math.min(1, Math.sqrt(sum / input.length) * 3);
+        // Muted: the mic keeps running (fast un-mute) but NOTHING leaves the device — the assistant
+        // genuinely cannot hear you until you un-mute (the waveform's mic bars are gated on mute too).
+        if (mutedRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
+        const input = e.inputBuffer.getChannelData(0);
         const down = downsampleFloat32(new Float32Array(input), micCtx.sampleRate, MIC_RATE);
         if (down.length === 0) return;
         ws.send(JSON.stringify({ type: 'audio', data: float32ToBase64PCM16(down) }));
       };
+
+      // REAL mic spectrum for the waveform — a tap on the same source (does not affect what is sent).
+      const micAnalyser = micCtx.createAnalyser();
+      micAnalyser.fftSize = 128;
+      source.connect(micAnalyser);
+      micAnalyserRef.current = micAnalyser;
 
       source.connect(proc);
       proc.connect(micCtx.destination);
@@ -225,10 +237,32 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
 
   const lastLine = lines.length ? lines[lines.length - 1] : null;
 
-  return (
-    <div style={screen}>
-      <style>{ORB_KEYFRAMES}</style>
-
+  // COMPACT voice widget (admin 2026-07-14: "full screen hata do, ui theek hai"). A bottom-docked
+  // card — NOT a full-screen takeover. It is still PORTALED to <body> (technical necessity, not the
+  // full-screen the admin meant): the SDA/professional chat has transformed ancestors, and a
+  // `position: fixed` element nested under a CSS-transformed ancestor is positioned relative to that
+  // ancestor, not the viewport — which trapped the widget in a tiny strip. The portal escapes that so
+  // the compact card docks correctly at the bottom-centre. A transparent full-viewport catcher behind
+  // it closes the widget on an outside tap without dimming/taking over the screen.
+  if (typeof document === 'undefined') return null;
+  const barColor = status !== 'live' ? '#6b7280' : speaking ? '#a78bfa' : '#34d399';
+  const waveform = (
+    <div style={waveWrap} aria-hidden="true">
+      {Array.from({ length: NBARS }).map((_, i) => (
+        <div
+          key={i}
+          ref={(el) => { barsRef.current[i] = el; }}
+          style={{ ...waveBar, background: barColor, transition: 'background 0.25s linear' }}
+        />
+      ))}
+    </div>
+  );
+  return createPortal(
+    <div
+      style={catcher}
+      onClick={(e) => { if (e.target === e.currentTarget && onClose) { stop(); onClose(); } }}
+    >
+    <div style={card}>
       {/* Top bar: brand + close. NO provider/model name anywhere. */}
       <div style={topBar}>
         <span style={brand}>NavBharatAI <span style={{ opacity: 0.6, fontWeight: 500 }}>Voice</span></span>
@@ -244,23 +278,23 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
 
       {status === 'disabled' ? (
         <div style={centerCol}>
-          <div style={{ ...orb, animation: 'none', opacity: 0.5 }} />
-          <p style={{ opacity: 0.75, maxWidth: 320, textAlign: 'center', marginTop: 28 }}>
+          {waveform}
+          <p style={{ opacity: 0.75, maxWidth: 320, textAlign: 'center', marginTop: 18, fontSize: 14 }}>
             Voice isn’t available right now. Please try again later.
           </p>
         </div>
       ) : (
         <>
           <div style={centerCol}>
-            {/* Live animated orb — scale + glow come from REAL audio levels (rAF above). */}
-            <div ref={orbRef} style={{ ...orb, animation: live ? 'nbv-breathe 4s ease-in-out infinite' : 'nbv-breathe 6s ease-in-out infinite' }} />
+            {/* Live audio-reactive waveform — bar heights come from REAL mic + playback levels (rAF above). */}
+            {waveform}
             <p style={stateText}>{stateLabel}</p>
             {status === 'live' && (
-              <span style={{ marginTop: 6, fontSize: 12, letterSpacing: 1, color: speaking ? '#a78bfa' : '#34d399' }}>
-                ● {speaking ? 'AI' : 'You'}
+              <span style={{ marginTop: 4, fontSize: 12, letterSpacing: 1, color: speaking ? '#a78bfa' : '#34d399' }}>
+                ● {speaking ? 'AI speaking' : 'Listening to you'}
               </span>
             )}
-            {error && <p style={{ color: '#f87171', marginTop: 14, maxWidth: 340, textAlign: 'center' }}>⚠️ {error}</p>}
+            {error && <p style={{ color: '#f87171', marginTop: 12, maxWidth: 340, textAlign: 'center', fontSize: 13 }}>⚠️ {error}</p>}
 
             {/* Minimal live caption (last line) when the transcript panel is closed. */}
             {!showTranscript && lastLine && (
@@ -348,23 +382,37 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
         </>
       )}
     </div>
+    </div>,
+    document.body,
   );
 }
 
-const ORB_KEYFRAMES = `
-@keyframes nbv-breathe { 0%,100% { filter: hue-rotate(0deg); } 50% { filter: hue-rotate(24deg); } }
-`;
-
-const screen: React.CSSProperties = {
+// Transparent full-viewport catcher — closes on an outside tap; does NOT dim or take over the screen
+// (admin: not full-screen). Docks the compact card at the bottom-centre, above the safe area.
+const catcher: React.CSSProperties = {
   position: 'fixed', inset: 0, zIndex: 2147483001,
-  background: 'radial-gradient(120% 120% at 50% 20%, #14082e 0%, #06040f 60%, #000 100%)',
+  display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center',
+  padding: `16px 12px calc(16px + env(safe-area-inset-bottom, 0px))`,
+  pointerEvents: 'auto',
+};
+const card: React.CSSProperties = {
+  width: 'min(440px, 96vw)', boxSizing: 'border-box',
+  background: 'linear-gradient(160deg, #1b1030 0%, #120b22 60%, #0b0716 100%)',
   color: '#f5f3ff', display: 'flex', flexDirection: 'column',
-  fontFamily: 'system-ui, -apple-system, sans-serif',
-  paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+  borderRadius: 22, border: '1px solid rgba(168,139,250,0.28)',
+  boxShadow: '0 20px 60px rgba(0,0,0,0.55), 0 0 40px rgba(124,58,237,0.15)',
+  fontFamily: 'system-ui, -apple-system, sans-serif', overflow: 'hidden',
+};
+// The audio-reactive equaliser — a row of bars whose heights come from REAL audio (see the rAF loop).
+const waveWrap: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 56,
+};
+const waveBar: React.CSSProperties = {
+  width: 6, height: 8, borderRadius: 999, willChange: 'height',
 };
 const topBar: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '16px 18px', flexShrink: 0,
+  padding: '12px 14px', flexShrink: 0,
 };
 const brand: React.CSSProperties = { fontSize: 16, fontWeight: 800, letterSpacing: 0.2 };
 const iconBtn: React.CSSProperties = {
@@ -373,29 +421,23 @@ const iconBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 };
 const centerCol: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  padding: 20, minHeight: 0,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  padding: '8px 20px 4px', minHeight: 0,
 };
-const orb: React.CSSProperties = {
-  width: 200, height: 200, borderRadius: '50%',
-  background: 'radial-gradient(circle at 35% 30%, #c4b5fd 0%, #7c3aed 45%, #4c1d95 100%)',
-  boxShadow: '0 0 40px 20px rgba(124,58,237,0.4)',
-  willChange: 'transform, box-shadow', transition: 'box-shadow 0.08s linear',
-};
-const stateText: React.CSSProperties = { marginTop: 34, fontSize: 17, fontWeight: 600, opacity: 0.9 };
+const stateText: React.CSSProperties = { marginTop: 14, fontSize: 15, fontWeight: 600, opacity: 0.9 };
 const caption: React.CSSProperties = {
-  marginTop: 18, maxWidth: 460, textAlign: 'center', fontSize: 15, lineHeight: 1.5,
-  opacity: 0.9, padding: '0 8px',
+  marginTop: 12, maxWidth: 400, textAlign: 'center', fontSize: 14, lineHeight: 1.45,
+  opacity: 0.9, padding: '0 8px', maxHeight: 60, overflow: 'hidden',
 };
 const transcriptPanel: React.CSSProperties = {
-  flexShrink: 0, maxHeight: '38vh', overflowY: 'auto', margin: '0 16px',
-  padding: 16, borderRadius: 16, background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.08)', fontSize: 14, lineHeight: 1.5,
+  flexShrink: 0, maxHeight: '28vh', overflowY: 'auto', margin: '0 14px',
+  padding: 14, borderRadius: 14, background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(255,255,255,0.08)', fontSize: 13.5, lineHeight: 1.5,
   display: 'flex', flexDirection: 'column',
 };
 const controls: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
-  padding: '20px 0 30px', flexShrink: 0,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14,
+  padding: '14px 0 20px', flexShrink: 0,
 };
 const voiceToggle: React.CSSProperties = {
   display: 'inline-flex', padding: 4, borderRadius: 999, gap: 4,
@@ -412,7 +454,7 @@ const boliSelect: React.CSSProperties = {
   borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none',
 };
 const micBtn: React.CSSProperties = {
-  width: 72, height: 72, borderRadius: '50%', border: 'none', cursor: 'pointer',
+  width: 64, height: 64, borderRadius: '50%', border: 'none', cursor: 'pointer',
   color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
   boxShadow: '0 8px 30px rgba(124,58,237,0.5)',
 };

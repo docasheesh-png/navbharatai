@@ -10,6 +10,7 @@ import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
 import { metricsStore } from '../lib/metricsStore';
 import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
 import { computeHealthScore } from '../lib/HealthScore';
@@ -442,6 +443,18 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       res.json(buildUsageReport(history, sonnetEquivalentUsd));
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build AgentV3 usage report.' });
+    }
+  });
+
+  // T1-admin-dashboard — build-FAILURE analytics: per-day failure rate + upward spike dates, from the
+  // same daily cost-telemetry aggregates. Surfaces the reliability half of "build/cost/failure".
+  app.get('/api/admin/agentv3/build-analytics', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
+      const history = await agentV3CostTelemetry.list(days);
+      res.json(summarizeBuildFailures(history));
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to build AgentV3 failure analytics.' });
     }
   });
 

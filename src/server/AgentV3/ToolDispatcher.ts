@@ -96,6 +96,7 @@ import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/Realtime
 import { generateSearchIntegration, isSearchProvider } from '../lib/SearchGenerator';
 import { generateMobileExport } from '../lib/MobileExportGenerator';
 import { generateDesktopExport } from '../lib/DesktopExportGenerator';
+import { generateExtensionExport } from '../lib/ExtensionExportGenerator';
 import { replaceSymbol } from '../AppMakerLab/generator/ASTPatching';
 import { analyzeConventions, type IdentifierKind } from '../lib/ConventionEngine';
 import { generateReleaseNote } from '../lib/ReleaseNotesGenerator';
@@ -2389,6 +2390,30 @@ export class ToolDispatcher {
         const deDeps = deResult.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         const deScripts = Object.entries(deResult.scripts).map(([k, v]) => `"${k}": "${v}"`).join(', ');
         return `Desktop export (Electron):\n${deWritten.join('\n')}\nSet package.json "main": "${deResult.mainEntry}"\nAdd the devDependencies: ${deDeps}\nAdd the scripts: ${deScripts}\n\n${deResult.instructions}`;
+      }
+
+      case 'generate_extension_export': {
+        // UT-3 — wrap the generated web app as a Manifest V3 browser extension. Pure generator in
+        // ExtensionExportGenerator.ts. Never clobbers an existing manifest.json.
+        const xtResult = generateExtensionExport({
+          appName: optStr(input, 'appName'),
+          description: optStr(input, 'description'),
+          webDir: optStr(input, 'webDir'),
+        });
+        const xtWritten: string[] = [];
+        for (const [path, content] of Object.entries(xtResult.files)) {
+          if (path === 'manifest.json') {
+            try { await this.actuator.readFile(this.workspaceId, path); xtWritten.push(`Kept existing ${path}`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          xtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('extension export');
+        return `Browser extension export (Manifest V3):\n${xtWritten.join('\n')}\n\n${xtResult.instructions}`;
       }
 
       case 'repair_ci_workflow': {

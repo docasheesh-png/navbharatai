@@ -16061,6 +16061,9 @@ input the old test asserted as null). Gate: server tsc clean; agentv3 suite gree
 platform can create files until a payment method is added at e2b.dev. This is why App #11 (and any build
 right now) produces nothing; it is not an engine defect. The engine now reports that state HONESTLY
 (FAILED, not charged) instead of faking success.
+
+---
+
 ## 2026-07-14 — Fix 62: never leak a raw provider/infra error into the user's chat
 
 Admin real run: a v3.0 build showed "the build sandbox isn't available right now (403: team is blocked:
@@ -16141,3 +16144,47 @@ working build — rule 1). Infra-only remainders are honestly OPEN (rule 6), nev
 **Honest note (rule 3):** this completes the admin's REQUESTED list — NOT the whole ROADMAP.md. Still open:
 Tier-0 live defects (T0-1 heavy-app preview death, T0-2 white screen, T0-4/5/6/7/8 — most need a real repro
 log to root-cause per rule 4), GA-8 multi-strategy repair, GA-11 threat modeling, GA-14/15 pipeline repair.
+
+---
+
+## 2026-07-14 — NavBharatAI Voice → professional-only, upgraded to a full voice partner (5 slices + KB sync)
+
+**Admin brief:** voice must live ONLY inside Professionals (never NavBharatAI Free, never Pro v3.0), sit
+compactly next to the Send button, and become a real voice partner — per-professional persona, text→voice
+continuity ("0 se start na kare"), barge-in, mute, multiple voices with regional **boli** ("boli ≠ language":
+tone shifts, the user's language stays), and cross-session conversation / "co-founder" memory. Shipped as
+five isolated slices, each branch → PR → CI green → squash-merge → auto-deploy:
+
+- **#1349 (Slice 1) — placement:** removed the global floating mic (`SonicLauncher` deleted, unmounted in
+  `main.tsx`); added `ProfessionalVoiceButton` (compact mic in the professional input row, gated on
+  `/api/sonic/status` enabled + signed-in). Voice now appears ONLY inside professional chats. `/sonic`
+  route kept as a general surface.
+- **#1351 (Slice 2) — persona + text→voice continuity:** `buildSystemPrompt(voice, persona)` leads with the
+  professional's own prompt (server-side lookup by `professionalId`, never a client-sent raw prompt →
+  injection-safe); the last 12 text turns are seeded into the Nova Sonic session so voice resumes where the
+  text chat stopped. WS `init` frame carries `{ professionalId, history }`.
+- **#1352 (Slice 3) — barge-in + mute:** new pure `isInterruptionSignal` catches Nova Sonic's
+  `{"interrupted":true}` (previously dropped as generic control-JSON) → `onInterrupted` → WS `{type:'interrupted'}`
+  → client flushes all scheduled `AudioBufferSource`s so playback cuts off the instant you speak over it.
+  Mic mute toggle (live only) stops audio leaving the device; honest "Muted" label.
+- **#1356 (Slice 4) — regional boli:** one pure catalog (`sonicBoli.ts`) shared by the picker and the server;
+  `boliClause` appends a tone/warmth flavour (Bhojpuri/UP-Bihar, Haryanvi, Punjabi, Rajasthani, Marathi,
+  Bengali, Hyderabadi, South Indian) that ALWAYS re-asserts "reply in the SAME language the user speaks".
+  Nova Sonic timbre stays fixed per male/female voice — honest tone layer, not a fake new voice. Compact Boli
+  dropdown under the ♀/♂ pills. `parseBoli` validates the untrusted WS value.
+- **#1358 (Slice 5) — co-founder memory:** every spoken turn is buffered and, on call end, folded into a
+  bounded rolling memory (last 30 turns) persisted per (user, professional) in Firestore (`sonic_voice_memory`,
+  `VoiceMemoryStore` mirrors `UserProfileStore` — VITEST-skip, best-effort, never blocks a call). Next session
+  loads + seeds it BEFORE the live text history via pure `mergeSeed` (persisted-first, newest-survives cap 16),
+  so the professional remembers past calls across sessions AND devices. The verified Firebase uid (already
+  required — voice is logged-in only) now also keys the memory. Only `{role, content}` text is stored; no audio.
+- **KB sync (this commit):** `AppKnowledgeBase.ts` `sonic_voice_chat` entry rewritten — it still described the
+  removed floating button + "general assistant". Now: voice lives inside each professional, in that
+  professional's persona, with male/female voice, boli, barge-in, mute, continuity and memory; keywords
+  expanded (professional voice, boli, mute, interrupt, voice memory, …). Definition-of-done for the feature.
+
+**Isolation preserved:** everything lives under `src/server/sonic/` + `src/components/sonic/` (+ the
+professional input-row wiring); deleting those two folders removes the feature. Gate on every slice:
+frontend `tsc` + server `tsc` + full `vitest` (6611 at Slice 5) + boot smoke (`/api/health` 200,
+`/api/sonic/status` enabled). **Still TODO (admin, "baad me"):** make professional voice PAID for all
+professionals; optional user-facing "forget my voice history" control.

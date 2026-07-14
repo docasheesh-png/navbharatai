@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* DNA-level theme system (admin 2026-07-14). The unlayered compat layer below must sit OUTSIDE any
+   @layer so it beats Tailwind v4's layered utilities and can recolor the app's hardcoded palette
+   per `html[data-theme]`. Imported right after tailwind so it always wins. Inert until data-theme is
+   set → an instant, total rollback (remove the attribute or this import). */
+@import "./styles/theme-compat.css";
 
 /* Disable the browser's left/right swipe back/forward navigation — it was
    triggering accidental history navigation. Custom swipe (open/close the
@@ -21,11 +26,78 @@ html, body {
 }
 
 @layer base {
+  /* ── DNA-level theme palette (admin 2026-07-14) ──────────────────────────────────────────────
+     ONE semantic palette per theme, keyed on `html[data-theme]`. The compat layer (theme-compat.css)
+     maps the app's hardcoded GitHub-dark literals to these vars, so switching data-theme recolours the
+     WHOLE app — desktop and mobile, deeply, not just the header/footer. `dark` is the default (:root),
+     so with no data-theme the app is byte-identical to before. Legacy --theme-bg/text/border/card are
+     kept as ALIASES so the 4 existing IDE consumers work unchanged. */
+  :root,
+  html[data-theme="dark"] {
+    --surface-base: #0d1117;   /* app background            */
+    --surface-card: #161b22;   /* cards / panels            */
+    --surface-raised: #21262d; /* raised chips / inputs     */
+    --text-primary: #ffffff;   /* headings / strong text    */
+    --text-body: #c9d1d9;      /* body text                 */
+    --text-muted: #8b949e;     /* secondary text            */
+    --text-faint: #484f58;     /* placeholder / faint       */
+    --border-soft: rgba(255, 255, 255, 0.1);
+    --accent: #818cf8;
+  }
+  html[data-theme="light"] {
+    --surface-base: #f8fafc;
+    --surface-card: #ffffff;
+    --surface-raised: #eef2f7;
+    --text-primary: #0f172a;
+    --text-body: #1e293b;
+    --text-muted: #475569;
+    --text-faint: #64748b;
+    --border-soft: #e2e8f0;
+    --accent: #4f46e5;
+  }
+  html[data-theme="dim"] {
+    --surface-base: #15202b;
+    --surface-card: #1c2732;
+    --surface-raised: #22303c;
+    --text-primary: #f7f9f9;
+    --text-body: #e1e8ed;
+    --text-muted: #8899a6;
+    --text-faint: #5b7083;
+    --border-soft: #38444d;
+    --accent: #1d9bf0;
+  }
+  html[data-theme="comfort"] {
+    /* Solarized-light — warm, low-eye-strain cream (now actually visible app-wide). */
+    --surface-base: #fdf6e3;
+    --surface-card: #eee8d5;
+    --surface-raised: #e4ddc7;
+    --text-primary: #073642;
+    --text-body: #586e75;
+    --text-muted: #657b83;
+    --text-faint: #93a1a1;
+    --border-soft: #dfd9c6;
+    --accent: #268bd2;
+  }
+  html[data-theme="contrast"] {
+    /* Maximum accessibility: every surface black, every text light → text OPPOSITE background,
+       app-wide (bug 4). Deterministic in CSS via the shared cascade — no per-element JS needed. */
+    --surface-base: #000000;
+    --surface-card: #000000;
+    --surface-raised: #000000;
+    --text-primary: #ffff00;
+    --text-body: #ffffff;
+    --text-muted: #ffffff;
+    --text-faint: #ffff00;
+    --border-soft: #ffff00;
+    --accent: #ffff00;
+  }
+
   :root {
-    --theme-bg: #0d1117;
-    --theme-text: #c9d1d9;
-    --theme-border: rgba(255, 255, 255, 0.1);
-    --theme-card: #161b22;
+    /* Legacy aliases (kept so the existing var(--theme-*) consumers follow the theme unchanged). */
+    --theme-bg: var(--surface-base);
+    --theme-text: var(--text-body);
+    --theme-border: var(--border-soft);
+    --theme-card: var(--surface-card);
 
     /* Native safe-area insets (Capacitor bundled app, admin 2026-07-13). The WebView draws
        edge-to-edge (viewport-fit=cover + black-translucent iOS status bar / Android cutout mode),

@@ -348,6 +348,11 @@ export default function App() {
   useEffect(() => { fetch('/api/health', { method: 'GET' }).catch(() => {}); }, []);
   // 12.2 — Track app load
   useEffect(() => { trackEvent('app_load', { referrer: document.referrer, ua: navigator.userAgent.slice(0, 100) }); }, []);
+  // DNA-level theming (admin 2026-07-14): the ACTIVE theme lives as `data-theme` on <html>, the single
+  // source of truth. index.css defines the semantic palette per theme and theme-compat.css remaps the
+  // app's hardcoded palette to it — so this one attribute recolours the WHOLE app, on desktop AND mobile
+  // (fixes "themes only work on mobile / only header changes"). Portalled modals at <body> inherit it too.
+  useEffect(() => { try { document.documentElement.setAttribute('data-theme', theme); } catch { /* no document */ } }, [theme]);
 
   useEffect(() => {
     localStorage.setItem('navbharat_sidebar_collapsed', isSidebarCollapsed.toString());
@@ -2335,11 +2340,8 @@ export default function App() {
         paddingTop: 'var(--nb-safe-top)',
         paddingLeft: 'var(--nb-safe-left)',
         paddingRight: 'var(--nb-safe-right)',
-        // @ts-ignore
-        '--theme-bg': themeClasses.raw.bg,
-        '--theme-text': themeClasses.raw.text,
-        '--theme-border': themeClasses.raw.border,
-        '--theme-card': themeClasses.raw.card
+        // NOTE: --theme-* now come from <html data-theme> (index.css) — the single source of truth — so
+        // they follow the theme AND respect [data-fixed-dark] subtrees. No inline override here.
       }}
     >
       {/* L3: skip to main content for keyboard/screen-reader users */}
@@ -3397,7 +3399,7 @@ export default function App() {
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
       {effectiveDeviceMode !== 'desktop' && !focusMode && (
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[#0d1117]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 h-14"
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-center justify-around px-2 h-14"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
         >
           {activeView === 'nbi_pro_chat' && v3FooterApi ? (

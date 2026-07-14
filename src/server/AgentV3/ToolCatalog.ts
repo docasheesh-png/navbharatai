@@ -837,6 +837,24 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_extension_export',
+      description:
+        'Wrap the generated web app as a Chrome/Edge/Firefox browser extension (Manifest V3): emits a ' +
+        'manifest.json that serves the built app as the extension popup + an EXTENSION_EXPORT.md runbook. Use ' +
+        'when the user wants a "browser extension / Chrome extension" version of their app. HONEST: it ' +
+        'generates the manifest + load/package instructions, not a published extension (publishing needs a ' +
+        'Web Store / AMO developer account + review). Never overwrites an existing manifest.json.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Extension name shown in the browser (e.g. "My Shop").' },
+          description: { type: 'string', description: 'Optional short description for the manifest / store listing.' },
+          webDir: { type: 'string', description: 'Build output dir whose index.html becomes the popup (Vite → "dist"). Default "dist".' },
+        },
+        required: [],
+      },
+    },
+    {
       name: 'schema_graph',
       description:
         'Show the database schema relationship graph (Prisma models / SQL tables and how they reference each ' +
@@ -1060,6 +1078,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_desktop_export',
   'repair_ci_workflow',
   'schema_graph',
+  'generate_extension_export',
   'replace_symbol',
   'check_conventions',
   'generate_release_notes',

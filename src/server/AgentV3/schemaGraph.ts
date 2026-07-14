@@ -127,6 +127,57 @@ export function analyzeSchemaGraph(sources: ReadonlyArray<{ path: string; conten
   };
 }
 
+// GA-5 (change-propagation blast-radius) — given a model/table, which OTHER models/tables depend on it.
+
+export interface SchemaDependent {
+  /** The model/table that references the target. */
+  from: string;
+  field: string;
+  file: string;
+  line: number;
+}
+
+/**
+ * The blast radius of a model/table: every relation/FK that points AT it — i.e. the models that would break
+ * or need review if it is renamed, dropped, or its key changes. Case-insensitive match (Prisma models are
+ * case-sensitive but SQL tables aren't; matching loosely only ever WIDENS the safety net). Pure.
+ */
+export function schemaDependents(graph: SchemaGraph, target: string): SchemaDependent[] {
+  if (!graph || !graph.relations || !target) return [];
+  const t = String(target).toLowerCase();
+  const out: SchemaDependent[] = [];
+  const seen = new Set<string>();
+  for (const r of graph.relations) {
+    if (String(r.to).toLowerCase() !== t) continue;
+    const key = `${r.file}:${r.line}:${r.from}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ from: r.from, field: r.field, file: r.file, line: r.line });
+  }
+  return out.sort((a, b) => a.from.localeCompare(b.from) || a.line - b.line);
+}
+
+/**
+ * Render the schema relationship graph + per-model blast radius (how many models reference each) as a compact
+ * report for the `schema_graph` tool. `target` (optional) drills into one model's dependents. Pure; '' when
+ * there is no schema.
+ */
+export function schemaGraphReport(graph: SchemaGraph, target?: string): string {
+  if (!graph || graph.models.length === 0) return '';
+  if (target) {
+    const deps = schemaDependents(graph, target);
+    if (deps.length === 0) return `Blast radius of '${target}': nothing references it — safe to change in isolation (or it is not a defined model/table).`;
+    const shown = deps.map((d) => `  • ${d.from}.${d.field} (${d.file}:${d.line})`);
+    return `Blast radius of '${target}' — ${deps.length} model(s)/table(s) reference it (review these before renaming/dropping it or changing its key):\n${shown.join('\n')}`;
+  }
+  const lines = graph.models.map((m) => {
+    const n = schemaDependents(graph, m.name).length;
+    return `  • ${m.name} — referenced by ${n} model(s)/table(s)`;
+  });
+  const dangle = graph.dangling.length ? `\n\n⚠️ ${graph.dangling.length} dangling reference(s) — see the readiness check.` : '';
+  return `Schema relationship graph (${graph.models.length} models/tables, ${graph.relations.length} relations):\n${lines.join('\n')}${dangle}`;
+}
+
 /** Advisory `evaluate` line for dangling relations, or '' when the schema graph is clean / absent. Pure. */
 export function schemaGraphSummary(graph: SchemaGraph): string {
   if (!graph || !graph.dangling || graph.dangling.length === 0) return '';

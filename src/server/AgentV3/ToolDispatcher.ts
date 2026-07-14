@@ -18,7 +18,7 @@ import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
 import { buildApiGraph, apiWiringSummary } from './apiGraph';
-import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary } from './schemaGraph';
+import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary, schemaGraphReport } from './schemaGraph';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
@@ -2420,6 +2420,25 @@ export class ToolDispatcher {
         const manual = issues.filter((i) => !i.autoFixable).map((i) => `  • ${i.file}:${i.line} — ${i.message}`);
         if (applied.length === 0 && manual.length === 0) return 'repair_ci_workflow: no CI-workflow problems detected — the workflows look runnable.';
         return `CI workflow repair:\n${applied.length ? applied.join('\n') : 'No auto-fixable issues.'}${manual.length ? `\n\nNeeds a manual fix (cannot auto-repair):\n${manual.join('\n')}` : ''}`;
+      }
+
+      case 'schema_graph': {
+        // GA-5 — the DB schema relationship graph + change-propagation blast radius: what depends on a
+        // model/table before you rename/drop it. Pure logic in schemaGraph.ts; reads .prisma/.sql separately.
+        let sgFiles: string[] = [];
+        try { sgFiles = await this.actuator.listFiles(this.workspaceId); } catch { return 'schema_graph: could not list workspace files.'; }
+        const schemaPaths = sgFiles.filter((p) => /\.(prisma|sql)$/i.test(p) && !/(^|[\\/])node_modules([\\/]|$)/.test(p)).slice(0, 30);
+        if (schemaPaths.length === 0) return 'schema_graph: no .prisma or .sql schema files found.';
+        const sgSources: Array<{ path: string; content: string }> = [];
+        for (const p of schemaPaths) {
+          try { sgSources.push({ path: p, content: await this.actuator.readFile(this.workspaceId, p) }); } catch { /* skip */ }
+        }
+        const target = optStr(input, 'model');
+        const prismaReport = schemaGraphReport(analyzeSchemaGraph(sgSources), target);
+        const sqlReport = schemaGraphReport(analyzeSqlSchema(sgSources), target);
+        const parts = [prismaReport, sqlReport].filter(Boolean);
+        if (parts.length === 0) return target ? `schema_graph: '${target}' is not a defined model/table.` : 'schema_graph: no models/tables detected in the schema files.';
+        return parts.join('\n\n');
       }
 
       case 'replace_symbol': {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary } from './schemaGraph';
+import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary, schemaDependents, schemaGraphReport } from './schemaGraph';
 
 const P = (content: string, path = 'prisma/schema.prisma') => [{ path, content }];
 
@@ -202,5 +202,46 @@ describe('sqlSchemaSummary', () => {
     expect(line).toContain('Schema —');
     expect(line).toContain("references 'users'");
     expect(line).toContain('foreign key');
+  });
+});
+
+describe('schemaDependents + schemaGraphReport (GA-5 blast-radius)', () => {
+  const g = analyzeSchemaGraph(P(`
+model User {
+  id    Int    @id
+  posts Post[]
+}
+model Post {
+  id       Int  @id
+  author   User @relation(fields: [authorId], references: [id])
+  authorId Int
+}
+model Comment {
+  id     Int  @id
+  author User @relation(fields: [uid], references: [id])
+  uid    Int
+}
+`));
+
+  it('lists every model that references the target (its blast radius)', () => {
+    const deps = schemaDependents(g, 'User');
+    expect(deps.map((d) => d.from).sort()).toEqual(['Comment', 'Post']);
+  });
+
+  it('is empty for a model nothing references (or unknown)', () => {
+    expect(schemaDependents(g, 'Comment')).toEqual([]);
+    expect(schemaDependents(g, 'Nope')).toEqual([]);
+  });
+
+  it('report drills into one model, or lists all with counts', () => {
+    expect(schemaGraphReport(g, 'User')).toContain("Blast radius of 'User' — 2");
+    expect(schemaGraphReport(g, 'Comment')).toContain('nothing references it');
+    const all = schemaGraphReport(g);
+    expect(all).toContain('Schema relationship graph');
+    expect(all).toContain('User — referenced by 2');
+  });
+
+  it('report is empty when there is no schema', () => {
+    expect(schemaGraphReport(analyzeSchemaGraph([]))).toBe('');
   });
 });

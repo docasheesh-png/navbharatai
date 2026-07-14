@@ -208,7 +208,12 @@ safely edit, or truly verify it).
   supervisor/queue (kill zombie sandbox processes, restart-on-crash) needs a separate deployed worker.
 - **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269); (7) conflicting package-manager lockfiles in one directory — inconsistent installs dev-vs-CI (#1280); (8) package-manager DETECTION from the root lockfile (`detectPackageManager`, #1282) now driving the CI/Docker/README generators (#1284–#1286). **Remaining ❌:** actually WIRING the detected non-npm manager into the live install/build path (the risky half — detection + all generated artifacts are done; the sandbox still installs with npm). UV (Python) engine is separate (P-PIPE-runtime).
 - **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
-- **GA-5** ❌ — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
+- **GA-5** 🟡 — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
+  **API-endpoint graph ✅:** `apiGraph.ts` (`buildApiGraph`) diffs backend routes vs frontend calls and the
+  `api_graph` tool renders it; the actionable `missing` set (a frontend call to an endpoint the backend never
+  defines — the #1 silent full-stack bug) is now surfaced AUTOMATICALLY as an advisory line in `evaluate`
+  (#1346, 2026-07-14, `apiWiringSummary`), so every build is wiring-checked, not only on demand. **Remaining
+  ❌:** DB schema/FK relationship graph + change-propagation blast-radius.
 - **GA-6** ❌ — Persistent Engineering Memory (ADR, tech-debt register, bug DB, deploy/migration history).
 - **GA-7** ❌ — Project Coordinator agent (milestone/task-board/resource coordination role).
 - **GA-8** 🟡 — Multi-Strategy Repair (ordered fallback + backoff + circuit-breaker +
@@ -226,7 +231,10 @@ safely edit, or truly verify it).
 - **GA-12** 🟡 — Static-quality engines: ESLint gate (`LintGate`, `AGENTV3_LINT_GATE`) + dead-code (`deadCode.ts` unwired-files)
   already exist; **maintainability code-smell slice ✅ (#1277, 2026-07-13):** `maintainabilityAnalysis` flags the oversized
   "God file/component" (≥1500 lines medium / ≥800 low, deterministic, test/.d.ts excluded), surfaced ADVISORY-only in
-  `evaluate` (never blocks a build). **Remaining ❌:** Prettier-as-engine + coupling/fan-in hotspot + more code-smell detectors.
+  `evaluate` (never blocks a build). **Coupling/fan-in slice ✅ (#1345, 2026-07-14):** `couplingAnalysis`
+  builds the app's internal import graph and flags fan-in hotspots (a module imported by ≥8 others — wide
+  change blast-radius) + high-fan-out God modules (a file importing ≥15 internal modules), AST-accurate via
+  ts-morph, ADVISORY-only in `evaluate`. **Remaining ❌:** Prettier-as-engine + more code-smell detectors.
 - **GA-13** 🟡 — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
   **SCANNER SHIPPED (#1330, 2026-07-13):** `VulnScanner` + the `scan_vulnerabilities` tool scan deps against
   OSV.dev (exact lockfile versions or approx ranges) and report vulnerable packages + advisory IDs — honest
@@ -260,8 +268,13 @@ safely edit, or truly verify it).
   starter test **by default** every build.
 - **Cap-2** 🟢🟡 — Ship a starter test by default + E2E (Playwright) generation (`generate_tests`
   is on-request today).
-- **U-4** 🟢❌ — Verified recipe modules (Stripe/Razorpay, email, realtime, search, storage)
-  that are generated AND smoke-tested.
+- **U-4** 🟢✅ — Verified recipe modules — COMPLETE (2026-07-14). Deterministic, unit-tested BYO-key
+  generators for the full track: payments (Razorpay/Stripe, #1340), transactional email (Resend/SendGrid,
+  #1341), file storage (S3-compatible/Cloudinary, #1342), realtime pub/sub (Pusher/Ably, #1343), full-text
+  search (Algolia/Meilisearch, #1344) — plus the earlier BYO-database wiring (#1336) and auth scaffold. Each
+  ships a server + client module with the secret kept server-side, the `.env.example` keys, the dependency,
+  and an agent tool (`generate_payment`/`_email`/`_storage`/`_realtime`/`_search`), and never clobbers an
+  existing `.env.example`. (Smoke-testing the generated recipe end-to-end remains a future enhancement.)
 - **Cap-4** 🟢🟡 — Auto-inject observability (error handler + request logger + `/health`) into
   generated apps + cost-alerting thresholds.
 

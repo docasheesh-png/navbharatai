@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEndpoints, extractApiCalls, buildApiGraph } from './apiGraph';
+import { extractEndpoints, extractApiCalls, buildApiGraph, apiWiringSummary } from './apiGraph';
 
 // GA-5: API-endpoint graph. Pure — extract backend routes + frontend calls and diff them.
 
@@ -75,5 +75,31 @@ describe('buildApiGraph', () => {
     const g = buildApiGraph([{ path: 'c.ts', content: "axios.get('/api/x');\n" }]);
     expect(g.missing).toEqual([]);
     expect(g.called.length).toBe(1);
+  });
+});
+
+describe('apiWiringSummary — advisory evaluate line', () => {
+  it('is empty when wiring is clean', () => {
+    const g = buildApiGraph([
+      { path: 's.ts', content: "app.get('/api/a', h);\n" },
+      { path: 'c.ts', content: "fetch('/api/a');\n" },
+    ]);
+    expect(apiWiringSummary(g)).toBe('');
+  });
+
+  it('reports the broken frontend calls (method + path + file)', () => {
+    const g = buildApiGraph([
+      { path: 's.ts', content: "app.get('/api/a', h);\n" },
+      { path: 'c.ts', content: "fetch('/api/typo');\naxios.post('/api/missing');\n" },
+    ]);
+    const line = apiWiringSummary(g);
+    expect(line).toContain('API wiring —');
+    expect(line).toContain('/api/typo');
+    expect(line).toContain('no backend route');
+  });
+
+  it('stays empty for a frontend-only repo (no false positives when the backend is external)', () => {
+    const g = buildApiGraph([{ path: 'c.ts', content: "axios.get('/api/x');\n" }]);
+    expect(apiWiringSummary(g)).toBe('');
   });
 });

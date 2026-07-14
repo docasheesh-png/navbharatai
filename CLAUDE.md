@@ -422,7 +422,12 @@ admin to "kick off" the next phase, never park a finished phase waiting for a no
 let CI polling stall forward progress — while one phase's CI is going green you may already
 be building the next. The cycle is a continuous conveyor, not a request-response loop.
 
-**🔵 CI RUNS IN THE BACKGROUND — NEVER BLOCK ON IT, ALWAYS ADVANCE (admin-mandated, 2026-07-13):**
+**🔵 CI RUNS IN THE BACKGROUND — NEVER BLOCK ON IT, ALWAYS ADVANCE (admin-mandated, 2026-07-13; reaffirmed 2026-07-14):**
+**THE ONE-LINE RULE (admin verbatim intent): CI ALWAYS runs in the background — the agent goes and
+completes the NEXT task, with one eye on CI in the background.** Push → start the next task immediately;
+a background timer/notification brings you back to merge each PR the moment its check is green. You are
+never idle-waiting on a progress bar — your attention is on the next unit of work, CI just pings you when
+it's ready.
 When the work is large or spans many PRs, MANY CI runs will queue up — that is expected and fine.
 Do NOT sit and watch any single CI run. The rule, every time you push:
 - **Push → then IMMEDIATELY move to the next unit of work** (investigate, design, or start the next

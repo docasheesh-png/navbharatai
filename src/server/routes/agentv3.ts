@@ -203,6 +203,7 @@ import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolve
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
+import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
@@ -5955,6 +5956,29 @@ export function registerAgentV3Routes(app: Express): void {
           );
         };
         const fastPreview = async (): Promise<void> => {
+          // FOUNDATION GUARANTEE (deep-test Level-1, build 7c56b35a): the file-list planner can OMIT the
+          // foundational files a vite-react app needs to install & boot — most damagingly `package.json`.
+          // When it does, the `fast-install` below fails `ENOENT … package.json` (exit -1), the missing-
+          // dependency reconcile (`npm install <pkgs>`) then fails 254 (no package.json to install INTO),
+          // and `npm run dev` never starts → the whole build degrades to BUILD_PARTIAL with the type-check
+          // unable to run. Root-cause fix: before ANY install, synthesize the foundational files that are
+          // ABSENT (package.json with deps derived from the code's REAL imports, index.html, an entry,
+          // vite.config, tsconfig) — never overwriting a generated OR on-disk-scaffolded file. Covers both
+          // fast-lane builders (SimpleBuilder + OneShot) since both funnel through fastPreview.
+          // Deterministic + unit-tested (FrameworkFoundation.ts). Kill switch: AGENTV3_FOUNDATION_GUARD=off.
+          if (process.env.AGENTV3_FOUNDATION_GUARD !== 'off') {
+            try {
+              const foundation = ensureViteReactFoundation(Object.fromEntries(writtenFiles), { framework, existingPaths: scaffold });
+              if (foundation.added.length > 0) {
+                fastLog(`🩹 Added ${foundation.added.length} missing foundational file(s) so the app can install & boot: ${foundation.added.join(', ')}`);
+                // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
+                // (the durable store + the reconcile scan below both then see the new package.json).
+                await mapWithConcurrency(Object.entries(foundation.files), 4, ([p, c], i) =>
+                  dispatcher.dispatch({ id: `fast-foundation-${i}`, name: 'write_file', input: { path: p, content: c } }, 'frontend'),
+                );
+              }
+            } catch { /* best-effort — a failure here just falls through to the install exactly as before */ }
+          }
           // ALWAYS run a real install — a build that just (re)wrote package.json MUST have its FULL
           // dependency tree installed. The old `… else echo "deps present"` skip trusted a pre-baked/
           // partial node_modules (the E2B base image ships one), which left a transitive babel/

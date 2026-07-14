@@ -20,6 +20,7 @@ import {
 } from '@aws-sdk/client-bedrock-runtime';
 import { sonicModelId, sonicRegion } from './featureFlag';
 import { isControlJson, isInterruptionSignal } from './isControlJson';
+import { boliClause, type SonicBoli } from './sonicBoli';
 import { SonicTranscriptGate } from './sonicTranscript';
 
 // Re-export so existing importers (and tests) keep `import { isControlJson } from './SonicBridge'`.
@@ -79,13 +80,15 @@ function voiceModeClauses(voice: SonicVoice): string {
 }
 
 /** Full system prompt: a persona (a professional's own prompt, or the default NavBharatAI Voice
- *  assistant) followed by the voice-mode clauses. The professional's identity is preserved so the
- *  Doctor voice sounds like the doctor, the Lawyer like the lawyer, etc. */
-export function buildSystemPrompt(voice: SonicVoice, persona?: string): string {
+ *  assistant) followed by the voice-mode clauses, then an optional regional-boli tone flavour. The
+ *  professional's identity is preserved so the Doctor voice sounds like the doctor, the Lawyer like
+ *  the lawyer; the boli only colours HOW it speaks (never WHICH language — see sonicBoli.ts). */
+export function buildSystemPrompt(voice: SonicVoice, persona?: string, boli: SonicBoli = 'neutral'): string {
   const base = (persona && persona.trim())
     ? persona.trim()
     : 'You are NavBharatAI Voice, a warm, concise spoken assistant for Indian users.';
-  return `${base}\n\n${voiceModeClauses(voice)}`;
+  const boli_ = boliClause(boli);
+  return `${base}\n\n${voiceModeClauses(voice)}${boli_ ? `\n\n${boli_}` : ''}`;
 }
 
 /**
@@ -141,10 +144,10 @@ export class SonicSession {
   private readonly voice: SonicVoice;
   private readonly history: SonicTurn[];
 
-  constructor(private readonly cb: SonicCallbacks, opts: { voice?: SonicVoice; persona?: string; history?: SonicTurn[] } = {}) {
+  constructor(private readonly cb: SonicCallbacks, opts: { voice?: SonicVoice; persona?: string; history?: SonicTurn[]; boli?: SonicBoli } = {}) {
     this.voice = opts.voice ?? 'female';
     this.history = Array.isArray(opts.history) ? opts.history.slice(-12) : []; // cap seeded context
-    this.systemPrompt = buildSystemPrompt(this.voice, opts.persona);
+    this.systemPrompt = buildSystemPrompt(this.voice, opts.persona, opts.boli ?? 'neutral');
     this.client = new BedrockRuntimeClient({
       region: sonicRegion(),
       credentials: {

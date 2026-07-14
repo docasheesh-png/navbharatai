@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail } from '../lib/authMiddleware';
+import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import {
   isAgentV3Enabled,
@@ -3444,7 +3444,7 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
-  app.post('/api/agentv3/chat', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
     // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
     // under VITEST (route handler isn't exercised by tests; the pure resolveBuildIdentity is tested

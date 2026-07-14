@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes custom_domains (server-only).
 import { doc, setDoc, getServerDb as getDb } from '../lib/serverDb';
-import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
 import {
   cloudflareConfigured,
   createCustomHostname,
@@ -31,7 +31,7 @@ function normalizeDomain(raw: unknown): string {
 const DOMAIN_RE = /^([a-z0-9-]+\.)+[a-z]{2,}$/;
 
 export function registerDomainsRoutes(app: Express): void {
-  app.post('/api/domains/connect', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/domains/connect', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     // SECURITY: provisioning a Cloudflare custom hostname spends NavBharatAI's zone quota and writes an
     // ownership mapping, so it MUST be authenticated. Derive the owner from the verified Firebase token —
     // never a spoofable req.body.userId (which also let an anonymous caller provision on our zone).

@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter } from '../lib/authMiddleware';
+import { buildRateLimiter, enforceNotBanned } from '../lib/authMiddleware';
 import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
 import { runRepoImprovementGen } from '../repoAnalyst/generate';
 
@@ -12,7 +12,7 @@ import { runRepoImprovementGen } from '../repoAnalyst/generate';
  *    repos; the feature works fully on public repos without one.
  */
 export function registerRepoAnalystRoutes(app: Express): void {
-  app.post('/api/repo-analyst/chat', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     if (typeof message !== 'string' || !message.trim()) {
       res.status(400).json({ error: 'message is required.' });
@@ -33,7 +33,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
   });
 
   // "Improver" — generate concrete improvement files for the referenced repo.
-  app.post('/api/repo-analyst/generate', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/generate', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     const token = req.headers.authorization?.split(' ')[1];
     const turns: AnalystTurn[] = Array.isArray(history)

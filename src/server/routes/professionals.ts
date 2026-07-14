@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, verifyFirebaseToken } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
@@ -24,7 +24,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     res.json({ professionals: listProfessionals() });
   });
 
-  app.post('/api/professional/:id/chat', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/professional/:id/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const config = getProfessional(req.params.id);
     if (!config) {
       res.status(404).json({ error: `Unknown professional: ${req.params.id}` });

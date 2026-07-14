@@ -17,6 +17,7 @@ import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { SonicSession, type SonicVoice, type SonicTurn } from './SonicBridge';
+import { parseBoli, type SonicBoli } from './sonicBoli';
 import { isSonicEnabled } from './featureFlag';
 import { getProfessional } from '../professionals/registry';
 import { buildProfessionalSystemPrompt } from '../professionals/engine';
@@ -48,9 +49,11 @@ function send(ws: WebSocket, msg: Record<string, unknown>): void {
 }
 
 wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-  // The chosen voice (male → matthew, female → tiffany) rides the WS query; default female.
-  const voiceParam = new URLSearchParams((req.url || '').split('?')[1] || '').get('voice');
-  const voice: SonicVoice = voiceParam === 'male' ? 'male' : 'female';
+  // The chosen voice (male → matthew, female → tiffany) and regional boli (tone flavour) ride the
+  // WS query; defaults: female voice, neutral boli. parseBoli validates the untrusted boli value.
+  const params = new URLSearchParams((req.url || '').split('?')[1] || '');
+  const voice: SonicVoice = params.get('voice') === 'male' ? 'male' : 'female';
+  const boli: SonicBoli = parseBoli(params.get('boli'));
 
   // The session is created on the client's FIRST message (`init`), which carries the persona
   // (a professional's own prompt) and the prior text conversation to continue. This lets the
@@ -67,7 +70,7 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       onInterrupted: () => send(ws, { type: 'interrupted' }),
       onError: (message) => send(ws, { type: 'error', message }),
       onClose: () => { try { ws.close(); } catch { /* already closed */ } },
-    }, { voice, persona, history });
+    }, { voice, persona, history, boli });
     session.start()
       .then(() => send(ws, { type: 'ready' }))
       .catch((e) => send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) }));

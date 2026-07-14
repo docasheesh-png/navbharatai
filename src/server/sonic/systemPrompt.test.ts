@@ -24,4 +24,14 @@ describe('buildSystemPrompt — persona + voice-mode clauses', () => {
     expect(p).toContain('NEVER mention or reveal');
     expect(p).toContain('NavBharatAI');
   });
+
+  it('appends a regional boli flavour when chosen, and nothing extra for neutral', () => {
+    const neutral = buildSystemPrompt('female', 'X', 'neutral');
+    const punjabi = buildSystemPrompt('female', 'X', 'punjabi');
+    expect(neutral).not.toContain('Punjabi');
+    expect(punjabi).toContain('Punjabi');
+    expect(punjabi.length).toBeGreaterThan(neutral.length);
+    // boli must never override the language rule.
+    expect(punjabi).toContain('SAME language');
+  });
 });

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { downsampleFloat32, float32ToBase64PCM16, base64PCM16ToFloat32 } from './sonicAudio';
+import { BOLI_OPTIONS, type SonicBoli } from '../../server/sonic/sonicBoli';
 import { auth } from '../../lib/firebase';
 
 type Status = 'loading' | 'disabled' | 'idle' | 'connecting' | 'live' | 'error';
@@ -28,6 +29,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
   const [speaking, setSpeaking] = useState(false); // assistant is talking (from real playback level)
   const [showTranscript, setShowTranscript] = useState(false);
   const [voice, setVoice] = useState<'male' | 'female'>('female'); // chosen before a call starts
+  const [boli, setBoli] = useState<SonicBoli>('neutral'); // regional tone flavour, chosen before a call
   const [muted, setMuted] = useState(false); // mic muted mid-call — mic audio stops leaving the device
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -164,7 +166,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       procRef.current = proc;
 
       const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}`);
+      const ws = new WebSocket(`${wsProto}://${window.location.host}/api/sonic/stream?token=${encodeURIComponent(token)}&voice=${voice}&boli=${boli}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -206,7 +208,7 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
       setStatus('error');
       stop();
     }
-  }, [playChunk, flushPlayback, stop, voice, professionalId, history]);
+  }, [playChunk, flushPlayback, stop, voice, boli, professionalId, history]);
 
   // Toggle mic mute mid-call. Mirrored into a ref so the audio callback sees it without re-binding.
   const toggleMute = useCallback(() => {
@@ -284,19 +286,36 @@ export function SonicChat({ onClose, professionalId, history }: { onClose?: () =
 
           {/* Bottom control: one big mic/stop button, like ChatGPT/Grok voice mode. */}
           <div style={controls}>
-            {/* Voice picker — choose male/female before starting; locked once a call is live. */}
+            {/* Voice + boli pickers — chosen before starting; locked once a call is live. */}
             {!live && (
-              <div style={voiceToggle} role="group" aria-label="Voice">
-                <button
-                  onClick={() => setVoice('female')}
-                  aria-pressed={voice === 'female'}
-                  style={{ ...voicePill, ...(voice === 'female' ? voicePillOn : {}) }}
-                >♀ Female</button>
-                <button
-                  onClick={() => setVoice('male')}
-                  aria-pressed={voice === 'male'}
-                  style={{ ...voicePill, ...(voice === 'male' ? voicePillOn : {}) }}
-                >♂ Male</button>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <div style={voiceToggle} role="group" aria-label="Voice">
+                  <button
+                    onClick={() => setVoice('female')}
+                    aria-pressed={voice === 'female'}
+                    style={{ ...voicePill, ...(voice === 'female' ? voicePillOn : {}) }}
+                  >♀ Female</button>
+                  <button
+                    onClick={() => setVoice('male')}
+                    aria-pressed={voice === 'male'}
+                    style={{ ...voicePill, ...(voice === 'male' ? voicePillOn : {}) }}
+                  >♂ Male</button>
+                </div>
+                {/* Regional boli — shifts tone/warmth only; language stays whatever YOU speak. */}
+                <label style={boliRow}>
+                  <span style={{ opacity: 0.6, fontSize: 12 }}>Boli</span>
+                  <select
+                    value={boli}
+                    onChange={(e) => setBoli(e.target.value as SonicBoli)}
+                    aria-label="Regional boli (speaking style)"
+                    title="Regional speaking style — tone only, your language stays the same"
+                    style={boliSelect}
+                  >
+                    {BOLI_OPTIONS.map((o) => (
+                      <option key={o.id} value={o.id} style={{ color: '#111' }}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 22 }}>
@@ -387,6 +406,11 @@ const voicePill: React.CSSProperties = {
   fontSize: 13, fontWeight: 700, padding: '7px 16px', borderRadius: 999,
 };
 const voicePillOn: React.CSSProperties = { background: 'linear-gradient(135deg,#6d28d9,#7c3aed)', color: '#fff' };
+const boliRow: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8 };
+const boliSelect: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#f5f3ff',
+  borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none',
+};
 const micBtn: React.CSSProperties = {
   width: 72, height: 72, borderRadius: '50%', border: 'none', cursor: 'pointer',
   color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',

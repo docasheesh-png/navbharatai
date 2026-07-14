@@ -16216,3 +16216,45 @@ bcrypt, "Authorization: Bearer", "SERVER-only". Gate: server tsc clean; systemPr
 
 **Open (unchanged):** GLM 429 saturation (37 this build) → step-limit — the extra GLM keys (pool live) are
 the fix. Prisma `.env`/DATABASE_URL setup gap is a smaller separate item for a future slice.
+
+---
+
+## 2026-07-14 — Mobile production fix: fake "123456" OTP bypass killed + real native phone OTP + Android runtime permissions (admin-mandated, DNA-level)
+
+**Admin report (2 Play-Store screenshots):** (1) In the Android app, phone-OTP login sent NO real SMS —
+it "logged in" on the hardcoded code `123456`. (2) The app requested NONE of the mobile runtime
+permissions (storage, mic, camera, location) users expect.
+
+**Root cause 1 — a fake feature shipped as real (breaks absolute rules 2 & 3).** `AuthComponent.handleSendOtp`'s
+catch block was `if (isNetworkOrIframeError || true) { … }` — the `|| true` force-ran a **fake "Sandbox
+Bypass"** on EVERY OTP path: it built a `dummyConfirmation` whose `confirm()` returned success for the literal
+string `'123456'`. On a real device the web-SDK `signInWithPhoneNumber` (reCAPTCHA-based) can't run, so it
+ALWAYS fell into this branch → every user "logged in" with 123456, and no real SMS was ever sent. This was
+both a **security hole** (anyone signs in as any number) and a **fake feature** (rules 2 & 3).
+
+**Fix 1 (real, no fake):** On native (`Capacitor.isNativePlatform()`) use the installed
+`@capacitor-firebase/authentication` native phone flow — a REAL SMS via Play Integrity (no reCAPTCHA), with
+Android auto-reading the code through the Google **SMS Retriever API** (the "direct OTP verification" the admin
+asked for). `phoneCodeSent` stores the `verificationId`; `phoneVerificationCompleted` auto-signs-in;
+`phoneVerificationFailed` surfaces an HONEST error. Manual entry builds a real `PhoneAuthProvider.credential`
+and `signInWithCredential`s the JS SDK. Web keeps the reCAPTCHA path. The `|| true` fake-bypass block is
+**deleted**; on failure the working Email / Google options remain. (`PhoneAuthProvider` is dynamic-imported
+`as any` — firebase v12 exports it at runtime but the umbrella types don't surface it.)
+
+**Root cause 2 — permissions never declared.** Capacitor's `BridgeWebChromeClient` auto-prompts for
+mic/camera when the WebView calls `getUserMedia`, but ONLY if the permission is declared in the manifest.
+`AndroidManifest.xml` declared only `INTERNET`, so every runtime request was auto-denied.
+
+**Fix 2:** Declared `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `CAMERA`, `ACCESS_FINE/COARSE_LOCATION`, and
+SDK-scoped storage/media reads (`READ_EXTERNAL_STORAGE` maxSdk32, `WRITE` maxSdk28, `READ_MEDIA_IMAGES/AUDIO`),
+with `uses-feature required="false"` so the app still installs on camera/mic-less devices. **READ_SMS is
+DELIBERATELY NOT declared** — SMS Retriever is hash-scoped and needs no SMS permission, and Play Store rejects
+non-default-handler apps that request it (professional standard, matches how other apps do it).
+
+**Honest infra boundaries (rule 6 — Claude cannot do these):** real OTP SMS requires the admin to enable the
+**Phone provider in Firebase console** and register the app's **SHA-1/SHA-256 fingerprints for
+`com.navbharat.ai`**. Because the app runs in Capacitor **bundled** mode, these fixes reach users only after a
+fresh **`.aab` build (android-aab.yml) + Play Store update** — a web deploy alone does NOT ship them.
+
+**Gate:** `npx tsc --noEmit` clean for the changed files (only the pre-existing `mobileNative.ts` missing-dep
+errors remain, unrelated). No server code touched.

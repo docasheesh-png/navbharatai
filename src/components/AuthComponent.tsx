@@ -139,6 +139,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
+  // Native (Android/iOS) phone-auth verification id — set by the plugin's `phoneCodeSent` listener.
+  const nativeVerificationId = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -212,10 +214,54 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         throw new Error(data.message || 'Verification gateway limits reached. Please wait.');
       }
 
-      // 2. Since security checks have passed, proceed to dispatch through Firebase auth
+      // 2. Security checks passed → dispatch a REAL OTP via Firebase Phone Auth.
+      if (Capacitor.isNativePlatform()) {
+        // NATIVE (Android/iOS): use the native Firebase phone flow — a REAL SMS sent via Play Integrity
+        // (no reCAPTCHA), and Android auto-reads the code via the SMS Retriever API (the "direct OTP
+        // verification" flow). No READ_SMS permission is needed (Retriever is hash-scoped), which also
+        // keeps the app Play-Store-compliant. Requires Firebase console: Phone provider enabled + the
+        // app's SHA-1/SHA-256 fingerprints registered for com.navbharat.ai.
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        // PhoneAuthProvider is exported by `firebase/auth` at runtime but the v12 umbrella types don't
+        // surface it to tsc — resolve it dynamically (it IS present) and build the JS-SDK credential.
+        const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
+        await FirebaseAuthentication.removeAllListeners();
+        nativeVerificationId.current = null;
+        // Auto-read (SMS Retriever) — sign in the JS SDK the moment the code is captured automatically.
+        await FirebaseAuthentication.addListener('phoneVerificationCompleted', async (event: any) => {
+          try {
+            const vid = event?.verificationId ?? nativeVerificationId.current;
+            const code = event?.verificationCode;
+            if (!vid || !code) return;
+            await signInWithCredential(auth, PhoneAuthProvider.credential(vid, code));
+            setIsOtpVerified(true);
+            setError('');
+            addTerminalLine(`[AUTH] Authentication successful via Phone (auto-verified)`, 'success');
+            onClose();
+          } catch (e: any) {
+            setError(e?.message || 'Auto sign-in failed. Enter the code manually.');
+          }
+        });
+        await FirebaseAuthentication.addListener('phoneCodeSent', (event: any) => {
+          nativeVerificationId.current = event?.verificationId ?? null;
+          setIsOtpSent(true);
+          setOtpCooldown(30);
+          setSuccessMessage('OTP sent to your phone.');
+          addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
+        });
+        await FirebaseAuthentication.addListener('phoneVerificationFailed', (event: any) => {
+          setError(event?.message || 'Phone verification failed. Please use Email or Google sign-in.');
+          setOtpSending(false);
+        });
+        await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phone });
+        setOtpSending(false);
+        return;
+      }
+
+      // WEB: reCAPTCHA-verified Firebase phone auth.
       initRecaptcha();
       if (!recaptchaVerifier.current) throw new Error('Recaptcha failed to initialize');
-      
+
       const result = await signInWithPhoneNumber(auth, phone, recaptchaVerifier.current);
       setConfirmationResult(result);
       setIsOtpSent(true);
@@ -223,39 +269,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setSuccessMessage('OTP sent successfully.');
       addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
     } catch (err: any) {
+      // HONEST failure — NO fake bypass (removed 2026-07-14). The old code force-activated a fake
+      // "enter 123456" login on EVERY failure (`|| true`), which was both a security hole (anyone could
+      // sign in as any number with 123456) and a fake feature. Real OTP only; on failure the working
+      // Email / Google sign-in options remain.
       console.error('[OTP SEND ERROR]', err);
-      const isNetworkOrIframeError = err.message?.includes('network-request-failed') || 
-                                     err.message?.includes('recaptcha') || 
-                                     err.message?.includes('captcha') || 
-                                     err.message?.includes('App Verification') ||
-                                     err.message?.includes('app-verification-disabled') ||
-                                     err.message?.includes('auth/operation-not-allowed') ||
-                                     err.message?.includes('restricted');
-                                     
-      if (isNetworkOrIframeError || true) { // Gracefully fallback under sandbox restriction or console disabled state
-         console.warn(`[AUTH] Triggering local Sandbox Simulation to bypass iframe cross-origin restriction.`);
-         addTerminalLine(`[AUTH] Firebase SMS gateway/network boundary detected. Activating Secure Sandbox Bypass...`, 'warn');
-         
-         const dummyConfirmation = {
-            confirm: async (verificationCode: string) => {
-               if (verificationCode === '123456') {
-                  return { user: { phoneNumber: phone } };
-               } else {
-                  throw new Error('Invalid verification code. Enter 123456 for Sandbox Bypass.');
-               }
-            }
-         };
-         
-         setConfirmationResult(dummyConfirmation as any);
-         setIsOtpSent(true);
-         setOtpCooldown(30);
-         setSuccessMessage('Sandbox Bypass Active: OTP generated safely. Use code 123456 to verify!');
-         addTerminalLine(`[AUTH] Sandbox Mode Active. Enter code 123456 to complete phone login.`, 'success');
-         setOtpSending(false);
-         return;
-      }
-      
-      setError(err.message || 'Failed to send OTP. Ensure phone auth is enabled in console.');
+      const code = err?.code || err?.message || '';
+      const msg = /operation-not-allowed/.test(code)
+        ? 'Phone OTP sign-in is not enabled for this app yet. Please use Email or Google sign-in.'
+        : (err?.message || 'Could not send the OTP. Please try again, or use Email / Google sign-in.');
+      setError(msg);
       if (recaptchaVerifier.current) {
         recaptchaVerifier.current.clear();
         recaptchaVerifier.current = null;
@@ -266,10 +289,18 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   };
 
   const handleVerifyOtp = async () => {
-    if (!confirmationResult) return;
     setLoading(true);
     try {
-      await confirmationResult.confirm(otp);
+      if (Capacitor.isNativePlatform()) {
+        // NATIVE: build a real Firebase phone credential from the plugin's verificationId + the entered
+        // code and sign the JS SDK in (skipNativeAuth keeps the web SDK the single session source).
+        if (!nativeVerificationId.current) throw new Error('Please request an OTP first.');
+        const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
+        await signInWithCredential(auth, PhoneAuthProvider.credential(nativeVerificationId.current, otp));
+      } else {
+        if (!confirmationResult) return;
+        await confirmationResult.confirm(otp);
+      }
       setIsOtpVerified(true);
       setError('');
       addTerminalLine(`[AUTH] Authentication successful via Phone`, 'success');

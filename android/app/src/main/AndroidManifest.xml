@@ -38,4 +38,34 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Microphone: NavBharatAI Voice (getUserMedia in the WebView). Capacitor's BridgeWebChromeClient
+         auto-requests the runtime prompt when the WebView asks for audio, but ONLY if declared here —
+         without these the mic request was auto-denied ("Permission denied" on the voice screen). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Camera: image capture / scanning inside the app. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Location: features that use the browser Geolocation API. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Storage: file uploads/downloads. Scoped by SDK — legacy read/write only up to Android 12 (API 32);
+         Android 13+ uses the granular media reads. WRITE is legacy-only (maxSdk 28). -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <!-- Features are optional so the app installs on devices lacking a camera/mic. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
+    <!-- NOTE: READ_SMS / RECEIVE_SMS are DELIBERATELY NOT declared. OTP auto-read uses the Google SMS
+         Retriever API (built into Firebase native phone auth) which is hash-scoped and needs NO SMS
+         permission — and Play Store REJECTS apps that request SMS permissions unless they are the
+         device's default SMS handler. Auto-verification still works without them. -->
 </manifest>

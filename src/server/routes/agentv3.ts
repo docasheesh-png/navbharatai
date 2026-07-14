@@ -144,7 +144,7 @@ import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/Preview
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
-import { billedAmountUsd, sonnetEquivalentUsd } from '../AgentV3/pricing';
+import { billedAmountUsd, sonnetEquivalentUsd, explainBuildCost } from '../AgentV3/pricing';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -7615,7 +7615,10 @@ export function registerAgentV3Routes(app: Express): void {
       // computed (zero extra cost) and ship it with the result — the reducer + <BuildHealthCard/> already
       // render it. Additive: the field is optional and the client no-ops when it's absent.
       const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
-      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), readiness: buildHealth });
+      // T1-cost-transparency: the "why this build cost ₹X" breakdown — token split, tier, markup, base cost.
+      // Only when the build was actually billed (>0); a free build has no charge to explain.
+      const costBreakdown = effectiveBilledUsd > 0 ? explainBuildCost(buildUsage.total(), powerLevelReqEffective, usdInrRate()) : null;
+      emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance
       // in-memory cache (lastDiagnostics) — it does NOT write to Firestore on every tick — so a crash

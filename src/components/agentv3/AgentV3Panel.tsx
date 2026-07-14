@@ -2448,6 +2448,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : `$${(state.billedUsd as number).toFixed(4)}`}
               </div>
             )}
+            {/* T1-cost-transparency — expandable "why this build cost ₹X" breakdown. */}
+            {state.done && state.costBreakdown && (
+              <details className="text-[11px] text-zinc-500">
+                <summary className="cursor-pointer select-none hover:text-zinc-300" title="See how this build's charge was calculated">
+                  Why this cost?
+                </summary>
+                <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-700 pl-2">
+                  <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
+                  <span>Tier: {state.costBreakdown.tierLabel} — {state.costBreakdown.baseModel} cost × {state.costBreakdown.multiplier}</span>
+                  <span>Base ${state.costBreakdown.baseUsd.toFixed(4)} × {state.costBreakdown.multiplier} = ${state.costBreakdown.billedUsd.toFixed(4)} → ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
+                </div>
+              </details>
+            )}
             {/* P-UX.7 — token usage for this build (input + output), shown alongside the ₹ cost. */}
             {state.done && typeof state.tokens === 'number' && state.tokens > 0 && (
               <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Tokens used by this build (input + output)">

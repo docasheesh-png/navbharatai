@@ -620,10 +620,19 @@ export function emptyBuildFailureSummary(
   fileCount: number,
   sandboxUnavailable: boolean,
 ): string | null {
-  if (!expectsArtifacts || fileCount > 0) return null;
-  return sandboxUnavailable
-    ? 'The build could not run — the sandbox was unavailable, so no files were created. Please try again in a moment; you have not been charged.'
-    : 'The build produced no files. Please try again — you have not been charged.';
+  if (!expectsArtifacts) return null;
+  // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
+  // could not be set up (403 "team is blocked: missing payment method"), EVERY write_file/bash 403'd, so
+  // NOTHING was persisted to the sandbox and NOTHING was ever installed/compiled/run. But the per-file
+  // generator still recorded 23 in-memory files (flushed only to the durable Firestore store), so
+  // `fileCount > 0` was true — and the old `fileCount > 0 → null` guard let the build report ok:true /
+  // "READY 100/100" over a preview with ZERO files ("0 file par build health 100%"). A dead sandbox can
+  // never have produced a real, runnable, VERIFIED app, so fail unconditionally when it was unavailable.
+  if (sandboxUnavailable) {
+    return 'The build could not run — the sandbox was unavailable (no files could be created, installed, or verified). Please try again in a moment; you have not been charged.';
+  }
+  if (fileCount > 0) return null;
+  return 'The build produced no files. Please try again — you have not been charged.';
 }
 
 /**

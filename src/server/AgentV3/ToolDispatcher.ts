@@ -91,6 +91,7 @@ import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager 
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
+import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
@@ -2190,22 +2191,38 @@ export class ToolDispatcher {
         try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
         const plans = detectMigrationPlan(files.filter((p) => !/^(node_modules|\.git)\//.test(p)), pkgJson);
-        if (plans.length === 0 || dryRun) return migrationPlanSummary(plans);
+        // GA-6 — read the persisted migration history back so the agent SEES what schema was already
+        // applied (and when / whether it succeeded) before it re-runs. Best-effort; never blocks.
+        const histBlock = summarizeMigrationHistory(await loadMigrationHistory(this.workspaceId).catch(() => []));
+        const histPrefix = histBlock ? `${histBlock}\n\n` : '';
+        if (plans.length === 0 || dryRun) return `${histPrefix}${migrationPlanSummary(plans)}`;
         const out: string[] = [];
         let allOk = true;
         for (const plan of plans) {
+          const exitCodes: number[] = [];
+          let planOk = true;
           for (const cmd of plan.commands) {
             let r: { exitCode: number; stdout: string; stderr: string };
             try { r = await this.actuator.runCommand(this.workspaceId, cmd); }
             catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
             const ok = r.exitCode === 0;
             allOk = allOk && ok;
+            planOk = planOk && ok;
+            exitCodes.push(r.exitCode);
             out.push(`${ok ? '✓' : '✗'} [${plan.tool}] ${cmd} → exit ${r.exitCode}${ok ? '' : `\n${(r.stderr || r.stdout || '').slice(-600)}`}`);
             if (!ok) break; // a failed step blocks the rest of this tool's chain — report honestly, don't push on
           }
+          // GA-6 — persist THIS plan's run (tool, commands, outcome, exit codes) so a later build remembers it.
+          void recordMigrationRun(this.workspaceId, {
+            tool: plan.tool,
+            commands: [...plan.commands],
+            ok: planOk,
+            exitCodes,
+            ranAt: new Date().toISOString(),
+          });
         }
         if (!allOk) getWorkspaceMemory(this.workspaceId).recordAudit('run_migrations: a migration command failed.');
-        return `${allOk ? '✅ Migrations applied.' : '⚠️ Migration FAILED (schema may be incomplete — fix before relying on the DB).'}\n${out.join('\n')}`;
+        return `${histPrefix}${allOk ? '✅ Migrations applied.' : '⚠️ Migration FAILED (schema may be incomplete — fix before relying on the DB).'}\n${out.join('\n')}`;
       }
 
       case 'generate_db_config': {

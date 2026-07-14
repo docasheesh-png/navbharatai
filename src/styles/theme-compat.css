@@ -1,0 +1,109 @@
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   DNA-level theme compatibility layer (admin 2026-07-14).
+
+   WHY THIS FILE EXISTS: the app expresses ~90% of its surfaces with a handful of hardcoded
+   GitHub-dark literal classes (bg-[#0d1117] ×275, bg-[#161b22] ×357, text-white ×1852,
+   text-[#8b949e] ×538, text-[#484f58] ×330, …). Prop-drilling a theme to 148 files, or rewriting
+   3,700 class usages, would be a massive, breakage-prone change. Instead this ONE file re-maps those
+   dominant literals to the semantic palette vars (defined per `html[data-theme]` in index.css), so a
+   single attribute switch recolours the WHOLE app — deeply, on desktop and mobile — with zero
+   per-component edits.
+
+   HOW IT WINS THE CASCADE: it is imported OUTSIDE any @layer. Per the CSS cascade-layers spec, normal
+   declarations that are NOT in a layer beat normal declarations inside a layer — and Tailwind v4 puts
+   every utility in `@layer utilities`. So these unlayered rules override the utility classes without
+   needing !important.
+
+   SAFE BY CONSTRUCTION: every rule is gated on `html[data-theme]`. With the attribute absent the app
+   falls back to the raw literals (dark) unchanged; removing the attribute (or this @import) is an
+   instant, total rollback. On the `dark` theme the vars equal the original hex, so it is a visual
+   no-op. Brand/semantic colours (indigo buttons, red errors, green success) are deliberately NOT
+   remapped — only the neutral chrome palette is. White text on coloured buttons is re-asserted below.
+   ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+/* ── Surfaces (backgrounds) ─────────────────────────────────────────────────────────────────── */
+html[data-theme] .bg-\[\#0d1117\],
+html[data-theme] .bg-\[\#0d1520\]              { background-color: var(--surface-base); }
+html[data-theme] .bg-\[\#161b22\],
+html[data-theme] .bg-\[\#1e1e1e\],
+html[data-theme] .bg-\[\#252526\],
+html[data-theme] .bg-\[\#111827\],
+html[data-theme] .bg-\[\#0f172a\],
+html[data-theme] .bg-zinc-900,
+html[data-theme] .bg-gray-900,
+html[data-theme] .bg-neutral-900             { background-color: var(--surface-card); }
+html[data-theme] .bg-\[\#21262d\],
+html[data-theme] .bg-\[\#1c2128\],
+html[data-theme] .bg-\[\#1c2732\],
+html[data-theme] .bg-\[\#30363d\],
+html[data-theme] .bg-zinc-800,
+html[data-theme] .bg-gray-800,
+html[data-theme] .bg-neutral-800             { background-color: var(--surface-raised); }
+
+/* ── Text (neutral only — brand/semantic text is left alone) ────────────────────────────────── */
+html[data-theme] .text-white                 { color: var(--text-primary); }
+html[data-theme] .text-\[\#c9d1d9\],
+html[data-theme] .text-\[\#e6edf3\],
+html[data-theme] .text-\[\#f7f9f9\],
+html[data-theme] .text-gray-100,
+html[data-theme] .text-gray-200,
+html[data-theme] .text-zinc-100,
+html[data-theme] .text-zinc-200,
+html[data-theme] .text-slate-200             { color: var(--text-body); }
+html[data-theme] .text-\[\#8b949e\],
+html[data-theme] .text-gray-300,
+html[data-theme] .text-gray-400,
+html[data-theme] .text-zinc-300,
+html[data-theme] .text-zinc-400,
+html[data-theme] .text-slate-400             { color: var(--text-muted); }
+html[data-theme] .text-\[\#484f58\],
+html[data-theme] .text-\[\#586069\],
+html[data-theme] .text-\[\#6e7681\],
+html[data-theme] .text-\[\#2d3748\],
+html[data-theme] .text-gray-500,
+html[data-theme] .text-gray-600,
+html[data-theme] .text-zinc-500,
+html[data-theme] .text-slate-500             { color: var(--text-faint); }
+
+/* ── Borders ────────────────────────────────────────────────────────────────────────────────── */
+html[data-theme] .border-\[\#30363d\],
+html[data-theme] .border-\[\#38444d\],
+html[data-theme] .border-white\/10,
+html[data-theme] .border-white\/5,
+html[data-theme] .border-zinc-700,
+html[data-theme] .border-zinc-800,
+html[data-theme] .border-gray-700,
+html[data-theme] .border-gray-800            { border-color: var(--border-soft); }
+
+/* ── Brand-button protection: white text on a saturated coloured background STAYS white ──────────
+   Two classes on the same element out-specify the single-class .text-white remap above, so these win.
+   Covers the common solid brand buttons + gradient buttons used across the app. */
+html[data-theme] .bg-indigo-600.text-white,   html[data-theme] .bg-indigo-500.text-white,
+html[data-theme] .bg-indigo-700.text-white,   html[data-theme] .bg-blue-600.text-white,
+html[data-theme] .bg-blue-500.text-white,     html[data-theme] .bg-emerald-600.text-white,
+html[data-theme] .bg-emerald-700.text-white,  html[data-theme] .bg-emerald-500.text-white,
+html[data-theme] .bg-green-600.text-white,    html[data-theme] .bg-green-700.text-white,
+html[data-theme] .bg-red-600.text-white,      html[data-theme] .bg-red-500.text-white,
+html[data-theme] .bg-rose-600.text-white,     html[data-theme] .bg-purple-600.text-white,
+html[data-theme] .bg-violet-600.text-white,   html[data-theme] .bg-fuchsia-600.text-white,
+html[data-theme] .bg-amber-500.text-white,    html[data-theme] .bg-amber-600.text-white,
+html[data-theme] .bg-orange-500.text-white,   html[data-theme] .bg-orange-600.text-white,
+html[data-theme] .bg-teal-600.text-white,     html[data-theme] .bg-cyan-600.text-white,
+html[data-theme] .bg-pink-600.text-white,
+html[data-theme] [class*="bg-gradient-"].text-white { color: #ffffff; }
+
+/* ── Fixed-dark exemption: deliberately branded-dark product surfaces (NavBharatAI Pro v3.0, Doctor
+   AI / SDA chat, NavBharatAI Voice) re-declare the palette back to GitHub-dark on their own subtree,
+   so the SAME cascade renders them dark under every app theme. No internal edits — one attribute on
+   each root element. */
+[data-fixed-dark] {
+  --surface-base: #0d1117;
+  --surface-card: #161b22;
+  --surface-raised: #21262d;
+  --text-primary: #ffffff;
+  --text-body: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-faint: #484f58;
+  --border-soft: rgba(255, 255, 255, 0.1);
+  --accent: #818cf8;
+}

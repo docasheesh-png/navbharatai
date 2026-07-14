@@ -16327,3 +16327,38 @@ persona had no concept-mastery method, only generic mode guidance.
 teacher persona lock in `tests/professionals.test.ts`. Gate: frontend tsc ✅, server tsc ✅, vitest full suite ✅
 (6731+ pass), boot smoke ✅ (server starts clean; dev-mode Vite middleware swallowing `/api/*` GETs is a
 PRE-EXISTING dev-only quirk documented in server.ts:403 — production ordering unaffected).
+## 2026-07-14 — Fix 64: DNA-level theme system — deep theming, desktop-reachable, comfort/contrast real
+
+Admin: 5 themes (light/dark/dim/comfort/contrast) but (1) only work on mobile not desktop, (2) only change
+header/footer not the whole page, (3) comfort/contrast name-only, (4) contrast should = text opposite bg,
+app-wide. "DNA level, bina tode."
+
+ROOT CAUSE (found via a 6-agent audit workflow, verified first-hand): the app expresses ~90% of surfaces
+with a handful of HARDCODED GitHub-dark literal classes (text-white ×1852, bg-[#161b22] ×357, bg-[#0d1117]
+×275, text-[#8b949e] ×538, text-[#484f58] ×330…). The theme (getThemeClasses) was prop-drilled to only ~7
+shell components; `var(--theme-*)` read by only 4 files; `data-theme` was set NOWHERE. So only the chrome
+recoloured, and desktop had no way to open the picker (it lives only in the mobile drawer). All 5 palettes
+WERE defined distinctly in theme.ts — the failure was pure consumption. (Audit's "SecurityScan corrupts
+theme" flag was a FALSE POSITIVE — that setTheme is a component-local 'dark'|'light' state, not the app
+theme; skipped per evidence.)
+
+FIX (DNA-level, no per-component rewrite, fully reversible):
+- `<html data-theme>` is the single source of truth (App.tsx effect keeps it synced; index.html sets it
+  pre-hydration → no theme flash). Works identically on desktop + mobile (bug 1 mechanism).
+- index.css: ONE semantic CSS-var palette per theme (--surface-base/card/raised, --text-primary/body/
+  muted/faint, --border-soft, --accent). Legacy --theme-* kept as aliases. contrast pins every surface
+  black + text yellow/white → text opposite bg APP-WIDE, deterministic in CSS (bug 4). comfort = real
+  solarized (bug 3).
+- NEW src/styles/theme-compat.css: an UNLAYERED remap (beats Tailwind v4's @layer utilities) that maps the
+  dominant hardcoded literals → the palette vars, gated on `html[data-theme]`. This recolours the WHOLE app
+  with ZERO component edits (bug 2). Brand buttons (bg-indigo-600.text-white etc.) re-assert white text so
+  they don't invert. `[data-fixed-dark]` escape hatch re-declares dark for any surface we later want pinned.
+  On `dark` the vars == original hex → byte-identical; removing the attribute/import = instant total rollback.
+- SidebarNav: the 5-theme picker added to the PERSISTENT DESKTOP rail (was mobile-drawer only) → desktop
+  users can finally switch themes (bug 1).
+- Mobile bottom-nav bg converted to var(--surface-base) so the footer themes too.
+
+Verification: tsc (frontend) 0; vitest 6704/6704 (new tests/themeSystem.test.ts 15 + theme.test.ts 7);
+npm run build PASS; built CSS confirmed to contain all 5 data-theme palette blocks + the compat remaps.
+Note: v3.0/SDA also theme now (admin wanted the WHOLE app); if any branded surface should stay dark, add
+data-fixed-dark to its root (one attribute). The Sonic voice widget uses inline styles → already immune.

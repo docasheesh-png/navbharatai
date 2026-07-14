@@ -2,6 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Theme (admin 2026-07-14): set data-theme on <html> BEFORE first paint so the app renders in the
+         saved theme with no dark→theme flash (FOUC). React keeps it in sync afterwards (App.tsx). -->
+    <script>
+      try { document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark'); } catch (e) {}
+    </script>
     <!-- viewport replaced below with viewport-fit=cover for PWA -->
     <title>NavBharatAI v2.0 — AI App Maker</title>
     

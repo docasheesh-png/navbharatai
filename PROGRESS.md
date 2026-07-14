@@ -15974,3 +15974,32 @@ deterministic/verifiable half shipped (the infra-only remainder stays honestly o
 #1326, GA-15 #1329, GA-13 #1330, GA-10 #1331, GA-2 reaper #1334, db-provision wiring #1336, + A2/C7/C8/GA-18/
 auth verified-built + ROADMAP corrected #1332). TWO infra-only remainders are honestly OPEN: GA-2's
 out-of-process supervisor worker, and db-provision's auto-create broker. No fakes, no inflated "10/10 done".
+
+---
+
+## 2026-07-14 — U-4 recipe track COMPLETE + GA-12 coupling + GA-5 API-wiring surfaced
+
+Continuing the autonomous conveyor after the pura-karo batch. Each item real, unit-tested, advisory-only
+where it is a quality signal (never blocks a working build — rule 1).
+
+- **U-4 verified-recipe modules — COMPLETE.** Shipped the last recipes to finish the track: file storage
+  (S3-compatible/Cloudinary, #1342), realtime pub/sub (Pusher/Ably, #1343), full-text search
+  (Algolia/Meilisearch, #1344), on top of payments (#1340) + email (#1341) + BYO-database (#1336). Every
+  generator is pure + unit-tested, keeps the secret server-side, emits `.env.example` keys + the dependency +
+  an agent tool, and never clobbers an existing `.env.example`. AppKnowledgeBase updated for each.
+- **GA-12 coupling/fan-in analyzer (#1345).** `couplingAnalysis` builds the internal import graph and flags
+  fan-in hotspots (module imported by ≥8 others — wide change blast-radius) + high-fan-out God modules
+  (file importing ≥15 internal modules). AST-accurate via ts-morph, resolves relative specifiers across
+  extensions/`index` barrels, counts static + `export…from` + dynamic `import()`. Advisory-only in `evaluate`.
+  (NOTE: this is GA-12's remaining "coupling/fan-in" item — an earlier draft mislabeled it GA-13; corrected in
+  code comments, ROADMAP, and the PR title before merge.)
+- **GA-5 API-wiring surfaced in evaluate (#1346).** `buildApiGraph` already detected the #1 silent full-stack
+  bug (a frontend call to an endpoint the backend never defines) but only via the on-demand `api_graph` tool.
+  Added `apiWiringSummary` and wired it into the `evaluate` readiness pass, so every build is auto-checked for
+  broken client↔server wiring. Reports only the actionable `missing` set, stays empty for a frontend-only repo
+  (external backend) to avoid false positives, advisory-only.
+
+**Honest direction note (rule 3):** the advisory-analyzer + BYO-recipe veins are now largely mined out. The
+genuinely high-value remaining roadmap work is larger-scope — GA-5's DB schema/FK graph + change-propagation,
+GA-4 incremental/cached builds, and the UT mobile/desktop output targets — not more small analyzers. Next
+autonomous steps should bite into one of those rather than manufacture marginal analyzer volume.

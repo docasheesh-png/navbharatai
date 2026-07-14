@@ -1,4 +1,4 @@
-// GA-13 (roadmap Tier 2C) — coupling / fan-in hotspot analyzer.
+// GA-12 (static-quality engines) — coupling / fan-in hotspot analyzer.
 //
 // The leading reason a growing app becomes fragile is a few modules that everything else imports. A util or
 // type file imported by 20+ modules is a CHANGE-RISK HOTSPOT: touching it risks breaking a wide blast radius,

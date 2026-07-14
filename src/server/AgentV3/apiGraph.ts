@@ -144,6 +144,19 @@ export function buildApiGraph(files: { path: string; content: string }[]): ApiGr
   return { defined, called, missing, unused };
 }
 
+/**
+ * Advisory `evaluate` line for broken client↔server wiring: frontend calls with NO matching backend route.
+ * Empty string when clean (or when there is nothing to compare). Only reports `missing` — the actionable,
+ * likely-broken set — never the best-effort `unused` list (a dead route is not a bug). Pure. Frames findings
+ * as "likely" because it reads call sites, not a running server, so it can only ADD a true signal here, never
+ * block a build (evaluate treats this as advisory).
+ */
+export function apiWiringSummary(g: ApiGraphResult): string {
+  if (!g || !g.missing || g.missing.length === 0) return '';
+  const shown = g.missing.slice(0, 8).map((m) => `  ⚠️ ${m.method} ${m.path} — no backend route (${m.file})`);
+  return `API wiring — ${g.missing.length} frontend call(s) with NO matching backend route (likely broken; add the route or fix the path/method):\n${shown.join('\n')}${g.missing.length > 8 ? `\n  …and ${g.missing.length - 8} more` : ''}`;
+}
+
 function dedupe<T>(items: T[], key: (t: T) => string): T[] {
   const seen = new Set<string>();
   const out: T[] = [];

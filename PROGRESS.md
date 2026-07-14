@@ -16107,3 +16107,37 @@ kill patients. Built exactly that.
 
 Tests: sonicPersona.test.ts (sda/doctor resolve, unknown→undefined, safety-keyword + no-text-signal
 assertions). Gate: tsc (frontend+server) 0, sonic suite green, full vitest + build pending.
+
+---
+
+## 2026-07-14 — "pura karo" big-items march COMPLETE (GA-4/5/6/7 · UT-1/2 · T1 trio)
+
+The admin's explicit remaining-big-items list is now fully shipped (13 PRs merged this march). Each item's
+buildable+verifiable part is real, unit-tested, advisory-only where it's a quality signal (never blocks a
+working build — rule 1). Infra-only remainders are honestly OPEN (rule 6), never faked.
+
+**Merged (all green CI → main → auto-deploy):**
+- **U-4 search** (#1344), **GA-12 coupling** (#1345), **GA-5 API-wiring in evaluate** (#1346),
+  **GA-5 Prisma schema graph** (#1350), **GA-5 SQL-DDL FK graph** (#1355).
+- **UT-2 mobile export** (Capacitor, #1360), **UT-1 desktop export** (Electron, #1361) — pure per-project
+  wrapper generators + agent tools; shared appId.ts (DRY).
+- **GA-6 persistent engineering memory** (#1363) — wired the tech-debt register's missing producer.
+- **GA-7 project coordinator** (#1364) — milestones + role assignment on the module DAG, surfaced in
+  moduleBuildContext (zero new surface).
+- **GA-4 incremental build plan** (#1366) — computeBuildPlan (changed+impacted+deps) upgrades the narration.
+- **T1-watchdog** (#1367) — proactive zombie-build sweeper (conservative: only definitively-dead builds).
+- **T1-cost-transparency** (#1369) — explainBuildCost + "Why this cost?" breakdown; provably == billedAmountUsd.
+- **T1-admin-dashboard** (#1371) — summarizeBuildFailures + /build-analytics + a failure-spike card.
+
+**OPEN root causes (infra-blocked — need out-of-process worker / native runners / E2B volume control; NOT faked):**
+- Signed mobile (.apk/.aab/.ipa) + desktop (.exe/.dmg) BINARY production — needs native SDK/runners + the
+  user's keystore. Wrapper configs + honest runbooks shipped; binary build is a runner follow-up.
+- GA-4 selective EXECUTION (skip tsc/lint/build in the sandbox) + persistent artifact/node_modules cache
+  across COLD E2B sandboxes — needs real E2B sandbox/volume control. The deterministic plan is shipped.
+- GA-2 / T1-watchdog: force-killing the orphaned E2B sandbox VM + auto-rebuild — needs the out-of-process
+  supervisor. The in-process reaper (reactive + proactive sweeper) is shipped.
+- GA-5 change-propagation blast-radius (beyond the API/schema graphs) — future slice.
+
+**Honest note (rule 3):** this completes the admin's REQUESTED list — NOT the whole ROADMAP.md. Still open:
+Tier-0 live defects (T0-1 heavy-app preview death, T0-2 white screen, T0-4/5/6/7/8 — most need a real repro
+log to root-cause per rule 4), GA-8 multi-strategy repair, GA-11 threat modeling, GA-14/15 pipeline repair.

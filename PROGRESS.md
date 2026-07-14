@@ -16188,3 +16188,31 @@ professional input-row wiring); deleting those two folders removes the feature. 
 frontend `tsc` + server `tsc` + full `vitest` (6611 at Slice 5) + boot smoke (`/api/health` 200,
 `/api/sonic/status` enabled). **Still TODO (admin, "baad me"):** make professional voice PAID for all
 professionals; optional user-facing "forget my voice history" control.
+---
+
+## 2026-07-14 — Deep-test App #12 (Habit Tracker re-run) autopsy + FIX: Node-only backend libs must NEVER be imported into frontend/browser code
+
+**Build:** weak/free tier, `noClaude:true` (✅ 🔒 rule held — GLM led 98 turns, zero Claude). Sandbox BACK
+(files built, 244 steps). `ok:false`, NOT READY 0/100, hit the 80-step limit. GLM 37×429.
+
+**Headline defect (preview-killer + SECURITY):** `src/lib/auth.ts` imported **`jsonwebtoken`** — a Node-only
+backend library — and that file is reachable from the browser (main.tsx → App.tsx → AuthContext →
+lib/auth.ts). The in-browser preview (and a real Vite build) cannot load it: "Could not load 'jsonwebtoken'
+from the CDN … Object prototype may only be an Object or null". Worse, doing JWT sign/verify client-side
+leaks JWT_SECRET into the browser bundle — almost certainly the "1 serious privacy/compliance" blocker too.
+Also: broken import `isAuthenticated ← ../lib/auth` (not exported) + 3 unresolved imports; Prisma P1012
+(`prisma/.env` missing DATABASE_URL). NOTE: no ambiguous-relation errors this run — the #1335 Prisma
+relation guidance held.
+
+**Root cause:** for a Vite+React JWT app the model wrote auth logic CLIENT-side. Correct architecture: JWT
+sign/verify + bcrypt hashing live ONLY on the SERVER; the frontend just stores the returned token and sends
+`Authorization: Bearer <token>` — it never imports jsonwebtoken/bcrypt and never sees the secret.
+
+**Fix (`systemPrompt.ts`, architect prompt):** a hard ⛔ rule — Node-only backend libs (`jsonwebtoken`,
+`bcrypt`/`bcryptjs`, `crypto`, `fs`, `express`, `@prisma/client`, pg/mysql2) NEVER go in any file that runs
+in the React app; JWT/bcrypt stay server-side; the client only stores the token + attaches the Authorization
+header (decode-for-display only, not jsonwebtoken.verify). Test asserts the guidance names jsonwebtoken,
+bcrypt, "Authorization: Bearer", "SERVER-only". Gate: server tsc clean; systemPrompt 38/38.
+
+**Open (unchanged):** GLM 429 saturation (37 this build) → step-limit — the extra GLM keys (pool live) are
+the fix. Prisma `.env`/DATABASE_URL setup gap is a smaller separate item for a future slice.

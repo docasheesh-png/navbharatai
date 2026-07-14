@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1549,6 +1549,31 @@ describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (a
 
   it('a normal/paid build keeps the Grok → Claude fallback (resilience unchanged)', () => {
     expect(planRunnerChainNames(false)).toEqual(['GROK', 'CLAUDE']);
+  });
+});
+
+describe('redactProviderError / sandboxUnavailableNotice — no raw infra error reaches the user (Fix 62)', () => {
+  it('the E2B 403 the admin saw is scrubbed of the vendor name + billing wording', () => {
+    const raw = '403: team is blocked: missing payment method';
+    // The exact reported leak: the sandbox note now carries NO raw text at all.
+    expect(sandboxUnavailableNotice()).not.toMatch(/E2B|payment method|team is blocked|403/i);
+    expect(sandboxUnavailableNotice()).toMatch(/temporarily unavailable/i);
+    // And if a redacted form is ever shown, the vendor name is gone.
+    expect(redactProviderError(raw)).not.toMatch(/\bE2B\b/);
+  });
+
+  it('a token-embedded clone URL in a git error is redacted (secret leak closed)', () => {
+    const raw = "fatal: unable to access 'https://x-access-token:ghp_SECRET123456@github.com/acme/private.git': 403";
+    const out = redactProviderError(raw);
+    expect(out).not.toContain('ghp_SECRET123456');
+    expect(out).not.toContain('x-access-token:ghp_SECRET123456');
+    expect(out).not.toMatch(/https?:\/\//);
+  });
+
+  it('caps length and never throws on odd input', () => {
+    expect(redactProviderError('x'.repeat(500)).length).toBeLessThanOrEqual(200);
+    expect(redactProviderError('')).toBe('');
+    expect(redactProviderError(undefined as unknown as string)).toBe('');
   });
 });
 

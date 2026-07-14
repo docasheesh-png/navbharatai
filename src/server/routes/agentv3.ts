@@ -1628,6 +1628,31 @@ export function planRunnerChainNames(noClaude: boolean): string[] {
 }
 
 /**
+ * Fix 62 (admin real run 2026-07-14) — NEVER surface a raw provider/infra error to an end user's chat.
+ * The E2B 403 "team is blocked: missing payment method" was shown verbatim: it leaks the infra vendor,
+ * alarms the user ("missing payment method" reads as THEIR billing problem), and — for a clone error —
+ * can echo a token-embedded URL (a real secret leak). These pure helpers give the user a clean, honest
+ * message; the RAW error still goes to the build report / logs (admin-only) for debugging.
+ */
+export function redactProviderError(raw: string): string {
+  return String(raw ?? '')
+    .replace(/https?:\/\/[^\s)]+/gi, '[link]')                       // URLs, incl. token-embedded clone URLs
+    .replace(/x-access-token:[^@\s]+/gi, '[token]')                  // git credential in a remote URL
+    .replace(/\b(bearer|token|key|secret|password)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]')
+    .replace(/\bE2B\b/gi, 'the build engine')                        // don't name the infra vendor
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+}
+
+/** The user-facing note when the build sandbox can't be set up (any cause). Deliberately carries NO
+ *  raw provider text — an end user can't act on an infra/billing issue and must not see one. The real
+ *  reason is recorded in the build report (buildDiag detail) for the admin. Pure + exported. */
+export function sandboxUnavailableNotice(): string {
+  return "Note: the build engine is temporarily unavailable, so I can't create files right now. I can still chat and plan with you — please try building again in a little while.";
+}
+
+/**
  * Full Team mid-build steering (Fix 60) — pure gates, exported for unit tests.
  * Steering is the FULL TEAM ('max') tier's premium capability: the gate runs on the BUILD's
  * resolved power level (what the engine actually runs), so a hand-crafted request from a
@@ -5035,8 +5060,11 @@ export function registerAgentV3Routes(app: Express): void {
             }
           } catch (importErr) {
             const m = importErr instanceof Error ? importErr.message : String(importErr);
-            failedImport = { url: importUrl, reason: `the import errored (${m})` };
-            events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${m}). Starting with an empty workspace instead.`, ts: Date.now() });
+            // Fix 62 — redact URLs/tokens/vendor from the git error before it reaches the user's chat
+            // (a raw clone error can echo the token-embedded remote URL — a secret leak).
+            const safeM = redactProviderError(m);
+            failedImport = { url: importUrl, reason: `the import errored (${safeM})` };
+            events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${safeM}). Starting with an empty workspace instead.`, ts: Date.now() });
           }
         }
         // FILE GUARDIAN: the files v3.0 created must STAY. The sandbox is ephemeral, so at the start
@@ -5100,7 +5128,8 @@ export function registerAgentV3Routes(app: Express): void {
         events.emit({
           type: 'narration',
           agent: 'architect',
-          text: `Note: the build sandbox isn't available right now (${m}). I can still chat, but I won't be able to build until it's back.`,
+          // Clean, non-leaky message to the user (Fix 62); the raw reason `m` is in buildDiag.detail above.
+          text: sandboxUnavailableNotice(),
           ts: Date.now(),
         });
       }

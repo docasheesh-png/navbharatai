@@ -1,0 +1,42 @@
+// Compact voice-mode button for the PROFESSIONAL chats ONLY (admin 2026-07-14: voice lives
+// inside professionals — never NavBharatAI Free, never Pro v3.0). Sits in the professional
+// chat input row next to Send; opens the full-screen NavBharatAI Voice surface. Renders
+// NOTHING (takes zero space) unless voice is enabled on the server AND the user is signed in
+// (voice is a paid, logged-in-only feature — the server enforces the same gate on the WS).
+
+import { useEffect, useState } from 'react';
+import { Mic } from 'lucide-react';
+import { auth } from '../../lib/firebase';
+import { SonicChat } from './SonicChat';
+
+export function ProfessionalVoiceButton() {
+  const [enabled, setEnabled] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/sonic/status')
+      .then((r) => r.json())
+      .then((d) => { if (alive) setEnabled(!!d?.enabled); })
+      .catch(() => { if (alive) setEnabled(false); });
+    const unsub = auth.onAuthStateChanged((u) => setSignedIn(!!u));
+    return () => { alive = false; unsub(); };
+  }, []);
+
+  if (!enabled || !signedIn) return null;
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        aria-label="Talk with voice"
+        title="Talk with voice"
+        className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-300 hover:text-indigo-200 flex items-center justify-center shrink-0"
+      >
+        <Mic className="w-4 h-4" />
+      </button>
+      {open && <SonicChat onClose={() => setOpen(false)} />}
+    </>
+  );
+}

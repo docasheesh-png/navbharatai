@@ -21,7 +21,6 @@ import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
 import { installNativeShellPolish } from './lib/nativeShell';
 import { SonicChat } from './components/sonic/SonicChat';
-import { SonicLauncher } from './components/sonic/SonicLauncher';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -235,7 +234,6 @@ createRoot(document.getElementById('root')!).render(
           <InviteAcceptGate />
           <SharePortal />
           <MobileEngagementGate />
-          <SonicLauncher />
         </BuildProvider>
       )}
     </ErrorBoundary>

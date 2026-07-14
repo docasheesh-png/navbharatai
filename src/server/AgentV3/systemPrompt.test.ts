@@ -39,6 +39,17 @@ describe('Prisma relation guidance (deep-test App #10 — 7 wasted `prisma gener
   });
 });
 
+describe('Node-only backend libs in frontend guidance (deep-test App #12 — jsonwebtoken in the browser)', () => {
+  it('forbids jsonwebtoken/bcrypt/etc. in browser code and keeps JWT sign/verify server-side', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('jsonwebtoken');
+    expect(p).toContain('bcrypt');
+    // the correct client behaviour: store token + Authorization header, never verify in the browser
+    expect(p).toContain('Authorization: Bearer');
+    expect(p).toContain('SERVER-only');
+  });
+});
+
 describe('summarizeFileTree (edit at scale — bound the injected tree)', () => {
   it('lists every path in full for a SMALL project (unchanged behaviour)', () => {
     const out = summarizeFileTree(['src/App.tsx', 'package.json', 'src/lib/util.ts']);

@@ -118,8 +118,11 @@ build order after Tier 0.
   for data-driven routing.
 - **T1-power-effort** 🟢⚠️ — Power-mode 5×/10×/20× → Opus 4.8 mini/medium/max effort selector
   (`powerLevel.ts`); billing sign-off pending.
-- **T1-cost-transparency** 🟢❌ — show per-build token/markup breakdown ("why this build cost ₹X")
-  + a daily-spend-vs-quota gauge (needs `/api/usage/tokens`).
+- **T1-cost-transparency** 🟢✅ — SHIPPED (#1369, 2026-07-14): `explainBuildCost` → a per-build breakdown
+  (input/output token split · tier · base cost · markup × · final USD→₹), surfaced as a "Why this cost?"
+  expander in the result footer. Its `billedUsd` is provably == `billedAmountUsd` (shared `powerToTier`/
+  `tierMultiplier`), so it can never show a dishonest number. **Remaining ❌:** a daily-spend-vs-quota gauge
+  (needs `/api/usage/tokens` + a quota definition).
 - **T1-provider-verify** 🟢⚠️ — real-key + real-sandbox measurement of cheap-provider build
   quality + Claude-fallback rate before defaulting the ladder ON.
 
@@ -132,9 +135,15 @@ build order after Tier 0.
   every build a `traceId` + timing spans with OTLP/Cloud Trace export, and `DecisionTraceManager`
   records the semantic decision trace. A further "promote the whole event stream to JSON" pass is a
   hot-path refactor for marginal gain — not scheduled unless a concrete observability gap appears.
-- **T1-admin-dashboard** 🟢❌ — aggregate logs + audit episodes into an admin build/cost/failure
-  dashboard + alerting on failure-rate spikes.
-- **T1-watchdog** 🟢❌ — `WatchdogService` for zombie sandbox processes (poll, force-kill + rebuild).
+- **T1-admin-dashboard** 🟢✅ — cost analytics existed; the FAILURE half SHIPPED (#1371, 2026-07-14):
+  `summarizeBuildFailures` → per-day failure rate + overall + upward-spike dates (z-score via AnomalyDetector),
+  a `GET /api/admin/agentv3/build-analytics` endpoint, and a "Build Failure Rate (30d)" card that turns red +
+  lists spike days. (Earlier ❌ was for the failure/alerting half only — cost analytics were already built.)
+- **T1-watchdog** 🟡 — proactive zombie-build sweeper SHIPPED (#1367, 2026-07-14): `selectZombieBuilds` +
+  a 60s `sweepZombieBuilds` interval reap definitively-dead builds (ended / past hard-max) so a hung build
+  never holds an account's slot until the next request; conservative (never kills a maybe-reconnecting live
+  build). **Remaining 🔒 (infra):** force-killing the orphaned E2B sandbox VM + auto-rebuild — needs the
+  out-of-process supervisor (GA-2 / V4-4 Nirman workers).
 
 ### 1E · Ship-it-live UX (big-app-maker parity)
 - **T1-deploy-1click** 🟢✅ — ALREADY BUILT (verified in code 2026-07-12): the client `deployLive()`
@@ -207,15 +216,29 @@ safely edit, or truly verify it).
   can no longer trap an account's "one build at a time" slot. **Remaining ❌ (infra):** the OUT-OF-PROCESS
   supervisor/queue (kill zombie sandbox processes, restart-on-crash) needs a separate deployed worker.
 - **GA-3** 🟡 — Dependency Intelligence. **Slices 1–6 ✅ (2026-07-12/13), all in `DependencyAnalysis` + wired into `analyzeDependencies`, non-semver skipped (no false positives):** (1) semver version-CONFLICT detector (same package non-intersecting ranges across dep sections + own-peerDeps violation, #1255); (2) conflict RESOLVER — each conflict/peer-violation now ships a concrete single-edit reconciliation (align older pin onto newer range; bump to peer floor), surfaced as `↳ Fix:` (#1260); (3) `@types/*` on a different major than its runtime lib (#1262); (4) git dep with no `#commit/#tag` ref → non-reproducible (#1263); (5) sibling packages that must share a major pinned apart — react/react-dom, @angular/* (#1266); (6) build-only/type-only tools misplaced in `dependencies` (#1269); (7) conflicting package-manager lockfiles in one directory — inconsistent installs dev-vs-CI (#1280); (8) package-manager DETECTION from the root lockfile (`detectPackageManager`, #1282) now driving the CI/Docker/README generators (#1284–#1286). **Remaining ❌:** actually WIRING the detected non-npm manager into the live install/build path (the risky half — detection + all generated artifacts are done; the sandbox still installs with npm). UV (Python) engine is separate (P-PIPE-runtime).
-- **GA-4** ❌ — Incremental / selective / cached builds (file-dependency delta graph + artifact/`node_modules` cache).
+- **GA-4** 🟡 — Incremental / selective / cached builds. **Plan SHIPPED (#1366, 2026-07-14):** `computeBuildPlan`
+  connects the (previously prod-dead) delta + reverse-import-graph + impact-BFS into one plan — changed +
+  IMPACTED blast-radius + a deps-changed (lockfile) signal — upgrading the post-build narration from cosmetic
+  to accurate. **Remaining 🔒 (infra):** actually SKIPPING tsc/lint/build in the sandbox from the plan, and a
+  persistent artifact/`node_modules` cache across COLD E2B sandboxes — need real E2B sandbox/volume control.
 - **GA-5** 🟡 — Relationship graphs + change propagation (API-endpoint graph, DB schema/FK graph).
   **API-endpoint graph ✅:** `apiGraph.ts` (`buildApiGraph`) diffs backend routes vs frontend calls and the
   `api_graph` tool renders it; the actionable `missing` set (a frontend call to an endpoint the backend never
   defines — the #1 silent full-stack bug) is now surfaced AUTOMATICALLY as an advisory line in `evaluate`
-  (#1346, 2026-07-14, `apiWiringSummary`), so every build is wiring-checked, not only on demand. **Remaining
-  ❌:** DB schema/FK relationship graph + change-propagation blast-radius.
-- **GA-6** ❌ — Persistent Engineering Memory (ADR, tech-debt register, bug DB, deploy/migration history).
-- **GA-7** ❌ — Project Coordinator agent (milestone/task-board/resource coordination role).
+  (#1346, 2026-07-14, `apiWiringSummary`), so every build is wiring-checked, not only on demand. **DB schema/FK
+  graph ✅:** `schemaGraph.ts` — `analyzeSchemaGraph` (Prisma, #1350) + `analyzeSqlSchema` (SQL-DDL foreign
+  keys, #1355) flag a relation/FK to a model/table the schema never defines (breaks `prisma migrate` / the SQL
+  migration), advisory in `evaluate`, conservative (no false positives). **Remaining ❌:** change-propagation
+  blast-radius (given a changed model/endpoint, what depends on it).
+- **GA-6** 🟡 — Persistent Engineering Memory. **Producer SHIPPED (#1363, 2026-07-14):** the tech-debt register
+  (dedup + age + prioritize, Firestore-backed) had no automatic writer, so it stayed empty; `findingsToDebt`
+  now funnels each build's unfixed security findings into it (`recordDebt`), + `engineeringMemoryDigest`.
+  **Remaining ❌:** ADR store wired into AgentV3 (exists only in AppMakerLab), append-across-builds decision
+  trace, real migration history.
+- **GA-7** 🟡 — Project Coordinator. **SHIPPED (#1364, 2026-07-14):** `computeMilestones` (dependency-ordered
+  delivery phases, cycle-safe) + `assignModuleRole` (specialist role per module) + `coordinatorDigest`, all
+  pure on the existing module DAG, surfaced into `moduleBuildContext` (zero new surface). **Remaining 🔒:** a
+  standing cross-session coordinator agent that live-replans/arbitrates — needs the out-of-process supervisor.
 - **GA-8** 🟡 — Multi-Strategy Repair (ordered fallback + backoff + circuit-breaker +
   regression-capture) — replaces the hardcoded 3-try loop. **Circuit-breaker slice ✅ (#1267, 2026-07-13):**
   the SimpleBuilder bounded tsc-repair loop now stops the moment a repair returns byte-identical compiler
@@ -295,9 +318,15 @@ safely edit, or truly verify it).
 ---
 
 ## 🎯 Tier 3 — Breadth & distribution targets
-- **UT-2 (mobile — biggest reach)** 🟢❌ — Native mobile output: React Native/Expo or
-  Capacitor → signed **APK/AAB/IPA**, QR preview. *(= old 5.8 / P-MOBILE / U-12 / P-CGE.12.)*
-- **UT-1 (desktop)** 🟢❌ — Electron/Tauri → `.exe` / `.dmg` / `.AppImage`.
+- **UT-2 (mobile — biggest reach)** 🟡 — Capacitor wrapper generator SHIPPED (#1360, 2026-07-14):
+  `generateMobileExport` + the `generate_mobile_export` tool emit a per-project `capacitor.config.ts` +
+  runbook + deps/scripts for a user's app. **Remaining 🔒 (infra):** producing the signed **APK/AAB/IPA**
+  binary + QR preview — needs the Android SDK / Xcode + the user's keystore on a build runner.
+  *(= old 5.8 / P-MOBILE / U-12 / P-CGE.12.)*
+- **UT-1 (desktop)** 🟡 — Electron wrapper generator SHIPPED (#1361, 2026-07-14): `generateDesktopExport` +
+  the `generate_desktop_export` tool emit `electron/main.cjs` + `electron-builder.yml` (nsis/dmg/AppImage) +
+  runbook. **Remaining 🔒 (infra):** producing the signed `.exe`/`.dmg` — electron-builder must run on the
+  matching OS runner with signing certs.
 - **UT-3 (extensions)** 🟢❌ — Browser extensions (Manifest V3).
 - **More languages** 🟢❌ — Rust (Cargo), Ruby/Rails, PHP/Laravel, C/C++ (CMake), DevOps
   templates (Terraform/Ansible/K8s/Docker). *(Redundancy-check each against the live

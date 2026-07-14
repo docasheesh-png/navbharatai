@@ -19,11 +19,11 @@ import {
   type InvokeModelWithBidirectionalStreamInput,
 } from '@aws-sdk/client-bedrock-runtime';
 import { sonicModelId, sonicRegion } from './featureFlag';
-import { isControlJson } from './isControlJson';
+import { isControlJson, isInterruptionSignal } from './isControlJson';
 import { SonicTranscriptGate } from './sonicTranscript';
 
 // Re-export so existing importers (and tests) keep `import { isControlJson } from './SonicBridge'`.
-export { isControlJson };
+export { isControlJson, isInterruptionSignal };
 
 export interface SonicCallbacks {
   /** Base64 LPCM 24kHz mono audio the model produced — play it back. */
@@ -32,6 +32,9 @@ export interface SonicCallbacks {
   onText: (text: string, role: string) => void;
   /** The model finished its turn (contentEnd for its audio). */
   onTurnComplete: () => void;
+  /** The user barged in (spoke over the assistant) — Nova Sonic signalled an interruption. The
+   *  client must flush any queued playback and go quiet immediately. Optional (older callers skip). */
+  onInterrupted?: () => void;
   /** Fatal error — the session is done. */
   onError: (message: string) => void;
   /** The stream closed. */
@@ -245,6 +248,13 @@ export class SonicSession {
         } else if (event.textOutput) {
           const t = event.textOutput as { content?: string; role?: string; contentName?: string };
           const role = t.role || 'ASSISTANT';
+          // Barge-in first: an interruption control signal must flush playback, not just be dropped
+          // silently. It is caught here (before the gate) so the client goes quiet the moment the
+          // user speaks over the assistant. It is still never shown as a transcript line.
+          if (isInterruptionSignal(t.content || '')) {
+            this.cb.onInterrupted?.();
+            continue;
+          }
           const stage = t.contentName ? this.textStage.get(t.contentName) : '';
           // ONE shared, tested gate decides visibility: drops empties, control-JSON, SPECULATIVE
           // duplicates and A,B,A,B repeats — so every spoken line shows exactly once.

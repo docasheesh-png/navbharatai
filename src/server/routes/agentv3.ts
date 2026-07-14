@@ -160,6 +160,7 @@ import { redactPII } from '../AgentV3/SecretRedactor';
 import { audit } from '../lib/audit';
 import { notePersistenceFailure, persistenceHealth } from '../lib/persistenceHealth';
 import { userPreferenceStore } from '../AgentV3/UserPreferenceStore';
+import { adrStore, renderAdrMarkdown } from '../AgentV3/adrMemory';
 import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
@@ -5344,6 +5345,13 @@ export function registerAgentV3Routes(app: Express): void {
         const prefContext = await userPreferenceStore.contextFor(userId);
         if (prefContext) architectSystem = `${prefContext}\n\n---\n\n${architectSystem}`;
       } catch { /* preference context is best-effort — a failure leaves the prompt unchanged */ }
+      // GA-6 — Persistent engineering memory: inject this PROJECT's prior architecture decisions (ADRs)
+      // so a follow-up build stays consistent with the established stack instead of re-deciding blind.
+      // Additive + best-effort — '' (no change) for a first build or on any error; never blocks a build.
+      try {
+        const adrContext = await adrStore.contextFor(userId, workspaceId);
+        if (adrContext) architectSystem = `${adrContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* ADR context is best-effort — a failure leaves the prompt unchanged */ }
       // Cross-Project Lesson Brain: inject the user's highest-confidence lessons learned across ALL
       // their PAST projects (proven fixes + reflections), so wisdom from project A helps project B.
       // Additive + best-effort — '' (no change) for a new user or on any error; never blocks a build.
@@ -7225,6 +7233,23 @@ export function registerAgentV3Routes(app: Express): void {
         userPreferenceStore
           .recordBuild(userId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString())
           .catch(() => {});
+      }
+
+      // GA-6 — Persistent engineering memory: capture THIS successful build's architecture decision as
+      // a numbered/dated ADR, persist it per-project, and drop the markdown into the workspace so the
+      // decision is both durable (read back into the next build above) and visible to the user. A
+      // no-change rebuild appends nothing (stackChanged guard). Best-effort — never affects the outcome.
+      if (result.ok && userId && writtenFiles.size > 0) {
+        (async () => {
+          try {
+            const rec = await adrStore.record(userId, workspaceId, { framework, files: Object.fromEntries(writtenFiles), prompt }, new Date().toISOString());
+            if (rec) {
+              const { path, content } = renderAdrMarkdown(rec);
+              await actuator.writeFile(workspaceId, path, content).catch(() => {});
+              onFileWrite?.(path, content);
+            }
+          } catch { /* ADR capture is best-effort — never blocks or affects the build */ }
+        })();
       }
 
       // Cross-Project Lesson Brain: promote THIS build's transferable lessons (proven fixes + the

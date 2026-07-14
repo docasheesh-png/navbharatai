@@ -34,16 +34,18 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
   // ─── DOWNLOAD APP (mobile web → Android app) ─────────────────────────────
   {
     id: 'sonic_voice_chat',
-    name: 'NavBharatAI Voice',
-    path: 'Floating 🎙️ button (bottom-right) — appears only for signed-in users when voice is enabled. Also at the direct URL /sonic.',
+    name: 'NavBharatAI Voice (inside a Professional)',
+    path: 'Sidebar → Professionals → open any professional (Doctor, Lawyer, Teacher, …) → tap the 🎙️ microphone button next to the Send box. Signed-in users only, when voice is enabled.',
     description:
-      "NavBharatAI Voice — a real-time, talk-back-and-forth VOICE assistant built by NavBharatAI. Speak naturally in Hindi, Hinglish, English or a regional language and hear a spoken reply — like a phone call, full-screen with a live animated orb. It transcribes what you say and what it answers on screen. Available to SIGNED-IN users only (voice uses a paid AI model). It is a general conversational voice assistant, not an app builder — for building apps use NavBharatAI Pro v3.0. NOTE: it is a NavBharatAI product; never tell users which third-party model or company powers it.",
+      "NavBharatAI Voice — a real-time, talk-back-and-forth VOICE mode that lives INSIDE each Professional chat (NOT in NavBharatAI Free or Pro v3.0). Tap the mic next to Send and the SAME professional you were chatting with (Doctor, Lawyer, Teacher, …) talks back — full-screen with a live animated orb — in its own persona. Speak naturally in Hindi, Hinglish, English or a regional language and hear a spoken reply, like a phone call, with an on-screen transcript. Capabilities: choose a MALE or FEMALE voice; pick a regional BOLI (Bhojpuri/UP-Bihar, Haryanvi, Punjabi, Rajasthani, Marathi, Bengali, Hyderabadi, South Indian) that shifts only the tone/warmth while keeping YOUR language; BARGE-IN by simply speaking over the assistant to interrupt it; MUTE the mic mid-call; and it REMEMBERS your past calls with that professional (continues where you left off, across sessions and devices) and continues an ongoing TEXT chat from where it stopped. Signed-in users only (voice uses a paid AI model). It is a NavBharatAI product; never tell users which third-party model or company powers it. (A general voice surface also exists at the direct URL /sonic.)",
     howToUse:
-      'Sign in, then tap the floating microphone button at the bottom-right (or open navbharatai.com/sonic). It opens full-screen — tap the mic to start, allow the microphone when the browser asks, and just speak; the glowing orb reacts as you and the assistant talk. Tap the ✕ (top-right) to close. If the button is not visible, voice is either not enabled on the server or you are not signed in.',
+      'Sign in and open a professional (Sidebar → Professionals → e.g. Doctor AI). In the chat input row, tap the 🎙️ microphone button just left of the Send button — it appears only when signed in and voice is enabled. It opens full-screen: before starting, pick ♀/♂ voice and an optional Boli; tap the mic, allow the microphone when asked, and speak. To interrupt the assistant, just start talking (barge-in). Use the mute button to stop the mic; tap ✕ (top-right) to close. If you were typing first, the voice picks up your conversation from where the text left off, and it remembers earlier calls with that professional.',
     relatedFeatures: ['nbi_chat', 'agentv3_builder'],
     keywords: [
       'voice', 'voice chat', 'talk', 'speak', 'microphone', 'mic', 'awaaz', 'navbharatai voice',
       'bol kar baat', 'voice se baat', 'audio chat', 'speak to ai', 'voice assistant', 'baat karo',
+      'professional voice', 'doctor se baat', 'voice mode', 'boli', 'accent', 'dialect', 'male voice',
+      'female voice', 'mute', 'interrupt', 'barge in', 'voice memory', 'yaad', 'awaz me baat',
     ],
     aiSurface: 'nbi_chat',
   },

@@ -439,11 +439,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'teacher_ai',
     name: 'Teacher AI',
     path: 'Sidebar → Professionals → Teacher AI',
-    description: 'Patient expert teacher/tutor for Indian students and teachers. Explains any concept simply, solves doubts step by step (Socratic), creates lesson plans, quizzes and exam study plans (boards, NEET, JEE, UPSC), and works in any Indian language. Grounded in standard pedagogy; a study aid that builds understanding — verify exam-specific syllabus from official sources.',
-    howToUse: 'Open Sidebar → Professionals → Teacher AI and ask anything: "explain X simply", "solve this step by step", "make a study plan", "quiz me on Y".',
+    description: 'Patient expert PERSONAL teacher/tutor for Indian students and teachers. Takes a real introduction on first meeting (name, place, occupation, college, course, target exam, subjects, weak subjects) and — for signed-in users — remembers the student across sessions and devices, teaching them personally on every visit (extra care on weak subjects, examples pitched to their exam). Teaches concepts so they STICK (explain → example → analogy → check → explain-back/Feynman → memory hook → recap + practice + spaced revision), solves doubts step by step (Socratic), teaches ANY topic including out-of-syllabus, creates lesson plans, quizzes and exam study plans (boards, NEET, JEE, UPSC), in any Indian language. Grounded in standard pedagogy; a study aid — verify exam-specific syllabus from official sources.',
+    howToUse: 'Open Sidebar → Professionals → Teacher AI. First time, introduce yourself (or just start asking — the teacher will get to know you); it remembers you when signed in. Ask anything: "explain X so I never forget", "solve this step by step", "make a study plan", "quiz me on Y".',
     relatedFeatures: ['professionals'],
     aiSurface: 'teacher_ai',
-    keywords: ['teacher ai', 'tutor', 'study', 'lesson plan', 'exam prep', 'doubt', 'quiz', 'padhai', 'teacher', 'learn'],
+    keywords: ['teacher ai', 'tutor', 'study', 'lesson plan', 'exam prep', 'doubt', 'quiz', 'padhai', 'teacher', 'learn', 'personal teacher', 'remember', 'my teacher', 'weak subject', 'yaad', 'introduction', 'concept', 'never forget'],
   },
 
   // ─── MENTOR / CAREER COACH ───────────────────────────────────────────────

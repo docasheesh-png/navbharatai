@@ -16283,3 +16283,47 @@ errors remain, unrelated). No server code touched.
 - **GA-12 Prettier-as-engine** — marginal: Prettier already runs; a formatter-diff engine would be advisory noise on top of the live ESLint gate. Not built (honest "not worth it now" rather than a fake tick).
 
 **Discipline notes:** CI kept in the background throughout (push → advance to next item; a background wakeup merges each PR on green — never idle-blocked on a progress bar). The single deploy branch drained PRs in dependency order via cherry-pick-isolate. `AppKnowledgeBase.ts` updated for the user-visible surfaces (DATABASE TYPES, INFRA OPTIMIZER, ENGINEERING MEMORY, CI GitLab/Jenkins).
+
+---
+
+## 2026-07-14 — Teacher AI becomes a REAL personal teacher: persistent student-profile memory + introduction + concept-mastery teaching (admin request)
+
+**Admin request (verbatim intent):** Teacher AI "theek se padhata nahi" — the teacher must (1) take a proper
+INTRODUCTION when a user arrives and save everything about the student in its MEMORY (name, place, occupation,
+college, what they study, target exam(s), subjects, weak subjects), (2) treat the returning student accordingly
+every time, (3) also answer extra topics, and (4) most importantly not just guide — make concepts SIT in the
+student's mind so they never forget.
+
+**Root cause:** the shared professional engine was 100% stateless — the server had NO persistent user memory
+(only the last 8 chat turns from the client), so the teacher could not remember any student; and the teacher
+persona had no concept-mastery method, only generic mode guidance.
+
+**Fix (class-level, config-driven — any professional can opt in):**
+- `src/server/professionals/studentProfile.ts` (NEW, pure) — `StudentProfile` type; `<student_memory>{json}`
+  hidden-block extraction + strip (user NEVER sees it); sanitising (unknown keys dropped, strings/arrays
+  bounded + deduped); merge (scalars overwrite, arrays union, newest wins the cap); prompt blocks
+  (`studentMemoryLayer` signed-in vs honest anonymous variant; `formatStudentProfileBlock`).
+- `src/server/professionals/StudentProfileStore.ts` (NEW) — Firestore `professional_student_profiles`
+  (doc id `uid__professionalId`), VITEST-skip, best-effort (memory can never break a chat turn); mirrors
+  VoiceMemoryStore/UserProfileStore.
+- `engine.ts` — `ProfessionalConfig.memory: 'student_profile'` loads the profile, injects layer + profile into
+  the system prompt, extracts/strips the model's memory block after the reply, merges + saves. EVERY reply is
+  defensively stripped (even memory-off professionals) so a leaked machine block never reaches a user. A reply
+  that was ONLY a block returns a safe line instead of leaking raw.
+- **SECURITY:** memory is keyed to the VERIFIED Firebase uid only (`verifyFirebaseToken` in the route); the
+  client-claimed body `userId` is never trusted for it (would be an IDOR into another user's remembered facts).
+  `ProfessionalChat.tsx` now sends `Authorization: Bearer <idToken>`.
+- `configs/teacher.ts` — `memory: 'student_profile'` + persona upgrade: "HOW YOU MAKE A CONCEPT STICK" (known →
+  explain → example → analogy → why it matters → check → student explains back (Feynman) → memory hook/mnemonic →
+  recap + practice + spaced revision); ANY topic incl. out-of-syllabus never refused; weak subjects get extra
+  care; new `memory_hooks` knowledge card. Welcome + quick prompts updated; `AppKnowledgeBase.ts` teacher entry
+  synced (definition-of-done).
+- Anonymous users still get the day-one introduction but the teacher must honestly say it cannot remember them
+  until they sign in (no fake memory claims).
+
+**Regression locks (new):** `tests/studentProfile.test.ts` (extraction/sanitise/merge/format/layers, 11),
+`tests/teacherMemoryEngine.test.ts` (prompt injection, strip+save, anon honesty, memory-off untouched, 6),
+`tests/professionalsRoute.test.ts` (verified-uid-only memory key — body userId spoof gets nothing, 3), plus
+teacher persona lock in `tests/professionals.test.ts`. Gate: frontend tsc ✅, server tsc ✅, vitest full suite ✅
+(6731+ pass), boot smoke ✅ (server starts clean; dev-mode Vite middleware swallowing `/api/*` GETs is a
+PRE-EXISTING dev-only quirk documented in server.ts:403 — production ordering unaffected).

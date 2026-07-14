@@ -2,6 +2,14 @@ import { AIRouterManager } from '../AI/AIRouterManager';
 import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import {
+  extractStudentMemory,
+  formatStudentProfileBlock,
+  mergeStudentProfile,
+  studentMemoryLayer,
+  type StudentProfile,
+} from './studentProfile';
+import { studentProfileStore } from './StudentProfileStore';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -28,10 +36,10 @@ export const PROFESSIONAL_PERSONA_LAYER = `HOW TO BEHAVE LIKE A REAL PROFESSIONA
  * consistently). Pure — exported so the assembly (and the attribution injection) is
  * unit-testable.
  */
-export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = ''): string {
+export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = '', memoryBlock = ''): string {
   // recencyDirective() anchors every professional to TODAY so none presents stale facts as current
   // (a lawyer must not cite a repealed rule as live, a CA a past year's slab as this year's, etc.).
-  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, kbBlock, recencyDirective(), CREATOR_IDENTITY]
+  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }
@@ -67,17 +75,36 @@ async function resilientCall(systemPrompt: string, prompt: string): Promise<stri
 
 /**
  * Run one professional chat turn: ground the persona in the config's knowledge
- * base (retrieved for this message), fold in recent conversation, call a model
- * resiliently, and return the reply. History format is normalised here, so
+ * base (retrieved for this message), fold in the user's remembered profile (for
+ * memory-enabled professionals like Teacher AI) and recent conversation, call a
+ * model resiliently, and return the reply. History format is normalised here, so
  * provider history-shape quirks can never break it.
+ *
+ * `verifiedUserId` MUST come from a verified Firebase token (never a client-claimed
+ * body field) — it keys the persistent profile, so trusting the client would let
+ * anyone read another user's remembered facts through the persona's replies.
  */
 export async function runProfessionalChat(
   config: ProfessionalConfig,
   message: string,
   history: ProfessionalTurn[] = [],
+  verifiedUserId?: string,
 ): Promise<string> {
+  // Student-profile memory (Teacher AI): load what we remember about this user and
+  // inject it + the memory behaviour layer. Anonymous users still get the day-one
+  // introduction behaviour, but with an honest "cannot remember you" constraint.
+  const memoryOn = config.memory === 'student_profile';
+  let profile: StudentProfile | null = null;
+  let memoryBlock = '';
+  if (memoryOn) {
+    if (verifiedUserId) profile = await studentProfileStore.load(verifiedUserId, config.id);
+    memoryBlock = [studentMemoryLayer(!!verifiedUserId), formatStudentProfileBlock(profile)]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
   const kbBlock = formatKnowledge(retrieveKnowledge(config.knowledge, message));
-  const systemPrompt = buildProfessionalSystemPrompt(config, kbBlock);
+  const systemPrompt = buildProfessionalSystemPrompt(config, kbBlock, memoryBlock);
 
   const transcript = (history || [])
     .slice(-8)
@@ -93,5 +120,16 @@ export async function runProfessionalChat(
     if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
   } catch { /* live search is best-effort */ }
 
-  return resilientCall(systemPrompt, prompt);
+  const raw = await resilientCall(systemPrompt, prompt);
+
+  // ALWAYS strip any <student_memory> block from what the user sees (even for
+  // memory-off professionals / anonymous users — a leaked machine block must never
+  // reach the chat). Persist the extracted facts only for a verified, memory-on user.
+  const { reply, update } = extractStudentMemory(raw);
+  if (memoryOn && verifiedUserId && update) {
+    await studentProfileStore.save(verifiedUserId, config.id, mergeStudentProfile(profile ?? {}, update));
+  }
+  // reply is empty only when the model's ENTIRE output was machine blocks — never
+  // fall back to raw there (that would leak the block into the chat).
+  return reply || 'Noted! What would you like to learn next?';
 }

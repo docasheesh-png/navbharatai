@@ -175,6 +175,7 @@ import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
+import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
 import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
@@ -959,6 +960,40 @@ export function drainRunningBuilds(): number {
 function isBuildRunning(buildKey: string): boolean {
   const rb = runningBuilds.get(buildKey);
   return !!rb && !rb.ended;
+}
+
+/**
+ * T1-watchdog: proactively reap DEFINITIVELY-dead builds (ended, or grossly past the hard max the
+ * AgentRunner already aborts at) so a hung/crashed build never holds an account's one-build slot until the
+ * next request happens to arrive. Conservative by design (see selectZombieBuilds): an abandoned-but-maybe-
+ * reconnecting build is left for the REACTIVE reclaim, never killed here. Tears each zombie down with the
+ * exact same clean sequence as the reactive path (abort → endBuild → drop both locks). Exported + returns a
+ * count so it is unit-testable; best-effort, never throws. Returns the number reaped.
+ *
+ * HONEST BOUNDARY (rule 6): this aborts + unlocks the IN-PROCESS build. Force-killing the orphaned E2B
+ * sandbox VM and auto-rebuild-on-crash need the out-of-process supervisor (GA-2 remaining, infra-blocked).
+ */
+export function sweepZombieBuilds(now: number = Date.now()): number {
+  const hardMaxMs = maxBuildSeconds() > 0 ? maxBuildSeconds() * 1000 + 120_000 : 0;
+  let reaped = 0;
+  for (const key of selectZombieBuilds(runningBuilds.entries(), now, hardMaxMs)) {
+    const rb = runningBuilds.get(key);
+    if (!rb) continue;
+    try { rb.abort.abort(); } catch { /* best-effort */ }
+    try { endBuild(rb); } catch { /* best-effort */ }
+    if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
+    activeBuilds.delete(key);
+    reaped++;
+    console.warn(`[AGENTV3 WATCHDOG] reaped zombie build ${key} (ended or past hard max).`);
+  }
+  return reaped;
+}
+
+// Run the sweeper on a bounded interval. Guarded out of tests (no stray timer); unref'd so it never keeps
+// the process alive. Cross-instance zombies on OTHER server instances are out of scope (in-process registry).
+if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+  const watchdogTimer = setInterval(() => { try { sweepZombieBuilds(); } catch { /* watchdog is best-effort */ } }, 60_000);
+  watchdogTimer.unref?.();
 }
 /** Is a build running for this account AND does it belong to `workspaceId`? Use this (not
  *  `isBuildRunning`) for any path that might auto-attach to a build the caller didn't itself start —

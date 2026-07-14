@@ -4,9 +4,10 @@ import {
   Stethoscope, ClipboardList, X, RefreshCw,
   Paperclip, Image as ImageIcon, FileSearch,
   Mic, MicOff, Download, BarChart2, Pill, TestTube,
-  Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp
+  Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
@@ -941,11 +942,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 </button>
                 <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES} onChange={handleFileSelect} className="hidden" />
 
-                {/* Mic button */}
+                {/* Dictation mic — speech → TEXT into the box (you still read + Send). */}
                 <button
                   onClick={isListening ? stopVoice : startVoice}
                   disabled={loading}
-                  title={isListening ? 'Stop voice input' : 'Start voice input'}
+                  title={isListening ? 'Stop voice input' : 'Dictate (speech → text)'}
                   className={cn(
                     "transition-colors pb-0.5 shrink-0 disabled:opacity-40",
                     isListening ? "text-red-400 animate-pulse" : "text-[#484f58] hover:text-blue-400"
@@ -953,6 +954,30 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
+
+                {/* Talk to SDA by VOICE — a full spoken back-and-forth with the doctor persona (distinct
+                    from dictation above). Renders nothing unless voice is enabled + the user is signed in.
+                    getHistory continues THIS case in voice (markers stripped so nothing is read aloud). */}
+                <ProfessionalVoiceButton
+                  professionalId="sda"
+                  title="Talk to SDA by voice"
+                  icon={<Volume2 className="w-4 h-4" />}
+                  className="text-[#484f58] hover:text-emerald-400 transition-colors pb-0.5 shrink-0"
+                  getHistory={() =>
+                    messages
+                      .filter((m) => m.text && m.text.trim())
+                      .slice(-20)
+                      .map((m) => ({
+                        role: (m.sender === 'doctor' ? 'user' : 'assistant') as 'user' | 'assistant',
+                        // Strip the text-only clinical machine signals so they are never spoken back.
+                        content: m.text
+                          .replace(/\[CLINICAL_JSON\][\s\S]*?\[\/CLINICAL_JSON\]/g, '')
+                          .replace(/\[CASE_COMPLETE\]/g, '')
+                          .trim(),
+                      }))
+                      .filter((t) => t.content)
+                  }
+                />
 
                 {/* Text input */}
                 <textarea
@@ -979,7 +1004,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
           </div>
 
           <p className="text-[9px] text-[#2d3748] mt-1.5 text-center">
-            📎 Docs · 🎙️ Voice · 🧮 Clinical Tools — Send button se bhejo
+            📎 Docs · 🎤 Dictate · 🔊 Talk to SDA · 🧮 Clinical Tools
           </p>
         </div>
       </div>

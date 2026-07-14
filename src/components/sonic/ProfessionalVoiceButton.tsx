@@ -15,7 +15,16 @@ import { SonicChat, type SonicTurn } from './SonicChat';
  * `getHistory` = a live getter for the current text conversation, read at open time so voice
  * CONTINUES the chat from where the text left off (admin 2026-07-14).
  */
-export function ProfessionalVoiceButton({ professionalId, getHistory }: { professionalId?: string; getHistory?: () => SonicTurn[] }) {
+export function ProfessionalVoiceButton({ professionalId, getHistory, className, icon, title }: {
+  professionalId?: string;
+  getHistory?: () => SonicTurn[];
+  /** Override the trigger button styling (e.g. the emerald SDA theme). */
+  className?: string;
+  /** Override the icon (defaults to a mic). */
+  icon?: React.ReactNode;
+  /** Accessible label / tooltip. */
+  title?: string;
+}) {
   const [enabled, setEnabled] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [open, setOpen] = useState(false);
@@ -37,11 +46,11 @@ export function ProfessionalVoiceButton({ professionalId, getHistory }: { profes
     <>
       <button
         onClick={() => { setHistory(getHistory ? getHistory() : []); setOpen(true); }}
-        aria-label="Talk with voice"
-        title="Talk with voice"
-        className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-300 hover:text-indigo-200 flex items-center justify-center shrink-0"
+        aria-label={title || 'Talk with voice'}
+        title={title || 'Talk with voice'}
+        className={className || 'w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-300 hover:text-indigo-200 flex items-center justify-center shrink-0'}
       >
-        <Mic className="w-4 h-4" />
+        {icon || <Mic className="w-4 h-4" />}
       </button>
       {open && <SonicChat onClose={() => setOpen(false)} professionalId={professionalId} history={history} />}
     </>

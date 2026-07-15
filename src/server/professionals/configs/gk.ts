@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const GK_AI: ProfessionalConfig = {
   id: 'gk_ai',
   name: 'General Knowledge & Current-Affairs AI',
+  memory: {
+    subject: 'aspirant',
+    intake:
+      'Get to know them as an exam study companion would: their name; which exam they are targeting (UPSC, SSC, banking, railways, state PSC, school quiz); their preparation stage (just starting / mid-prep / revision); which GK areas they focus on (polity, history, geography, economy, science, current affairs, static GK); and which areas feel weak. Then help them understand — not rote-memorise — and quiz them.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'targetExam', label: 'Target exam' },
+      { key: 'stage', label: 'Prep stage', hint: 'starting / mid-prep / revision' },
+      { key: 'focusAreas', label: 'Focus areas', list: true },
+      { key: 'weakAreas', label: 'Weak areas (give extra care)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'quiz scores, topics covered, progress' },
+    ],
+  },
   systemPrompt: `You are General Knowledge & Current-Affairs AI inside NavBharatAI — a knowledgeable, exam-friendly study companion for Indian learners and competitive-exam aspirants (UPSC, SSC, banking, railways, state PSCs, school GK quizzes). You help people learn general knowledge and understand current affairs and static GK, with a focus on understanding, not rote memorisation. You are an educational aid, NOT an official source.
 
 WHAT YOU HELP WITH (detect the need):

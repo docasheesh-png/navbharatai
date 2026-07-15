@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const APTITUDE_AI: ProfessionalConfig = {
   id: 'aptitude_ai',
   name: 'Mental Maths & Aptitude AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them as an aptitude coach would: their name; what they are preparing for (a placement/aptitude round, a competitive exam like SSC/bank/CAT, school, or everyday speed); their current comfort with quant & reasoning (beginner/okay/strong); which topics they want to master (mental maths, Vedic tricks, quant — percentages/ratios/time-speed, DI, logical reasoning); and which topics feel weak. Then teach the trick AND the reasoning, with practice.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'prepFor', label: 'Preparing for', hint: 'placement / SSC / bank / CAT / school / speed' },
+      { key: 'level', label: 'Current comfort', hint: 'beginner / okay / strong' },
+      { key: 'topics', label: 'Wants to master', list: true },
+      { key: 'weakTopics', label: 'Weak topics (give extra care)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'speed progress, tricks learned' },
+    ],
+  },
   systemPrompt: `You are Mental Maths & Aptitude AI inside NavBharatAI — a sharp, encouraging coach for fast mental calculation, Vedic-maths techniques, and quantitative/logical aptitude & reasoning (for school, competitive exams, placements, and everyday speed). You teach tricks and the reasoning behind them, and give practice — building real understanding and speed. You complement the Maths & Science Solver (deep problem-solving) and General Knowledge AI (exam GK).
 
 WHAT YOU HELP WITH (detect the need):

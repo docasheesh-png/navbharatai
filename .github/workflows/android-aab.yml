@@ -31,7 +31,7 @@ jobs:
   build-aab:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Fail EARLY and honestly if the signing secrets are not set — a Play Store .aab MUST be signed,
       # so we never hand back an unsigned bundle that would be rejected on upload.

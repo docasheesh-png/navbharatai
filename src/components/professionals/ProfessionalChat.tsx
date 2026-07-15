@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, Sparkles, X, FileText } from 'lucide-react';
+import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn } from 'lucide-react';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
+import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -58,7 +59,33 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [pass, setPass] = useState<PassStatus | null>(null);
+  const [paywall, setPaywall] = useState<null | 'paywall' | 'login'>(null);
+  const [buying, setBuying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const refreshPass = React.useCallback(() => { fetchPassStatus().then((p) => setPass(p)).catch(() => {}); }, []);
+  // Load pass/quota state on mount and whenever the signed-in user changes (also picks up a pass that
+  // was just granted after returning from the Cashfree checkout).
+  useEffect(() => {
+    refreshPass();
+    const unsub = auth.onAuthStateChanged(() => refreshPass());
+    return () => unsub();
+  }, [refreshPass]);
+
+  const startBuyPass = async () => {
+    if (buying || !pass) return;
+    setBuying(true);
+    try {
+      const outcome = await buyProfessionalPass(pass.priceInr, pass.passDays);
+      if (outcome === 'granted') { setPaywall(null); refreshPass(); } // simulator (dev) → pass active now
+      // 'redirecting' → the gateway page took over; on return the app refetches status.
+    } catch (e: any) {
+      alert(e?.message || 'Could not start the Pass purchase. Please try again.');
+    } finally {
+      setBuying(false);
+    }
+  };
 
   useEffect(() => {
     try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-50))); } catch { /* ignore */ }
@@ -104,8 +131,12 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
         }),
       });
       const data = await res.json().catch(() => ({}));
+      // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
+      if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }
+      if (res.status === 401 || data?.code === 'login_required') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
       setMessages((m) => [...m, { role: 'assistant', content: data.reply || '(no reply)' }]);
+      refreshPass(); // update the "X/limit free today" counter
     } catch (e: any) {
       setMessages((m) => [...m, { role: 'assistant', content: `⚠️ ${e?.message || 'Something went wrong — please try again.'}` }]);
     } finally {
@@ -116,10 +147,27 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const showQuick = config.quickPrompts && messages.filter((m) => m.role === 'user').length === 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-white">
+    <div className="relative flex flex-col h-full min-h-0 bg-[#0d1117] text-white">
       <div className="px-4 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
         <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Sparkles className="w-4 h-4" /></div>
         <span className="font-bold text-sm">{config.name}</span>
+        {/* Pass / free-quota chip — only when the paid gate is on for a signed-in user. */}
+        {pass?.enabled && pass?.signedIn && (
+          pass.unlimited ? (
+            <span className="ml-auto flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              <Crown className="w-3 h-3" /> {pass.hasPass ? 'Pass active' : 'Unlimited'}
+            </span>
+          ) : (
+            <button
+              onClick={() => setPaywall('paywall')}
+              title="Get the Professional Pass for unlimited access"
+              className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-[#c9d1d9]"
+            >
+              <span className={pass.remainingFree <= 3 ? 'text-amber-300' : ''}>{pass.remainingFree}/{pass.freeDailyLimit} free today</span>
+              <Crown className="w-3 h-3 text-amber-400" />
+            </button>
+          )
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
@@ -188,6 +236,39 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </button>
       </div>
+
+      {/* Paywall / login card — shown when the gate blocks a turn (or the user taps the quota chip). */}
+      {paywall && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-5" onClick={() => setPaywall(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-[#161b22] border border-white/10 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setPaywall(null)} className="absolute right-3 top-3 text-[#586069] hover:text-white"><X className="w-4 h-4" /></button>
+            {paywall === 'login' ? (
+              <>
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-indigo-500/15 text-indigo-300 flex items-center justify-center"><LogIn className="w-6 h-6" /></div>
+                <h3 className="font-bold text-white mb-1">Sign in to continue</h3>
+                <p className="text-sm text-[#8b949e]">Professionals need a free account. Sign in to get {pass?.freeDailyLimit ?? 50} free messages every day.</p>
+              </>
+            ) : (
+              <>
+                <div className="mx-auto mb-3 w-12 h-12 rounded-full bg-amber-500/15 text-amber-300 flex items-center justify-center"><Crown className="w-6 h-6" /></div>
+                <h3 className="font-bold text-white mb-1">Get the Professional Pass</h3>
+                <p className="text-sm text-[#8b949e] mb-4">
+                  You've used your {pass?.freeDailyLimit ?? 50} free messages for today. Unlock <span className="text-white font-semibold">unlimited</span> access to every professional.
+                </p>
+                <button
+                  onClick={startBuyPass}
+                  disabled={buying}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-black font-bold flex items-center justify-center gap-2"
+                >
+                  {buying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />}
+                  {buying ? 'Opening checkout…' : `Get Pass — ₹${pass?.priceInr ?? 99}/month`}
+                </button>
+                <p className="text-[11px] text-[#586069] mt-2">Cancel anytime · secure payment</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

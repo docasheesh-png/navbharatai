@@ -113,6 +113,45 @@ jobs:
           npx cap add ios || echo "ios/ already present — continuing"
           npx cap sync ios
 
+      # Firebase iOS config. The @capacitor-firebase/authentication plugin calls FirebaseApp.configure()
+      # at launch, which reads GoogleService-Info.plist from the app bundle — WITHOUT it the app CRASHES
+      # on launch (TestFlight build #12 did exactly this; Android is fine because it ships
+      # google-services.json). The committed ios-config/GoogleService-Info.plist is registered for the iOS
+      # app (bundle com.navbharat.ai) in the same Firebase project the web app authenticates against
+      # (gen-lang-client-0866594388). We (1) copy it into the generated project, (2) add it to the Xcode
+      # target's resources so it lands at the bundle root where FirebaseApp.configure() looks, and (3) add
+      # its REVERSED_CLIENT_ID as a URL scheme so native Google Sign-In can return to the app.
+      - name: Add Firebase iOS config (GoogleService-Info.plist + Google Sign-In URL scheme)
+        run: |
+          set -e
+          cp ios-config/GoogleService-Info.plist ios/App/App/GoogleService-Info.plist
+          # 1) Reference the plist in the App target's resources build phase (idempotent).
+          gem install xcodeproj --no-document --quiet
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'App' } or abort('App target not found')
+          group = proj.main_group.find_subpath('App', false) or abort('App group not found')
+          name = 'GoogleService-Info.plist'
+          unless group.files.any? { |f| f.display_name == name }
+            ref = group.new_reference(name)
+            target.resources_build_phase.add_file_reference(ref, true)
+          end
+          proj.save
+          puts "OK: GoogleService-Info.plist referenced in the App target."
+          RUBY
+          # 2) Add the Google Sign-In callback URL scheme (REVERSED_CLIENT_ID) to Info.plist.
+          PLIST="ios/App/App/Info.plist"
+          RID="$(/usr/libexec/PlistBuddy -c "Print :REVERSED_CLIENT_ID" ios/App/App/GoogleService-Info.plist)"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$PLIST" >/dev/null 2>&1 \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
+          # Append a fresh URL-type entry (count existing entries to get the next index).
+          n=0; while /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:$n" "$PLIST" >/dev/null 2>&1; do n=$((n+1)); done
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes:0 string $RID" "$PLIST"
+          echo "Firebase iOS config in place; Google Sign-In URL scheme = $RID"
+
       # App Store REQUIRES a purpose string for every device permission the app can request, or review
       # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the
       # MICROPHONE (Sonic voice) + CAMERA + photo library (image attach) — same permissions as the

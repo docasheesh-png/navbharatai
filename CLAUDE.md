@@ -702,6 +702,67 @@ FAILED build ₹811). The Opus tiers are untouched.
   cache-miss rate → real cost is a slight OVER-estimate (margin-safe). A later slice can capture
   `cache_read` usage to bill even lower.
 
+## User-facing Billing + Provider Anonymization — the White-Label Law (admin-mandated 2026-07-15) — ⚠️ CONFIRM WITH ADMIN BEFORE CHANGING
+
+**Two promises to every end user, always kept together:** (1) the bill and cost breakdown they see are
+**100% REAL**, and (2) the AI that did the work is **always "NavBharatAI"** — the user must NEVER learn which
+third-party model ran in the background. These are not in tension: anonymizing the *vendor* is white-labeling,
+NOT dishonesty. We never fake the **result** or the **amount charged**; we only brand the **engine** as ours.
+(This is exactly how Lovable/Bolt/v0/Cursor present themselves — the user buys "the product's AI", not a
+reseller of someone else's API.)
+
+### 1) The user sees a REAL bill + REAL cost breakdown (honest — rules 2 & 3 apply)
+- Every user-facing bill / receipt / wallet entry reflects the user's **actual usage** and the **actual ₹
+  charged** (per the REAL-COST + tiered-markup billing model above). **No fabricated, rounded-up, or
+  placeholder numbers.** A build that did not succeed is **never** charged (the "working app or free" law).
+- The user CAN see an **itemized breakdown** — but itemized by **USER-FACING categories only**: e.g. tokens
+  used, the build / tier chosen, ₹ amount, date, and (optionally) which of THEIR builds/features consumed
+  what. The breakdown must add up to the real total, so it survives scrutiny.
+- The breakdown is **NEVER** itemized by underlying vendor/model. The user must never see a line like
+  "GLM $0.02 + Claude $0.11 + Gemini $0.01" — that both leaks the providers AND confuses the buyer. Collapse
+  all provider cost into NavBharatAI's own categories (e.g. "AI build — <tier> — ₹X").
+
+### 2) Provider anonymization — ABSOLUTE, on EVERY user-facing surface
+On anything a normal end user can see, the AI is **always "NavBharatAI"** (or "NavBharatAI's engine" / "our
+AI"). The user must **NEVER** encounter any of:
+- Vendor / brand names: **GLM / Z.ai, Kimi / Moonshot, Claude / Anthropic, Gemini / Vertex / Google, Grok /
+  xAI, Bedrock / AWS, DeepSeek, OpenAI**, etc.
+- **Model ids**: `glm-4.7`, `glm-5.2`, `kimi-k2*`, `claude-sonnet-*`, `claude-opus-*`, `gemini-*`, `grok-*`, …
+- **Routing/fallback leakage**: "Provider GLM failed — falling back", "switching to Kimi", "429 from Z.ai",
+  "Sonnet is repairing it", "the cheap floor", or any hint that more than one vendor exists. A user-facing
+  error degrades to a NavBharatAI-branded line — e.g. *"NavBharatAI's engine hit a brief hiccup and retried"* —
+  never the raw provider error. Provider fallback/retry/escalation is **invisible** to the user: they only ever
+  see NavBharatAI working.
+- Surfaces this covers (non-exhaustive): chat replies, **build progress / narration / status lines**, the
+  Billing panel + receipts + wallet ledger, error toasts/messages, empty/"not available" states, exported or
+  **shared** build reports, emails/notifications, and any AI that answers "who built this?" / "which AI are
+  you?" → the honest, on-brand answer is **"NavBharatAI"**, never the underlying model. (Note: the model-identity
+  rule for THIS Claude Code session is separate and internal — it never reaches an end user either.)
+
+### 3) Where provider names ARE allowed — ADMIN-ONLY, never exposed to users
+Provider/model identity is essential for ops and MUST stay available to the admin: the **admin dashboard**,
+**build-diagnostics JSON**, **server logs**, the **`deliveredVia` / per-provider token telemetry**, cost
+autopsies, and `PROGRESS.md`. These are internal/forensic. The hard rule: **no admin-only diagnostic
+(especially the build-diagnostics report, which literally names "Provider GLM failed" / "kimi" / "claude-…")
+may ever be surfaced to an end user** — not linked, not embedded in a shared report, not shown in a user's
+build feed. If a build report is ever made user-shareable, it must pass through an anonymization pass first.
+
+### 4) Enforcement (how we keep it true, not just aspirational)
+- **Single choke point:** route every user-facing provider reference through ONE anonymizer
+  (e.g. a `publicEngineName()` / `redactProviders(text)` helper) so a NavBharatAI label is applied by
+  construction — never sprinkled ad-hoc per call site (same discipline as `enforceNoClaude` / the no-Claude zone).
+- **Test the invariant:** a regression test asserts that user-facing streams (narration, `done` summaries,
+  billing payloads, error bodies) contain **none** of the forbidden vendor/model tokens, for representative
+  builds — so a new leak fails CI instead of reaching a user.
+- **Audit before trusting "it's already hidden":** today provider names live in admin diagnostics
+  (`buildDiag.record(... "Provider X failed ...")`) and `deliveredVia` telemetry — NOT in user narration — so
+  the current default is compliant, but any NEW user-facing surface (a richer billing breakdown, a shared
+  report, a "why did this cost so much?" explainer) MUST be built anonymized from the first commit.
+
+**Bottom line:** to the user it is always **NavBharatAI** doing the work, and the bill they pay is always the
+**real** one — honestly itemized in our own terms, never a vendor-by-vendor ledger. Real cost, real bill, one
+brand.
+
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 
 These were previously only stated inside `PROGRESS.md`. Because that file is

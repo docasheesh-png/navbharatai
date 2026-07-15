@@ -38,7 +38,7 @@ import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
@@ -1039,6 +1039,21 @@ export class ToolDispatcher {
           return pmsg;
         }
         // Governance (Layer 58): classify the command's risk BEFORE execution.
+        // DESTRUCTIVE SOURCE-DIR DELETION — BLOCKED (deep-test "PaisaTrack", 2026-07-15). The builder
+        // ran `rm -rf src/components src/hooks src/types src/utils` to "fix" two trivial tsc errors,
+        // wiping the feature components → the app shipped with orphaned/missing features. Recursively
+        // deleting a source directory during a build almost always destroys working app code; refuse it
+        // and tell the model to fix the specific error in-file instead. Checked BEFORE the generic risk
+        // classifier so the message is the actionable one.
+        const destructiveTarget = destructiveSourceDeletionTarget(command);
+        if (destructiveTarget) {
+          const blockMsg = destructiveSourceDeletionMessage(destructiveTarget);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DESTRUCTIVE] refused source-dir delete: ${command.slice(0, 200)}`,
+          );
+          this.state?.appendTerminal(blockMsg);
+          return blockMsg;
+        }
         // HIGH-risk commands are BLOCKED outright — they are irreversible, exfiltrate
         // secrets, or execute remote code. MEDIUM commands run but carry a warning.
         const risk = classifyCommandRisk(command);

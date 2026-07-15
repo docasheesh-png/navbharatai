@@ -43,8 +43,12 @@ export function isValidCashfreeSignature(opts: {
 export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitRequestHandler): void {
   app.post('/api/payment/create-order', paymentLimiter, async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { amount, userId, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount } = req.body;
+    const { amount, userId, userEmail, userName, userPhone, isVishwakarmaOrder, buyPass, tokenAmount, productType, passPlan, passDays } = req.body;
     if (!userId) return res.status(400).json({ error: 'User is not authenticated' });
+    // Product routed on fulfilment: 'professional_pass' grants a time-based Professional Pass (no wallet
+    // tokens); anything else is the existing wallet recharge. Untrusted, but harmless — the fulfilment
+    // path re-derives days/plan from the server config, and the amount is reconciled against Cashfree.
+    const isProfessionalPass = String(productType || '') === 'professional_pass';
     const orderAmount = parseFloat(amount);
     if (isNaN(orderAmount) || orderAmount <= 0) {
       return res.status(400).json({ error: 'Invalid order amount' });
@@ -64,6 +68,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         isVishwakarmaOrder: !!isVishwakarmaOrder,
         buyPass: !!buyPass,
         tokenAmount: tokenAmount ? parseFloat(tokenAmount) : 0,
+        // Professional Pass product (fulfilment grants a pass instead of crediting wallet tokens).
+        productType: isProfessionalPass ? 'professional_pass' : 'wallet',
+        ...(isProfessionalPass ? { passPlan: String(passPlan || 'monthly'), passDays: Number(passDays) || 0 } : {}),
         paymentProvider: 'CASHFREE',
         paymentStatus: 'PENDING',
         paymentReference: '',

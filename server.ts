@@ -380,6 +380,13 @@ setInterval(() => {
   // Registered before the SPA catch-all so it isn't swallowed and returned as
   // index.html. Streams the request/response untouched (any method).
   const FIREBASE_AUTH_HOST = 'gen-lang-client-0866594388.firebaseapp.com';
+  // Keep-alive agent: the sign-in handler pulls several sub-resources back-to-back; reusing one warm
+  // TLS connection removes a fresh handshake per request (a big chunk of the perceived login latency).
+  const firebaseAuthAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 15000 });
+  // A stalled upstream must FAIL FAST, never hang. Node's https.request has NO default timeout, so a
+  // stuck socket could leave the login popup waiting minutes (the exact "Google login takes 5–7 min"
+  // symptom). Cap it at 15s → the browser retries a fresh request instead of hanging on a dead one.
+  const AUTH_PROXY_TIMEOUT_MS = 15000;
   const proxyFirebaseAuth = (req: any, res: any) => {
     const upstream = https.request(
       {
@@ -388,13 +395,17 @@ setInterval(() => {
         path: req.originalUrl,
         method: req.method,
         headers: { ...req.headers, host: FIREBASE_AUTH_HOST },
+        agent: firebaseAuthAgent,
+        timeout: AUTH_PROXY_TIMEOUT_MS,
       },
       (pres) => {
         res.writeHead(pres.statusCode || 502, pres.headers);
         pres.pipe(res, { end: true });
       },
     );
-    upstream.on('error', () => { if (!res.headersSent) res.status(502).end('Auth proxy error'); });
+    // timeout fires on an idle socket (connect or response stall) — abort so the client fails fast.
+    upstream.on('timeout', () => { upstream.destroy(new Error('auth proxy upstream timeout')); });
+    upstream.on('error', () => { if (!res.headersSent) res.status(504).end('Auth proxy timeout'); });
     req.pipe(upstream, { end: true });
   };
   app.use('/__/auth', proxyFirebaseAuth);

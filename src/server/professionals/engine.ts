@@ -3,13 +3,14 @@ import { retrieveKnowledge, formatKnowledge } from './knowledge';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import {
-  extractStudentMemory,
-  formatStudentProfileBlock,
-  mergeStudentProfile,
-  studentMemoryLayer,
-  type StudentProfile,
-} from './studentProfile';
-import { studentProfileStore } from './StudentProfileStore';
+  extractMemory,
+  formatProfileBlock,
+  mergeProfile,
+  memoryLayer,
+  sanitizeUpdate,
+  type ClientProfile,
+} from './clientMemory';
+import { clientProfileStore } from './ClientProfileStore';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -90,15 +91,15 @@ export async function runProfessionalChat(
   history: ProfessionalTurn[] = [],
   verifiedUserId?: string,
 ): Promise<string> {
-  // Student-profile memory (Teacher AI): load what we remember about this user and
-  // inject it + the memory behaviour layer. Anonymous users still get the day-one
+  // Per-user memory (memory-enabled professionals): load what we remember about this
+  // user and inject it + the memory behaviour layer. Anonymous users still get the
   // introduction behaviour, but with an honest "cannot remember you" constraint.
-  const memoryOn = config.memory === 'student_profile';
-  let profile: StudentProfile | null = null;
+  const memory = config.memory;
+  let profile: ClientProfile | null = null;
   let memoryBlock = '';
-  if (memoryOn) {
-    if (verifiedUserId) profile = await studentProfileStore.load(verifiedUserId, config.id);
-    memoryBlock = [studentMemoryLayer(!!verifiedUserId), formatStudentProfileBlock(profile)]
+  if (memory) {
+    if (verifiedUserId) profile = await clientProfileStore.load(verifiedUserId, config.id);
+    memoryBlock = [memoryLayer(!!verifiedUserId, memory), formatProfileBlock(profile, memory)]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -122,12 +123,16 @@ export async function runProfessionalChat(
 
   const raw = await resilientCall(systemPrompt, prompt);
 
-  // ALWAYS strip any <student_memory> block from what the user sees (even for
-  // memory-off professionals / anonymous users — a leaked machine block must never
-  // reach the chat). Persist the extracted facts only for a verified, memory-on user.
-  const { reply, update } = extractStudentMemory(raw);
-  if (memoryOn && verifiedUserId && update) {
-    await studentProfileStore.save(verifiedUserId, config.id, mergeStudentProfile(profile ?? {}, update));
+  // ALWAYS strip any memory block from what the user sees (even for memory-off
+  // professionals / anonymous users — a leaked machine block must never reach the
+  // chat). Persist the extracted facts only for a verified, memory-on user, and only
+  // after validating them against THIS professional's declared fields.
+  const { reply, raw: rawUpdate } = extractMemory(raw);
+  if (memory && verifiedUserId && rawUpdate) {
+    const update = sanitizeUpdate(rawUpdate, memory.fields);
+    if (update) {
+      await clientProfileStore.save(verifiedUserId, config.id, mergeProfile(profile ?? {}, update, memory.fields));
+    }
   }
   // reply is empty only when the model's ENTIRE output was machine blocks — never
   // fall back to raw there (that would leak the block into the chat).

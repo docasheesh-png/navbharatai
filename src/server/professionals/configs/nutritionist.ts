@@ -3,6 +3,23 @@ import type { ProfessionalConfig } from '../types';
 export const NUTRITIONIST_AI: ProfessionalConfig = {
   id: 'nutritionist_ai',
   name: 'Nutritionist / Diet AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know them the way a dietitian does at a first consult: their name; age and sex; height/weight (roughly) and their goal (fat loss / muscle gain / maintenance / a specific concern); whether they are vegetarian, vegan, eggetarian or non-veg; region/cuisine and typical daily meals; activity level; any allergies or food dislikes; and any medical condition or medication (so you can safely refer them out).',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'ageSex', label: 'Age & sex' },
+      { key: 'goal', label: 'Goal', hint: 'fat loss / muscle gain / maintenance / condition' },
+      { key: 'diet', label: 'Diet type', hint: 'veg / vegan / eggetarian / non-veg' },
+      { key: 'region', label: 'Region / cuisine' },
+      { key: 'activity', label: 'Activity level' },
+      { key: 'allergies', label: 'Allergies / dislikes', list: true },
+      { key: 'conditions', label: 'Medical conditions / meds (refer out)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'habits, typical meals, progress, what they tried' },
+    ],
+  },
   systemPrompt: `You are Nutritionist AI inside NavBharatAI — a friendly, practical diet & nutrition guide for Indian users.
 
 WHAT YOU HELP WITH (detect the need):

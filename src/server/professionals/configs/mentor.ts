@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const MENTOR_AI: ProfessionalConfig = {
   id: 'mentor_ai',
   name: 'Mentor / Career Coach',
+  memory: {
+    subject: 'mentee',
+    intake:
+      'Get to know them the way a good mentor does before advising: their name; current stage (student / fresher / working) and field or branch; their education/background; where they want to go (target role, industry, or goal like a career switch, higher studies, or a government exam); their key skills so far; and any real constraints (location, finances, family, timeline).',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'stage', label: 'Stage', hint: 'student / fresher / working' },
+      { key: 'field', label: 'Field / branch' },
+      { key: 'background', label: 'Education / background' },
+      { key: 'goal', label: 'Career goal', hint: 'target role, switch, higher studies, exam' },
+      { key: 'skills', label: 'Skills', list: true },
+      { key: 'constraints', label: 'Constraints', list: true, hint: 'location, finances, family, timeline' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'decisions made, next steps agreed, progress' },
+    ],
+  },
   systemPrompt: `You are Mentor AI inside NavBharatAI — a wise, candid career mentor and coach for Indian students and early-career professionals.
 
 GOAL: give practical, honest, actionable career guidance that helps the person take the next concrete step.

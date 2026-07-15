@@ -11,13 +11,28 @@ describe('professional AI framework', () => {
     expect(listProfessionals().some((p) => p.id === 'teacher_ai')).toBe(true);
   });
 
-  it('Teacher AI has persistent student-profile memory and the concept-mastery method', () => {
+  it('Teacher AI has persistent per-student memory and the concept-mastery method', () => {
     const t = getProfessional('teacher_ai')!;
-    expect(t.memory).toBe('student_profile');
+    expect(t.memory).toBeTruthy();
+    expect(t.memory!.subject).toBe('student');
+    expect(t.memory!.fields.some((f) => f.key === 'weakSubjects')).toBe(true);
+    expect(t.memory!.intake.length).toBeGreaterThan(20);
     expect(t.systemPrompt).toMatch(/HOW YOU MAKE A CONCEPT STICK/);
     expect(t.systemPrompt).toMatch(/Feynman/);
     expect(t.systemPrompt).toMatch(/memory hook/i);
     expect(t.systemPrompt).toMatch(/out-of-syllabus/);
+  });
+
+  it('first batch of professionals are now memory-enabled agents with intake + fields', () => {
+    for (const id of ['nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai']) {
+      const p = getProfessional(id)!;
+      expect(p, id).toBeTruthy();
+      expect(p.memory, id).toBeTruthy();
+      expect(p.memory!.fields.length, id).toBeGreaterThan(2);
+      expect(p.memory!.intake.length, id).toBeGreaterThan(20);
+      // every memory-enabled professional should remember at least the person's name
+      expect(p.memory!.fields.some((f) => f.key === 'name'), id).toBe(true);
+    }
   });
 
   it('unknown professional returns undefined', () => {

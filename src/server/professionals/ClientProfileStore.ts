@@ -1,29 +1,29 @@
 /**
- * Persistent per-user student profiles for professionals with `memory: 'student_profile'`
- * (Teacher AI). The teacher takes a real introduction on day one and remembers the student
- * across sessions and devices (admin 2026-07-14).
+ * Persistent per-user profiles for memory-enabled professionals (admin 2026-07-15 —
+ * every professional can remember its user across sessions and devices).
  *
- * Best-effort by design: if Firestore is unavailable (or under test) every method degrades
- * to null / no-op — memory must never block or break a chat turn.
+ * Best-effort by design: if Firestore is unavailable (or under test) every method
+ * degrades to null / no-op — memory must never block or break a chat turn.
  *
- * Collection: `professional_student_profiles` (doc id = profileKey(userId, professionalId))
+ * Collection: `professional_user_memory` (doc id = profileKey(userId, professionalId),
+ * so every professional is naturally namespaced within the one collection).
  * Pattern: VITEST-skip, best-effort, admin SDK — mirrors VoiceMemoryStore / UserProfileStore.
  */
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
-import { profileKey, type StudentProfile } from './studentProfile';
+import { profileKey, type ClientProfile } from './clientMemory';
 
-const COLLECTION = 'professional_student_profiles';
+const COLLECTION = 'professional_user_memory';
 
 interface ProfileDoc {
   userId: string;
   professionalId: string;
-  profile: StudentProfile;
+  profile: ClientProfile;
   updatedAt: number;
   createdAt: number;
 }
 
-class StudentProfileStore {
+class ClientProfileStore {
   private db: admin.firestore.Firestore | null = null;
 
   private getDb(): admin.firestore.Firestore | null {
@@ -40,7 +40,7 @@ class StudentProfileStore {
   }
 
   /** The remembered profile for this user + professional. Null when none/unavailable. */
-  async load(userId: string, professionalId: string): Promise<StudentProfile | null> {
+  async load(userId: string, professionalId: string): Promise<ClientProfile | null> {
     const db = this.getDb();
     if (!db || !userId) return null;
     try {
@@ -54,7 +54,7 @@ class StudentProfileStore {
   }
 
   /** Persist the (already merged + bounded) profile. Best-effort — never throws. */
-  async save(userId: string, professionalId: string, profile: StudentProfile): Promise<void> {
+  async save(userId: string, professionalId: string, profile: ClientProfile): Promise<void> {
     const db = this.getDb();
     if (!db || !userId) return;
     const now = Date.now();
@@ -70,4 +70,4 @@ class StudentProfileStore {
   }
 }
 
-export const studentProfileStore = new StudentProfileStore();
+export const clientProfileStore = new ClientProfileStore();

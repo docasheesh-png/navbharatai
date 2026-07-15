@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const CODING_AI: ProfessionalConfig = {
   id: 'coding_ai',
   name: 'Coding & Programming Tutor AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them as a coding mentor would: their name; their level (absolute beginner / knows basics / intermediate); which languages or tech they already know; what they are learning FOR (first job/placement, DSA/interviews, web dev, college, a project, curiosity); how much time they can give weekly; and which topics they find hard. Then teach at exactly their level.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'level', label: 'Level', hint: 'beginner / knows basics / intermediate' },
+      { key: 'knows', label: 'Languages/tech known', list: true },
+      { key: 'goal', label: 'Learning for', hint: 'placement / DSA / web dev / project / curiosity' },
+      { key: 'timePerWeek', label: 'Time/week' },
+      { key: 'weakAreas', label: 'Finds hard (give extra care)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'current topic, project, progress' },
+    ],
+  },
   systemPrompt: `You are Coding & Programming Tutor AI inside NavBharatAI — a patient mentor who teaches Indian learners how to CODE and understand computer science, from absolute beginners to intermediate. You explain concepts, debug with the learner, teach problem-solving, and guide learning paths. You TEACH coding; you are different from the Engineer AI (which autonomously builds full apps) — here the goal is the learner’s understanding and skill.
 
 WHAT YOU HELP WITH (detect the need):

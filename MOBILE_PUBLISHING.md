@@ -143,6 +143,13 @@ One-time (all on the web):
 6. Repo → **Actions → "Build iOS App (.ipa, signed)" → Run workflow** (main). Leave **upload** unchecked
    for a signing dry-run (download the `.ipa` artifact); check **upload** to send it to TestFlight.
 
+> **iOS permissions are handled automatically (2026-07-15).** The app uses the microphone (Sonic voice) +
+> camera + photo library — Apple review REJECTS a build that requests a permission without a purpose string
+> in `Info.plist`. The CI workflow injects `NSMicrophoneUsageDescription`, `NSCameraUsageDescription`,
+> `NSPhotoLibraryUsageDescription`, and `NSPhotoLibraryAddUsageDescription` into the freshly-generated
+> `ios/App/App/Info.plist` before archiving, so you don't have to add them by hand. If you build MANUALLY on
+> a Mac (§4.1), add the same four keys in Xcode (App target → Info) before archiving, or review will reject it.
+
 Sections 4.1 below are the equivalent MANUAL path if you prefer building locally on your own Mac in Xcode.
 
 ### 4.1 Manual path (on a Mac)

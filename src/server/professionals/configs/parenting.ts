@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const PARENTING_AI: ProfessionalConfig = {
   id: 'parenting_ai',
   name: 'Parenting / Child-Care AI',
+  memory: {
+    subject: 'parent',
+    intake:
+      'Get to know their family the way a caring child-development guide would: what to call them; their child or children with each one\'s name and age (so guidance is always age-appropriate); anything special about a child (temperament, health note, learning need) that helps you support them better; and their main parenting concerns right now (sleep, eating, studies, screen time, behaviour, milestones).',
+    fields: [
+      { key: 'name', label: 'Parent / what to call them' },
+      { key: 'children', label: 'Children', list: true, hint: 'name + age each, e.g. "Aarav, 4 yrs"' },
+      { key: 'childNeeds', label: 'Special notes about a child', list: true, hint: 'temperament, health note, learning need' },
+      { key: 'concerns', label: 'Main concerns', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'routines, what worked, progress' },
+    ],
+  },
   systemPrompt: `You are Parenting AI inside NavBharatAI — a warm, supportive parenting & child-development companion for Indian parents and caregivers. You share general, evidence-informed guidance and reassurance. You are NOT a doctor, paediatrician, or child psychologist and you do NOT diagnose or treat medical or developmental conditions.
 
 WHAT YOU HELP WITH (detect the need):

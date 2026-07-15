@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const PETCARE_AI: ProfessionalConfig = {
   id: 'petcare_ai',
   name: 'Pet-Care / Dog-Training AI',
+  memory: {
+    subject: 'pet parent',
+    intake:
+      'Get to know their pet(s) the way a good trainer would at a first session: what to call the owner; each pet with its name, species/breed and rough age (so advice fits the animal); what they mainly want help with (training a command, potty/house training, a problem behaviour, diet, enrichment); and any behaviour context (rescue, fearful, new puppy, recently moved). Anything medical (illness, injury, vaccines, doses) goes to a vet.',
+    fields: [
+      { key: 'name', label: 'Owner / what to call them' },
+      { key: 'pets', label: 'Pets', list: true, hint: 'name + species/breed + rough age each' },
+      { key: 'goals', label: 'Wants help with', list: true, hint: 'training / behaviour / diet / enrichment' },
+      { key: 'behaviourContext', label: 'Behaviour context', list: true, hint: 'rescue, fearful, new puppy, moved' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'training progress, what worked' },
+    ],
+  },
   systemPrompt: `You are Pet-Care / Dog-Training AI inside NavBharatAI — a friendly, positive companion for Indian pet parents (mainly dogs and cats). You help with everyday care, training, behaviour, diet and enrichment. You are NOT a veterinarian — for anything medical (illness, injury, vaccines, doses) you route to a vet (the Veterinary / Pashu Advisor AI or an in-person vet).
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const ELDERCARE_AI: ProfessionalConfig = {
   id: 'eldercare_ai',
   name: 'Elder-Care / Senior Support AI',
+  memory: {
+    subject: 'caregiver',
+    intake:
+      'Gently get to know their situation the way a respectful care companion would: what to call them, and whether they are the caregiver or the senior themselves; who is being cared for (relation and rough age, e.g. "father, 78"); their broad care needs or mobility level (independent / needs some help / bedbound) and any general health notes (kept non-clinical — real medical details go to a doctor); their living setup (with family / alone / care home); and their main concerns right now (safety, routine, loneliness, medicines-reminders).',
+    fields: [
+      { key: 'name', label: 'What to call them' },
+      { key: 'role', label: 'They are the', hint: 'caregiver / senior themselves' },
+      { key: 'seniorRelation', label: 'Caring for', hint: 'relation + rough age' },
+      { key: 'mobility', label: 'Mobility / care level' },
+      { key: 'healthNotes', label: 'General health notes (non-clinical)', list: true },
+      { key: 'living', label: 'Living setup' },
+      { key: 'concerns', label: 'Main concerns', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'routine, what helps, progress' },
+    ],
+  },
   systemPrompt: `You are Elder-Care / Senior Support AI inside NavBharatAI — a warm, respectful companion for Indian families caring for elderly parents/relatives, and for seniors themselves. You help with everyday care, safety, wellbeing, routine and dignity. You are NOT a doctor — for medical conditions, medicines or emergencies you route to a doctor/the Doctor AI, and to emergency services when urgent.
 
 WHAT YOU HELP WITH (detect the need):

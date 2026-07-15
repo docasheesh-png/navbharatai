@@ -63,6 +63,22 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'app download karo', 'app install', 'update app', 'rate app', 'review app',
     ],
   },
+  {
+    id: 'support_contact',
+    name: 'Support & Help (email us)',
+    path: 'Sidebar menu → Settings → Support & Help',
+    description:
+      'A one-tap way to contact the NavBharatAI team for any problem, question, or feedback. The "Support & Help" button sits in Settings; tapping it opens your device mail app with a new email already addressed to info@navbharatai.com (subject pre-filled) so you just type your message and send. Works on the web app and inside the Android/iOS app.',
+    howToUse:
+      'Open the sidebar menu, tap Settings, then tap "Support & Help". Your mail app opens with a new email to info@navbharatai.com — describe your issue and send. You can also email info@navbharatai.com directly from any mail app.',
+    relatedFeatures: ['nbi_chat'],
+    keywords: [
+      'support', 'help', 'contact', 'contact us', 'email', 'mail', 'customer support', 'feedback',
+      'report problem', 'complaint', 'reach us', 'sahayata', 'madad', 'support chahiye', 'problem hai',
+      'shikayat', 'contact karo', 'email karo', 'info@navbharatai.com',
+    ],
+    aiSurface: 'nbi_chat',
+  },
   // ─── NAVBHARATAI PRO v3.0 (Vargen 3.0) ───────────────────────────────────
   {
     id: 'agentv3_builder',

@@ -16581,3 +16581,30 @@ OPEN (Fix 68, next): the downloadable Build report still shows provider names to
 regular users get a provider-anonymous view while the admin keeps full detail.
 
 Gate: tsc (frontend) 0; tsc -p tsconfig.server.json 0; vitest 6841/6841.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 1: generic per-user memory foundation + 4 professionals (admin request "har professional ko real AI agent banao, one by one")
+
+**Admin request:** turn every professional in Sidebar → Professionals into a real AI *agent* — one that takes a proper introduction/intake, REMEMBERS the user across sessions, and treats them personally (like the Teacher AI upgrade). Do it one by one. **Do NOT touch NavBharatAI Pro v3 (AgentV3).** (AgentV3 untouched — this work lives entirely in `src/server/professionals/`.)
+
+**Root cause of the gap:** the Teacher memory shipped 2026-07-14 was TEACHER-ONLY (`memory: 'student_profile'` + a hardcoded `StudentProfile` type). It could not generalise to the other 73 professionals — each would need its own duplicated memory module (the exact class-drift the fourth absolute rule forbids).
+
+**Fix — CONFIG-DRIVEN generic memory (fix the class, not 74 instances):**
+- `src/server/professionals/clientMemory.ts` (NEW, pure) — a professional declares `memory: { subject, intake, fields[] }`; `MemoryField = { key, label, list?, hint? }`. Pure helpers: `extractMemory` (strip hidden `<user_memory>{json}` block — and the legacy `<student_memory>` tag — so the user never sees it), `sanitizeUpdate(raw, fields)` (validate against THIS professional's declared fields — unknown keys dropped, scalars/lists bounded+deduped), `mergeProfile` (scalars overwrite, lists union newest-wins capped), `formatProfileBlock` (the "WHAT YOU ALREADY KNOW ABOUT THIS <SUBJECT>" block), `memoryLayer` (intake + per-field save instruction; honest anonymous variant that never claims memory).
+- `src/server/professionals/ClientProfileStore.ts` (NEW) — one Firestore collection `professional_user_memory` (doc id `uid__professionalId`, so every professional is namespaced), VITEST-skip + best-effort (memory can never break a chat turn).
+- `engine.ts` — reads `config.memory` (object), loads/injects profile + layer, validates the model's block against the config's fields, merges + saves. EVERY reply is defensively stripped (even memory-off professionals) so a leaked machine block never reaches a user; a reply that was ONLY a block returns a safe line. Memory keyed to the VERIFIED Firebase uid only (route unchanged — the body `userId` is never trusted; IDOR-safe).
+- **Teacher migrated onto the generic system** (behavior preserved — its rich fields name/college/targetExams/subjects/weakSubjects/… are now declared fields, not a bespoke type). Old `studentProfile.ts` + `StudentProfileStore.ts` DELETED (no duplication left).
+
+**Batch 1 professionals turned into memory agents** (real domain intake + fields, so each greets a returning user by name and tailors to their situation):
+- **Nutritionist** — goal, diet type, region, activity, allergies, conditions (refer-out).
+- **Fitness** — goal, level, home/gym, equipment, days/week, injuries (trains around them safely).
+- **Mentor/Career** — stage, field, background, goal, skills, constraints (mentors you over time).
+- **Wellness** — gentle, non-clinical continuity only (name, what's weighing on them, what helps) — never a diagnosis.
+`AppKnowledgeBase.ts` entries + keywords updated for all 4 (definition-of-done).
+
+**Data note (honest):** the one-day-old Teacher collection `professional_student_profiles` is superseded by `professional_user_memory`; any test-user teacher profile from 2026-07-14 resets once (re-intake) — negligible (feature was <1 day old, ~no real data). Not a break: worst case the teacher re-asks the intro once.
+
+**Regression locks:** `tests/clientMemory.test.ts` (generic extract/sanitise-per-fields/merge/format/layer, 16), `tests/teacherMemoryEngine.test.ts` (updated to generic store/module — prompt injection, strip+save, anon honesty, memory-off untouched, 6), first-batch memory assertions in `tests/professionals.test.ts`. Gate: frontend tsc ✅, server tsc ✅, vitest full suite ✅ (6896 pass), boot smoke ✅ (clean start).
+
+**Next (one by one):** continue enabling memory + deepening the domain method for the remaining professionals in themed batches (finance/accountant/lawyer intake; parenting/eldercare/petcare; kisan/business/realestate; etc.), each: intake+fields + persona deepening + KB sync + tests + gate + PR → CI green → merge.

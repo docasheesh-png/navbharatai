@@ -3,6 +3,23 @@ import type { ProfessionalConfig } from '../types';
 export const FITNESS_AI: ProfessionalConfig = {
   id: 'fitness_ai',
   name: 'Fitness / Personal Trainer AI',
+  memory: {
+    subject: 'trainee',
+    intake:
+      'Get to know them the way a personal trainer does at intake: their name; goal (fat loss / muscle / strength / stamina / general fitness); current experience level; where they train (home / gym) and what equipment they have; how many days a week they can commit; any injuries, pain points or health conditions (so you keep them safe); and their age range.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'goal', label: 'Goal', hint: 'fat loss / muscle / strength / stamina / general' },
+      { key: 'level', label: 'Experience level' },
+      { key: 'place', label: 'Trains at', hint: 'home / gym' },
+      { key: 'equipment', label: 'Equipment', list: true },
+      { key: 'daysPerWeek', label: 'Days/week available' },
+      { key: 'injuries', label: 'Injuries / conditions (train around safely)', list: true },
+      { key: 'ageRange', label: 'Age range' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'current plan, PRs, progress, preferences' },
+    ],
+  },
   systemPrompt: `You are Fitness AI inside NavBharatAI — an encouraging, practical personal-trainer & fitness coach for Indian users of all levels. You give general fitness GUIDANCE and motivation. You are NOT a doctor or physiotherapist and you do NOT diagnose or treat injuries or medical conditions.
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,10 +3,25 @@ import type { ProfessionalConfig } from '../types';
 export const TEACHER_AI: ProfessionalConfig = {
   id: 'teacher_ai',
   name: 'Teacher AI',
-  // Persistent student-profile memory: take a day-one introduction (name, place,
-  // occupation, college, course, target exams, subjects, weak subjects), remember it
-  // across sessions, and teach that student personally on every visit.
-  memory: 'student_profile',
+  // Persistent per-student memory: take a day-one introduction, remember it across
+  // sessions, and teach that student personally on every visit.
+  memory: {
+    subject: 'student',
+    intake:
+      'Across the first few messages learn: their name; where they are from; what they do (school/college/job); their school or college; what they are studying (class/course/stream); which exam(s) they are preparing for; which subjects they want to study; and which subjects or topics feel weak.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'location', label: 'From' },
+      { key: 'occupation', label: 'Does', hint: 'school student / college student / job' },
+      { key: 'college', label: 'School/College' },
+      { key: 'studying', label: 'Studying', hint: 'class / course / stream' },
+      { key: 'targetExams', label: 'Preparing for', list: true, hint: 'e.g. NEET, JEE, boards' },
+      { key: 'subjects', label: 'Subjects', list: true },
+      { key: 'weakSubjects', label: 'Weak subjects/topics (give these extra care)', list: true },
+      { key: 'language', label: 'Prefers to learn in' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'learning style, goals, schedule, topic progress' },
+    ],
+  },
   systemPrompt: `You are Teacher AI inside NavBharatAI — a patient, encouraging expert teacher and tutor for Indian students (school, board, and competitive exams) and for teachers planning lessons. You are each student's PERSONAL teacher: you know them, remember them, and teach them as an individual — not an anonymous helpdesk.
 
 GOAL: build real, permanent UNDERSTANDING — a concept taught by you should stick in the student's mind so they never forget it. You don't just guide; you TEACH until it is truly learned.

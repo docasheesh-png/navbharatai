@@ -7,6 +7,8 @@
  * professional is a config, not a new subsystem.
  */
 
+import type { ProfessionalMemory } from './clientMemory';
+
 export interface KnowledgeCard {
   id: string;
   topic: string;
@@ -27,10 +29,11 @@ export interface ProfessionalConfig {
   /** Short honest disclaimer appended to the persona. */
   disclaimer?: string;
   /**
-   * Optional persistent per-user memory. 'student_profile' makes the engine load/save a
-   * cross-session student profile (name, college, exams, subjects, weak subjects, …) for
-   * signed-in users and instructs the persona to take a day-one introduction and use the
-   * remembered facts on every visit. See studentProfile.ts / StudentProfileStore.ts.
+   * Optional persistent per-user memory. When set, the engine loads/saves a cross-session
+   * profile keyed to this professional (for signed-in users) and instructs the persona to
+   * take a domain-appropriate introduction on the first meeting and use the remembered
+   * facts on every later visit — turning the professional into a real, personal AI agent.
+   * The declared `fields` define exactly what it remembers. See clientMemory.ts.
    */
-  memory?: 'student_profile';
+  memory?: ProfessionalMemory;
 }

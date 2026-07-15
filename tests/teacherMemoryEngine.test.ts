@@ -1,10 +1,10 @@
 /**
- * Engine wiring for student-profile memory (Teacher AI, admin 2026-07-14) — regression lock.
+ * Engine wiring for generic per-user professional memory (admin 2026-07-15) — regression lock.
  *
  * Locks the exact contract: the stored profile + memory layer reach the SYSTEM prompt,
- * the model's <student_memory> block never reaches the user, facts are persisted ONLY
- * for a verified user on a memory-enabled professional, and memory-off professionals
- * are byte-for-byte unaffected (their replies are still defensively stripped).
+ * the model's <user_memory> block never reaches the user, facts are validated against
+ * the config's declared fields and persisted ONLY for a verified user on a memory-enabled
+ * professional, and memory-off professionals are unaffected (replies still defensively stripped).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -15,8 +15,8 @@ vi.mock('../src/server/AI/AIRouterManager', () => ({
 
 const loadMock = vi.fn();
 const saveMock = vi.fn();
-vi.mock('../src/server/professionals/StudentProfileStore', () => ({
-  studentProfileStore: {
+vi.mock('../src/server/professionals/ClientProfileStore', () => ({
+  clientProfileStore: {
     load: (...args: unknown[]) => loadMock(...args),
     save: (...args: unknown[]) => saveMock(...args),
   },
@@ -29,7 +29,16 @@ const TEACHER: ProfessionalConfig = {
   id: 'teacher_ai',
   name: 'Teacher AI',
   systemPrompt: 'You are Teacher AI.',
-  memory: 'student_profile',
+  memory: {
+    subject: 'student',
+    intake: 'Learn their name, college, exams and weak subjects.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'college', label: 'School/College' },
+      { key: 'targetExams', label: 'Preparing for', list: true },
+      { key: 'weakSubjects', label: 'Weak subjects', list: true },
+    ],
+  },
 };
 
 const PLAIN: ProfessionalConfig = {
@@ -47,7 +56,7 @@ function routerCapturing(content: string) {
   };
 }
 
-describe('professional engine — student-profile memory', () => {
+describe('professional engine — generic per-user memory', () => {
   beforeEach(() => {
     getRouterMock.mockReset();
     loadMock.mockReset().mockResolvedValue(null);

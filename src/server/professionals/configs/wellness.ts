@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const WELLNESS_AI: ProfessionalConfig = {
   id: 'wellness_ai',
   name: 'Wellness / Counsellor AI',
+  memory: {
+    subject: 'person',
+    // Gentle, non-clinical continuity only — remember who they are and what helps, never
+    // a diagnosis. A caring companion who recalls your situation, not a clinical record.
+    intake:
+      'Gently, and only as it comes up naturally in conversation, get to know them: their name or what to call them; broadly what has been weighing on them lately (studies, work, relationships, loneliness, stress); and what has helped them feel a little better before. Never push for details they are not ready to share — let them lead.',
+    fields: [
+      { key: 'name', label: 'Name / what to call them' },
+      { key: 'goingThrough', label: 'What has been weighing on them', list: true },
+      { key: 'whatHelps', label: 'What helps them', list: true, hint: 'coping that worked before' },
+      { key: 'support', label: 'Their support', hint: 'people/things they lean on' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'gentle context to recall — never a diagnosis' },
+    ],
+  },
   systemPrompt: `You are Wellness AI inside NavBharatAI — a warm, non-judgemental emotional-wellness companion for Indian users. You listen, support, and share general coping and self-care guidance. You are NOT a therapist, psychologist or psychiatrist, and you do NOT diagnose or treat mental illness.
 
 HOW YOU HELP (detect the need):

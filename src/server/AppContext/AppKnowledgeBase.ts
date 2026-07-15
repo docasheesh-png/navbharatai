@@ -451,11 +451,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'mentor_ai',
     name: 'Mentor / Career Coach',
     path: 'Sidebar → Professionals → Mentor / Career Coach',
-    description: 'Career mentor & coach for Indian students and early-career professionals: career-direction guidance, resume/CV review & drafting, interview prep (STAR), skill roadmaps, job-search/career-switch strategy, and higher-studies/study-abroad guidance. Honest and India-aware (campus placements, govt vs private vs startup, UPSC/CAT, study-abroad). General guidance — does not guarantee jobs/salaries/admissions.',
-    howToUse: 'Open Sidebar → Professionals → Mentor / Career Coach and ask: "help me choose a career", "review my resume", "prep me for an interview", "make a skill roadmap".',
+    description: 'Personal career mentor & coach for Indian students and early-career professionals: takes an intake on first meeting (your stage, field, goal, skills, constraints) and — for signed-in users — REMEMBERS you across sessions to mentor you personally over time. Career-direction guidance, resume/CV review & drafting, interview prep (STAR), skill roadmaps, job-search/career-switch strategy, and higher-studies/study-abroad guidance. Honest and India-aware (campus placements, govt vs private vs startup, UPSC/CAT, study-abroad). General guidance — does not guarantee jobs/salaries/admissions.',
+    howToUse: 'Open Sidebar → Professionals → Mentor / Career Coach and ask: "help me choose a career", "review my resume", "prep me for an interview", "make a skill roadmap". Introduce yourself once and it remembers your goal & progress (when signed in).',
     relatedFeatures: ['professionals'],
     aiSurface: 'mentor_ai',
-    keywords: ['mentor', 'career', 'coach', 'resume', 'cv', 'interview', 'job', 'skill roadmap', 'career change', 'study abroad', 'naukri'],
+    keywords: ['mentor', 'career', 'coach', 'resume', 'cv', 'interview', 'job', 'skill roadmap', 'career change', 'study abroad', 'naukri', 'remembers me', 'personal mentor', 'my goal'],
   },
 
   // ─── THESIS / RESEARCH WRITER ────────────────────────────────────────────
@@ -547,11 +547,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'nutritionist_ai',
     name: 'Nutritionist / Diet AI',
     path: 'Sidebar → Professionals → Nutritionist / Diet AI',
-    description: 'Friendly nutrition & diet guide for Indian users: balanced Indian plate & portions, sustainable goal-based eating (weight loss/gain, muscle, maintenance) using common foods (roti, rice, dal, sabzi, curd, paneer, eggs, millets), veg/vegan protein sources, micronutrient awareness (iron/calcium/B12/vitamin-D), hydration & gut health, and cutting added sugar/salt/ultra-processed food. Safety-first: general nutrition EDUCATION only, not medical nutrition therapy; refers clinical conditions (diabetes, kidney, thyroid, pregnancy, allergies, eating disorders) to a registered dietitian/doctor; no crash diets, detox fads or fabricated calorie numbers.',
-    howToUse: 'Open Sidebar → Professionals → Nutritionist / Diet AI and ask: "make a balanced veg meal plan", "healthy ways to lose weight", "best protein for vegetarians", "how do I cut down sugar & junk food".',
+    description: 'Personal nutrition & diet guide for Indian users: takes a first-consult intake (your goal, diet type, region, activity, allergies, any condition) and — for signed-in users — REMEMBERS you across sessions so plans stay tailored to you. Balanced Indian plate & portions, sustainable goal-based eating (weight loss/gain, muscle, maintenance) using common foods (roti, rice, dal, sabzi, curd, paneer, eggs, millets), veg/vegan protein sources, micronutrient awareness (iron/calcium/B12/vitamin-D), hydration & gut health, and cutting added sugar/salt/ultra-processed food. Safety-first: general nutrition EDUCATION only, not medical nutrition therapy; refers clinical conditions (diabetes, kidney, thyroid, pregnancy, allergies, eating disorders) to a registered dietitian/doctor; no crash diets, detox fads or fabricated calorie numbers.',
+    howToUse: 'Open Sidebar → Professionals → Nutritionist / Diet AI and ask: "make a balanced veg meal plan", "healthy ways to lose weight", "best protein for vegetarians", "how do I cut down sugar & junk food". Tell it your goal & diet once and it remembers (when signed in).',
     relatedFeatures: ['professionals', 'sda_chat'],
     aiSurface: 'nutritionist_ai',
-    keywords: ['nutrition', 'nutritionist', 'diet', 'food', 'meal plan', 'weight loss', 'weight gain', 'protein', 'calories', 'healthy eating', 'khana', 'diet plan', 'sugar', 'vegetarian'],
+    keywords: ['nutrition', 'nutritionist', 'diet', 'food', 'meal plan', 'weight loss', 'weight gain', 'protein', 'calories', 'healthy eating', 'khana', 'diet plan', 'sugar', 'vegetarian', 'remembers me', 'personal diet', 'my goal'],
   },
 
   // ─── WELLNESS / COUNSELLOR AI ────────────────────────────────────────────
@@ -559,11 +559,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'wellness_ai',
     name: 'Wellness / Counsellor AI',
     path: 'Sidebar → Professionals → Wellness / Counsellor',
-    description: 'Warm, non-judgemental emotional-wellness companion: listens & validates feelings, shares general coping & self-care (grounding/breathing for anxiety, sleep & routine for low mood, CBT-style thought reframing, stress/exam/work/relationship support), and encourages real-world & professional help while reducing stigma. Safety-first: an AI companion, NOT a therapist, NO diagnosis, NO medication advice; on any crisis/self-harm it shares India helplines (Tele-MANAS 14416 / 1-800-891-4416, KIRAN 1800-599-0019, emergency 112) and steers to immediate human help; never fabricates helplines or clinical claims.',
+    description: 'Warm, non-judgemental emotional-wellness companion that remembers you gently: recalls what you are called, what has been weighing on you, and what helps you — for signed-in users, across sessions (never a diagnosis, just caring continuity). Listens & validates feelings, shares general coping & self-care (grounding/breathing for anxiety, sleep & routine for low mood, CBT-style thought reframing, stress/exam/work/relationship support), and encourages real-world & professional help while reducing stigma. Safety-first: an AI companion, NOT a therapist, NO diagnosis, NO medication advice; on any crisis/self-harm it shares India helplines (Tele-MANAS 14416 / 1-800-891-4416, KIRAN 1800-599-0019, emergency 112) and steers to immediate human help; never fabricates helplines or clinical claims.',
     howToUse: 'Open Sidebar → Professionals → Wellness / Counsellor and share how you feel: "I am feeling stressed", "help me calm down from anxiety", "how do I deal with low mood", "when should I see a counsellor". For medical/clinical questions use Doctor AI or a professional.',
     relatedFeatures: ['professionals', 'sda_chat'],
     aiSurface: 'wellness_ai',
-    keywords: ['wellness', 'counsellor', 'counselor', 'mental health', 'stress', 'anxiety', 'depression', 'sad', 'low mood', 'therapy', 'emotional', 'support', 'mann', 'tension', 'help'],
+    keywords: ['wellness', 'counsellor', 'counselor', 'mental health', 'stress', 'anxiety', 'depression', 'sad', 'low mood', 'therapy', 'emotional', 'support', 'mann', 'tension', 'help', 'remembers me', 'someone who listens'],
   },
 
   // ─── FITNESS / PERSONAL TRAINER AI ───────────────────────────────────────
@@ -571,11 +571,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'fitness_ai',
     name: 'Fitness / Personal Trainer AI',
     path: 'Sidebar → Professionals → Fitness / Personal Trainer',
-    description: 'Encouraging personal-trainer & fitness coach: home/gym workout plans for goals (fat loss, muscle/strength, stamina, general fitness), exercise form & technique cues, warm-up/mobility/recovery & rest, cardio & steps, and habit/motivation help. Defers detailed diet to the Nutritionist AI. Safety-first: general fitness education, NOT medical/physiotherapy advice; advises medical clearance before a new programme (health condition, pregnancy, older, inactive), stop & see a doctor/physio for pain/injury; no crash regimes, overtraining, dehydration cutting, or anabolic/unproven supplements.',
-    howToUse: 'Open Sidebar → Professionals → Fitness / Personal Trainer and ask: "beginner home workout plan", "plan to build muscle", "lose fat safely", "fix my squat form". For diet specifics use Nutritionist AI; for pain/injury see a doctor/physio.',
+    description: 'Encouraging personal-trainer & fitness coach that trains YOU specifically: takes an intake (your goal, level, home/gym, equipment, days/week, any injury) and — for signed-in users — REMEMBERS it across sessions so every plan fits you and trains around your injuries. Home/gym workout plans for goals (fat loss, muscle/strength, stamina, general fitness), exercise form & technique cues, warm-up/mobility/recovery & rest, cardio & steps, and habit/motivation help. Defers detailed diet to the Nutritionist AI. Safety-first: general fitness education, NOT medical/physiotherapy advice; advises medical clearance before a new programme (health condition, pregnancy, older, inactive), stop & see a doctor/physio for pain/injury; no crash regimes, overtraining, dehydration cutting, or anabolic/unproven supplements.',
+    howToUse: 'Open Sidebar → Professionals → Fitness / Personal Trainer and ask: "beginner home workout plan", "plan to build muscle", "lose fat safely", "fix my squat form". Tell it your goal & equipment once and it remembers (when signed in). For diet specifics use Nutritionist AI; for pain/injury see a doctor/physio.',
     relatedFeatures: ['professionals', 'nutritionist_ai', 'sda_chat'],
     aiSurface: 'fitness_ai',
-    keywords: ['fitness', 'workout', 'exercise', 'gym', 'trainer', 'muscle', 'strength', 'fat loss', 'cardio', 'home workout', 'training', 'kasrat', 'vyayam', 'bodyweight'],
+    keywords: ['fitness', 'workout', 'exercise', 'gym', 'trainer', 'muscle', 'strength', 'fat loss', 'cardio', 'home workout', 'training', 'kasrat', 'vyayam', 'bodyweight', 'remembers me', 'personal trainer', 'my plan'],
   },
 
   // ─── VETERINARY / PASHU ADVISOR AI ───────────────────────────────────────

@@ -46,30 +46,33 @@ export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBloc
     .join('\n\n');
 }
 
+/** Which model chain a professional turn may use, decided by the caller's billing tier. */
+export type ProfessionalTier = 'free' | 'paid';
+
 /**
- * Resilient model call for the professional universe — a two-tier ladder (admin 2026-07-09):
+ * Resilient model call for the professional universe — tier-aware (admin 2026-07-15). BOTH tiers lead
+ * with GLM-4.7-Flash ($0 on Z.AI) so a successful free answer fires ZERO paid calls and paid margin
+ * stays high. The tiers differ ONLY in the FALLBACK when GLM fails/rate-limits:
  *
- *   1. PROFESSIONAL-FREE first — the isolated single-provider universe holding only
- *      GLM-4.7-Flash ($0 in/out on Z.AI). A successful free answer fires ZERO paid
- *      provider calls. Inert when GLM_API_KEY is unset (healthCheck false), so behaviour
- *      then degrades to exactly the paid path below.
- *   2. PROFESSIONAL (paid) fallback — today's path, byte-for-byte unchanged: routeRaced
- *      fires Grok × Gemini × Vertex concurrently and uses Claude Haiku ONLY if all fail.
+ *   • FREE tier  → PROFESSIONAL-FREE-FALLBACK = Vertex only (cheap Gemini). NEVER Grok / direct Gemini
+ *     / Claude — a free user must never trigger the pricier paid providers (cost policy).
+ *   • PAID tier  → PROFESSIONAL = RACE(Grok × Gemini × Vertex) → Claude Haiku last resort. The ₹99/mo
+ *     Pass buys the full-quality, never-fail chain.
  *
- * Every config-driven professional — Teacher, Lawyer, CA, Astrologer, Kisan, … — shares
- * these isolated universes, never mixing routing state with FREE or PRO. (Doctor AI / SDA
- * has its own route and stays directly on the paid universe.)
+ * Every config-driven professional shares these isolated universes, never mixing routing state with
+ * FREE or PRO. (Doctor AI / SDA has its own route.)
  */
-async function resilientCall(systemPrompt: string, prompt: string): Promise<string> {
-  // Tier 1 — free (GLM-flash). Any failure/rate-limit/empty reply falls through silently.
+async function resilientCall(systemPrompt: string, prompt: string, tier: ProfessionalTier): Promise<string> {
+  // Tier-1 leader (BOTH tiers) — GLM-flash. Any failure/rate-limit/empty reply falls through silently.
   try {
     const freeRouter = AIRouterManager.getRouter('professional-free');
     const { response, telemetry } = await freeRouter.routeRaced(prompt, systemPrompt);
     if (telemetry.success && response.content?.trim()) return response.content;
-  } catch { /* fall through to the paid universe */ }
+  } catch { /* fall through to the tier's fallback universe */ }
 
-  // Tier 2 — paid (unchanged): RACE(Grok × Gemini × Vertex) → Claude Haiku last resort.
-  const router = AIRouterManager.getRouter('professional');
+  // Fallback universe depends on the tier: free → Vertex-only; paid → full race → Haiku.
+  const fallbackNs = tier === 'free' ? 'professional-free-fallback' : 'professional';
+  const router = AIRouterManager.getRouter(fallbackNs);
   const { response, telemetry } = await router.routeRaced(prompt, systemPrompt);
   if (telemetry.success && response.content?.trim()) return response.content;
   throw new Error('All AI providers failed for this professional.');
@@ -91,6 +94,7 @@ export async function runProfessionalChat(
   message: string,
   history: ProfessionalTurn[] = [],
   verifiedUserId?: string,
+  tier: ProfessionalTier = 'paid',
 ): Promise<string> {
   // Per-user memory (memory-enabled professionals): load what we remember about this
   // user and inject it + the memory behaviour layer. Anonymous users still get the
@@ -127,7 +131,7 @@ export async function runProfessionalChat(
     if (liveBlock) prompt = `${liveBlock}\n\n---\n${prompt}`;
   } catch { /* live search is best-effort */ }
 
-  const raw = await resilientCall(systemPrompt, prompt);
+  const raw = await resilientCall(systemPrompt, prompt, tier);
 
   // ALWAYS strip any memory block from what the user sees (even for memory-off
   // professionals / anonymous users — a leaked machine block must never reach the

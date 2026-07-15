@@ -20,7 +20,8 @@ import { professionalUsageStore } from '../professionals/ProfessionalUsageStore'
  */
 async function gateProfessionalTurn(uid: string | null, email: string | null) {
   if (!professionalPaidEnabled()) {
-    return { allow: true as const, countsAgainstFree: false, uid };
+    // Flag off → today's behaviour: full paid-quality chain, no metering.
+    return { allow: true as const, countsAgainstFree: false, uid, tier: 'paid' as const };
   }
   const freeListed = isProfessionalFreeUser(uid, email);
   const freeDailyLimit = professionalFreeDailyLimit();
@@ -31,7 +32,10 @@ async function gateProfessionalTurn(uid: string | null, email: string | null) {
     enabled: true, signedIn: !!uid, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
   });
   if (decision.action === 'allow') {
-    return { allow: true as const, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid };
+    // Model tier: an active Pass (or the admin free-list) → the full paid chain; a within-quota free
+    // user → the free chain (GLM → Vertex only). This is what makes "free = cheap models" real.
+    const tier: 'free' | 'paid' = decision.reason === 'within-free-quota' ? 'free' : 'paid';
+    return { allow: true as const, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier };
   }
   const login = decision.reason === 'login-required';
   return {
@@ -129,7 +133,7 @@ export function registerProfessionalsRoutes(app: Express): void {
     }
 
     try {
-      const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined);
+      const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined, gate.tier);
       // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
       if (gate.countsAgainstFree && verifiedUserId) {
         void professionalUsageStore.increment(verifiedUserId);

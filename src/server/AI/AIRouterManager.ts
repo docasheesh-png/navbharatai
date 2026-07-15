@@ -24,8 +24,9 @@ export class AIRouterManager {
   private static instancePro: AIRouter | null = null;
   private static instanceProfessional: AIRouter | null = null;
   private static instanceProfessionalFree: AIRouter | null = null;
+  private static instanceProfessionalFreeFallback: AIRouter | null = null;
 
-  static getRouter(namespace: 'free' | 'pro' | 'professional' | 'professional-free'): AIRouter {
+  static getRouter(namespace: 'free' | 'pro' | 'professional' | 'professional-free' | 'professional-free-fallback'): AIRouter {
     if (namespace === 'pro') {
       if (!this.instancePro) this.instancePro = this.buildPro();
       return this.instancePro;
@@ -38,11 +39,15 @@ export class AIRouterManager {
       if (!this.instanceProfessionalFree) this.instanceProfessionalFree = this.buildProfessionalFree();
       return this.instanceProfessionalFree;
     }
+    if (namespace === 'professional-free-fallback') {
+      if (!this.instanceProfessionalFreeFallback) this.instanceProfessionalFreeFallback = this.buildProfessionalFreeFallback();
+      return this.instanceProfessionalFreeFallback;
+    }
     if (!this.instanceFree) this.instanceFree = this.buildFree();
     return this.instanceFree;
   }
 
-  static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; }
+  static reset() { this.instanceFree = null; this.instancePro = null; this.instanceProfessional = null; this.instanceProfessionalFree = null; this.instanceProfessionalFreeFallback = null; }
 
   // FREE: GLM-flash (free leader) → Vertex (3 models) → Gemini (2 models) → Grok.
   // Claude NEVER used in free.
@@ -179,6 +184,23 @@ export class AIRouterManager {
       const glm = new GlmProvider();
       glm.priority = 0;
       router.registerProvider(glm);
+    } catch {}
+    return router;
+  }
+
+  // PROFESSIONAL-FREE-FALLBACK universe (admin 2026-07-15): the ONLY fallback a FREE-tier professional
+  // user gets when GLM-flash fails/rate-limits — Vertex (cheap Gemini on Google), NEVER Grok / direct
+  // Gemini / Claude. This enforces the free-tier cost policy "GLM (free) + Vertex only" so a free user
+  // can never trigger the pricier paid providers. gemini-2.5-flash primary → -flash-lite (cheaper)
+  // fallback within Vertex. If Vertex is unavailable the router simply fails and the engine returns an
+  // honest "busy" — a free build must never silently escalate to a paid provider.
+  private static buildProfessionalFreeFallback(): AIRouter {
+    const router = new AIRouter("professional-free-fallback");
+    console.log('[ROUTER_MGR] Building PROFESSIONAL-FREE-FALLBACK chain: Vertex only (gemini-2.5-flash → -flash-lite)');
+    try {
+      const vertex = new VertexProvider();
+      router.registerProvider(slot(vertex, 1, 'gemini-2.5-flash'));
+      router.registerProvider(slot(vertex, 2, 'gemini-2.5-flash-lite'));
     } catch {}
     return router;
   }

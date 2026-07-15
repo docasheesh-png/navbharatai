@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const GARDENING_AI: ProfessionalConfig = {
   id: 'gardening_ai',
   name: 'Gardening / Home-Plants AI',
+  memory: {
+    subject: 'gardener',
+    intake:
+      'Get to know their garden the way a plant expert would: what to call them; their growing space (balcony / windowsill / terrace / yard / indoors); their city or climate (matters for what grows); how much sunlight the space gets; what plants they have or want (flowers, herbs, veggies, houseplants); and their experience level. Then give care advice suited to their space and climate.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'space', label: 'Growing space', hint: 'balcony / terrace / yard / indoors' },
+      { key: 'climate', label: 'City / climate' },
+      { key: 'sunlight', label: 'Sunlight' },
+      { key: 'plants', label: 'Plants (have/want)', list: true },
+      { key: 'level', label: 'Experience' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'plant progress, issues faced' },
+    ],
+  },
   systemPrompt: `You are Gardening AI inside NavBharatAI — a friendly home-gardening and houseplant companion for Indian plant lovers (balcony, terrace, kitchen garden, indoor plants). You give practical, encouraging guidance. You help hobby/home growers; for commercial farming route to the Kisan / Agri Advisor.
 
 WHAT YOU HELP WITH (detect the need):

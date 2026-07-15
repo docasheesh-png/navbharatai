@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const INTERIOR_AI: ProfessionalConfig = {
   id: 'interior_ai',
   name: 'Interior Design & Home-Decor AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their space the way an interior designer would: what to call them; which space they are working on (living room / bedroom / kitchen / whole home / rental); the style they like (modern, minimal, traditional Indian, cozy, colourful); their rough budget; and any constraints (rented so no drilling, small space, kids/pets). Then suggest ideas that fit their space, taste and budget.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'space', label: 'Space', hint: 'room / whole home / rental' },
+      { key: 'style', label: 'Style liked' },
+      { key: 'budget', label: 'Budget' },
+      { key: 'constraints', label: 'Constraints', list: true, hint: 'rented, small, kids/pets' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'ideas liked, progress' },
+    ],
+  },
   systemPrompt: `You are Interior Design & Home-Decor AI inside NavBharatAI — a practical, creative guide to decorating and organising Indian homes on any budget (rented or owned, small flats to houses). You help with layout, colour, decor, storage and DIY styling. You give design IDEAS and guidance; for anything structural, electrical, plumbing or safety-related you route to a professional (architect/civil engineer/electrician), and to the Home Repair AI for fixes.
 
 WHAT YOU HELP WITH (detect the need):

@@ -43,26 +43,36 @@ on:
 
 jobs:
   build-ios:
-    # macos-15 = a real Mac in the cloud with Xcode 16.x (this replaces owning a Mac). Must be 16+ because
-    # the @capacitor-firebase/authentication plugin pulls firebase-ios-sdk 12.7+, whose Swift Package
-    # requires the Xcode 16 toolchain (Swift 6.1) — the older default Xcode 15.4 fails SPM resolution with
-    # "incompatible tools version (6.1.0)".
+    # macos-15 (Sequoia) is a real Mac in the cloud. It ships multiple Xcodes including Xcode 26 (which runs
+    # on macOS 15.6+). We select the NEWEST one because Apple now REJECTS App Store uploads built with an SDK
+    # older than iOS 26 ("must be built with the iOS 26 SDK or later, included in Xcode 26 or later"). The
+    # newest Xcode also satisfies the @capacitor-firebase/authentication SPM requirement (Swift 6.1+), so
+    # newest-wins is strictly better than the old "pin Xcode 16".
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
-      # Pin the NEWEST installed Xcode 16.x (macos-15 ships several) so SPM can resolve the Firebase SDK.
-      # Fails loudly if no Xcode 16 is present rather than silently building on an incompatible toolchain.
-      - name: Select the latest Xcode 16 (Firebase SDK requires it)
+      # Select the newest installed Xcode. Apple requires Xcode 26+ (iOS 26 SDK) to upload to App Store
+      # Connect — fail early and loudly if this runner's newest Xcode is older, rather than building an
+      # .ipa that Apple will reject only at the upload step (as build #10 did).
+      - name: Select the newest Xcode (Apple requires Xcode 26+ / iOS 26 SDK to upload)
         run: |
-          LATEST="$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)"
+          LATEST="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
           if [ -z "$LATEST" ]; then
-            echo "::error::No Xcode 16.x found on the runner — the Firebase iOS SDK needs it. Installed Xcodes:"
+            echo "::error::No Xcode found on the runner. Installed Xcodes:"
             ls -d /Applications/Xcode_*.app || true
             exit 1
           fi
           sudo xcode-select -s "$LATEST/Contents/Developer"
-          xcodebuild -version | head -1
+          xcodebuild -version | head -2
+          # Apple rejects uploads built with an SDK older than iOS 26. Fail early (before the long build) if
+          # the newest Xcode on this runner is < 26, so we don't waste an archive on an .ipa Apple will refuse.
+          MAJOR="$(xcodebuild -version | head -1 | sed -E 's/Xcode ([0-9]+).*/\1/')"
+          if [ -z "$MAJOR" ] || [ "$MAJOR" -lt 26 ]; then
+            echo "::error::Newest Xcode on this runner is '$MAJOR' — Apple requires Xcode 26+ (iOS 26 SDK) to upload to App Store Connect. Change the runner image to one that ships Xcode 26. Installed Xcodes:"
+            ls -d /Applications/Xcode_*.app || true
+            exit 1
+          fi
 
       # Fail EARLY and honestly if the Apple secrets are not set — a store .ipa MUST be signed with your
       # Apple identity, so we never hand back an unsigned/unusable build.

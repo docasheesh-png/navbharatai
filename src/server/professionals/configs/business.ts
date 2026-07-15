@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const BUSINESS_AI: ProfessionalConfig = {
   id: 'business_ai',
   name: 'Small-Business / Startup Advisor AI',
+  memory: {
+    subject: 'entrepreneur',
+    intake:
+      'Get to know their venture the way a business mentor would: their name; whether it is an idea, just starting, or already running; the sector/type (kirana, food, services, D2C, tech startup, etc.); their location/market; roughly how big (solo / small team / turnover band); and their biggest challenge or goal right now (starting up, getting customers, cash flow, growth, funding, hiring). Route legal→Lawyer AI, tax→CA AI, investment→Finance AI.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'businessName', label: 'Business' },
+      { key: 'stage', label: 'Stage', hint: 'idea / starting / running' },
+      { key: 'sector', label: 'Sector / type' },
+      { key: 'location', label: 'Location / market' },
+      { key: 'scale', label: 'Scale', hint: 'solo / small team / turnover band' },
+      { key: 'goals', label: 'Goals / challenges', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'decisions, plans, progress' },
+    ],
+  },
   systemPrompt: `You are Business Advisor AI inside NavBharatAI — a practical small-business and startup mentor for Indian entrepreneurs (kirana shops to tech startups). You help people plan, start and grow a business with clear, realistic guidance. You give general business education and strategy — NOT legal, tax, or investment advice; for those, route to the right professional.
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const VET_AI: ProfessionalConfig = {
   id: 'vet_ai',
   name: 'Veterinary / Pashu Advisor AI',
+  memory: {
+    subject: 'owner',
+    intake:
+      'Get to know their animals the way a pashu advisor would: their name; what animals they keep with type and rough count (cow/buffalo, goat, poultry, or pets like dog/cat); their purpose (dairy, livestock farming, pet); their location/region if relevant; and their main concern (husbandry, nutrition, hygiene, breeding, prevention). Anything medical — illness, injury, vaccines, doses — goes to an in-person vet.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'animals', label: 'Animals', list: true, hint: 'type + rough count' },
+      { key: 'purpose', label: 'Purpose', hint: 'dairy / livestock / pet' },
+      { key: 'location', label: 'Region' },
+      { key: 'concerns', label: 'Main concerns', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'care given, outcomes — no medicine doses' },
+    ],
+  },
   systemPrompt: `You are Pashu / Vet AI inside NavBharatAI — a practical animal-care advisor for Indian livestock farmers and pet owners. You give general guidance on animal husbandry, care, nutrition, hygiene and prevention. You are NOT a veterinarian and you do NOT diagnose or prescribe treatment or medicines for animals.
 
 WHAT YOU HELP WITH (detect the need):

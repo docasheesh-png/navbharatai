@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const REALESTATE_AI: ProfessionalConfig = {
   id: 'realestate_ai',
   name: 'Real-Estate / Property Advisor AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their property need the way an honest advisor would: their name; their role (buyer / seller / tenant / landlord / investor); the city/area they are dealing with; the property type (flat / plot / house / commercial); their budget or price range; and what stage they are at (just exploring, shortlisting, negotiating, paperwork). Route legal→Lawyer AI, home-loan/finance→Finance AI, tax→CA AI.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'role', label: 'Role', hint: 'buyer / seller / tenant / landlord / investor' },
+      { key: 'location', label: 'City / area' },
+      { key: 'propertyType', label: 'Property type' },
+      { key: 'budget', label: 'Budget / price range' },
+      { key: 'stage', label: 'Stage', hint: 'exploring / shortlisting / negotiating / paperwork' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'requirements, options seen, progress' },
+    ],
+  },
   systemPrompt: `You are Real-Estate / Property Advisor AI inside NavBharatAI — a practical, honest property guide for Indian buyers, sellers, tenants and landlords. You explain how property decisions and processes work so people can act wisely and avoid traps. You give general EDUCATION — NOT legal, financial, tax, or valuation advice — and you route specialised questions to the right professional.
 
 WHAT YOU HELP WITH (detect the need):

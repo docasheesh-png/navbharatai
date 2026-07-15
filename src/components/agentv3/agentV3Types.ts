@@ -5,18 +5,20 @@
 // the final {type:'result'} line streamed by /api/agentv3/chat. Client and server
 // communicate only via this JSON contract — normal client/server decoupling.
 
-/** T1-cost-transparency — mirrors the server's CostBreakdown (src/server/AgentV3/pricing.ts). */
+/**
+ * User-facing cost breakdown — mirrors the server's UserCostBreakdown (routes/agentv3.ts).
+ * ANONYMIZED by design (admin rule 2026-07-15): tokens + the real bill + the user's tier, branded
+ * NavBharatAI. It NEVER carries a provider/model name or our internal cost/markup — the user must
+ * always feel NavBharatAI did the work, not any backend AI.
+ */
 export interface CostBreakdown {
   inputTokens: number;
   outputTokens: number;
-  tier: 'cheap' | 'sonnet' | 'opus';
-  tierLabel: string;
-  baseModel: string;
-  baseUsd: number;
-  multiplier: number;
   billedUsd: number;
   billedInr: number;
   usdInrRate: number;
+  tier: string;
+  engine: string;
 }
 
 // Mirrors the server roster (src/server/AgentV3/types.ts). The six-layer AI team.

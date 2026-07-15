@@ -16548,3 +16548,36 @@ format) needs one more trace before fixing — recorded, not patched blind (rule
 No code shipped for LedgerLite this autopsy — the real roots are subsystem-level (handoff) + infra (keys) + a
 not-yet-traced detector; rushing a patch would violate rule 4. The PaisaTrack `rm -rf` guard (this same PR)
 already removes one arm of the cascade's damage. The handoff fix (#1) is queued as the next dedicated slice.
+## 2026-07-15 — Fix 67: real-cost billing on the watchdog/advisory path + user-facing provider anonymity
+
+VERIFIED LIVE (admin before/after dashboards, PaisaTrack build): real provider cost = Kimi $0.24831 +
+GLM $0.04 + Gemini ₹14.26 + **Claude $0.00** + Grok $0.00 = **$0.452 ≈ ₹39**. The "512k claude-sonnet-4-6"
+bucket in the report was NOT real Claude (Claude deduction was ₹0) — it was Gemini/Vertex serving the
+fallback; the "sonnet" label was only the REQUESTED model. Fix 65's correct bill = tieredMarkup($0.452) =
+**₹157** (4×, ₹118 margin). But the app SHOWED **₹250.67** — the old flat formula — because the build
+finalized via the wall-clock/advisory cap, which bypassed Fix 65.
+
+ROOT CAUSE: `finalizeOnDeadline` (the wall-clock + post-success advisory-cap finalizer) billed the OLD
+`billedAmountUsd(...)` and skipped `setProviderTokens`/`setBilling`, so an overran build showed the wrong
+₹ and its report came back billing-null/providerTokens-null. It also never debited (silent free-build
+revenue leak) while still SHOWING a charge.
+
+WHAT SHIPPED:
+- Shared `decideBuildBilledUsd()` (routes/agentv3.ts) now drives BOTH the normal settle AND the
+  finalizer — one implementation, no drift. Refactored the settle block to call it.
+- `finalizeOnDeadline` success branch: computes the real-cost bill via the shared helper, records
+  per-provider tokens + billing INTO the report (set before report()), and debits the wallet with the
+  SAME idempotent buildRef the settle uses (`${workspaceId}_${buildStartedAt}`), via an outer-scope
+  `billingCtx` holder that the inner build scope populates (the ledger/ref live in a deeper scope).
+- USER-FACING PROVIDER ANONYMITY (admin rule): new exported `userCostBreakdown()` — the ONLY cost object
+  sent to the client. Tokens + real bill + user tier, branded `NavBharatAI Pro v3.0`; NEVER a
+  provider/model name or our internal cost/markup. Replaced the leaky per-tier breakdown (which showed
+  "Sonnet"/"real Opus"/GLM/Kimi) AND fixed a real client crash (Fix 65's mismatched breakdown shapes made
+  the client do `undefined.toFixed()`). Client `CostBreakdown` type + AgentV3Panel render updated.
+- Test lock: `tests/userCostBreakdown.test.ts` (5) asserts the serialized breakdown never matches any
+  provider/model name + the tier mapping. providerRates suite still green.
+
+OPEN (Fix 68, next): the downloadable Build report still shows provider names to everyone — gate it so
+regular users get a provider-anonymous view while the admin keeps full detail.
+
+Gate: tsc (frontend) 0; tsc -p tsconfig.server.json 0; vitest 6841/6841.

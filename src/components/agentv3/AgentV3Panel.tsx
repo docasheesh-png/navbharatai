@@ -2474,8 +2474,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 </summary>
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-700 pl-2">
                   <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
-                  <span>Tier: {state.costBreakdown.tierLabel} — {state.costBreakdown.baseModel} cost × {state.costBreakdown.multiplier}</span>
-                  <span>Base ${state.costBreakdown.baseUsd.toFixed(4)} × {state.costBreakdown.multiplier} = ${state.costBreakdown.billedUsd.toFixed(4)} → ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
+                  <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
+                  <span>Total: ₹{state.costBreakdown.billedInr.toFixed(2)}</span>
                 </div>
               </details>
             )}

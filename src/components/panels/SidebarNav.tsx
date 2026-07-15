@@ -39,7 +39,6 @@ export interface SidebarNavProps {
   setTheme: (t: ThemeMode) => void;
   isThemePickerOpen: boolean;
   setIsThemePickerOpen: (v: boolean) => void;
-  isAdmin: boolean;
   setShowVishwakarmaChooser: (v: boolean) => void;
   setErrorContext: (v: any) => void;
   /** Reopen a past chat (routes v3.0 → Pro v3.0, others → their own surface). Unused by this
@@ -110,7 +109,7 @@ export function SidebarNav({
   isMenuOpen, setIsMenuOpen, menuItems, enabledModules,
   activeView, toggleTab, setActiveView, hasGeneratedCode, user, setShowAuth,
   addLog, theme, setTheme, isThemePickerOpen, setIsThemePickerOpen,
-  isAdmin, setShowVishwakarmaChooser, setErrorContext,
+  setShowVishwakarmaChooser, setErrorContext,
 }: SidebarNavProps) {
   const visibleItems = menuItems.filter(item => enabledModules[item.id] !== false);
 
@@ -390,13 +389,9 @@ export function SidebarNav({
                     <Info className="w-4.5 h-4.5 text-indigo-400" />
                     <span className="text-sm font-bold tracking-tight">App Builder v3.0</span>
                   </button>
-                  <button
-                    onClick={() => { toggleTab('admin'); setIsMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'admin' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
-                  >
-                    <Lock className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">{isAdmin ? 'Admin Dashboard' : 'Admin Login'}</span>
-                  </button>
+                  {/* Admin access moved to a dedicated URL (admin 2026-07-15): reach the admin login /
+                      dashboard at /admin. It's intentionally NOT a menu item so the entry isn't
+                      advertised in the UI. */}
                 </div>
               </div>
 

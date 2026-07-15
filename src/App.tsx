@@ -373,7 +373,25 @@ export default function App() {
   const readV3ViewFlag = (): boolean => {
     try { return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('nbi_v3_open') === '1'; } catch { return false; }
   };
-  const [activeView, setActiveView] = useState<ViewType>(() => (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'));
+  // Admin access moved OFF the sidebar to a dedicated URL (admin 2026-07-15): /admin deep-links straight
+  // into the existing admin view (login → MFA → dashboard). Keeping it a URL (not a visible menu item)
+  // means the admin entry isn't advertised in the UI, and it reuses ALL the existing, tested admin
+  // wiring rather than duplicating it. A trailing slash is tolerated.
+  const readAdminRoute = (): boolean => {
+    try { return typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/admin'; } catch { return false; }
+  };
+  const [activeView, setActiveView] = useState<ViewType>(() =>
+    readAdminRoute() ? 'admin' : (readV3ViewFlag() ? 'nbi_pro_chat' : 'home'),
+  );
+  // Keep the address bar honest about the admin view: reflect /admin while it's open (so a refresh or
+  // bookmark reopens it) and restore / on leaving. replaceState (not push) so it never pollutes history.
+  useEffect(() => {
+    try {
+      const onAdminPath = window.location.pathname.replace(/\/+$/, '') === '/admin';
+      if (activeView === 'admin' && !onAdminPath) window.history.replaceState(null, '', '/admin');
+      else if (activeView !== 'admin' && onAdminPath) window.history.replaceState(null, '', '/');
+    } catch { /* history unavailable — best effort */ }
+  }, [activeView]);
   // Phase 3.1 — unified Chat+IDE: when an app exists, the live workspace (code +
   // preview) docks to the right of the Pro Chat on desktop. User can collapse it.
   const [settingsScreen, setSettingsScreen] = useState<SettingsScreen>('root');
@@ -2401,7 +2419,6 @@ export default function App() {
         setTheme={setTheme}
         isThemePickerOpen={isThemePickerOpen}
         setIsThemePickerOpen={setIsThemePickerOpen}
-        isAdmin={isAdmin}
         setShowVishwakarmaChooser={setShowVishwakarmaChooser}
         setErrorContext={setErrorContext}
         sessions={sessions}

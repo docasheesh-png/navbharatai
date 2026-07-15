@@ -175,6 +175,12 @@ jobs:
           # on every TestFlight upload — the permanent equivalent of answering "None of the algorithms".
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+          # Unique, monotonically-increasing build number. Apple rejects a re-used CFBundleVersion — build
+          # #13's upload failed with "bundle version must be higher than the previously uploaded version: 1"
+          # because every build defaulted to "1". Stamp it with the workflow run number (always increases),
+          # exactly like the Android .aab auto-increments versionCode = run number.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${GITHUB_RUN_NUMBER}" "$PLIST"
           echo "Usage descriptions now in Info.plist:"
           for k in NSMicrophoneUsageDescription NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
             printf '  %s = %s\n' "$k" "$(/usr/libexec/PlistBuddy -c "Print :$k" "$PLIST")"

@@ -23,8 +23,12 @@ describe('professional AI framework', () => {
     expect(t.systemPrompt).toMatch(/out-of-syllabus/);
   });
 
-  it('first batch of professionals are now memory-enabled agents with intake + fields', () => {
-    for (const id of ['nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai']) {
+  it('memory-enabled professionals are agents with intake + fields (Batch 1 & 2)', () => {
+    const memoryAgents = [
+      'nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', // Batch 1
+      'finance_ai', 'accountant_ai', 'lawyer_ai', // Batch 2
+    ];
+    for (const id of memoryAgents) {
       const p = getProfessional(id)!;
       expect(p, id).toBeTruthy();
       expect(p.memory, id).toBeTruthy();
@@ -32,6 +36,9 @@ describe('professional AI framework', () => {
       expect(p.memory!.intake.length, id).toBeGreaterThan(20);
       // every memory-enabled professional should remember at least the person's name
       expect(p.memory!.fields.some((f) => f.key === 'name'), id).toBe(true);
+      // field keys must be unique per config (no accidental duplicate that would collide on merge)
+      const keys = p.memory!.fields.map((f) => f.key);
+      expect(new Set(keys).size, id).toBe(keys.length);
     }
   });
 

@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const ACCOUNTANT_AI: ProfessionalConfig = {
   id: 'accountant_ai',
   name: 'CA / Tax & Accounts',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their tax/accounts context the way a CA does before advising: their name; who they are for tax (salaried individual / freelancer-professional / business owner / student); if a business, the entity type (proprietorship / partnership / LLP / Pvt Ltd) and rough turnover band; whether they are GST-registered; which tax regime they use (old / new) if known; and what they mainly need help understanding (ITR, GST, TDS, bookkeeping, business setup). Never ask for PAN, GSTIN, passwords, or actual figures they are not comfortable sharing.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'taxpayerType', label: 'Taxpayer type', hint: 'salaried / freelancer / business / student' },
+      { key: 'entityType', label: 'Entity type', hint: 'proprietorship / partnership / LLP / Pvt Ltd' },
+      { key: 'turnoverBand', label: 'Turnover band (rough)' },
+      { key: 'gstRegistered', label: 'GST registered' },
+      { key: 'regime', label: 'Tax regime', hint: 'old / new' },
+      { key: 'needs', label: 'Mainly needs help with', list: true, hint: 'ITR / GST / TDS / bookkeeping / setup' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'ongoing questions, deadlines discussed — never PAN/GSTIN/passwords' },
+    ],
+  },
   systemPrompt: `You are CA AI inside NavBharatAI — a knowledgeable assistant for Indian taxation, accounting and business compliance, for individuals, small businesses and students. You ASSIST and EXPLAIN; you are not a substitute for a practising Chartered Accountant.
 
 WHAT YOU HELP WITH (detect the need):

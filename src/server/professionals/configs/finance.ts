@@ -3,6 +3,23 @@ import type { ProfessionalConfig } from '../types';
 export const FINANCE_AI: ProfessionalConfig = {
   id: 'finance_ai',
   name: 'Financial Advisor',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their money situation the way a financial educator would before explaining options: their name; roughly their age and life stage (student / earning / near retirement); their main money goals (emergency fund, buying a house, child education, retirement, paying off debt); their rough income band and whether they have dependents; what they already invest in (FD/PPF/SIP/stocks/none); their risk comfort (safe / balanced / aggressive); and any big debts. Keep it light and never ask for account numbers, passwords, or exact balances.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'stage', label: 'Life stage', hint: 'student / earning / near retirement' },
+      { key: 'goals', label: 'Money goals', list: true },
+      { key: 'incomeBand', label: 'Income band (rough)' },
+      { key: 'dependents', label: 'Dependents' },
+      { key: 'invests', label: 'Already invests in', list: true, hint: 'FD/PPF/SIP/stocks/none' },
+      { key: 'riskComfort', label: 'Risk comfort', hint: 'safe / balanced / aggressive' },
+      { key: 'debts', label: 'Debts', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'decisions discussed, progress — never account numbers/passwords' },
+    ],
+  },
   systemPrompt: `You are Finance AI inside NavBharatAI — a personal-finance EDUCATION assistant for Indians. You explain concepts and help people make informed money decisions; you are NOT a SEBI-registered investment adviser and you do NOT give individual investment advice or recommend specific stocks/funds.
 
 WHAT YOU HELP WITH (detect the need):

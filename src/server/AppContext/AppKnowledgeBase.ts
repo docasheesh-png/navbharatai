@@ -475,11 +475,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'accountant_ai',
     name: 'CA / Tax & Accounts',
     path: 'Sidebar → Professionals → CA / Tax & Accounts',
-    description: 'Educational assistant for Indian taxation, accounting & business compliance: explains GST, income tax (old vs new regime), TDS/TCS, deductions (80C etc.), capital gains; helps understand a tax notice or ITR/GST form; bookkeeping (double-entry, P&L, balance sheet); business setup & compliance (proprietorship/LLP/Pvt Ltd, Udyam, ROC). NOT a substitute for a qualified CA — tax rates/slabs/dates change every Financial Year, so it always tells you to verify current figures (incometax.gov.in / gst.gov.in) and consult a CA.',
-    howToUse: 'Open Sidebar → Professionals → CA / Tax & Accounts and ask: "old vs new tax regime", "how GST ITC works", "what is TDS / Form 26AS", "bookkeeping basics".',
+    description: 'Personal educational assistant for Indian taxation, accounting & business compliance: takes an intake on first meeting (taxpayer type, entity, turnover band, GST/regime, what you need) and — for signed-in users — REMEMBERS your context across sessions so answers fit your situation. Explains GST, income tax (old vs new regime), TDS/TCS, deductions (80C etc.), capital gains; helps understand a tax notice or ITR/GST form; bookkeeping (double-entry, P&L, balance sheet); business setup & compliance (proprietorship/LLP/Pvt Ltd, Udyam, ROC). NOT a substitute for a qualified CA — tax rates/slabs/dates change every Financial Year, so it always tells you to verify current figures (incometax.gov.in / gst.gov.in) and consult a CA; never asks for PAN/GSTIN/passwords.',
+    howToUse: 'Open Sidebar → Professionals → CA / Tax & Accounts and ask: "old vs new tax regime", "how GST ITC works", "what is TDS / Form 26AS", "bookkeeping basics". Tell it your taxpayer/entity type once and it remembers (when signed in).',
     relatedFeatures: ['professionals'],
     aiSurface: 'accountant_ai',
-    keywords: ['ca', 'tax', 'gst', 'income tax', 'itr', 'tds', 'accountant', 'bookkeeping', 'accounts', '80c', 'audit', 'compliance', 'msme'],
+    keywords: ['ca', 'tax', 'gst', 'income tax', 'itr', 'tds', 'accountant', 'bookkeeping', 'accounts', '80c', 'audit', 'compliance', 'msme', 'remembers me', 'my business'],
   },
 
   // ─── LAWYER / LEGAL ──────────────────────────────────────────────────────
@@ -487,11 +487,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'lawyer_ai',
     name: 'Lawyer / Legal Assistant',
     path: 'Sidebar → Professionals → Lawyer / Legal',
-    description: 'General legal-INFORMATION assistant for Indian law: explains rights & processes (consumer, tenancy, employment, contracts, cheque bounce, FIR, RTI), helps understand a notice/contract clause, drafts templates (legal notice, RTI, complaint, rent agreement, affidavit), and explains how to file an FIR/consumer complaint/RTI. NOT legal advice and NOT a lawyer-client relationship — Indian laws change & vary by state/forum (e.g. IPC→BNS), so it never cites a section/case as definitive and tells you to verify and consult an advocate; drafts must be lawyer-vetted.',
-    howToUse: 'Open Sidebar → Professionals → Lawyer / Legal and ask: "explain my consumer rights", "draft a legal notice", "how to file an RTI", "explain this clause".',
+    description: 'Personal legal-INFORMATION assistant for Indian law: takes an intake on first meeting (your state/jurisdiction, area of law, the matter, any deadline, desired outcome) and — for signed-in users — REMEMBERS your matter across sessions so it never re-asks. Explains rights & processes (consumer, tenancy, employment, contracts, cheque bounce, FIR, RTI), helps understand a notice/contract clause, drafts templates (legal notice, RTI, complaint, rent agreement, affidavit), and explains how to file an FIR/consumer complaint/RTI. NOT legal advice and NOT a lawyer-client relationship — Indian laws change & vary by state/forum (e.g. IPC→BNS), so it never cites a section/case as definitive and tells you to verify and consult an advocate; drafts must be lawyer-vetted. Reminds you not to share sensitive/privileged details.',
+    howToUse: 'Open Sidebar → Professionals → Lawyer / Legal and ask: "explain my consumer rights", "draft a legal notice", "how to file an RTI", "explain this clause". Tell it your state & matter once and it remembers (when signed in).',
     relatedFeatures: ['professionals'],
     aiSurface: 'lawyer_ai',
-    keywords: ['lawyer', 'legal', 'law', 'advocate', 'notice', 'rti', 'fir', 'consumer', 'contract', 'agreement', 'rights', 'kanoon'],
+    keywords: ['lawyer', 'legal', 'law', 'advocate', 'notice', 'rti', 'fir', 'consumer', 'contract', 'agreement', 'rights', 'kanoon', 'remembers me', 'my case'],
   },
 
   // ─── FINANCIAL ADVISOR ───────────────────────────────────────────────────
@@ -499,11 +499,11 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
     id: 'finance_ai',
     name: 'Financial Advisor',
     path: 'Sidebar → Professionals → Financial Advisor',
-    description: 'Personal-finance EDUCATION assistant for India: budgeting & emergency fund, how SIP/mutual funds/index funds/PPF/EPF/NPS/FD work, risk vs return & diversification, insurance (term + health first), debt payoff, and goal-based planning. NOT investment advice and NOT a SEBI-registered adviser — never recommends specific stocks/funds, always notes market risk and "past performance ≠ future returns", and tells you to consult a SEBI-registered adviser (and a CA for tax).',
-    howToUse: 'Open Sidebar → Professionals → Financial Advisor and ask: "start a budget & emergency fund", "explain SIP & mutual funds", "term vs endowment insurance", "how to pay off loans".',
+    description: 'Personal-finance EDUCATION assistant for India that knows YOUR situation: takes an intake on first meeting (life stage, money goals, income band, what you invest in, risk comfort, debts) and — for signed-in users — REMEMBERS it across sessions to tailor explanations. Budgeting & emergency fund, how SIP/mutual funds/index funds/PPF/EPF/NPS/FD work, risk vs return & diversification, insurance (term + health first), debt payoff, and goal-based planning. NOT investment advice and NOT a SEBI-registered adviser — never recommends specific stocks/funds, always notes market risk and "past performance ≠ future returns", and tells you to consult a SEBI-registered adviser (and a CA for tax); never asks for account numbers/passwords.',
+    howToUse: 'Open Sidebar → Professionals → Financial Advisor and ask: "start a budget & emergency fund", "explain SIP & mutual funds", "term vs endowment insurance", "how to pay off loans". Tell it your goals & risk comfort once and it remembers (when signed in).',
     relatedFeatures: ['professionals', 'accountant_ai'],
     aiSurface: 'finance_ai',
-    keywords: ['finance', 'financial', 'money', 'invest', 'sip', 'mutual fund', 'savings', 'budget', 'insurance', 'ppf', 'nps', 'retirement', 'paisa', 'nivesh'],
+    keywords: ['finance', 'financial', 'money', 'invest', 'sip', 'mutual fund', 'savings', 'budget', 'insurance', 'ppf', 'nps', 'retirement', 'paisa', 'nivesh', 'remembers me', 'my goals'],
   },
 
   // ─── ASTROLOGER ──────────────────────────────────────────────────────────

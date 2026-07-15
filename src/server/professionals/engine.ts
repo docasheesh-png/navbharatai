@@ -11,6 +11,7 @@ import {
   type ClientProfile,
 } from './clientMemory';
 import { clientProfileStore } from './ClientProfileStore';
+import { AppContextInjector } from '../AppContext/AppContextInjector';
 import type { ProfessionalConfig } from './types';
 
 export interface ProfessionalTurn { role: 'user' | 'assistant'; content: string; }
@@ -105,7 +106,12 @@ export async function runProfessionalChat(
   }
 
   const kbBlock = formatKnowledge(retrieveKnowledge(config.knowledge, message));
-  const systemPrompt = buildProfessionalSystemPrompt(config, kbBlock, memoryBlock);
+  let systemPrompt = buildProfessionalSystemPrompt(config, kbBlock, memoryBlock);
+  // Every professional also offers our support email when the user has an app/account/service problem
+  // (domain surface → only the unambiguous CORE signals, so a legal/health/domain "problem" never
+  // triggers an off-topic support pitch). Same shared trigger + message every other AI uses.
+  const supportOffer = AppContextInjector.getSupportOffer(message, 'professional');
+  if (supportOffer) systemPrompt = `${systemPrompt}\n\n${supportOffer}`;
 
   const transcript = (history || [])
     .slice(-8)

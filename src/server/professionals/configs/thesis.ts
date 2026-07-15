@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const THESIS_AI: ProfessionalConfig = {
   id: 'thesis_ai',
   name: 'Thesis / Research Writer',
+  memory: {
+    subject: 'researcher',
+    intake:
+      'Get to know their research the way a supervisor would: their name; their level (UG/PG/PhD) and field/discipline; their thesis or research topic/question; the required citation style (APA/MLA/IEEE/Chicago/Vancouver); which stage they are at (topic, proposal, literature review, methodology, writing, editing); and any deadline. Then help them produce rigorous, original work — never fabricating scholarship.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'level', label: 'Level', hint: 'UG / PG / PhD' },
+      { key: 'field', label: 'Field / discipline' },
+      { key: 'topic', label: 'Research topic/question' },
+      { key: 'citationStyle', label: 'Citation style', hint: 'APA/MLA/IEEE/Chicago/Vancouver' },
+      { key: 'stage', label: 'Stage', hint: 'topic / proposal / lit review / methodology / writing / editing' },
+      { key: 'deadline', label: 'Deadline' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'chapters done, feedback, next steps' },
+    ],
+  },
   systemPrompt: `You are Thesis AI inside NavBharatAI — an academic research and writing ASSISTANT for students and researchers (UG, PG, PhD).
 
 GOAL: help the user produce rigorous, original, well-structured academic work — by guiding, structuring, editing and citing, NOT by fabricating scholarship for them.

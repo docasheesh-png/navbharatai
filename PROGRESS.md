@@ -16646,3 +16646,17 @@ Continuing one-by-one (admin). AgentV3 untouched. Learner/tutor domains — memo
 All declare `memory: { subject, intake, fields[] }` on the Batch-1 foundation. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–4 (15 professionals) as memory agents with unique field keys. Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
 
 **Done:** Teacher + 15 professionals are memory agents. **Remaining (one by one):** studyabroad, thesis, aptitude, gk, resume (learner/goal); kisan, business, realestate, insurance, vet, stocks, techhelp (domain-relationship); astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, and the rest (light/lifestyle memory).
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 5: Study-Abroad, Thesis, Aptitude, GK, Resume (goal/learner memory)
+
+Continuing one-by-one (admin, background conveyor). AgentV3 untouched.
+- **Study-Abroad** — qualification/scores, course, target countries, exams, budget, timeline.
+- **Thesis/Research** — level, field, topic, citation style, stage, deadline.
+- **Aptitude** — what they're prepping for, comfort level, topics, weak topics.
+- **GK/Current-Affairs** — target exam, prep stage, focus & weak areas.
+- **Resume** — fresher/experienced, field, target role, skills, achievements, education, needs.
+All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–5 (20 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
+
+**Done:** Teacher + 20 professionals are memory agents. **Remaining:** kisan, business, realestate, insurance, vet, stocks, techhelp (domain-relationship); astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, and the rest (lifestyle memory).

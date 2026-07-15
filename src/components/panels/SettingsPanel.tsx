@@ -7,7 +7,7 @@ import {
   Figma, Rocket, Smartphone, CloudUpload, Package, IndianRupee, Users2, Palette, TrendingUp,
   BarChart2, Cpu, Sparkles, Eye, EyeOff, Github, List, LogOut, GitBranch as GitBranchIcon,
   Folder, Check, Search, RefreshCw, Box, Zap, Globe as GlobeIcon, Search as SearchIcon,
-  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User,
+  Heart, HardDrive, ShieldCheck, Languages, Plus, ExternalLink, Copy, User, Mail,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -425,6 +425,21 @@ export function SettingsPanel({
                     </div>
                   </div>
                 ))}
+
+                {/* Support — direct email to the NavBharatAI team. An <a href="mailto:"> anchor is used
+                    (not a JS handler) because Capacitor's native WebView opens the device mail app for
+                    mailto: link clicks, and browsers open the default mail client — one line, works on
+                    web + Android + iOS with no plugin. */}
+                <a
+                  href="mailto:info@navbharatai.com?subject=NavBharatAI%20Support%20Request"
+                  className="w-full flex items-center gap-3 p-3 bg-[#161b22] border border-white/5 rounded-xl hover:border-indigo-500/20 transition-all group"
+                >
+                  <Mail className="w-4 h-4 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold text-[#8b949e] group-hover:text-white transition-colors">Support &amp; Help</span>
+                    <span className="text-[9px] text-[#484f58] truncate">Email us at info@navbharatai.com</span>
+                  </div>
+                </a>
 
                 {/* Admin + Footer */}
                 {isAdmin && (

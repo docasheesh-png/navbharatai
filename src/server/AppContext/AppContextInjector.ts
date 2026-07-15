@@ -43,6 +43,54 @@ function normalize(text: string): string {
   return String(text || '').toLowerCase();
 }
 
+// The one NavBharatAI support address every AI points users to (single source of truth).
+export const SUPPORT_EMAIL = 'info@navbharatai.com';
+
+// CORE support signals — an explicit account / payment / help / complaint matter. These fire on EVERY
+// AI surface (Doctor, Engineer, Professionals, Free, Pro), because they are never a domain question:
+// no medical symptom or coding task looks like "refund" or "kisi se baat karni hai".
+const SUPPORT_CORE_SIGNALS = [
+  // English
+  'support', 'contact us', 'contact support', 'customer care', 'customer support', 'help desk',
+  'complaint', 'refund', 'charged', 'double charge', 'payment failed', 'payment not', 'not credited',
+  'money deducted', 'account issue', 'account problem', 'cannot login', "can't login", 'login issue',
+  'reset password', 'talk to someone', 'talk to a human', 'reach the team', 'contact the team',
+  // Hindi / Hinglish (romanized)
+  'shikayat', 'sampark', 'madad chahiye', 'sahayata', 'sahayta', 'help chahiye', 'refund chahiye',
+  'paisa kat', 'paise kat', 'paisa cut', 'payment nahi hua', 'paise nahi aaye', 'account ki problem',
+  'login nahi ho', 'log in nahi ho', 'otp nahi aa', 'password bhool', 'kisi se baat', 'team se baat',
+  'humse sampark', 'sampark kare',
+];
+
+// TECH-FAILURE signals — the app/site itself misbehaving. These fire on the GENERAL chat surfaces
+// (Free, Pro) but NOT on domain AIs (Doctor / Engineer / Professionals), where "kaam nahi kar raha"
+// or "error" is usually the AI's own subject (a medicine that isn't working, a build error to fix).
+const SUPPORT_TECH_SIGNALS = [
+  'not working', "doesn't work", 'does not work', "won't open", 'wont open', 'not loading',
+  'not opening', 'app crash', 'crashing', 'keeps crashing', 'blank screen', 'white screen',
+  'stuck on', 'app is slow', 'app hangs', 'freezes', 'glitch', 'broken',
+  'kaam nahi kar raha', 'kaam nahi kr raha', 'kaam ni kar raha', 'chal nahi raha', 'khul nahi raha',
+  'load nahi ho', 'band ho gaya', 'band ho raha', 'hang ho', 'atak gaya', 'ruk gaya', 'error aa raha',
+  'error a raha', 'app kharab',
+];
+
+// Surfaces whose whole job is the very words in SUPPORT_TECH_SIGNALS — they must only react to the
+// unambiguous CORE signals, so a symptom ("dawai kaam nahi kar rahi") or a build error never triggers
+// an off-topic support pitch. Preserves the injector's "no behavior change for domain questions" rule.
+const DOMAIN_SURFACES = new Set(['engineer_ai', 'sda_chat', 'professional']);
+
+// The instruction handed to the AI when a support-worthy problem is detected. It never hard-codes a
+// reply — the AI writes a fresh, humble, situation-shaped offer every time (admin: "har baar alag").
+const SUPPORT_OFFER_BLOCK =
+  `[NAVBHARATAI SUPPORT — offer our help email, warmly and only when it truly helps]\n` +
+  `The user seems to be facing a problem or asking for help. In your reply: FIRST genuinely help as far ` +
+  `as you can. THEN, if the NavBharatAI team should step in (an app / account / payment issue, something ` +
+  `you cannot fully resolve, or the user sounds stuck or frustrated), gently offer our support email — ` +
+  `${SUPPORT_EMAIL} — and you may add that they can also tap Settings → Support & Help. Write this offer ` +
+  `FRESH in your own words EVERY time, shaped to the user's exact situation, need and feelings — never a ` +
+  `canned or copy-pasted sentence. Keep it humble, warm, brief and reassuring, in the user's own language. ` +
+  `Do NOT force the email into an ordinary question you can already answer well.`;
+
 export class AppContextInjector {
   /**
    * Return a focused block of relevant AppKnowledgeBase entries for this message,
@@ -51,17 +99,23 @@ export class AppContextInjector {
    */
   static getRelevantContext(userMessage: string, surface?: string): string {
     const msg = normalize(userMessage);
-    if (!msg.trim()) return '';
+    // Support offer is computed for EVERY message (independent of app-navigation matching) and appended
+    // to whatever feature context we return, so every AI that calls this offers our help email when the
+    // user is facing a problem — see getSupportOffer for the surface-aware trigger rules.
+    const support = this.getSupportOffer(userMessage, surface);
+    const withSupport = (features: string) => [features, support].filter(Boolean).join('\n\n');
+
+    if (!msg.trim()) return withSupport('');
 
     // Broad "what can this app do" questions → full summary.
     if (this.isWholeAppQuestion(msg)) {
-      return this.formatBlock(APP_KNOWLEDGE_BASE);
+      return withSupport(this.formatBlock(APP_KNOWLEDGE_BASE));
     }
 
     // "What can YOU do?" directed at a specific AI surface → all entries for that surface.
     if (surface && SURFACE_CAPABILITY_PATTERNS.some(p => p.test(msg))) {
       const surfaceFeatures = APP_KNOWLEDGE_BASE.filter(f => f.aiSurface === surface);
-      if (surfaceFeatures.length > 0) return this.formatBlock(surfaceFeatures);
+      if (surfaceFeatures.length > 0) return withSupport(this.formatBlock(surfaceFeatures));
     }
 
     // Only inject when the message looks like an app-navigation/feature question.
@@ -73,21 +127,40 @@ export class AppContextInjector {
       .filter(s => s.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    if (scored.length === 0) return '';
+    if (scored.length === 0) return withSupport('');
 
     // A strong direct keyword hit is enough even without a question signal.
     // A weak hit needs a question signal to inject.
     const topScore = scored[0].score;
-    if (topScore < 3 && !looksLikeAppQuestion) return '';
+    if (topScore < 3 && !looksLikeAppQuestion) return withSupport('');
 
     // Return top 5 matches (increased from 3 for better coverage).
     const top = scored.slice(0, 5).map(s => s.feature);
-    return this.formatBlock(top);
+    return withSupport(this.formatBlock(top));
   }
 
   /** Full app summary — used when the user explicitly asks about the whole app. */
   static getFullSummary(): string {
     return this.formatBlock(APP_KNOWLEDGE_BASE);
+  }
+
+  /**
+   * When the user is facing a problem or asking for help, return an instruction telling the AI to warmly
+   * offer NavBharatAI's support email (info@navbharatai.com) — phrased freshly by the AI every time. Empty
+   * string when no support-worthy signal is present.
+   *
+   * Surface-aware so it never intrudes on a domain question: CORE signals (account / payment / help /
+   * complaint) fire on EVERY surface, while TECH-failure signals ("not working", "error aa raha") fire
+   * only on the general chats — on Doctor / Engineer / Professionals those words are usually the AI's own
+   * subject (a medicine that isn't working, a build error to fix), so only the unambiguous CORE signals
+   * apply there. This is exported and shared so every AI uses ONE trigger + ONE message (no drift).
+   */
+  static getSupportOffer(userMessage: string, surface?: string): string {
+    const msg = normalize(userMessage);
+    if (!msg.trim()) return '';
+    const hitCore = SUPPORT_CORE_SIGNALS.some(s => msg.includes(s));
+    const hitTech = !DOMAIN_SURFACES.has(surface || '') && SUPPORT_TECH_SIGNALS.some(s => msg.includes(s));
+    return hitCore || hitTech ? SUPPORT_OFFER_BLOCK : '';
   }
 
   /** All features for a specific AI surface (e.g. all Engineer AI entries). */

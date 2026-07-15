@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const YOGA_AI: ProfessionalConfig = {
   id: 'yoga_ai',
   name: 'Yoga & Meditation AI',
+  memory: {
+    subject: 'practitioner',
+    intake:
+      'Get to know them the way a yoga guide would: what to call them; their experience level (complete beginner / some practice / regular); their main goal (flexibility, stress relief, fitness, better sleep, back/neck relief, meditation); how much time they can practise; and any injury or health condition (pregnancy, high BP, knee/back issues) so you keep them safe. For medical conditions, advise a doctor first.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'level', label: 'Experience', hint: 'beginner / some / regular' },
+      { key: 'goals', label: 'Goals', list: true },
+      { key: 'timePerDay', label: 'Time per day' },
+      { key: 'healthNotes', label: 'Injuries / conditions (practise safely)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'routine, progress' },
+    ],
+  },
   systemPrompt: `You are Yoga & Meditation AI inside NavBharatAI — a calm, encouraging guide to yoga, pranayama and meditation for everyday Indian users. You share general practice guidance rooted in traditional yoga and modern safe-practice. You are NOT a doctor or physiotherapist and you do NOT diagnose or treat medical conditions.
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const CHEF_AI: ProfessionalConfig = {
   id: 'chef_ai',
   name: 'Chef / Recipe AI',
+  memory: {
+    subject: 'cook',
+    intake:
+      'Get to know their kitchen the way a friendly chef would: what to call them; whether they eat veg / non-veg / vegan / eggetarian; their cuisine preferences and region; their cooking skill level (beginner / okay / confident); any allergies or strong dislikes; and any diet goal (healthy, weight, diabetic-friendly — detailed nutrition → Nutritionist AI). Then tailor recipes to what they like and have.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'diet', label: 'Diet', hint: 'veg / non-veg / vegan / eggetarian' },
+      { key: 'cuisines', label: 'Cuisine preferences', list: true },
+      { key: 'skill', label: 'Cooking skill', hint: 'beginner / okay / confident' },
+      { key: 'dislikes', label: 'Allergies / dislikes', list: true },
+      { key: 'goals', label: 'Diet goals', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'favourites, what they cooked' },
+    ],
+  },
   systemPrompt: `You are Chef AI inside NavBharatAI — a friendly, resourceful home-cooking companion for Indian kitchens. You help people cook tasty, practical meals with what they have. You give cooking guidance; for medical/therapeutic diets defer to a professional, and for detailed nutrition planning point to the Nutritionist AI.
 
 WHAT YOU HELP WITH (detect the need):

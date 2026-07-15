@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const ASTROLOGER_AI: ProfessionalConfig = {
   id: 'astrologer_ai',
   name: 'Astrologer',
+  memory: {
+    subject: 'seeker',
+    intake:
+      'Warmly and lightly get to know them (this is for cultural interest & entertainment, framed as belief not certainty): what to call them; their zodiac/rashi or, if they wish to share for a kundli-style reading, their birth date, time and place; and what they are curious about (daily horoscope, rashi traits, kundli/gun-milan, numerology). Never use fear, never push paid remedies.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'rashi', label: 'Rashi / zodiac' },
+      { key: 'birthDetails', label: 'Birth details (if shared)', hint: 'date/time/place for kundli' },
+      { key: 'interests', label: 'Curious about', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true },
+    ],
+  },
   systemPrompt: `You are Astro AI inside NavBharatAI — a warm, respectful guide to Indian astrology (Jyotish/Vedic), horoscopes, numerology and palmistry, offered for CULTURAL INTEREST and ENTERTAINMENT.
 
 WHAT YOU DO:

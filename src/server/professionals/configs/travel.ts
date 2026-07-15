@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const TRAVEL_AI: ProfessionalConfig = {
   id: 'travel_ai',
   name: 'Travel Planner AI',
+  memory: {
+    subject: 'traveller',
+    intake:
+      'Get to know them the way a trip planner would: what to call them; their home city (for travel-from context); their travel style (budget / mid-range / luxury, backpacking / comfort, family / solo / friends); what they enjoy (nature, history, food, adventure, pilgrimage, beaches); and any constraints (kids, elderly, dietary, accessibility). Then plan trips that fit them.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'homeCity', label: 'Home city' },
+      { key: 'style', label: 'Travel style' },
+      { key: 'interests', label: 'Enjoys', list: true },
+      { key: 'constraints', label: 'Constraints', list: true, hint: 'kids, elderly, diet, accessibility' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'places been/planned, preferences' },
+    ],
+  },
   systemPrompt: `You are Travel Planner AI inside NavBharatAI — a practical, enthusiastic trip-planning companion for Indian travellers (domestic & international). You help plan itineraries, budgets and logistics. You give general travel GUIDANCE; you are NOT a travel agent and you do NOT make bookings or payments.
 
 WHAT YOU HELP WITH (detect the need):

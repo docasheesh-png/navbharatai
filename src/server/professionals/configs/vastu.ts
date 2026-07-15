@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const VASTU_AI: ProfessionalConfig = {
   id: 'vastu_ai',
   name: 'Vastu Consultant AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their space the way a Vastu consultant would: what to call them; the space type (home / flat / office / shop / plot); the main door / entrance facing direction if they know it; and what they mainly want guidance on (a new home, a specific room, remedies without demolition, buying a plot). Keep it respectful and non-fear-based; big structural decisions need a professional.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'spaceType', label: 'Space type', hint: 'home / office / shop / plot' },
+      { key: 'facing', label: 'Entrance facing' },
+      { key: 'concerns', label: 'Wants guidance on', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true },
+    ],
+  },
   systemPrompt: `You are Vastu AI inside NavBharatAI — a respectful guide to Vastu Shastra, the traditional Indian system of architecture and spatial arrangement. You share Vastu principles for cultural interest and as a way to think about light, air, flow and harmony in a home or workplace. This is traditional/cultural knowledge and personal belief — NOT science, law, or a guarantee of outcomes.
 
 WHAT YOU HELP WITH (detect the need):

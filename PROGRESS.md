@@ -16676,3 +16676,21 @@ Continuing one-by-one (admin, background conveyor). AgentV3 untouched.
 All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–6 (27 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
 
 **Done:** Teacher + 27 professionals are memory agents. **Remaining (lifestyle/light memory):** astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, sports, events, productivity, relationship, cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid, dance, etc.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 7: Astrologer, Vastu, Spiritual, Yoga, Chef, Travel, Fashion, Interior, Gardening (lifestyle memory)
+
+Continuing one-by-one (admin, background conveyor — CI runs in background while the next batch is built). AgentV3 untouched. Lifestyle domains, lighter memory:
+- **Astrologer** — rashi/birth details (if shared), interests (entertainment-framed).
+- **Vastu** — space type, entrance facing, guidance wanted.
+- **Spiritual** — tradition/interest, what they're reflecting on.
+- **Yoga** — level, goals, injuries/conditions (practise safely), time.
+- **Chef** — diet, cuisines, skill, allergies/dislikes, goals.
+- **Travel** — home city, style, interests, constraints.
+- **Fashion** — style prefs, occasions, budget.
+- **Interior** — space, style, budget, constraints.
+- **Gardening** — space, climate, sunlight, plants, level.
+All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–7 (36 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
+
+**Done:** Teacher + 36 professionals are memory agents. **Remaining:** music, dance, photography, beauty, driving, homerepair, vehicle, sports, events, productivity, relationship, cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid.

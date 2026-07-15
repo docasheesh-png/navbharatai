@@ -32,8 +32,34 @@ platform :ios do
       in_house: false,
     )
 
-    # Distribution certificate — created once and imported into the temporary CI keychain.
-    cert(api_key: api_key)
+    # A dedicated, UNLOCKED keychain with a KNOWN password. This is the fix for build #9's
+    # `errSecInternalComponent` → "Could not find the newly generated certificate installed": `cert` must
+    # import the new distribution certificate's private key AND run `security set-key-partition-list` so
+    # codesign can use it non-interactively. That partition-list call needs the keychain password — without
+    # it, the import fails on the headless runner. We create the keychain ourselves (default + in the search
+    # list) and hand its password to both `cert` and `build_app`.
+    keychain_name = "nbai_ci.keychain"
+    keychain_password = "nbai_ci_ephemeral_pw"
+    keychain_path = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
+    create_keychain(
+      name: keychain_name,
+      password: keychain_password,
+      default_keychain: true,
+      unlock: true,
+      timeout: 3600,
+      lock_when_sleeps: false,
+      add_to_search_list: true,
+    )
+
+    # Distribution certificate — created via the API and imported into our unlocked keychain (with password
+    # so the partition list can be set). NOTE: `cert` cannot reuse a prior cert on an ephemeral runner (the
+    # private key never persists), so it mints a new one each run — fine for now; migrate to `match` later
+    # for a persistent, reusable cert (Apple caps distribution certs at 2, tracked as a follow-up).
+    cert(
+      api_key: api_key,
+      keychain_path: keychain_path,
+      keychain_password: keychain_password,
+    )
 
     # App Store provisioning profile for the bundle id (sigh defaults to an App Store distribution profile).
     sigh(

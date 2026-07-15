@@ -16761,3 +16761,24 @@ Final push of the signature-`method` rollout on the EXPERT_METHOD_LAYER foundati
 - **Batch 6 (service/utility/misc, 18):** driving, homerepair, vehicle, sports, events, productivity, relationship, disability, techbuy, translate, babynames, astronomy, disaster, environment, festival, hygiene, safety, volunteer.
 
 **MILESTONE: every config-driven professional (Teacher + 72) now works like a top expert with a real, step-by-step signature method** — e.g. Lawyer=IRAC, CA=classify→provision→worked-calc, Kisan=agronomy+IPM, Astrologer=entertainment-framed+free-will, Safety=empower-not-fearmonger, Translate=meaning-not-word-for-word. Each method also bakes in the domain's safety boundaries and honesty rules (medical→doctor, legal→advocate, no fabrication, no dose/diagnosis, scam warnings). All 72 carry a `method` field; Teacher keeps its inline concept-mastery method. The test is REGISTRY-WIDE: every professional must have a deep method or CI fails, so the invariant can't regress. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Combined with the earlier work, every professional is now a real personal AI agent (memory + intake) AND a real expert (depth + signature method).
+## 2026-07-15 — Admin panel: "users list not showing" = a masked error (honesty fix)
+
+**Admin report (screenshot):** admin panel → Users tab shows "NO USERS FOUND. CLICK LOAD TO FETCH" — the
+list never appears.
+
+**Investigation (rule 1):** the read path is CORRECT — `GET /api/admin/users` and `GET /api/admin/analytics`
+both do the same `getDocs(collection(db,'user_token_wallets'))`, and `serverDb.getDocs` calls `.get()` on the
+collection ref properly. No definitive server bug is findable from code, so the live cause is runtime (an
+expired admin token → 401, a Firestore error/timeout → 500, or a network failure). **Root cause of the
+SYMPTOM:** the client `fetchUsers` did `Array.isArray(d) ? d : []` WITHOUT checking `r.ok` — so a 401/500
+response body (an object, not an array) was silently rendered as "No users found", indistinguishable from a
+genuinely-empty list. The real failure was invisible (rule-5 honesty gap).
+
+**Fix:** (client) `fetchUsers` now checks `r.ok`, captures the real reason, and shows it — 401 → "Admin
+session expired — log out and log in again", 500 → the Firestore `detail`, network throw → "Couldn't reach
+the server". A distinct red error row + Retry replaces the misleading "No users found" (which now shows ONLY on
+a real empty result). (Server) the `/api/admin/users` 500 now returns `detail: e.message` (admin-only endpoint,
+so the raw reason is allowed — the white-label law covers END-USER surfaces only). This makes the true cause
+visible so it can be fixed at the root; most likely it is an expired admin token (re-login resolves it).
+
+Gate: frontend `tsc --noEmit` clean; server tsc clean; full vitest 6883 pass.

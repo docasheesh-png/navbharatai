@@ -679,7 +679,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         banned: u.banned || false,
         createdAt: u.updatedAt || u.createdAt || '',
       })));
-    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+    } catch (e: any) {
+      // Admin-only endpoint: surface the REAL failure reason (Firestore error / timeout) so the panel can
+      // show WHY the list didn't load instead of a misleading "no users found". (Not a user-facing surface,
+      // so the raw detail is fine here — the white-label law covers END-USER surfaces only.)
+      console.error('[ADMIN] /users failed:', e?.message);
+      res.status(500).json({ error: 'Failed to load users', detail: e?.message || String(e) });
+    }
   });
 
   // ── User token adjustment ─────────────────────────────────────────────────

@@ -22,7 +22,7 @@ import { loadDraft, saveDraft } from './composerDraft';
 import { decideAutoContinue } from './planAutoContinue';
 import { shouldRunNextQueued } from './queueExecutor';
 import { buildChatBlocks } from './activityTimeline';
-import { ActionGroupRow } from './ActivityTimeline';
+import { ActionGroupRow } from './ActivityTimelineRow';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';

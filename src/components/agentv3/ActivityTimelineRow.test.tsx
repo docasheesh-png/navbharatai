@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ActionGroupRow } from './ActivityTimeline';
+import { ActionGroupRow } from './ActivityTimelineRow';
 import { buildChatBlocks } from './activityTimeline';
 import type { ActivityEntry } from './agentV3Types';
 

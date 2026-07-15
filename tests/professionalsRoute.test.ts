@@ -90,6 +90,27 @@ describe('professional chat route — verified identity only', () => {
       await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi' } }), res);
       expect(res.statusCode).toBe(200);
       expect(runChatMock).toHaveBeenCalledTimes(1);
+      // free-list → the full PAID model chain (admin gets best quality).
+      expect(runChatMock.mock.calls[0][4]).toBe('paid');
+    } finally {
+      process.env.PROFESSIONAL_PAID_ENABLED = prevFlag;
+      process.env.AGENTV3_FREE_LIST = prevList;
+    }
+  });
+
+  it('Professional Pass gate ON + signed-in non-subscriber → free-tier models (200, tier "free")', async () => {
+    const prevFlag = process.env.PROFESSIONAL_PAID_ENABLED;
+    const prevList = process.env.AGENTV3_FREE_LIST;
+    process.env.PROFESSIONAL_PAID_ENABLED = 'true';
+    process.env.AGENTV3_FREE_LIST = 'someone-else'; // this user is NOT free-listed
+    try {
+      // Under VITEST the pass/usage stores return no-pass / 0-used, so this user is within the free quota.
+      verifyIdentityMock.mockResolvedValue({ uid: 'uid-normal', email: 'user@example.com' });
+      const res = mockRes();
+      await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi' } }), res);
+      expect(res.statusCode).toBe(200);
+      expect(runChatMock).toHaveBeenCalledTimes(1);
+      expect(runChatMock.mock.calls[0][4]).toBe('free'); // within free quota → cheap models only
     } finally {
       process.env.PROFESSIONAL_PAID_ENABLED = prevFlag;
       process.env.AGENTV3_FREE_LIST = prevList;

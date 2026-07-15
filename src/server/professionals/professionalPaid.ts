@@ -13,10 +13,11 @@ export function professionalPaidEnabled(): boolean {
   return String(process.env.PROFESSIONAL_PAID_ENABLED || '').trim().toLowerCase() === 'true';
 }
 
-/** Daily free-message allowance for non-subscribers (across all professionals). Default 10. */
+/** Daily free-message allowance for non-subscribers (across all professionals). Default 50 (admin
+ *  2026-07-15). Env-tunable without a deploy. */
 export function professionalFreeDailyLimit(): number {
   const n = Number(process.env.PROFESSIONAL_FREE_DAILY_LIMIT);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 10;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 50;
 }
 
 /** Professional Pass price in ₹. Default 99. */

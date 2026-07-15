@@ -1,9 +1,55 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { buildRateLimiter, verifyFirebaseIdentity, enforceNotBanned } from '../lib/authMiddleware';
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { decideProfessionalAccess } from '../professionals/access';
+import {
+  professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
+  professionalPassDays, isProfessionalFreeUser,
+} from '../professionals/professionalPaid';
+import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import { professionalUsageStore } from '../professionals/ProfessionalUsageStore';
+
+/**
+ * Professional Pass gate for one chat turn. FLAG OFF ⇒ always allow (today's behaviour, zero extra
+ * Firestore reads). FLAG ON ⇒ free-list & active-pass are unlimited; anonymous callers must sign in;
+ * everyone else gets professionalFreeDailyLimit() free messages/day. Returns the decision plus a
+ * ready-to-send paywall payload for a block.
+ */
+async function gateProfessionalTurn(uid: string | null, email: string | null) {
+  if (!professionalPaidEnabled()) {
+    return { allow: true as const, countsAgainstFree: false, uid };
+  }
+  const freeListed = isProfessionalFreeUser(uid, email);
+  const freeDailyLimit = professionalFreeDailyLimit();
+  // Only touch Firestore for a signed-in, non-free-listed user (pass + today's count).
+  const hasActivePass = !!uid && !freeListed ? (await professionalPassStore.getStatus(uid)).active : false;
+  const usedToday = !!uid && !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
+  const decision = decideProfessionalAccess({
+    enabled: true, signedIn: !!uid, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
+  });
+  if (decision.action === 'allow') {
+    return { allow: true as const, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid };
+  }
+  const login = decision.reason === 'login-required';
+  return {
+    allow: false as const,
+    status: login ? 401 : 402,
+    body: {
+      error: login
+        ? 'Please sign in to use the Professionals. New users get free messages every day.'
+        : `You've used your ${freeDailyLimit} free messages for today. Get the Professional Pass for unlimited access to every professional.`,
+      code: login ? 'login_required' : 'professional_paywall',
+      reason: decision.reason,
+      remainingFree: 0,
+      freeDailyLimit,
+      passPriceInr: professionalPassPriceInr(),
+      passDays: professionalPassDays(),
+    },
+  };
+}
 
 /** Max attachments accepted per turn (defense against oversized payload loops). */
 const MAX_PROFESSIONAL_ATTACHMENTS = 4;
@@ -72,9 +118,22 @@ export function registerProfessionalsRoutes(app: Express): void {
     // Persistent memory (e.g. Teacher AI's student profile) is keyed by the VERIFIED
     // token identity ONLY — the client-claimed body `userId` is never trusted for it
     // (trusting it would let anyone read another user's remembered facts).
-    const verifiedUserId = await verifyFirebaseToken(req);
+    const identity = await verifyFirebaseIdentity(req);
+    const verifiedUserId = identity?.uid || null;
+
+    // Professional Pass gate (flag-off = no-op). Blocks anonymous / out-of-free-quota users honestly.
+    const gate = await gateProfessionalTurn(verifiedUserId, identity?.email || null);
+    if (!gate.allow) {
+      res.status(gate.status).json(gate.body);
+      return;
+    }
+
     try {
       const reply = await runProfessionalChat(config, effectiveMessage, turns, verifiedUserId || undefined);
+      // Only a genuinely-answered FREE turn burns a daily message (never on a paywall block or an error).
+      if (gate.countsAgainstFree && verifiedUserId) {
+        void professionalUsageStore.increment(verifiedUserId);
+      }
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
       res.status(503).json({ error: err?.message || 'The assistant is busy. Please try again.' });

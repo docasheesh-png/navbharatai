@@ -3414,8 +3414,15 @@ export default function App() {
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
       {effectiveDeviceMode !== 'desktop' && !focusMode && (
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-center justify-around px-2 h-14"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[150] bg-[var(--surface-base)]/95 backdrop-blur-xl border-t border-[var(--border-soft)] flex items-stretch justify-around px-2"
+          style={{
+            // The bar is a FIXED 3.5rem of tappable content PLUS the device's home-indicator inset BELOW it.
+            // Adding the safe-area to the height (instead of the old fixed h-14 with padding eating INTO it
+            // under box-sizing:border-box) stops the icons/labels from being squeezed and poking above the
+            // top border — so it reads as a clean native tab bar (admin 2026-07-15).
+            height: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          }}
         >
           {activeView === 'nbi_pro_chat' && v3FooterApi ? (
             [

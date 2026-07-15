@@ -1606,6 +1606,73 @@ export const AIChat: React.FC<AIChatProps> = ({
                 ))}
               </div>
             )}
+            {/* Composer actions — moved ABOVE the input (admin 2026-07-15): a compact chip row so the
+                on-screen keyboard never hides them and they read as real, tappable buttons on the native
+                app. The parent's space-y handles the gap to the input below. */}
+            <div className="flex items-center justify-between px-0.5">
+              <div className="flex items-center gap-2 min-w-0">
+                {isPinned && (
+                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
+                    <Zap className="w-2 h-2 fill-current" />
+                    Pinned
+                  </div>
+                )}
+                {input.length > 60 && (
+                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
+                    {input.length}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {/* Enter sends toggle */}
+                <button
+                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
+                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
+                  className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
+                >
+                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
+                </button>
+                {messages.length > 0 && (
+                  <>
+                    {/* Toggle chat search */}
+                    <button
+                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
+                      title="Search messages (Ctrl+F)"
+                      className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all active:scale-95 ${showChatSearch ? 'bg-indigo-600/20 text-indigo-400' : 'bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10'}`}
+                    >
+                      Search
+                    </button>
+                    {/* Export chat as markdown */}
+                    <button
+                      onClick={() => {
+                        const md = messages.map(m => {
+                          const role = m.sender === 'user' ? '**You**' : '**AI**';
+                          return `${role}\n\n${m.text || ''}\n`;
+                        }).join('\n---\n\n');
+                        const blob = new Blob([md], { type: 'text/markdown' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                      }}
+                      title="Export chat as Markdown"
+                      className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
+                    >
+                      Export
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
+                      title="Clear conversation"
+                      className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-white/5 text-[#8b949e] hover:text-white hover:bg-white/10 transition-all active:scale-95"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
             <div className="bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-2xl focus-within:border-indigo-500 transition-all">
                   <div className="relative flex items-center">
                   {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) near the send row. */}
@@ -1699,71 +1766,6 @@ export const AIChat: React.FC<AIChatProps> = ({
                   </div>
                   </div>{/* end inner flex row */}
             </div>{/* end rounded input container */}
-
-            {/* B4 — character count + B5 clear chat */}
-            <div className="flex items-center justify-between px-1 mt-1">
-              <div className="flex items-center gap-2">
-                {isPinned && (
-                  <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 uppercase tracking-widest bg-amber-500/10 px-1.5 py-0.5 rounded-full border border-amber-500/20">
-                    <Zap className="w-2 h-2 fill-current" />
-                    Pinned
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {input.length > 60 && (
-                  <span className={`text-[9px] font-mono ${input.length > 1000 ? 'text-amber-400' : 'text-[#484f58]'}`}>
-                    {input.length}
-                  </span>
-                )}
-                {/* B30: Enter sends toggle */}
-                <button
-                  onClick={() => { const v = !sendOnEnter; setSendOnEnter(v); localStorage.setItem('chat_sendOnEnter', String(v)); }}
-                  title={sendOnEnter ? 'Enter sends message (click to toggle)' : 'Shift+Enter sends (click to toggle)'}
-                  className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
-                >
-                  {sendOnEnter ? '↵ Send' : '⇧↵ Send'}
-                </button>
-                {messages.length > 0 && (
-                  <>
-                    {/* B17: Toggle chat search */}
-                    <button
-                      onClick={() => { setShowChatSearch(v => !v); if (showChatSearch) setChatSearchQuery(''); }}
-                      title="Search messages (Ctrl+F)"
-                      className={`text-[8px] font-black uppercase tracking-widest transition-colors ${showChatSearch ? 'text-indigo-400' : 'text-[#30363d] hover:text-[#484f58]'}`}
-                    >
-                      Search
-                    </button>
-                    {/* B16: Export chat as markdown */}
-                    <button
-                      onClick={() => {
-                        const md = messages.map(m => {
-                          const role = m.sender === 'user' ? '**You**' : '**AI**';
-                          return `${role}\n\n${m.text || ''}\n`;
-                        }).join('\n---\n\n');
-                        const blob = new Blob([md], { type: 'text/markdown' });
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `chat-${new Date().toISOString().slice(0, 10)}.md`;
-                        a.click();
-                        URL.revokeObjectURL(a.href);
-                      }}
-                      title="Export chat as Markdown"
-                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
-                    >
-                      Export
-                    </button>
-                    <button
-                      onClick={() => { if (window.confirm('Clear conversation?')) { onSendSuggestion?.('__CLEAR_CHAT__'); } }}
-                      title="Clear conversation"
-                      className="text-[8px] font-black uppercase tracking-widest text-[#30363d] hover:text-[#484f58] transition-colors"
-                    >
-                      Clear
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
         </div>
       </div>
     </div>

@@ -136,13 +136,15 @@ jobs:
 
       # Archive with AUTOMATIC signing — the API key lets Xcode create the distribution certificate and
       # provisioning profile on the fly (-allowProvisioningUpdates), so nothing is pre-created by hand.
+      # NOTE: Capacitor 7+ uses Swift Package Manager (not CocoaPods), so `cap add ios` generates a
+      # Package.swift + App.xcodeproj and NO App.xcworkspace — build with `-project …App.xcodeproj`.
       - name: Archive the app (.xcarchive)
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
-          xcodebuild -workspace ios/App/App.xcworkspace \
+          xcodebuild -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \

@@ -2538,8 +2538,6 @@ export default function App() {
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
-              generatedCode={generatedCode}
-              onSendSuggestion={(prompt) => handleSend(prompt)}
             />
           )}
 

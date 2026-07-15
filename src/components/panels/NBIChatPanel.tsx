@@ -1,15 +1,9 @@
-import React, { lazy, Suspense } from 'react';
+import React from 'react';
 import { cn } from '../../lib/utils';
 import { AIChat } from '../ide/AIChat';
 import type { ThemeMode } from '../../lib/theme';
 import type { Message, ChatSession, AgentMode } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
-
-const AISuggestions = lazy(() =>
-  import('../ide/AISuggestions')
-    .then(m => ({ default: m.AISuggestions }))
-    .catch(() => ({ default: (() => null) as React.ComponentType<any> }))
-);
 
 export interface NBIChatPanelProps {
   themeClasses: {
@@ -46,8 +40,6 @@ export interface NBIChatPanelProps {
   wallet: any;
   setPreferredLanguage: (lang: any) => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  generatedCode: string;
-  onSendSuggestion: (prompt: string) => void;
 }
 
 export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
@@ -78,8 +70,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   wallet,
   setPreferredLanguage,
   setMessages,
-  generatedCode,
-  onSendSuggestion,
 }) => {
   const currentSession = sessions.find(s => s.id === currentSessionId);
 
@@ -155,14 +145,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           }}
         />
       </div>
-
-      {/* AI Copilot Suggestions */}
-      <Suspense fallback={null}>
-        <AISuggestions
-          generatedCode={generatedCode}
-          onSendSuggestion={onSendSuggestion}
-        />
-      </Suspense>
     </div>
   );
 };

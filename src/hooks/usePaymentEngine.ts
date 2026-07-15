@@ -129,23 +129,30 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setLoadingWallet(true);
     try {
       const walletHeaders = await authedHeaders();
-      const res = await axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders });
-      setWallet(res.data);
-
-      const logsRes = await axios.get(`/api/wallet/${user.uid}/logs`, { headers: walletHeaders });
-      setBillingLogs(Array.isArray(logsRes.data) ? logsRes.data : []);
-
-      const txsRes = await axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders });
-      setBillingTransactions(Array.isArray(txsRes.data) ? txsRes.data : []);
-
-      // Phase 4.2 — fetch monthly AI cost (best-effort, never blocks wallet load).
-      try {
-        const usageRes = await fetch(`/api/user/usage/${encodeURIComponent(user.uid)}`, { headers: await authedHeaders() });
-        if (usageRes.ok) {
-          const usageData = await usageRes.json();
+      // Fire the wallet, logs, transactions and usage calls IN PARALLEL (was 4 sequential awaits).
+      // On a native app these are cross-origin to the production API and often hit a cold instance;
+      // serialising them made a cold post-login stack up round-trip after round-trip (the "app is slow
+      // to load after login on the app" symptom). allSettled keeps each independent — a failed logs/
+      // transactions call never loses the wallet balance, exactly like the old per-call resilience.
+      const usageUrl = `/api/user/usage/${encodeURIComponent(user.uid)}`;
+      const [walletR, logsR, txsR, usageR] = await Promise.allSettled([
+        axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders }),
+        axios.get(`/api/wallet/${user.uid}/logs`, { headers: walletHeaders }),
+        axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders }),
+        fetch(usageUrl, { headers: walletHeaders }),
+      ]);
+      if (walletR.status === 'fulfilled') setWallet(walletR.value.data);
+      if (logsR.status === 'fulfilled') setBillingLogs(Array.isArray(logsR.value.data) ? logsR.value.data : []);
+      if (txsR.status === 'fulfilled') setBillingTransactions(Array.isArray(txsR.value.data) ? txsR.value.data : []);
+      // Monthly AI cost — best-effort, never blocks the wallet.
+      if (usageR.status === 'fulfilled' && usageR.value.ok) {
+        try {
+          const usageData = await usageR.value.json();
           setMonthlyAiCost({ totalBuilds: usageData.totalBuilds ?? 0, totalCostUsd: usageData.totalCostUsd ?? 0, month: usageData.month ?? '' });
-        }
-      } catch { /* usage fetch never blocks wallet */ }
+        } catch { /* usage body parse never blocks wallet */ }
+      }
+      // A wallet failure is the only real error (secondary panels degrade silently).
+      if (walletR.status === 'rejected') throw walletR.reason;
     } catch (err) {
       console.error('Failed to sync wallet data with Firestore:', err);
     } finally {

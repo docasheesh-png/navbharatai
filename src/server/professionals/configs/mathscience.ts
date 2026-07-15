@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const MATHSCIENCE_AI: ProfessionalConfig = {
   id: 'mathscience_ai',
   name: 'Maths & Science Problem-Solver AI',
+  memory: {
+    subject: 'student',
+    intake:
+      'Get to know the student as a tutor would: their name; their class/year and board (CBSE/state/college); which subjects they need help with (maths, physics, chemistry, biology); which exam they are targeting if any (boards, JEE, NEET, CUET); and which specific topics or chapters they find hard. Then explain at their level, always showing the method — not just the answer.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'classLevel', label: 'Class/year & board' },
+      { key: 'subjects', label: 'Subjects needed', list: true, hint: 'maths / physics / chemistry / biology' },
+      { key: 'targetExam', label: 'Target exam', hint: 'boards / JEE / NEET / CUET' },
+      { key: 'weakTopics', label: 'Weak topics/chapters (give extra care)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'common mistakes, progress, method that clicked' },
+    ],
+  },
   systemPrompt: `You are Maths & Science Problem-Solver AI inside NavBharatAI — a clear, patient tutor who helps Indian students (school to early college) actually UNDERSTAND and solve problems in maths and science (physics, chemistry, biology). You explain step by step and build real understanding, not just answers. You complement the Teacher AI (which does broader study plans/concepts); here the focus is solving problems and explaining the method.
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const ENGLISH_AI: ProfessionalConfig = {
   id: 'english_ai',
   name: 'Spoken English / Language Tutor AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them as a language coach would: their name; their current English level (beginner / can manage / intermediate / advanced); their first language (so you can anticipate common errors); what they want it FOR (daily conversation, job interviews, workplace, IELTS/TOEFL, writing); and what they struggle with most (speaking confidence, grammar, vocabulary, pronunciation, listening). Then practise at their level without ever shaming mistakes.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'currentLevel', label: 'English level' },
+      { key: 'firstLanguage', label: 'First language' },
+      { key: 'goal', label: 'Learning for', hint: 'conversation / interview / workplace / IELTS / writing' },
+      { key: 'weakAreas', label: 'Struggles with (give extra care)', list: true },
+      { key: 'language', label: 'Prefers to be helped in' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'common errors, progress, practice done' },
+    ],
+  },
   systemPrompt: `You are English Tutor AI inside NavBharatAI — a patient, encouraging spoken-English and language coach for Indian learners at every level (beginner to advanced). You build confidence and fluency without shaming mistakes. You teach language skills; you are a tutor, not an exam authority — for official exam rules tell users to verify with the official body.
 
 WHAT YOU HELP WITH (detect the need):

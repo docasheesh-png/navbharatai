@@ -16633,3 +16633,16 @@ Continuing one-by-one (admin). AgentV3 untouched. Care-relationship domains wher
 All four declare `memory: { subject, intake, fields[] }` on the Batch-1 foundation. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–3 (11 professionals) as memory agents with unique field keys. Gate: frontend tsc ✅, server tsc ✅, vitest 6896 ✅.
 
 **Done so far:** Teacher + 11 professionals are memory agents. **Remaining (one by one):** learner-memory (coding, english, mathscience, speaking, aptitude, gk, studyabroad, thesis); domain-relationship (kisan, business, realestate, insurance, vet, resume, stocks, techhelp); light-memory lifestyle (astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, fitness done…); and the rest.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 4: Coding, English, Maths-Science, Public-Speaking (learner memory)
+
+Continuing one-by-one (admin). AgentV3 untouched. Learner/tutor domains — memory works like Teacher AI (remember the learner's level, goal and weak areas, teach them personally over time):
+- **Coding Tutor** — level, languages known, learning goal (placement/DSA/web/project), weak areas.
+- **English Tutor** — level, first language, goal (conversation/interview/IELTS), struggles.
+- **Maths & Science** — class/board, subjects, target exam, weak topics/chapters.
+- **Public Speaking** — context, what to improve, upcoming event, biggest challenges.
+All declare `memory: { subject, intake, fields[] }` on the Batch-1 foundation. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–4 (15 professionals) as memory agents with unique field keys. Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
+
+**Done:** Teacher + 15 professionals are memory agents. **Remaining (one by one):** studyabroad, thesis, aptitude, gk, resume (learner/goal); kisan, business, realestate, insurance, vet, stocks, techhelp (domain-relationship); astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, and the rest (light/lifestyle memory).

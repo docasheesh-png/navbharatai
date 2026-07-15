@@ -86,6 +86,28 @@ jobs:
           npx cap add ios || echo "ios/ already present — continuing"
           npx cap sync ios
 
+      # App Store REQUIRES a purpose string for every device permission the app can request, or review
+      # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the
+      # MICROPHONE (Sonic voice) + CAMERA + photo library (image attach) — same permissions as the
+      # committed Android manifest (RECORD_AUDIO + CAMERA). Because ios/ is generated fresh above, its
+      # default Info.plist has none of these, so we inject them here (idempotent Add-or-Set) into the
+      # generated project. PlistBuddy ships on every macOS runner.
+      - name: Inject iOS permission usage descriptions (App Store requires them)
+        run: |
+          PLIST="ios/App/App/Info.plist"
+          set_key() {
+            /usr/libexec/PlistBuddy -c "Add :$1 string \"$2\"" "$PLIST" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Set :$1 \"$2\"" "$PLIST"
+          }
+          set_key NSMicrophoneUsageDescription "NavBharatAI uses the microphone for voice conversations with the AI assistant."
+          set_key NSCameraUsageDescription "NavBharatAI uses the camera to capture and scan images inside the app."
+          set_key NSPhotoLibraryUsageDescription "NavBharatAI uses your photo library to attach images to your builds."
+          set_key NSPhotoLibraryAddUsageDescription "NavBharatAI can save generated images to your photo library."
+          echo "Usage descriptions now in Info.plist:"
+          for k in NSMicrophoneUsageDescription NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
+            printf '  %s = %s\n' "$k" "$(/usr/libexec/PlistBuddy -c "Print :$k" "$PLIST")"
+          done
+
       # Write the App Store Connect API key (.p8) where xcodebuild AND altool both look for it.
       - name: Install App Store Connect API key
         env:

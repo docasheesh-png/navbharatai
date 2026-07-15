@@ -20,7 +20,6 @@ import { hasAnalyticsConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
 import { installNativeShellPolish } from './lib/nativeShell';
-import { SonicChat } from './components/sonic/SonicChat';
 
 // Top-level crash fallback — guarantees the app NEVER shows a full white page.
 // Any uncaught render error anywhere in the tree lands here with a recovery option.
@@ -216,26 +215,20 @@ function initWebVitals() {
 initWebVitals();
 window.addEventListener(CONSENT_EVENT, () => initWebVitals());
 
-// ISOLATED EXPERIMENT ROUTE (admin 2026-07-13): /sonic renders ONLY the Nova Sonic voice
-// surface — the main NavBharatAI app tree is never mounted for this path, so the experiment
-// can be tested and kept-or-deleted without touching anything else. Remove this branch (and
-// the src/components/sonic + src/server/sonic folders) to delete the experiment entirely.
-const isSonicRoute = typeof window !== 'undefined' && window.location.pathname === '/sonic';
-
+// NOTE: the public /sonic experiment route was removed (admin 2026-07-15) to close a misuse vector —
+// an unauthenticated, discoverable voice page. The voice capability itself is NOT deleted: it lives on
+// inside the professional chats as the gated ProfessionalVoiceButton (paid, signed-in only), which mounts
+// the same SonicChat widget on demand. So /sonic now just loads the normal app (SPA catch-all → Home).
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary fallback={RootFallback}>
-      {isSonicRoute ? (
-        <SonicChat />
-      ) : (
-        <BuildProvider>
-          <App />
-          <ConsentBanner />
-          <InviteAcceptGate />
-          <SharePortal />
-          <MobileEngagementGate />
-        </BuildProvider>
-      )}
+      <BuildProvider>
+        <App />
+        <ConsentBanner />
+        <InviteAcceptGate />
+        <SharePortal />
+        <MobileEngagementGate />
+      </BuildProvider>
     </ErrorBoundary>
   </StrictMode>,
 );

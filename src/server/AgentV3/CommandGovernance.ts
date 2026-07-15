@@ -77,6 +77,66 @@ export function classifyCommandRisk(command: string): CommandRisk {
   return { level: 'none', reasons: [] };
 }
 
+// Source directories that hold GENERATED APP CODE. Recursively deleting one during a build destroys
+// the app's own work. Real failure (deep-test "PaisaTrack", 2026-07-15): to "fix" two trivial tsc
+// errors (an unused import + a type cast), the builder ran `rm -rf src/components src/hooks src/types
+// src/utils`, wiping the feature components → the delivered app had orphaned/missing features (Add,
+// Delete, Filter, List had no control) yet still shipped as a glowing success. The correct action was
+// to fix the two specific errors in-file. This guard makes that class of self-destruction impossible.
+const SOURCE_DIR_RE =
+  /^(src|app|components|pages|hooks|lib|utils|util|types|type|features|feature|store|stores|context|contexts|services|service|api|routes|styles|assets|models|state|store|containers|views|layouts|widgets)$/i;
+// Regenerable / recoverable targets that are ALWAYS safe to delete recursively.
+const SAFE_DELETE_RE =
+  /^(node_modules|dist|build|out|coverage|\.next|\.nuxt|\.svelte-kit|\.vite|\.cache|\.turbo|\.parcel-cache|tmp|\.tmp|logs|\.expo)$/i;
+
+/**
+ * Detect `rm -r…` (recursive) deletion of a workspace SOURCE directory and return the first such
+ * target, or null. Pure & deterministic. Precise by construction so it never blocks legitimate
+ * cleanup: it requires a RECURSIVE flag (you cannot rm a directory without one), skips any path that
+ * looks like a single file (has an extension), skips regenerable targets (node_modules/dist/.vite/…),
+ * and only fires on a bare or `src/`-rooted source directory. Handles chained commands
+ * (`rm -rf a && rm -rf b`) by scanning each shell segment.
+ */
+export function destructiveSourceDeletionTarget(command: string): string | null {
+  const segments = (command || '').split(/[;&|\n]+/);
+  for (const seg of segments) {
+    const s = seg.trim();
+    const m = /^rm\s+(.+)$/i.exec(s);
+    if (!m) continue;
+    const args = m[1].trim().split(/\s+/);
+    const hasRecursive = args.some((a) => /^-[a-z]*[rR]/.test(a));
+    if (!hasRecursive) continue;
+    for (const rawArg of args) {
+      if (rawArg.startsWith('-')) continue; // a flag, not a path
+      const path = rawArg.replace(/^['"]|['"]$/g, '').replace(/\/+$/, '');
+      if (!path) continue;
+      // A bare `.` or `*` at the workspace root wipes the whole project — always block.
+      if (path === '.' || path === './' || path === '*' || path === './*') return path;
+      const norm = path.replace(/^\.\//, '');
+      const parts = norm.split('/');
+      const last = parts[parts.length - 1];
+      if (/\.[a-z0-9]+$/i.test(last)) continue; // looks like a single file (has an extension) — allowed
+      if (parts.some((p) => SAFE_DELETE_RE.test(p))) continue; // node_modules/dist/… — allowed
+      // A source dir at the root (`src`, `components`) OR nested directly under src (`src/components`).
+      if (SOURCE_DIR_RE.test(norm) || (parts.length === 2 && parts[0].toLowerCase() === 'src')) {
+        return path;
+      }
+    }
+  }
+  return null;
+}
+
+/** The honest, actionable refusal shown to the build agent when it tries to nuke a source directory. */
+export function destructiveSourceDeletionMessage(target: string): string {
+  return (
+    `[GOVERNANCE BLOCKED] Refused to run \`rm -r\` on the source directory "${target}" — recursively ` +
+    `deleting generated app code almost always destroys working features (this is a known failure mode). ` +
+    `Do NOT delete a source directory to fix a compile error. Instead, FIX the specific error in the file ` +
+    `it reports (e.g. remove the unused import, correct the type) and re-run the check. If a single file is ` +
+    `genuinely stale, delete just that one file by name.`
+  );
+}
+
 /** A short, honest governance advisory appended to a risky command's result. */
 export function governanceNote(risk: CommandRisk): string {
   if (risk.level === 'none') return '';

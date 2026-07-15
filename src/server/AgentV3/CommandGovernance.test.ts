@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCommandRisk, governanceNote } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage } from './CommandGovernance';
 
 describe('classifyCommandRisk — HIGH', () => {
   it('flags recursive delete of root/home/wildcard', () => {
@@ -98,5 +98,46 @@ describe('governanceNote', () => {
     const note = governanceNote(classifyCommandRisk('rm -rf /'));
     expect(note).toContain('HIGH-risk');
     expect(note).toContain('decision-audit trail');
+  });
+});
+
+describe('destructiveSourceDeletionTarget — block rm -rf of a source directory', () => {
+  it('blocks the exact PaisaTrack failure (multi-dir rm -rf of source dirs)', () => {
+    expect(destructiveSourceDeletionTarget('rm -rf src/components src/hooks src/types src/utils')).toBe('src/components');
+  });
+  it('blocks deleting the whole src tree or a bare source dir', () => {
+    expect(destructiveSourceDeletionTarget('rm -rf src')).toBe('src');
+    expect(destructiveSourceDeletionTarget('rm -rf components')).toBe('components');
+    expect(destructiveSourceDeletionTarget('rm -r pages/')).toBe('pages');
+    expect(destructiveSourceDeletionTarget('rm -rf ./src/lib')).toBe('./src/lib');
+  });
+  it('blocks a bare . or * that wipes the whole workspace', () => {
+    expect(destructiveSourceDeletionTarget('rm -rf .')).toBe('.');
+    expect(destructiveSourceDeletionTarget('rm -rf *')).toBe('*');
+  });
+  it('blocks a source-dir delete anywhere in a chained command', () => {
+    expect(destructiveSourceDeletionTarget('npm run clean && rm -rf src/features')).toBe('src/features');
+  });
+  it('ALLOWS regenerable targets (node_modules/dist/.vite/caches)', () => {
+    expect(destructiveSourceDeletionTarget('rm -rf node_modules')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm -rf dist')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm -rf node_modules dist .vite')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm -rf build && npm run build')).toBeNull();
+  });
+  it('ALLOWS deleting a single stale FILE by name (has an extension)', () => {
+    expect(destructiveSourceDeletionTarget('rm -f src/old.tsx')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm src/components/Stale.tsx')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm -rf src/legacy.ts')).toBeNull();
+  });
+  it('ALLOWS a non-recursive rm and non-rm commands', () => {
+    expect(destructiveSourceDeletionTarget('rm somefile')).toBeNull();
+    expect(destructiveSourceDeletionTarget('ls -la src/components')).toBeNull();
+    expect(destructiveSourceDeletionTarget('npm run build')).toBeNull();
+  });
+  it('message is actionable — names the target and says fix the file instead', () => {
+    const msg = destructiveSourceDeletionMessage('src/components');
+    expect(msg).toContain('src/components');
+    expect(msg).toContain('GOVERNANCE BLOCKED');
+    expect(msg).toMatch(/fix the specific error/i);
   });
 });

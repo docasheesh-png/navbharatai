@@ -16481,3 +16481,70 @@ one shared enforcement, not seven drifting copies.
 
 **Next slices (admin user-management):** B — token adjust consistency (tokenBalance + remaining_balance) + exact
 set/zero; C — real joining-date field + activity high/low sort; D — suspicious-activity auto-detect surface.
+
+---
+
+## 2026-07-15 — Deep-test autopsy: "PaisaTrack" expense tracker (5th absolute rule) + DNA fix: block rm -rf of source dirs
+
+**Build:** PaisaTrack (React+TS expense tracker), cheap-floor ON (GLM/Kimi led, Claude/Haiku backstop),
+ok:true, ~19 min (est 11), 221 events / 0 errors / 19 warnings / 219 auto-resolved / 2 unresolved.
+
+**5-bucket ledger (honest):**
+- ✅ **Self-healed:** MISSING_FILES_HEALED (ExpenseList.css created); 1 import auto-fixed pre-preview; 219/221 auto-resolved.
+- 🔀 **Worked around (deferred root causes):** GLM 429 → provider fallback (many); KIMI timeout incl. one **223-SECOND** single-file call → fallback; simple-build timed out (240s) → fell back to the full agentic builder, **rebuilding from scratch** (the simple lane's files weren't visible to the full builder — a workspace-handoff gap).
+- ⏭️ **Skipped:** 4 orphan-component warnings, no-error-boundary, no-tests — recorded, not acted on. The 2 tsc errors were "resolved" destructively (see ❌).
+- ❌ **Shipped imperfect (most urgent):** FEATURE_COVERAGE — "4 requested features (Add, Delete, Filter, List) have NO visible control. Present: none"; 4 orphan components (List/CategoryBreakdown never wired into App). YET the build reported ok:true + "Preview verified — renders correctly" + a glowing feature-complete summary → **honesty gap** (fake-success class). (Caveat noted: the 2 browser_action calls failed with a 64KB JSON truncation, so "Present: none" may over-state — but the orphan-component static analysis independently confirms List+Breakdown are genuinely unwired.)
+- 🥵 **Struggle:** simple lane burned ~4 min then discarded all work; full builder rebuilt; **`rm -rf src/components src/hooks src/types src/utils`** to "fix" 2 trivial tsc errors; 19 min vs 11 est; browser_action 64KB truncation ×2.
+
+**Missing subsystem (systemic):** three, ranked: (1) a **destructive-command guard** — nothing stopped the builder from nuking its own source dirs; (2) **cheap-floor per-file timeout in the simple lane** — a 223s Kimi call should be aborted far sooner, and the simple lane's work should carry over to the full builder instead of being discarded; (3) **feature-wiring honesty** — orphan-component + feature-coverage findings should downgrade the outcome / trigger a wiring auto-fix, not ship as a glowing success.
+
+**DNA fix shipped THIS autopsy (the direct cause of the broken app):** `CommandGovernance.destructiveSourceDeletionTarget()` + a hard BLOCK in `ToolDispatcher`'s bash handler. Recursively deleting a workspace SOURCE directory (`src`, `src/components`, `components`, `hooks`, `lib`, …, or a bare `.`/`*`) is now REFUSED with an actionable message ("fix the specific error in the file, don't delete the directory"). Precise by construction — requires a recursive flag, skips single files (has an extension), and ALLOWS regenerable targets (node_modules/dist/.vite/caches). Reinforced with an architect-prompt rule. Tests: 10 new cases incl. the exact PaisaTrack command + all allow-cases; systemPrompt 38/38; server tsc clean; full suite 6861 pass.
+
+**Open root causes (rule 6 — honestly recorded, not silently patched):**
+1. **GLM 429 + Kimi 223s latency** — the dominant time sink. Levers: the GLM key pool (admin's extra keys) + a tighter per-file timeout on cheap-floor calls in the SIMPLE lane (a 223s call must abort ~30-60s). Ties into the weak-reliability slices already merged.
+2. **Simple-lane work discarded on fallback** — the fast-lane files should hand off to the full builder, not force a from-scratch rebuild (the "project doesn't seem to have files yet" thrash).
+3. **Feature-wiring honesty gap** — a build with orphan components + zero feature controls must not report a glowing success; the finding should downgrade the outcome or trigger a wiring heal. (Next autopsy target.)
+
+---
+
+## 2026-07-15 — Deep-test autopsy #2: "LedgerLite" invoice manager (ok:false — honesty layer WORKED) + open root causes
+
+**Build:** LedgerLite (freelancer invoice manager, React+TS), cheap-floor ON, **ok:false** — the readiness
+gate honestly caught it: "NOT READY — score 0/100. 7 unresolved import(s) — the build will fail" and
+explicitly prefixed "What the agent reported (may overstate — the readiness verdict above is the real
+status)". This is the honesty layer doing its job (the fix I flagged as needed from PaisaTrack — here it
+already downgraded a glowing agent summary to an honest failure). 333 events / 8 errors / 13 unresolved.
+
+**5-bucket ledger:**
+- ✅ Self-healed: 320/333 auto-resolved; "renamed 3 .jsx→.tsx (TS syntax in a JS file)"; auto-fixed 2 imports.
+- 🔀 Workarounds (deferred): GLM 429 (repeatCount 12, 14, …) + Kimi timeouts → provider fallback; Vertex hit max_tokens (truncated); simple-build 4-min timeout → full builder.
+- ⏭️ Skipped: 2 orphan components (Dashboard, InvoiceList); @types/react v19 vs react v18 mismatch.
+- ❌ Shipped-broken (but HONESTLY reported ok:false): 7 unresolved imports; `Identifier 'InvoiceStatus' has already been declared` (duplicate import/decl) in InvoiceForm.tsx; `npm run build` exit-2; in-browser preview failed to start.
+- 🥵 Struggle: same cascade as PaisaTrack — full builder read an EMPTY workspace ("package.json/App.tsx does not exist") and rebuilt from scratch; JS/TS extension chaos; model ran `npm run build` prematurely (mid-build, ~17/23 files).
+
+**Confirmed NEW honesty bug (evidence, not guess):** the coverage detector flagged "Requested feature not
+found: login / authentication" and "blog / articles" for an INVOICE app that requested neither. Verified: the
+`RequirementCoverage` request-regexes do NOT match the real prompt (only `search` legitimately matches). So a
+detector is extracting "requested" features from the WRONG input — almost certainly the prompt CONTAMINATED
+with injected cross-project memory/lessons (the Claude turns show a large "Lessons from YOUR PAST PROJECTS"
+prefix). The exact producing detector (the "Requested feature not found:" string is NOT RequirementCoverage's
+format) needs one more trace before fixing — recorded, not patched blind (rule 6).
+
+**Open root causes (ranked, honestly recorded — the shared cause of BOTH deep-test failures):**
+1. **[#1 systemic] Simple-build → full-builder handoff loses all work.** When the cheap-floor simple lane
+   times out (240s, driven by GLM 429 + Kimi latency), the agentic full builder starts on a workspace that
+   looks EMPTY (`package.json does not exist`) and rebuilds from scratch → the chaos that produced PaisaTrack's
+   `rm -rf` and LedgerLite's duplicate-import/extension mess. FIX (next dedicated slice): materialize the fast
+   lane's already-written files into the sandbox before the agentic builder runs (or make the builder aware
+   they exist) so it CONTINUES/FIXES instead of blindly rebuilding. This is the highest-value v3.0 hardening.
+2. **[infra] GLM 429 + Kimi timeout** — the trigger for (1). Lever: the GLM key pool (admin's extra keys) + a
+   tighter per-file timeout on cheap-floor calls in the simple lane. (Same lever logged across App #7/9/10/12 + PaisaTrack.)
+3. **[honesty] Coverage-detector false positives** — features never requested (login/blog) reported "not found".
+   Trace the producing detector's input and extract requested features from the USER PROMPT ONLY, never the
+   memory-augmented text. Regression test with the LedgerLite prompt (must yield only `search`).
+4. **[quality] JS/TS extension chaos** — the .jsx→.tsx rename heal exists but left 7 unresolved imports; the file
+   planner should emit TS extensions for a TS framework up front.
+
+No code shipped for LedgerLite this autopsy — the real roots are subsystem-level (handoff) + infra (keys) + a
+not-yet-traced detector; rushing a patch would violate rule 4. The PaisaTrack `rm -rf` guard (this same PR)
+already removes one arm of the cascade's damage. The handoff fix (#1) is queued as the next dedicated slice.

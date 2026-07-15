@@ -25,8 +25,13 @@ const config: CapacitorConfig = {
   // API calls use the transport interceptor (src/lib/apiBase.ts) to rewrite /api/* to production.
   // No server.url → app loads from dist/ and WebView origin is capacitor://localhost.
   ios: {
-    // Respect the safe-area insets (notch / home indicator) instead of drawing the WebView under them.
-    contentInset: 'automatic',
+    // Draw the WebView EDGE-TO-EDGE and let our CSS own the safe-area insets (the `--nb-safe-*` vars in
+    // index.css pad the app in from the notch, and the fixed bottom nav pads itself with
+    // env(safe-area-inset-bottom)). 'automatic' made WKWebView ALSO inset the content, so the top notch
+    // area AND the bottom home-indicator area were padded TWICE — a big wasted black strip above the header
+    // and below the composer (admin screenshots 2026-07-15). 'never' removes the native double-inset so
+    // there is exactly one inset (ours), and the content extends to fill the screen.
+    contentInset: 'never',
   },
   plugins: {
     // Native Google Sign-In. Google BLOCKS OAuth inside embedded WebViews (their policy), which is

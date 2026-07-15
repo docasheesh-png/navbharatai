@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const LAWYER_AI: ProfessionalConfig = {
   id: 'lawyer_ai',
   name: 'Lawyer / Legal Assistant',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their matter the way a lawyer takes instructions at a first meeting: their name; the STATE/city (jurisdiction matters in India); the broad area of law (consumer, tenancy/property, employment, family, cheque bounce, contract, criminal, RTI, etc.); a brief of what is going on; whether anything is in writing or a deadline/date is looming; and what outcome they want. Remind them not to share anything they consider confidential/sensitive since this is general information, not privileged advice.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'state', label: 'State / city (jurisdiction)' },
+      { key: 'matterArea', label: 'Area of law', hint: 'consumer / property / employment / family / criminal / RTI …' },
+      { key: 'matterBrief', label: 'Matter (brief)' },
+      { key: 'deadline', label: 'Deadline / key date' },
+      { key: 'desiredOutcome', label: 'Wants' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'documents mentioned, steps discussed — no sensitive/privileged details' },
+    ],
+  },
   systemPrompt: `You are Legal AI inside NavBharatAI — a legal-information assistant for Indian law, for ordinary people, students and businesses. You provide general legal INFORMATION and help understand and draft documents; you are NOT an advocate and you do NOT give binding legal advice.
 
 WHAT YOU HELP WITH (detect the need):

@@ -16608,3 +16608,15 @@ Gate: tsc (frontend) 0; tsc -p tsconfig.server.json 0; vitest 6841/6841.
 **Regression locks:** `tests/clientMemory.test.ts` (generic extract/sanitise-per-fields/merge/format/layer, 16), `tests/teacherMemoryEngine.test.ts` (updated to generic store/module — prompt injection, strip+save, anon honesty, memory-off untouched, 6), first-batch memory assertions in `tests/professionals.test.ts`. Gate: frontend tsc ✅, server tsc ✅, vitest full suite ✅ (6896 pass), boot smoke ✅ (clean start).
 
 **Next (one by one):** continue enabling memory + deepening the domain method for the remaining professionals in themed batches (finance/accountant/lawyer intake; parenting/eldercare/petcare; kisan/business/realestate; etc.), each: intake+fields + persona deepening + KB sync + tests + gate + PR → CI green → merge.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 2: Finance, CA/Accountant, Lawyer get memory intake + fields
+
+Continuing the one-by-one conveyor (admin "har professional ko real AI agent banao"). AgentV3 untouched. Uses the generic memory foundation from Batch 1 — each professional just declares its `memory: { subject, intake, fields[] }`:
+- **Financial Advisor** — life stage, money goals, income band, dependents, what they invest in, risk comfort, debts. Intake explicitly forbids asking for account numbers/passwords.
+- **CA / Tax & Accounts** — taxpayer type, entity type, turnover band, GST-registered, regime, what they need. Intake forbids asking for PAN/GSTIN/passwords.
+- **Lawyer / Legal** — state/jurisdiction, area of law, matter brief, deadline, desired outcome. Intake reminds the user not to share sensitive/privileged details (this is general info, not privileged advice).
+`AppKnowledgeBase.ts` entries + keywords synced for all three. Test `professionals.test.ts` now asserts Batch 1 + 2 are memory agents (intake + fields + name field + unique field keys). Gate: frontend tsc ✅, server tsc ✅, vitest 6896 ✅.
+
+**Remaining (one by one):** parenting/eldercare/petcare/maternity; kisan/business/realestate/insurance; astrologer/vastu/spiritual (light memory); coding/english/mathscience (learner memory like teacher); etc.

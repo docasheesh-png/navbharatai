@@ -9,7 +9,7 @@
 #
 # ONE-TIME SETUP (all on the web — no Mac needed):
 #   A. App Store Connect → Users and Access → Integrations → App Store Connect API → generate an API key
-#      with the "App Manager" role. Download the `AuthKey_XXXXXX.p8` (you can download it ONCE — keep it safe).
+#      with the "Admin" role (App Manager CANNOT create the distribution certificate for App Store cloud signing). Download the `AuthKey_XXXXXX.p8` (you can download it ONCE — keep it safe).
 #      Note the Key ID (e.g. ABC123DEF4) and the Issuer ID (a UUID shown at the top of the Keys page).
 #   B. Apple Developer → Membership → copy your Team ID (10 chars, e.g. 9ABCD1EFGH).
 #   C. App Store Connect → My Apps → + → New App → Bundle ID `com.navbharat.ai`, name "NavBharatAI"
@@ -29,7 +29,7 @@
 #
 # HONEST NOTE: iOS code-signing on CI is fussier than Android. If the first run fails on a signing step,
 # it fails LOUDLY (never a fake success) — read the error, and it's almost always a wrong Team ID, an API
-# key without the "App Manager" role, or the app record (step C) not created yet.
+# key without the "Admin" role (needed to create the distribution certificate), or the app record (step C) not created yet.
 
 name: Build iOS App (.ipa, signed)
 

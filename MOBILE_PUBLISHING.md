@@ -133,7 +133,7 @@ runner auto-creates the distribution certificate + provisioning profile (`-allow
 
 One-time (all on the web):
 1. **App Store Connect → Users and Access → Integrations → App Store Connect API** → generate a key with
-   the **App Manager** role. Download `AuthKey_XXXXXX.p8` (downloadable once — keep it safe). Note the
+   the **Admin** role (App Manager cannot create the distribution certificate for cloud signing). Download `AuthKey_XXXXXX.p8` (downloadable once — keep it safe). Note the
    **Key ID** and the **Issuer ID** (UUID at the top of the Keys page).
 2. **Apple Developer → Membership** → copy your **Team ID** (10 chars).
 3. **App Store Connect → My Apps → +** → New App → Bundle ID `com.navbharat.ai`, name "NavBharatAI".

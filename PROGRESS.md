@@ -16460,3 +16460,24 @@ WHAT SHIPPED:
 
 Verification gate: tsc (frontend) 0; tsc -p tsconfig.server.json 0; vitest 6818/6818 (14 new providerRates
 + 2 new ledger model-aware + 1 new runner model-forward). Opus-tier billing untouched.
+## 2026-07-14 — Admin user-management Slice A: REAL ban enforcement (fixes a fake feature)
+
+**Admin request:** admin dashboard me user block kar sake. **Finding (honest, rule 2/3):** the admin "Block user"
+action (`POST /api/admin/users/:userId/ban`) already existed — but it only WROTE a `banned` flag onto the
+wallet doc; NOTHING read/enforced it. A banned user could still build and spend NavBharatAI's provider budget.
+A button that does nothing = a fake feature (breaks absolute rule 2).
+
+**Root-cause fix (rule 4) + siblings (rule 3):** `src/server/lib/banGate.ts` — a pure, Firestore-free
+`readBanStatus(read, uid)` (fail-open) + `banStatusFromWallet` (strict boolean `true` only) + honest
+`suspendedMessage`. A shared `enforceNotBanned()` middleware (`authMiddleware.ts`) reads the ban status for the
+VERIFIED token uid (a banned user cannot evade by claiming another uid), bounded to 3s and FAIL-OPEN (a degraded
+Firestore never locks out every user), and refuses with an honest 403 `ACCOUNT_SUSPENDED`. Applied to ALL six
+build/spend entry points (rule-3 siblings): `/api/agentv3/chat`, `/api/build`, `/api/build-stream`,
+`/api/repo-analyst/chat`, `/api/repo-analyst/generate`, `/api/professional/:id/chat`, `/api/domains/connect` —
+one shared enforcement, not seven drifting copies.
+
+**Gate:** server tsc clean (only pre-existing `ws` gap); `banGate.test.ts` 10/10 (incl. fail-open + strict-boolean
++ anon short-circuit); `authMiddleware.test.ts` 19/19; `routesDomainsAuth.test.ts` green (middleware chain intact).
+
+**Next slices (admin user-management):** B — token adjust consistency (tokenBalance + remaining_balance) + exact
+set/zero; C — real joining-date field + activity high/low sort; D — suspicious-activity auto-detect surface.

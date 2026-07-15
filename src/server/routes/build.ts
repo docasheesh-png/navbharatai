@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { buildRateLimiter, requireUserMatch, verifyFirebaseToken } from '../lib/authMiddleware';
+import { buildRateLimiter, requireUserMatch, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
@@ -269,7 +269,7 @@ export function registerBuildRoutes(app: Express): void {
     }
   });
 
-  app.post('/api/build', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/build', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     try {
       const { prompt, files, userKey, preview, isEdit } = req.body || {};
       if (!prompt || typeof prompt !== 'string') {
@@ -341,7 +341,7 @@ export function registerBuildRoutes(app: Express): void {
   // Streaming build (SSE): module-by-module generation with LIVE real progress.
   // The open connection means the many small per-module calls never hit the
   // gateway 504, so large multi-module apps build to ~100% coverage.
-  app.post('/api/build-stream', buildRateLimiter(), async (req: Request, res: Response) => {
+  app.post('/api/build-stream', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');

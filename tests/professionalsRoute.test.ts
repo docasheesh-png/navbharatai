@@ -17,6 +17,7 @@ vi.mock('../src/server/professionals/engine', () => ({
 const verifyTokenMock = vi.fn();
 vi.mock('../src/server/lib/authMiddleware', () => ({
   buildRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  enforceNotBanned: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   verifyFirebaseToken: (...args: unknown[]) => verifyTokenMock(...args),
 }));
 

@@ -18,7 +18,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import { consumeDurableRate } from './DurableRateLimit';
 import { loadFirebaseAdmin } from './firebaseAdminModule';
-import { getServerDb } from './serverDb';
+import { getServerDb, doc, getDoc } from './serverDb';
+import { readBanStatus, suspendedMessage } from './banGate';
+import { audit } from './audit';
 
 /**
  * firebase-admin init options. Passes an EXPLICIT projectId when the environment provides one, so the
@@ -360,6 +362,44 @@ export function requireRole(...allowed: UserRole[]) {
  *  anon ceiling so a botnet rotating IPs still can't exceed the whole-platform anonymous budget. */
 export function buildRateLimiter() {
   return rateLimiter({ name: 'build', authed: 10, anon: 5, noun: 'builds', anonGlobalPerHour: 100 });
+}
+
+/**
+ * enforceNotBanned() — Express middleware that refuses a build/spend request from a user the admin has
+ * BLOCKED (POST /api/admin/users/:userId/ban). This is what makes the admin "Block" action REAL: the
+ * `banned` flag on the wallet doc is now ENFORCED at every build/spend entry point, not merely stored
+ * (previously a banned user could still build and spend NavBharatAI's provider budget — a fake feature).
+ *
+ * Identity is the VERIFIED token uid ONLY, so a banned user cannot evade by claiming another uid.
+ * FAIL-OPEN + bounded: an anonymous caller, a missing token, or any Firestore error/timeout passes
+ * through (readBanStatus returns not-banned, and the read is capped at 3s), so a degraded Firestore can
+ * never lock out every legitimate user. VITEST-skipped, like the other auth middleware.
+ */
+export function enforceNotBanned() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (process.env.VITEST) return next();
+    try {
+      const uid = await verifyFirebaseToken(req);
+      if (uid) {
+        const reader = async (u: string): Promise<unknown | null> => {
+          const snap = await getDoc(doc(getServerDb() as any, 'user_token_wallets', u));
+          return snap.exists() ? snap.data() : null;
+        };
+        // Bound the Firestore read so a hung/slow read can't stall the request; a timeout resolves to
+        // not-banned (fail-open), matching readBanStatus's own error posture.
+        const ban = await Promise.race([
+          readBanStatus(reader, uid),
+          new Promise<{ banned: false }>((resolve) => setTimeout(() => resolve({ banned: false }), 3_000)),
+        ]);
+        if (ban.banned) {
+          audit('BANNED_USER_REQUEST_REFUSED', { uid, path: req.path, reason: ban.reason ?? null }, 'warn');
+          res.status(403).json({ error: suspendedMessage(ban), code: 'ACCOUNT_SUSPENDED' });
+          return;
+        }
+      }
+    } catch { /* fail-open — a ban-check error never blocks a legitimate request */ }
+    next();
+  };
 }
 
 /**

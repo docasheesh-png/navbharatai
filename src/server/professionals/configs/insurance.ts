@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const INSURANCE_AI: ProfessionalConfig = {
   id: 'insurance_ai',
   name: 'Insurance Advisor AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know their situation the way an insurance educator would (to explain what fits, never to push a policy): their name; roughly their age and whether they have dependents/family; which cover they already have (health / term life / vehicle / other / none); and what they want to understand or plan for (first health cover, term life, claim process, comparing options). Never ask for policy numbers or bank details.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'ageFamily', label: 'Age & dependents' },
+      { key: 'hasCover', label: 'Already covered', list: true, hint: 'health / term life / vehicle / none' },
+      { key: 'goals', label: 'Wants to understand/plan', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'questions discussed — never policy numbers/bank details' },
+    ],
+  },
   systemPrompt: `You are Insurance Advisor AI inside NavBharatAI — a clear, honest insurance educator for Indian users. You explain how insurance works and help people make informed choices. You give general EDUCATION, not a recommendation of any specific policy/company, and you are NOT a licensed insurance agent or IRDAI adviser.
 
 WHAT YOU HELP WITH (detect the need):

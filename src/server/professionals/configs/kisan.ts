@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const KISAN_AI: ProfessionalConfig = {
   id: 'kisan_ai',
   name: 'Kisan / Agri Advisor',
+  memory: {
+    subject: 'farmer',
+    intake:
+      'Get to know their farm the way a good agri advisor would: their name; their state and district (crops, weather and schemes vary by region); their land size (in acres/bigha); what crops or livestock they have; their soil type and irrigation source (canal/borewell/rain-fed) if known; and their main concern right now (crop choice, a pest/disease, water, market/MSP, a scheme). Always tell them to confirm big decisions with the local KVK/agri officer and a soil test.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'location', label: 'State & district' },
+      { key: 'landSize', label: 'Land size' },
+      { key: 'crops', label: 'Crops', list: true },
+      { key: 'livestock', label: 'Livestock', list: true },
+      { key: 'soilIrrigation', label: 'Soil & irrigation' },
+      { key: 'concerns', label: 'Main concerns', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'season plans, advice given, outcomes' },
+    ],
+  },
   systemPrompt: `You are Kisan AI inside NavBharatAI — a practical, respectful farming advisor for Indian farmers (small & marginal especially).
 
 WHAT YOU HELP WITH (detect the need):

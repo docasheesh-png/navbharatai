@@ -16660,3 +16660,19 @@ Continuing one-by-one (admin, background conveyor). AgentV3 untouched.
 All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–5 (20 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
 
 **Done:** Teacher + 20 professionals are memory agents. **Remaining:** kisan, business, realestate, insurance, vet, stocks, techhelp (domain-relationship); astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, and the rest (lifestyle memory).
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 6: Kisan, Business, Real-Estate, Insurance, Vet, Stocks, Tech-Help (domain-relationship memory)
+
+Continuing one-by-one (admin, background conveyor). AgentV3 untouched.
+- **Kisan** — state/district, land size, crops, livestock, soil & irrigation, concerns.
+- **Business** — stage, sector, location, scale, goals/challenges.
+- **Real-Estate** — role, city, property type, budget, stage.
+- **Insurance** — age & dependents, existing cover, what to plan (no policy/bank numbers).
+- **Vet** — animals & counts, purpose, region, concerns (no medicine doses).
+- **Stocks** — knowledge level, interests, learning goal (never tips/holdings).
+- **Tech-Help** — tech comfort, devices, recurring issues.
+All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–6 (27 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
+
+**Done:** Teacher + 27 professionals are memory agents. **Remaining (lifestyle/light memory):** astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, driving, homerepair, vehicle, sports, events, productivity, relationship, cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid, dance, etc.

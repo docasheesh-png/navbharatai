@@ -43,10 +43,26 @@ on:
 
 jobs:
   build-ios:
-    # macos-14 = a real Mac in the cloud with Xcode + CocoaPods preinstalled (this is what replaces owning a Mac).
-    runs-on: macos-14
+    # macos-15 = a real Mac in the cloud with Xcode 16.x (this replaces owning a Mac). Must be 16+ because
+    # the @capacitor-firebase/authentication plugin pulls firebase-ios-sdk 12.7+, whose Swift Package
+    # requires the Xcode 16 toolchain (Swift 6.1) — the older default Xcode 15.4 fails SPM resolution with
+    # "incompatible tools version (6.1.0)".
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # Pin the NEWEST installed Xcode 16.x (macos-15 ships several) so SPM can resolve the Firebase SDK.
+      # Fails loudly if no Xcode 16 is present rather than silently building on an incompatible toolchain.
+      - name: Select the latest Xcode 16 (Firebase SDK requires it)
+        run: |
+          LATEST="$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$LATEST" ]; then
+            echo "::error::No Xcode 16.x found on the runner — the Firebase iOS SDK needs it. Installed Xcodes:"
+            ls -d /Applications/Xcode_*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$LATEST/Contents/Developer"
+          xcodebuild -version | head -1
 
       # Fail EARLY and honestly if the Apple secrets are not set — a store .ipa MUST be signed with your
       # Apple identity, so we never hand back an unsigned/unusable build.

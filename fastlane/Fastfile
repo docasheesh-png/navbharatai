@@ -21,11 +21,14 @@ platform :ios do
   lane :beta do
     setup_ci
 
+    # duration: keep it WELL under Apple's 20-minute (1200s) cap. Using exactly 1200 makes Apple reject the
+    # JWT with "Authentication credentials are missing or invalid" whenever there is any clock skew (the exp
+    # claim lands at/over the 20-min limit). 500s is fastlane's own default and is comfortably valid.
     api_key = app_store_connect_api_key(
       key_id: ENV.fetch("IOS_ASC_KEY_ID"),
       issuer_id: ENV.fetch("IOS_ASC_ISSUER_ID"),
       key_filepath: ENV.fetch("ASC_KEY_PATH"),
-      duration: 1200,
+      duration: 500,
       in_house: false,
     )
 

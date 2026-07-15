@@ -762,6 +762,29 @@ build feed. If a build report is ever made user-shareable, it must pass through 
 **Bottom line:** to the user it is always **NavBharatAI** doing the work, and the bill they pay is always the
 **real** one — honestly itemized in our own terms, never a vendor-by-vendor ledger. Real cost, real bill, one
 brand.
+### Fix 67 — real-cost billing on the watchdog/advisory path + USER-facing provider anonymity (admin 2026-07-15)
+
+Two admin-mandated additions to the billing surface (both verified live: a real PaisaTrack build showed
+₹250.67 via the old path while the true cost was ₹39 and the correct Fix 65 bill was ₹157):
+
+- **Watchdog/advisory finalization now bills via Fix 65 too.** A build that overran its wall-clock or
+  (post-success) advisory cap used to finalize through `finalizeOnDeadline`, which billed the OLD flat
+  `billedAmountUsd` and SKIPPED `setProviderTokens`/`setBilling` — so long builds showed the wrong ₹ and
+  their report was billing-null. The shared `decideBuildBilledUsd()` now drives BOTH the normal settle
+  AND the finalizer (no drift); the finalizer also records per-provider tokens + billing into the report
+  and debits the wallet with the SAME idempotent buildRef (`${workspaceId}_${buildStartedAt}`) the settle
+  uses, so a race can never double-charge.
+- **🔒 USER-FACING PROVIDER ANONYMITY (standing rule, never weaken without admin sign-off):** the user must
+  NEVER see which backend AI did the work — to them, **NavBharatAI did everything**. The user-facing cost
+  breakdown is now `userCostBreakdown()` (exported, test-locked in `tests/userCostBreakdown.test.ts`): it
+  carries ONLY tokens + the real bill + the user's selected tier, branded `NavBharatAI Pro v3.0` — never a
+  provider/model name (GLM/Kimi/Claude/Sonnet/Opus/Gemini/Grok/…), never our internal real cost or markup
+  (those stay ADMIN-only in the diagnostics report). This also fixed a real crash: Fix 65's per-tier
+  breakdown objects had mismatched shapes that made the client do `undefined.toFixed()`. ⚠️ OPEN ITEM
+  (Fix 68, not yet done): the downloadable **Build report** still shows provider names for everyone
+  (`PROVIDER_FALLBACK "Provider GLM failed"`, `providerDelivery`, `providerTokens`, `llmCalls` provider/
+  model). That report must be gated so regular users see a provider-anonymous view while the ADMIN keeps
+  the full detail. Do NOT surface provider names on any user-facing screen.
 
 ## Core engineering rules (copied up from PROGRESS.md so they're never missed)
 

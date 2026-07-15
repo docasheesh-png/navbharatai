@@ -146,8 +146,8 @@ import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/Preview
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
-import { billedAmountUsd, sonnetEquivalentUsd, explainBuildCost, powerToTier } from '../AgentV3/pricing';
-import { tieredMarkupUsd, realProviderCostUsd, explainRealCostBuild } from '../AgentV3/providerRates';
+import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
+import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -742,6 +742,98 @@ export function perTierBillingEnabled(): boolean {
 export function realCostBillingEnabled(): boolean {
   const v = (process.env.AGENTV3_REALCOST_BILLING ?? '').toLowerCase();
   return !(v === 'off' || v === '0' || v === 'false');
+}
+
+/**
+ * USER-FACING cost breakdown — provider-ANONYMOUS by design (admin rule 2026-07-15: the user must
+ * NEVER see which backend AI did the work; to them, NavBharatAI did everything). It carries ONLY the
+ * real bill + token counts + the user's own selected tier, branded as NavBharatAI. It deliberately
+ * omits every provider/model name (GLM/Kimi/Claude/Sonnet/Opus/Gemini/Grok), our internal real cost,
+ * and the markup multiplier — those live only in the admin diagnostics report. This is also the SINGLE
+ * shape the client renders, so it can never crash on a mismatched per-tier object.
+ */
+export interface UserCostBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  billedUsd: number;
+  billedInr: number;
+  usdInrRate: number;
+  /** The user's selected tier, in user-facing words (never a model/provider name). */
+  tier: string;
+  /** Always the NavBharatAI engine — the only "who did the work" the user ever sees. */
+  engine: string;
+}
+
+const POWER_TIER_DISPLAY: Record<string, string> = {
+  weak: 'Weak', off: 'Normal', mini: 'Strong', medium: 'Powerful', max: 'Full Team',
+};
+
+/** Build the anonymized, client-safe cost breakdown for a build. Pure. */
+export function userCostBreakdown(
+  sinkTotal: { inputTokens: number; outputTokens: number },
+  billedUsd: number,
+  powerLevel: BillingPowerLevel | boolean,
+  rate: number,
+): UserCostBreakdown {
+  const key = powerLevel === true ? 'medium' : powerLevel === false ? 'off' : String(powerLevel);
+  return {
+    inputTokens: Math.max(0, sinkTotal.inputTokens || 0),
+    outputTokens: Math.max(0, sinkTotal.outputTokens || 0),
+    billedUsd,
+    billedInr: Math.round(billedUsd * Math.max(0, rate) * 100) / 100,
+    usdInrRate: Math.max(0, rate),
+    tier: POWER_TIER_DISPLAY[key] ?? 'NavBharatAI',
+    engine: 'NavBharatAI Pro v3.0',
+  };
+}
+
+/** Minimal shape of the per-provider ledger the billing decision needs (structural — no import cycle). */
+interface BillingLedgerView {
+  entries: () => Array<{ provider: string; model?: string; usage: { inputTokens: number; outputTokens: number } }>;
+  byProvider: () => Record<string, { inputTokens: number; outputTokens: number }>;
+  total: () => { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * THE single billing decision for a build (Fix 65 + Fix 67). Computes the USD to bill from the build's
+ * per-provider token ledger + power level: Opus tiers keep real Opus × 2; every non-Opus tier bills
+ * tieredMarkup(REAL provider cost) under the real-cost kill-switch, else the legacy flat/per-tier path.
+ * Extracted so BOTH exit paths — the normal settle AND the watchdog/advisory wall-clock finalization —
+ * bill IDENTICALLY (Fix 67 root cause: the watchdog path used the old flat formula and skipped the
+ * per-provider recording, so a build that overran its cap silently bypassed Fix 65). Pure w.r.t. its
+ * inputs (reads only env + the shared routing predicate); the zero-bill guards are applied by callers.
+ */
+function decideBuildBilledUsd(
+  providerLedger: BillingLedgerView,
+  sinkTotal: { inputTokens: number; outputTokens: number },
+  powerLevel: BillingPowerLevel | boolean,
+  userId: string | null | undefined,
+  email: string | null | undefined,
+): {
+  effectiveBilledUsd: number;
+  reconciledProviderUsage: Record<string, { inputTokens: number; outputTokens: number }>;
+  realCostRemainder: { inputTokens: number; outputTokens: number };
+  isOpusTier: boolean;
+} {
+  const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), sinkTotal);
+  const flatBilledUsd = billedAmountUsd(sinkTotal, powerLevel);
+  const ledgerAttributed = providerLedger.total();
+  const realCostRemainder = {
+    inputTokens: Math.max(0, (sinkTotal.inputTokens || 0) - (ledgerAttributed.inputTokens || 0)),
+    outputTokens: Math.max(0, (sinkTotal.outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
+  };
+  const isOpusTier = powerToTier(powerLevel) === 'opus';
+  let effectiveBilledUsd: number;
+  if (isOpusTier) {
+    effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
+  } else if (realCostBillingEnabled()) {
+    effectiveBilledUsd = tieredMarkupUsd(realProviderCostUsd(providerLedger.entries(), realCostRemainder));
+  } else {
+    effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
+      ? perTierBilledUsd(reconciledProviderUsage, powerLevel)
+      : flatBilledUsd;
+  }
+  return { effectiveBilledUsd, reconciledProviderUsage, realCostRemainder, isOpusTier };
 }
 
 /**
@@ -4540,6 +4632,12 @@ export function registerAgentV3Routes(app: Express): void {
     // replaced the main build's (previously discarded) are now billed. Root-cause fix for the
     // ₹14k-real-vs-₹1,524-billed leak: bill the whole build, not one runner's turns.
     const buildUsage = createUsageSink();
+    // Fix 67 — the per-provider ledger + build ref live in the INNER build scope (created once the build
+    // starts), but finalizeOnDeadline (the wall-clock/advisory finalizer) lives out here. This holder is
+    // populated by the inner scope so the finalizer can bill via the SAME real-cost path (Fix 65) and
+    // debit with the SAME idempotent buildRef the normal settle uses. Empty until the build starts → the
+    // finalizer safely skips billing if the cap somehow fires before then.
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number } = {};
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -4570,6 +4668,34 @@ export function registerAgentV3Routes(app: Express): void {
       // NOT a misleading "paused, type continue". The user's app is done; the advisory extras are
       // optional. This is the #1 cause of "Build paused at the time limit" appearing on a finished app.
       const ok = !!buildResultRef && buildResultRef.ok === true;
+      // Fix 67 — a build finalized by the wall-clock / advisory cap must bill via the SAME real-cost
+      // path as the normal settle (Fix 65), NOT the old flat formula, and must record its per-provider
+      // tokens + billing INTO the report (set BEFORE report() below). Root cause: this path used
+      // billedAmountUsd(...) and skipped setProviderTokens/setBilling, so a build that overran its cap
+      // showed the wrong legacy ₹ (e.g. ₹250 instead of the real-cost ₹157) and its report was
+      // billing-null. Only a SUCCESSFUL app is billed; an overran-but-failed build stays free.
+      let watchdogBilledUsd = 0;
+      if (ok && billingCtx.providerLedger) {
+        try {
+          const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email);
+          watchdogBilledUsd = decided.effectiveBilledUsd;
+          buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
+          buildDiagRef?.setBilling({
+            userTier: isAgentV3FreeUser(userId, email)
+              ? 'free-list (admin/tester)'
+              : freeTierBuildActive
+                ? 'free (welcome bonus — cheap engines)'
+                : (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email)
+                  ? 'paid'
+                  : 'billing-off (no charge)',
+            billedUsd: Math.round(watchdogBilledUsd * 1_000_000) / 1_000_000,
+            billedInr: Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100,
+            powerMode: onlyOpus,
+            powerLevel: powerLevelReqEffective,
+            noClaude: noClaudeBuild,
+          });
+        } catch { /* billing enrichment is best-effort — never blocks finalization */ }
+      }
       let dl: BuildDiagnosticsReport | undefined;
       try {
         if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
@@ -4587,11 +4713,34 @@ export function registerAgentV3Routes(app: Express): void {
         }
       } catch { /* diagnostics are best-effort */ }
       if (ok && buildResultRef) {
-        // Billing accounting fix: show the REAL spend so far from the build-level sink (not one
-        // runner's snapshot), so a wall-clock-finalized build's displayed amount matches the actual
-        // charge settled later at the sink total.
-        const billedUsd = billedAmountUsd(buildUsage.total(), powerLevelReqEffective);
-        emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd, billedInr: Math.round(billedUsd * usdInrRate() * 100) / 100, ...(dl ? { diagnostics: dl } : {}) });
+        // Fix 67 — DEBIT the wallet for a cap-finalized successful build, idempotent by the SAME
+        // buildRef the normal settle uses (`${workspaceId}_${buildStartedAt}`), so a race between this
+        // finalizer and a normal settle can never double-charge. Gated exactly like the normal path
+        // (paid-public/credit-gate AND non-free-user AND amount > 0). Without this a build that overran
+        // its cap was silently FREE (a revenue leak) while still SHOWING a charge — now the shown ₹, the
+        // report, and the actual debit all agree on the Fix 65 real-cost amount.
+        let watchdogWalletDebit: { tokensDebited: number; tokenBalance: number } | null = null;
+        if (userId && watchdogBilledUsd > 0) {
+          userCostStore.record(userId, watchdogBilledUsd).catch(() => {});
+          // Only debit with the EXACT buildRef the normal settle uses; without it a ref mismatch could
+          // let a race double-charge, so skip the debit rather than risk it (the build stays free — safe).
+          const billingActiveNow = (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+          if (billingActiveNow && billingCtx.buildStartedAt !== undefined) {
+            try {
+              const debitRes = await debitWalletForBuild(getDb() as any, userId, {
+                billedInr: watchdogBilledUsd * usdInrRate(),
+                buildRef: `${workspaceId}_${billingCtx.buildStartedAt}`,
+                description: 'NavBharatAI Pro v3.0 build (time-capped)',
+              });
+              if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
+            } catch { /* debit failure never blocks finalization (logged nowhere-critical) */ }
+          }
+        }
+        const billedInr = Math.round(watchdogBilledUsd * usdInrRate() * 100) / 100;
+        const watchdogCostBreakdown = watchdogBilledUsd > 0
+          ? userCostBreakdown(buildUsage.total(), watchdogBilledUsd, powerLevelReqEffective, usdInrRate())
+          : null;
+        emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
       } else {
         // RC-4 (admin 2026-07-06): HONEST pause wording. The old line claimed "It was likely almost
         // done" — an unverified guess that is false for a big build that timed out early. Report only the
@@ -4813,6 +4962,7 @@ export function registerAgentV3Routes(app: Express): void {
       // (they share this client) + the escalation runner. Observational: it never changes billing
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
+      billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
         providerLedger.add(used, usage, model);
       };
@@ -4885,6 +5035,7 @@ export function registerAgentV3Routes(app: Express): void {
       });
       // Build start time — used for cost-ladder telemetry duration (P2 measurement).
       const buildStartedAt = Date.now();
+      billingCtx.buildStartedAt = buildStartedAt; // Fix 67 — the finalizer debits with this exact ref
       etaStartMs = buildStartedAt; // anchor the live ETA heartbeat to the real build start
       // P-BRE.1 — open a distributed trace for this build (root span). Continues an inbound W3C
       // traceparent if the client sent one, so the build links into the caller's trace. Exported to
@@ -7464,33 +7615,13 @@ export function registerAgentV3Routes(app: Express): void {
       // Billing Phase 3 — reconcile the per-provider ledger against the billing sink's grand total so
       // the per-provider view (admin usage-report) always sums to exactly what was billed; the aux-call
       // remainder lands in the 'other' bucket. Cost is unchanged unless per-tier billing is flipped ON.
-      const reconciledProviderUsage = reconcileWithSink(providerLedger.byProvider(), buildUsage.total());
-      const flatBilledUsd = billedAmountUsd(buildUsage.total(), powerLevelReqEffective);
-      // The unattributed remainder (aux calls the per-provider ledger never saw: blueprint/plan/judge)
-      // for the REAL-cost path — priced conservatively at Sonnet rates inside realProviderCostUsd.
-      const ledgerAttributed = providerLedger.total();
-      const realCostRemainder = {
-        inputTokens: Math.max(0, (buildUsage.total().inputTokens || 0) - (ledgerAttributed.inputTokens || 0)),
-        outputTokens: Math.max(0, (buildUsage.total().outputTokens || 0) - (ledgerAttributed.outputTokens || 0)),
-      };
-      // BILLING (admin model 2026-07-14): the Opus tiers (Powerful/Full Team) keep "real Opus × 2"
-      // unchanged. EVERY non-Opus tier (Weak/Normal/Strong) now bills tieredMarkup(REAL provider
-      // cost) — exact per-provider/model tokens × each provider's own rate card, marked up ×4 under
-      // $1 / ×3 on the excess. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`);
-      // OFF falls back to the legacy flat/per-tier path so a live anomaly is a one-env revert, no deploy.
-      const isOpusTier = powerToTier(powerLevelReqEffective) === 'opus';
-      let effectiveBilledUsd: number;
-      if (isOpusTier) {
-        effectiveBilledUsd = flatBilledUsd; // real Opus × 2 — unchanged
-      } else if (realCostBillingEnabled()) {
-        effectiveBilledUsd = tieredMarkupUsd(realProviderCostUsd(providerLedger.entries(), realCostRemainder));
-      } else {
-        // Legacy path (kill-switch): the per-feature flag / cost-routing canary priced each tier's
-        // share separately (Sonnet work at ×3); otherwise the flat power-derived amount.
-        effectiveBilledUsd = (perTierBillingEnabled() || costRoutingActiveFor(userId, email))
-          ? perTierBilledUsd(reconciledProviderUsage, powerLevelReqEffective)
-          : flatBilledUsd;
-      }
+      // BILLING (admin model 2026-07-14, Fix 65): Opus tiers (Powerful/Full Team) keep "real Opus × 2";
+      // every non-Opus tier (Weak/Normal/Strong) bills tieredMarkup(REAL provider cost). Computed by the
+      // shared decideBuildBilledUsd so this settle path and the watchdog finalization (Fix 67) never
+      // drift. The realcost path is default-ON (kill-switch `AGENTV3_REALCOST_BILLING`).
+      const { effectiveBilledUsd: decidedBilledUsd, reconciledProviderUsage } =
+        decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email);
+      let effectiveBilledUsd: number = decidedBilledUsd;
       // WHY a build ended up free — recorded into the build report's billing section (admin
       // 2026-07-11) so a ₹0 build always explains itself.
       let zeroBillReason: string | undefined;
@@ -7774,14 +7905,13 @@ export function registerAgentV3Routes(app: Express): void {
       const buildHealth = buildHealthFromDiagnostics(diagnostics, result.ok);
       // T1-cost-transparency: the "why this build cost ₹X" breakdown — token split, tier, markup, base cost.
       // Only when the build was actually billed (>0); a free build has no charge to explain.
-      // Cost transparency — the "why this build cost ₹X" breakdown. For the two Opus tiers it is the
-      // real-Opus×2 explanation; for every non-Opus tier under the real-cost path it is the honest
-      // real-provider-cost + tiered-markup breakdown (billedUsd EQUALS what was charged either way).
+      // Cost transparency — the user-facing "what this build cost" breakdown. ANONYMIZED (admin rule
+      // 2026-07-15): tokens + the real bill + the user's tier, branded NavBharatAI — never a provider/
+      // model name or our internal cost/markup (those stay in the admin diagnostics report only). One
+      // consistent shape for every tier, so the client render can never crash on a per-tier mismatch.
       const costBreakdown = effectiveBilledUsd <= 0
         ? null
-        : (!isOpusTier && realCostBillingEnabled())
-          ? explainRealCostBuild(providerLedger.entries(), realCostRemainder, usdInrRate())
-          : explainBuildCost(buildUsage.total(), powerLevelReqEffective, usdInrRate());
+        : userCostBreakdown(buildUsage.total(), effectiveBilledUsd, powerLevelReqEffective, usdInrRate());
       emit({ type: 'result', ...result, ...projectContinue, buildId, promptHash, billedUsd: effectiveBilledUsd, billedInr: Math.round(effectiveBilledUsd * usdInrRate() * 100) / 100, ...(totalTokens > 0 ? { tokens: totalTokens } : {}), ...(walletDebit && walletDebit.tokensDebited > 0 ? { walletTokensDebited: walletDebit.tokensDebited, walletTokenBalance: walletDebit.tokenBalance } : {}), ...(diagnostics ? { diagnostics } : {}), ...(costBreakdown ? { costBreakdown } : {}), readiness: buildHealth });
     } catch (err) {
       // Capture the crash in the diagnostics report too. NOTE: onUpdate only refreshes the per-instance

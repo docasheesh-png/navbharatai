@@ -14,11 +14,11 @@ vi.mock('../src/server/professionals/engine', () => ({
   runProfessionalChat: (...args: unknown[]) => runChatMock(...args),
 }));
 
-const verifyTokenMock = vi.fn();
+const verifyIdentityMock = vi.fn();
 vi.mock('../src/server/lib/authMiddleware', () => ({
   buildRateLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   enforceNotBanned: () => (_req: unknown, _res: unknown, next: () => void) => next(),
-  verifyFirebaseToken: (...args: unknown[]) => verifyTokenMock(...args),
+  verifyFirebaseIdentity: (...args: unknown[]) => verifyIdentityMock(...args),
 }));
 
 vi.mock('../src/server/lib/attachmentText', () => ({
@@ -39,11 +39,11 @@ function chatHandler() {
 describe('professional chat route — verified identity only', () => {
   beforeEach(() => {
     runChatMock.mockReset().mockResolvedValue('teacher reply');
-    verifyTokenMock.mockReset().mockResolvedValue(null);
+    verifyIdentityMock.mockReset().mockResolvedValue(null);
   });
 
   it('threads the VERIFIED uid into the engine (memory key), never the body userId', async () => {
-    verifyTokenMock.mockResolvedValue('uid-verified');
+    verifyIdentityMock.mockResolvedValue({ uid: 'uid-verified', email: null });
     const res = mockRes();
     await chatHandler()(
       mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', userId: 'uid-attacker-claimed' } }),
@@ -56,7 +56,7 @@ describe('professional chat route — verified identity only', () => {
   });
 
   it('anonymous request (no/invalid token): engine gets NO user id even if body claims one', async () => {
-    verifyTokenMock.mockResolvedValue(null);
+    verifyIdentityMock.mockResolvedValue(null);
     const res = mockRes();
     await chatHandler()(
       mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hello', userId: 'uid-victim' } }),
@@ -64,6 +64,36 @@ describe('professional chat route — verified identity only', () => {
     );
     expect(res.statusCode).toBe(200);
     expect(runChatMock.mock.calls[0][3]).toBeUndefined();
+  });
+
+  it('Professional Pass gate ON + anonymous → 401 login_required, engine never called', async () => {
+    const prev = process.env.PROFESSIONAL_PAID_ENABLED;
+    process.env.PROFESSIONAL_PAID_ENABLED = 'true';
+    try {
+      verifyIdentityMock.mockResolvedValue(null); // anonymous
+      const res = mockRes();
+      await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi' } }), res);
+      expect(res.statusCode).toBe(401);
+      expect(res.body.code).toBe('login_required');
+      expect(runChatMock).not.toHaveBeenCalled();
+    } finally { process.env.PROFESSIONAL_PAID_ENABLED = prev; }
+  });
+
+  it('Professional Pass gate ON + free-listed user → unlimited (200, engine called)', async () => {
+    const prevFlag = process.env.PROFESSIONAL_PAID_ENABLED;
+    const prevList = process.env.AGENTV3_FREE_LIST;
+    process.env.PROFESSIONAL_PAID_ENABLED = 'true';
+    process.env.AGENTV3_FREE_LIST = 'uid-free';
+    try {
+      verifyIdentityMock.mockResolvedValue({ uid: 'uid-free', email: 'admin@navbharatai.com' });
+      const res = mockRes();
+      await chatHandler()(mockReq({ params: { id: 'teacher_ai' }, body: { message: 'hi' } }), res);
+      expect(res.statusCode).toBe(200);
+      expect(runChatMock).toHaveBeenCalledTimes(1);
+    } finally {
+      process.env.PROFESSIONAL_PAID_ENABLED = prevFlag;
+      process.env.AGENTV3_FREE_LIST = prevList;
+    }
   });
 
   it('unknown professional → 404; missing message → 400 (engine never called)', async () => {

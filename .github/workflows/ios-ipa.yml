@@ -150,77 +150,31 @@ jobs:
           # Also drop a copy in RUNNER_TEMP for the explicit -authenticationKeyPath below.
           cp "$DEST" "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
 
-      # Archive UNSIGNED, then sign for DISTRIBUTION at the export step below. WHY: during `archive` with
-      # automatic signing, Xcode tries to mint an "iOS App Development" profile — which requires a
-      # registered test DEVICE ("Your team has no devices…") and fails on a headless CI runner. The App
-      # Store build doesn't need a development profile at all: the export step (method=app-store) uses the
-      # App Store Connect API key to create the DISTRIBUTION certificate + profile on the fly — and
-      # distribution profiles need NO devices. So we build the archive with signing OFF and let export do
-      # all the (distribution) signing.
-      # NOTE: Capacitor 7+ uses Swift Package Manager (not CocoaPods), so `cap add ios` generates a
-      # Package.swift + App.xcodeproj and NO App.xcworkspace — build with `-project …App.xcodeproj`.
-      - name: Archive the app (.xcarchive, unsigned)
-        run: |
-          xcodebuild -project ios/App/App.xcodeproj \
-            -scheme App \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/NavBharatAI.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO \
-            archive
-
-      - name: Export the signed .ipa
+      # Build + sign + upload via fastlane (fastlane/Fastfile). WHY fastlane instead of raw xcodebuild:
+      # `xcodebuild -exportArchive` could not create the iOS Distribution certificate on a fresh runner
+      # ("No signing certificate 'iOS Distribution' found"). fastlane's cert+sigh recipe explicitly
+      # CREATES the distribution certificate + App Store profile with the API key (Admin role) and signs
+      # manually — the proven CI path. NOTE: Capacitor 7+ uses SPM (not CocoaPods), so `cap add ios`
+      # generates App.xcodeproj (no .xcworkspace); the Fastfile builds the .xcodeproj.
+      - name: Build, sign & upload to TestFlight (fastlane)
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          DO_UPLOAD: ${{ inputs.upload }}
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+          FASTLANE_HIDE_CHANGELOG: "1"
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>${IOS_TEAM_ID}</string>
-            <key>signingStyle</key>
-            <string>automatic</string>
-            <key>destination</key>
-            <string>export</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          EOF
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/NavBharatAI.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$IOS_ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$IOS_ASC_ISSUER_ID"
+          export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
+          fastlane ios beta
 
       - name: Upload the .ipa artifact
         uses: actions/upload-artifact@v4
         with:
           name: navbharatai-release-ipa
-          path: ${{ runner.temp }}/export/*.ipa
+          path: ${{ runner.temp }}/NavBharatAI.ipa
           retention-days: 14
-
-      # Optional: push the build straight to TestFlight / App Store Connect (only when "upload" is checked).
-      - name: Upload to App Store Connect (TestFlight)
-        if: ${{ inputs.upload }}
-        env:
-          IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
-          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
-        run: |
-          IPA_PATH="$(ls "$RUNNER_TEMP"/export/*.ipa | head -n1)"
-          echo "Uploading $IPA_PATH to App Store Connect…"
-          xcrun altool --upload-app -f "$IPA_PATH" -t ios \
-            --apiKey "$IOS_ASC_KEY_ID" \
-            --apiIssuer "$IOS_ASC_ISSUER_ID"
 
       # The API key is a secret — never let it linger on the runner beyond this job.
       - name: Always remove the API key (never leaves the runner)

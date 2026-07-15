@@ -1,0 +1,75 @@
+# NavBharatAI — iOS App Store build + TestFlight upload (cloud-signed, no Mac needed).
+#
+# Run on GitHub's macOS runner by .github/workflows/ios-ipa.yml. Raw `xcodebuild -exportArchive` could
+# not create the iOS Distribution certificate on a fresh runner ("No signing certificate 'iOS
+# Distribution' found"), so we use fastlane's proven CI signing recipe instead:
+#   setup_ci                    → a temporary keychain for code signing on the ephemeral runner
+#   cert(api_key:)              → create/download the DISTRIBUTION certificate into that keychain
+#   sigh(api_key:)              → create the App Store provisioning profile for com.navbharat.ai
+#   update_code_signing_settings→ switch the Capacitor project to MANUAL signing with that cert + profile
+#   build_app                   → archive + export the signed .ipa
+#   upload_to_testflight        → ship it to App Store Connect / TestFlight (when DO_UPLOAD=true)
+# Everything authenticates with the App Store Connect API key (.p8) — the key must have the Admin role,
+# which is what can create the distribution certificate.
+
+default_platform(:ios)
+
+APP_IDENTIFIER = "com.navbharat.ai"
+
+platform :ios do
+  desc "Build the App Store .ipa (cloud-signed) and optionally upload to TestFlight"
+  lane :beta do
+    setup_ci
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("IOS_ASC_KEY_ID"),
+      issuer_id: ENV.fetch("IOS_ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      duration: 1200,
+      in_house: false,
+    )
+
+    # Distribution certificate — created once and imported into the temporary CI keychain.
+    cert(api_key: api_key)
+
+    # App Store provisioning profile for the bundle id (sigh defaults to an App Store distribution profile).
+    sigh(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+    )
+
+    # The Capacitor project ships with automatic signing; switch it to manual so the archive uses the
+    # exact distribution cert + profile created above (no dependence on Xcode cloud cert creation).
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "ios/App/App.xcodeproj",
+      team_id: ENV.fetch("IOS_TEAM_ID"),
+      bundle_identifier: APP_IDENTIFIER,
+      profile_name: lane_context[SharedValues::SIGH_NAME],
+      code_sign_identity: "Apple Distribution",
+      targets: ["App"],
+    )
+
+    build_app(
+      project: "ios/App/App.xcodeproj",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: ENV.fetch("RUNNER_TEMP"),
+      output_name: "NavBharatAI",
+      export_options: {
+        provisioningProfiles: {
+          APP_IDENTIFIER => lane_context[SharedValues::SIGH_NAME],
+        },
+      },
+    )
+
+    if ENV["DO_UPLOAD"] == "true"
+      upload_to_testflight(
+        api_key: api_key,
+        skip_waiting_for_build_processing: true,
+        ipa: File.join(ENV.fetch("RUNNER_TEMP"), "NavBharatAI.ipa"),
+      )
+    end
+  end
+end

@@ -27,6 +27,7 @@ describe('professional AI framework', () => {
     const memoryAgents = [
       'nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', // Batch 1
       'finance_ai', 'accountant_ai', 'lawyer_ai', // Batch 2
+      'parenting_ai', 'eldercare_ai', 'petcare_ai', 'maternity_ai', // Batch 3
     ];
     for (const id of memoryAgents) {
       const p = getProfessional(id)!;

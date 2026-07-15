@@ -16620,3 +16620,16 @@ Continuing the one-by-one conveyor (admin "har professional ko real AI agent ban
 `AppKnowledgeBase.ts` entries + keywords synced for all three. Test `professionals.test.ts` now asserts Batch 1 + 2 are memory agents (intake + fields + name field + unique field keys). Gate: frontend tsc ✅, server tsc ✅, vitest 6896 ✅.
 
 **Remaining (one by one):** parenting/eldercare/petcare/maternity; kisan/business/realestate/insurance; astrologer/vastu/spiritual (light memory); coding/english/mathscience (learner memory like teacher); etc.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 3: Parenting, Elder-Care, Pet-Care, Maternity get memory intake + fields
+
+Continuing one-by-one (admin). AgentV3 untouched. Care-relationship domains where remembering the person/pet being cared for is the core value:
+- **Parenting** — remembers each child (name + age), special notes per child, the parent's concerns (guidance stays age-appropriate).
+- **Elder-Care** — remembers who's cared for (relation + rough age), care/mobility level, living setup, concerns; general health notes kept NON-clinical (real medical → doctor).
+- **Pet-Care** — remembers each pet (name/breed/age), training goals, behaviour context; anything medical → vet.
+- **Maternity** — remembers stage (weeks/trimester or baby age), first-baby, what they want support with; gentle, clinical → doctor.
+All four declare `memory: { subject, intake, fields[] }` on the Batch-1 foundation. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–3 (11 professionals) as memory agents with unique field keys. Gate: frontend tsc ✅, server tsc ✅, vitest 6896 ✅.
+
+**Done so far:** Teacher + 11 professionals are memory agents. **Remaining (one by one):** learner-memory (coding, english, mathscience, speaking, aptitude, gk, studyabroad, thesis); domain-relationship (kisan, business, realestate, insurance, vet, resume, stocks, techhelp); light-memory lifestyle (astrologer, vastu, spiritual, yoga, chef, travel, fashion, interior, gardening, music, dance, photography, fitness done…); and the rest.

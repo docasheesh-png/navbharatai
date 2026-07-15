@@ -130,10 +130,17 @@ jobs:
           set_key NSCameraUsageDescription "NavBharatAI uses the camera to capture and scan images inside the app."
           set_key NSPhotoLibraryUsageDescription "NavBharatAI uses your photo library to attach images to your builds."
           set_key NSPhotoLibraryAddUsageDescription "NavBharatAI can save generated images to your photo library."
+          # Export compliance: the app uses ONLY standard HTTPS/TLS (exempt encryption) and implements no
+          # proprietary/custom crypto, so it uses no non-exempt encryption. Declaring this in Info.plist
+          # (a BOOLEAN, not a string) makes App Store Connect skip the "App Encryption Documentation" popup
+          # on every TestFlight upload — the permanent equivalent of answering "None of the algorithms".
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
           echo "Usage descriptions now in Info.plist:"
           for k in NSMicrophoneUsageDescription NSCameraUsageDescription NSPhotoLibraryUsageDescription; do
             printf '  %s = %s\n' "$k" "$(/usr/libexec/PlistBuddy -c "Print :$k" "$PLIST")"
           done
+          printf '  %s = %s\n' ITSAppUsesNonExemptEncryption "$(/usr/libexec/PlistBuddy -c "Print :ITSAppUsesNonExemptEncryption" "$PLIST")"
 
       # Write the App Store Connect API key (.p8) where xcodebuild AND altool both look for it.
       #

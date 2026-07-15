@@ -126,27 +126,63 @@ jobs:
           done
 
       # Write the App Store Connect API key (.p8) where xcodebuild AND altool both look for it.
-      - name: Install App Store Connect API key
+      #
+      # ROBUST NORMALIZATION (2026-07-15): builds #7/#8 failed with Apple's "Authentication credentials are
+      # missing or invalid" at the very first API call. That error means the signed JWT did not verify — the
+      # two overwhelming causes are (a) the pasted .p8 lost its line breaks so the key body is corrupt (the old
+      # BEGIN-header check still passed, masking it), or (b) the Key ID / Issuer ID are swapped or typo'd. This
+      # step now (1) rebuilds a CANONICAL PEM from whatever was pasted — single-line, space-mangled, or base64 —
+      # so paste corruption can't survive, (2) parses it with openssl to prove it is a real private key, and
+      # (3) validates the Key ID + Issuer ID shape, failing with a precise message naming the wrong one.
+      - name: Install & validate App Store Connect API key
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
+          IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_ASC_KEY_BASE64: ${{ secrets.IOS_ASC_KEY_BASE64 }}
         run: |
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           DEST="$HOME/.appstoreconnect/private_keys/AuthKey_${IOS_ASC_KEY_ID}.p8"
-          # Accept the secret in EITHER form (admin convenience, 2026-07-15): the RAW .p8 file contents
-          # (a PEM that starts with "-----BEGIN PRIVATE KEY-----") pasted directly, OR a base64-encoded
-          # blob. Pasting the raw key needs no `base64` step on your machine — just open AuthKey_*.p8 in a
-          # text editor and paste all of it (BEGIN/END lines included) into the IOS_ASC_KEY_BASE64 secret.
-          if printf '%s' "$IOS_ASC_KEY_BASE64" | grep -q 'BEGIN PRIVATE KEY'; then
-            printf '%s\n' "$IOS_ASC_KEY_BASE64" > "$DEST"
-          else
-            printf '%s' "$IOS_ASC_KEY_BASE64" | base64 -d > "$DEST"
+
+          # 1) Get the raw PEM text — accept a directly-pasted .p8 (contains BEGIN) OR base64 of the .p8 file.
+          RAW="$IOS_ASC_KEY_BASE64"
+          if ! printf '%s' "$RAW" | grep -q 'BEGIN PRIVATE KEY'; then
+            RAW="$(printf '%s' "$RAW" | tr -d '[:space:]' | base64 -d 2>/dev/null || true)"
           fi
-          # Sanity: a valid .p8 must contain the PEM header, or every signing step below fails confusingly.
-          if ! grep -q 'BEGIN PRIVATE KEY' "$DEST"; then
-            echo "::error::IOS_ASC_KEY_BASE64 did not decode to a valid .p8 key (no PEM header). Paste either the raw AuthKey_*.p8 contents OR its base64."
+          if ! printf '%s' "$RAW" | grep -q 'BEGIN PRIVATE KEY'; then
+            echo "::error::IOS_ASC_KEY_BASE64 is neither a valid .p8 (no -----BEGIN PRIVATE KEY----- header) nor base64 of one. Paste the ENTIRE AuthKey_*.p8 file contents (BEGIN/END lines included), or its base64."
             exit 1
           fi
+
+          # 2) Rebuild a CANONICAL PEM: strip header/footer + ALL whitespace to recover the pure base64 body,
+          #    then re-wrap at 64 cols. This makes a single-line or space-mangled paste produce a valid key.
+          BODY="$(printf '%s' "$RAW" \
+            | sed -e 's/-----BEGIN PRIVATE KEY-----//' -e 's/-----END PRIVATE KEY-----//' \
+            | tr -d '[:space:]')"
+          {
+            echo "-----BEGIN PRIVATE KEY-----"
+            printf '%s' "$BODY" | fold -w 64
+            echo ""
+            echo "-----END PRIVATE KEY-----"
+          } > "$DEST"
+
+          # 3) Prove it is a real private key (openssl prints nothing on success — no secret leaks to the log).
+          if ! openssl pkey -in "$DEST" -noout 2>/dev/null; then
+            echo "::error::The App Store Connect key in IOS_ASC_KEY_BASE64 is not a valid private key even after normalization. It is likely truncated or the wrong file was pasted. Re-copy the ENTIRE contents of your AuthKey_XXXX.p8 (every character between and including the BEGIN/END lines) into the secret."
+            exit 1
+          fi
+
+          # 4) Validate the two IDs (masked in logs — we only echo PASS/FAIL, never the value). The #1 human
+          #    error is putting the 10-char Key ID into the Issuer ID field: the Issuer ID is a UUID.
+          if ! printf '%s' "$IOS_ASC_ISSUER_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "::error::IOS_ASC_ISSUER_ID is not a UUID. It must be the *Issuer ID* shown at the TOP of App Store Connect → Users and Access → Integrations → App Store Connect API (a long id with dashes like 69a6de70-1234-...), NOT the short Key ID."
+            exit 1
+          fi
+          if ! printf '%s' "$IOS_ASC_KEY_ID" | grep -qE '^[A-Za-z0-9]{8,12}$'; then
+            echo "::error::IOS_ASC_KEY_ID does not look like a Key ID (it should be ~10 letters/digits, e.g. ABC123DEF4 — the 'KEY ID' column next to the key you generated)."
+            exit 1
+          fi
+          echo "API key normalized and parsed OK; Key ID + Issuer ID shape valid."
+
           # Also drop a copy in RUNNER_TEMP for the explicit -authenticationKeyPath below.
           cp "$DEST" "$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
 

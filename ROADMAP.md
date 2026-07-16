@@ -82,10 +82,20 @@ existing roadmap ids (noted inline) — build the ADMIN framing, don't duplicate
 ### Tier A — Reliability (the real fight)
 - **AP-1 — Real browser runtime gate ("preview EARNED" truly enforced)** 🔴 **[TOP-3]** — a build can pass
   `tsc` with correct imports and still crash at RUNTIME (StudySync shipped `Cannot read properties of
-  undefined (reading 'RED')` to the USER). Upgrade: after every build, a headless browser actually LOADS
-  the preview, detects console errors + blank-screen, and on a crash runs a bounded auto-repair from that
-  same report. The gate must be what the user SEES (render), not what compiles. *(Deepens B5 / T0-5 /
-  PPIPE-smoke — make the live-render check the authoritative gate, not advisory.)*
+  undefined (reading 'RED')` to the USER). **AUDIT (2026-07-16): ~80% ALREADY BUILT.** The route's
+  PREVIEW SELF-CHECK + HEAL block (`agentv3.ts` ~L6950–7058, default-on, `AGENTV3_PREVIEW_VERIFY`) already:
+  opens the running app in a REAL browser (`actuator.browseUrl`), reads the rendered DOM
+  (`analyzePreviewHtml` → blank/overlay/compile/404), captures CONSOLE errors
+  (`actuator.getConsoleErrors` → `filterActionableErrors`, whose NOISE list does NOT swallow runtime
+  `TypeError`s), gates on `verdict.rendered && consoleErrs.length === 0`, runs a BOUNDED heal loop
+  (`healRunner` + `buildPreviewRepairPrompt`) up to `autoFixMaxAttempts`, re-verifies, and ZEROES the bill
+  (`previewVerifiedFailed`) if it still fails. **Remaining (needs a REAL StudySync report to autopsy, rule
+  5 — do NOT guess-patch this core gate):** the exact miss is one of — (a) the block is SKIPPED when the
+  lane has no `actuator.browseUrl` / `getConsoleErrors` (e.g. in-browser preview) and ships unverified with
+  no honest "runtime unchecked" downgrade; (b) console capture only catches INITIAL-load errors, missing one
+  that fires on a later route/interaction; (c) the crash left enough DOM that `verdict.rendered` was true
+  AND the console error was filtered/late. Fix the specific one the report proves, plus add an honest
+  "shipped unverified — runtime not checked" diagnostic for case (a). *(Deepens B5 / T0-5 / PPIPE-smoke.)*
 - **AP-2 — Provider throughput structural fix** 🔴 **[TOP-3]** — GLM's 429 ceiling is per-ACCOUNT, so the
   5-key pool didn't clear it (repeatCount 65); cooldown stopped the storm but the ceiling stands. Weigh:
   (a) buy a higher GLM rate-tier; (b) **adaptive lead** — when GLM is saturated, Kimi LEADS that build (not
@@ -121,8 +131,16 @@ existing roadmap ids (noted inline) — build the ADMIN framing, don't duplicate
 
 ### Tier D — Product / UX
 - **AP-9 — Kill requirement-coverage false positives** 🟡 — StudySync's report warned "login/blog not found"
-  for things never asked — false positives break trust. Ground the coverage check in the PROMPT (judge only
-  what the user actually requested). *(Hardens the existing `RequirementCoverage` engine / GA-18.)*
+  for things never asked — false positives break trust. **AUDIT (2026-07-16): coverage is ALREADY
+  prompt-grounded.** Both `analyzeRequirementCoverage` (RequirementCoverage.ts) and `checkFeaturePresence`
+  (FeaturePresence.ts) gate every feature through `isAffirmativelyRequested(prompt, feature)` — a mention is
+  counted ONLY when it appears in the prompt AND is not preceded by a negation cue (negation-aware). So the
+  check does NOT invent requirements. **Remaining (needs the REAL StudySync prompt, rule 5):** the residual
+  is the INCIDENTAL-mention class — a feature word present in the prompt but not actually a request (e.g.
+  "like a blog", a comparative/aside). Tightening the matcher to require an intent verb is risky: it can
+  cause FALSE NEGATIVES that HIDE a genuinely-skipped feature (violates rule 2, worse than the warning). Fix
+  only with the real prompt in hand, targeting the exact incidental match. *(Hardens `RequirementCoverage` /
+  GA-18.)*
 - **AP-10 — Template gallery + remix** 🟡 — 20–30 curated, guaranteed-working starters ("Restaurant site",
   "CRM", "Portfolio") that deploy in 30 s and are then customized in edit-mode. Kills cold-start and makes
   weak-tier LLM cost ~zero. *(= the existing Tier-3 **Template gallery** item — admin-priority framing.)*

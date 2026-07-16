@@ -16720,3 +16720,27 @@ Final push of the one-by-one conveyor (admin, background — CI in background wh
 Sensitive domains keep memory NON-clinical and honest (pharmacist/firstaid never store a diagnosis; relationship gentle-continuity-only; cybersafety/insurance/budget never store passwords/OTP/account numbers).
 
 **MILESTONE: every config-driven professional in the registry (Teacher + 72) is now a real personal AI agent** — takes a domain-appropriate introduction/intake and remembers its user across sessions (verified-uid-keyed, IDOR-safe), on the one generic memory foundation. The test is now REGISTRY-WIDE: `professionals.test.ts` asserts EVERY `listProfessionals()` entry has `memory` (intake + >2 fields + a name field + unique keys), so any NEW professional added without memory fails CI — the invariant can never silently regress. `AppKnowledgeBase.ts` synced for all. Gate: frontend tsc ✅, server tsc ✅, vitest 6918 ✅.
+
+---
+
+## 2026-07-16 — Deeper capabilities for EVERY profession (not just Teacher) — foundation + signature-method Batch 1 (admin request)
+
+**Admin:** "deeper capabilities, sirf teachers ke liye nahi — sabhi profession ke liye chahiye." Every professional should work a problem like a genuine top expert with a real method, not a chatbot that gives the first generic answer.
+
+**Class-level fix (root-cause rule — one change lifts all 73):**
+- **`EXPERT_METHOD_LAYER`** (engine.ts) — a shared DEPTH layer injected into every professional's system prompt (the persona layer governs tone; this governs expertise/method): go deep not surface, diagnose the real need, work it through step-by-step, give actionable+complete output (recommendation → next steps → pitfalls → how to verify → checklist/template), make it STICK (memorable takeaway), be proactive (anticipate next question + risks), match depth to the need, stay honest at expert level. All 73 professionals get this immediately.
+- **`ProfessionalConfig.method`** (types.ts) — an optional per-domain SIGNATURE METHOD (the rigorous field-specific way an expert works, like Teacher's "HOW YOU MAKE A CONCEPT STICK"). Injected prominently right after the persona via `buildProfessionalSystemPrompt`.
+
+**Signature-method Batch 1 (8 flagship domains):**
+- **Lawyer** — ISSUE → FACTS → LAW → APPLICATION → OPTIONS → ACTION (IRAC, jurisdiction-aware, verify-current).
+- **CA/Accountant** — classify → identify provision → explain + worked calc → compliance/forms → legitimate planning → next steps + when a CA must sign.
+- **Finance** — goal/horizon/risk → foundations first (emergency fund + insurance) → explain instruments → asset-allocation to goal → next step + market-risk honesty → SEBI-adviser boundary.
+- **Nutritionist** — assess → review → build balanced Indian plan → sample day/week → start-small habit → check-back.
+- **Fitness** — assess → choose split/progression → coach form/effort → weekly plan → progression rule + red-flags → consistency anchor.
+- **Mentor** — understand → map options w/ trade-offs → recommend → skill roadmap → next action → anticipate obstacle.
+- **Wellness** — listen/validate → understand gently → reflect back → one coping step → encourage support → safety-first crisis handling.
+- **Coding** — understand goal → debug PROCESS (reproduce→read error→hypothesis→test→why) / concept (explain→example→exercise) → idiomatic code + principle → next practice → run-it-yourself.
+
+This is an AI-prompt QUALITY improvement, so per AppKnowledgeBase rules it needs no KB entries (prompt/quality changes are exempt). Tests: shared depth layer present for every professional (even method-less), signature method injected when present, Batch-1 domains have a method (professionals.test.ts + teacherMemoryEngine.test.ts). Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅.
+
+**Next (one by one):** add signature `method` to the remaining professionals in themed batches; the shared EXPERT_METHOD_LAYER already deepens all of them today.

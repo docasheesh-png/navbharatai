@@ -43,6 +43,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [promos, setPromos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState('');
   const [userSort, setUserSort] = useState('tokens');
   const [userSearch, setUserSearch] = useState('');
   const [toastMsg, setToastMsg] = useState('');
@@ -122,12 +123,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const fetchUsers = useCallback(async () => {
     setUsersLoading(true);
+    setUsersError('');
     try {
       const r = await fetch(`/api/admin/users?sort=${userSort}&search=${encodeURIComponent(userSearch)}`, { headers });
+      // HONESTY (admin bug 2026-07-15: "users list show nahi ho rahi"): the old code did
+      // `Array.isArray(d) ? d : []`, so a 401 (expired admin token) / 500 (Firestore error) response
+      // body — an OBJECT, not an array — was silently shown as "No users found", indistinguishable from
+      // a genuinely-empty list. Check r.ok first and surface the REAL reason so the admin can act
+      // (re-login on 401, see the Firestore error on 500) instead of a misleading empty state.
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({} as any));
+        const reason = body?.detail || body?.error || `HTTP ${r.status}`;
+        setUsers([]);
+        setUsersError(r.status === 401 ? 'Admin session expired — please log out and log in again.' : `Couldn't load users: ${reason}`);
+        return;
+      }
       const d = await r.json();
       setUsers(Array.isArray(d) ? d : []);
-    } catch (e) { console.error(e); }
-    finally { setUsersLoading(false); }
+      if (!Array.isArray(d)) setUsersError('Unexpected response from the server.');
+    } catch (e: any) {
+      setUsers([]);
+      setUsersError(`Couldn't reach the server: ${e?.message || 'network error'}`);
+    } finally { setUsersLoading(false); }
   }, [adminToken, userSort, userSearch]);
 
   const fetchPromos = useCallback(async () => {
@@ -323,6 +340,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await adminPost(`/api/admin/users/${userId}/pro`, { grant });
       if (r.ok) { toast(grant ? 'Pro granted!' : 'Pro revoked'); fetchUsers(); }
       else toast('Error: ' + r.error);
+    } finally { setActionLoading(null); }
+  };
+
+  // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
+  // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
+  // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
+  const handleMerge = async (intoUserId: string) => {
+    const fromUserId = window.prompt(`Merge which account's wallet INTO this user?\nEnter the SOURCE userId (the duplicate to retire).\n\nDebt carries, welcome bonus counts once, purchases carry. The source wallet is zeroed and retired.`);
+    if (!fromUserId || !fromUserId.trim()) return;
+    if (!window.confirm(`Merge wallet of\n  ${fromUserId.trim()}\nINTO\n  ${intoUserId}\n?\nThis is irreversible. The source is zeroed and flagged merged.`)) return;
+    setActionLoading(intoUserId + '_merge');
+    try {
+      const r = await adminPost(`/api/admin/users/${intoUserId}/merge`, { fromUserId: fromUserId.trim() });
+      if (r.ok) { toast(`Merged! New balance: ${(r.newBalance ?? 0).toLocaleString()} tokens`); fetchUsers(); }
+      else toast('Merge failed: ' + (r.detail || r.error));
     } finally { setActionLoading(null); }
   };
 
@@ -645,7 +677,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                       {usersLoading && (
                         <tr><td colSpan={7} className="py-10 text-center"><RefreshCw className="w-5 h-5 animate-spin text-indigo-400 mx-auto" /></td></tr>
                       )}
-                      {!usersLoading && users.length === 0 && (
+                      {!usersLoading && users.length === 0 && usersError && (
+                        <tr><td colSpan={7} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>
+                      )}
+                      {!usersLoading && users.length === 0 && !usersError && (
                         <tr><td colSpan={7} className="py-10 text-center text-[#8b949e] text-[10px] font-bold uppercase">No users found. Click Load to fetch.</td></tr>
                       )}
                       {users.map((u: any) => (
@@ -685,6 +720,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   </button>
                                   <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
+                                  </button>
+                                  <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-purple-400 uppercase hover:bg-purple-500/20 transition-all">
+                                    {actionLoading === u.userId + '_merge' ? '...' : 'Merge'}
                                   </button>
                                 </>
                               )}

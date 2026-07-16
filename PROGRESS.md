@@ -16761,3 +16761,85 @@ Final push of the signature-`method` rollout on the EXPERT_METHOD_LAYER foundati
 - **Batch 6 (service/utility/misc, 18):** driving, homerepair, vehicle, sports, events, productivity, relationship, disability, techbuy, translate, babynames, astronomy, disaster, environment, festival, hygiene, safety, volunteer.
 
 **MILESTONE: every config-driven professional (Teacher + 72) now works like a top expert with a real, step-by-step signature method** — e.g. Lawyer=IRAC, CA=classify→provision→worked-calc, Kisan=agronomy+IPM, Astrologer=entertainment-framed+free-will, Safety=empower-not-fearmonger, Translate=meaning-not-word-for-word. Each method also bakes in the domain's safety boundaries and honesty rules (medical→doctor, legal→advocate, no fabrication, no dose/diagnosis, scam warnings). All 72 carry a `method` field; Teacher keeps its inline concept-mastery method. The test is REGISTRY-WIDE: every professional must have a deep method or CI fails, so the invariant can't regress. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Combined with the earlier work, every professional is now a real personal AI agent (memory + intake) AND a real expert (depth + signature method).
+## 2026-07-15 — Admin panel: "users list not showing" = a masked error (honesty fix)
+
+**Admin report (screenshot):** admin panel → Users tab shows "NO USERS FOUND. CLICK LOAD TO FETCH" — the
+list never appears.
+
+**Investigation (rule 1):** the read path is CORRECT — `GET /api/admin/users` and `GET /api/admin/analytics`
+both do the same `getDocs(collection(db,'user_token_wallets'))`, and `serverDb.getDocs` calls `.get()` on the
+collection ref properly. No definitive server bug is findable from code, so the live cause is runtime (an
+expired admin token → 401, a Firestore error/timeout → 500, or a network failure). **Root cause of the
+SYMPTOM:** the client `fetchUsers` did `Array.isArray(d) ? d : []` WITHOUT checking `r.ok` — so a 401/500
+response body (an object, not an array) was silently rendered as "No users found", indistinguishable from a
+genuinely-empty list. The real failure was invisible (rule-5 honesty gap).
+
+**Fix:** (client) `fetchUsers` now checks `r.ok`, captures the real reason, and shows it — 401 → "Admin
+session expired — log out and log in again", 500 → the Firestore `detail`, network throw → "Couldn't reach
+the server". A distinct red error row + Retry replaces the misleading "No users found" (which now shows ONLY on
+a real empty result). (Server) the `/api/admin/users` 500 now returns `detail: e.message` (admin-only endpoint,
+so the raw reason is allowed — the white-label law covers END-USER surfaces only). This makes the true cause
+visible so it can be fixed at the root; most likely it is an expired admin token (re-login resolves it).
+
+Gate: frontend `tsc --noEmit` clean; server tsc clean; full vitest 6883 pass.
+
+---
+
+## 2026-07-16 — Slice 1 of one-wallet: tested wallet-MERGE core + admin merge tool (money-safe)
+
+**Admin goal:** one person = one wallet on the ONE NavBharatAI project; login method is just a gate; a
+restored account's balance should follow. This slice ships the MONEY-CRITICAL core + a usable admin tool.
+
+**`accountMerge.ts` (pure, 10/10 tests):** `mergeWallets(into, other, nowIso)` reconstructs the merged
+balance FROM FIRST PRINCIPLES — `realPurchased(A) + realPurchased(B) + ONE welcome (if either got it) −
+used(A) − used(B)` — so:
+- **Debt carries** (a negative/overdrafted balance reduces the merged balance — a user can NEVER escape
+  their own debt by starting fresh). Admin's exact case tested: paid ₹100 (10k tokens) + own old account
+  overdrafted 10k → **net 0**, not ₹100.
+- **Welcome bonus counts ONCE per person** (not once-per-account) — no N×50k farming. Tested incl. a
+  partially-spent welcome not resurrecting.
+- **Real purchases all carry**; Pass = OR; usage totals sum; ledger concatenated + bounded with an honest
+  merge marker.
+
+**`POST /api/admin/users/:userId/merge` (admin-gated, transactional):** the admin PROVES identity by
+choosing the two accounts (never inferred — merely fetching a GitHub repo can NEVER move a wallet). Atomic
++ idempotent: the source wallet is zeroed and flagged `mergedInto` so it can never be spent again or
+double-merged. Admin UI: a **Merge** button in the users table (prompts for the source userId, double-confirm).
+
+**Honest scope — what's NOT in this slice (next steps):**
+- CLIENT account-linking (a signed-in user attaching another provider via `linkWithCredential`, + the
+  Firebase console "one account per email" setting) — prevents FUTURE duplicates. Needs live Firebase to
+  verify; admin does the console toggle.
+- An alias resolver so logging into a merged (retired) source account auto-resolves to the canonical wallet
+  (today it correctly shows 0). 
+- Chat-history/build re-keying on merge (this slice merges the WALLET/money; history-merge is separate).
+
+Gate: frontend `tsc --noEmit` clean; server tsc clean; `accountMerge.test.ts` 10/10; full vitest 6918 pass.
+
+---
+
+## 2026-07-16 — One-wallet Slice 2: canonical-wallet RESOLVER (completes the merge on read + spend)
+
+Slice 1 shipped the wallet-merge core + admin merge tool, but a user logging into a RETIRED (mergedInto)
+account still saw 0 instead of their unified balance. This slice closes that: a pure, tested resolver follows
+the `mergedInto` pointer to the CANONICAL wallet, wired into ALL three money sites so a merged account
+transparently reads AND spends the account it was merged into — one wallet however the user signs in.
+
+**`walletResolve.ts` (pure, 9/9 tests):** `resolveCanonicalWalletId(readMergedInto, uid, maxHops=5)` —
+bounded, cycle-guarded, fail-safe (any error / cycle / hop-limit → last known id; never throws or loops).
+Gated by `walletMergeResolveEnabled()` (`WALLET_MERGE_RESOLVE=on`, default OFF).
+
+**Wired (all behind the flag → zero behaviour change until the admin turns it on after verifying a merge):**
+- `routes/wallet.ts` GET — reads the canonical wallet (user sees their unified balance).
+- `lib/walletDebit.ts` — debits the canonical wallet (a build on a merged account charges the unified balance).
+- `AgentV3/WalletBalance.ts` `firestoreWalletReader` — the affordability gate judges the canonical balance
+  (a merged account isn't wrongly blocked). The pure `readWalletBalanceInr` is untouched (tests unaffected).
+
+Security: `requireUserMatch` still checks the token uid against the requested uid; resolution to the canonical
+(also-owned) account happens only server-side, after auth. Fetching a GitHub repo never triggers a merge or a
+resolve — only an explicit admin merge writes `mergedInto`.
+
+**Enable order (admin):** run a real merge via the admin Merge tool → verify → set `WALLET_MERGE_RESOLVE=on`
+in Cloud Run. The flag is the instant, no-deploy kill switch.
+
+Gate: server tsc clean; walletResolve 9/9 + accountMerge 10/10 + WalletBalance 5/5; full vitest 6927 pass.

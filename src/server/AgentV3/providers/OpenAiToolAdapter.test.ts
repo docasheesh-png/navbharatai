@@ -127,6 +127,23 @@ describe('parseOpenAiCompletion', () => {
     expect(r.rawContent).toEqual([{ type: 'text', text: 'Done!' }]);
   });
 
+  it('captures the prefix-cache hit from prompt_tokens_details.cached_tokens (GLM/Kimi)', () => {
+    const r = parseOpenAiCompletion({
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5000, completion_tokens: 40, prompt_tokens_details: { cached_tokens: 4200 } },
+    });
+    expect(r.usage.inputTokens).toBe(5000); // prompt_tokens includes the cached ones
+    expect(r.usage.cacheReadInputTokens).toBe(4200);
+  });
+
+  it('falls back to a top-level cached_tokens field', () => {
+    const r = parseOpenAiCompletion({
+      choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 800, completion_tokens: 10, cached_tokens: 512 } as any,
+    });
+    expect(r.usage.cacheReadInputTokens).toBe(512);
+  });
+
   it('parses tool calls into Anthropic-shaped toolUses + rawContent and forces tool_use', () => {
     const r = parseOpenAiCompletion({
       choices: [{

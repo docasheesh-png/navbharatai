@@ -4637,7 +4637,7 @@ export function registerAgentV3Routes(app: Express): void {
     // populated by the inner scope so the finalizer can bill via the SAME real-cost path (Fix 65) and
     // debit with the SAME idempotent buildRef the normal settle uses. Empty until the build starts → the
     // finalizer safely skips billing if the cap somehow fires before then.
-    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number } = {};
+    const billingCtx: { providerLedger?: BillingLedgerView; buildStartedAt?: number; cacheReadInputTokens?: number } = {};
     // Force-finalize a build that overran its wall-clock cap — or, once the build has already SUCCEEDED,
     // its much shorter ADVISORY cap (see armAdvisoryCap). Extracted so the initial arm and the re-arm
     // share one implementation. Guarded by rb.ended so it can never double-emit after a clean finish.
@@ -4680,6 +4680,7 @@ export function registerAgentV3Routes(app: Express): void {
           const decided = decideBuildBilledUsd(billingCtx.providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email);
           watchdogBilledUsd = decided.effectiveBilledUsd;
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
+          buildDiagRef?.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
           buildDiagRef?.setBilling({
             userTier: isAgentV3FreeUser(userId, email)
               ? 'free-list (admin/tester)'
@@ -4963,8 +4964,14 @@ export function registerAgentV3Routes(app: Express): void {
       // with the per-tier flag off. Aux calls (blueprint/plan/judge) reconcile into 'other' at settle.
       const providerLedger = createProviderUsageLedger();
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
-      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string): void => {
+      const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number): void => {
         providerLedger.add(used, usage, model);
+        // Fix 66 (measure-first) — accumulate the prefix-cache HIT tokens the cheap-floor providers
+        // (GLM/Kimi) report, so the diagnostics report can show the real cache-hit rate on a build.
+        // Purely observational: it never touches the billing ledger/sink above.
+        if (Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0) {
+          billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + (cacheReadInputTokens ?? 0);
+        }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted
       // users — OR is forced ON+cheap-ONLY for a not-yet-paying free-tier user. Computed ONCE here and
@@ -6164,7 +6171,7 @@ export function registerAgentV3Routes(app: Express): void {
           // REAL-cost billing (Fix 65): attribute this fast-lane call to the provider/model that ACTUALLY
           // delivered, so a cheap GLM/Kimi fast-lane build is priced at the cheap rate — not swept into
           // the Sonnet-rate "unattributed remainder". Mirrors the agentic chain's onTurnComplete.
-          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model);
+          captureTurnUsage(usedProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
           return t.text;
         };
         const fastWrite = async (files: { path: string; content: string }[]): Promise<void> => {
@@ -7789,6 +7796,7 @@ export function registerAgentV3Routes(app: Express): void {
           // still DELIVERED a turn (a genuine chain leak), report noClaude:false + a loud NO_CLAUDE_VIOLATION.
           // Provider tokens must be set FIRST so the detector can see the corroborating cost signal.
           buildDiag.setProviderTokens(reconciledProviderUsage);
+          buildDiag.setCacheReadInputTokens(billingCtx.cacheReadInputTokens ?? 0);
           const leakedClaudeProvider = noClaudeBuild ? buildDiag.claudeProviderDelivered() : null;
           if (leakedClaudeProvider) {
             buildDiag.record({

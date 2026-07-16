@@ -326,7 +326,9 @@ export function SettingsPanel({
                     color: 'text-indigo-400',
                     icon: User as any,
                     items: [
-                      { id: 'profile', label: 'My Profile', icon: User as any, nav: true },
+                      // Opens the SAME real profile page as the top-right avatar → Profile (view
+                      // 'my_profile'). It used to point at a non-existent 'profile' view → blank page.
+                      { id: 'my_profile', label: 'My Profile', icon: User as any, nav: true },
                     ],
                   },
                   {

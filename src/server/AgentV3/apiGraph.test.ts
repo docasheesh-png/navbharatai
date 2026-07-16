@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEndpoints, extractApiCalls, buildApiGraph, apiWiringSummary } from './apiGraph';
+import { extractEndpoints, extractApiCalls, buildApiGraph, apiWiringSummary, endpointDependents, apiEndpointBlastReport } from './apiGraph';
 
 // GA-5: API-endpoint graph. Pure — extract backend routes + frontend calls and diff them.
 
@@ -101,5 +101,48 @@ describe('apiWiringSummary — advisory evaluate line', () => {
   it('stays empty for a frontend-only repo (no false positives when the backend is external)', () => {
     const g = buildApiGraph([{ path: 'c.ts', content: "axios.get('/api/x');\n" }]);
     expect(apiWiringSummary(g)).toBe('');
+  });
+});
+
+describe('GA-5 — endpoint blast-radius (change-propagation drill-down)', () => {
+  const files = [
+    { path: 'server/routes.ts', content: "app.get('/users/:id', h);\napp.delete('/users/:id', h);\napp.post('/orders', h);" },
+    { path: 'web/Profile.tsx', content: "axios.get('/users/42');" },
+    { path: 'web/UserCard.tsx', content: "fetch('/users/7');" },
+    { path: 'web/Delete.tsx', content: "fetch('/users/9', { method: 'DELETE' });" },
+  ];
+  const g = buildApiGraph(files);
+
+  it('endpointDependents returns every frontend call site depending on GET /users/:id (concrete + templated)', () => {
+    const deps = endpointDependents(g, 'GET', '/users/:id');
+    const filesHit = deps.map((d) => d.file).sort();
+    expect(filesHit).toEqual(['web/Profile.tsx', 'web/UserCard.tsx']); // both GET call sites
+    expect(deps.some((d) => d.file === 'web/Delete.tsx')).toBe(false); // DELETE is a different verb
+  });
+
+  it('a concrete id call (/users/9) resolves to the :id wildcard route', () => {
+    const deps = endpointDependents(g, 'DELETE', '/users/:id');
+    expect(deps.map((d) => d.file)).toEqual(['web/Delete.tsx']);
+  });
+
+  it('apiEndpointBlastReport lists dependents for a real route', () => {
+    const r = apiEndpointBlastReport(g, 'GET /users/:id');
+    expect(r).toContain('Blast radius of');
+    expect(r).toContain('2 frontend call site(s)');
+    expect(r).toContain('web/Profile.tsx');
+  });
+
+  it('reports "safe to change" when nothing depends on the route', () => {
+    const r = apiEndpointBlastReport(g, 'POST /orders'); // defined, but no frontend caller
+    expect(r).toContain('safe to change');
+  });
+
+  it('reports "matches no defined route" for an unknown endpoint', () => {
+    expect(apiEndpointBlastReport(g, 'GET /nope')).toContain('matches no defined route');
+  });
+
+  it('returns "" when no target is given (the global overview handles that)', () => {
+    expect(apiEndpointBlastReport(g)).toBe('');
+    expect(apiEndpointBlastReport(g, '  ')).toBe('');
   });
 });

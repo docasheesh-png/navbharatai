@@ -157,6 +157,56 @@ export function apiWiringSummary(g: ApiGraphResult): string {
   return `API wiring — ${g.missing.length} frontend call(s) with NO matching backend route (likely broken; add the route or fix the path/method):\n${shown.join('\n')}${g.missing.length > 8 ? `\n  …and ${g.missing.length - 8} more` : ''}`;
 }
 
+/**
+ * GA-5 (change-propagation blast-radius, ENDPOINT dimension) — given a CHANGED/renamed/removed backend
+ * endpoint (method + path), return every frontend call site that DEPENDS on it (the downstream that would
+ * break if the route's method/path changes). Mirrors schemaGraph's `schemaDependents`. `method` may be
+ * empty/ALL to match any verb. Pure; reuses the existing `callMatches` path-pattern matcher. */
+export function endpointDependents(g: ApiGraphResult, method: string, path: string): ApiCall[] {
+  if (!g || !Array.isArray(g.called)) return [];
+  const synthetic: Endpoint = { method: (method || 'ALL').toUpperCase(), path: normPath(path), file: '' };
+  const seen = new Set<string>();
+  const out: ApiCall[] = [];
+  for (const call of g.called) {
+    if (!callMatches(call, [synthetic])) continue;
+    const k = `${call.method} ${call.path} ${call.file}`;
+    if (!seen.has(k)) { seen.add(k); out.push(call); }
+  }
+  return out;
+}
+
+/** Parse a "METHOD /path" (or bare "/path") drill-down target into a method + path. Pure. */
+function parseEndpointTarget(target: string): { method: string; path: string } {
+  const t = (target || '').trim();
+  const m = t.match(/^([A-Za-z]+)\s+(\/\S*|\S+)$/);
+  if (m && HTTP_VERBS.has(m[1].toUpperCase())) return { method: m[1].toUpperCase(), path: m[2] };
+  return { method: 'ALL', path: t };
+}
+
+/**
+ * GA-5 — the endpoint blast-radius drill-down report. With a target, resolve the matching DEFINED
+ * route(s) and list the frontend call sites that depend on it; an honest "safe to change" when nothing
+ * depends on it, and a clear "matches no defined route" when the target isn't a route the repo defines.
+ * Without a target, returns '' (the global api_graph overview already covers that). Pure. */
+export function apiEndpointBlastReport(g: ApiGraphResult, target?: string): string {
+  if (!target || !target.trim()) return '';
+  const { method, path } = parseEndpointTarget(target);
+  const wantPath = normPath(path);
+  const matchesDefined = (g.defined || []).filter(
+    (ep) => ep.path === wantPath && (method === 'ALL' || ep.method === 'ALL' || ep.method === method),
+  );
+  if (matchesDefined.length === 0) {
+    return `Endpoint "${method === 'ALL' ? '' : method + ' '}${wantPath}" matches no defined route in this project — nothing to compute a blast radius for (check the method/path, or it may live in an external backend).`;
+  }
+  const deps = endpointDependents(g, method, path);
+  const label = `${method === 'ALL' ? '' : method + ' '}${wantPath}`.trim();
+  if (deps.length === 0) {
+    return `Blast radius of \`${label}\` — nothing in the frontend depends on it; safe to change.`;
+  }
+  const shown = deps.slice(0, 12).map((d) => `  • ${d.method} ${d.path} — ${d.file}`);
+  return `Blast radius of \`${label}\` — ${deps.length} frontend call site(s) depend on it; review before renaming/removing the route or changing its method/path:\n${shown.join('\n')}${deps.length > 12 ? `\n  …and ${deps.length - 12} more` : ''}`;
+}
+
 function dedupe<T>(items: T[], key: (t: T) => string): T[] {
   const seen = new Set<string>();
   const out: T[] = [];

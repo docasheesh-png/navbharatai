@@ -17,7 +17,7 @@ import { planAppDefaults } from './appDefaults';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
-import { buildApiGraph, apiWiringSummary } from './apiGraph';
+import { buildApiGraph, apiWiringSummary, apiEndpointBlastReport } from './apiGraph';
 import { analyzeSchemaGraph, schemaGraphSummary, analyzeSqlSchema, sqlSchemaSummary, schemaGraphReport } from './schemaGraph';
 import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
@@ -1823,6 +1823,10 @@ export class ToolDispatcher {
         }
         const g = buildApiGraph(contents);
         if (!g.defined.length && !g.called.length) return 'api_graph: no HTTP routes or API calls detected in the workspace.';
+        // GA-5 drill-down: `endpoint="METHOD /path"` → the change-propagation blast radius for that one
+        // route (which frontend call sites depend on it), mirroring schema_graph's `model=` drill-down.
+        const endpointTarget = optStr(input, 'endpoint');
+        if (endpointTarget) return apiEndpointBlastReport(g, endpointTarget);
         const lines: string[] = [`API graph — ${g.defined.length} route(s) defined, ${g.called.length} frontend call site(s).`];
         if (g.missing.length) {
           lines.push(`\nMISSING — ${g.missing.length} frontend call(s) with NO matching backend route (likely broken; add the route or fix the path/method):`);

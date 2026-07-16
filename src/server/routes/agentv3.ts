@@ -123,6 +123,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
+import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
@@ -7828,6 +7829,24 @@ export function registerAgentV3Routes(app: Express): void {
             noClaude: noClaudeBuild && !leakedClaudeProvider,
           });
         } catch { /* report enrichment is best-effort — never blocks the report itself */ }
+        // U-1 — record the signed determinism-audit manifest (routing inputs + sha256 of every written
+        // file, HMAC-signed by SECRET_ENCRYPTION_KEY when present). Best-effort; never blocks the report.
+        try {
+          const manifest = signManifest(
+            buildBuildManifest({
+              buildId,
+              promptHash,
+              model: String(model),
+              effort: powerSpecResolved?.effort,
+              powerLevel: powerLevelReqEffective,
+              framework,
+              createdAt: new Date().toISOString(),
+              files: Object.fromEntries(writtenFiles),
+            }),
+            process.env.SECRET_ENCRYPTION_KEY,
+          );
+          buildDiag.recordManifest(manifest);
+        } catch { /* manifest is best-effort — never blocks the build or report */ }
         buildDiag.finish(result.ok, result.summary);
         diagnostics = buildDiag.report();
         lastDiagnostics.set(buildKey, diagnostics);

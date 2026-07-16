@@ -16744,3 +16744,11 @@ Sensitive domains keep memory NON-clinical and honest (pharmacist/firstaid never
 This is an AI-prompt QUALITY improvement, so per AppKnowledgeBase rules it needs no KB entries (prompt/quality changes are exempt). Tests: shared depth layer present for every professional (even method-less), signature method injected when present, Batch-1 domains have a method (professionals.test.ts + teacherMemoryEngine.test.ts). Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅.
 
 **Next (one by one):** add signature `method` to the remaining professionals in themed batches; the shared EXPERT_METHOD_LAYER already deepens all of them today.
+
+## 2026-07-16 — Deeper capabilities: signature-method Batches 2 & 3 (education + health/care)
+
+Continuing the per-domain signature `method` rollout on the EXPERT_METHOD_LAYER foundation (#1429). AgentV3 untouched.
+- **Batch 2 (education/tutor):** Maths-Science (understand→plan→solve-with-reasoning→check→explain→practice), English (meet-level→correct-with-why→drill→confidence), Public-Speaking (structure→delivery→practise→confidence), Resume (real-bullets→ATS→tailor), Thesis (question→structure→synthesise→methodology→edit→cite), Study-Abroad (fit-shortlist→requirements→apply→funding→verify), Aptitude (type→trick+why→drill→speed), GK (context→exam→quiz→strategy→hook).
+- **Batch 3 (health/care):** Parenting (normalise→why→positive-strategy→red-flags), Elder-Care (dignity-first→plan→caregiver→red-flags), Pet-Care (why→positive-plan→consistency→safety), Maternity (inform-alongside-doctor→warning-signs→safety-first), Vet (good-practice→prevention→red-flags), Pharmacist (info-only→boundary→red-flags, never dose/diagnosis), First-Aid (call-112-first→steps→do/don't→boundary), Yoga (breath-first→sequence→form→routine).
+
+Every method encodes the domain's real rigor AND its safety boundaries (medical → doctor, legal → advocate, no fabrication). Test `professionals.test.ts` asserts all 24 method-bearing domains carry a real method. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Shared EXPERT_METHOD_LAYER already deepens the remaining professions; bespoke methods continue in batches.

@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import type { AgentEvent } from './types';
+import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -224,6 +225,8 @@ export interface BuildDiagnosticsReport {
   /** Fix 37c — explicit data-loss/recovery events (sandbox recycled, files restored, generation
    *  reset), each with the observed CAUSE, so "data kyu udha" is answered inside the report itself. */
   dataLossEvents?: Array<{ ts: number; cause: string; detail: string }>;
+  /** U-1 — the signed determinism-audit manifest for this build (routing inputs + file hashes). */
+  manifest?: BuildManifestV1;
 }
 
 export interface BuildDiagnosticsMeta {
@@ -311,6 +314,7 @@ export class BuildDiagnostics {
   private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
   private reviewText?: string;
+  private manifest?: BuildManifestV1;
   private priorFailedBuilds: number | undefined;
   private dataLossEvents: Array<{ ts: number; cause: string; detail: string }> = [];
 
@@ -702,6 +706,11 @@ export class BuildDiagnostics {
     this.record({ phase: 'build', severity: 'warning', code: 'DATA_LOSS_EVENT', message: `${cause}: ${detail}`.slice(0, 400), autoResolved: true });
   }
 
+  /** U-1 — attach the signed determinism-audit manifest for this build (best-effort; never throws). */
+  recordManifest(manifest: BuildManifestV1): void {
+    this.manifest = manifest;
+  }
+
   /**
    * Fix 45 (autopsy 2026-07-11) — record the deferred outcome upgrade after the route's real-browser
    * preview self-check CONFIRMED the app renders. SimpleBuilder classifies with previewOk unknown
@@ -732,6 +741,7 @@ export class BuildDiagnostics {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
       promptHash: this.meta.promptHash,
+      manifest: this.manifest,
       sessionId: this.meta.sessionId,
       workspaceId: this.meta.workspaceId,
       prompt: this.meta.prompt,
@@ -873,6 +883,7 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   lines.push(`Prompt   : ${r.prompt ?? '(n/a)'}`);
   lines.push(`Framework: ${r.framework ?? '(n/a)'}`);
   lines.push(`Model    : ${r.model ?? '(n/a)'}`);
+  if (r.manifest) lines.push(`Manifest : ${manifestSummaryLine(r.manifest)}`); // U-1 signed determinism-audit manifest
   // Which provider(s) actually drove the build turns — the real "kaun sa reply kis provider se aaya".
   const deliveredBy = formatProviderDelivery(r.providerDelivery);
   if (r.builtBy) lines.push(`Built by : ${r.builtBy}${deliveredBy ? ` — full split: ${deliveredBy}` : ''}`);

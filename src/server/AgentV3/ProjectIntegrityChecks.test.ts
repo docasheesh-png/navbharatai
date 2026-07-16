@@ -128,3 +128,86 @@ describe('analyzeProjectIntegrity + integrityRepairInstruction', () => {
     expect(instr).toContain('src/SearchBar.tsx');
   });
 });
+
+// === ORPHAN STYLESHEET (NotesNest autopsy 2026-07-16) ==============================================
+// The app compiled, previewed and shipped — but rendered as RAW unstyled HTML because src/index.css
+// was imported by NOTHING (the fallback full builder hand-wrote main.tsx without the import).
+import { findOrphanStylesheets, injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+
+describe('findOrphanStylesheets — a stylesheet wired into nothing ships an unstyled app', () => {
+  it('flags a global stylesheet with zero importers (the NotesNest bug)', () => {
+    const files = {
+      'src/index.css': 'body { margin: 0; }',
+      'src/main.tsx': `import App from './App';`, // no css import — the real failure
+      'src/App.tsx': `export default () => <div>hi</div>;`,
+    };
+    expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'src/index.css' }]);
+  });
+
+  it('a side-effect import from ANY module clears it (path spelling variations match by filename)', () => {
+    const files = {
+      'src/index.css': 'body {}',
+      'src/main.tsx': `import './index.css';\nimport App from './App';`,
+    };
+    expect(findOrphanStylesheets(files)).toHaveLength(0);
+    const viaParent = {
+      'src/styles/index.css': 'body {}',
+      'src/main.tsx': `import './styles/index.css';`,
+    };
+    expect(findOrphanStylesheets(viaParent)).toHaveLength(0);
+  });
+
+  it('an HTML <link> also counts as wired (static apps)', () => {
+    const files = {
+      'style.css': 'body {}',
+      'index.html': `<html><head><link rel="stylesheet" href="./style.css"></head><body></body></html>`,
+    };
+    expect(findOrphanStylesheets(files)).toHaveLength(0);
+  });
+
+  it('ignores CSS Modules (unused module sheet = dead code, not an unstyled app) and commented imports do not count as wired', () => {
+    const files = {
+      'src/Button.module.css': '.btn {}', // module sheet, unreferenced — NOT an orphan finding
+      'src/index.css': 'body {}',
+      'src/main.tsx': `// import './index.css';\nimport App from './App';`, // commented out — NOT wired
+    };
+    expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'src/index.css' }]);
+  });
+});
+
+describe('injectGlobalStylesheetImport — the deterministic fix', () => {
+  it('injects the import into the entry module and clears the orphan', () => {
+    const files = {
+      'src/index.css': 'body { margin: 0; }',
+      'src/main.tsx': `import App from './App';\nexport {};`,
+    };
+    const { files: out, injected } = injectGlobalStylesheetImport(files);
+    expect(injected).toEqual([{ stylesheet: 'src/index.css', entry: 'src/main.tsx' }]);
+    expect(out['src/main.tsx'].startsWith(`import './index.css';`)).toBe(true);
+    expect(findOrphanStylesheets(out)).toHaveLength(0);
+  });
+
+  it('does NOT guess an importer for a feature-level sheet (left to the LLM repair pass)', () => {
+    const files = {
+      'src/components/Sidebar.css': '.sidebar {}', // not a global name — injection must not fire
+      'src/main.tsx': `import App from './App';`,
+    };
+    const { injected } = injectGlobalStylesheetImport(files);
+    expect(injected).toHaveLength(0);
+  });
+
+  it('no entry module → no injection (report finding only), and a wired project is untouched', () => {
+    const noEntry = { 'src/index.css': 'body {}', 'src/App.tsx': 'export default () => null;' };
+    expect(injectGlobalStylesheetImport(noEntry).injected).toHaveLength(0);
+    const wired = { 'src/index.css': 'body {}', 'src/main.tsx': `import './index.css';` };
+    expect(injectGlobalStylesheetImport(wired).files).toBe(wired); // same reference — untouched
+  });
+
+  it('analyzeProjectIntegrity reports the orphan (ok=false) and the repair instruction names it', () => {
+    const files = { 'src/index.css': 'body {}', 'src/App.tsx': 'export default () => null;' };
+    const report = analyzeProjectIntegrity(files);
+    expect(report.ok).toBe(false);
+    expect(report.orphanStylesheets).toEqual([{ stylesheet: 'src/index.css' }]);
+    expect(integrityRepairInstruction(report)).toContain('ORPHAN STYLESHEET');
+  });
+});

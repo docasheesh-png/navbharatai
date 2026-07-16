@@ -131,7 +131,7 @@ import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation,
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { analyzeProjectIntegrity, integrityRepairInstruction } from '../AgentV3/ProjectIntegrityChecks';
+import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport } from '../AgentV3/ProjectIntegrityChecks';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -6914,6 +6914,21 @@ export function registerAgentV3Routes(app: Express): void {
       // LLM reviewer text mentioned them — never structured). The bounded LLM SELF-HEAL is gated behind
       // AGENTV3_INTEGRITY_GATE (default OFF — canary first, like LintGate); flip on to auto-fix them.
       try {
+        // ORPHAN STYLESHEET — deterministic fix FIRST (NotesNest autopsy 2026-07-16: the app shipped as
+        // raw unstyled HTML because src/index.css was imported by nothing). When the global sheet can be
+        // wired by construction (inject `import './index.css'` into the entry), do it directly — no LLM,
+        // no flag: this is the same class of certainty as the HTML-entry guard. Kill: AGENTV3_CSS_IMPORT_GUARD=off.
+        if (process.env.AGENTV3_CSS_IMPORT_GUARD !== 'off') {
+          const wired = injectGlobalStylesheetImport(Object.fromEntries(writtenFiles));
+          for (const inj of wired.injected) {
+            const newEntry = wired.files[inj.entry];
+            if (typeof newEntry === 'string') {
+              writtenFiles.set(inj.entry, newEntry);
+              try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
+            }
+          }
+        }
         const integrity = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
@@ -6921,6 +6936,9 @@ export function registerAgentV3Routes(app: Express): void {
           }
           for (const d of integrity.duplicateStylesheets) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', message: `"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`, autoResolved: false });
+          }
+          for (const o of integrity.orphanStylesheets) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', message: `"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`, autoResolved: false });
           }
           // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
           // that can't fix leaves the honest warnings above and the app still ships.

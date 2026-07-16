@@ -71,3 +71,22 @@ describe('ViteReactProvider scaffold — resolves baseUrl-"src" imports (Kanban 
     expect(JSON.parse(files['package.json']).devDependencies['vite-tsconfig-paths']).toBeTruthy();
   });
 });
+
+// NotesNest autopsy (2026-07-16): the scaffold shipped NO stylesheet and main.tsx imported none, so a
+// build whose generated CSS never got wired rendered as raw unstyled HTML. "Styled" is now the default
+// by construction: the starter ships src/index.css and main.tsx imports it.
+describe('ViteReactProvider — ships a wired global stylesheet by default', () => {
+  const files = new ViteReactProvider().getFiles([]);
+
+  it('includes src/index.css with a real base (font stack, box-sizing, theme variables)', () => {
+    const css = files['src/index.css'];
+    expect(css).toBeDefined();
+    expect(css).toContain('font-family');
+    expect(css).toContain('box-sizing');
+    expect(css).toContain('--accent');
+  });
+
+  it('main.tsx imports it (so an app is styled even if the generator forgets the import)', () => {
+    expect(files['src/main.tsx']).toContain("import './index.css'");
+  });
+});

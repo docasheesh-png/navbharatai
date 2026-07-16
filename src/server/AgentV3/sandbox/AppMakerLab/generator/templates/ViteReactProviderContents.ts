@@ -91,6 +91,7 @@ export const indexHtml = `<!DOCTYPE html>
 
 export const mainTsx = `import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './index.css';
 import App from './App';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -143,4 +144,68 @@ export const appTsx = `function App() {
   );
 }
 export default App;
+`;
+
+// STARTER GLOBAL STYLESHEET (NotesNest autopsy 2026-07-16): the scaffold used to ship NO stylesheet
+// and main.tsx imported none — so when a build's generated CSS never got wired in, the app rendered
+// as raw unstyled HTML and nothing anywhere caught it. Shipping index.css + the main.tsx import makes
+// "styled" the default by construction: generators OVERWRITE this file's content freely (the import
+// is already in place), and a modern base (font stack, box-sizing, color-scheme) is the floor even
+// if they never touch it.
+export const indexCss = `:root {
+  color-scheme: light dark;
+  --bg: #f7f7f8;
+  --fg: #1a1a1e;
+  --muted: #6b7280;
+  --accent: #4f46e5;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101014;
+    --fg: #ececf1;
+    --muted: #9ca3af;
+    --card: #1a1a21;
+    --border: #2d2d36;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  background: var(--card);
+  color: var(--fg);
+}
+button:hover { border-color: var(--accent); }
+
+input, textarea, select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 `;

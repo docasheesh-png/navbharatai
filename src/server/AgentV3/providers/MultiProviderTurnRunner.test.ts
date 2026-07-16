@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, type NamedRunner } from './MultiProviderTurnRunner';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
+
+// The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
+// tests so one test's simulated 429 storm can never bench a provider for an unrelated test.
+beforeEach(() => sharedRateLimitCooldowns.reset());
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 
 const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 'hi' }] };
@@ -295,6 +299,90 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     await r2.runTurn(PARAMS); // 429 #1 again (streak was reset) → falls to Claude, NOT benched
     expect((await r2.runTurn(PARAMS)).text).toBe('recovered again'); // still reachable — proves reset
     expect(flaky.runTurn).toHaveBeenCalledTimes(4);
+  });
+
+  // === SHARED 429 COOLDOWN (StudySync autopsy 2026-07-16) ==========================================
+  // 172 GLM failures in ONE build despite the per-instance bench: every call site builds its own
+  // runner (each re-learns from zero) and the fast lane fires 8 concurrent turns (all start before
+  // any streak hits 2). The shared registry is the cross-instance memory; these tests lock it.
+
+  it('SHARED COOLDOWN — a 429-benched provider is skipped by a DIFFERENT runner instance (cross-instance memory)', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    let t = 1_000_000;
+    const now = () => t;
+    const glm1 = runnerFail('429 Rate limit reached');
+    const r1 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm1 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r1.runTurn(PARAMS); // 429 #1
+    await r1.runTurn(PARAMS); // 429 #2 → shared cooldown armed
+    // A brand-new instance (a heal gate / judge / next fast-lane call) — the pre-fix bug re-learned from zero.
+    const glm2 = runnerFail('429 Rate limit reached');
+    const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm2 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    const res = await r2.runTurn(PARAMS);
+    expect(res.text).toBe('c');
+    expect(glm2.runTurn).not.toHaveBeenCalled(); // skipped instantly — no re-hammering the saturated provider
+  });
+
+  it('SHARED COOLDOWN — expires: the provider is tried again after the window (softer than the run-long bench)', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    let t = 1_000_000;
+    const now = () => t;
+    const glm = { runTurn: vi.fn() };
+    glm.runTurn
+      .mockRejectedValueOnce(new Error('429 Rate limit reached'))
+      .mockRejectedValueOnce(new Error('429 Rate limit reached'))
+      .mockResolvedValue({ text: 'glm recovered', usage: { inputTokens: 1, outputTokens: 1 } });
+    // Two instances so the per-instance run-long bench (which never expires) doesn't mask the cooldown expiry.
+    const r1 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm as never }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r1.runTurn(PARAMS); // 429 #1
+    await r1.runTurn(PARAMS); // 429 #2 → cooldown until t+60s
+    const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm as never }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    expect((await r2.runTurn(PARAMS)).text).toBe('c'); // still cooling — skipped
+    t += 61_000; // the window passes — GLM deserves another chance
+    expect((await r2.runTurn(PARAMS)).text).toBe('glm recovered');
+    expect(cooldowns.until('GLM')).toBe(0); // success cleared the shared state for everyone
+  });
+
+  it('SHARED COOLDOWN — per bench NAME: one throttled key does not cool the rest of the pool', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const key1 = runnerFail('429 Rate limit reached');
+    const key2 = runnerOk('from key2');
+    const r = makeMultiProviderTurnRunner(
+      [{ name: 'GLM', runner: key1, reportAs: 'GLM' }, { name: 'GLM#2', runner: key2, reportAs: 'GLM' }, { name: 'CLAUDE', runner: runnerOk('c') }],
+      { cooldowns, now },
+    );
+    await r.runTurn(PARAMS);
+    await r.runTurn(PARAMS);
+    expect(cooldowns.until('GLM')).toBeGreaterThan(0); // key 1 cooling
+    expect(cooldowns.until('GLM#2')).toBe(0); // key 2 untouched — the pool keeps serving
+    expect((await r.runTurn(PARAMS)).text).toBe('from key2');
+  });
+
+  it('SHARED COOLDOWN — disabled (cooldownMs 0) never arms: prior behavior byte-for-byte', async () => {
+    const cooldowns = createRateLimitCooldowns(0, 2);
+    const now = () => 1_000_000;
+    const glm = runnerFail('429 Rate limit reached');
+    const r1 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r1.runTurn(PARAMS);
+    await r1.runTurn(PARAMS);
+    expect(cooldowns.until('GLM')).toBe(0); // strike counted but no cooldown ever arms
+    // A second instance still tries GLM — exactly the pre-fix behavior when the feature is off.
+    const glm2 = runnerFail('429 Rate limit reached');
+    const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm2 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r2.runTurn(PARAMS);
+    expect(glm2.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('SHARED COOLDOWN — a non-429 failure never strikes the shared registry (timeouts/5xx unaffected)', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const glm = runnerFail('500 internal server error');
+    const r = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r.runTurn(PARAMS);
+    await r.runTurn(PARAMS);
+    await r.runTurn(PARAMS);
+    expect(cooldowns.until('GLM')).toBe(0);
+    expect(glm.runTurn).toHaveBeenCalledTimes(3); // ordinary fallthrough each turn, no cooldown
   });
 
   it('a size-gate skip does NOT count toward the timeout bench (skips are free, not failures)', async () => {

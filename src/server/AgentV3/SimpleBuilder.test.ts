@@ -209,6 +209,94 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(r.reason).toContain('timed out');
   });
 
+  // === TIMEOUT HANDOFF (StudySync root cause, 2026-07-16) ==========================================
+  // The real failure: the 240s timeout fired mid-generation, the full builder started on an EMPTY
+  // workspace, and the ORPHANED (zombie) closure finished minutes later and dumped its files in —
+  // two parallel module trees → 4 broken imports → dead app. These tests lock the fix:
+  // salvage-once at timeout, zombie can never write, later generations stop burning tokens.
+
+  it('TIMEOUT SALVAGE — completed files are written ONCE at timeout and reported as salvagedPaths', async () => {
+    const writes: OneShotFile[][] = [];
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      overallTimeoutMs: 60,
+      generate: async (_s, user) => {
+        if (user.includes('Plan the file list')) return 'src/lib/types.ts :: types\nsrc/lib/seed.ts :: seed\nsrc/App.tsx :: app';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x.ts';
+        // Foundation tier (src/lib/*, tier 0) completes fast; the shell (src/App.tsx, tier 2) hangs
+        // past the deadline — exactly the StudySync shape (foundation done, shell never finished).
+        if (path === 'src/App.tsx') return new Promise<string>(() => {});
+        return `<<<FILE ${path}>>>\nexport const x = 1\n<<<ENDFILE>>>`;
+      },
+      writeFiles: async (f) => { writes.push(f.map((x) => ({ ...x }))); },
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('timed out');
+    // The finished foundation files were salvaged into the workspace for the full builder.
+    expect(r.salvagedPaths?.sort()).toEqual(['src/lib/seed.ts', 'src/lib/types.ts']);
+    expect(r.filesWritten).toBe(2);
+    expect(writes).toHaveLength(1); // exactly the salvage write — no zombie dump later
+    expect(writes[0].map((f) => f.path).sort()).toEqual(['src/lib/seed.ts', 'src/lib/types.ts']);
+  });
+
+  it('ZOMBIE KILL — the orphaned closure can NEVER write files after the timeout fired', async () => {
+    const writes: OneShotFile[][] = [];
+    let releaseShell: (v: string) => void = () => {};
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      overallTimeoutMs: 60,
+      generate: async (_s, user) => {
+        if (user.includes('Plan the file list')) return 'src/lib/a.ts :: a\nsrc/lib/b.ts :: b\nsrc/App.tsx :: app';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x.ts';
+        if (path === 'src/App.tsx') {
+          // Resolves AFTER the timeout — the zombie then reaches its final writeFiles and must be refused.
+          return new Promise<string>((res) => { releaseShell = res; });
+        }
+        return `<<<FILE ${path}>>>\nexport const v = 1\n<<<ENDFILE>>>`;
+      },
+      writeFiles: async (f) => { writes.push(f.map((x) => ({ ...x }))); },
+    }));
+    expect(r.ok).toBe(false);
+    const writesAtTimeout = writes.length; // the salvage write only
+    // Now the zombie's hung call completes — in the real bug this is where the second module tree landed.
+    releaseShell('<<<FILE src/App.tsx>>>\nexport default function App(){return null}\n<<<ENDFILE>>>');
+    await new Promise((res) => setTimeout(res, 50)); // give the orphaned closure time to (try to) write
+    expect(writes.length).toBe(writesAtTimeout); // ZERO post-timeout writes — the workspace stays the full builder's
+  });
+
+  it('TOKEN-BURN STOP — after the timeout, queued per-file generations are skipped (no more model calls)', async () => {
+    const genPaths: string[] = [];
+    let releaseFirst: (v: string) => void = () => {};
+    const r = await runSimpleBuild(baseDeps({
+      shareContract: false,
+      depOrder: false, // one flat batch, concurrency 1 → the 2nd/3rd files queue behind the hung 1st
+      concurrency: 1,
+      overallTimeoutMs: 60,
+      generate: async (_s, user) => {
+        if (user.includes('Plan the file list')) return 'src/lib/a.ts :: a\nsrc/lib/b.ts :: b\nsrc/lib/c.ts :: c';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x.ts';
+        genPaths.push(path);
+        return new Promise<string>((res) => { releaseFirst = res; }); // first call hangs past the deadline
+      },
+      writeFiles: async () => {},
+    }));
+    expect(r.ok).toBe(false);
+    releaseFirst('<<<FILE src/lib/a.ts>>>\nexport const a = 1\n<<<ENDFILE>>>');
+    await new Promise((res) => setTimeout(res, 50));
+    expect(genPaths).toEqual(['src/lib/a.ts']); // b/c were queued behind it and SKIPPED once lapsed — no wasted calls
+  });
+
+  it('a NON-timeout failure (manifest too small) salvages nothing — old behavior unchanged', async () => {
+    const writes: OneShotFile[][] = [];
+    const r = await runSimpleBuild(baseDeps({
+      generate: async () => 'src/App.tsx :: only one file',
+      writeFiles: async (f) => { writes.push(f); },
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.salvagedPaths).toBeUndefined();
+    expect(writes).toHaveLength(0);
+  });
+
   it('a slow/hung preview never blocks success (files already written)', async () => {
     const r = await runSimpleBuild(baseDeps({ startPreview: () => new Promise(() => {}), previewTimeoutMs: 20 }));
     expect(r.ok).toBe(true);

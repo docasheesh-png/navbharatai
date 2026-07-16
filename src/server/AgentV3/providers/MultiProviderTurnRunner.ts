@@ -45,6 +45,14 @@ export interface MultiProviderOptions {
    * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
   onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number) => void;
+  /**
+   * Shared 429-cooldown registry (StudySync autopsy 2026-07-16) — the cross-instance memory of which
+   * bench names are currently rate-limit-saturated. Defaults to the process-wide singleton so every
+   * runner (fast lane, heal gates, judge, escalation) sees the same cooldowns; tests inject their own.
+   */
+  cooldowns?: RateLimitCooldowns;
+  /** Clock override for tests (defaults to Date.now). */
+  now?: () => number;
 }
 
 /**
@@ -210,6 +218,62 @@ export function forceModelRunner(runner: TurnRunner, model: string): TurnRunner 
 }
 
 /**
+ * SHARED, TIME-BASED 429 COOLDOWN (StudySync autopsy 2026-07-16). The per-instance
+ * `rateLimitStreak` bench below is real but structurally blind two ways, proven by 172 GLM
+ * failures in one build DESPITE the bench: (1) every call site (fast-lane generate, heal gates,
+ * judge, escalation) constructs its OWN runner instance, so each re-learns the same saturated
+ * provider from zero; (2) the fast lane fires 8 CONCURRENT turns, all of which start before any
+ * streak reaches 2. This registry is the cross-instance, cross-turn memory: after `benchAfter`
+ * consecutive 429s on a bench name, EVERY runner skips that name until the cooldown expires —
+ * then it is tried again automatically (unlike the run-long bench, a recovered provider comes
+ * BACK mid-build; deliberately SOFTER, so cheap GLM capacity is never permanently sidelined to
+ * a pricier fallback — the sibling autopsy's honest "cost backfire" concern). A success clears
+ * the name instantly. Injectable (tests use a fake clock); production uses the module singleton.
+ */
+export interface RateLimitCooldowns {
+  /** ms timestamp until which this bench name is cooling down (0 = not cooling). */
+  until(name: string): number;
+  /** Record one 429 for the name; arms/extends the cooldown once the consecutive threshold is hit. */
+  strike(name: string, nowMs: number): void;
+  /** The provider answered — clear its strikes and any active cooldown. */
+  clear(name: string): void;
+  /** Reset all state (tests). */
+  reset(): void;
+}
+
+export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2): RateLimitCooldowns {
+  const strikes = new Map<string, number>();
+  const untilMs = new Map<string, number>();
+  return {
+    until: (name) => untilMs.get(name) ?? 0,
+    strike(name, nowMs) {
+      const n = (strikes.get(name) ?? 0) + 1;
+      strikes.set(name, n);
+      if (cooldownMs > 0 && n >= benchAfter) untilMs.set(name, nowMs + cooldownMs);
+    },
+    clear(name) {
+      strikes.delete(name);
+      untilMs.delete(name);
+    },
+    reset() {
+      strikes.clear();
+      untilMs.clear();
+    },
+  };
+}
+
+/** Cooldown length (ms). Env-tunable; `0`/`off` disables the shared cooldown (per-instance bench remains). */
+function rateLimitCooldownMs(): number {
+  const raw = (process.env.AGENTV3_RATE_LIMIT_COOLDOWN_MS ?? '').trim().toLowerCase();
+  if (raw === 'off') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 60_000;
+}
+
+/** The production singleton — one shared memory across every runner instance in the process. */
+export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs());
+
+/**
  * Build a TurnRunner that tries each runner in `chain` order and returns the first that
  * succeeds. The final entry is the guaranteed backstop — keep Claude last. Throws only if
  * EVERY runner (including the backstop) fails.
@@ -230,6 +294,11 @@ export function makeMultiProviderTurnRunner(
   const rateLimitStreak = new Map<string, number>(); // name → consecutive 429 count
   const TIMEOUT_BENCH_AFTER = 2;
   const RATE_LIMIT_BENCH_AFTER = 2; // 2 consecutive 429s → stop hammering a throttled provider this run
+  // Cross-instance 429 memory (see RateLimitCooldowns above) — the per-instance streak alone was
+  // structurally blind to concurrent turns and to sibling runner instances (172 GLM failures in one
+  // real build). Default = the process-wide singleton; tests inject a fake registry + clock.
+  const cooldowns = opts.cooldowns ?? sharedRateLimitCooldowns;
+  const now = opts.now ?? Date.now;
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -246,6 +315,10 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name); // rate-limited — skip so we don't 429-storm it every remaining turn
           continue;
         }
+        if (cooldowns.until(name) > now()) {
+          fellBackFrom.push(name); // SHARED cooldown — another turn/instance already proved it saturated
+          continue;
+        }
         const fatalReason = deadForRun.get(name);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
@@ -259,6 +332,7 @@ export function makeMultiProviderTurnRunner(
           const result = await runner.runTurn(params);
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
+          cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
           opts.onProviderUsed?.(reportName, [...fellBackFrom]);
           // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
           // Best-effort + observational: a throw here must never break a delivered turn.
@@ -279,6 +353,7 @@ export function makeMultiProviderTurnRunner(
             timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
           } else if (isRateLimitProviderError(err)) {
             rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
+            cooldowns.strike(name, now()); // shared memory — concurrent turns/instances stop hammering too
           } else if (isHopelesslyOversizedError(err)) {
             // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
             // Abort now instead of replaying the same doomed multi-megabyte request down the chain.

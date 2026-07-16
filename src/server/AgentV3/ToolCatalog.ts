@@ -705,6 +705,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'check_licenses',
+      description:
+        'Check the app\'s dependency LICENSES for copyleft-compliance risk. Reads package-lock.json and ' +
+        'classifies each dependency\'s SPDX license, flagging strong-copyleft (GPL/AGPL) packages that could ' +
+        'require you to release your own source, plus weak-copyleft (LGPL/MPL) ones for awareness, and ' +
+        'confirms "no copyleft risk" when clean. Pure/offline (no network); advisory only — it never blocks a ' +
+        'build. Run before shipping a real app. No arguments.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'run_migrations',
       description:
         'Apply the database schema before the app runs. Detects the migration tool the project uses ' +
@@ -1101,6 +1111,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',
+  'check_licenses',
   'run_migrations',
   'generate_db_config',
   'generate_payment',

@@ -71,6 +71,64 @@ highest priority because they violate the one absolute rule *today*.
 
 ---
 
+## 🎯 Admin strategic priorities (2026-07-16) — Reliability > Speed > Capability > UX
+
+Admin-set direction: the war is **reliability, not features**. A new user judges v3.0 on three
+things the first time — **app chali? kitni der lagi? tooti to nahi?** So the top-3 (**AP-1 runtime
+gate, AP-2 throughput, AP-4 speed**) come before every capability item; features (AP-6…AP-8) only
+sell once those three are rock-solid. These reinforce the "error-free v3.0" bar. Some overlap
+existing roadmap ids (noted inline) — build the ADMIN framing, don't duplicate the id.
+
+### Tier A — Reliability (the real fight)
+- **AP-1 — Real browser runtime gate ("preview EARNED" truly enforced)** 🔴 **[TOP-3]** — a build can pass
+  `tsc` with correct imports and still crash at RUNTIME (StudySync shipped `Cannot read properties of
+  undefined (reading 'RED')` to the USER). Upgrade: after every build, a headless browser actually LOADS
+  the preview, detects console errors + blank-screen, and on a crash runs a bounded auto-repair from that
+  same report. The gate must be what the user SEES (render), not what compiles. *(Deepens B5 / T0-5 /
+  PPIPE-smoke — make the live-render check the authoritative gate, not advisory.)*
+- **AP-2 — Provider throughput structural fix** 🔴 **[TOP-3]** — GLM's 429 ceiling is per-ACCOUNT, so the
+  5-key pool didn't clear it (repeatCount 65); cooldown stopped the storm but the ceiling stands. Weigh:
+  (a) buy a higher GLM rate-tier; (b) **adaptive lead** — when GLM is saturated, Kimi LEADS that build (not
+  just fallback); (c) per-file build calls provider-round-robin so no single account bursts. The biggest
+  weak-tier speed+success lever. *(Extends the GLM KEY POOL item in Tier 4 from rotation → adaptive lead.)*
+- **AP-3 — Build resume (a build never dies from zero)** 🟡 — a 20-min build that dies mid-way
+  (timeout/crash/instance rotation) currently costs the user everything. Salvage-handoff exists; next: every
+  build checkpoints (files + plan + todo state) DURABLY, and "Send your message again to continue" resumes
+  from WHERE it stopped — not a full rebuild. *(= T1-session-rehydrate + the durable half of V4-4 Nirman
+  workers; the checkpoint store is code-tractable even before the out-of-process worker.)*
+
+### Tier B — Speed (the user's patience is the real currency)
+- **AP-4 — Medium app 20 min → 5–7 min** 🔴 **[TOP-3]** — Lovable/Bolt ship in 2–4 min. The fast lane is
+  good but the full builder is SERIAL. Upgrade: run frontend/backend sub-agents in PARALLEL in the full
+  builder too (`SubAgent.ts` exists), and MERGE the heal gates (integrity/preview/C9) into one combined
+  single-pass repair instead of each firing its own LLM round.
+- **AP-5 — Prompt-cache discipline on every provider** 🟡 — Fix 66 gave the measurement; now design
+  byte-identical stable prefixes (system prompt + scaffold context) per turn for GLM/Kimi so cache-hit rate
+  reaches 60–80%. Drops COGS + latency together.
+
+### Tier C — Capability (what pulls ahead of competitors)
+- **AP-6 — Full-stack builds first-class** 🟡 — today's real strength is frontend + localStorage.
+  `FULLSTACK_E2B_TEMPLATE_ID` exists — make it production-grade: DB migration runner (GA-10 ✅), seed data,
+  API smoke tests, env-var pre-flight. "Backend wala app" is where Bolt/v0 wobble — winning here is real
+  differentiation. *(Ties GA-10 + AP-1 runtime gate + AB-3/AB-9 multi-service infra in Tier 4.)*
+- **AP-7 — Edit-mode as smart as build-mode** 🟡 — 80% of user time is AFTER the first build ("make this
+  button bigger", "add dark mode"). Needs: changed-file-only context (partial today), the SAME runtime gate
+  (AP-1) after an edit, and a visual diff preview ("this changed — accept/undo"). Retention comes from the
+  edit experience, not the first build.
+- **AP-8 — Screenshot-to-app / Figma-to-app** 🟡 — the vision pipeline (Gemini describe) exists; add an "is
+  design ko app banao" flow: image → layout contract → build. Sells hardest in marketing. *(= the existing
+  Tier-3 **Design-to-code** item — this is its admin-priority framing.)*
+
+### Tier D — Product / UX
+- **AP-9 — Kill requirement-coverage false positives** 🟡 — StudySync's report warned "login/blog not found"
+  for things never asked — false positives break trust. Ground the coverage check in the PROMPT (judge only
+  what the user actually requested). *(Hardens the existing `RequirementCoverage` engine / GA-18.)*
+- **AP-10 — Template gallery + remix** 🟡 — 20–30 curated, guaranteed-working starters ("Restaurant site",
+  "CRM", "Portfolio") that deploy in 30 s and are then customized in edit-mode. Kills cold-start and makes
+  weak-tier LLM cost ~zero. *(= the existing Tier-3 **Template gallery** item — admin-priority framing.)*
+
+---
+
 ## 🥈 Tier 1 — Near-term hardening (high-value, code-tractable)
 The "R-phase" program from the Pro-v3 hardening roadmap, deduped. This is the recommended
 build order after Tier 0.

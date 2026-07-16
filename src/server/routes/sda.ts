@@ -404,7 +404,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         throw new Error('Grok SDA: empty');
       });
 
-      if (sdaGeminiKey) sdaRacers.push(async (signal) => {
+      // TIER: for a FREE text turn, GLM leads (via the professional-free universe below), exactly like
+      // every other professional — so the Gemini-direct racer is PAID-only for text. Vision (image/PDF)
+      // still needs Gemini/Vertex on any tier (GLM can't read attachments), so keep it there.
+      if (sdaGeminiKey && (sdaTier === 'paid' || isImage || isPDF)) sdaRacers.push(async (signal) => {
         const { GoogleGenAI } = await import('@google/genai');
         const contents = buildGeminiContents();
         for (const m of geminiVisionModels()) {
@@ -443,8 +446,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             .map((m: any) => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${m.content}`)
             .join('\n');
           const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
-          // TIER: free → the cheap Vertex-only universe (never Grok/Claude); paid → the full race.
-          const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free-fallback' : 'professional');
+          // TIER: free → GLM-flash (the professional-free universe) leads, EXACTLY like every other
+          // professional; if GLM is empty the Vertex fallback below finishes the free chain (GLM → Vertex).
+          // Paid → the full race (Grok × Gemini × Vertex → Claude). Never Grok/Claude on the free tier.
+          const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free' : 'professional');
           const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;

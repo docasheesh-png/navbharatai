@@ -1,9 +1,8 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, Palette, X, Globe, Download } from 'lucide-react';
+import { Info, Lock, Settings, Heart, X, Globe, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
-import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { ViewType, ChatSession } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -176,42 +175,8 @@ export function SidebarNav({
               ))}
             </div>
 
-            {/* Theme picker — DESKTOP (admin 2026-07-14): the picker used to live ONLY in the mobile
-                drawer, so desktop users had no way to change the theme ("themes only work on mobile").
-                A compact 5-theme grid here makes it reachable on the persistent desktop rail. */}
-            <div className="space-y-2 mt-8">
-              <div className="text-[10px] font-black text-indigo-500 uppercase tracking-widest px-3 mb-3 flex items-center gap-2">
-                <div className="w-1 h-3 bg-indigo-500 rounded-full"></div>
-                Theme
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {THEME_MODES.map((t) => {
-                  const isSelected = theme === t.value;
-                  return (
-                    <button
-                      key={t.value}
-                      onClick={() => { setTheme(t.value); addLog(`Theme changed to ${t.label}`, 'success'); }}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-2 rounded-xl text-left text-[10px] font-bold uppercase tracking-wider transition-all border",
-                        isSelected
-                          ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10"
-                          : "bg-white/5 border-transparent text-[#8b949e] hover:bg-white/10 hover:text-white"
-                      )}
-                    >
-                      <div className={cn(
-                        "w-2 h-2 rounded-full shrink-0 border border-black/20",
-                        t.value === 'light' ? 'bg-white border-gray-400' :
-                        t.value === 'dark' ? 'bg-[#0d1117]' :
-                        t.value === 'dim' ? 'bg-[#15202b]' :
-                        t.value === 'comfort' ? 'bg-[#fdf6e3]' :
-                        'bg-[#ffff00]'
-                      )} />
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Theme picker moved to Settings → General (admin 2026-07-16) — reachable & working in
+                all view modes there, so it no longer lives on the sidebar rail or the mobile drawer. */}
           </div>
         </aside>
       )}
@@ -292,57 +257,7 @@ export function SidebarNav({
                     </a>
                   )}
 
-                  {/* Theme Selector */}
-                  <div className="space-y-2 mt-2 px-1">
-                    <button
-                      onClick={() => setIsThemePickerOpen(!isThemePickerOpen)}
-                      className={cn(
-                        "w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all group border hover:bg-white/5 text-left",
-                        isThemePickerOpen
-                          ? "bg-indigo-600/15 border-indigo-500/30 text-white"
-                          : "border-transparent text-[#8b949e] hover:text-white"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Palette className="w-4.5 h-4.5 text-indigo-400 group-hover:scale-110 transition-transform" />
-                        <span className="text-sm font-bold tracking-tight">Theme</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-semibold text-indigo-400 capitalize bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                          {theme === 'dim' ? 'Dim Light' : theme === 'comfort' ? 'Comfort' : theme === 'contrast' ? 'Contrast' : theme === 'light' ? 'Light' : 'Dark'}
-                        </span>
-                      </div>
-                    </button>
-                    {isThemePickerOpen && (
-                      <div className="grid grid-cols-2 gap-2 p-2 bg-black/25 rounded-2xl border border-white/5">
-                        {THEME_MODES.map((t) => {
-                          const isSelected = theme === t.value;
-                          return (
-                            <button
-                              key={t.value}
-                              onClick={() => { setTheme(t.value); addLog(`Theme changed to ${t.label}`, 'success'); }}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-left text-[10px] font-bold uppercase tracking-wider transition-all border",
-                                isSelected
-                                  ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10"
-                                  : "bg-white/5 border-transparent text-[#8b949e] hover:bg-white/10 hover:text-white"
-                              )}
-                            >
-                              <div className={cn(
-                                "w-2 h-2 rounded-full shrink-0",
-                                t.value === 'light' ? 'bg-white border border-gray-400' :
-                                t.value === 'dark' ? 'bg-[#0d1117]' :
-                                t.value === 'dim' ? 'bg-[#15202b]' :
-                                t.value === 'comfort' ? 'bg-[#fdf6e3]' :
-                                'bg-[#ffff00]'
-                              )} />
-                              <span className="truncate">{t.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                  {/* Theme picker moved to Settings → General (admin 2026-07-16). */}
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-white/5">

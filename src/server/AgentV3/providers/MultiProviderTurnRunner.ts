@@ -44,7 +44,7 @@ export interface MultiProviderOptions {
    * per-provider/model ProviderUsageLedger. Purely observational: it never changes which provider
    * runs or how the turn is billed. `model` is optional so older callers keep compiling.
    */
-  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string) => void;
+  onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number) => void;
 }
 
 /**
@@ -266,7 +266,7 @@ export function makeMultiProviderTurnRunner(
             opts.onTurnComplete?.(reportName, {
               inputTokens: result.usage?.inputTokens ?? 0,
               outputTokens: result.usage?.outputTokens ?? 0,
-            }, result.model);
+            }, result.model, result.usage?.cacheReadInputTokens ?? 0);
           } catch { /* telemetry attribution must never disturb the build */ }
           return result;
         } catch (err) {

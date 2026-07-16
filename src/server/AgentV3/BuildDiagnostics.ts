@@ -199,6 +199,9 @@ export interface BuildDiagnosticsReport {
   /** Per-provider REAL token spend for this build (reconciled to the billed total; 'other' = aux
    *  calls). The report-level view of the Billing-Phase-3 ledger. */
   providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  /** Fix 66 — total prefix-cache HIT input tokens (GLM/Kimi auto-cache). Compare against providerTokens'
+   *  input total for the real cache-hit rate on this build. Absent/0 when nothing was cache-served. */
+  cacheReadInputTokens?: number;
   /** Billing & tier facts (free/paid user, actual charge, wallet debit, why-free). */
   billing?: BuildBillingRecord;
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
@@ -305,6 +308,7 @@ export class BuildDiagnostics {
   private readonly providerDelivery = new Map<string, number>();
   private readonly providerFailures = new Map<string, number>();
   private providerTokens?: Record<string, { inputTokens: number; outputTokens: number }>;
+  private cacheReadInputTokens?: number;
   private billing?: BuildBillingRecord;
   private reviewText?: string;
   private priorFailedBuilds: number | undefined;
@@ -680,6 +684,13 @@ export class BuildDiagnostics {
     if (u && Object.keys(u).length > 0) this.providerTokens = u;
   }
 
+  /** Fix 66 (measure-first) — the total prefix-cache HIT input tokens the cheap-floor providers
+   *  (GLM/Kimi) served this build. Purely observational: reveals the real cache-hit rate against
+   *  providerTokens' input total, so we can see whether the big cheap-floor input is cache-served. */
+  setCacheReadInputTokens(n: number): void {
+    if (Number.isFinite(n) && n > 0) this.cacheReadInputTokens = n;
+  }
+
   /** Fix 37a — stamp how many earlier builds in this workspace ended not-ok (from durable history). */
   setPriorFailedBuilds(n: number): void {
     if (Number.isFinite(n) && n >= 0) this.priorFailedBuilds = Math.floor(n);
@@ -750,6 +761,7 @@ export class BuildDiagnostics {
       builtBy: dominantDeliveryProvider(this.providerDelivery),
       providerFailures: this.providerFailures.size ? Object.fromEntries(this.providerFailures) : undefined,
       providerTokens: this.providerTokens,
+      cacheReadInputTokens: this.cacheReadInputTokens,
       billing: this.billing,
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,

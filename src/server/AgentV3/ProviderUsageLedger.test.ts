@@ -29,6 +29,26 @@ describe('ProviderUsageLedger — per-provider token attribution', () => {
     expect(l.byProvider().GLM).toEqual({ inputTokens: 100, outputTokens: 0 });
   });
 
+  it('Fix 66 — accumulates cacheReadInputTokens per provider AND per (provider, model) entry', () => {
+    const l = createProviderUsageLedger();
+    l.add('GLM', { inputTokens: 100_000, outputTokens: 1_000, cacheReadInputTokens: 80_000 }, 'glm-4.7');
+    l.add('GLM', { inputTokens: 50_000, outputTokens: 500, cacheReadInputTokens: 40_000 }, 'glm-4.7');
+    l.add('KIMI', { inputTokens: 30_000, outputTokens: 300 }, 'kimi-k2.5'); // no cache field → untouched
+    expect(l.byProvider().GLM.cacheReadInputTokens).toBe(120_000);
+    expect(l.byProvider().KIMI.cacheReadInputTokens).toBeUndefined();
+    const glm = l.entries().find((e) => e.provider === 'GLM');
+    expect(glm?.usage.cacheReadInputTokens).toBe(120_000);
+    // total() (the sink-reconciliation contract) is unchanged by the cache field.
+    expect(l.total()).toEqual({ inputTokens: 180_000, outputTokens: 1_800 });
+  });
+
+  it('Fix 66 — negative/non-finite cacheRead is ignored', () => {
+    const l = createProviderUsageLedger();
+    l.add('GLM', { inputTokens: 100, outputTokens: 10, cacheReadInputTokens: -50 });
+    l.add('GLM', { inputTokens: 100, outputTokens: 10, cacheReadInputTokens: NaN });
+    expect(l.byProvider().GLM.cacheReadInputTokens).toBeUndefined();
+  });
+
   it('entries() splits by (provider, model) for REAL-cost pricing; byProvider() stays aggregated', () => {
     const l = createProviderUsageLedger();
     l.add('GLM', { inputTokens: 100, outputTokens: 10 }, 'glm-4.7-flash');

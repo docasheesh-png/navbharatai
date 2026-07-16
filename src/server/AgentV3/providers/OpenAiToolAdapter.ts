@@ -43,7 +43,15 @@ export interface OpenAiCompletionLike {
     message: { role: string; content: string | null; tool_calls?: OpenAiToolCall[] };
     finish_reason: string | null;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /** OpenAI-compatible prefix-cache hit count. GLM (Z.ai) and Kimi (Moonshot) auto-cache a repeated
+     *  prompt prefix and report the hit here; some providers put it at the top-level `cached_tokens`.
+     *  `prompt_tokens` INCLUDES these. Capturing it reveals the real cache-hit rate on cheap-floor builds. */
+    prompt_tokens_details?: { cached_tokens?: number };
+    cached_tokens?: number;
+  };
 }
 
 // ── Anthropic transcript block shapes (the canonical format) ──────────────────────
@@ -197,11 +205,20 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
   if (text) rawContent.push({ type: 'text', text });
   for (const tu of toolUses) rawContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
 
+  // Capture the prefix-cache hit (previously hardcoded 0 → we were blind to it). GLM/Kimi auto-cache a
+  // repeated prefix and report the hit as prompt_tokens_details.cached_tokens (a few report a top-level
+  // cached_tokens). prompt_tokens already INCLUDES the cached ones. This drives the report's cache-hit
+  // rate so we can SEE whether the big cheap-floor input is cache-served; billing still prices at the
+  // full (margin-safe) rate for now — a later slice discounts the cache-read tokens.
+  const cachedRead = Math.max(
+    0,
+    completion?.usage?.prompt_tokens_details?.cached_tokens ?? completion?.usage?.cached_tokens ?? 0,
+  );
   const usage: TurnUsage = {
     inputTokens: completion?.usage?.prompt_tokens ?? 0,
     outputTokens: completion?.usage?.completion_tokens ?? 0,
     cacheCreationInputTokens: 0,
-    cacheReadInputTokens: 0,
+    cacheReadInputTokens: cachedRead,
   };
 
   // If the model returned tool calls, the agent loop must run them: force tool_use.

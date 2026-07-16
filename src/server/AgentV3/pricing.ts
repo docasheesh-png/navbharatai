@@ -39,6 +39,11 @@ function envRate(name: string, fallback: number): number {
 export interface TokenRate {
   inputPerMTok: number;
   outputPerMTok: number;
+  /** USD per 1M CACHE-HIT input tokens (providers price a prefix-cache hit far below a fresh input
+   *  token — Moonshot/Z.ai ≈ 25% of the input rate). OPTIONAL and margin-safe by construction: when
+   *  absent, cache-read tokens are priced at the FULL inputPerMTok (i.e. no discount), so an unknown
+   *  provider can never be under-billed. Only the Fix-66 real-cost path reads this field. */
+  cacheReadPerMTok?: number;
 }
 
 /** Claude Opus token rates, USD per 1,000,000 tokens. Override via env. */

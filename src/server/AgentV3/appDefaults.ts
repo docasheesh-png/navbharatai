@@ -17,6 +17,8 @@ export interface AppDefaultsResult {
 }
 
 const MANIFEST_HREF = '/manifest.webmanifest';
+const ICON_HREF = '/icon.svg';
+const SW_HREF = '/sw.js';
 
 function manifestJson(appName: string): string {
   return JSON.stringify(
@@ -27,12 +29,64 @@ function manifestJson(appName: string): string {
       display: 'standalone',
       background_color: '#ffffff',
       theme_color: '#0f172a',
-      icons: [],
+      // A real (SVG) icon so the manifest is genuinely installable — an empty icons[] fails PWA criteria.
+      icons: [{ src: ICON_HREF, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
     },
     null,
     2,
   ) + '\n';
 }
+
+/** A minimal, self-contained maskable app icon: a monogram of the app's first letter. Pure. */
+function iconSvg(appName: string): string {
+  const letter = (appName.trim()[0] || 'A').toUpperCase().replace(/[<>&"']/g, 'A');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="${appName} icon">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="280" font-weight="700" fill="#ffffff">${letter}</text>
+</svg>
+`;
+}
+
+/**
+ * A minimal offline-first service worker: precache the app shell on install, then serve cache-first
+ * with a network fallback (and cache successful GETs). The CACHE version bumps invalidate old caches.
+ * Self-contained (no build step), so it works in any static/Vite/CRA app. Pure string.
+ */
+function swJs(): string {
+  return `// Auto-generated offline-first service worker (NavBharatAI app defaults).
+const CACHE = 'app-shell-v1';
+const SHELL = ['/', '/index.html'];
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+  );
+});
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    caches.match(e.request).then((hit) =>
+      hit ||
+      fetch(e.request)
+        .then((res) => {
+          if (res && res.status === 200 && res.type === 'basic') {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match('/index.html')),
+    ),
+  );
+});
+`;
+}
+
+/** The idempotent service-worker registration snippet injected into index.html. */
+const SW_REGISTER_SCRIPT =
+  `<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('${SW_HREF}').catch(function(){})})}</script>`;
 
 const ROBOTS_TXT = 'User-agent: *\nAllow: /\n';
 
@@ -55,6 +109,8 @@ export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppD
   // Standalone files, added only if absent from the workspace (the tool checks existence before writing).
   files[MANIFEST_HREF.replace(/^\//, '')] = manifestJson(appName);
   files['robots.txt'] = ROBOTS_TXT;
+  files[ICON_HREF.replace(/^\//, '')] = iconSvg(appName); // real installable icon (referenced by the manifest)
+  files[SW_HREF.replace(/^\//, '')] = swJs();             // offline-first service worker (PWA)
 
   if (indexHtml == null) {
     return { indexHtml: null, files, added };
@@ -74,7 +130,9 @@ export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppD
     { test: /property=["']og:title["']/i, tag: `<meta property="og:title" content="${appName}" />`, label: 'og:title' },
     { test: /property=["']og:description["']/i, tag: `<meta property="og:description" content="${appName}" />`, label: 'og:description' },
     { test: /name=["']twitter:card["']/i, tag: '<meta name="twitter:card" content="summary_large_image" />', label: 'twitter:card' },
+    { test: /name=["']theme-color["']/i, tag: '<meta name="theme-color" content="#0f172a" />', label: 'theme-color' },
     { test: /rel=["']manifest["']/i, tag: `<link rel="manifest" href="${MANIFEST_HREF}" />`, label: 'manifest link' },
+    { test: /rel=["']icon["']/i, tag: `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`, label: 'icon link' },
   ];
 
   const toInsert: string[] = [];
@@ -82,6 +140,7 @@ export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppD
     if (!e.test.test(html)) { toInsert.push('    ' + e.tag); added.push(e.label); }
   }
 
+  let headPatched = true;
   if (toInsert.length) {
     const block = '\n' + toInsert.join('\n') + '\n';
     if (/<\/head>/i.test(html)) {
@@ -91,9 +150,16 @@ export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppD
     } else {
       // No <head> to patch safely — don't risk mangling the document; drop the head-only additions.
       for (const e of ensures) { const i = added.indexOf(e.label); if (i >= 0) added.splice(i, 1); }
-      return { indexHtml: langAdded ? html : indexHtml, files, added };
+      headPatched = false;
     }
   }
 
-  return { indexHtml: html, files, added };
+  // Register the service worker (idempotent — only when it isn't registered yet AND there is a body to
+  // inject into safely). Injected before </body> so it runs after the app scripts.
+  if (headPatched && !/serviceWorker\.register/.test(html) && /<\/body>/i.test(html)) {
+    html = html.replace(/<\/body>/i, `    ${SW_REGISTER_SCRIPT}\n  </body>`);
+    added.push('service worker registration');
+  }
+
+  return { indexHtml: headPatched || langAdded ? html : indexHtml, files, added };
 }

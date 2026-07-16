@@ -9,6 +9,8 @@ import { retrieveClinicalKnowledge, formatKnowledgeForPrompt } from '../lib/clin
 import { detectRedFlagsAcross } from '../lib/clinical/redFlags';
 import { isAuditReplyClean } from '../lib/clinical/auditGate';
 import { AIRouterManager } from '../AI/AIRouterManager';
+import { verifyFirebaseIdentity } from '../lib/authMiddleware';
+import { gateProfessionalTurn, burnFreeMessage, type ProfessionalTier } from '../professionals/passGate';
 
 /**
  * Senior Doctor Assistant (SDA) chat route extracted from the server.ts monolith
@@ -100,6 +102,15 @@ export function registerSdaRoutes(app: Express): void {
       let { message, history = [], teachingMode = false, userId, sessionId, fileData, fileType, fileName } = req.body;
       if (!message && !fileData) return res.status(400).json({ error: 'Message required' });
       message = message || 'Please analyze this medical document and extract all relevant clinical findings.';
+
+      // Professional Pass gate — Doctor AI is a professional too (admin 2026-07-15: "Doctor AI = same as
+      // all professionals"). Same shared gate as every config-driven professional: 50 free msgs/day
+      // (across ALL professionals), Pass ⇒ unlimited, anonymous ⇒ sign in. Flag-off ⇒ no-op (today's
+      // behaviour). The verified identity keys the gate — never the client-claimed body userId.
+      const sdaIdentity = await verifyFirebaseIdentity(req);
+      const sdaGate = await gateProfessionalTurn(sdaIdentity?.uid || null, sdaIdentity?.email || null);
+      if (!sdaGate.allow) return res.status(sdaGate.status).json(sdaGate.body);
+      const sdaTier: ProfessionalTier = sdaGate.tier;
 
       // ── Session / clinical-store resolution ──────────────────────────────────
       // sessionId is preferred; fall back to userId for backwards compat.
@@ -366,8 +377,10 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       type SdaRacerFn = (signal: AbortSignal) => Promise<string>;
       const sdaRacers: SdaRacerFn[] = [];
 
-      // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files
-      if (sdaGrokKey && !isPDF) sdaRacers.push(async (signal) => {
+      // Grok supports images via vision models but NOT PDFs — skip Grok for PDF files.
+      // TIER: Grok is a premium provider — PAID tier only. A free-tier turn uses the cheap providers
+      // (Gemini/Vertex) just like every other professional's free tier (admin 2026-07-15).
+      if (sdaGrokKey && !isPDF && sdaTier === 'paid') sdaRacers.push(async (signal) => {
         const { default: OpenAI } = await import('openai');
         const c = new OpenAI({ apiKey: sdaGrokKey, baseURL: 'https://api.x.ai/v1' });
 
@@ -430,7 +443,8 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
             .map((m: any) => `${m.role === 'user' ? 'Dr' : 'SDA'}: ${m.content}`)
             .join('\n');
           const fallbackPrompt = histText ? `${histText}\nDr: ${message}` : message;
-          const professionalRouter = AIRouterManager.getRouter('professional');
+          // TIER: free → the cheap Vertex-only universe (never Grok/Claude); paid → the full race.
+          const professionalRouter = AIRouterManager.getRouter(sdaTier === 'free' ? 'professional-free-fallback' : 'professional');
           const { response, telemetry } = await professionalRouter.routeRaced(fallbackPrompt, SDA_SYSTEM_FINAL);
           if (telemetry.success && response.content?.trim()) {
             reply = response.content;
@@ -458,7 +472,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
         } catch (e: any) { console.warn('[SDA] Vertex err:', e.message); }
       }
 
-      if (!reply) {
+      // TIER: Claude is the premium last resort — PAID tier only. A free-tier turn that got no reply
+      // from the cheap providers (Gemini/Vertex) fails honestly rather than escalating to a paid model.
+      if (!reply && sdaTier === 'paid') {
         const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         if (anthropicKey) {
           try {
@@ -543,6 +559,9 @@ IMPORTANT: You are assisting a doctor. Responses must be clinically rigorous, ev
       if (suggestPDF) clinicalEntry.stage = 'complete';
       clinicalEntry.updatedAt = Date.now();
 
+      // A genuinely-answered FREE-tier turn burns one of today's free messages (shared across all
+      // professionals + Doctor AI). Never on a paywall block or an error. Best-effort.
+      if (sdaGate.countsAgainstFree) burnFreeMessage(sdaGate.uid);
       return res.json({ reply: finalReply, redFlagDetected, redFlags, patientUpdate, fileAnalyzed: hasFile ? fileName : null, suggestPDF, sessionId: sdaSessionId });
 
     } catch (err: any) {

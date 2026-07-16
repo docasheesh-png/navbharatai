@@ -16843,3 +16843,72 @@ resolve — only an explicit admin merge writes `mergedInto`.
 in Cloud Run. The flag is the instant, no-deploy kill switch.
 
 Gate: server tsc clean; walletResolve 9/9 + accountMerge 10/10 + WalletBalance 5/5; full vitest 6927 pass.
+
+---
+
+## 2026-07-16 — Deep-test autopsy #N: "StudySync" (spaced-repetition flashcards) — the builder SELF-DESTRUCTED
+
+Free/weak-tier build (`powerLevel: weak`, `noClaude: true` — **✅ the no-Claude guarantee held: zero
+Sonnet/Opus ran on a free build**, GLM/KIMI/VERTEX only). `ok: false`, readiness **NOT READY 0/100**,
+1233 s (20.5 min). Billed **₹0** — `zeroBillReason: "build did not succeed — working app or free"` (**✅
+honest**: a failed build is never charged). Delivered-by: KIMI 45 / GLM 21 / VERTEX 8. **Provider failures:
+GLM 172, KIMI 6.**
+
+### Step 1 — Itemized 5-bucket ledger
+- ✅ **Self-healed — 295** (`autoResolved: 295/301`). The deterministic fast-lane import self-heal
+  (reconcile kind mismatches, add forgotten imports, re-point wrong-source, generate missing css-modules/
+  barrels) fixed 295 issues before preview; provider failover (GLM 429 → KIMI/VERTEX) kept the run alive.
+- 🔀 **Worked around — ~178** (DEFERRED debt, not wins): **172 GLM 429 "Rate limit reached" failures**
+  routed around to KIMI/VERTEX, + 6 KIMI timeouts. The build only survived because of fallback — the real
+  problem (GLM is rate-limited to death) was never solved, just avoided.
+- ⏭️ **Skipped — 3**: 2 requirement-coverage false positives correctly dismissed ("login/auth",
+  "blog/articles" — never actually requested by the prompt); 1 unused `ErrorBoundary.tsx` component left in.
+- ❌ **Still broken — 6** (the delivered app FAILED): **4 broken import(s)** — `ReviewHistory` and
+  `BOX_INTERVALS` imported from `../types` by `src/lib/seed.ts` + `src/lib/storage.ts`, but the types module
+  never exported them; **2 unresolved import(s)**. Plus (from the admin's preview screenshot) a
+  `Cannot read properties of undefined (reading 'RED')` crash in `Sidebar.tsx` (a missing colour constant).
+- 🥵 **Struggle — severe**: 20.5-min build; GLM 429s arrived in **storms of repeatCount 55 and 65**
+  (same 429, dozens of times); KIMI timed out repeatedly; and the fatal sequence — after `npm run build`
+  failed, the full agentic builder ran `ls src/components src/hooks src/utils`, then
+  **`rm src/components/CardEditor.tsx CardList.tsx Dashboard.tsx ReviewSummary.tsx …`** (bulk-deleted its own
+  components), then **`rmdir src/components src/hooks src/utils`** (removed the emptied dirs). Its own
+  `AGENT_NOTE`: *"The build failed because I deleted some of the old files that were no longer needed. My
+  apologies. I'll get everything back in order right away."* — it ran out of budget before restoring them.
+
+### Step 2 — Missing subsystem
+The engine had **no guard against a build agent DELETING its own module tree to "restructure"** beyond the
+narrow `rm -rf <dir>` case added for PaisaTrack. StudySync used two *siblings* that slipped through: bulk
+`rm` of individual files + `rmdir` of the emptied dirs. The deeper missing subsystem is a **single
+source-of-truth module structure shared across both build lanes** — the fast lane wrote `src/lib/*` while the
+full builder wrote `src/types/*` + `src/utils/*` with a *different* type organisation, so `seed.ts`/
+`storage.ts` imported type/const names from a `../types` that no longer defined them, and the reconciler
+couldn't re-point (the symbol was defined nowhere — its defining file had been deleted).
+
+### Step 3 — Fixes
+- ✅ **FIXED (this PR) — self-destruction class closed at the choke point.** Extended
+  `destructiveSourceDeletionTarget` (CommandGovernance.ts, the single dispatcher guard) from "rm -rf a source
+  dir" to also block: (2) **`rmdir` of a source dir**, and (3) **bulk `rm` of ≥3 source-code files**
+  (`.ts/.tsx/.js/.jsx/.vue/.svelte/.astro`) under a source location — the exact StudySync commands. Precise
+  by construction: 1–2 stale files stay deletable; boilerplate assets (`.css/.svg/.json`) don't count toward
+  the bulk threshold; regenerable dirs (node_modules/dist) stay allowed. The refusal message steers the agent
+  to **fix the specific broken import in place** (add the missing export / correct the path) instead of
+  restructuring. Regression tests (30 total) encode the byte-exact StudySync `rm …` and `rmdir …` commands.
+  Had this been live, the components would have survived and the only remaining gap would be the missing type
+  exports — a small, recoverable fix instead of a 0/100 wipe.
+- 🔴 **OPEN root cause A (recorded, rule 6) — GLM 429 is per-ACCOUNT, not per-key.** The 5 GLM keys did NOT
+  stop the storm (172 failures, repeats of 55/65) because Z.ai rate-limits per account and the fast lane fans
+  out at concurrency 8 → guaranteed 429s. `MultiProviderTurnRunner` benches a provider after 2 consecutive
+  429s, but the *per-file fast lane* (`SimpleBuilder.genOne`, concurrency 8) opens a fresh call per file and
+  re-hammers it. **Next slice:** per-provider **adaptive concurrency throttle + exponential backoff on 429**
+  shared across the fast lane, and/or **lead the free ladder with KIMI when GLM is throttled**. Infra option:
+  a second Z.ai *account* (not just more keys on one) genuinely multiplies the limit.
+- 🔴 **OPEN root cause B (recorded, rule 6) — the recurring deep-test #1: simple-build → full-builder handoff
+  produces CONFLICTING module trees.** The two lanes must share ONE authoritative file/type layout (enforce
+  the shared manifest/contract across BOTH lanes, or make the full builder ADOPT the fast lane's exact
+  structure rather than restructure-and-delete). Until then the deletion guard prevents the *catastrophic*
+  failure mode (wiped features), and the readiness gate honestly fails the *coherence* failure mode (billed
+  ₹0) — but the coherence itself is the next real engine fix.
+
+**Honesty verdict:** the system told the truth end-to-end — readiness reported 0/100, `ok:false`, and billing
+charged ₹0. The engine's *reporting* is sound; its *behaviour* (self-destruct + module-split) is what this
+autopsy hardens.

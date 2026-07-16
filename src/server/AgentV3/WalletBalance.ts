@@ -14,6 +14,7 @@
 
 import { doc, getDoc, type Firestore } from '../lib/serverDb'; // admin-SDK binding — reads the owner-only wallet doc
 import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
 
 /** Minimal shape we read off the wallet doc. `remaining_balance` is ₹; `tokenBalance` is the token mirror. */
 export interface WalletDocData {
@@ -62,7 +63,17 @@ export async function readWalletBalanceInr(read: WalletReader, userId: string): 
 export function firestoreWalletReader(db: Firestore | null): WalletReader {
   return async (userId: string): Promise<WalletDocData | null> => {
     if (!db) return null;
-    const snap = await getDoc(doc(db, 'user_token_wallets', userId));
+    // One-wallet: read the CANONICAL wallet's balance if this account was merged into another, so the
+    // affordability gate judges the unified balance (matches the wallet-read + debit resolution). No-op
+    // unless WALLET_MERGE_RESOLVE=on; a resolver error falls back to the raw uid (fail-open, never blocks).
+    let ownerId = userId;
+    if (walletMergeResolveEnabled()) {
+      ownerId = await resolveCanonicalWalletId(async (u) => {
+        const s = await getDoc(doc(db as any, 'user_token_wallets', u));
+        return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
+      }, userId).catch(() => userId);
+    }
+    const snap = await getDoc(doc(db as any, 'user_token_wallets', ownerId));
     return snap.exists() ? (snap.data() as WalletDocData) : null;
   };
 }

@@ -5,6 +5,17 @@ import { doc, getDoc, setDoc, runTransaction, collection, query, where, orderBy,
 import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
+import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+
+/** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
+ *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
+async function canonicalWalletId(db: any, uid: string): Promise<string> {
+  if (!walletMergeResolveEnabled()) return uid;
+  return resolveCanonicalWalletId(async (u) => {
+    const s = await getDoc(doc(db, 'user_token_wallets', u));
+    return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
+  }, uid);
+}
 
 /**
  * Wallet / token-balance read routes extracted from the server.ts monolith
@@ -21,11 +32,14 @@ export function registerWalletRoutes(app: Express): void {
   // sends the Bearer token via authedHeaders(); VITEST skips the check.
   app.get('/api/wallet/:userId', requireUserMatch('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    const { userId } = req.params;
+    const { userId: rawUserId } = req.params;
     const email = req.query.email as string || '';
     const name = req.query.name as string || '';
 
     try {
+      // One-wallet: if this login's account was merged into another, read the CANONICAL wallet so the
+      // user sees their ONE unified balance however they signed in. No-op unless WALLET_MERGE_RESOLVE=on.
+      const userId = await canonicalWalletId(db, rawUserId);
       const walletRef = doc(db, 'user_token_wallets', userId);
       const snap = await getDoc(walletRef);
       if (snap.exists()) {

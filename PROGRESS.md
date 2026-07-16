@@ -16815,3 +16815,31 @@ double-merged. Admin UI: a **Merge** button in the users table (prompts for the 
 - Chat-history/build re-keying on merge (this slice merges the WALLET/money; history-merge is separate).
 
 Gate: frontend `tsc --noEmit` clean; server tsc clean; `accountMerge.test.ts` 10/10; full vitest 6918 pass.
+
+---
+
+## 2026-07-16 — One-wallet Slice 2: canonical-wallet RESOLVER (completes the merge on read + spend)
+
+Slice 1 shipped the wallet-merge core + admin merge tool, but a user logging into a RETIRED (mergedInto)
+account still saw 0 instead of their unified balance. This slice closes that: a pure, tested resolver follows
+the `mergedInto` pointer to the CANONICAL wallet, wired into ALL three money sites so a merged account
+transparently reads AND spends the account it was merged into — one wallet however the user signs in.
+
+**`walletResolve.ts` (pure, 9/9 tests):** `resolveCanonicalWalletId(readMergedInto, uid, maxHops=5)` —
+bounded, cycle-guarded, fail-safe (any error / cycle / hop-limit → last known id; never throws or loops).
+Gated by `walletMergeResolveEnabled()` (`WALLET_MERGE_RESOLVE=on`, default OFF).
+
+**Wired (all behind the flag → zero behaviour change until the admin turns it on after verifying a merge):**
+- `routes/wallet.ts` GET — reads the canonical wallet (user sees their unified balance).
+- `lib/walletDebit.ts` — debits the canonical wallet (a build on a merged account charges the unified balance).
+- `AgentV3/WalletBalance.ts` `firestoreWalletReader` — the affordability gate judges the canonical balance
+  (a merged account isn't wrongly blocked). The pure `readWalletBalanceInr` is untouched (tests unaffected).
+
+Security: `requireUserMatch` still checks the token uid against the requested uid; resolution to the canonical
+(also-owned) account happens only server-side, after auth. Fetching a GitHub repo never triggers a merge or a
+resolve — only an explicit admin merge writes `mergedInto`.
+
+**Enable order (admin):** run a real merge via the admin Merge tool → verify → set `WALLET_MERGE_RESOLVE=on`
+in Cloud Run. The flag is the instant, no-deploy kill switch.
+
+Gate: server tsc clean; walletResolve 9/9 + accountMerge 10/10 + WalletBalance 5/5; full vitest 6927 pass.

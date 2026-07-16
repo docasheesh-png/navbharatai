@@ -1,5 +1,6 @@
-import { doc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
+import { doc, getDoc, runTransaction } from './serverDb'; // admin-SDK binding (bypasses rules) — see serverDb.ts
 import { inrToDebitTokens } from './payments';
+import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletResolve';
 
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
@@ -117,7 +118,17 @@ export async function debitWalletForBuild(
     return { ok: false, error: `Non-debitable amount: ${tx.billedInr}` };
   }
   try {
-    const walletRef = doc(db, 'user_token_wallets', userId);
+    // One-wallet: debit the CANONICAL wallet if this account was merged into another, so a build on a
+    // merged/retired account correctly charges the unified balance (matches the wallet-read resolution).
+    // No-op unless WALLET_MERGE_RESOLVE=on. Best-effort: on any resolver error we debit the raw uid.
+    let ownerId = userId;
+    if (walletMergeResolveEnabled()) {
+      ownerId = await resolveCanonicalWalletId(async (u) => {
+        const s = await getDoc(doc(db, 'user_token_wallets', u));
+        return s.exists() ? ((s.data() as any)?.mergedInto ?? null) : null;
+      }, userId).catch(() => userId);
+    }
+    const walletRef = doc(db, 'user_token_wallets', ownerId);
     const debited = await runTransaction(db, async (t: any) => {
       const snap = await t.get(walletRef);
       const current = snap.exists() ? snap.data() : { userId, tokenBalance: 0, totalTokensUsed: 0, remaining_balance: 0, walletLedger: [] };

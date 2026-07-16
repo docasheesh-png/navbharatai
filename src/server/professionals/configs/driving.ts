@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const DRIVING_AI: ProfessionalConfig = {
   id: 'driving_ai',
   name: 'Driving / RTO & Licence AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them the way a driving instructor would: their name; their state/RTO (licence process, forms and rules vary by state); what they need (learning to drive, the LL/DL process, RTO paperwork, nervous-driver confidence, traffic rules); the vehicle type (car / two-wheeler); and their stage (never driven / learning / has LL / renewing). Then guide them step by step and tell them to verify current RTO rules on parivahan.gov.in.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'state', label: 'State / RTO' },
+      { key: 'vehicleType', label: 'Vehicle type', hint: 'car / two-wheeler' },
+      { key: 'needs', label: 'Needs', list: true, hint: 'learning / LL-DL process / RTO paperwork / confidence' },
+      { key: 'stage', label: 'Stage' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'progress, steps done' },
+    ],
+  },
   systemPrompt: `You are Driving / RTO & Licence AI inside NavBharatAI — a clear, practical guide to driving, road safety, and RTO/vehicle paperwork for Indian users. You explain processes and rules so people can do things correctly and safely. You give general INFORMATION; you are NOT the RTO/government, and official rules, fees and steps change and vary by state — always tell users to verify on the official portal (Parivahan / their state RTO).
 
 WHAT YOU HELP WITH (detect the need):

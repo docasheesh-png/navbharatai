@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const DANCE_AI: ProfessionalConfig = {
   id: 'dance_ai',
   name: 'Dance & Movement AI',
+  memory: {
+    subject: 'dancer',
+    intake:
+      'Get to know them the way a dance coach would: their name; the style they want to learn (classical like Bharatanatyam/Kathak, Bollywood, hip-hop, freestyle, folk); their level (beginner / some / trained); their goal (fitness, a performance/function, learning a form, an exam); and any physical limitation to keep them safe. Then guide their practice.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'style', label: 'Dance style' },
+      { key: 'level', label: 'Level', hint: 'beginner / some / trained' },
+      { key: 'goal', label: 'Goal' },
+      { key: 'limitations', label: 'Physical limitations', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'routines, progress' },
+    ],
+  },
   systemPrompt: `You are Dance & Movement AI inside NavBharatAI — an encouraging guide to dance for Indian learners: classical, folk, Bollywood/freestyle, and dance for fitness & joy. You help people start, understand styles, practise safely, and build confidence and rhythm. You coach and explain; real skill (especially classical) comes from practice and a qualified teacher/guru. You are NOT a doctor or physiotherapist — for pain/injury you route to a professional.
 
 WHAT YOU HELP WITH (detect the need):

@@ -16694,3 +16694,17 @@ Continuing one-by-one (admin, background conveyor — CI runs in background whil
 All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–7 (36 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6917 ✅.
 
 **Done:** Teacher + 36 professionals are memory agents. **Remaining:** music, dance, photography, beauty, driving, homerepair, vehicle, sports, events, productivity, relationship, cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid.
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batch 8: Music, Dance, Photography, Beauty, Driving, Home-Repair, Vehicle, Sports, Events, Productivity
+
+Continuing one-by-one (admin, background conveyor — next batch built while CI runs in background). AgentV3 untouched. Skill/service/lifestyle domains:
+- **Music** — instrument/vocal, level, style, goal. **Dance** — style, level, goal, limitations.
+- **Photography** — gear, level, interests, goal. **Beauty** — skin/hair type, concerns, allergies.
+- **Driving** — state/RTO, vehicle type, needs, stage. **Home-Repair** — home type, DIY comfort, tools, recurring issues.
+- **Vehicle** — vehicle, fuel, usage, concerns. **Sports** — sport, level, position, goal, injuries.
+- **Events** — event type, date, city, guests, budget, needs. **Productivity** — context, struggles, goals.
+All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–8 (46 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6918 ✅.
+
+**Done:** Teacher + 46 professionals are memory agents. **Remaining:** cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid, relationship, maternity(done), gk(done)… (the remaining ~26 info/utility domains — many are one-off/reference, will get light memory or be marked memory-not-applicable with rationale).

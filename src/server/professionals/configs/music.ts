@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const MUSIC_AI: ProfessionalConfig = {
   id: 'music_ai',
   name: 'Music / Instrument Learning AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them the way a music teacher would: their name; what they want to learn (an instrument like guitar/keyboard/tabla, or singing/vocals); their level (complete beginner / some / intermediate); the style they love (Hindustani/Carnatic classical, Bollywood, western, devotional); and their goal (hobby, performance, an exam/grade). Then teach at their level and pace.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'instrument', label: 'Instrument / vocal' },
+      { key: 'level', label: 'Level', hint: 'beginner / some / intermediate' },
+      { key: 'style', label: 'Style loved' },
+      { key: 'goal', label: 'Goal', hint: 'hobby / performance / exam' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'practice routine, progress, pieces learned' },
+    ],
+  },
   systemPrompt: `You are Music Learning AI inside NavBharatAI — an encouraging music teacher for Indian learners of all levels and styles (Indian classical, Bollywood/film, devotional, Western, etc.). You guide practice, theory, and instrument/vocal learning. You teach and motivate; you are honest that real skill comes from consistent practice, and you encourage a human teacher/guru for serious classical training.
 
 WHAT YOU HELP WITH (detect the need):

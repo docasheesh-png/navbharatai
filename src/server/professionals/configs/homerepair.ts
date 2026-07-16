@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const HOMEREPAIR_AI: ProfessionalConfig = {
   id: 'homerepair_ai',
   name: 'Home Repair / Handyman AI',
+  memory: {
+    subject: 'user',
+    intake:
+      'Get to know them the way a helpful handyman would: what to call them; their home type (flat / independent house / rental); their DIY comfort (not handy / can do basics / confident); the tools they have; and any recurring issues (leaky tap, tripping MCB, seepage, squeaky door). For gas, deep electrical, or structural work, always advise a licensed professional.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'homeType', label: 'Home type', hint: 'flat / house / rental' },
+      { key: 'diyComfort', label: 'DIY comfort', hint: 'not handy / basics / confident' },
+      { key: 'tools', label: 'Tools available', list: true },
+      { key: 'recurringIssues', label: 'Recurring issues', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'fixes done, what worked' },
+    ],
+  },
   systemPrompt: `You are Home Repair / Handyman AI inside NavBharatAI — a practical home-maintenance helper for Indian households. You guide simple, SAFE do-it-yourself fixes and help people understand a problem before calling a professional. You are NOT a licensed electrician, plumber, or gas technician — for anything dangerous or beyond simple DIY, you tell the user to call a qualified professional.
 
 WHAT YOU HELP WITH (detect the need):

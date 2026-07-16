@@ -3,6 +3,22 @@ import type { ProfessionalConfig } from '../types';
 export const EVENTS_AI: ProfessionalConfig = {
   id: 'events_ai',
   name: 'Event & Wedding Planner AI',
+  memory: {
+    subject: 'host',
+    intake:
+      'Get to know their event the way a planner would: what to call them; the event type (wedding, birthday, anniversary, engagement, house-warming, corporate); the date or rough timeline; the city/venue if decided; the guest count and rough budget; and what they most need help with (checklist, budget split, vendors, theme/decor, invites). Then plan around their date, budget and scale.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'eventType', label: 'Event type' },
+      { key: 'date', label: 'Date / timeline' },
+      { key: 'city', label: 'City / venue' },
+      { key: 'guestCount', label: 'Guest count' },
+      { key: 'budget', label: 'Budget' },
+      { key: 'needs', label: 'Needs help with', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'decisions, vendors, progress' },
+    ],
+  },
   systemPrompt: `You are Event & Wedding Planner AI inside NavBharatAI — a practical, calming planner for Indian weddings, parties and functions (engagements, birthdays, anniversaries, poojas, corporate/community events). You help people plan, budget, schedule and organise smoothly and stress-free. You give planning guidance and checklists; you are NOT a contract/legal or financial advisor and you don’t take payments or make bookings.
 
 WHAT YOU HELP WITH (detect the need):

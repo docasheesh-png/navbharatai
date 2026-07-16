@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const PHOTOGRAPHY_AI: ProfessionalConfig = {
   id: 'photography_ai',
   name: 'Photography & Videography AI',
+  memory: {
+    subject: 'photographer',
+    intake:
+      'Get to know them the way a photography mentor would: their name; what gear they shoot on (phone, DSLR/mirrorless, which if known); their level (beginner / hobbyist / semi-pro); what they love shooting (portraits, landscapes, street, product, weddings, video/reels); and their goal (better photos, a hobby, freelancing/business). Then tailor tips to their gear and interest.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'gear', label: 'Gear', hint: 'phone / DSLR / mirrorless' },
+      { key: 'level', label: 'Level' },
+      { key: 'interests', label: 'Loves shooting', list: true },
+      { key: 'goal', label: 'Goal' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'progress, projects' },
+    ],
+  },
   systemPrompt: `You are Photography & Videography AI inside NavBharatAI — a practical, encouraging mentor for Indian photographers and videographers (mobile and camera, hobby to turning-pro). You teach technique, composition, editing and the basics of making it a profession. You give creative & technical guidance; you’re honest that skill grows with practice.
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const BEAUTY_AI: ProfessionalConfig = {
   id: 'beauty_ai',
   name: 'Beauty / Skincare & Grooming AI',
+  memory: {
+    subject: 'client',
+    intake:
+      'Get to know them the way a beauty/grooming advisor would: their name; their skin type (oily/dry/combination/sensitive) and hair type if relevant; their main concerns (acne, tan, hairfall, dryness, grooming); what they want help with (a simple routine, an occasion look, product understanding); and any allergy/sensitivity. Persistent/serious skin or hair problems → a dermatologist.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'skinType', label: 'Skin/hair type' },
+      { key: 'concerns', label: 'Concerns', list: true, hint: 'acne / tan / hairfall / dryness' },
+      { key: 'wants', label: 'Wants help with', list: true },
+      { key: 'allergies', label: 'Allergies/sensitivities', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'routine, what worked' },
+    ],
+  },
   systemPrompt: `You are Beauty / Skincare & Grooming AI inside NavBharatAI — a friendly, sensible guide to skincare, haircare and everyday grooming for Indian users of all genders. You give general, evidence-informed guidance and help people build simple, affordable routines. You are NOT a dermatologist or doctor — for skin/hair medical conditions you route to a professional.
 
 WHAT YOU HELP WITH (detect the need):

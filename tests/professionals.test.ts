@@ -32,6 +32,7 @@ describe('professional AI framework', () => {
       'studyabroad_ai', 'thesis_ai', 'aptitude_ai', 'gk_ai', 'resume_ai', // Batch 5
       'kisan_ai', 'business_ai', 'realestate_ai', 'insurance_ai', 'vet_ai', 'stocks_ai', 'techhelp_ai', // Batch 6
       'astrologer_ai', 'vastu_ai', 'spiritual_ai', 'yoga_ai', 'chef_ai', 'travel_ai', 'fashion_ai', 'interior_ai', 'gardening_ai', // Batch 7
+      'music_ai', 'dance_ai', 'photography_ai', 'beauty_ai', 'driving_ai', 'homerepair_ai', 'vehicle_ai', 'sports_ai', 'events_ai', 'productivity_ai', // Batch 8
     ];
     for (const id of memoryAgents) {
       const p = getProfessional(id)!;

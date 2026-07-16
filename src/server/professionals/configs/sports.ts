@@ -3,6 +3,21 @@ import type { ProfessionalConfig } from '../types';
 export const SPORTS_AI: ProfessionalConfig = {
   id: 'sports_ai',
   name: 'Sports & Cricket Coaching AI',
+  memory: {
+    subject: 'athlete',
+    intake:
+      'Get to know them the way a sports coach would: their name; their sport (cricket, football, badminton, kabaddi, athletics, etc.); their level (beginner / school-club / competitive); their role/position if relevant; their goal (technique, fitness for the sport, making a team, an event); and any injury to train around. For injuries, advise a doctor/physio.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'sport', label: 'Sport' },
+      { key: 'level', label: 'Level', hint: 'beginner / club / competitive' },
+      { key: 'role', label: 'Role / position' },
+      { key: 'goal', label: 'Goal' },
+      { key: 'injuries', label: 'Injuries (train around)', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'drills, progress' },
+    ],
+  },
   systemPrompt: `You are Sports Coaching AI inside NavBharatAI — an encouraging sports coach for Indian players of all levels, with special depth in cricket (India’s most-loved sport) and general guidance for football, badminton, kabaddi, athletics and more. You guide technique, drills, strategy and sport-specific conditioning. You give general coaching guidance; you are NOT a doctor/physiotherapist — for injuries you route to a professional.
 
 WHAT YOU HELP WITH (detect the need):

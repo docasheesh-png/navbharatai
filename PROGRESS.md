@@ -16912,3 +16912,33 @@ couldn't re-point (the symbol was defined nowhere — its defining file had been
 **Honesty verdict:** the system told the truth end-to-end — readiness reported 0/100, `ok:false`, and billing
 charged ₹0. The engine's *reporting* is sound; its *behaviour* (self-destruct + module-split) is what this
 autopsy hardens.
+
+---
+
+## 2026-07-16 — Token-cost autopsy shipped: Fix 66 (cache measure + cache-read billing) + Fix 69 (export-surface context)
+
+**Trigger (5th absolute rule):** admin supplied 3 real build-diagnostics reports (PaisaTrack ✅ / LedgerLite ❌ /
+HabitTracker ❌). Forensic finding: **INPUT tokens ran 26–45× OUTPUT** (HabitTracker ~2.46M in vs 55K out) —
+each of ~40 turns re-sent the same big prefix + all sibling file bodies on GLM/Kimi (`noClaude: true`).
+
+- ✅ **Fix 66 — merged PR #1434 (2 slices).** (1) MEASURE: the OpenAI adapter had `cacheReadInputTokens`
+  HARDCODED to 0 — we were blind to GLM/Kimi prefix-cache hits. `parseOpenAiCompletion` now reads
+  `usage.prompt_tokens_details.cached_tokens` (top-level fallback), threaded to a `cacheReadInputTokens`
+  field on the build report (cache-hit rate now visible per build). (2) BILL: `TokenRate.cacheReadPerMTok`
+  (glm 0.15 / glm-5 0.35 / kimi 0.15 / kimi-k2.7 0.24 USD/MTok; env `RATE_*_CACHE`) — `usageCostUsd` prices
+  the cache-hit share at the cache rate. Margin-safe by construction: clamp to input total; missing cache
+  rate defaults to the FULL input rate; Opus tiers/per-tier/Sonnet-baseline untouched.
+- ✅ **Fix 69 — merged PR #1436.** Fast-lane sibling context (`dependencyContext`, full bodies, 4,000-char
+  cap/file — the O(n²) growth) replaced by the **export surface** (`exportSurface.ts`): exact exported
+  names, enum members + type/interface shapes IN FULL, function signatures, component prop types, CSS
+  class/var vocabulary. ALSO fixes a real quality defect: the old `slice(0,4000)` HID exports declared past
+  4,000 chars (test-locked proof). Per-file fallback to the old capped body when extraction finds nothing;
+  kill switch `AGENTV3_SIGNATURE_CONTEXT=off`; repair prompts + agentic path untouched. >60% context-size
+  cut locked by test.
+- ✅ **GLM 429 circuit-breaker — investigated, honest no-op.** `RATE_LIMIT_BENCH_AFTER=2` already benches a
+  429-storming provider; the autopsy's 37 interleaved 429s burned latency, not tokens (GLM still delivered
+  98 cheap turns). Making the bench total-count-aggressive would push turns to expensive Claude — a cost
+  backfire. (The deeper per-account throttle remains OPEN root cause A above.)
+- **Next measurement:** the next real build's report now shows `cacheReadInputTokens` + a lower real-cost
+  bill + smaller per-turn inputs — verify both savings AND that import-mismatch warnings did not increase
+  (quality must only improve; kill switch stands ready).

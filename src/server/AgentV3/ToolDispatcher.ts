@@ -38,7 +38,7 @@ import type { ComplianceIssue, ComplianceSeverity } from './ComplianceAnalysis';
 import type { DependencyIssue } from './DependencyAnalysis';
 import type { EnvVarIssue } from './EnvVarAnalysis';
 import { computeBuildConfidence, buildConfidenceSummary, type SeverityTally } from './BuildConfidence';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
@@ -841,6 +841,17 @@ export class ToolDispatcher {
         } catch {
           kind = 'create';
         }
+        // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
+        // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
+        // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
+        // so the file survives; a legitimate full-content rewrite (non-empty) is never blocked.
+        if (isDestructiveEmptyOverwrite(path, existingContent, content)) {
+          const blockMsg = emptyOverwriteMessage(path);
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${path}`,
+          );
+          return blockMsg;
+        }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
@@ -926,6 +937,15 @@ export class ToolDispatcher {
           let kind: 'create' | 'modify' = 'create';
           let priorContent = '';
           try { priorContent = await this.actuator.readFile(this.workspaceId, file.path); kind = 'modify'; } catch { kind = 'create'; }
+          // Self-destruct guard (parity with write_file): refuse to BLANK a populated source file — the
+          // same catastrophe as deleting it, via the tool path. Skip this one file's write; the rest of
+          // the batch proceeds. A legitimate full-content rewrite is never blocked (only empty content is).
+          if (isDestructiveEmptyOverwrite(file.path, priorContent, file.content)) {
+            getWorkspaceMemory(this.workspaceId).recordAudit(
+              `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (batch): ${file.path}`,
+            );
+            return { path: file.path, kind, shrink: false, blocked: true };
+          }
           // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
           // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
@@ -945,8 +965,9 @@ export class ToolDispatcher {
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
           return { path: file.path, kind, shrink };
         });
-        const written: string[] = perFile.map((r) => r.path);
-        const overwritten: string[] = perFile.filter((r) => r.kind === 'modify').map((r) => r.path); // existing files this batch REPLACED wholesale
+        const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path); // empty-overwrite refusals — NOT written
+        const written: string[] = perFile.filter((r) => !(r as { blocked?: boolean }).blocked).map((r) => r.path);
+        const overwritten: string[] = perFile.filter((r) => r.kind === 'modify' && !(r as { blocked?: boolean }).blocked).map((r) => r.path); // existing files this batch REPLACED wholesale
         const shrunk: string[] = perFile.filter((r) => r.shrink).map((r) => r.path); // rewrites that likely DROPPED code
         // Checkpoint ONCE for the whole batch — NOT once per file. A git commit per file made an
         // N-file batch cost N commits (with `git add -A` each ~45s pre-gitignore), which is exactly
@@ -961,7 +982,11 @@ export class ToolDispatcher {
         const contentLossWarning = shrunk.length
           ? `\n⚠️  LIKELY CONTENT LOSS: ${shrunk.length} of these rewrites came back much smaller than the file they replaced (${shrunk.slice(0, 8).join(', ')}${shrunk.length > 8 ? '…' : ''}) — a wholesale write commonly drops code the model forgot. Re-read those files and restore anything you did not intend to delete.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}`;
+        // Self-destruct guard: any file whose write was refused for being an empty-overwrite of populated source.
+        const blockedWarning = blocked.length
+          ? `\n[GOVERNANCE BLOCKED] ${blocked.length} file(s) were NOT written — refused to blank populated source (${blocked.slice(0, 8).join(', ')}${blocked.length > 8 ? '…' : ''}). Write their FULL new content, or leave them untouched.`
+          : '';
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}`;
       }
 
       case 'edit_file': {
@@ -975,6 +1000,14 @@ export class ToolDispatcher {
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
         const updated = guardConfigContent(path, edited);
+        // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
+        // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
+        if (isDestructiveEmptyOverwrite(path, existing, updated)) {
+          getWorkspaceMemory(this.workspaceId).recordAudit(
+            `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file (edit): ${path}`,
+          );
+          return emptyOverwriteMessage(path);
+        }
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);

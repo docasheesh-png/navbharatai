@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage } from './CommandGovernance';
 
 describe('classifyCommandRisk — HIGH', () => {
   it('flags recursive delete of root/home/wildcard', () => {
@@ -171,9 +171,10 @@ describe('destructiveSourceDeletionTarget — sibling patterns (StudySync 2026-0
     expect(destructiveSourceDeletionTarget('rm src/a.ts src/b.ts src/c.ts')).toBe('src/a.ts');
     expect(destructiveSourceDeletionTarget('rm -f src/hooks/useA.ts src/hooks/useB.ts src/hooks/useC.ts')).toBe('src/hooks/useA.ts');
   });
-  it('ALLOWS deleting one or two genuinely-stale files (below the bulk threshold)', () => {
+  it('ALLOWS deleting ONE genuinely-stale file, blocks TWO+ (audit vector: rm src/App.tsx src/main.tsx wipes entry points)', () => {
     expect(destructiveSourceDeletionTarget('rm src/components/Stale.tsx')).toBeNull();
-    expect(destructiveSourceDeletionTarget('rm src/old.ts src/older.ts')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm src/old.ts src/older.ts')).toBe('src/old.ts');
+    expect(destructiveSourceDeletionTarget('rm src/App.tsx src/main.tsx')).toBe('src/App.tsx');
   });
   it('does NOT count boilerplate assets (.css/.svg/.json) toward the bulk threshold', () => {
     expect(destructiveSourceDeletionTarget('rm src/App.css src/index.css src/assets/logo.svg')).toBeNull();
@@ -182,5 +183,109 @@ describe('destructiveSourceDeletionTarget — sibling patterns (StudySync 2026-0
     expect(
       destructiveSourceDeletionTarget('npm run build; rm src/x.tsx src/y.tsx src/z.tsx && rmdir src/components'),
     ).toBe('src/x.tsx');
+  });
+});
+
+// The 14 self-destruct vectors an adversarial audit CONFIRMED still bypassed the guard after the StudySync
+// fix (ultracode workflow wy3cy1pw8, 2026-07-16). Each is the same catastrophe (generated source destroyed
+// mid-build → broken imports → build fails) via a different shell idiom. This suite locks every one closed.
+describe('destructiveSourceDeletionTarget — audit-confirmed bypass vectors (2026-07-16)', () => {
+  it('vector 1 — blocks rm -rf of a NESTED source dir at ANY depth (the depth-2 gap)', () => {
+    expect(destructiveSourceDeletionTarget('rm -rf src/features/auth')).toBe('src/features/auth');
+    expect(destructiveSourceDeletionTarget('rm -rf src/components/dashboard')).toBe('src/components/dashboard');
+    expect(destructiveSourceDeletionTarget('rm -rf ./src/lib/helpers')).toBe('./src/lib/helpers');
+    expect(destructiveSourceDeletionTarget('rmdir src/features/auth')).toBe('src/features/auth');
+  });
+  it('vector 2/3 — blocks find … -delete and find … -exec rm targeting source', () => {
+    expect(destructiveSourceDeletionTarget("find src -name '*.tsx' -delete")).toBeTruthy();
+    expect(destructiveSourceDeletionTarget("find src -type f -name '*.tsx' -exec rm {} +")).toBeTruthy();
+    expect(destructiveSourceDeletionTarget("find . -name '*.ts' -delete")).toBeTruthy();
+  });
+  it('vector 4 — blocks ls … | xargs rm of source', () => {
+    expect(destructiveSourceDeletionTarget('ls src/components/*.tsx | xargs rm')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('find src -name "*.tsx" | xargs rm -f')).toBeTruthy();
+  });
+  it('vector 5 — blocks a for-loop deleting over a source glob', () => {
+    expect(destructiveSourceDeletionTarget('for f in src/components/*.tsx; do rm "$f"; done')).toBeTruthy();
+  });
+  it('vector 6 — blocks BLANKING a source file via redirection/truncate/dev-null', () => {
+    expect(destructiveSourceDeletionTarget(': > src/App.tsx')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('> src/App.tsx')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget("echo '' > src/App.tsx")).toBeTruthy();
+    expect(destructiveSourceDeletionTarget("printf '' > src/main.tsx")).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('truncate -s 0 src/App.tsx')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('cp /dev/null src/App.tsx')).toBeTruthy();
+  });
+  it('vector 7 — blocks git rm -r of source', () => {
+    expect(destructiveSourceDeletionTarget('git rm -r src/components')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('git rm src/App.tsx')).toBeTruthy();
+  });
+  it('vector 8 — blocks git clean of untracked (generated) source', () => {
+    expect(destructiveSourceDeletionTarget('git clean -fd')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('git clean -fdx')).toBeTruthy();
+  });
+  it('vector 9 — blocks mv of a source dir OUT of the workspace', () => {
+    expect(destructiveSourceDeletionTarget('mv src/components /tmp/old-components')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('mv src/lib ~/backup')).toBeTruthy();
+  });
+  it('vector 10 — blocks npx rimraf / rimraf of source', () => {
+    expect(destructiveSourceDeletionTarget('npx rimraf src/components')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('rimraf src/hooks')).toBeTruthy();
+  });
+  it('vector 11 — blocks rm $(find src …) command substitution', () => {
+    expect(destructiveSourceDeletionTarget("rm $(find src -name '*.tsx')")).toBeTruthy();
+  });
+  it('vector 13 — blocks git checkout -- . and git reset --hard (discards generated source)', () => {
+    expect(destructiveSourceDeletionTarget('git checkout -- .')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('git checkout .')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('git reset --hard')).toBeTruthy();
+    expect(destructiveSourceDeletionTarget('git reset --hard HEAD~1')).toBeTruthy();
+  });
+
+  // False-positive protection — the guard must NEVER block a legitimate build operation.
+  it('ALLOWS legitimate operations (no over-blocking)', () => {
+    // regenerable dir cleanup
+    expect(destructiveSourceDeletionTarget('rm -rf node_modules dist .vite')).toBeNull();
+    expect(destructiveSourceDeletionTarget('npx rimraf dist')).toBeNull();
+    // writing REAL content via a redirect (codegen) — only blanking is blocked
+    expect(destructiveSourceDeletionTarget('echo "export const x = 1" > src/config.ts')).toBeNull();
+    expect(destructiveSourceDeletionTarget('cat template.txt > src/generated.ts')).toBeNull();
+    // renaming WITHIN the workspace
+    expect(destructiveSourceDeletionTarget('mv src/Old.tsx src/New.tsx')).toBeNull();
+    // find with a NON-source target
+    expect(destructiveSourceDeletionTarget("find . -name '*.log' -delete")).toBeNull();
+    expect(destructiveSourceDeletionTarget("find dist -name '*.map' -delete")).toBeNull();
+    // reverting a single non-source file
+    expect(destructiveSourceDeletionTarget('git checkout -- package.json')).toBeNull();
+    // ordinary build/test commands
+    expect(destructiveSourceDeletionTarget('npm run build')).toBeNull();
+    expect(destructiveSourceDeletionTarget('git clean -n')).toBeNull(); // dry-run, no -f
+    expect(destructiveSourceDeletionTarget('git add -A && git commit -m wip')).toBeNull();
+  });
+});
+
+describe('isDestructiveEmptyOverwrite — tool-path self-destruct (StudySync vector 14)', () => {
+  it('BLOCKS blanking a populated source file (write_file/edit content = "")', () => {
+    expect(isDestructiveEmptyOverwrite('src/App.tsx', 'export default function App(){return null}', '')).toBe(true);
+    expect(isDestructiveEmptyOverwrite('src/App.tsx', 'a lot of real code here', '   \n  \n ')).toBe(true);
+    expect(isDestructiveEmptyOverwrite('src/lib/storage.ts', 'export const save = () => {}', '')).toBe(true);
+  });
+  it('ALLOWS a first-time create (no existing content)', () => {
+    expect(isDestructiveEmptyOverwrite('src/App.tsx', '', 'export default function App(){}')).toBe(false);
+    expect(isDestructiveEmptyOverwrite('src/App.tsx', '', '')).toBe(false); // empty create — nothing lost
+  });
+  it('ALLOWS a legitimate full-content rewrite (new content is non-empty)', () => {
+    expect(isDestructiveEmptyOverwrite('src/App.tsx', 'old code', 'brand new full implementation')).toBe(false);
+  });
+  it('only guards real source-code files (not assets/config/docs)', () => {
+    expect(isDestructiveEmptyOverwrite('src/App.css', '.a{color:red}', '')).toBe(false);
+    expect(isDestructiveEmptyOverwrite('README.md', '# docs', '')).toBe(false);
+    expect(isDestructiveEmptyOverwrite('public/data.json', '{"a":1}', '')).toBe(false);
+  });
+  it('message names the file and tells the agent to write full content', () => {
+    const m = emptyOverwriteMessage('src/App.tsx');
+    expect(m).toContain('src/App.tsx');
+    expect(m).toMatch(/GOVERNANCE BLOCKED/);
+    expect(m).toMatch(/full new content|FULL new content/i);
   });
 });

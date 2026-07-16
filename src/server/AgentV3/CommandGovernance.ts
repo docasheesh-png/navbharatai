@@ -77,24 +77,24 @@ export function classifyCommandRisk(command: string): CommandRisk {
   return { level: 'none', reasons: [] };
 }
 
-// Source directories that hold GENERATED APP CODE. Recursively deleting one during a build destroys
-// the app's own work. Real failure (deep-test "PaisaTrack", 2026-07-15): to "fix" two trivial tsc
-// errors (an unused import + a type cast), the builder ran `rm -rf src/components src/hooks src/types
-// src/utils`, wiping the feature components → the delivered app had orphaned/missing features (Add,
-// Delete, Filter, List had no control) yet still shipped as a glowing success. The correct action was
-// to fix the two specific errors in-file. This guard makes that class of self-destruction impossible.
+// Source directories that hold GENERATED APP CODE. Destroying one during a build destroys the app's own
+// work. Real failure (deep-test "PaisaTrack", 2026-07-15): to "fix" two trivial tsc errors (an unused
+// import + a type cast), the builder ran `rm -rf src/components src/hooks src/types src/utils`, wiping the
+// feature components → the delivered app had orphaned/missing features yet still shipped as a glowing
+// success. The correct action was to fix the two specific errors in-file. This guard makes that entire
+// CLASS of self-destruction impossible — no matter which shell idiom the agent reaches for.
 const SOURCE_DIR_RE =
   /^(src|app|components|pages|hooks|lib|utils|util|types|type|features|feature|store|stores|context|contexts|services|service|api|routes|styles|assets|models|state|store|containers|views|layouts|widgets)$/i;
 // Regenerable / recoverable targets that are ALWAYS safe to delete recursively.
 const SAFE_DELETE_RE =
   /^(node_modules|dist|build|out|coverage|\.next|\.nuxt|\.svelte-kit|\.vite|\.cache|\.turbo|\.parcel-cache|tmp|\.tmp|logs|\.expo)$/i;
-// Script/component file extensions — deleting MANY of these in one command is the destructive-consolidation
-// signature (the builder wiping its own module set to restructure), NOT ordinary boilerplate cleanup (which
-// removes .css/.svg/.json assets, never a batch of components). Deliberately excludes .css/.svg/.json/etc.
+// Script/component file extensions — the app's actual code. Deleting/blanking these is the destructive-
+// consolidation signature (the builder wiping its own module set to restructure), NOT boilerplate asset
+// cleanup (.css/.svg/.json). A glob of these (`*.tsx`) is likewise a source-wide target.
 const SOURCE_CODE_EXT_RE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro)$/i;
-// Deleting this many source-code FILES in a single `rm` is treated as a bulk source wipe, not stale-file
-// cleanup. One or two genuinely-stale files stay allowed (the message tells the agent to do exactly that).
-const BULK_SOURCE_DELETE_THRESHOLD = 3;
+// Deleting this many source-code FILES in a single command is a bulk source wipe, not stale-file cleanup.
+// ONE genuinely-stale file stays allowed (the message tells the agent to do exactly that, one at a time).
+const BULK_SOURCE_DELETE_THRESHOLD = 2;
 
 /** Does a normalized path live in a source location (a `src/`-rooted path, or a bare source-dir segment)? */
 function isUnderSourceLocation(norm: string): boolean {
@@ -110,76 +110,167 @@ function cleanPathArg(rawArg: string): string {
 }
 
 /**
- * Detect a build-agent command that DESTROYS generated app source, and return the first offending
- * target, or null. Pure & deterministic. Covers THREE sibling self-destruction patterns proven in
- * real deep-test failures — each is a different command that produces the same catastrophe (the app's
- * own module tree deleted mid-build → broken imports → build fails / features vanish):
+ * Classify a raw shell path argument as protected generated source, or null (safe to touch).
+ * Returns 'dir' for a source DIRECTORY at ANY depth (bare `components`, `src`, or `src/features/auth`),
+ * and 'file' for a source-CODE file under a source location. Regenerable targets (node_modules/dist/…)
+ * and boilerplate assets (.css/.svg/.json) are null. Pure & deterministic.
+ */
+function classifySourceTarget(rawPath: string): 'dir' | 'file' | null {
+  const path = cleanPathArg(rawPath);
+  if (!path) return null;
+  // A bare `.`/`*`/`src/*` at the workspace root wipes the whole project.
+  if (path === '.' || path === './' || path === '*' || path === './*') return 'dir';
+  const norm = path.replace(/^\.\//, '');
+  const parts = norm.split('/');
+  if (parts.some((p) => SAFE_DELETE_RE.test(p))) return null; // node_modules/dist/.vite/… — always allowed
+  const last = parts[parts.length - 1];
+  const hasExt = /\.[a-z0-9]+$/i.test(last);
+  if (hasExt) {
+    // A source-code file, whether under src/ or a bare entry file (App.tsx, main.tsx) at the root.
+    if (SOURCE_CODE_EXT_RE.test(last) && (isUnderSourceLocation(norm) || parts.length === 1)) return 'file';
+    return null; // an asset / config / doc file — not protected against a single delete
+  }
+  // No extension → a directory. Protected if it is (or is under) a source location.
+  if (SOURCE_DIR_RE.test(norm) || isUnderSourceLocation(norm)) return 'dir';
+  return null;
+}
+
+/** True when a `mv` destination lands OUTSIDE the workspace (absolute, home, parent, /dev/null, /tmp). */
+function isOutsideWorkspace(rawDest: string): boolean {
+  const d = rawDest.replace(/^['"]|['"]$/g, '');
+  return /^(\/|~|\.\.\/|\/tmp\b|\/dev\/null\b)/.test(d) || d === '/dev/null';
+}
+
+/**
+ * Detect a build-agent command that DESTROYS generated app source, and return the first offending target
+ * (a short human-readable label), or null. Pure & deterministic. This closes the ENTIRE class of
+ * self-destruction — every idiom an LLM reaches for to "restructure" or "clean up" its own module tree,
+ * all of which produce the same catastrophe (source deleted mid-build → broken imports → build fails):
  *
- *   1. `rm -r…` (recursive) of a source DIRECTORY   — "PaisaTrack" (2026-07-15): `rm -rf src/components …`.
- *   2. `rmdir` of a source DIRECTORY                — "StudySync"  (2026-07-16): `rmdir src/components src/hooks src/utils`.
- *   3. bulk `rm` of ≥3 source-code FILES at once    — "StudySync"  (2026-07-16): `rm src/components/CardEditor.tsx CardList.tsx Dashboard.tsx …`.
+ *   A. Directory teardown at ANY depth   — `rm -rf src/features/auth`, `rmdir src/hooks`, `npx rimraf src/lib`.
+ *   B. Bulk source-FILE deletion         — `rm a.tsx b.tsx`, `find src -name '*.tsx' -delete`, `ls src/*.tsx | xargs rm`,
+ *                                          `for f in src/*.tsx; do rm "$f"; done`, `rm $(find src -name '*.tsx')`.
+ *   C. Source-file blanking              — `: > src/App.tsx`, `> src/App.tsx`, `echo '' > src/App.tsx`,
+ *                                          `truncate -s 0 src/App.tsx`, `cp /dev/null src/App.tsx`.
+ *   D. Move source OUT of the workspace  — `mv src/components /tmp/old`.
+ *   E. Git working-tree wipes            — `git rm -r src`, `git clean -fd`, `git checkout -- .`, `git reset --hard`.
  *
- * Precise by construction so it never blocks legitimate cleanup: recursive-dir deletion still requires a
- * recursive flag; single/stale-file deletion (1–2 files) stays allowed; regenerable targets
- * (node_modules/dist/.vite/…) are always allowed; boilerplate asset cleanup (.css/.svg/.json) never counts
- * toward the bulk threshold. Handles chained commands (`rm … && rmdir …`) by scanning each shell segment.
+ * Precise by construction so it NEVER blocks legitimate cleanup: deleting ONE stale source file by name is
+ * allowed; regenerable targets (node_modules/dist/.vite/…) are always allowed; asset cleanup (.css/.svg)
+ * never counts; writing REAL content via a redirect (`echo "code" > f`) is allowed (only blanking is
+ * blocked); renaming a file WITHIN the workspace (`mv a.tsx b.tsx`) is allowed. Scans the WHOLE command,
+ * not just segment starts, so a destructive verb hidden in a loop body / pipe / `-exec` is still caught.
  */
 export function destructiveSourceDeletionTarget(command: string): string | null {
-  const segments = (command || '').split(/[;&|\n]+/);
+  const cmd = (command || '').trim();
+  if (!cmd) return null;
+
+  // === D/E-adjacent whole-command idioms first (these hide the destructive verb mid-command) ===
+
+  // find … -delete  |  find … -exec rm/unlink/shred {}  — wipes matching files in bulk.
+  if (/\bfind\b/.test(cmd) && /(-delete\b|-exec\s+(rm|unlink|shred)\b)/.test(cmd)) {
+    // Fires when find targets source: a source-code -name/-path glob, OR a source search root.
+    if (/-(name|path|iname|ipath)\s+['"]?[^'"]*\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro)\b/i.test(cmd)) {
+      return `find … -delete (source-code files)`;
+    }
+    const roots = cmd.replace(/^.*?\bfind\b/i, '').trim().split(/\s+/).filter(Boolean);
+    for (const r of roots) {
+      if (r.startsWith('-')) break; // reached the first predicate — roots are done
+      if (r === '.' || r === './') continue; // a bare `.` root is governed by the -name predicate (checked above)
+      if (classifySourceTarget(r) === 'dir') return `find ${r} … -delete`;
+    }
+  }
+
+  // … | xargs [flags] rm/unlink/shred/rimraf — the producer names the files; block when source is in play.
+  if (/\|\s*xargs\b[^\n|]*\b(rm|unlink|shred|rimraf)\b/i.test(cmd)) {
+    if (isUnderSourceLocation(cmd.replace(/^\.\//, '')) || /\bsrc\b|\.(tsx?|jsx?|vue|svelte|astro)\b/i.test(cmd)) {
+      return `xargs rm (piped source files)`;
+    }
+  }
+
+  // for f in <source glob>; do … rm/unlink … done — loop deletion over a source glob.
+  if (/\bfor\b[^\n;]*\bin\b[^\n;]*;\s*do\b/i.test(cmd) && /\b(rm|unlink|shred)\b/.test(cmd)) {
+    const inList = /\bfor\b[^\n;]*\bin\b([^\n;]*);\s*do\b/i.exec(cmd)?.[1] ?? '';
+    if (/\bsrc\b/.test(inList) || /\.(tsx?|jsx?|vue|svelte|astro)\b/i.test(inList) ||
+        inList.trim().split(/\s+/).some((t) => classifySourceTarget(t))) {
+      return `for-loop rm over source (${inList.trim().slice(0, 40)})`;
+    }
+  }
+
+  // Source-file blanking: bare/`:` redirect, empty echo/printf redirect, truncate -s 0, cp/cat /dev/null.
+  const blankRes: RegExp[] = [
+    /(?:^|[;&|]|\bdo\b|\bthen\b)\s*:?\s*>\s*(\S+)/,                 // `: > f`  or bare `> f`
+    /\becho\s*(?:''|"")?\s*>\s*(\S+)/,                              // `echo > f` / `echo '' > f`
+    /\bprintf\s*(?:''|"")?\s*>\s*(\S+)/,                            // `printf '' > f`
+    /\btruncate\s+-s\s*0\s+(\S+)/,                                  // `truncate -s 0 f`
+    /\bcp\s+\/dev\/null\s+(\S+)/,                                   // `cp /dev/null f`
+    /\bcat\s+\/dev\/null\s*>\s*(\S+)/,                              // `cat /dev/null > f`
+  ];
+  for (const re of blankRes) {
+    const hit = re.exec(cmd);
+    if (hit && classifySourceTarget(hit[1]) === 'file') return `blank ${hit[1]}`;
+  }
+
+  // Command-substitution rm — `rm $(find src …)` / rm `find src…`. The literal args aren't source paths,
+  // but the substitution expands to them. Checked on the WHOLE command (the segment splitter consumes the
+  // `(` of `$(`, so it must run before segmentation). Fires when rm is paired with a source-referencing sub.
+  if (/\brm\b/i.test(cmd) && /(\$\(|`)/.test(cmd) &&
+      /\b(find|src|components|hooks|pages|lib|utils|features|services|routes)\b/i.test(cmd)) {
+    return `rm $(…) expanding to source`;
+  }
+
+  // git working-tree wipes (a generated workspace's source is untracked / uncommitted).
+  if (/\bgit\s+clean\b[^\n]*\s-[a-z]*f/i.test(cmd)) return `git clean (deletes untracked source)`;
+  if (/\bgit\s+reset\b[^\n]*--hard\b/i.test(cmd)) return `git reset --hard (discards generated source)`;
+  if (/\bgit\s+checkout\b\s+(--\s+)?(\.|\.\/|src)(?=[/\s]|$)/i.test(cmd)) return `git checkout (discards generated source)`;
+  if (/\bgit\s+rm\b/i.test(cmd)) {
+    const after = cmd.replace(/^.*?\bgit\s+rm\b/i, '').trim().split(/\s+/);
+    for (const a of after) { const c = classifySourceTarget(a); if (c) return `git rm ${a}`; }
+  }
+
+  // === Per-segment verb scan: rm / rmdir / rimraf / mv, wherever they appear (loops, chains, subshells) ===
+  const segments = cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/);
   for (const seg of segments) {
     const s = seg.trim();
 
-    // Pattern 2 — `rmdir <source dir> …`. rmdir ONLY removes directories, so any source-dir arg is a
-    // deliberate module-tree teardown; no recursive flag to check. Regenerable dirs stay allowed.
-    const rmdirMatch = /^rmdir\s+(.+)$/i.exec(s);
-    if (rmdirMatch) {
-      for (const rawArg of rmdirMatch[1].trim().split(/\s+/)) {
-        const path = cleanPathArg(rawArg);
-        if (!path) continue;
-        const norm = path.replace(/^\.\//, '');
-        const parts = norm.split('/');
-        if (parts.some((p) => SAFE_DELETE_RE.test(p))) continue;
-        if (SOURCE_DIR_RE.test(norm) || (parts.length === 2 && parts[0].toLowerCase() === 'src')) {
-          return path;
+    // rmdir / rimraf / npx rimraf <dir …> — directory teardown (no recursive flag needed).
+    const dirDel = /^(?:npx\s+)?(?:rmdir|rimraf)\s+(.+)$/i.exec(s);
+    if (dirDel) {
+      for (const raw of dirDel[1].trim().split(/\s+/)) {
+        if (classifySourceTarget(raw) === 'dir') return cleanPathArg(raw) || raw;
+      }
+      continue;
+    }
+
+    // mv <source dir/file> <dest OUTSIDE workspace> — relocating source out of the tree destroys it.
+    const mvMatch = /^mv\s+(.+)$/i.exec(s);
+    if (mvMatch) {
+      const args = mvMatch[1].trim().split(/\s+/).filter((a) => !a.startsWith('-'));
+      if (args.length >= 2) {
+        const dest = args[args.length - 1];
+        if (isOutsideWorkspace(dest)) {
+          for (const src of args.slice(0, -1)) {
+            if (classifySourceTarget(src)) return `mv ${cleanPathArg(src) || src} → ${dest}`;
+          }
         }
       }
       continue;
     }
 
-    const m = /^rm\s+(.+)$/i.exec(s);
-    if (!m) continue;
-    const args = m[1].trim().split(/\s+/);
+    const rmMatch = /^rm\s+(.+)$/i.exec(s);
+    if (!rmMatch) continue;
+    const args = rmMatch[1].trim().split(/\s+/);
     const hasRecursive = args.some((a) => /^-[a-z]*[rR]/.test(a));
 
-    // Pattern 1 — recursive delete of a source DIRECTORY.
+    // Recursive delete of a source DIRECTORY at any depth.
     if (hasRecursive) {
-      for (const rawArg of args) {
-        const path = cleanPathArg(rawArg);
-        if (!path) continue;
-        // A bare `.` or `*` at the workspace root wipes the whole project — always block.
-        if (path === '.' || path === './' || path === '*' || path === './*') return path;
-        const norm = path.replace(/^\.\//, '');
-        const parts = norm.split('/');
-        const last = parts[parts.length - 1];
-        if (/\.[a-z0-9]+$/i.test(last)) continue; // looks like a single file (has an extension) — allowed
-        if (parts.some((p) => SAFE_DELETE_RE.test(p))) continue; // node_modules/dist/… — allowed
-        // A source dir at the root (`src`, `components`) OR nested directly under src (`src/components`).
-        if (SOURCE_DIR_RE.test(norm) || (parts.length === 2 && parts[0].toLowerCase() === 'src')) {
-          return path;
-        }
+      for (const raw of args) {
+        if (classifySourceTarget(raw) === 'dir') return cleanPathArg(raw) || raw;
       }
     }
 
-    // Pattern 3 — bulk delete of many source-code FILES in a single rm (recursive flag or not). Deleting
-    // 3+ .ts/.tsx/.js/… files under a source location in one shot is the "wipe my own module set" signature,
-    // not stale-file cleanup. Assets (.css/.svg/.json) and non-source paths don't count toward the threshold.
-    const sourceFileArgs: string[] = [];
-    for (const rawArg of args) {
-      const path = cleanPathArg(rawArg);
-      if (!path) continue;
-      const norm = path.replace(/^\.\//, '');
-      if (SOURCE_CODE_EXT_RE.test(norm) && isUnderSourceLocation(norm)) sourceFileArgs.push(path);
-    }
+    // Bulk delete of source-code FILES (≥ threshold) in one rm — the "wipe my module set" signature.
+    const sourceFileArgs = args.map(cleanPathArg).filter((p) => p && classifySourceTarget(p) === 'file');
     if (sourceFileArgs.length >= BULK_SOURCE_DELETE_THRESHOLD) return sourceFileArgs[0];
   }
   return null;
@@ -188,12 +279,37 @@ export function destructiveSourceDeletionTarget(command: string): string | null 
 /** The honest, actionable refusal shown to the build agent when it tries to destroy generated app source. */
 export function destructiveSourceDeletionMessage(target: string): string {
   return (
-    `[GOVERNANCE BLOCKED] Refused to bulk-delete generated app source ("${target}") — deleting a source ` +
-    `directory (via \`rm -r\` or \`rmdir\`) or a batch of source files almost always destroys working ` +
-    `features and leaves broken imports (a known build-killing failure mode). Do NOT delete or restructure ` +
-    `source to fix a compile/import error. Instead, FIX the specific error in the file it reports — e.g. add ` +
-    `the missing export, correct the import path, remove the unused import — and re-run the check. If ONE ` +
-    `file is genuinely stale, delete just that single file by name.`
+    `[GOVERNANCE BLOCKED] Refused to destroy generated app source ("${target}") — deleting, blanking, moving ` +
+    `away, or git-wiping source almost always destroys working features and leaves broken imports (a known ` +
+    `build-killing failure mode). Do NOT delete or restructure source to fix a compile/import error. Instead, ` +
+    `FIX the specific error in the file it reports — e.g. add the missing export, correct the import path, ` +
+    `remove the unused import — and re-run the check. If ONE file is genuinely stale, delete just that single ` +
+    `file by name.`
+  );
+}
+
+/**
+ * TOOL-path sibling of the shell guard: detect a `write_file` / `write_files_batch` / `edit_file` call that
+ * BLANKS an existing, populated source file (new content empty or whitespace-only over a file that had real
+ * code). Same net effect as `rm` — the module vanishes and its importers break — but it bypasses the shell
+ * guard entirely (confirmed vector, StudySync autopsy 2026-07-16). Pure & deterministic. Returns true ONLY
+ * when the file already held substantive content: a first-time create (`existing` empty) and a legitimate
+ * rewrite (new content non-empty) both return false, so real builds are never blocked.
+ */
+export function isDestructiveEmptyOverwrite(path: string, existingContent: string, newContent: string): boolean {
+  if (classifySourceTarget(path) !== 'file') return false; // only guard real source-code files
+  const hadContent = (existingContent || '').trim().length > 0;
+  const nowEmpty = (newContent || '').trim().length === 0;
+  return hadContent && nowEmpty;
+}
+
+/** The honest refusal shown when a tool call would blank a populated source file. */
+export function emptyOverwriteMessage(path: string): string {
+  return (
+    `[GOVERNANCE BLOCKED] Refused to overwrite "${path}" with empty content — blanking a populated source ` +
+    `file deletes its code and breaks every file that imports it (a known build-killing failure mode). If you ` +
+    `need to change this file, write its FULL new content; if it is genuinely obsolete, remove exactly one ` +
+    `stale file by name instead of emptying it.`
   );
 }
 

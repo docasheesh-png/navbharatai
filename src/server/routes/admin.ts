@@ -3,8 +3,9 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, getServerDb as getDb } from '../lib/serverDb';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
+import { mergeWallets } from '../lib/accountMerge';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
@@ -708,6 +709,45 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
       res.json({ ok: true, newBalance });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // ── Merge a duplicate account's wallet INTO another (one person = one wallet) ──────────────
+  // Admin-triggered ONLY: the admin PROVES the two accounts are the same person by choosing them —
+  // identity is never inferred, and merely fetching someone's GitHub repo can NEVER move a wallet.
+  // Uses the tested, pure mergeWallets: debt carries (a negative balance is NOT escaped), the welcome
+  // bonus counts ONCE (no farming), and real purchases all carry. Atomic + idempotent: the source
+  // wallet is zeroed and stamped `mergedInto` so it can never be spent again or double-merged.
+  app.post('/api/admin/users/:userId/merge', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    const { userId } = req.params;             // the account to KEEP (merge INTO)
+    const fromUserId = req.body?.fromUserId;   // the duplicate account to merge and retire
+    if (!fromUserId || typeof fromUserId !== 'string') return res.status(400).json({ error: 'fromUserId (string) required' });
+    if (fromUserId === userId) return res.status(400).json({ error: 'Cannot merge an account into itself' });
+    try {
+      const intoRef = doc(db, 'user_token_wallets', userId);
+      const fromRef = doc(db, 'user_token_wallets', fromUserId);
+      const out = await runTransaction(db, async (tx: any) => {
+        const intoSnap = await tx.get(intoRef);
+        const fromSnap = await tx.get(fromRef);
+        if (!fromSnap.exists()) throw new Error('Source account has no wallet to merge');
+        const fromData = fromSnap.data();
+        if (fromData.mergedInto) throw new Error(`Source account was already merged into ${fromData.mergedInto}`);
+        const intoData = intoSnap.exists()
+          ? intoSnap.data()
+          : { userId, tokenBalance: 0, totalTokensUsed: 0, totalTokensPurchased: 0, total_output_tokens_used: 0, total_money_spent: 0, remaining_balance: 0, walletLedger: [] };
+        const nowIso = new Date().toISOString();
+        const { wallet: merged, audit: mergeAudit } = mergeWallets(intoData, fromData, nowIso);
+        tx.set(intoRef, merged);
+        // Retire the source: zero its balance and flag it merged so it can never be spent or re-merged.
+        tx.set(fromRef, { ...fromData, tokenBalance: 0, remaining_balance: 0, total_balance: 0, mergedInto: userId, mergedAt: nowIso, updatedAt: nowIso });
+        return { newBalance: merged.tokenBalance, mergeAudit };
+      });
+      audit('ADMIN_WALLET_MERGE', { into: userId, from: fromUserId, newBalance: out.newBalance, ...out.mergeAudit, ip: req.ip });
+      res.json({ ok: true, into: userId, from: fromUserId, newBalance: out.newBalance, audit: out.mergeAudit });
+    } catch (e: any) {
+      console.error('[ADMIN] wallet merge failed:', e?.message);
+      res.status(500).json({ error: 'Merge failed', detail: e?.message || String(e) });
+    }
   });
 
   // ── Ban / unban user ──────────────────────────────────────────────────────

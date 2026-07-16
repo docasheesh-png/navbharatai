@@ -16782,3 +16782,36 @@ so the raw reason is allowed — the white-label law covers END-USER surfaces on
 visible so it can be fixed at the root; most likely it is an expired admin token (re-login resolves it).
 
 Gate: frontend `tsc --noEmit` clean; server tsc clean; full vitest 6883 pass.
+
+---
+
+## 2026-07-16 — Slice 1 of one-wallet: tested wallet-MERGE core + admin merge tool (money-safe)
+
+**Admin goal:** one person = one wallet on the ONE NavBharatAI project; login method is just a gate; a
+restored account's balance should follow. This slice ships the MONEY-CRITICAL core + a usable admin tool.
+
+**`accountMerge.ts` (pure, 10/10 tests):** `mergeWallets(into, other, nowIso)` reconstructs the merged
+balance FROM FIRST PRINCIPLES — `realPurchased(A) + realPurchased(B) + ONE welcome (if either got it) −
+used(A) − used(B)` — so:
+- **Debt carries** (a negative/overdrafted balance reduces the merged balance — a user can NEVER escape
+  their own debt by starting fresh). Admin's exact case tested: paid ₹100 (10k tokens) + own old account
+  overdrafted 10k → **net 0**, not ₹100.
+- **Welcome bonus counts ONCE per person** (not once-per-account) — no N×50k farming. Tested incl. a
+  partially-spent welcome not resurrecting.
+- **Real purchases all carry**; Pass = OR; usage totals sum; ledger concatenated + bounded with an honest
+  merge marker.
+
+**`POST /api/admin/users/:userId/merge` (admin-gated, transactional):** the admin PROVES identity by
+choosing the two accounts (never inferred — merely fetching a GitHub repo can NEVER move a wallet). Atomic
++ idempotent: the source wallet is zeroed and flagged `mergedInto` so it can never be spent again or
+double-merged. Admin UI: a **Merge** button in the users table (prompts for the source userId, double-confirm).
+
+**Honest scope — what's NOT in this slice (next steps):**
+- CLIENT account-linking (a signed-in user attaching another provider via `linkWithCredential`, + the
+  Firebase console "one account per email" setting) — prevents FUTURE duplicates. Needs live Firebase to
+  verify; admin does the console toggle.
+- An alias resolver so logging into a merged (retired) source account auto-resolves to the canonical wallet
+  (today it correctly shows 0). 
+- Chat-history/build re-keying on merge (this slice merges the WALLET/money; history-merge is separate).
+
+Gate: frontend `tsc --noEmit` clean; server tsc clean; `accountMerge.test.ts` 10/10; full vitest 6918 pass.

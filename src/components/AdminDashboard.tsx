@@ -343,6 +343,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
+  // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
+  // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
+  // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
+  const handleMerge = async (intoUserId: string) => {
+    const fromUserId = window.prompt(`Merge which account's wallet INTO this user?\nEnter the SOURCE userId (the duplicate to retire).\n\nDebt carries, welcome bonus counts once, purchases carry. The source wallet is zeroed and retired.`);
+    if (!fromUserId || !fromUserId.trim()) return;
+    if (!window.confirm(`Merge wallet of\n  ${fromUserId.trim()}\nINTO\n  ${intoUserId}\n?\nThis is irreversible. The source is zeroed and flagged merged.`)) return;
+    setActionLoading(intoUserId + '_merge');
+    try {
+      const r = await adminPost(`/api/admin/users/${intoUserId}/merge`, { fromUserId: fromUserId.trim() });
+      if (r.ok) { toast(`Merged! New balance: ${(r.newBalance ?? 0).toLocaleString()} tokens`); fetchUsers(); }
+      else toast('Merge failed: ' + (r.detail || r.error));
+    } finally { setActionLoading(null); }
+  };
+
   const handleSettingsSave = async () => {
     const r = await adminPost('/api/admin/settings', { maintenanceMode, featureFlags, pricingConfig, providerEnabled });
     if (r.ok) toast('Settings saved!');
@@ -705,6 +720,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   </button>
                                   <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
+                                  </button>
+                                  <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-purple-400 uppercase hover:bg-purple-500/20 transition-all">
+                                    {actionLoading === u.userId + '_merge' ? '...' : 'Merge'}
                                   </button>
                                 </>
                               )}

@@ -44,8 +44,16 @@ describe('professional AI framework', () => {
     }
   });
 
-  it('flagship professionals have a domain signature method (deeper capabilities, batch 1)', () => {
-    for (const id of ['nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', 'coding_ai', 'lawyer_ai', 'accountant_ai', 'finance_ai']) {
+  it('professionals with a domain signature method carry a real one (deeper capabilities)', () => {
+    const withMethod = [
+      // Batch 1 — flagship advice domains
+      'nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', 'coding_ai', 'lawyer_ai', 'accountant_ai', 'finance_ai',
+      // Batch 2 — education/tutor domains
+      'mathscience_ai', 'english_ai', 'speaking_ai', 'resume_ai', 'thesis_ai', 'studyabroad_ai', 'aptitude_ai', 'gk_ai',
+      // Batch 3 — health/care domains
+      'parenting_ai', 'eldercare_ai', 'petcare_ai', 'maternity_ai', 'vet_ai', 'pharmacist_ai', 'firstaid_ai', 'yoga_ai',
+    ];
+    for (const id of withMethod) {
       const p = getProfessional(id)!;
       expect(p.method, id).toBeTruthy();
       expect(p.method!.length, id).toBeGreaterThan(80);

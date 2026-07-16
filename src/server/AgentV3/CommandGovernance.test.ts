@@ -141,3 +141,46 @@ describe('destructiveSourceDeletionTarget — block rm -rf of a source directory
     expect(msg).toMatch(/fix the specific error/i);
   });
 });
+
+// StudySync deep-test (2026-07-16): the builder self-destructed via TWO siblings the rm -rf guard missed —
+// it bulk-`rm`'d the individual component files, then `rmdir`'d the emptied module dirs, leaving broken
+// imports (ReviewHistory/BOX_INTERVALS unresolvable) → the app failed the readiness gate. These siblings
+// are the SAME self-destruction class and must be blocked too.
+describe('destructiveSourceDeletionTarget — sibling patterns (StudySync 2026-07-16)', () => {
+  it('blocks the EXACT StudySync rmdir of emptied source dirs', () => {
+    expect(destructiveSourceDeletionTarget('rmdir src/components src/hooks src/utils')).toBe('src/components');
+  });
+  it('blocks rmdir of a bare source dir or the whole src tree', () => {
+    expect(destructiveSourceDeletionTarget('rmdir src')).toBe('src');
+    expect(destructiveSourceDeletionTarget('rmdir components')).toBe('components');
+    expect(destructiveSourceDeletionTarget('rmdir ./src/lib')).toBe('./src/lib');
+    expect(destructiveSourceDeletionTarget('rmdir -p src/hooks 2>/dev/null')).toBe('src/hooks');
+  });
+  it('ALLOWS rmdir of regenerable dirs', () => {
+    expect(destructiveSourceDeletionTarget('rmdir node_modules')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rmdir dist build')).toBeNull();
+  });
+  it('blocks the EXACT StudySync bulk rm of the component set (≥3 source files)', () => {
+    expect(
+      destructiveSourceDeletionTarget(
+        'rm src/components/CardEditor.tsx src/components/CardList.tsx src/components/Dashboard.tsx src/components/ReviewSummary.tsx',
+      ),
+    ).toBe('src/components/CardEditor.tsx');
+  });
+  it('blocks a bulk source-file rm even without a recursive flag', () => {
+    expect(destructiveSourceDeletionTarget('rm src/a.ts src/b.ts src/c.ts')).toBe('src/a.ts');
+    expect(destructiveSourceDeletionTarget('rm -f src/hooks/useA.ts src/hooks/useB.ts src/hooks/useC.ts')).toBe('src/hooks/useA.ts');
+  });
+  it('ALLOWS deleting one or two genuinely-stale files (below the bulk threshold)', () => {
+    expect(destructiveSourceDeletionTarget('rm src/components/Stale.tsx')).toBeNull();
+    expect(destructiveSourceDeletionTarget('rm src/old.ts src/older.ts')).toBeNull();
+  });
+  it('does NOT count boilerplate assets (.css/.svg/.json) toward the bulk threshold', () => {
+    expect(destructiveSourceDeletionTarget('rm src/App.css src/index.css src/assets/logo.svg')).toBeNull();
+  });
+  it('blocks a bulk source delete anywhere in a chained command', () => {
+    expect(
+      destructiveSourceDeletionTarget('npm run build; rm src/x.tsx src/y.tsx src/z.tsx && rmdir src/components'),
+    ).toBe('src/x.tsx');
+  });
+});

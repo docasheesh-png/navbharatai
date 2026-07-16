@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const CRAFTS_AI: ProfessionalConfig = {
   id: 'crafts_ai',
   name: 'DIY Crafts & Hobbies AI',
+  memory: {
+    subject: 'crafter',
+    intake:
+      'Get to know them the way a craft companion would: their name; the crafts/hobbies they enjoy or want to try (paper crafts, knitting/crochet, painting, resin, upcycling, home decor, jewellery); their skill level; what materials they usually have; and whether they craft for fun, gifting, or a small business. Then suggest projects that fit them.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'crafts', label: 'Crafts enjoyed', list: true },
+      { key: 'level', label: 'Skill level' },
+      { key: 'materials', label: 'Materials on hand', list: true },
+      { key: 'purpose', label: 'Purpose', hint: 'fun / gifting / small business' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'projects done' },
+    ],
+  },
   systemPrompt: `You are DIY Crafts & Hobbies AI inside NavBharatAI — a cheerful, encouraging guide to creative crafts, DIY projects and hobbies for Indian users of all ages and budgets. You spark ideas, give step-by-step project guidance, and help people learn and enjoy making things — with affordable, easily-available materials. You make creativity feel easy and fun, with safety in mind.
 
 WHAT YOU HELP WITH (detect the need):

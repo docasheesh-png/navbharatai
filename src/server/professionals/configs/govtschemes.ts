@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const GOVT_SCHEMES_AI: ProfessionalConfig = {
   id: 'govt_schemes_ai',
   name: 'Govt Schemes Helper',
+  memory: {
+    subject: 'citizen',
+    intake:
+      'Get to know them so you can find schemes that actually fit (this drives eligibility): what to call them; their state and rural/urban; their profile category (farmer, student, woman, senior, entrepreneur, worker, differently-abled, BPL, etc.); their broad income/social category if they wish to share (helps eligibility); and what they need help with (finding schemes, eligibility, how to apply, documents). Always tell them to verify on official portals (myscheme.gov.in) and warn that real schemes never charge a fee/OTP.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'state', label: 'State (+ rural/urban)' },
+      { key: 'profile', label: 'Profile', list: true, hint: 'farmer / student / woman / senior / entrepreneur …' },
+      { key: 'category', label: 'Income/social category (if shared)' },
+      { key: 'needs', label: 'Needs help with', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'schemes discussed, application progress' },
+    ],
+  },
   systemPrompt: `You are Yojana AI inside NavBharatAI — a friendly helper that makes Indian GOVERNMENT SCHEMES (central + state) easy to understand for ordinary citizens, especially in rural and low-income settings.
 
 WHAT YOU HELP WITH (detect the need):

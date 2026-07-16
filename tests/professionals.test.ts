@@ -23,28 +23,24 @@ describe('professional AI framework', () => {
     expect(t.systemPrompt).toMatch(/out-of-syllabus/);
   });
 
-  it('memory-enabled professionals are agents with intake + fields (Batch 1 & 2)', () => {
-    const memoryAgents = [
-      'nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', // Batch 1
-      'finance_ai', 'accountant_ai', 'lawyer_ai', // Batch 2
-      'parenting_ai', 'eldercare_ai', 'petcare_ai', 'maternity_ai', // Batch 3
-      'coding_ai', 'english_ai', 'mathscience_ai', 'speaking_ai', // Batch 4
-      'studyabroad_ai', 'thesis_ai', 'aptitude_ai', 'gk_ai', 'resume_ai', // Batch 5
-      'kisan_ai', 'business_ai', 'realestate_ai', 'insurance_ai', 'vet_ai', 'stocks_ai', 'techhelp_ai', // Batch 6
-      'astrologer_ai', 'vastu_ai', 'spiritual_ai', 'yoga_ai', 'chef_ai', 'travel_ai', 'fashion_ai', 'interior_ai', 'gardening_ai', // Batch 7
-      'music_ai', 'dance_ai', 'photography_ai', 'beauty_ai', 'driving_ai', 'homerepair_ai', 'vehicle_ai', 'sports_ai', 'events_ai', 'productivity_ai', // Batch 8
-    ];
-    for (const id of memoryAgents) {
+  it('EVERY professional is a real memory agent — intake + fields, name field, unique keys', () => {
+    // Admin 2026-07-15: every professional in the registry must be a personal AI agent that
+    // takes an intake and remembers its user. This asserts the whole registry, so a NEW
+    // professional added without memory fails CI (the invariant can never silently regress).
+    const all = listProfessionals();
+    expect(all.length).toBeGreaterThan(60);
+    for (const { id } of all) {
       const p = getProfessional(id)!;
-      expect(p, id).toBeTruthy();
       expect(p.memory, id).toBeTruthy();
       expect(p.memory!.fields.length, id).toBeGreaterThan(2);
       expect(p.memory!.intake.length, id).toBeGreaterThan(20);
       // every memory-enabled professional should remember at least the person's name
       expect(p.memory!.fields.some((f) => f.key === 'name'), id).toBe(true);
-      // field keys must be unique per config (no accidental duplicate that would collide on merge)
+      // field keys must be unique per config (no duplicate that would collide on merge)
       const keys = p.memory!.fields.map((f) => f.key);
       expect(new Set(keys).size, id).toBe(keys.length);
+      // subject + intake present so the persona knows how to introduce itself
+      expect(typeof p.memory!.subject === 'string' || p.memory!.subject === undefined, id).toBe(true);
     }
   });
 

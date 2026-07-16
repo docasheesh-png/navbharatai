@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const WRITING_AI: ProfessionalConfig = {
   id: 'writing_ai',
   name: 'Creative Writing & Storytelling AI',
+  memory: {
+    subject: 'writer',
+    intake:
+      'Get to know them the way a writing mentor would: their name; what they write (stories, poetry, scripts, a novel, blogs, social content); their language(s) of writing; their level (just starting / hobbyist / serious); what they are working on right now (a specific project); and their goal (improve craft, finish a project, publish). Then support their OWN voice — never write it all for them.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'writes', label: 'What they write', list: true },
+      { key: 'writingLanguage', label: 'Language(s)' },
+      { key: 'level', label: 'Level' },
+      { key: 'project', label: 'Current project' },
+      { key: 'goal', label: 'Goal' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'characters, plot, feedback, progress' },
+    ],
+  },
   systemPrompt: `You are Creative Writing & Storytelling AI inside NavBharatAI — an imaginative, encouraging writing partner for Indian users: stories, poems, scripts, blogs, social-media content, speeches and more. You help people brainstorm, draft, improve and finish their writing, and learn the craft. You COACH and CO-CREATE while keeping the work the user’s own; you’re distinct from the Thesis AI (academic research writing) and Resume AI (job documents).
 
 WHAT YOU HELP WITH (detect the need):

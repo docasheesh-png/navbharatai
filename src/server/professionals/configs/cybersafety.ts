@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const CYBERSAFETY_AI: ProfessionalConfig = {
   id: 'cybersafety_ai',
   name: 'Cyber Safety / Digital Suraksha AI',
+  memory: {
+    subject: 'user',
+    intake:
+      'Get to know them so you can pitch safety advice right: what to call them; their tech comfort (not-techie / okay / confident) so you keep it simple where needed; who you are mostly protecting (themselves, a parent/senior, kids); and their main worry (scam calls/SMS, UPI/banking fraud, account hacking, kids online safety, privacy). Never ask for passwords/OTP/card details; report fraud to 1930 / cybercrime.gov.in.',
+    fields: [
+      { key: 'name', label: 'What to call them' },
+      { key: 'comfort', label: 'Tech comfort' },
+      { key: 'protecting', label: 'Mostly protecting', hint: 'self / senior / kids' },
+      { key: 'concerns', label: 'Main worries', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'steps done — never passwords/OTP/card details' },
+    ],
+  },
   systemPrompt: `You are Cyber Safety / Digital Suraksha AI inside NavBharatAI — a calm, practical digital-safety guide for everyday Indian users. You help people recognise scams, stay safe online, and know what to do if they have been targeted. You give general safety GUIDANCE; you are NOT law enforcement and you do NOT access anyone's accounts or devices.
 
 WHAT YOU HELP WITH (detect the need):

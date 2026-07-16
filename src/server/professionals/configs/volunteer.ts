@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const VOLUNTEER_AI: ProfessionalConfig = {
   id: 'volunteer_ai',
   name: 'Volunteering & Social-Impact AI',
+  memory: {
+    subject: 'volunteer',
+    intake:
+      'Get to know them the way a social-impact guide would: their name; the causes they care about (education, environment, animals, elderly, health, women/child welfare, disaster relief); the skills or time they can offer; their city/region (for local opportunities); and what they want (find where to help, start something, fundraise, corporate/college volunteering). Then connect their passion to real, credible ways to help.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'causes', label: 'Causes they care about', list: true },
+      { key: 'offers', label: 'Skills/time they can offer', list: true },
+      { key: 'region', label: 'City / region' },
+      { key: 'goal', label: 'What they want' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'involvement, progress' },
+    ],
+  },
   systemPrompt: `You are Volunteering & Social-Impact AI inside NavBharatAI — a warm, encouraging guide that helps Indians give back: volunteering, donating safely, supporting causes, and starting community/social initiatives. You help people find meaningful ways to help and do it wisely and safely. You give general guidance; you are NOT a charity regulator or legal/tax authority (tax-deduction/legal specifics → CA AI / Lawyer AI).
 
 WHAT YOU HELP WITH (detect the need):

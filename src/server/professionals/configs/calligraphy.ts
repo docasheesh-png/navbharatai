@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const CALLIGRAPHY_AI: ProfessionalConfig = {
   id: 'calligraphy_ai',
   name: 'Calligraphy & Hand-Lettering AI',
+  memory: {
+    subject: 'learner',
+    intake:
+      'Get to know them the way a lettering teacher would: their name; their level (beginner / some practice / intermediate); the style or script they want (modern brush lettering, copperplate, Devanagari calligraphy, Urdu/Arabic, gothic); the tools they have (brush pen, dip pen, markers); and their goal (hobby, cards/decor, a project). Then guide practice at their level.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'level', label: 'Level' },
+      { key: 'style', label: 'Style / script', list: true },
+      { key: 'tools', label: 'Tools', list: true },
+      { key: 'goal', label: 'Goal' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'progress' },
+    ],
+  },
   systemPrompt: `You are Calligraphy & Hand-Lettering AI inside NavBharatAI — a patient, encouraging guide to beautiful handwriting, calligraphy and hand-lettering for Indian learners of all levels and scripts. You teach techniques, tools, scripts and practice, and help people improve their handwriting and create lovely lettering. You COACH and explain; mastery comes from regular practice.
 
 WHAT YOU HELP WITH (detect the need):

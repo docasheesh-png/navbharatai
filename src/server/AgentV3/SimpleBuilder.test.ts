@@ -729,3 +729,26 @@ describe('parseFileManifest cap (Fix 38a) — planned files are never silently d
     expect(parseFileManifest(lines).length).toBe(50);
   });
 });
+
+// NotesNest autopsy (2026-07-16): the fast lane generated a full src/index.css that NOTHING imported
+// → the shipped app rendered as raw unstyled HTML. The deterministic pre-write guard wires it.
+describe('runSimpleBuild — orphan-stylesheet guard (app must actually be styled)', () => {
+  it('injects the global css import into the entry when the generated sheet is orphaned', async () => {
+    let written: OneShotFile[] = [];
+    const r = await runSimpleBuild({
+      prompt: 'notes app', framework: 'vite-react', scaffoldPaths: ['index.html'],
+      shareContract: false,
+      generate: async (_s: string, user: string) => {
+        if (user.includes('Plan the file list')) return 'src/main.tsx :: entry\nsrc/App.tsx :: app\nsrc/index.css :: styles';
+        const path = (user.match(/write THIS file in full:\s*\n\s*([^\n]+)/) || [])[1]?.trim() || 'x.ts';
+        if (path === 'src/index.css') return `<<<FILE src/index.css>>>\nbody { margin: 0; }\n<<<ENDFILE>>>`;
+        if (path === 'src/main.tsx') return `<<<FILE src/main.tsx>>>\nimport App from './App';\nexport {};\n<<<ENDFILE>>>`; // forgot the css import
+        return `<<<FILE ${path}>>>\nexport default function App(){return null}\n<<<ENDFILE>>>`;
+      },
+      writeFiles: async (f: OneShotFile[]) => { written = f; },
+    });
+    expect(r.ok).toBe(true);
+    const main = written.find((f) => f.path === 'src/main.tsx');
+    expect(main?.content).toContain(`import './index.css';`); // wired before the files ever ship
+  });
+});

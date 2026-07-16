@@ -16983,3 +16983,45 @@ weak tier, noClaude:true, billed ₹0 correctly). Ledger: ✅295 auto-resolved �
 **Open root cause (rule 6, still):** GLM 429 is per-ACCOUNT throughput saturation — 5 keys did not
 remove it (repeatCount 65). The cooldown stops the storm + latency burn; the throughput ceiling
 itself needs either a higher GLM tier or Kimi-first lead when GLM is saturated (future decision).
+
+---
+
+## 2026-07-17 — NotesNest autopsy: fixes PROVEN live + the "unstyled app" root cause killed (orphan stylesheet + scaffold pre-flight + design contract)
+
+**Trigger (5th absolute rule):** admin's NotesNest build report + screenshot ("designer theek se kaam
+nahi kar raha — app sundar nahi lag rahi"). ok:true, READY 76/100, 881s, ₹6.03, weak/noClaude.
+
+**Previous fixes PROVEN in this real build:** `SIMPLE_BUILD_SALVAGE` fired (4 files handed off), the
+full builder said "continue building it without duplicating structure" — NO module split; GLM
+failures 172→30 and GLM then delivered 115 turns (shared cooldown recovered it mid-build).
+
+**Ledger:** ✅348 auto-resolved · 🥵 6 tsc-repair rounds on ONE unused variable + 2 edit_file misses ·
+🔀 builder hand-wrote package.json/tsconfig ("npm enoent" — scaffold absent in sandbox after fallback)
+· ❌ the app shipped as RAW UNSTYLED HTML (the admin's complaint), dangerouslySetInnerHTML warning,
+FEATURE_COVERAGE probe claimed 0 controls present (false positive — screenshot shows them; open).
+
+**Root causes fixed (this PR):**
+- ✅ **Orphan stylesheet — the unstyled-app class.** src/index.css existed but was imported by NOTHING
+  (fallback-written main.tsx had no import) — compiler/tsc/preview all stay green, so no gate caught
+  it. New `findOrphanStylesheets` + deterministic `injectGlobalStylesheetImport`
+  (ProjectIntegrityChecks): global sheet with zero JS imports AND no HTML <link> → inject the entry
+  import by construction. Wired at BOTH lanes: fast-lane pre-write guard + route-level integrity pass
+  (before the LLM self-heal; new INTEGRITY_CSS_WIRED / INTEGRITY_ORPHAN_STYLESHEET diagnostics). Kill:
+  AGENTV3_CSS_IMPORT_GUARD=off. 8 regression tests.
+- ✅ **Template ships styled-by-default.** The vite-react starter had NO stylesheet and main.tsx
+  imported none. Now: starter `src/index.css` (theme variables, font stack, styled buttons/inputs,
+  dark/light) + `import './index.css'` in template main.tsx. Generators overwrite the content freely —
+  the wiring already exists.
+- ✅ **Scaffold pre-flight at agentic start.** Both StudySync and NotesNest hit "npm enoent
+  package.json" after fallback → builder hand-wrote a DRIFTED scaffold (its strict tsconfig caused the
+  6-round unused-var grind). `ensureScaffoldOnce` now runs on the FIRST tool call of every run
+  (~1 readFile when scaffolded), and `ensureViteScaffold` became NON-DESTRUCTIVE per file (never
+  clobbers salvaged work with the starter).
+- ✅ **Design contract (the "sundar" baseline).** A compact DESIGN QUALITY bar in every fast-lane
+  per-file prompt (`DESIGN_CONTRACT`) + the agentic systemPrompt: real layout (cards/panels, spacing
+  scale), styled interactive elements with hover/focus states, :root CSS variables, hierarchy, empty
+  states; "raw-HTML looks are a defect".
+
+**Open root causes (rule 6):** FEATURE_COVERAGE browser probe reported "Present: none" on an app whose
+screenshot clearly shows the controls — detector false positive, needs its own autopsy; the deeper
+"visual QA pass" (screenshot→vision judge on real render) remains the Tier-1 upgrade for design quality.

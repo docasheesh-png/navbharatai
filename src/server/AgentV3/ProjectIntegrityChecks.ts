@@ -29,12 +29,23 @@ export interface DuplicateStylesheet {
   importers: string[];
 }
 
+export interface OrphanStylesheet {
+  /** The stylesheet file that exists in the project but is wired into NOTHING. */
+  stylesheet: string;
+}
+
 export interface ProjectIntegrityReport {
   /** Components that own initial focus. A conflict exists when this has 2+ entries. */
   focusOwners: FocusOwner[];
   /** Stylesheets imported by 2+ modules. */
   duplicateStylesheets: DuplicateStylesheet[];
-  /** True when there is no integrity defect (≤1 focus owner AND no duplicate stylesheet). */
+  /**
+   * GLOBAL stylesheets imported by ZERO modules and linked from no HTML (NotesNest autopsy
+   * 2026-07-16): the app compiled and "worked" but rendered as RAW unstyled HTML because
+   * src/index.css was never imported anywhere — the exact inverse of duplicateStylesheets.
+   */
+  orphanStylesheets: OrphanStylesheet[];
+  /** True when there is no integrity defect (≤1 focus owner, no duplicate AND no orphan stylesheet). */
   ok: boolean;
 }
 
@@ -110,12 +121,77 @@ export function findDuplicateStylesheets(files: Record<string, string>): Duplica
   return dups.sort((a, b) => a.stylesheet.localeCompare(b.stylesheet));
 }
 
+/**
+ * Find GLOBAL stylesheets that exist in the project but are wired into NOTHING — no side-effect
+ * `import "….css"` from any module AND no `<link …href="….css">` in any HTML file. Such an app ships
+ * as raw unstyled HTML (real case: NotesNest 2026-07-16 — the fast lane generated a full src/index.css,
+ * the fallback full builder hand-wrote main.tsx WITHOUT the import, and nothing anywhere checked).
+ * CSS Modules (`*.module.css`) are excluded — an unused module sheet is dead code, not an unstyled app.
+ */
+export function findOrphanStylesheets(files: Record<string, string>): OrphanStylesheet[] {
+  const cssFiles = Object.keys(files).filter((p) => /\.css$/i.test(p) && !/\.module\.css$/i.test(p));
+  if (cssFiles.length === 0) return [];
+  // Collect every stylesheet reference: JS/TS side-effect imports + HTML <link href>.
+  const referencedKeys = new Set<string>();
+  const importRe = /import\s+['"]([^'"]+\.css)['"]/g;
+  const linkRe = /<link\b[^>]*href\s*=\s*['"]([^'"]+\.css)['"]/gi;
+  for (const [file, raw] of Object.entries(files)) {
+    if (typeof raw !== 'string') continue;
+    if (isSourceFile(file)) {
+      const src = stripComments(raw);
+      let m: RegExpExecArray | null;
+      while ((m = importRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+    } else if (/\.html?$/i.test(file)) {
+      let m: RegExpExecArray | null;
+      while ((m = linkRe.exec(raw)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+    }
+  }
+  return cssFiles
+    .filter((p) => !referencedKeys.has(stylesheetKey(p)))
+    .sort()
+    .map((stylesheet) => ({ stylesheet }));
+}
+
+/**
+ * DETERMINISTIC FIX for an orphan GLOBAL stylesheet: inject its side-effect import at the top of the
+ * app's entry module (src/main.tsx / main.jsx / main.ts / index.tsx …) so the app is actually styled.
+ * Returns the updated files plus what was injected (empty = nothing to do / no entry to inject into).
+ * Only fires for an orphan named like a global sheet living beside the entry (index/main/app/global/
+ * style[s].css) — an unreferenced feature-level sheet stays a report finding for the LLM repair pass,
+ * because guessing its importer would be wrong more often than right. Pure.
+ */
+export function injectGlobalStylesheetImport(
+  files: Record<string, string>,
+): { files: Record<string, string>; injected: Array<{ stylesheet: string; entry: string }> } {
+  const orphans = findOrphanStylesheets(files);
+  if (orphans.length === 0) return { files, injected: [] };
+  const entry = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx']
+    .find((p) => typeof files[p] === 'string');
+  if (!entry) return { files, injected: [] };
+  const entryDir = entry.slice(0, entry.lastIndexOf('/') + 1); // '' when the entry sits at the root
+  const globalName = /^(index|main|app|global|globals|style|styles)\.css$/i;
+  const out = { ...files };
+  const injected: Array<{ stylesheet: string; entry: string }> = [];
+  for (const { stylesheet } of orphans) {
+    const base = stylesheet.split('/').pop() ?? stylesheet;
+    if (!globalName.test(base)) continue; // feature-level sheet — leave to the repair pass
+    // Import specifier relative to the entry: same dir → './x.css'; otherwise from the project root.
+    const spec = stylesheet.startsWith(entryDir) && entryDir
+      ? `./${stylesheet.slice(entryDir.length)}`
+      : `/${stylesheet}`.replace('//', '/');
+    out[entry] = `import '${spec}';\n${out[entry]}`;
+    injected.push({ stylesheet, entry });
+  }
+  return { files: out, injected };
+}
+
 /** Run every project-integrity check over the written file set. Pure + deterministic. */
 export function analyzeProjectIntegrity(files: Record<string, string>): ProjectIntegrityReport {
   const focusOwners = findFocusOwners(files);
   const duplicateStylesheets = findDuplicateStylesheets(files);
-  const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0;
-  return { focusOwners, duplicateStylesheets, ok };
+  const orphanStylesheets = findOrphanStylesheets(files);
+  const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0 && orphanStylesheets.length === 0;
+  return { focusOwners, duplicateStylesheets, orphanStylesheets, ok };
 }
 
 /**
@@ -139,6 +215,13 @@ export function integrityRepairInstruction(report: ProjectIntegrityReport): stri
       `DUPLICATE STYLESHEET — "${d.stylesheet}" is imported by ${d.importers.length} modules ` +
       `(${d.importers.join(', ')}). Import a shared/global stylesheet from EXACTLY ONE module (the entry, ` +
       `e.g. main.tsx) and remove the duplicate import from the other(s).`,
+    );
+  }
+  for (const o of report.orphanStylesheets) {
+    parts.push(
+      `ORPHAN STYLESHEET — "${o.stylesheet}" exists but is imported by NOTHING (no module imports it and ` +
+      `no HTML links it), so the app renders as raw unstyled HTML. Add a side-effect import for it in the ` +
+      `entry module (e.g. \`import './index.css'\` in src/main.tsx), or in the one component it belongs to.`,
     );
   }
   return parts.join('\n');

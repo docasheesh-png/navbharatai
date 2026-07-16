@@ -23,6 +23,7 @@ import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
+import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
 
 export interface SimpleFileSpec {
   path: string;
@@ -164,8 +165,25 @@ export function fileSystemPrompt(framework: string): string {
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     ...EXPORT_IMPORT_CONVENTION,
+    ...DESIGN_CONTRACT,
   ].join('\n');
 }
+
+/**
+ * A FIXED visual-design bar, injected into every per-file generation call (NotesNest autopsy
+ * 2026-07-16: the delivered app was functionally complete but looked like raw HTML — "designer theek
+ * se kaam nahi kar raha"). Cheap models default to bare markup unless the bar is explicit; this keeps
+ * it compact (a few lines of tokens) and concrete so every file pulls toward the same polished look.
+ */
+export const DESIGN_CONTRACT: string[] = [
+  '',
+  'DESIGN QUALITY (the app must look professionally designed, not like raw HTML):',
+  '- Layout: real structure (sidebar/panels/cards with borders+radius+padding), never bare stacked elements; use flex/grid with a consistent spacing scale (4/8/12/16/24px).',
+  '- Style every interactive element: buttons/inputs get padding, border-radius, hover & focus-visible states — default browser widgets must never appear.',
+  '- Theme via CSS variables on :root (background, text, muted, accent, card, border) so dark/light stays consistent; system-ui font stack; line-height ~1.5.',
+  '- In components, use className with classes that REALLY exist in the global stylesheet (and add any class you use to it when you write that stylesheet).',
+  '- Empty states, hover feedback and a clear visual hierarchy (one accent color, muted secondary text) — small details make it feel like a real product.',
+];
 
 /**
  * A FIXED export/import convention, injected into every per-file generation + repair prompt. Because
@@ -669,6 +687,21 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             deps.log?.('🔧 Re-attached the entry script to index.html so the app actually boots.');
           }
         } catch { /* best-effort — a failure just leaves the HTML as generated */ }
+      }
+      // DETERMINISTIC ORPHAN-STYLESHEET GUARD before write/preview (NotesNest autopsy 2026-07-16): a
+      // generated global stylesheet that NOTHING imports ships as a raw unstyled app — the compiler,
+      // tsc and the preview all stay green, so only this wiring check catches it. Inject the entry-side
+      // side-effect import (`import './index.css'`) when the sheet is orphaned. Best-effort.
+      // Kill: AGENTV3_CSS_IMPORT_GUARD=off.
+      if (process.env.AGENTV3_CSS_IMPORT_GUARD !== 'off') {
+        try {
+          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
+          const wired = injectGlobalStylesheetImport(before);
+          if (wired.injected.length > 0) {
+            for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🎨 Wired ${wired.injected.length} orphaned global stylesheet(s) into the entry so the app is actually styled.`);
+          }
+        } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
       // ZOMBIE GUARD: if the race was already lost, this closure is an orphan — writing now would dump
       // a second module tree into a workspace the full builder is ALREADY building in (the StudySync

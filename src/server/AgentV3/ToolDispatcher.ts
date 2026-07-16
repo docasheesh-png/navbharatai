@@ -339,7 +339,13 @@ export class ToolDispatcher {
    * Self-heal the workspace scaffold using the configured framework template.
    * The actuator normally seeds a starter at workspace creation; this is the
    * safety net for when no package.json (or equivalent entry file) is present.
-   * Called when the scaffold guard blocks a create-* command — best-effort, never throws.
+   * Called when the scaffold guard blocks a create-* command AND once at the start
+   * of every agentic run (see ensureScaffoldOnce) — best-effort, never throws.
+   *
+   * NON-DESTRUCTIVE by file (NotesNest autopsy 2026-07-16): each template file is
+   * written ONLY if that path is absent. The fallback-after-salvage workspace has
+   * real generated src files but no package.json — blanket-writing the starter
+   * would clobber the salvaged work with "Hello World".
    */
   private async ensureViteScaffold(): Promise<void> {
     const entryFile = this.frameworkEntryFile();
@@ -357,11 +363,30 @@ export class ToolDispatcher {
       })();
       const files = provider.getFiles([]);
       for (const [path, content] of Object.entries(files)) {
+        const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
+        if (exists) continue; // never clobber real (e.g. salvaged) work with the starter
         await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
       }
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
     }
+  }
+
+  // PRE-FLIGHT SCAFFOLD (NotesNest autopsy 2026-07-16): both StudySync and NotesNest hit
+  // "npm error enoent: no package.json" AFTER the fast-lane fallback — the full builder then
+  // hand-wrote its own minimal package.json/tsconfig (drifted: a strict hand-made tsconfig cost
+  // 6 wasted tsc-repair rounds on an unused variable). The self-heal above only ran when the
+  // scaffold GUARD tripped, which a plain `npm install` never does. Now the FIRST tool call of a
+  // run ensures the scaffold once (one readFile probe when already scaffolded — ~free).
+  private scaffoldEnsured = false;
+  private async ensureScaffoldOnce(): Promise<void> {
+    if (this.scaffoldEnsured) return;
+    this.scaffoldEnsured = true; // set first — a probe failure must not re-run this every call
+    // Only when the FRAMEWORK is known (the real build dispatcher always passes it) — without it we
+    // could seed the wrong starter into a workspace we know nothing about (and unit tests construct
+    // bare dispatchers that must stay byte-for-byte unaffected).
+    if (!this.framework) return;
+    await this.ensureViteScaffold().catch(() => {});
   }
 
   /** Returns the canonical entry file to probe for an existing scaffold (framework-aware). */
@@ -811,6 +836,10 @@ export class ToolDispatcher {
   }
 
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
+    // Pre-flight: the very first tool touch of a run guarantees the framework scaffold exists in
+    // the sandbox (non-destructive; ~one readFile probe when already scaffolded). Kills the whole
+    // "npm enoent package.json → builder hand-writes a drifted scaffold" class on fallback builds.
+    await this.ensureScaffoldOnce();
     const input = call.input;
     switch (call.name) {
       case 'read_file': {

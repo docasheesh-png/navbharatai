@@ -436,9 +436,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'flag every frontend call that has NO matching backend route (the classic silent full-stack bug: ' +
         'it compiles and the preview loads, but the feature is broken at runtime). Also lists routes with ' +
         'no caller. Detects Express/Fastify, FastAPI/Flask and Spring routes, and fetch/axios calls. ' +
-        'Read-only, no arguments. Run it on a full-stack app before declaring it done, then fix any ' +
-        'MISSING call by adding the route or correcting the path/method.',
-      input_schema: { type: 'object', properties: {} },
+        'Run it on a full-stack app before declaring it done, then fix any ' +
+        'MISSING call by adding the route or correcting the path/method. ' +
+        'Optional `endpoint="METHOD /path"` (or just "/path") drills into ONE route\'s change-propagation ' +
+        'blast radius — the frontend call sites that depend on it — so you can review them before renaming, ' +
+        'removing, or changing that route\'s method/path. Omit it for the whole-graph overview.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          endpoint: {
+            type: 'string',
+            description: 'Optional "METHOD /path" (or bare "/path") to see that route\'s blast radius — the frontend call sites that depend on it. Omit for the whole graph.',
+          },
+        },
+      },
     },
     {
       name: 'code_graph',

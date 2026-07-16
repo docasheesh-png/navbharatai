@@ -480,6 +480,13 @@ export interface SimpleBuildResult {
   /** Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …). */
   outcome?: BuildOutcome;
   /**
+   * HANDOFF (StudySync autopsy 2026-07-16): on a TIMEOUT fallback, the paths of the completed files
+   * that were SALVAGED into the workspace before handing off — so the full builder continues from
+   * them (its own prior work) instead of rebuilding from an empty tree. Empty/undefined when nothing
+   * was salvageable (or the failure wasn't a timeout).
+   */
+  salvagedPaths?: string[];
+  /**
    * FALSE when the verify gate was wired but could not EXECUTE (sandbox infra failure) — the app
    * shipped UNVERIFIED, so the caller must NOT skip its own downstream gates. True = tsc really ran
    * and passed; undefined = verify was not wired at all.
@@ -512,6 +519,18 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   const shareContract = deps.shareContract !== false;
   let files: OneShotFile[];
   let contract = '';
+  // ZOMBIE-WRITE KILL + SALVAGE (StudySync root cause, 2026-07-16). withTimeout only RACES — the
+  // inner closure keeps running after a timeout. In the real failure the timed-out lane finished
+  // generating minutes later and dumped its files into the workspace WHILE the full builder was
+  // already building its own structure → two parallel module trees → 4 broken imports → dead app.
+  //   • `lapsed` flips the moment the race is lost: in-flight genOne results are discarded, later
+  //     genOne calls return immediately (no more token burn), and the closure's final writeFiles is
+  //     refused — the zombie can never touch the workspace again.
+  //   • `generatedSoFar` mirrors every completed file OUTSIDE the closure, so the catch can SALVAGE
+  //     the finished work into the workspace ONCE, synchronously, BEFORE the full builder starts —
+  //     it continues from real files instead of rebuilding from an empty tree.
+  let lapsed = false;
+  const generatedSoFar: OneShotFile[] = [];
   try {
     files = await withTimeout((async () => {
       deps.log?.('Planning the file list…');
@@ -536,6 +555,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // Generate ONE file (its own call, returns one FILE block). `produced` is the real source of
       // earlier-tier files, injected so this file uses their EXACT exported names.
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
+        if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
         try {
           // Fix 69 — feed consumers the producers' EXPORT SURFACE (exact names/shapes/signatures,
           // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
@@ -545,12 +565,15 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ? (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced))
             : '';
           const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock));
+          if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];
           if (!match) return null;
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
           deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
-          return { path: spec.path, content: match.content };
+          const file = { path: spec.path, content: match.content };
+          generatedSoFar.push(file); // mirror outside the closure so a timeout can salvage finished work
+          return file;
         } catch {
           return null; // a single file's call failing must not kill the whole build
         }
@@ -647,12 +670,40 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         } catch { /* best-effort — a failure just leaves the HTML as generated */ }
       }
+      // ZOMBIE GUARD: if the race was already lost, this closure is an orphan — writing now would dump
+      // a second module tree into a workspace the full builder is ALREADY building in (the StudySync
+      // catastrophe). Refuse; the catch below has salvaged what was finished.
+      if (lapsed) throw new Error('simple-build-cancelled');
       await deps.writeFiles(written);
       return written;
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
   } catch (e) {
+    lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
     const reason = e instanceof Error ? e.message : String(e);
-    return { ok: false, filesWritten: 0, summary: 'Simple build could not produce the app — switching to the full builder.', reason, outcome: 'BUILD_FAILED' };
+    // SALVAGE (timeout only): hand the full builder the files that DID finish, so it continues from
+    // real work instead of an empty tree. Written once, synchronously, BEFORE the fallback returns —
+    // there is no later writer (the zombie is dead), so the workspace the full builder first reads is
+    // exactly the workspace it keeps. Best-effort with its own small timeout; salvage failure only
+    // means the old empty-tree behavior.
+    let salvagedPaths: string[] | undefined;
+    if (reason.includes('timed out') && generatedSoFar.length > 0) {
+      const salvage = [...generatedSoFar]; // snapshot — in-flight genOne pushes can't mutate mid-write
+      try {
+        await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');
+        salvagedPaths = salvage.map((f) => f.path);
+        deps.log?.(`⏱️ The fast lane ran out of time — handing its ${salvage.length} finished file(s) to the full builder to complete.`);
+      } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
+    }
+    return {
+      ok: false,
+      filesWritten: salvagedPaths?.length ?? 0,
+      summary: salvagedPaths?.length
+        ? `Simple build timed out after generating ${salvagedPaths.length} file(s) — the full builder continues from them.`
+        : 'Simple build could not produce the app — switching to the full builder.',
+      reason,
+      outcome: 'BUILD_FAILED',
+      salvagedPaths,
+    };
   }
 
   deps.log?.(`Built your app — ${files.length} file(s), each generated individually.`);

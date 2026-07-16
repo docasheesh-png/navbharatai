@@ -16942,3 +16942,44 @@ each of ~40 turns re-sent the same big prefix + all sibling file bodies on GLM/K
 - **Next measurement:** the next real build's report now shows `cacheReadInputTokens` + a lower real-cost
   bill + smaller per-turn inputs — verify both savings AND that import-mismatch warnings did not increase
   (quality must only improve; kill switch stands ready).
+
+---
+
+## 2026-07-16 — StudySync autopsy: self-destruct CLASS closed (PR #1443 merged) + handoff zombie/salvage + shared 429 cooldown
+
+**Trigger (5th absolute rule):** admin's StudySync build report (ok:false, readiness 0/100, 1233s,
+weak tier, noClaude:true, billed ₹0 correctly). Ledger: ✅295 auto-resolved · 🔀66 provider fallbacks
+(GLM 172 failures, repeatCount up to 65 — WITH the 5-key pool live) · ❌4 broken imports
+(`ReviewHistory`/`BOX_INTERVALS` ← ../types) + 2 unresolved → dead preview ("reading 'RED'").
+
+**Root causes found and fixed:**
+- ✅ **Self-destruct CLASS killed — PR #1443 (merged, deployed).** After PR #1435 blocked the exact
+  StudySync commands, an ultracode adversarial audit (5 lenses, per-finding refutation) confirmed
+  **14 more idioms** still open. `destructiveSourceDeletionTarget` rewritten as a whole-command
+  detector: any-depth dir deletes (`rm -rf src/features/auth`, `rmdir`, `npx rimraf`), `find -delete`
+  / `-exec rm`, `xargs rm`, for-loop rm, blanking (`: > f`, `echo '' >`, `truncate -s 0`,
+  `cp /dev/null`), `mv src/… /tmp`, `git rm -r`/`git clean -fd`/`git checkout -- .`/`git reset --hard`,
+  `rm $(find …)`, bulk-rm threshold 3→2. NEW tool-path guard `isDestructiveEmptyOverwrite`:
+  write_file/write_files_batch/edit_file REFUSE to blank a populated source file (checked BEFORE the
+  write). systemPrompt rule broadened (own-prior-work framing). 47 governance tests.
+- ✅ **Simple→full handoff ZOMBIE + SALVAGE (this PR).** THE module-split root cause: `withTimeout`
+  only races — the timed-out fast lane kept generating and dumped `src/lib/*` into the workspace
+  MINUTES after the full builder had started its own `src/utils/*`/`src/types` tree → 4 broken
+  imports. Fix in `runSimpleBuild`: a `lapsed` flag kills the zombie (no post-timeout writes, queued
+  generations skipped — token burn stops); completed files are SALVAGED into the workspace once,
+  synchronously, before fallback; `salvagedPaths` returned; routes/agentv3.ts injects a
+  [CONTINUE — DO NOT START OVER] framing into buildPrompt so the full builder completes the salvaged
+  tree instead of re-planning a parallel one. 4 regression tests (salvage-once, zombie-kill,
+  token-burn stop, non-timeout unchanged).
+- ✅ **Shared 429 cooldown (this PR).** 172 GLM failures happened DESPITE the per-instance 2-strike
+  bench because (a) every call site builds its own runner instance (each re-learns from zero) and
+  (b) the fast lane fires 8 concurrent turns that all start before any streak hits 2. New
+  `RateLimitCooldowns` registry (process-wide singleton, injectable): 2 consecutive 429s on a bench
+  name → ALL instances skip it for 60s (env `AGENTV3_RATE_LIMIT_COOLDOWN_MS`, `0`/`off` disables),
+  success clears instantly. Deliberately SOFTER than the run-long bench (provider comes back
+  mid-build) — honours the earlier autopsy's "cost backfire" finding instead of contradicting it.
+  Per-name isolation keeps the key pool serving. 5 regression tests.
+
+**Open root cause (rule 6, still):** GLM 429 is per-ACCOUNT throughput saturation — 5 keys did not
+remove it (repeatCount 65). The cooldown stops the storm + latency burn; the throughput ceiling
+itself needs either a higher GLM tier or Kimi-first lead when GLM is saturated (future decision).

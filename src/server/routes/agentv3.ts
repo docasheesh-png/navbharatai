@@ -6379,6 +6379,20 @@ export function registerAgentV3Routes(app: Express): void {
         // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
         if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
+        // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
+        // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
+        // to complete — not alien clutter to re-plan around or delete. Without this framing the full
+        // builder rebuilt a PARALLEL module tree (src/utils + src/types beside the fast lane's src/lib)
+        // → 4 broken imports → a dead app. The note travels in buildPrompt so EVERY fallback runner
+        // (start-tier, escalation, default) sees it.
+        if (!sb.ok && sb.salvagedPaths?.length) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
+          buildPrompt =
+            `[CONTINUE — DO NOT START OVER] A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
+            `they are in the workspace now and they are YOUR OWN prior work:\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
+            `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
+        }
         if (sb.ok) {
           if (sb.typecheckRan === false) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });

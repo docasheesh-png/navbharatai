@@ -302,14 +302,22 @@ export function SettingsPanel({
                     <Monitor className="w-4 h-4 text-indigo-400" />
                     <h4 className="text-xs font-bold text-white uppercase tracking-widest">View Mode</h4>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {['auto', 'mobile', 'desktop'].map(m => (
-                      <button key={m} onClick={() => setDeviceMode(m as any)}
-                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
-                        {m.charAt(0).toUpperCase() + m.slice(1)}
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'auto', label: '🖥️ Auto' },
+                      { id: 'mobile', label: '📱 Mobile' },
+                      { id: 'tablet', label: '📟 Tablet' },
+                      { id: 'desktop', label: '💻 Desktop' },
+                    ].map(m => (
+                      <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
+                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
+                        {m.label}
                       </button>
                     ))}
                   </div>
+                  <p className="text-[10px] text-[#586069] mt-2 leading-relaxed">
+                    Auto follows your screen size. Mobile shows the compact layout (menu + bottom bar); Tablet & Desktop show the side rail.
+                  </p>
                 </div>
                 {/* 6 grouped sections */}
                 {[

@@ -82,7 +82,7 @@ export function TopNav({
       themeClasses.card, themeClasses.border
     )}>
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        {effectiveDeviceMode !== 'desktop' && (
+        {effectiveDeviceMode === 'mobile' && (
           <button
             onClick={() => setIsMenuOpen(true)}
             className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"
@@ -91,7 +91,7 @@ export function TopNav({
           </button>
         )}
 
-        {effectiveDeviceMode === 'desktop' && (
+        {effectiveDeviceMode !== 'mobile' && (
           <button
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             className="p-2 hover:bg-white/5 rounded-lg text-indigo-400 transition-all shrink-0 border border-white/5"

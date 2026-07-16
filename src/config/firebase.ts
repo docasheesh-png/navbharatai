@@ -30,7 +30,26 @@
 //     AND https://navbharatai.com as a JavaScript origin.
 // Override per-env with VITE_FIREBASE_AUTH_DOMAIN. NOTE: server.ts's FIREBASE_AUTH_HOST must stay the
 // real *.firebaseapp.com host — that is the proxy's upstream, not the client authDomain.
-const AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'navbharatai.com';
+//
+// NATIVE APP (admin 2026-07-15 — "google login iOS app me nahi ho raha: auth/network-request-failed"):
+// the custom authDomain (navbharatai.com) is served through server.ts's reverse-proxy. In the WEB that
+// is fine and fixes the redirect-partitioning bug. But inside a Capacitor WebView (origin
+// capacitor://localhost) the Firebase SDK reaching that PROXIED custom domain is a real extra failure
+// point — a proxy hiccup / unreachable custom host surfaces as auth/network-request-failed and blocks
+// Google sign-in. The native app signs in via the NATIVE Google plugin + signInWithCredential, which
+// talks to Google's own hosts directly and does NOT need the custom domain — so on native we use the
+// project's default *.firebaseapp.com authDomain (Google-hosted, always reachable, no proxy). Web is
+// unchanged.
+const DEFAULT_FIREBASE_AUTH_DOMAIN = 'gen-lang-client-0866594388.firebaseapp.com';
+function isNativeShell(): boolean {
+  try {
+    const c = (globalThis as unknown as { Capacitor?: { isNativePlatform?: () => boolean; isNative?: boolean } }).Capacitor;
+    if (!c) return false;
+    return typeof c.isNativePlatform === 'function' ? c.isNativePlatform() === true : c.isNative === true;
+  } catch { return false; }
+}
+const AUTH_DOMAIN = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN
+  || (isNativeShell() ? DEFAULT_FIREBASE_AUTH_DOMAIN : 'navbharatai.com');
 
 export const firebaseConfig = {
   projectId:        import.meta.env.VITE_FIREBASE_PROJECT_ID       || 'gen-lang-client-0866594388',

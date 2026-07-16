@@ -226,3 +226,129 @@ export function integrityRepairInstruction(report: ProjectIntegrityReport): stri
   }
   return parts.join('\n');
 }
+
+// === MIXED IMPORT SPECIFIERS (FitPulse autopsy 2026-07-17) =========================================
+// The SAME project module imported via DIFFERENT specifier styles (relative './context/ThemeContext'
+// vs baseUrl 'context/ThemeContext' vs alias '@/context/ThemeContext'). tsc + Vite dev (with
+// vite-tsconfig-paths) resolve all forms to ONE module — but the IN-BROWSER preview bundler treats
+// them as TWO modules, so a React context created in that file exists TWICE: the provider sets one
+// instance, the hook reads the other → "useX must be used within a XProvider" crash that only the
+// user's preview shows. Deterministic fix: normalize every project-module import to the relative form.
+
+export interface MixedSpecifierModule {
+  /** The resolved project module (a real file key, e.g. src/context/ThemeContext.tsx). */
+  module: string;
+  /** The distinct raw specifier strings used for it. */
+  specifiers: string[];
+}
+
+const CODE_RESOLVE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx'];
+
+/** Join + normalize a POSIX-ish path (handles ./ and ../ segments). Returns null if it escapes root. */
+function joinPath(baseDir: string, rel: string): string | null {
+  const parts = (baseDir ? baseDir.split('/') : []).filter(Boolean);
+  for (const seg of rel.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { if (!parts.length) return null; parts.pop(); continue; }
+    parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/** Resolve an import specifier to a project file key, or null when it's a package/unknown. */
+export function resolveProjectSpecifier(
+  files: Record<string, string>, importer: string, spec: string,
+): string | null {
+  const clean = spec.split(/[?#]/)[0];
+  let base: string | null = null;
+  if (clean.startsWith('./') || clean.startsWith('../')) {
+    base = joinPath(importer.slice(0, importer.lastIndexOf('/')), clean);
+  } else if (clean.startsWith('@/')) {
+    base = `src/${clean.slice(2)}`;
+  } else if (!clean.startsWith('/')) {
+    base = `src/${clean}`; // tsconfig baseUrl:"src" bare form — only counts if it actually resolves
+  }
+  if (!base) return null;
+  if (files[base] !== undefined) return base;
+  for (const suf of CODE_RESOLVE_SUFFIXES) if (files[base + suf] !== undefined) return base + suf;
+  return null;
+}
+
+const ANY_IMPORT_RE = /(\bimport\s+(?:[\w*{},\s$]+\s+from\s+)?|\bexport\s+[\w*{},\s$]+\s+from\s+|\brequire\s*\(\s*)['"]([^'"]+)['"]/g;
+
+/** The RESOLUTION KIND of a specifier. Two relative spellings resolve identically in every bundler;
+ *  the duplicate-module risk exists only when KINDS mix (relative vs baseUrl-bare vs @/alias) —
+ *  a naive string-keyed bundler then instantiates the same file under two module keys. */
+function specifierKind(spec: string): 'relative' | 'alias' | 'bare' {
+  if (spec.startsWith('./') || spec.startsWith('../')) return 'relative';
+  if (spec.startsWith('@/')) return 'alias';
+  return 'bare';
+}
+
+/** Find project modules imported via 2+ DISTINCT specifier KINDS (the duplicate-module crash class). */
+export function findMixedImportSpecifiers(files: Record<string, string>): MixedSpecifierModule[] {
+  const byModule = new Map<string, { specs: Set<string>; kinds: Set<string> }>();
+  for (const [file, raw] of Object.entries(files)) {
+    if (!isSourceFile(file) || typeof raw !== 'string') continue;
+    const src = stripComments(raw);
+    let m: RegExpExecArray | null;
+    while ((m = ANY_IMPORT_RE.exec(src)) !== null) {
+      const spec = m[2];
+      if (spec.endsWith('.css')) continue; // stylesheets have their own checks
+      const resolved = resolveProjectSpecifier(files, file, spec);
+      if (!resolved) continue;
+      const entry = byModule.get(resolved) ?? { specs: new Set<string>(), kinds: new Set<string>() };
+      entry.specs.add(spec);
+      entry.kinds.add(specifierKind(spec));
+      byModule.set(resolved, entry);
+    }
+  }
+  const out: MixedSpecifierModule[] = [];
+  for (const [module, { specs, kinds }] of byModule) {
+    if (kinds.size >= 2) out.push({ module, specifiers: [...specs].sort() });
+  }
+  return out.sort((a, b) => a.module.localeCompare(b.module));
+}
+
+/** The canonical RELATIVE specifier from an importer to a module file (extensionless for code). */
+export function relativeSpecifier(importer: string, module: string): string {
+  const from = importer.split('/').slice(0, -1);
+  const to = module.split('/');
+  let i = 0;
+  while (i < from.length && i < to.length - 1 && from[i] === to[i]) i++;
+  const up = from.length - i;
+  const down = to.slice(i).join('/');
+  let rel = (up === 0 ? './' : '../'.repeat(up)) + down;
+  rel = rel.replace(/\/index\.(t|j)sx?$/, '').replace(/\.(t|j)sx?$/, '');
+  return rel;
+}
+
+/**
+ * DETERMINISTIC FIX: rewrite every import of a mixed-specifier module to the canonical relative form,
+ * so every bundler (including the in-browser preview) sees ONE module instance. Pure.
+ */
+export function normalizeImportSpecifiers(
+  files: Record<string, string>,
+): { files: Record<string, string>; rewrites: Array<{ file: string; from: string; to: string }> } {
+  const mixed = findMixedImportSpecifiers(files);
+  if (mixed.length === 0) return { files, rewrites: [] };
+  const targets = new Map(mixed.map((m) => [m.module, new Set(m.specifiers)] as const));
+  const out = { ...files };
+  const rewrites: Array<{ file: string; from: string; to: string }> = [];
+  for (const [file, raw] of Object.entries(files)) {
+    if (!isSourceFile(file) || typeof raw !== 'string') continue;
+    let next = raw;
+    for (const [module, specs] of targets) {
+      const canonical = relativeSpecifier(file, module);
+      for (const spec of specs) {
+        if (spec === canonical) continue;
+        if (resolveProjectSpecifier(files, file, spec) !== module) continue; // this file's spec resolves elsewhere
+        const re = new RegExp(`(['"])${spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`, 'g');
+        const replaced = next.replace(re, `'${canonical}'`);
+        if (replaced !== next) { next = replaced; rewrites.push({ file, from: spec, to: canonical }); }
+      }
+    }
+    if (next !== raw) out[file] = next;
+  }
+  return { files: out, rewrites };
+}

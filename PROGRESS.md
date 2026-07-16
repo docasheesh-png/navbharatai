@@ -17025,3 +17025,38 @@ FEATURE_COVERAGE probe claimed 0 controls present (false positive — screenshot
 **Open root causes (rule 6):** FEATURE_COVERAGE browser probe reported "Present: none" on an app whose
 screenshot clearly shows the controls — detector false positive, needs its own autopsy; the deeper
 "visual QA pass" (screenshot→vision judge on real render) remains the Tier-1 upgrade for design quality.
+
+---
+
+## 2026-07-17 — FitPulse autopsy: duplicate-context preview crash killed (mixed import specifiers) + integrity false-positive + summary honesty
+
+**Trigger (5th absolute rule):** admin's FitPulse report + screenshot. ok:true READY 78/100, but the
+USER's in-browser preview crashed: "useTheme must be used within a ThemeProvider" — while the server-
+side browser verify honestly PASSED (the live-server render works; only the in-browser bundler breaks).
+
+**Fixes proven live in this build:** salvage handoff again (7 files, no split, builder: "complete the
+FitPulse app around them"); scaffold pre-flight (npm-enoent GONE — npm install exit 0 first try);
+GLM cache-hit measured 2.36M/2.77M tokens (85%).
+
+**Root causes fixed (this PR):**
+- ✅ **Mixed import specifiers — the duplicate-context crash class.** ThemeContext was imported as
+  './context/ThemeContext' in one file and 'context/ThemeContext' (tsconfig baseUrl form) in another.
+  tsc + Vite dev resolve both to ONE module; the in-browser preview bundler string-keys them as TWO →
+  two React context instances → provider sets one, hook reads the other → crash only the user sees.
+  New `findMixedImportSpecifiers` (kind-aware: relative vs baseUrl-bare vs @/alias — two relative
+  spellings are safe) + deterministic `normalizeImportSpecifiers` (rewrite every import of a mixed
+  module to the canonical relative form). Applied at the route integrity pass
+  (INTEGRITY_IMPORTS_NORMALIZED; kill: AGENTV3_IMPORT_NORMALIZE=off). 6 regression tests.
+- ✅ **Integrity false positive — analysis ran on writtenFiles only.** With the scaffold pre-flight,
+  main.tsx is template-owned and NOT in writtenFiles → the orphan-stylesheet check flagged a correctly-
+  wired app (INTEGRITY_ORPHAN_STYLESHEET on a main.tsx that HAD the import). The integrity pass now
+  merges the sandbox's entry/html/css candidates into the analysis set — it judges the app the user
+  actually runs.
+- ✅ **Summary honesty — heal chatter replaced the build result.** The integrity heal's final narration
+  became the build summary ("It seems there's a misunderstanding… I will not make any changes"). The
+  heal now contributes only its edits; the REAL build summary always ships.
+
+**Open root causes (rule 6):** FEATURE_COVERAGE probe still reports "Present: none" falsely; the
+server-side preview-verify uses the LIVE-SERVER render while users default to the IN-BROWSER preview —
+the verify should ALSO exercise the in-browser bundler path (bigger slice, queued); residual GLM 429
+singles (~2/min under sustained load) are the per-account ceiling, not the storm (cooldown working).

@@ -131,7 +131,7 @@ import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation,
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport } from '../AgentV3/ProjectIntegrityChecks';
+import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, type JudgeRunTurn } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
@@ -6915,22 +6915,53 @@ export function registerAgentV3Routes(app: Express): void {
       // LLM reviewer text mentioned them — never structured). The bounded LLM SELF-HEAL is gated behind
       // AGENTV3_INTEGRITY_GATE (default OFF — canary first, like LintGate); flip on to auto-fix them.
       try {
+        // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17): `writtenFiles` holds only the
+        // files THIS build wrote — the scaffold's entry/html (now template-owned via the pre-flight) are
+        // NOT in it, which made the orphan-stylesheet check report a FALSE POSITIVE on a correctly-wired
+        // app (main.tsx with the import existed only in the sandbox). Pull the entry/html candidates from
+        // the sandbox when absent, so the analysis judges the app the user actually runs.
+        const integrityFiles = Object.fromEntries(writtenFiles);
+        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
+          if (integrityFiles[p] === undefined) {
+            try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }
+          }
+        }
+        // MIXED IMPORT SPECIFIERS — deterministic normalize (FitPulse: ThemeContext imported both
+        // './context/ThemeContext' and 'context/ThemeContext' → the in-browser bundler instantiated the
+        // module TWICE → two React contexts → "useTheme must be used within a ThemeProvider" crash that
+        // only the user's preview showed). Rewrite every project import to ONE canonical relative form.
+        // Kill: AGENTV3_IMPORT_NORMALIZE=off.
+        if (process.env.AGENTV3_IMPORT_NORMALIZE !== 'off') {
+          const norm = normalizeImportSpecifiers(integrityFiles);
+          const touched = new Set(norm.rewrites.map((r) => r.file));
+          for (const f of touched) {
+            const content = norm.files[f];
+            if (typeof content !== 'string') continue;
+            integrityFiles[f] = content;
+            if (writtenFiles.has(f) || f !== 'index.html') writtenFiles.set(f, content);
+            try { await actuator.writeFile(workspaceId, f, content); } catch { /* sandbox write best-effort */ }
+          }
+          if (norm.rewrites.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_IMPORTS_NORMALIZED', message: `Normalized ${norm.rewrites.length} import specifier(s) so every bundler sees one module instance (prevents duplicate-context "must be used within a Provider" crashes).`, autoResolved: true, detail: norm.rewrites.slice(0, 10).map((r) => `${r.file}: ${r.from} → ${r.to}`).join('; ') });
+          }
+        }
         // ORPHAN STYLESHEET — deterministic fix FIRST (NotesNest autopsy 2026-07-16: the app shipped as
         // raw unstyled HTML because src/index.css was imported by nothing). When the global sheet can be
         // wired by construction (inject `import './index.css'` into the entry), do it directly — no LLM,
         // no flag: this is the same class of certainty as the HTML-entry guard. Kill: AGENTV3_CSS_IMPORT_GUARD=off.
         if (process.env.AGENTV3_CSS_IMPORT_GUARD !== 'off') {
-          const wired = injectGlobalStylesheetImport(Object.fromEntries(writtenFiles));
+          const wired = injectGlobalStylesheetImport(integrityFiles);
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
+              integrityFiles[inj.entry] = newEntry;
               writtenFiles.set(inj.entry, newEntry);
               try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
           }
         }
-        const integrity = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
+        const integrity = analyzeProjectIntegrity(integrityFiles);
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', message: `${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`, autoResolved: false });
@@ -6957,7 +6988,11 @@ export function registerAgentV3Routes(app: Express): void {
                 `possible edits to the existing files, change nothing else:\n\n${integrityRepairInstruction(integrity)}`,
               );
               if (healed.ok) {
-                result = healed;
+                // SUMMARY HONESTY (FitPulse autopsy 2026-07-17): the heal run's final narration used to
+                // REPLACE the build summary — a no-op heal shipped "It seems there's a misunderstanding…
+                // I will not make any changes." as the user's build result. Keep the REAL build summary;
+                // the heal contributes its edits, never its chatter.
+                result = { ...healed, summary: result.summary };
                 const after = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
                 if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed (single focus owner; no duplicate stylesheet).', autoResolved: true });
               }

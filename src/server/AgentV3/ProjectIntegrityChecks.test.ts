@@ -211,3 +211,74 @@ describe('injectGlobalStylesheetImport — the deterministic fix', () => {
     expect(integrityRepairInstruction(report)).toContain('ORPHAN STYLESHEET');
   });
 });
+
+// === MIXED IMPORT SPECIFIERS (FitPulse autopsy 2026-07-17) =========================================
+// ThemeContext was imported as './context/ThemeContext' in one file and 'context/ThemeContext'
+// (baseUrl form) in another — the in-browser bundler instantiated the module TWICE → two React
+// contexts → "useTheme must be used within a ThemeProvider" crash only the user's preview showed.
+import { findMixedImportSpecifiers, normalizeImportSpecifiers, resolveProjectSpecifier, relativeSpecifier } from './ProjectIntegrityChecks';
+
+describe('findMixedImportSpecifiers — the duplicate-module-instance crash class', () => {
+  const FILES = {
+    'src/context/ThemeContext.tsx': `import { createContext } from 'react';\nexport const useTheme = () => {};\nexport default function ThemeProvider(){return null}`,
+    'src/main.tsx': `import ThemeProvider from './context/ThemeContext';`,
+    'src/App.tsx': `import { useTheme } from 'context/ThemeContext';`, // baseUrl form — SAME module
+  };
+
+  it('flags the FitPulse shape: relative + baseUrl specifiers for one module', () => {
+    const mixed = findMixedImportSpecifiers(FILES);
+    expect(mixed).toHaveLength(1);
+    expect(mixed[0].module).toBe('src/context/ThemeContext.tsx');
+    expect(mixed[0].specifiers.sort()).toEqual(['./context/ThemeContext', 'context/ThemeContext']);
+  });
+
+  it('consistent imports (one style everywhere) are clean, and package imports never count', () => {
+    const clean = {
+      'src/a.tsx': `import { x } from './lib/util';\nimport React from 'react';`,
+      'src/b.tsx': `import { x } from '../src/lib/util';`, // resolves elsewhere (escapes) — ignored
+      'src/lib/util.ts': 'export const x = 1;',
+    };
+    expect(findMixedImportSpecifiers(clean)).toHaveLength(0);
+  });
+
+  it('@/ alias vs relative also counts as mixed', () => {
+    const files = {
+      'src/hooks/useX.ts': 'export const useX = () => 1;',
+      'src/a.tsx': `import { useX } from '@/hooks/useX';`,
+      'src/b.tsx': `import { useX } from './hooks/useX';`,
+    };
+    expect(findMixedImportSpecifiers(files)).toHaveLength(1);
+  });
+});
+
+describe('normalizeImportSpecifiers — the deterministic fix', () => {
+  it('rewrites every import of the mixed module to the canonical relative form (crash gone)', () => {
+    const files = {
+      'src/context/ThemeContext.tsx': 'export const useTheme = () => {};',
+      'src/main.tsx': `import ThemeProvider from './context/ThemeContext';`,
+      'src/App.tsx': `import { useTheme } from 'context/ThemeContext';`,
+      'src/components/Header.tsx': `import { useTheme } from '@/context/ThemeContext';`,
+    };
+    const { files: out, rewrites } = normalizeImportSpecifiers(files);
+    expect(out['src/App.tsx']).toContain(`from './context/ThemeContext'`);
+    expect(out['src/components/Header.tsx']).toContain(`from '../context/ThemeContext'`);
+    expect(out['src/main.tsx']).toBe(files['src/main.tsx']); // already canonical — untouched
+    expect(rewrites.length).toBe(2);
+    expect(findMixedImportSpecifiers(out)).toHaveLength(0); // verified fixed
+  });
+
+  it('a clean project is returned untouched (same reference)', () => {
+    const files = { 'src/a.tsx': `import { x } from './b';`, 'src/b.ts': 'export const x = 1;' };
+    expect(normalizeImportSpecifiers(files).files).toBe(files);
+  });
+
+  it('resolveProjectSpecifier + relativeSpecifier basics (suffixes, index, escape-safety)', () => {
+    const files = { 'src/lib/index.ts': 'export {}', 'src/x.ts': 'export {}' };
+    expect(resolveProjectSpecifier(files, 'src/a.tsx', './lib')).toBe('src/lib/index.ts');
+    expect(resolveProjectSpecifier(files, 'src/a.tsx', './x')).toBe('src/x.ts');
+    expect(resolveProjectSpecifier(files, 'src/a.tsx', 'react')).toBe(null);
+    expect(resolveProjectSpecifier(files, 'src/a.tsx', '../../../etc/passwd')).toBe(null);
+    expect(relativeSpecifier('src/components/Header.tsx', 'src/context/ThemeContext.tsx')).toBe('../context/ThemeContext');
+    expect(relativeSpecifier('src/main.tsx', 'src/lib/index.ts')).toBe('./lib');
+  });
+});

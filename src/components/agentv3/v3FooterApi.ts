@@ -56,9 +56,10 @@ export function footerSection(showWorkspace: boolean, tab: string): V3FooterSect
 
 /**
  * Should the v3.0 panel run in mobile-footer layout? True exactly when the app's bottom nav is
- * visible (mobile/tablet device mode, not focus mode) — the same condition App.tsx renders the nav
- * under, so the header controls and their footer replacements can never BOTH disappear. Pure.
+ * visible — which is now the MOBILE view mode only (tablet & desktop use the side rail, no bottom
+ * nav), not focus mode — the same condition App.tsx renders the nav under, so the header controls and
+ * their footer replacements can never BOTH disappear. Pure.
  */
 export function v3MobileFooterActive(effectiveDeviceMode: string, focusMode: boolean): boolean {
-  return effectiveDeviceMode !== 'desktop' && !focusMode;
+  return effectiveDeviceMode === 'mobile' && !focusMode;
 }

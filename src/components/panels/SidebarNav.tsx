@@ -132,11 +132,14 @@ export function SidebarNav({
 
   return (
     <>
-      {/* Persistent Desktop Sidebar */}
-      {effectiveDeviceMode === 'desktop' && (
+      {/* Persistent side rail — Tablet + Desktop (NOT mobile). Its visibility is driven ONLY by the
+          chosen view mode (effectiveDeviceMode), never a viewport breakpoint — so forcing Desktop/Tablet
+          from Settings → View Mode actually shows the rail on ANY screen size (the old `hidden lg:flex`
+          made this inert on phones). */}
+      {effectiveDeviceMode !== 'mobile' && (
         <aside data-tour="sidebar" className={cn(
-          "bg-[#161b22] border-r border-white/10 hidden lg:flex flex-col h-full shadow-3xl flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
-          isSidebarCollapsed ? 'w-0' : 'w-72'
+          "bg-[#161b22] border-r border-white/10 flex flex-col h-full shadow-3xl flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden",
+          isSidebarCollapsed ? 'w-0' : (effectiveDeviceMode === 'tablet' ? 'w-60' : 'w-72')
         )}>
           <div className="p-6 border-b border-white/10 flex items-center justify-between bg-[#0d1117]/30">
             <button

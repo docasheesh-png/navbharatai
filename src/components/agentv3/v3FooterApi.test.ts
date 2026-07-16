@@ -19,11 +19,11 @@ describe('footerSection (v3.0 mobile footer — active-item highlight from real 
 });
 
 describe('v3MobileFooterActive (must mirror the App.tsx bottom-nav visibility gate exactly)', () => {
-  it('active on mobile/tablet outside focus mode', () => {
+  it('active on MOBILE only, outside focus mode (tablet & desktop use the side rail — no bottom nav)', () => {
     expect(v3MobileFooterActive('mobile', false)).toBe(true);
-    expect(v3MobileFooterActive('tablet', false)).toBe(true);
+    expect(v3MobileFooterActive('tablet', false)).toBe(false);
   });
-  it('inactive on desktop and in focus mode — the header keeps its controls there', () => {
+  it('inactive on tablet/desktop and in focus mode — the header keeps its controls there', () => {
     expect(v3MobileFooterActive('desktop', false)).toBe(false);
     expect(v3MobileFooterActive('mobile', true)).toBe(false);
     expect(v3MobileFooterActive('desktop', true)).toBe(false);

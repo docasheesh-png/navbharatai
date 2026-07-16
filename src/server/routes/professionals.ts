@@ -4,56 +4,13 @@ import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
-import { decideProfessionalAccess } from '../professionals/access';
 import {
   professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
   professionalPassDays, isProfessionalFreeUser,
 } from '../professionals/professionalPaid';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
 import { professionalUsageStore } from '../professionals/ProfessionalUsageStore';
-
-/**
- * Professional Pass gate for one chat turn. FLAG OFF ⇒ always allow (today's behaviour, zero extra
- * Firestore reads). FLAG ON ⇒ free-list & active-pass are unlimited; anonymous callers must sign in;
- * everyone else gets professionalFreeDailyLimit() free messages/day. Returns the decision plus a
- * ready-to-send paywall payload for a block.
- */
-async function gateProfessionalTurn(uid: string | null, email: string | null) {
-  if (!professionalPaidEnabled()) {
-    // Flag off → today's behaviour: full paid-quality chain, no metering.
-    return { allow: true as const, countsAgainstFree: false, uid, tier: 'paid' as const };
-  }
-  const freeListed = isProfessionalFreeUser(uid, email);
-  const freeDailyLimit = professionalFreeDailyLimit();
-  // Only touch Firestore for a signed-in, non-free-listed user (pass + today's count).
-  const hasActivePass = !!uid && !freeListed ? (await professionalPassStore.getStatus(uid)).active : false;
-  const usedToday = !!uid && !freeListed && !hasActivePass ? await professionalUsageStore.getTodayCount(uid) : 0;
-  const decision = decideProfessionalAccess({
-    enabled: true, signedIn: !!uid, isFreeListed: freeListed, hasActivePass, usedToday, freeDailyLimit,
-  });
-  if (decision.action === 'allow') {
-    // Model tier: an active Pass (or the admin free-list) → the full paid chain; a within-quota free
-    // user → the free chain (GLM → Vertex only). This is what makes "free = cheap models" real.
-    const tier: 'free' | 'paid' = decision.reason === 'within-free-quota' ? 'free' : 'paid';
-    return { allow: true as const, countsAgainstFree: decision.countsAgainstFree, remainingFree: decision.remainingFree, uid, tier };
-  }
-  const login = decision.reason === 'login-required';
-  return {
-    allow: false as const,
-    status: login ? 401 : 402,
-    body: {
-      error: login
-        ? 'Please sign in to use the Professionals. New users get free messages every day.'
-        : `You've used your ${freeDailyLimit} free messages for today. Get the Professional Pass for unlimited access to every professional.`,
-      code: login ? 'login_required' : 'professional_paywall',
-      reason: decision.reason,
-      remainingFree: 0,
-      freeDailyLimit,
-      passPriceInr: professionalPassPriceInr(),
-      passDays: professionalPassDays(),
-    },
-  };
-}
+import { gateProfessionalTurn } from '../professionals/passGate';
 
 /** Max attachments accepted per turn (defense against oversized payload loops). */
 const MAX_PROFESSIONAL_ATTACHMENTS = 4;

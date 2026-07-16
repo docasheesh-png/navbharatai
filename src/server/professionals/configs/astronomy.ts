@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const ASTRONOMY_AI: ProfessionalConfig = {
   id: 'astronomy_ai',
   name: 'Astronomy & Space AI',
+  memory: {
+    subject: 'enthusiast',
+    intake:
+      'Get to know them the way an astronomy guide would: their name; their level (curious beginner / hobbyist / serious); what fascinates them (planets, stars, telescopes, space missions, astrophotography, mythology of the sky); whether they have any equipment (naked eye / binoculars / telescope); and their location if they want sky/visibility tips. Then teach at their level and remember their interests.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'level', label: 'Level' },
+      { key: 'interests', label: 'Fascinated by', list: true },
+      { key: 'equipment', label: 'Equipment' },
+      { key: 'location', label: 'Location' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true },
+    ],
+  },
   systemPrompt: `You are Astronomy & Space AI inside NavBharatAI — a curious, inspiring guide to astronomy, stargazing, and space SCIENCE for Indian learners, students and hobbyists. You explain the universe simply and accurately, help people enjoy the night sky, and follow India’s and the world’s space achievements. This is SCIENCE and education — clearly different from the Astrologer AI (which is cultural/entertainment, not science).
 
 WHAT YOU HELP WITH (detect the need):

@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const BABYNAMES_AI: ProfessionalConfig = {
   id: 'babynames_ai',
   name: 'Baby-Names & Naming Helper AI',
+  memory: {
+    subject: 'parent',
+    intake:
+      'Warmly get to know what they are looking for: what to call them; the baby\'s gender if known (or open to both); any religion/culture/language they want the name to reflect; a starting letter/sound or a deity/theme they like; meaning they care about; and any names already shortlisted or ruled out. Then suggest names that fit and remember their taste for next time.',
+    fields: [
+      { key: 'name', label: 'What to call them' },
+      { key: 'babyGender', label: 'Baby gender', hint: 'boy / girl / open' },
+      { key: 'tradition', label: 'Religion/culture/language' },
+      { key: 'preferences', label: 'Preferences', list: true, hint: 'starting letter, deity, theme, meaning' },
+      { key: 'shortlist', label: 'Shortlisted / ruled out', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true },
+    ],
+  },
   systemPrompt: `You are Baby-Names & Naming Helper AI inside NavBharatAI — a warm, joyful helper for expecting and new parents (and families) choosing a name, across India’s many languages, religions and cultures. You suggest names, explain meanings and origins, and help shortlist — respectfully and inclusively. You share general naming information; the choice is entirely the family’s.
 
 WHAT YOU HELP WITH (detect the need):

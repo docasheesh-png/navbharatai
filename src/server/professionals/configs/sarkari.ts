@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const SARKARI_AI: ProfessionalConfig = {
   id: 'sarkari_ai',
   name: 'Sarkari / Govt-Job Exam Guide AI',
+  memory: {
+    subject: 'aspirant',
+    intake:
+      'Get to know their goal the way a govt-exam guide would: their name; which exam(s)/post they are targeting (UPSC, SSC, banking, railways, state PSC, defence, teaching); their preparation stage (deciding / just started / mid-prep / revision); their education & any eligibility questions; and their main need (choosing an exam, syllabus/strategy, current-affairs, doubts). Always tell them to confirm official notifications/dates/vacancies on the commission/board site.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'targetExams', label: 'Target exam(s)/post', list: true },
+      { key: 'stage', label: 'Prep stage' },
+      { key: 'education', label: 'Education' },
+      { key: 'needs', label: 'Needs help with', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'plan, progress, attempts' },
+    ],
+  },
   systemPrompt: `You are Sarkari / Govt-Job Exam Guide AI inside NavBharatAI — a clear, motivating guide for Indian government-job aspirants. You help people understand which exams lead to which jobs, general eligibility, the selection process, and how to prepare and stay consistent. You give general guidance & strategy — NOT official notifications; aspirants must ALWAYS verify current vacancies, dates, eligibility and patterns on the official commission/board website. (For GK/current-affairs content, the General Knowledge AI; for general career direction, the Mentor AI.)
 
 WHAT YOU HELP WITH (detect the need):

@@ -16708,3 +16708,15 @@ Continuing one-by-one (admin, background conveyor — next batch built while CI 
 All declare `memory: { subject, intake, fields[] }`. `AppKnowledgeBase.ts` synced. `professionals.test.ts` asserts Batches 1–8 (46 professionals). Gate: frontend tsc ✅, server tsc ✅, vitest 6918 ✅.
 
 **Done:** Teacher + 46 professionals are memory agents. **Remaining:** cybersafety, govtschemes, sarkari, civic, disability, environment, safety, translate, crafts, festival, writing, disaster, nature, freelance, babynames, hygiene, volunteer, astronomy, calligraphy, games, techbuy, adventure, budget, pharmacist, firstaid, relationship, maternity(done), gk(done)… (the remaining ~26 info/utility domains — many are one-off/reference, will get light memory or be marked memory-not-applicable with rationale).
+
+---
+
+## 2026-07-15 — Professionals → real AI agents, Batches 9 & 10: EVERY remaining professional now has memory — COMPLETE
+
+Final push of the one-by-one conveyor (admin, background — CI in background while next batch built). AgentV3 untouched. This closes out ALL remaining professionals:
+- **Batch 9** (relationship-worthy): relationship, freelance, budget, writing, disability, pharmacist, techbuy, govt-schemes, sarkari, cybersafety, translate, babynames, civic.
+- **Batch 10** (info/hobby/utility, light memory): adventure, astronomy, calligraphy, crafts, disaster, environment, festival, firstaid, games, hygiene, nature, safety, volunteer.
+
+Sensitive domains keep memory NON-clinical and honest (pharmacist/firstaid never store a diagnosis; relationship gentle-continuity-only; cybersafety/insurance/budget never store passwords/OTP/account numbers).
+
+**MILESTONE: every config-driven professional in the registry (Teacher + 72) is now a real personal AI agent** — takes a domain-appropriate introduction/intake and remembers its user across sessions (verified-uid-keyed, IDOR-safe), on the one generic memory foundation. The test is now REGISTRY-WIDE: `professionals.test.ts` asserts EVERY `listProfessionals()` entry has `memory` (intake + >2 fields + a name field + unique keys), so any NEW professional added without memory fails CI — the invariant can never silently regress. `AppKnowledgeBase.ts` synced for all. Gate: frontend tsc ✅, server tsc ✅, vitest 6918 ✅.

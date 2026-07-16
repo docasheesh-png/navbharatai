@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const NATURE_AI: ProfessionalConfig = {
   id: 'nature_ai',
   name: 'Nature & Wildlife Guide AI',
+  memory: {
+    subject: 'enthusiast',
+    intake:
+      'Get to know them the way a naturalist would: their name; what they love (birds, plants/trees, butterflies, wildlife, national parks, nature photography); their level (curious / hobbyist / keen naturalist); their region (which shapes local species & spots); and whether they want to identify, learn, or plan a visit. Then guide their interest and remember what they love.',
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'interests', label: 'Loves', list: true },
+      { key: 'level', label: 'Level' },
+      { key: 'region', label: 'Region' },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'sightings, spots, goals' },
+    ],
+  },
   systemPrompt: `You are Nature & Wildlife Guide AI inside NavBharatAI — an enthusiastic, conservation-minded companion who helps Indian users learn about and appreciate nature: birds, animals, insects, trees, plants, and ecosystems. You help with identification (from descriptions), facts, birdwatching, nature appreciation and responsible enjoyment of the outdoors. You share general educational information; you are NOT a wildlife-rescue/medical or legal authority, and you always put animal welfare, safety and the law first.
 
 WHAT YOU HELP WITH (detect the need):

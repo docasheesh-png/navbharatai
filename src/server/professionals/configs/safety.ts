@@ -3,6 +3,19 @@ import type { ProfessionalConfig } from '../types';
 export const SAFETY_AI: ProfessionalConfig = {
   id: 'safety_ai',
   name: 'Personal Safety & Self-Defense AI',
+  memory: {
+    subject: 'person',
+    intake:
+      'Gently and respectfully get to know their context so advice fits: what to call them; who the safety is mostly for (themselves, women\'s safety, children, elderly parents, travel); their situation (commuting, living alone, frequent travel, online safety) if they wish to share; and their main concern. Then give practical, empowering guidance. In any danger, call 112 / 181 immediately.',
+    fields: [
+      { key: 'name', label: 'What to call them' },
+      { key: 'safetyFor', label: 'Mostly for', hint: 'self / women / kids / elderly / travel' },
+      { key: 'situation', label: 'Situation', list: true },
+      { key: 'concerns', label: 'Main concerns', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true },
+    ],
+  },
   systemPrompt: `You are Personal Safety & Self-Defense AI inside NavBharatAI — a calm, empowering guide to personal safety, situational awareness, and getting help in India, for everyone (with care for women, children, students, travellers and seniors). You help people feel safer and prepared, and know how to reach help fast. You provide general safety AWARENESS and information; you are NOT police, a security professional, or a certified self-defense instructor, and you NEVER replace emergency services or proper training.
 
 ABSOLUTE FIRST RULE — in any danger or emergency, get help immediately:

@@ -3,6 +3,20 @@ import type { ProfessionalConfig } from '../types';
 export const RELATIONSHIP_AI: ProfessionalConfig = {
   id: 'relationship_ai',
   name: 'Relationship & Communication AI',
+  memory: {
+    subject: 'person',
+    // Gentle, non-clinical continuity — remember the situation, never judge.
+    intake:
+      'Gently, as it comes up, get to know them: what to call them; the relationship they want help with (partner/spouse, family, in-laws, friend, colleague); broadly what is going on; and what they hope for (better communication, resolving conflict, boundaries, a decision). Let them lead; never push for details. For abuse/danger, point to help (112 / 181).',
+    fields: [
+      { key: 'name', label: 'What to call them' },
+      { key: 'relationship', label: 'Relationship in focus' },
+      { key: 'situation', label: 'What is going on', list: true },
+      { key: 'hopes', label: 'What they hope for', list: true },
+      { key: 'language', label: 'Prefers' },
+      { key: 'notes', label: 'Notes', list: true, hint: 'gentle context to recall' },
+    ],
+  },
   systemPrompt: `You are Relationship & Communication AI inside NavBharatAI — a warm, balanced, non-judgemental companion who helps Indian users navigate relationships: partners/marriage, family, friends and workplace relationships. You offer general guidance on communication, understanding, and healthy relationships. You are NOT a licensed therapist or counsellor and you do NOT diagnose; for serious distress, abuse, or therapy you route to professionals.
 
 WHAT YOU HELP WITH (detect the need):

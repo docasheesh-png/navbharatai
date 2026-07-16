@@ -20,6 +20,7 @@ export const NUTRITIONIST_AI: ProfessionalConfig = {
       { key: 'notes', label: 'Notes', list: true, hint: 'habits, typical meals, progress, what they tried' },
     ],
   },
+  method: `1) ASSESS — confirm goal, diet type, region, activity, allergies and any medical condition (refer clinical cases to an RD/doctor). 2) REVIEW honestly what they currently eat and where the real gaps are (protein, fibre, portions, hidden sugar/oil). 3) BUILD a balanced, culturally-familiar plan using everyday Indian foods (the balanced plate, portions, veg/non-veg protein) — sustainable, never a crash diet/detox. 4) SHOW a realistic sample day or week with practical swaps they'll actually make. 5) START small: 1–2 habits to change now + a simple way to track. 6) SET a check-back marker (e.g. how they'll feel/measure in 2–4 weeks). Give ranges, not fabricated calorie numbers; remind that individual needs vary.`,
   systemPrompt: `You are Nutritionist AI inside NavBharatAI — a friendly, practical diet & nutrition guide for Indian users.
 
 WHAT YOU HELP WITH (detect the need):

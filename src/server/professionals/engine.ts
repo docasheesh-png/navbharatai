@@ -32,6 +32,24 @@ export const PROFESSIONAL_PERSONA_LAYER = `HOW TO BEHAVE LIKE A REAL PROFESSIONA
 - STAY honest like a real professional: say plainly when something is outside your scope or needs an in-person expert, and never invent facts, laws, dosages, or figures.`;
 
 /**
+ * The shared EXPERT METHOD LAYER (admin 2026-07-16: "deeper capabilities for EVERY profession,
+ * not just Teacher"). The persona layer above governs TONE/behaviour; this governs DEPTH — it
+ * makes every professional work a problem like a genuine top expert with a real method, not a
+ * chatbot that gives the first generic answer. Defined ONCE so all 73 professionals inherit the
+ * same rigor and it can never drift (root-cause rule). A per-config `method` adds the field's
+ * own signature method on top of this.
+ */
+export const EXPERT_METHOD_LAYER = `HOW A TOP EXPERT IN YOUR FIELD ACTUALLY WORKS (bring this depth to every substantive answer):
+- GO DEEP, not surface-level. Give the answer a seasoned expert would give — not the first generic thing anyone could say. Draw on your field's real frameworks, standards, best practices and hard-won edge cases, and name the principle/framework when it helps the user trust and remember it.
+- DIAGNOSE the real need first. Look past the literal question to the underlying goal or root cause and solve THAT. If the user is heading toward a common mistake, flag it kindly before answering.
+- WORK IT THROUGH like a professional: reason step by step so the user sees WHY, not just WHAT — the method, the trade-offs, and the assumptions you're making.
+- Make it ACTIONABLE and complete: a clear recommendation, then concrete step-by-step next actions they can take now, the pitfalls/red-flags to avoid, and how they'll know it worked. Offer a simple checklist, template, plan, or worked example whenever it makes the advice usable.
+- Make it STICK: end with a short, memorable takeaway (a rule of thumb, one-line summary, or mental model) so the insight carries forward — and, where useful, check they've understood.
+- Be PROACTIVE like an expert who cares: anticipate the likely next question, surface a risk they didn't ask about, and suggest the sensible next step.
+- MATCH depth to the need: a small question gets a crisp expert answer; a big or important one earns the full method. Depth means substance, never padding.
+- Stay HONEST at expert level: separate what's established from your judgement, say when something needs an in-person professional or up-to-date verification, and never fabricate specifics.`;
+
+/**
  * Assemble a professional's full system prompt: persona, the shared professional-persona
  * layer, disclaimer, the knowledge retrieved for this message, and the shared
  * creator-attribution instruction (so every professional credits Dr Asheesh and team
@@ -41,7 +59,10 @@ export const PROFESSIONAL_PERSONA_LAYER = `HOW TO BEHAVE LIKE A REAL PROFESSIONA
 export function buildProfessionalSystemPrompt(config: ProfessionalConfig, kbBlock = '', memoryBlock = ''): string {
   // recencyDirective() anchors every professional to TODAY so none presents stale facts as current
   // (a lawyer must not cite a repealed rule as live, a CA a past year's slab as this year's, etc.).
-  return [config.systemPrompt, PROFESSIONAL_PERSONA_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), CREATOR_IDENTITY]
+  // config.method (the field's signature method) sits right after the persona so its domain rigor
+  // is prominent; EXPERT_METHOD_LAYER gives every professional expert depth even without a bespoke method.
+  const methodBlock = config.method ? `YOUR SIGNATURE METHOD (${config.name}) — follow it whenever you do your core work:\n${config.method}` : '';
+  return [config.systemPrompt, methodBlock, PROFESSIONAL_PERSONA_LAYER, EXPERT_METHOD_LAYER, config.disclaimer, memoryBlock, kbBlock, recencyDirective(), CREATOR_IDENTITY]
     .filter(Boolean)
     .join('\n\n');
 }

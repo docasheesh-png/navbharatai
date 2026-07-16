@@ -137,4 +137,22 @@ describe('professional engine — generic per-user memory', () => {
     expect(prompt).toMatch(/MEMORY BLOCK/);
     expect(prompt).toMatch(/KB BLOCK/);
   });
+
+  it('EVERY professional gets the shared expert-depth method layer', () => {
+    // The depth layer must be present even for a config with no bespoke method.
+    const prompt = buildProfessionalSystemPrompt(PLAIN);
+    expect(prompt).toMatch(/HOW A TOP EXPERT IN YOUR FIELD ACTUALLY WORKS/);
+    expect(prompt).toMatch(/GO DEEP/);
+  });
+
+  it("a config's signature method is injected prominently when present", () => {
+    const withMethod: ProfessionalConfig = { ...PLAIN, method: 'STEP-A then STEP-B then STEP-C.' };
+    const prompt = buildProfessionalSystemPrompt(withMethod);
+    expect(prompt).toMatch(/YOUR SIGNATURE METHOD/);
+    expect(prompt).toMatch(/STEP-A then STEP-B/);
+    // and the shared depth layer still applies on top
+    expect(prompt).toMatch(/HOW A TOP EXPERT IN YOUR FIELD ACTUALLY WORKS/);
+    // no signature-method heading when a config has none
+    expect(buildProfessionalSystemPrompt(PLAIN)).not.toMatch(/YOUR SIGNATURE METHOD/);
+  });
 });

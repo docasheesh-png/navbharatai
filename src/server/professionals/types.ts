@@ -29,6 +29,14 @@ export interface ProfessionalConfig {
   /** Short honest disclaimer appended to the persona. */
   disclaimer?: string;
   /**
+   * Optional domain-specific SIGNATURE METHOD — the rigorous, step-by-step way a top expert
+   * in THIS field actually works a problem (the way Teacher AI has "HOW YOU MAKE A CONCEPT
+   * STICK"). Injected prominently into the system prompt so the professional doesn't just
+   * answer — it applies real expertise with depth. The shared EXPERT_METHOD_LAYER lifts every
+   * professional; this adds the field's own signature rigor on top. See engine.ts.
+   */
+  method?: string;
+  /**
    * Optional persistent per-user memory. When set, the engine loads/saves a cross-session
    * profile keyed to this professional (for signed-in users) and instructs the persona to
    * take a domain-appropriate introduction on the first meeting and use the remembered

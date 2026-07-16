@@ -44,6 +44,14 @@ describe('professional AI framework', () => {
     }
   });
 
+  it('flagship professionals have a domain signature method (deeper capabilities, batch 1)', () => {
+    for (const id of ['nutritionist_ai', 'fitness_ai', 'wellness_ai', 'mentor_ai', 'coding_ai', 'lawyer_ai', 'accountant_ai', 'finance_ai']) {
+      const p = getProfessional(id)!;
+      expect(p.method, id).toBeTruthy();
+      expect(p.method!.length, id).toBeGreaterThan(80);
+    }
+  });
+
   it('unknown professional returns undefined', () => {
     expect(getProfessional('nope_ai')).toBeUndefined();
   });

@@ -2483,6 +2483,8 @@ export default function App() {
               setDeviceMode={setDeviceMode}
               preferredLanguage={preferredLanguage}
               setPreferredLanguage={setPreferredLanguage}
+              theme={theme}
+              setTheme={setTheme}
               enabledModules={enabledModules}
               setEnabledModules={setEnabledModules}
               menuItems={menuItems}

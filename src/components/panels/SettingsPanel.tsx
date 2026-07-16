@@ -15,6 +15,8 @@ import {
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
+import { THEME_MODES } from '../../lib/theme';
+import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // Lazy-loaded sub-components (same pattern as App.tsx)
@@ -57,6 +59,10 @@ export interface SettingsPanelProps {
   setDeviceMode: (m: 'auto' | 'mobile' | 'tablet' | 'desktop') => void;
   preferredLanguage: 'hindi' | 'hinglish' | 'english' | 'auto' | undefined;
   setPreferredLanguage: (l: 'hindi' | 'hinglish' | 'english' | 'auto') => void;
+
+  // theme (moved out of the sidebar into Settings → General, admin 2026-07-16)
+  theme: ThemeMode;
+  setTheme: (t: ThemeMode) => void;
 
   // modules
   enabledModules: Record<string, boolean>;
@@ -207,6 +213,8 @@ export function SettingsPanel({
   setDeviceMode,
   preferredLanguage,
   setPreferredLanguage,
+  theme,
+  setTheme,
   enabledModules,
   setEnabledModules,
   menuItems,
@@ -506,32 +514,37 @@ export function SettingsPanel({
                   </div>
 
                   <div className="space-y-6 pt-4">
+                     {/* Theme — moved here from the sidebar (admin 2026-07-16). Lives in Settings →
+                         General so it is reachable and working in ALL view modes (mobile, tablet,
+                         desktop), not only the sidebar rail/drawer. Drives the same setTheme as before. */}
                      <div className="space-y-3">
-                       <label htmlFor="settings-app-name" className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1 block pl-1">Application Name</label>
-                       <input
-                         id="settings-app-name"
-                         defaultValue="Navbharat AI"
-                         className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-4 text-sm font-bold text-white outline-none focus:border-indigo-500 transition-all shadow-inner"
-                       />
-                     </div>
-
-                     <div className="space-y-3 pt-6 border-t border-white/10">
-                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Device Mode</label>
-                        <div className="grid grid-cols-4 gap-2">
-                          {[
-                              {id: 'auto', label: 'Auto'},
-                              {id: 'mobile', label: '📱'},
-                              {id: 'tablet', label: '📟'},
-                              {id: 'desktop', label: '💻'}
-                          ].map(mode => (
-                           <button
-                              key={mode.id}
-                              onClick={() => setDeviceMode(mode.id as any)}
-                              className={`p-3 rounded-xl border border-white/5 font-black text-[10px] uppercase tracking-widest ${deviceMode === mode.id ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-[#0d1117] text-[#8b949e]'}`}
-                           >
-                              {mode.label}
-                           </button>
-                          ))}
+                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2 block pl-1">Theme</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {THEME_MODES.map((t) => {
+                            const isSelected = theme === t.value;
+                            return (
+                              <button
+                                key={t.value}
+                                onClick={() => setTheme(t.value)}
+                                className={cn(
+                                  "flex items-center gap-2 px-4 py-3 rounded-xl text-left text-[11px] font-black uppercase tracking-wider transition-all border",
+                                  isSelected
+                                    ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-600/10"
+                                    : "bg-[#0d1117] border-white/5 text-[#8b949e] hover:bg-white/5 hover:text-white"
+                                )}
+                              >
+                                <div className={cn(
+                                  "w-3 h-3 rounded-full shrink-0 border border-black/20",
+                                  t.value === 'light' ? 'bg-white border-gray-400' :
+                                  t.value === 'dark' ? 'bg-[#0d1117]' :
+                                  t.value === 'dim' ? 'bg-[#15202b]' :
+                                  t.value === 'comfort' ? 'bg-[#fdf6e3]' :
+                                  'bg-[#ffff00]'
+                                )} />
+                                {t.label}
+                              </button>
+                            );
+                          })}
                         </div>
                      </div>
 

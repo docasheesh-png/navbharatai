@@ -20,6 +20,7 @@ import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { generateMissingCssModules } from './CssModuleGenerator';
 import { generateMissingBarrels } from './BarrelGenerator';
+import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 
@@ -536,7 +537,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // earlier-tier files, injected so this file uses their EXACT exported names.
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         try {
-          const depBlock = produced.length ? dependencyContext(produced) : '';
+          // Fix 69 — feed consumers the producers' EXPORT SURFACE (exact names/shapes/signatures,
+          // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
+          // information at a fraction of the input tokens. AGENTV3_SIGNATURE_CONTEXT=off restores
+          // the old full-body dump verbatim.
+          const depBlock = produced.length
+            ? (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced))
+            : '';
           const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock));
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];

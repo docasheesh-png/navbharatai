@@ -578,9 +578,10 @@ describe('runSimpleBuild — LENS B staged generation', () => {
     expect(iTypes).toBeGreaterThanOrEqual(0);
     expect(iTypes).toBeLessThan(iComp);   // foundation first
     expect(iComp).toBeLessThan(iApp);     // component before the shell
-    // The component's prompt carried the REAL generated source of the foundation file.
+    // The component's prompt carried the foundation file's REAL export surface (Fix 69: signature
+    // context replaces the full-body dump — same names/shapes, a fraction of the tokens).
     expect(h.prompts['src/components/MediaPlayer.tsx']).toContain('ALREADY-WRITTEN FILES YOU CAN IMPORT');
-    expect(h.prompts['src/components/MediaPlayer.tsx']).toContain('<<<FILE src/types/media.ts>>>');
+    expect(h.prompts['src/components/MediaPlayer.tsx']).toContain('<<<EXPORTS src/types/media.ts>>>');
     // The shell saw both the foundation AND the component.
     expect(h.prompts['src/App.tsx']).toContain('src/components/MediaPlayer.tsx');
   });

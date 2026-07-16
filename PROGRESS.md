@@ -20364,3 +20364,12 @@ Whole file green (35 tests); `tsc --noEmit` (frontend) + `tsc -p tsconfig.server
 referencing an undefined model (LearnLoop's `Certificate`) — these need a real `prisma validate` preflight
 that surfaces exact errors to a heal pass, not a blind mechanical rewrite (can't invent a missing model). The
 Prisma-7 skew, npm ERESOLVE / legacy-peer-deps, and the GLM 429 storm are already closed by prior sessions.
+
+## 2026-07-16 — Deeper capabilities COMPLETE: every professional now has its own signature method (batches 4,5,6)
+
+Final push of the signature-`method` rollout on the EXPERT_METHOD_LAYER foundation. AgentV3 untouched.
+- **Batch 4 (advisory/service, 12):** kisan, business, realestate, insurance, stocks, techhelp, budget, freelance, govt-schemes, sarkari, cybersafety, civic.
+- **Batch 5 (lifestyle/creative, 18):** astrologer, vastu, spiritual, chef, travel, fashion, interior, gardening, music, dance, photography, beauty, writing, calligraphy, crafts, games, adventure, nature.
+- **Batch 6 (service/utility/misc, 18):** driving, homerepair, vehicle, sports, events, productivity, relationship, disability, techbuy, translate, babynames, astronomy, disaster, environment, festival, hygiene, safety, volunteer.
+
+**MILESTONE: every config-driven professional (Teacher + 72) now works like a top expert with a real, step-by-step signature method** — e.g. Lawyer=IRAC, CA=classify→provision→worked-calc, Kisan=agronomy+IPM, Astrologer=entertainment-framed+free-will, Safety=empower-not-fearmonger, Translate=meaning-not-word-for-word. Each method also bakes in the domain's safety boundaries and honesty rules (medical→doctor, legal→advocate, no fabrication, no dose/diagnosis, scam warnings). All 72 carry a `method` field; Teacher keeps its inline concept-mastery method. The test is REGISTRY-WIDE: every professional must have a deep method or CI fails, so the invariant can't regress. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Combined with the earlier work, every professional is now a real personal AI agent (memory + intake) AND a real expert (depth + signature method).

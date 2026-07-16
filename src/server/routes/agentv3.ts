@@ -178,6 +178,7 @@ import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration 
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests } from '../AgentV3/TestGenerationAgent';
+import { planAppDefaults } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -7948,6 +7949,52 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
+      // U-2 — app-scaffold quality defaults BY DEFAULT. After a successful build with an index.html,
+      // deterministically ensure SEO/OG meta, viewport, html lang, theme-color, a web manifest + a real
+      // installable icon, robots.txt, and an offline-first service worker (+ its registration) — the same
+      // by-default discipline as the auto-test pass above, instead of hoping the model calls the tool.
+      // Pure + idempotent: only MISSING tags/files are added, existing files are never clobbered. Additive
+      // and best-effort — never blocks or fails the build.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0) {
+          const idxPath = writtenFiles.has('index.html') ? 'index.html' : (writtenFiles.has('public/index.html') ? 'public/index.html' : 'index.html');
+          let indexHtml: string | null = writtenFiles.get(idxPath) ?? null;
+          if (indexHtml == null) {
+            try { indexHtml = await actuator.readFile(workspaceId, idxPath); } catch { indexHtml = null; }
+          }
+          const appName = deriveTitle(prompt) || 'App';
+          const defaults = planAppDefaults(indexHtml, appName);
+          const savedDefaults: Record<string, string> = {};
+          // Patch index.html only when the generator actually changed it.
+          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
+            try {
+              await actuator.writeFile(workspaceId, idxPath, defaults.indexHtml);
+              writtenFiles.set(idxPath, defaults.indexHtml);
+              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
+              savedDefaults[idxPath] = defaults.indexHtml;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
+          for (const [rel, content] of Object.entries(defaults.files)) {
+            if (writtenFiles.has(rel)) continue;
+            let exists = false;
+            try { await actuator.readFile(workspaceId, rel); exists = true; } catch { exists = false; }
+            if (exists) continue;
+            try {
+              await actuator.writeFile(workspaceId, rel, content);
+              writtenFiles.set(rel, content);
+              try { getWorkspaceMemory(workspaceId).indexFile(rel, content); } catch { /* index best-effort */ }
+              savedDefaults[rel] = content;
+            } catch { /* best-effort per file */ }
+          }
+          if (Object.keys(savedDefaults).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
+            if (defaults.added.length > 0) {
+              events.emit({ type: 'narration', agent: 'architect', text: `🧩 Added production defaults: ${defaults.added.join(', ')} + a web manifest, icon, robots.txt and an offline service worker.`, ts: Date.now() });
+            }
+          }
+        }
+      } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
       // P-UX.7 — surface the build's token count to the client (in + out) for a usage badge. 0 → omitted.
       const totalTokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
       // SOFTWARE PROJECT MODE (SPM-2): a successful MODULE turn with plan modules still buildable

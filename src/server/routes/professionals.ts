@@ -74,6 +74,33 @@ export function registerProfessionalsRoutes(app: Express): void {
     res.json({ professionals: listProfessionals() });
   });
 
+  // Professional Pass status for the CURRENT user — the UI uses this to show "X/limit free today",
+  // an active-pass badge, or the paywall + price. Reflects the same gate the chat route enforces.
+  app.get('/api/professional/pass/status', async (req: Request, res: Response) => {
+    const identity = await verifyFirebaseIdentity(req);
+    const uid = identity?.uid || null;
+    const enabled = professionalPaidEnabled();
+    const freeDailyLimit = professionalFreeDailyLimit();
+    const priceInr = professionalPassPriceInr();
+    const passDays = professionalPassDays();
+    if (!uid) {
+      // Anonymous: with the gate on, login is required (no free quota without an account to key it).
+      res.json({ enabled, signedIn: false, unlimited: false, hasPass: false, freeDailyLimit, usedToday: 0, remainingFree: 0, priceInr, passDays });
+      return;
+    }
+    const freeListed = isProfessionalFreeUser(uid, identity?.email || null);
+    const pass = enabled ? await professionalPassStore.getStatus(uid) : { active: false, expiresAt: null, plan: null };
+    const unlimited = !enabled || freeListed || pass.active;
+    const usedToday = unlimited ? 0 : await professionalUsageStore.getTodayCount(uid);
+    res.json({
+      enabled, signedIn: true, freeListed,
+      hasPass: pass.active, passExpiresAt: pass.expiresAt, plan: pass.plan,
+      unlimited,
+      freeDailyLimit, usedToday, remainingFree: Math.max(0, freeDailyLimit - usedToday),
+      priceInr, passDays,
+    });
+  });
+
   app.post('/api/professional/:id/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     const config = getProfessional(req.params.id);
     if (!config) {

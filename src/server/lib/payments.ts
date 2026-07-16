@@ -3,6 +3,8 @@ import axios from 'axios';
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, runTransaction, getServerDb as getDb } from './serverDb';
 import { getSecretValue } from './secrets';
+import { professionalPassStore } from '../professionals/ProfessionalPassStore';
+import { professionalPassDays } from '../professionals/professionalPaid';
 
 // SECURITY (audit C4 — CRITICAL, financial): the vishwakarma order's paid amount is
 // `tokenAmount₹ + (buyPass ? pass : 0)` (client: createVishwakarmaOrder in App.tsx). The credit path
@@ -231,6 +233,17 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       });
       if (!claimedNow) {
         return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      }
+
+      // PROFESSIONAL PASS product: grant a time-based pass — never credit wallet tokens. The atomic
+      // PENDING→SUCCESS claim above already guarantees this runs exactly once per paid order (webhook +
+      // client poll can't double-grant). Days/plan come from the tx doc, falling back to the server
+      // config (never trusts the client for the entitlement length).
+      if (String(txData.productType || '') === 'professional_pass') {
+        const days = Number.isFinite(Number(txData.passDays)) && Number(txData.passDays) > 0 ? Number(txData.passDays) : professionalPassDays();
+        const plan = String(txData.passPlan || 'monthly');
+        const expiresAt = await professionalPassStore.grant(txData.userId, days, plan);
+        return { success: true, data: { professionalPass: true, expiresAt, plan, days } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);

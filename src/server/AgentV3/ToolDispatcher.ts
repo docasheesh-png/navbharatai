@@ -90,6 +90,7 @@ import { generateMigration, type MigrationEntity, type MigrationDialect, type Sq
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
+import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
@@ -2231,6 +2232,24 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(`scan_vulnerabilities: ${result.findings.length} vulnerable dep(s) (e.g. ${result.findings[0].package}).`);
         }
         return vulnScanSummary(result);
+      }
+
+      case 'check_licenses': {
+        // PPIPE-gates — license/copyleft advisory over the app's package-lock.json (SPDX classification
+        // via SBOMGenerator). Flags strong-copyleft (GPL/AGPL) deps that could impose source-disclosure
+        // obligations. Pure analysis (no network); advisory only, never blocks. Parity with the on-demand
+        // scan_vulnerabilities CVE tool; the automatic build-end wiring is a separate slice.
+        let lockRaw: string | undefined;
+        try { lockRaw = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockRaw = undefined; }
+        if (typeof lockRaw !== 'string') return 'check_licenses: no package-lock.json in the workspace — run an install first, then re-check.';
+        let lock: unknown;
+        try { lock = JSON.parse(lockRaw); } catch { return 'check_licenses: package-lock.json is not valid JSON — cannot classify licenses.'; }
+        const analysis = analyzeAppDependencies(lock);
+        const summary = licenseAdvisorySummary(analysis);
+        if (analysis.hasCopyleftRisk) {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`check_licenses: ${analysis.copyleft.strong.length} strong-copyleft dep(s) (e.g. ${analysis.copyleft.strong[0].name}).`);
+        }
+        return summary || 'check_licenses: no dependency components found in the lockfile.';
       }
 
       case 'run_migrations': {

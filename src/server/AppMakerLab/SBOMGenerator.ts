@@ -137,3 +137,29 @@ export function analyzeAppDependencies(lock: any, generatedAt = '1970-01-01T00:0
     hasCopyleftRisk: copyleft.strong.length > 0,
   };
 }
+
+/**
+ * PPIPE-gates — an advisory license line for the build pipeline: flag strong-copyleft (GPL/AGPL)
+ * dependencies that could impose source-disclosure obligations on a shipped app, list a few weak-
+ * copyleft (LGPL/MPL) ones for awareness, and confirm "no copyleft risk" when clean. Pure; never
+ * blocks a build (a license concern is a review item, not a correctness bug). Empty string when the
+ * SBOM has no components (no lockfile / nothing to judge — neutral, never a false "clean"). */
+export function licenseAdvisorySummary(result: AppSbomResult): string {
+  if (!result || result.componentCount === 0) return '';
+  const { strong, weak } = result.copyleft;
+  if (strong.length === 0 && weak.length === 0) {
+    return `License check — no copyleft-license risk across ${result.componentCount} dependency component(s).`;
+  }
+  const lines: string[] = [];
+  if (strong.length) {
+    const shown = strong.slice(0, 6).map((f) => `  ⚠️ ${f.name}@${f.version} — ${f.license} (strong copyleft)`);
+    lines.push(`${strong.length} strong-copyleft (GPL/AGPL) dependency(ies) — may require releasing your source; review before shipping:`);
+    lines.push(...shown);
+    if (strong.length > 6) lines.push(`  …and ${strong.length - 6} more`);
+  }
+  if (weak.length) {
+    const names = weak.slice(0, 6).map((f) => `${f.name} (${f.license})`).join(', ');
+    lines.push(`${weak.length} weak-copyleft (LGPL/MPL) dependency(ies) — usually fine when unmodified: ${names}${weak.length > 6 ? ', …' : ''}`);
+  }
+  return `License check — ${lines.join('\n')}`;
+}

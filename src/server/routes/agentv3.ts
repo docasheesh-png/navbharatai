@@ -4965,12 +4965,14 @@ export function registerAgentV3Routes(app: Express): void {
       const providerLedger = createProviderUsageLedger();
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number }, model?: string, cacheReadInputTokens?: number): void => {
-        providerLedger.add(used, usage, model);
-        // Fix 66 (measure-first) — accumulate the prefix-cache HIT tokens the cheap-floor providers
-        // (GLM/Kimi) report, so the diagnostics report can show the real cache-hit rate on a build.
-        // Purely observational: it never touches the billing ledger/sink above.
-        if (Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0) {
-          billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + (cacheReadInputTokens ?? 0);
+        // Fix 66 — the cache-hit share rides the ledger entry so the REAL-cost settle prices it at the
+        // provider's cheaper cache-read rate (usageCostUsd). Margin-safe: providers without a cache
+        // line in the rate card price it at the full input rate (identical to before).
+        const cacheRead = Number.isFinite(cacheReadInputTokens) && (cacheReadInputTokens ?? 0) > 0 ? (cacheReadInputTokens ?? 0) : 0;
+        providerLedger.add(used, cacheRead > 0 ? { ...usage, cacheReadInputTokens: cacheRead } : usage, model);
+        // …and accumulate the build total for the diagnostics report's cache-hit rate line.
+        if (cacheRead > 0) {
+          billingCtx.cacheReadInputTokens = (billingCtx.cacheReadInputTokens ?? 0) + cacheRead;
         }
       };
       // The cheap floor (GLM/Kimi) leads a build's FIRST attempt for simple/medium apps for allowlisted

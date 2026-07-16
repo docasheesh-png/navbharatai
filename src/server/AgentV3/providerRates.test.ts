@@ -11,18 +11,18 @@ import {
 describe('realRateFor — resolves the exact rate by model id, then provider label', () => {
   it('prices GLM by the exact rung: flash is free, 4.7 is cheap, 5.2 is flagship', () => {
     expect(realRateFor('GLM', 'glm-4.7-flash')).toEqual({ inputPerMTok: 0, outputPerMTok: 0 });
-    expect(realRateFor('GLM', 'glm-4.7')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2 });
-    expect(realRateFor('GLM', 'glm-5.2')).toEqual({ inputPerMTok: 1.4, outputPerMTok: 4.4 });
+    expect(realRateFor('GLM', 'glm-4.7')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 });
+    expect(realRateFor('GLM', 'glm-5.2')).toEqual({ inputPerMTok: 1.4, outputPerMTok: 4.4, cacheReadPerMTok: 0.35 });
   });
 
   it('prices Kimi by rung: k2.5 cheap, k2.7 stronger coder', () => {
-    expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5 });
-    expect(realRateFor('KIMI', 'kimi-k2.7-code')).toEqual({ inputPerMTok: 0.95, outputPerMTok: 4.0 });
+    expect(realRateFor('KIMI', 'kimi-k2.5')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
+    expect(realRateFor('KIMI', 'kimi-k2.7-code')).toEqual({ inputPerMTok: 0.95, outputPerMTok: 4.0, cacheReadPerMTok: 0.24 });
   });
 
   it('falls back to the provider label when the model id is unknown/absent', () => {
-    expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2 });
-    expect(realRateFor('KIMI')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5 });
+    expect(realRateFor('GLM')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 });
+    expect(realRateFor('KIMI')).toEqual({ inputPerMTok: 0.6, outputPerMTok: 2.5, cacheReadPerMTok: 0.15 });
     expect(realRateFor('CLAUDE_HAIKU')).toEqual({ inputPerMTok: 1, outputPerMTok: 5 });
     expect(realRateFor('CLAUDE')).toEqual({ inputPerMTok: 3, outputPerMTok: 15 }); // Sonnet
     expect(realRateFor('GROK')).toEqual({ inputPerMTok: 3, outputPerMTok: 15 });
@@ -47,6 +47,35 @@ describe('usageCostUsd — token cost at a rate', () => {
   });
   it('clamps negative tokens to 0', () => {
     expect(usageCostUsd({ inputTokens: -100, outputTokens: -100 }, { inputPerMTok: 1, outputPerMTok: 1 })).toBe(0);
+  });
+
+  // ── Fix 66 billing slice — cache-read discount ──────────────────────────────────────────────
+  it('prices the cache-hit share at cacheReadPerMTok and the rest at the full input rate', () => {
+    // 1M input of which 800k cache-served: 0.2M@$0.60 + 0.8M@$0.15 = 0.12 + 0.12 = $0.24
+    expect(usageCostUsd(
+      { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 800_000 },
+      { inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 },
+    )).toBeCloseTo(0.24, 6);
+  });
+  it('with NO cacheReadPerMTok on the rate, cacheRead changes nothing (margin-safe default)', () => {
+    const withCache = usageCostUsd({ inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 900_000 }, { inputPerMTok: 0.6, outputPerMTok: 2.2 });
+    const without = usageCostUsd({ inputTokens: 1_000_000, outputTokens: 0 }, { inputPerMTok: 0.6, outputPerMTok: 2.2 });
+    expect(withCache).toBeCloseTo(without, 9);
+  });
+  it('clamps cacheRead to the input total (a provider cannot cache-serve more than it received)', () => {
+    // cacheRead 2M > input 1M → all 1M priced at the cache rate, never negative fresh-input tokens.
+    expect(usageCostUsd(
+      { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 2_000_000 },
+      { inputPerMTok: 0.6, outputPerMTok: 2.2, cacheReadPerMTok: 0.15 },
+    )).toBeCloseTo(0.15, 6);
+  });
+  it('a real GLM slice with a big cache-hit share costs a fraction of the undiscounted price', () => {
+    // HabitTracker-scale: 2.4M GLM input. Undiscounted $1.44; with 80% cache-hit at the default
+    // glm cache rate ($0.15): 0.48M@0.6 + 1.92M@0.15 = 0.288 + 0.288 = $0.576.
+    const entries: ProviderCostEntry[] = [
+      { provider: 'GLM', model: 'glm-4.7', usage: { inputTokens: 2_400_000, outputTokens: 0, cacheReadInputTokens: 1_920_000 } },
+    ];
+    expect(realProviderCostUsd(entries)).toBeCloseTo(0.576, 3);
   });
 });
 

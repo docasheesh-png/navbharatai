@@ -43,12 +43,16 @@ function envRate(name: string, fallback: number): number {
 export function realRateCard(): Record<string, TokenRate> {
   return {
     // ── GLM (Z.ai) ──────────────────────────────────────────────────────────────────────────────
+    // cacheReadPerMTok (Fix 66 billing slice): both Z.ai and Moonshot price a prefix-cache HIT at
+    // ≈25% of the fresh-input rate (their published cache-hit lines). Env-tunable like every rate;
+    // providers WITHOUT a cache line (Gemini/Grok/Claude rows below) omit it → full input rate
+    // (no discount) by construction, so nothing can be under-billed.
     'glm-flash': { inputPerMTok: envRate('RATE_GLM_FLASH_IN', 0), outputPerMTok: envRate('RATE_GLM_FLASH_OUT', 0) },
-    'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4) },
-    'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2) }, // glm-4.x coder
+    'glm-5': { inputPerMTok: envRate('RATE_GLM5_IN', 1.4), outputPerMTok: envRate('RATE_GLM5_OUT', 4.4), cacheReadPerMTok: envRate('RATE_GLM5_CACHE', 0.35) },
+    'glm': { inputPerMTok: envRate('RATE_GLM_IN', 0.6), outputPerMTok: envRate('RATE_GLM_OUT', 2.2), cacheReadPerMTok: envRate('RATE_GLM_CACHE', 0.15) }, // glm-4.x coder
     // ── Kimi (Moonshot) ─────────────────────────────────────────────────────────────────────────
-    'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0) },
-    'kimi': { inputPerMTok: envRate('RATE_KIMI_IN', 0.6), outputPerMTok: envRate('RATE_KIMI_OUT', 2.5) }, // k2.5/k2.6
+    'kimi-k2.7': { inputPerMTok: envRate('RATE_KIMI27_IN', 0.95), outputPerMTok: envRate('RATE_KIMI27_OUT', 4.0), cacheReadPerMTok: envRate('RATE_KIMI27_CACHE', 0.24) },
+    'kimi': { inputPerMTok: envRate('RATE_KIMI_IN', 0.6), outputPerMTok: envRate('RATE_KIMI_OUT', 2.5), cacheReadPerMTok: envRate('RATE_KIMI_CACHE', 0.15) }, // k2.5/k2.6
     // ── Google (Vertex / Gemini) ──────────────────────────────────────────────────────────────────
     'gemini-pro': { inputPerMTok: envRate('RATE_GEMINI_PRO_IN', 1.25), outputPerMTok: envRate('RATE_GEMINI_PRO_OUT', 10) },
     'gemini': { inputPerMTok: envRate('RATE_GEMINI_IN', 0.3), outputPerMTok: envRate('RATE_GEMINI_OUT', 2.5) }, // flash-class
@@ -96,9 +100,17 @@ export function realRateFor(provider: string, model?: string): TokenRate {
 }
 
 /** The real USD cost of one usage bucket at a given rate. Pure; negatives clamp to 0. */
-export function usageCostUsd(usage: BilledUsage, rate: TokenRate): number {
+export function usageCostUsd(usage: BilledUsage & { cacheReadInputTokens?: number }, rate: TokenRate): number {
+  const input = Math.max(0, usage.inputTokens);
+  // Fix 66 billing slice — price the CACHE-HIT share of the input at the provider's (far cheaper)
+  // cache-read rate. cacheRead is clamped to the input total (a provider can never cache-serve more
+  // than it received), and when the rate card has no cache line the cache rate DEFAULTS to the full
+  // input rate — i.e. exactly the old formula, so unknown providers/models keep the margin-safe price.
+  const cacheRead = Math.min(input, Math.max(0, usage.cacheReadInputTokens ?? 0));
+  const cacheRate = rate.cacheReadPerMTok ?? rate.inputPerMTok;
   return (
-    (Math.max(0, usage.inputTokens) / 1_000_000) * rate.inputPerMTok +
+    ((input - cacheRead) / 1_000_000) * rate.inputPerMTok +
+    (cacheRead / 1_000_000) * cacheRate +
     (Math.max(0, usage.outputTokens) / 1_000_000) * rate.outputPerMTok
   );
 }

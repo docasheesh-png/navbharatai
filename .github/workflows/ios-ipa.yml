@@ -22,6 +22,25 @@
 #                                included — easiest, no encoding step) OR its base64 (`base64 -i AuthKey.p8`).
 #        IOS_TEAM_ID           = your Team ID from step B
 #
+# ⭐ RECOMMENDED — PERSISTENT DISTRIBUTION CERT (fixes the "reached the maximum number of available
+#   Distribution certificates" cap). Without this, the build MINTS A NEW distribution cert every run;
+#   Apple allows only 2, so after two runs every build fails. Provide ONE reusable cert instead — all on
+#   the web + the `openssl` CLI (no Mac):
+#     1. Apple Developer → Certificates → REVOKE any stale/unused "Apple Distribution" certs so a slot is free
+#        (they are safe to revoke — already-shipped App Store builds are unaffected).
+#     2. Make a private key + CSR (any machine with openssl):
+#          openssl genrsa -out dist.key 2048
+#          openssl req -new -key dist.key -out dist.csr -subj "/CN=NavBharatAI Distribution/O=NavBharatAI"
+#     3. Apple Developer → Certificates → + → "Apple Distribution" → upload dist.csr → download the .cer.
+#     4. Convert cert to PEM, then bundle key + cert into a password-protected .p12:
+#          openssl x509 -inform der -in distribution.cer -out dist.pem
+#          openssl pkcs12 -export -inkey dist.key -in dist.pem -out dist.p12 -passout pass:YOUR_P12_PASSWORD
+#     5. base64 the .p12 and add TWO more repo secrets:
+#          IOS_DIST_CERT_P12_BASE64 = base64 -i dist.p12    (macOS)  /  base64 -w0 dist.p12  (linux)
+#          IOS_DIST_CERT_PASSWORD   = YOUR_P12_PASSWORD
+#   With these set, the Fastfile imports + reuses this ONE cert every run — the cap is never hit again.
+#   (Leave them unset to keep the old mint-per-run behavior.)
+#
 # HOW TO RUN:
 #   Repo → Actions → "Build iOS App (.ipa, signed)" → Run workflow (main).
 #   - Leave "upload" unchecked to just BUILD + download the .ipa artifact (a dry run to confirm signing works).
@@ -259,6 +278,11 @@ jobs:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          # Persistent distribution cert (optional). When set, the Fastfile REUSES this one cert every run
+          # instead of minting a new one — the fix for Apple's "reached the maximum number of available
+          # Distribution certificates" cap. Unset ⇒ the Fastfile falls back to creating a cert per run.
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           DO_UPLOAD: ${{ inputs.upload }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"

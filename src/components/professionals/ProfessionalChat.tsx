@@ -88,7 +88,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   };
 
   useEffect(() => {
-    try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-50))); } catch { /* ignore */ }
+    try { localStorage.setItem(storeKey, JSON.stringify(messages.slice(-120))); } catch { /* ignore */ }
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, storeKey]);
 
@@ -112,7 +112,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
     setLoading(true);
     try {
       const fileAttachments = await Promise.all(sendFiles.map(fileToAttachment));
-      const history = next.filter((m) => m.content !== config.welcome).slice(-10);
+      const history = next.filter((m) => m.content !== config.welcome).slice(-20);
       // Bearer token so the server can key persistent memory (e.g. Teacher AI's student
       // profile) to the VERIFIED identity — the body userId alone is never trusted for that.
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };

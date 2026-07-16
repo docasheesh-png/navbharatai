@@ -86,10 +86,10 @@ describe('sanitizeUpdate (per declared fields)', () => {
   });
 
   it('bounds scalar length and list size', () => {
-    const many = Array.from({ length: 50 }, (_, i) => `s${i}`);
-    const upd = sanitizeUpdate({ name: 'x'.repeat(500), subjects: many }, FIELDS)!;
-    expect(upd.name!.length).toBeLessThanOrEqual(200);
-    expect((upd.subjects as string[]).length).toBeLessThanOrEqual(15);
+    const many = Array.from({ length: 60 }, (_, i) => `s${i}`);
+    const upd = sanitizeUpdate({ name: 'x'.repeat(800), subjects: many }, FIELDS)!;
+    expect(upd.name!.length).toBeLessThanOrEqual(500);
+    expect((upd.subjects as string[]).length).toBeLessThanOrEqual(40);
   });
 
   it('rejects empty / non-object updates', () => {
@@ -110,9 +110,9 @@ describe('mergeProfile', () => {
   });
 
   it('caps keep the NEWEST list facts when full', () => {
-    const existing: ClientProfile = { subjects: Array.from({ length: 15 }, (_, i) => `old${i}`) };
+    const existing: ClientProfile = { subjects: Array.from({ length: 40 }, (_, i) => `old${i}`) };
     const merged = mergeProfile(existing, { subjects: ['brand new'] }, FIELDS);
-    expect((merged.subjects as string[]).length).toBeLessThanOrEqual(15);
+    expect((merged.subjects as string[]).length).toBeLessThanOrEqual(40);
     expect(merged.subjects).toContain('brand new');
     expect(merged.subjects).not.toContain('old0');
   });

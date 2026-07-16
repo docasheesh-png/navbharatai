@@ -46,10 +46,12 @@ export interface ProfessionalMemory {
 /** A stored per-user profile: dynamic map of declared field key → scalar or list value. */
 export type ClientProfile = Record<string, string | string[]>;
 
-// Bounds — a profile document must stay small and can never grow unbounded.
-const SCALAR_MAX_CHARS = 200;
-const ITEM_MAX_CHARS = 140;
-const LIST_MAX_ITEMS = 15;
+// Bounds — a profile document must stay bounded (never grow forever) but hold as much as safely fits
+// (admin 2026-07-15: "grow professional memory as much as you can"). Raised well above the originals
+// while staying comfortably inside Firestore's 1 MiB doc limit even across many fields.
+const SCALAR_MAX_CHARS = 500;
+const ITEM_MAX_CHARS = 240;
+const LIST_MAX_ITEMS = 40;
 
 // Distinctive tags so a leaked machine block is unambiguous to strip. `<user_memory>` is the
 // current tag; `<student_memory>` is the legacy Teacher-only tag, still stripped defensively so

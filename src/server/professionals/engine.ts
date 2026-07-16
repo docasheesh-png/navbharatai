@@ -138,8 +138,18 @@ export async function runProfessionalChat(
   const supportOffer = AppContextInjector.getSupportOffer(message, 'professional');
   if (supportOffer) systemPrompt = `${systemPrompt}\n\n${supportOffer}`;
 
-  const transcript = (history || [])
-    .slice(-8)
+  // Remember more of the conversation (admin 2026-07-15: grow memory) and DE-DUPLICATE it so the same
+  // question/answer can never appear twice in one session (admin: "ek question ek session me double na
+  // ho") — a resend, retry, or restore can otherwise repeat a turn and make the professional re-ask.
+  const dedupedHistory: ProfessionalTurn[] = [];
+  for (const m of history || []) {
+    const content = (m?.content || '').trim();
+    if (!content) continue;
+    if (dedupedHistory.some((p) => p.role === m.role && p.content.trim() === content)) continue; // drop exact repeats
+    dedupedHistory.push(m);
+  }
+  const transcript = dedupedHistory
+    .slice(-20)
     .map((m) => `${m.role === 'user' ? 'User' : config.name}: ${m.content}`)
     .join('\n');
   let prompt = transcript ? `Conversation so far:\n${transcript}\n\nUser: ${message}` : message;

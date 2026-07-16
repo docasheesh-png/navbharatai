@@ -51,15 +51,37 @@ platform :ios do
       add_to_search_list: true,
     )
 
-    # Distribution certificate — created via the API and imported into our unlocked keychain (with password
-    # so the partition list can be set). NOTE: `cert` cannot reuse a prior cert on an ephemeral runner (the
-    # private key never persists), so it mints a new one each run — fine for now; migrate to `match` later
-    # for a persistent, reusable cert (Apple caps distribution certs at 2, tracked as a follow-up).
-    cert(
-      api_key: api_key,
-      keychain_path: keychain_path,
-      keychain_password: keychain_password,
-    )
+    # Distribution certificate. THE ROOT-CAUSE FIX (build 29504642757: "Could not create another
+    # Distribution certificate, reached the maximum number of available Distribution certificates"):
+    # `cert` MINTS A NEW distribution certificate on every run, because the private key never survives the
+    # ephemeral runner. Apple caps distribution certs at 2 — so after two runs, every build fails here.
+    #
+    # DURABLE PATH (preferred): supply ONE persistent distribution certificate + its private key once, as a
+    # base64-encoded `.p12` in the IOS_DIST_CERT_P12_BASE64 secret (password in IOS_DIST_CERT_PASSWORD).
+    # We import THAT and reuse it every run — `cert` is never called, so the 2-cert cap is never touched
+    # again. import_certificate also runs `security set-key-partition-list` (needs keychain_password) so
+    # codesign can use the key non-interactively on the headless runner.
+    #
+    # FALLBACK (secret unset): today's behavior exactly — mint via the API. Keeps working until the cap.
+    dist_p12_b64 = ENV["IOS_DIST_CERT_P12_BASE64"].to_s.strip
+    if dist_p12_b64.empty?
+      cert(
+        api_key: api_key,
+        keychain_path: keychain_path,
+        keychain_password: keychain_password,
+      )
+    else
+      require "base64"
+      p12_path = File.join(ENV.fetch("RUNNER_TEMP"), "nbai_dist.p12")
+      File.open(p12_path, "wb") { |f| f.write(Base64.decode64(dist_p12_b64)) }
+      import_certificate(
+        certificate_path: p12_path,
+        certificate_password: ENV["IOS_DIST_CERT_PASSWORD"].to_s,
+        keychain_name: keychain_name,
+        keychain_password: keychain_password,
+      )
+      File.delete(p12_path) if File.exist?(p12_path) # the private key now lives only in the ephemeral keychain
+    end
 
     # App Store provisioning profile for the bundle id (sigh defaults to an App Store distribution profile).
     sigh(

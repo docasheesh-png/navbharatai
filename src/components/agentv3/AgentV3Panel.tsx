@@ -113,6 +113,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Proposed steps already added this turn (disable their buttons — enqueue is idempotent-by-user).
   const [addedSteps, setAddedSteps] = useState<Set<string>>(new Set());
   const ghToken = () => { try { return localStorage.getItem('gh_token') || undefined; } catch { return undefined; } };
+  // "made by NavBharatAI" signature preference (Settings → General, admin 2026-07-16). Default ON;
+  // only 'off' turns the badge off. Read at send time so a toggle change applies to the next build.
+  const appSignaturePref = () => { try { return localStorage.getItem('navbharat_app_signature') !== 'off'; } catch { return true; } };
   const doShipToMain = useCallback(async () => {
     if (!state.ownRepo || shipping) return;
     setShipping(true);
@@ -839,7 +842,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
     start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework,
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
@@ -973,7 +976,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
+    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
@@ -1007,7 +1010,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework });
+      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
       void refreshQueue();
     } finally {
       queueClaimInFlightRef.current = false;
@@ -1720,7 +1723,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider, appSignature: appSignaturePref() },
     );
   };
 

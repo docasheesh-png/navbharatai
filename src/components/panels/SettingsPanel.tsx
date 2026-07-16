@@ -203,6 +203,52 @@ function FontScaleControl() {
   );
 }
 
+/**
+ * "made by NavBharatAI" signature toggle (Settings → General, admin 2026-07-16). When ON (default),
+ * every app the user builds carries a small "made by NavBharatAI" badge in the bottom-right corner
+ * that links to navbharatai.com — the viral-growth mechanic (a friend clicks it → lands on
+ * navbharatai.com → becomes a customer). Persisted to localStorage `navbharat_app_signature`
+ * ('off' when disabled); the build request reads it (AgentV3Panel) and the server bakes the badge
+ * into the built app's index.html. Self-contained (own state), same pattern as MotionModeControl.
+ */
+function AppSignatureToggle() {
+  const KEY = 'navbharat_app_signature';
+  const [enabled, setEnabled] = React.useState<boolean>(() => {
+    try { return localStorage.getItem(KEY) !== 'off'; } catch { return true; }
+  });
+  const toggle = () => {
+    setEnabled((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(KEY, next ? 'on' : 'off'); } catch { /* ignore */ }
+      return next;
+    });
+  };
+  return (
+    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+      <div className="flex items-center gap-4 min-w-0">
+        <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center shrink-0">
+          <Heart className="w-5 h-5 text-indigo-400" />
+        </div>
+        <div className="min-w-0">
+          <h4 className="text-[11px] font-black text-white uppercase tracking-widest">&ldquo;Made by NavBharatAI&rdquo; Signature</h4>
+          <p className="text-[10px] text-[#8b949e] mt-1 leading-relaxed max-w-xs">
+            Show a small &ldquo;made by NavBharatAI&rdquo; badge in the bottom-right corner of every app you build. It links to navbharatai.com.
+          </p>
+        </div>
+      </div>
+      <button
+        role="switch"
+        aria-checked={enabled}
+        aria-label="Toggle the made-by-NavBharatAI signature on built apps"
+        onClick={toggle}
+        className={`w-12 h-6 rounded-full p-1 flex items-center transition-all shrink-0 ${enabled ? 'bg-indigo-600 justify-end' : 'bg-black/40 justify-start border border-white/10'}`}
+      >
+        <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
+      </button>
+    </div>
+  );
+}
+
 export function SettingsPanel({
   themeClasses,
   settingsScreen,
@@ -576,6 +622,9 @@ export function SettingsPanel({
                          <div className="w-4 h-4 bg-white rounded-full shadow-lg"></div>
                        </button>
                      </div>
+
+                     {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
+                     <AppSignatureToggle />
 
                      <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner space-y-3">
                        <div className="flex items-center gap-3 mb-2">

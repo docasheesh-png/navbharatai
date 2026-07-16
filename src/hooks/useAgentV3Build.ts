@@ -36,7 +36,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor' }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -898,7 +898,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor' }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => {
       if (running) return;
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
@@ -968,6 +968,9 @@ export function useAgentV3Build(): UseAgentV3Build {
             importUrl: opts?.importUrl || undefined,
             // R5 §5.1 — the hosting provider the user chose for a deploy turn (no lock-in).
             deployProvider: opts?.deployProvider || undefined,
+            // "made by NavBharatAI" app-signature toggle (Settings → General, admin 2026-07-16).
+            // Default ON — only sent as `false` when the user turned the badge off.
+            appSignature: opts?.appSignature,
             // When the user signed in with GitHub, forward their OAuth token so the build can store
             // the project in the USER'S OWN GitHub repo (commit / PR / CI / merge). Best-effort: a
             // missing token simply falls back to the platform's invisible storage. Read at send time

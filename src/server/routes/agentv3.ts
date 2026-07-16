@@ -3937,6 +3937,9 @@ export function registerAgentV3Routes(app: Express): void {
     const planFirstRequested = req.body?.planFirst !== false;
     const planFirst = planFirstRequested && decidePlanning(prompt) !== 'skip';
     const thinking = req.body?.thinking === true; // adaptive thinking, off by default
+    // "made by NavBharatAI" app-signature toggle (admin 2026-07-16). Default ON (viral-growth):
+    // absent/undefined = ON; only an explicit `false` from Settings → General turns it off.
+    const appSignatureEnabled = req.body?.appSignature !== false;
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -5483,6 +5486,9 @@ export function registerAgentV3Routes(app: Express): void {
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
         (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+      // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
+      // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
+      dispatcher.setSignatureEnabled(appSignatureEnabled);
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
 
       // Surgical edit mode (gold standard): when the user is editing an existing

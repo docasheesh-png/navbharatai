@@ -138,6 +138,15 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   const [otpCooldown, setOtpCooldown] = useState(0);
   const [successMessage, setSuccessMessage] = useState('');
   
+  // NATIVE AUTH TRAIL (admin iPhone debug 2026-07-17): a live, on-screen list of the exact sign-in
+  // steps as they happen, shown ONLY in the native app. The Google-login hang survived one fix and the
+  // next screenshot must answer "WHERE does it stop" with data, not guesses — the trail shows whether
+  // the flow died at the Google sheet, the returned token, or the Firebase verify call.
+  const [authTrail, setAuthTrail] = useState<string[]>([]);
+  const mark = (step: string) => {
+    try { setAuthTrail((prev) => [...prev.slice(-7), `${new Date().toISOString().slice(11, 19)} ${step}`]); } catch { /* trail is best-effort */ }
+  };
+
   const recaptchaRef = useRef<HTMLDivElement>(null);
   const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
   // Native (Android/iOS) phone-auth verification id — set by the plugin's `phoneCodeSent` listener.
@@ -323,13 +332,27 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setError('');
     setLoading(true);
     try {
+      // The same no-hang guarantee as social sign-in: an unanswered auth request surfaces an honest
+      // timeout instead of an endless spinner (iPhone report 2026-07-17 — the spinner sat on THIS button).
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        mark('email sign-in…');
+        await raceNativeAuth(
+          signInWithEmailAndPassword(auth, email, password),
+          'Sign-in timed out — check your internet and try again.',
+          45_000,
+        );
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        mark('creating account…');
+        await raceNativeAuth(
+          createUserWithEmailAndPassword(auth, email, password),
+          'Sign-up timed out — check your internet and try again.',
+          45_000,
+        );
       }
+      mark('email auth ✓');
       onClose();
     } catch (err: any) {
+      mark(`failed: ${String(err?.message || err).slice(0, 80)}`);
       setError(`${describeAuthError(err)} · diagnosing…`);
       setError(`${describeAuthError(err)}\n${await diagnoseAuth(email, password)}`);
     } finally {
@@ -392,8 +415,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     if (Capacitor.isNativePlatform() && (isGoogle || isApple)) {
       try {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        // STALE-SESSION CLEAR (admin's own diagnosis 2026-07-17: "logout dikhta hai par hua nahi") —
+        // a half-dead previous session (plugin- or SDK-side) can wedge a fresh sign-in. The user is at
+        // the login screen, so clearing both layers first is always safe and gives GIDSignIn/Firebase a
+        // clean slate. Best-effort: a signOut failure must never block the sign-in itself.
+        mark('clearing any stale session…');
+        try { await FirebaseAuthentication.signOut(); } catch { /* no native session — fine */ }
+        try { await auth.signOut(); } catch { /* no web session — fine */ }
         let credential;
         if (isGoogle) {
+          mark('opening Google sign-in…');
           // raceNativeAuth (2026-07-17): a wiring/SDK fault once left this promise PENDING FOREVER
           // (the redirect URL never reached GIDSignIn) — the user saw an infinite spinner. The bridge
           // now always answers within the window or the user gets an honest, retryable error.
@@ -402,6 +433,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             'Google sign-in timed out — please try again.',
           );
           const idToken = nativeResult.credential?.idToken;
+          mark(`Google returned — token: ${idToken ? 'YES' : 'NO'}`);
           if (!idToken) {
             throw new Error(
               'Native Google sign-in returned no ID token — check the iOS GoogleService-Info.plist / Android google-services.json (SHA-1) setup.',
@@ -409,6 +441,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           }
           credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
         } else {
+          mark('opening Apple sign-in…');
           // Apple: the plugin returns an Apple identity token + the raw nonce it used; Firebase's
           // Apple OAuthProvider verifies the token against that same nonce. Missing token ⇒ the
           // "Sign in with Apple" capability / Firebase Apple provider isn't set up yet.
@@ -428,20 +461,25 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           const appleProvider = new OAuthProvider('apple.com');
           credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
+        mark('verifying with Firebase…');
         // Exchange the native credential into the Firebase JS SDK, but NEVER let a stalled WKWebView
         // persistence write hang the login spinner forever (the "stuck after returning from Google" bug,
         // admin 2026-07-17). settleNativeSignIn caps the exchange and, if it overruns, still succeeds
         // when the session actually landed via the auth listener — else it reports a clean failure.
+        // (The on-screen trail marks each hop so a stuck attempt shows exactly where it stopped.)
         let result: UserCredential | null = null;
         const exchange = signInWithCredential(auth, credential).then((r) => { result = r; });
         const outcome = await settleNativeSignIn(exchange, auth, 15000, 3000);
         if (outcome === 'failed') {
+          mark('failed: sign-in did not complete');
           throw new Error('Sign-in did not complete. Please check your connection and try again.');
         }
+        mark(`Firebase ✓ signed in${result ? '' : ' (via session listener)'}`);
         if (result) onCredential?.(result);
         onClose();
         return 'ok';
       } catch (nativeErr: any) {
+        mark(`failed: ${String(nativeErr?.message || nativeErr).slice(0, 80)}`);
         // The user dismissing the native account sheet must mean CANCEL — never an error banner.
         // iOS Apple cancel surfaces code 1001 / "AuthorizationError"; Google Android cancel is 12501.
         const msg = String(nativeErr?.message || nativeErr?.code || '').toLowerCase();
@@ -875,6 +913,17 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-400 text-[10px] font-bold">
               <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">✓</div>
               <span>{successMessage}</span>
+            </div>
+          )}
+
+          {/* Native sign-in trail (native app only): the LIVE step list of the current attempt so a
+              stuck login shows exactly WHERE it stopped — real diagnosis instead of a blind spinner. */}
+          {Capacitor.isNativePlatform() && authTrail.length > 0 && (
+            <div className="p-3 bg-white/5 border border-white/10 rounded-2xl">
+              <p className="text-[8px] font-black uppercase tracking-widest text-[#8b949e] mb-1">Sign-in progress</p>
+              {authTrail.map((t, i) => (
+                <p key={i} className="text-[9px] font-mono text-[#c9d1d9] leading-relaxed break-all">{t}</p>
+              ))}
             </div>
           )}
 

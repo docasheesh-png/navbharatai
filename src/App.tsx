@@ -23,7 +23,9 @@ import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3F
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
-import { OfflineAI } from './components/offline/OfflineAI';
+// Lazy — keeps the bundled AppKnowledgeBase (imported by the Offline AI) OUT of the main index chunk,
+// so it loads as its own split chunk only when the user opens Offline AI (bundle-budget safe).
+const OfflineAI = lazy(() => import('./components/offline/OfflineAI').then((m) => ({ default: m.OfflineAI })));
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';

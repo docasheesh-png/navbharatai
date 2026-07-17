@@ -715,6 +715,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'threat_model',
+      description:
+        'Threat-model the app\'s OWN code (complements scan_vulnerabilities, which covers dependencies). A ' +
+        'high-precision scan for the most exploitable web-app defects: a secret hardcoded into client-side ' +
+        'code (ships to the browser), a wildcard CORS with credentials, SQL built by string interpolation ' +
+        '(injection), XSS via dangerouslySetInnerHTML from a non-constant, and eval()/new Function() on a ' +
+        'non-literal. Each finding names the file, line and fix. Pure/offline; advisory only — never blocks a ' +
+        'build. Run before shipping a real app. No arguments.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'run_migrations',
       description:
         'Apply the database schema before the app runs. Detects the migration tool the project uses ' +
@@ -1112,6 +1123,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_iac',
   'scan_vulnerabilities',
   'check_licenses',
+  'threat_model',
   'run_migrations',
   'generate_db_config',
   'generate_payment',

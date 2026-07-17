@@ -60,6 +60,7 @@ import { analyzeDependencies, dependencySummary } from './DependencyAnalysis';
 import { analyzeMaintainability, maintainabilitySummary } from './maintainabilityAnalysis';
 import { analyzeLockfiles, lockfileSummary, detectPackageManager, packageManagerSummary } from './lockfileAnalysis';
 import { detectMonorepo, monorepoSummary } from './monorepoAnalysis';
+import { analyzeThreatModel, threatModelSummary } from './threatModelAnalysis';
 import { analyzeHeavyImports, heavyImportSummary } from './heavyImportAnalysis';
 import { analyzeQueryPatterns, queryPatternSummary } from './queryPatternAnalysis';
 import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnalysis';
@@ -1598,6 +1599,9 @@ export class ToolDispatcher {
         const couplingLine = couplingSummary(await analyzeCoupling(snap.sources).catch(() => []));
         // GA-5 — API wiring: frontend calls with no matching backend route (likely broken). Advisory-only.
         const apiWiringLine = (() => { try { return apiWiringSummary(buildApiGraph(snap.sources)); } catch { return ''; } })();
+        // GA-13 — threat model: high-precision own-code security defects (client secret, wildcard-CORS+creds,
+        // SQL string-interp, XSS via dangerouslySetInnerHTML, eval on non-literal). Advisory.
+        const threatLine = threatModelSummary(analyzeThreatModel(snap.sources));
         // D12 — monorepo: detect turbo/nx/pnpm-workspaces and advise the correct scoped install/build/test. Advisory.
         const monorepoLine = (() => {
           try {
@@ -1637,7 +1641,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
       }
 
       case 'update_todo': {
@@ -2360,6 +2364,28 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(`check_licenses: ${analysis.copyleft.strong.length} strong-copyleft dep(s) (e.g. ${analysis.copyleft.strong[0].name}).`);
         }
         return summary || 'check_licenses: no dependency components found in the lockfile.';
+      }
+
+      case 'threat_model': {
+        // GA-13 — threat model over the app's OWN code (not deps): high-precision STRIDE-style scan for a
+        // client-shipped secret, wildcard CORS + credentials, SQL string-interpolation, XSS via
+        // dangerouslySetInnerHTML from a non-constant, and eval on a non-literal. Pure; advisory only.
+        let files: string[];
+        try { files = await this.actuator.listFiles(this.workspaceId); }
+        catch { return 'threat_model: failed to list workspace files.'; }
+        const CODE = /\.(t|j)sx?$/;
+        const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
+        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 300);
+        const sources: { path: string; content: string }[] = [];
+        for (const f of codeFiles) {
+          try { sources.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); }
+          catch { /* skip unreadable */ }
+        }
+        const findings = analyzeThreatModel(sources);
+        if (findings.some((x) => x.severity === 'high')) {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`threat_model: ${findings.filter((x) => x.severity === 'high').length} high-severity issue(s) (e.g. ${findings[0].kind}).`);
+        }
+        return threatModelSummary(findings) || 'threat_model: no high-signal security issues found in the app\'s own code.';
       }
 
       case 'run_migrations': {

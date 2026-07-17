@@ -173,15 +173,21 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
     probes.push({ feature: def.feature, label: def.label, present });
   }
   const presentProbes = probes.filter((p) => p.present);
-  // CAPTURE-FAILURE GUARD (deep-test build #4, 2026-07-17): when we probed ≥2 requested features and found
-  // ZERO present ("Present: none"), the overwhelmingly likely cause is that the preview capture returned a
-  // pre-render / partial DOM — NOT that a build which rendered and passed its preview self-check genuinely
-  // shipped none of its UI. A REAL missing-feature result is PARTIAL (some present, some missing); an
-  // all-absent result is the capture-miss signature. This backstops isUnrenderedSpaShell for a capture that
-  // isn't a recognisable bare shell (build #4: "renders correctly" at 468s, yet FEATURE_COVERAGE said
-  // Present: none for all 6). Advisory-only, so staying silent can never hide a real failure from the user —
-  // a genuinely blank app is caught by the preview/readiness checks, not by this heuristic. Report nothing.
-  if (probes.length >= 2 && presentProbes.length === 0) return empty;
+  // CAPTURE-CORROBORATION GUARD (deep-test build #4, 2026-07-17; widened by real report 1682cd03,
+  // 2026-07-17): only report a REQUESTED feature "missing" once the capture is CORROBORATED — i.e. at
+  // least one OTHER requested feature probed PRESENT, proving the rendered DOM was really captured. When
+  // ZERO probed features are present ("Present: none"), the far likelier cause is a pre-render/partial
+  // capture or an over-broad keyword match than a build (which rendered and passed its preview self-check)
+  // genuinely shipping none of its UI. A REAL missing-feature result is PARTIAL (some present, some
+  // missing); an all-absent result is the capture-miss / false-trigger signature.
+  //   • build #4: "renders correctly" at 468s yet FEATURE_COVERAGE claimed Present: none for all 6.
+  //   • report 1682cd03: the Hinglish EDIT instruction "rest timer me 30s ka option bhi add karo" — where
+  //     "add karo" means "please make this change", NOT "build an Add feature" — tripped the lone `add`
+  //     probe, found no Add/create control, and falsely reported "Present: none" (it became the rootCause
+  //     of a 95/100 PASSING build). A single unproven signal must not indict a working app.
+  // So: any all-absent result (regardless of probe count) stays silent. Advisory-only — a genuinely blank
+  // app is caught by the preview/readiness checks, not by this heuristic. Report nothing.
+  if (probes.length >= 1 && presentProbes.length === 0) return empty;
   return {
     probes,
     missing: probes.filter((p) => !p.present).map((p) => p.label),

@@ -1,11 +1,11 @@
-// AgentV3 (Vargen 3.0) — shared type contracts for the v3.0 agent engine.
+// AgentV3 (Vargen 3.0) — shared type contracts for the v5.0 agent engine.
 //
 // DESIGN: NAVBHARATAI_PRO_V3_DESIGN.md. This is the P0 skeleton — the type
 // vocabulary plus the state/event spine that P1+ fills in. By design (strangler-
 // fig) nothing in AgentV3 imports from the live Pro/Engineer build paths, so the
-// module cannot affect the live app until v3.0 is explicitly enabled and proven.
+// module cannot affect the live app until v5.0 is explicitly enabled and proven.
 
-/** Current build phase of the v3.0 engine. Bumped as phases land. */
+/** Current build phase of the v5.0 engine. Bumped as phases land. */
 export const AGENTV3_PHASE = 'P3' as const;
 
 /** Native tool-use tool names the agent team can call (RC-1). */

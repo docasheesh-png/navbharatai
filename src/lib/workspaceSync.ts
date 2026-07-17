@@ -1,9 +1,9 @@
-// IDE ↔ v3.0 workspace sync (Phase S1 of the "one body, many organs" rebuild).
+// IDE ↔ v5.0 workspace sync (Phase S1 of the "one body, many organs" rebuild).
 //
-// When a user edits a file in Code Studio, that edit must reach the v3.0 workspace's DURABLE store
-// (so v3.0 sees it and the File Guardian never reverts it). This module is the thin, safe glue:
+// When a user edits a file in Code Studio, that edit must reach the v5.0 workspace's DURABLE store
+// (so v5.0 sees it and the File Guardian never reverts it). This module is the thin, safe glue:
 //   • diffChangedFiles — pure: which files are new/changed vs the previous set,
-//   • stripEcho — pure: drop files that just arrived FROM v3.0 (so a remote sync doesn't bounce back),
+//   • stripEcho — pure: drop files that just arrived FROM v5.0 (so a remote sync doesn't bounce back),
 //   • makeWorkspaceSyncer — debounced + in-flight-coalesced scheduler around a best-effort sync fn,
 //     so keystrokes don't thrash the network and there is never a sync feedback loop.
 //
@@ -34,13 +34,13 @@ export function stripEcho(changed: FileMap, remote: FileMap | null | undefined):
 export interface WorkspaceSyncer {
   /** Call on a local (IDE) file-set change; schedules a debounced durable sync of just the diff. */
   onLocalChange(prev: FileMap, next: FileMap): void;
-  /** Record files that just arrived FROM v3.0 so they are not echoed back out. */
+  /** Record files that just arrived FROM v5.0 so they are not echoed back out. */
   noteRemote(files: FileMap): void;
-  /** Are there local edits not yet pushed to v3.0 (pending or in-flight)? Used by the dirty guard. */
+  /** Are there local edits not yet pushed to v5.0 (pending or in-flight)? Used by the dirty guard. */
   hasPending(): boolean;
   /**
    * Force any pending edits to sync NOW (bypass the debounce) and resolve once the durable store has
-   * them. Called BEFORE a v3.0 build starts so the build never runs on a stale file set while the user
+   * them. Called BEFORE a v5.0 build starts so the build never runs on a stale file set while the user
    * has un-flushed edits — the Phase S3 conflict guard. Safe to call when nothing is pending (no-op).
    */
   flush(): Promise<void>;

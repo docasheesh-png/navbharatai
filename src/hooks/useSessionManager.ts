@@ -1,6 +1,6 @@
 // useSessionManager — the session-restore / session-management slice, lifted out of the App.tsx God
 // component (P3.1, behavior-preserving). Owns handleRestoreUci (restore a chat by its UCI/id — local
-// cache then Firestore, with the v3.0-session resume branch), handleRestoreByUci (restore from the
+// cache then Firestore, with the v5.0-session resume branch), handleRestoreByUci (restore from the
 // typed UCI input), deleteSession (delete a saved session locally + in Firestore), and startNewChat.
 // Code moved BYTE-IDENTICAL — pure relocation, zero logic change. Everything from the rest of the app
 // is injected via deps, and App.tsx destructures the SAME identifiers back, so every call site (the
@@ -102,9 +102,9 @@ export function useSessionManager(deps: SessionManagerDeps) {
       return false;
     }
 
-    // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
+    // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
     // (backend continues with the same workspace/memory, best-effort) and restore the
-    // saved thread, then open the v3.0 tab. Other sessions fall through to the regular
+    // saved thread, then open the v5.0 tab. Other sessions fall through to the regular
     // chat restore below.
     const isV3Session = targetSession.agent === 'agentv3'
       || (targetSession as any).originalAgent === 'agentv3'
@@ -122,8 +122,8 @@ export function useSessionManager(deps: SessionManagerDeps) {
       setCurrentSessionId(targetSession.id);
       v3ResumeInFlightRef.current = true; // resume, NOT a fresh open — suppress the new-chat bump so
                                           // toggleTab doesn't start a blank session over the resumed one
-      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
-      addToast('Resumed v3.0 session.', 'success');
+      toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
+      addToast('Resumed v5.0 session.', 'success');
       return true;
     }
 
@@ -256,9 +256,9 @@ export function useSessionManager(deps: SessionManagerDeps) {
       } catch (err) {
         console.error('Error deleting session from Firestore:', err);
       }
-      // A v3.0 session's transcript lives in the SERVER conversation store (single source of
+      // A v5.0 session's transcript lives in the SERVER conversation store (single source of
       // truth) — deleting only the chat_sessions metadata row would leave the real record behind,
-      // still listed inside the v3.0 History menu. The server resolves the v3_ id to its stored
+      // still listed inside the v5.0 History menu. The server resolves the v3_ id to its stored
       // record(s) and removes them; owner-checked server-side. Best-effort.
       if (id.startsWith('v3_')) {
         try {

@@ -132,15 +132,15 @@ describe('classifyIntent — "something isn\'t working" bug reports resume the b
   });
 });
 
-describe('classifyIntent — comparison/explanation asks are chat, not a build (real report: "v3.0 aur claude code ko campair karo")', () => {
+describe('classifyIntent — comparison/explanation asks are chat, not a build (real report: "v5.0 aur claude code ko campair karo")', () => {
   it('routes the exact reported message to chat, not a ~9-minute build', () => {
-    // Real report: v3.0 spent a full build cycle ("Estimated build time: ~9 min", "Setting up your
+    // Real report: v5.0 spent a full build cycle ("Estimated build time: ~9 min", "Setting up your
     // workspace…") answering what was only a comparison QUESTION — because the message contains "code"
     // (as part of "Claude Code"), a BUILD_SIGNALS keyword, which used to win by default.
-    expect(classifyIntent('v3.0 aur claude code ko campair karo')).toBe('chat');
+    expect(classifyIntent('v5.0 aur claude code ko campair karo')).toBe('chat');
   });
   it('routes English "compare X and Y" / "X vs Y" phrasings to chat', () => {
-    expect(classifyIntent('compare v3.0 and Claude Code')).toBe('chat');
+    expect(classifyIntent('compare v5.0 and Claude Code')).toBe('chat');
     expect(classifyIntent('react vs vue, which is better?')).toBe('chat');
     expect(classifyIntent('what is the difference between vite and webpack')).toBe('chat');
   });
@@ -149,9 +149,9 @@ describe('classifyIntent — comparison/explanation asks are chat, not a build (
     expect(classifyIntent('tulna karo dono ki')).toBe('chat');
   });
   it('marks it HIGH-confidence so the LLM upgrade cannot be talked into a build', async () => {
-    expect(classifyIntentWithConfidence('v3.0 aur claude code ko campair karo')).toEqual({ intent: 'chat', confidence: 'high', signal: 'informational' });
+    expect(classifyIntentWithConfidence('v5.0 aur claude code ko campair karo')).toEqual({ intent: 'chat', confidence: 'high', signal: 'informational' });
     const llm = async () => 'build';
-    expect(await classifyIntentSmart('v3.0 aur claude code ko campair karo', llm)).toBe('chat');
+    expect(await classifyIntentSmart('v5.0 aur claude code ko campair karo', llm)).toBe('chat');
   });
   it('an explicit build/edit verb still wins over a comparison mention in the same message', () => {
     expect(classifyIntent('build a comparison table and compare products')).toBe('new_build');

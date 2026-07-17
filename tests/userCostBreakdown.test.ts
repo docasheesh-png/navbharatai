@@ -18,7 +18,7 @@ describe('userCostBreakdown — provider-anonymous by construction', () => {
   });
 
   it('always brands the engine as NavBharatAI', () => {
-    expect(userCostBreakdown({ inputTokens: 5, outputTokens: 5 }, 2, 'off', 87).engine).toBe('NavBharatAI Pro v3.0');
+    expect(userCostBreakdown({ inputTokens: 5, outputTokens: 5 }, 2, 'off', 87).engine).toBe('NavBharatAI Pro v5.0');
   });
 
   it('the ENTIRE serialized breakdown contains no backend AI name (the anonymization guarantee)', () => {

@@ -1,4 +1,4 @@
-// P4.2 — Event Sourcing + Replay (UPGRADE v3.0).
+// P4.2 — Event Sourcing + Replay (UPGRADE v5.0).
 //
 // A REAL, honest replay projection: fold a workspace's event log into the state the events
 // actually prove. Verified ground truth (see the discovery notes): AppMakerLab event payloads

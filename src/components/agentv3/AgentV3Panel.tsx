@@ -46,7 +46,7 @@ async function authJsonHeaders(): Promise<Record<string, string>> {
 import { doc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 /**
- * AgentV3Panel — NavBharatAI Pro v3.0 (Vargen 3.0), a Claude-Code-style chat
+ * AgentV3Panel — NavBharatAI Pro v5.0 (Vargen 3.0), a Claude-Code-style chat
  * app builder. You chat with it (it replies to anything, even "hello"); when you
  * describe an app it builds it for real, and the workspace surfaces (preview,
  * files, diff, terminal, git) update live alongside. All activity is REAL engine
@@ -206,7 +206,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [userId, email, state.done, billingBlock, settingsOpen]);
   // Mode (Build / Plan / Advise) is the 3-tab switcher at the top of the chat — admin 2026-07-06.
   // Files the user attached for the next message (images, PDFs, Word/Excel/PPT,
-  // ZIP, text/code). Read and analyzed by v3.0 — converted to base64 on send.
+  // ZIP, text/code). Read and analyzed by v5.0 — converted to base64 on send.
   const [files, setFiles] = useState<File[]>([]);
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -391,9 +391,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   };
   const sessionIdRef = useRef<string>('');
   if (!sessionIdRef.current) {
-    // ADMIN RULE (2026-07-05 — REPLACES the retired 2026-07-01 always-fresh rule): the v3.0 chat is
+    // ADMIN RULE (2026-07-05 — REPLACES the retired 2026-07-01 always-fresh rule): the v5.0 chat is
     // STICKY. A reload, a tab switch, the phone being switched off — none of them change the chat;
-    // reopening v3.0 restores the SAME session where the user left it. The chat changes only via
+    // reopening v5.0 restores the SAME session where the user left it. The chat changes only via
     // ☰ "+New chat", ☰ opening another chat, or the header tab ✕ (which CLEARS the sticky id — see
     // App.closeTab → clearStickySession). The 07-01 rule existed for a once-stuck chat that could not
     // be cleared; that bug class is fixed and the admin retired the rule ("is rule ki need nahi hai").
@@ -405,8 +405,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }
   // The workspaceId THIS session expects — passed to checkRunning/resume/subscribeLive so the server
   // only auto-attaches/mirrors a build that actually belongs to THIS session, never one still running
-  // under a DIFFERENT v3.0 chat on the same account (root-caused 2026-07-01: "+ New chat" — and, more
-  // generally, opening any v3.0 session — could show an unrelated session's in-progress build).
+  // under a DIFFERENT v5.0 chat on the same account (root-caused 2026-07-01: "+ New chat" — and, more
+  // generally, opening any v5.0 session — could show an unrelated session's in-progress build).
   // ANON PARITY (Fix 26, report 2026-07-07): mirrors the server's deriveWorkspaceId INCLUDING the
   // anon identity — a signed-out/auth-degraded session builds under `agentv3-anon-<sid>`, and every
   // continuity feature must compute that same id instead of silently going dead (`undefined`).
@@ -571,7 +571,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // once, AND a deliberate session switch mid-load discards the stale result so New chat stays blank.
   const autoRestoredSessionRef = useRef<string>('');
   // Fresh-open discriminator (Bugs 1/3/4/5): App bumps freshOpenNonce ONLY when the user deliberately
-  // opens v3.0 from the menu/sidebar → start a brand-new chat. A hard reload restores the v3.0 view
+  // opens v5.0 from the menu/sidebar → start a brand-new chat. A hard reload restores the v5.0 view
   // WITHOUT bumping the nonce (stays 0) → this effect takes the RESTORE branch instead, bringing the
   // same project's messages/files/preview back. Each distinct nonce is handled at most once.
   useEffect(() => {
@@ -584,7 +584,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // server-side but the client refused to restore it.
     if (running || state.narration.length > 0 || userMsgs.length > 0) return;
     // STICKY-SESSION RESTORE (admin rule 2026-07-05 — replaces the retired 2026-07-01 always-fresh
-    // rule): opening v3.0 with an empty panel restores the STICKY session's saved chat — text back
+    // rule): opening v5.0 with an empty panel restores the STICKY session's saved chat — text back
     // where the user left it after a reload / phone-off / browser kill — and, if that session's build
     // is still running server-side, re-attaches it live (openConversation's resume-live path). Silent:
     // a brand-new sticky session with nothing saved yet simply stays a blank new chat (no error, no
@@ -602,7 +602,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // later) to avoid a temporal-dead-zone on workspaceFiles. New chat / open / resume reset it to ''.
   const rehydratedWsRef = useRef<string>('');
 
-  // Resume a saved v3.0 conversation opened from History ("open chat"). Adopt its sessionId and
+  // Resume a saved v5.0 conversation opened from History ("open chat"). Adopt its sessionId and
   // restore its saved thread into the chat.
   //
   // ROOT-CAUSE FIX (2026-07-02): a plain `useEffect` ALWAYS runs once on mount, and App never clears
@@ -707,7 +707,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // HISTORY REBUILD (single source of truth, admin order 2026-07-02): the server ConversationStore
   // is the ONLY transcript writer — the client persists NO messages, ever. This effect now writes a
   // METADATA-ONLY row into chat_sessions (title/tags/lastUpdated, keyed by the stable sessionId) so
-  // (a) the main sidebar History still lists v3.0 sessions and (b) sessions whose server record is
+  // (a) the main sidebar History still lists v5.0 sessions and (b) sessions whose server record is
   // anon-degraded still get a list row here. It deliberately writes NO `messages` field: with
   // `{ merge: true }` an existing legacy transcript in the doc is left untouched (read-only legacy
   // data), and no client write can ever again shrink/erase a thread — the root cause of the
@@ -837,7 +837,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
     const pendingImportUrl = (override?.importUrl ?? importUrl).trim();
     if (!override) setImportUrl(''); // consume the set-by-hand import URL on first send
-    // Phase S3 conflict guard: flush any pending IDE edits to v3.0's durable store BEFORE the build
+    // Phase S3 conflict guard: flush any pending IDE edits to v5.0's durable store BEFORE the build
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
@@ -1122,7 +1122,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     reset();
   };
 
-  // History menu: list this account's saved v3.0 chats and open any of them. Because conversations
+  // History menu: list this account's saved v5.0 chats and open any of them. Because conversations
   // are stored per-USER in Firestore (not per device), the same list — and continuing the SAME
   // project/memory — works from any device the user signs in on (Claude-style continuity).
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1182,7 +1182,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Reusable loader so both the initial open AND the "Try again" retry button can
   // re-fetch without duplicating the fetch/loading-state logic.
   //
-  // Two sources are merged so EVERY v3.0 session shows: (1) the server conversation store
+  // Two sources are merged so EVERY v5.0 session shows: (1) the server conversation store
   // (/api/agentv3/conversations) — the single source of truth for transcripts, but its LIST is
   // keyed to the verified uid, so sessions persisted while identity degraded to anon don't list
   // there; and (2) the Firestore `chat_sessions` metadata rows (`v3_<sessionId>`), which this
@@ -1194,7 +1194,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     try {
       const { items, error: loadErr } = await listConversations({ userId, email });
 
-      // Pull this account's v3.0 sessions from chat_sessions (client SDK) — the reliable superset.
+      // Pull this account's v5.0 sessions from chat_sessions (client SDK) — the reliable superset.
       let chatItems: ConversationMeta[] = [];
       chatSessionMsgsRef.current.clear();
       const prefix = `agentv3-${normalizeUid(userId)}-`;
@@ -1228,7 +1228,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       const sidOf = (c: ConversationMeta) =>
         (c.workspaceId && c.workspaceId.startsWith(prefix)) ? c.workspaceId.slice(prefix.length) : c.id;
       const bySession = new Map<string, ConversationMeta>();
-      for (const c of chatItems) bySession.set(sidOf(c), c);   // baseline: every saved v3.0 session
+      for (const c of chatItems) bySession.set(sidOf(c), c);   // baseline: every saved v5.0 session
       for (const c of items) bySession.set(sidOf(c), c);        // richer conversation-store record wins
       const merged = [...bySession.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
@@ -1480,7 +1480,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setTab(t);
     setShowWorkspace(true);
   };
-  // ── Mobile footer (admin 2026-07-07): v3.0 owns the app's bottom nav while it is the active view.
+  // ── Mobile footer (admin 2026-07-07): v5.0 owns the app's bottom nav while it is the active view.
   // One sheet at a time: the footer's History and More items open bottom sheets anchored above the
   // nav; any footer navigation action closes them.
   const [mobileSheet, setMobileSheet] = useState<null | 'history' | 'more'>(null);
@@ -1500,7 +1500,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const anyToggleOn = planFirst || thinking || onlyOpus;
 
 
-  // Download the LAST build's diagnostics report (every issue v3.0 hit — provider fallbacks,
+  // Download the LAST build's diagnostics report (every issue v5.0 hit — provider fallbacks,
   // tool errors, "replied without building" nudges, readiness blockers, sandbox problems) as
   // JSON, so the admin can hand it to Claude and the rough edges get fixed in code.
   const [downloadingDiag, setDownloadingDiag] = useState(false);
@@ -1756,7 +1756,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // ── Mobile footer API (admin 2026-07-07): register the panel's REAL actions with the app-level
   // bottom nav — the same code paths the desktop header uses (openTab, the history loader, the
   // diagnostics download). Re-registered whenever the active surface changes so the nav's highlight
-  // tracks reality; unregistered on unmount (effect above) so a closed v3.0 never leaves stale
+  // tracks reality; unregistered on unmount (effect above) so a closed v5.0 never leaves stale
   // footer buttons. Lives below the workspaceFiles declaration it reads (TDZ).
   useEffect(() => {
     if (!onFooterApi) return;
@@ -1857,8 +1857,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.workspaceId]);
 
-  // Lift the v3.0 preview state (live URL + workspace) up to the app shell so the MAIN slide-out
-  // "Preview" menu can render the SAME working v3.0 preview — not the retired v2.0 generatedCode.
+  // Lift the v5.0 preview state (live URL + workspace) up to the app shell so the MAIN slide-out
+  // "Preview" menu can render the SAME working v5.0 preview — not the retired v2.0 generatedCode.
   // `framework`/`running` are ALSO lifted (2026-07-01) so the sidebar's PreviewSurface can reach full
   // feature parity with this in-panel one (auto-resume + framework-aware Diagnose need them).
   useEffect(() => {
@@ -2080,7 +2080,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             )}
           </div>
           <Bot className="w-5 h-5 text-indigo-400" />
-          <span className="font-semibold">NavBharatAI Pro v3.0</span>
+          <span className="font-semibold">NavBharatAI Pro v5.0</span>
           <span className="text-[10px] uppercase tracking-wide bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">beta</span>
           {/* Paid-public (billing PR 5): a live wallet-balance chip — shown ONLY when this user is
               actually on paid billing (server `billed:true`), so admin/free-list users and the
@@ -2153,7 +2153,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <button
             onClick={() => downloadDiagnostics('download')}
             disabled={downloadingDiag}
-            title="Download the diagnostics report from your last build (JSON) — every issue v3.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
+            title="Download the diagnostics report from your last build (JSON) — every issue v5.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
@@ -2790,7 +2790,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
                       ? '⚡ Message the team while they build — they will act on it at the next step…'
-                      : 'Message v3.0… (e.g. “hello”, “build a notes app”, or attach a file)'
+                      : 'Message v5.0… (e.g. “hello”, “build a notes app”, or attach a file)'
                   }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -2932,10 +2932,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           )}
           {!showWorkspace ? null : tab === 'preview' ? null : tab === 'files' ? (
             // Unified Files — the SAME rich FilesPanel the sidebar "Files" menu uses, so both
-            // entry points are ONE feature with two gates. It shows the union of the live v3.0
+            // entry points are ONE feature with two gates. It shows the union of the live v5.0
             // sandbox files (workspaceFiles) and the main-app files (user uploads + already-synced
-            // builds via onFilesSync) — i.e. exactly "the files v3.0 built OR the user uploaded".
-            // Empty state keeps v3.0's own restore-all safety net (the sandbox-level restore the
+            // builds via onFilesSync) — i.e. exactly "the files v5.0 built OR the user uploaded".
+            // Empty state keeps v5.0's own restore-all safety net (the sandbox-level restore the
             // sidebar's History tab does not provide).
             (() => {
               const unified: Record<string, string> = { ...(filesPanel?.files || {}), ...(workspaceFiles || {}) };
@@ -2947,7 +2947,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     files={unified}
                     hasGeneratedCode={hasAny}
                     // REAL delete in the unified view: the parent's onDeleteFile purges the main-app
-                    // state + IndexedDB + the v3.0 durable store — but this panel's OWN sandbox-files
+                    // state + IndexedDB + the v5.0 durable store — but this panel's OWN sandbox-files
                     // cache (workspaceFiles) also lists the path, so purge it here too or the row
                     // reappears in the union and the delete looks fake.
                     onDeleteFile={(path: string) => {
@@ -3246,7 +3246,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Import Project</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v3.0 workspace</p>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v5.0 workspace</p>
               </div>
               <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
                 <X className="w-4 h-4" />

@@ -1,6 +1,6 @@
 /**
  * Project Insights & Integrations panel — wires the previously-headless backends into the actual
- * v3.0 UI so they DO something visible:
+ * v5.0 UI so they DO something visible:
  *   - Build SLO compliance        → GET  /api/analytics/slo        (P-PME.11)
  *   - App SBOM + license check     → POST /api/workspace/sbom       (P-BRE.10)
  *   - Webhook management           → /api/webhooks/:userId CRUD     (P-PME.9)

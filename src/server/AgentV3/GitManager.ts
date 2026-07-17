@@ -40,7 +40,7 @@ export class GitManager implements Checkpointer {
       await this.run(
         'git rev-parse --git-dir >/dev/null 2>&1 || ' +
           '( git init -q && git config user.email "agent@navbharatai.dev" ' +
-          '&& git config user.name "NavBharatAI v3.0" )',
+          '&& git config user.name "NavBharatAI v5.0" )',
       );
       // 3) Untrack heavy dirs an OLDER sandbox may have committed before this .gitignore
       //    existed, so future checkpoints stay fast. Best-effort — a no-op on a fresh repo.

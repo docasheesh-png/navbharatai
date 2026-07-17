@@ -1,4 +1,4 @@
-// AgentV3 — server-side WALLET BALANCE reader for the paid-public v3.0 gate (admin plan 2026-07-06).
+// AgentV3 — server-side WALLET BALANCE reader for the paid-public v5.0 gate (admin plan 2026-07-06).
 //
 // Reads a user's remaining ₹ balance so the affordability gate can compare it against a build's
 // pre-flight estimate. The wallet is the same Firestore doc the wallet routes use:

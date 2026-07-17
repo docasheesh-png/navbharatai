@@ -1,6 +1,6 @@
 // AgentV3 — OpenAI-compatible tool-use adapter (multi-provider cost routing, phase 1).
 //
-// v3.0's agent loop keeps its canonical transcript in ANTHROPIC shape (each turn's
+// v5.0's agent loop keeps its canonical transcript in ANTHROPIC shape (each turn's
 // rawContent is appended verbatim as Anthropic content blocks). To let a cheaper,
 // OpenAI-compatible provider (Grok / any OpenAI-style endpoint) take a turn, we must
 // translate that Anthropic transcript + tool definitions INTO the OpenAI Chat

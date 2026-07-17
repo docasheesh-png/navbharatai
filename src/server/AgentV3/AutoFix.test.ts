@@ -24,7 +24,7 @@ describe('AutoFix flags (R4 §2.3)', () => {
     expect(autoFixEnabled()).toBe(false); // strict 'on'
   });
 
-  it('reviewer [CRITICAL] auto-fix is ON by default (v3.0 must never knowingly ship its own diagnosed defect)', () => {
+  it('reviewer [CRITICAL] auto-fix is ON by default (v5.0 must never knowingly ship its own diagnosed defect)', () => {
     const prev = process.env.AGENTV3_REVIEWER_AUTOFIX;
     try {
       // The 2026-07-07 bug: the reviewer found a real [CRITICAL] on a successful build, but the C9

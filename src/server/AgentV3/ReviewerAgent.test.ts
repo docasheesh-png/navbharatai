@@ -58,7 +58,7 @@ const makeSpawn =
 
 describe('isReviewFailureSummary + reviewBuild honesty (no fake "(85/100)" on an errored review)', () => {
   it('classifies real reviewer-failure summaries as failures', () => {
-    expect(isReviewFailureSummary('Error: All v3.0 providers failed (CLAUDE → CLAUDE_HAIKU → VERTEX → GEMINI).')).toBe(true);
+    expect(isReviewFailureSummary('Error: All v5.0 providers failed (CLAUDE → CLAUDE_HAIKU → VERTEX → GEMINI).')).toBe(true);
     expect(isReviewFailureSummary('This request is too large for every AI provider')).toBe(true);
     expect(isReviewFailureSummary('Step limit reached (40)')).toBe(true);
     expect(isReviewFailureSummary('')).toBe(true);
@@ -69,13 +69,13 @@ describe('isReviewFailureSummary + reviewBuild honesty (no fake "(85/100)" on an
     expect(isReviewFailureSummary('[PASS] App looks complete. Score: 92')).toBe(false);
   });
   it('score 0 (no rendered review) when the reviewer sub-agent returned ok:false — the report bug', async () => {
-    const failed: SubAgentSpawn = async () => ({ ok: false, summary: 'Error: All v3.0 providers failed. Last error: prompt is too long: 2204128 tokens > 1000000 maximum' });
+    const failed: SubAgentSpawn = async () => ({ ok: false, summary: 'Error: All v5.0 providers failed. Last error: prompt is too long: 2204128 tokens > 1000000 maximum' });
     const r = await reviewBuild({ userRequest: 'x', fileTree: ['a'], fileSample: [], spawn: failed });
     expect(r.score).toBe(0);
-    expect(formatReview(r)).toBe(''); // never "⚠️ Build Review (85/100): Error: All v3.0 providers failed…"
+    expect(formatReview(r)).toBe(''); // never "⚠️ Build Review (85/100): Error: All v5.0 providers failed…"
   });
   it('score 0 even when ok:true but the summary IS an error string (belt-and-suspenders)', async () => {
-    const r = await reviewBuild({ userRequest: 'x', fileTree: ['a'], fileSample: [], spawn: makeSpawn('Error: All v3.0 providers failed') });
+    const r = await reviewBuild({ userRequest: 'x', fileTree: ['a'], fileSample: [], spawn: makeSpawn('Error: All v5.0 providers failed') });
     expect(r.score).toBe(0);
     expect(formatReview(r)).toBe('');
   });

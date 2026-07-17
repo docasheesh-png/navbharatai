@@ -216,7 +216,7 @@ describe('conversationIdForWorkspace — one conversation per SESSION, not per m
   });
 });
 
-describe('chatWorkspaceContextLine — v3.0 always knows its real file count, even in plain chat', () => {
+describe('chatWorkspaceContextLine — v5.0 always knows its real file count, even in plain chat', () => {
   it('is empty for a brand-new/empty workspace — nothing honest to add', () => {
     expect(chatWorkspaceContextLine(0)).toBe('');
     expect(chatWorkspaceContextLine(-1)).toBe('');
@@ -830,7 +830,7 @@ describe('selectBuildModel — admin cost-routing (small=Haiku, complex=Sonnet, 
 
 describe('isLargeExistingProject — the "badi app" threshold', () => {
   afterEach(() => { delete process.env.AGENTV3_LARGE_PROJECT_FILES; });
-  it('Mitrify-scale (317 files) is large; a fresh v3.0 app (40 files) is not', () => {
+  it('Mitrify-scale (317 files) is large; a fresh v5.0 app (40 files) is not', () => {
     expect(isLargeExistingProject(317)).toBe(true);
     expect(isLargeExistingProject(40)).toBe(false);
   });
@@ -858,7 +858,7 @@ describe('shouldRouteStrongModel (Fix 4 — imports skip Haiku/cheap floor)', ()
   });
 });
 
-describe('resolveClaudeFirst — v3.0 builds lead with Claude by default', () => {
+describe('resolveClaudeFirst — v5.0 builds lead with Claude by default', () => {
   it('defaults to Claude-first when no opt and no env override', () => {
     expect(resolveClaudeFirst(undefined, undefined)).toBe(true);
   });
@@ -1177,7 +1177,7 @@ describe('sandboxDiag (why the Live-server/E2B preview tab is missing)', () => {
 });
 
 describe('isBuildRunningForWorkspace — server-side session/workspace scoping for auto-resume + live-mirror', () => {
-  // Root-caused 2026-07-01: a build genuinely still running in a DIFFERENT v3.0 session under the
+  // Root-caused 2026-07-01: a build genuinely still running in a DIFFERENT v5.0 session under the
   // same account was silently auto-attached/mirrored into whatever session the user had just opened
   // (e.g. right after "+ New chat"), because the running-build registry was checked account-wide
   // (userId only) with no idea WHICH session's build it actually was.

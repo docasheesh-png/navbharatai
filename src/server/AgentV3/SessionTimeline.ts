@@ -1,7 +1,7 @@
 // AgentV3 — Eternal sessions (history enhancement, admin order 2026-07-03):
 // "chahe 10 saal baad chat kholo — wahi memory, wahi UX."
 //
-// A LIVE v3.0 session shows far more than prose: collapsed Claude-style action rows
+// A LIVE v5.0 session shows far more than prose: collapsed Claude-style action rows
 // ("Created 33 files +812 -0", "Ran `npm install`"), per-file diffs, terminal output, the
 // working-indicator step log, and the cost/token/health footer. All of that was derived from
 // TRANSIENT wire events and vanished on reopen — a restored session was a bare prose transcript.

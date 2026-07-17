@@ -1,5 +1,5 @@
 // AgentV3 — Web Search tool (ported from Engineer AI's WebSearchClient, made self-contained and
-// strict-typed so v3.0 owns it and it survives deletion of the old engines).
+// strict-typed so v5.0 owns it and it survives deletion of the old engines).
 //
 // Lets the agent look up package versions, framework docs and error meanings instead of being
 // blind to anything outside the workspace. Priority:

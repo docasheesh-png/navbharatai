@@ -20,7 +20,7 @@ import type { CommandRunner } from './GitManager';
  * plain `https://[token@]github.com/owner/repo[.git]`. Returns a shell-safe URL, or null when the
  * input is not an acceptable GitHub URL.
  *
- * SECURITY (v3.0 audit C2 — host command injection + SSRF): `authedUrl` derives from the user's
+ * SECURITY (v5.0 audit C2 — host command injection + SSRF): `authedUrl` derives from the user's
  * `importUrl` and is interpolated into a `git clone "…"` / `git push "…"` shell string that runs on
  * the actuator (the HOST process when the E2B key is unset → LocalActuator). Without this guard a
  * payload like `https://github.com/o/r"; curl 169.254.169.254/… ; echo "` breaks out of the quotes

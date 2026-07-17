@@ -1,5 +1,5 @@
 // AgentV3 — Real persistent deployment (ported from Engineer AI's DeploymentService, made
-// v3.0-owned so it survives deletion of the old engines).
+// v5.0-owned so it survives deletion of the old engines).
 //
 // Builds → Firebase Hosting: takes the static dist/ files from the sandbox and publishes them to a
 // per-workspace Hosting channel, returning a PERMANENT public URL that survives sandbox

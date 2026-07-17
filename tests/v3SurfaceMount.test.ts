@@ -2,15 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { shouldRenderV3Surface, v3SurfaceDisplayClass, V3_VIEW } from '../src/components/agentv3/v3SurfaceMount';
 
 describe('shouldRenderV3Surface (window semantics)', () => {
-  it('renders when v3.0 is the active tab', () => {
+  it('renders when v5.0 is the active tab', () => {
     expect(shouldRenderV3Surface(V3_VIEW, false, false)).toBe(true);
     expect(shouldRenderV3Surface(V3_VIEW, true, true)).toBe(true);
   });
 
-  // THE round-2 fix (IMG_5715): the v3.0 tab is OPEN in the tab bar → the surface stays mounted under
+  // THE round-2 fix (IMG_5715): the v5.0 tab is OPEN in the tab bar → the surface stays mounted under
   // ANY other active tab, build running or not. The old running-only keep-alive unmounted the surface
   // the moment the build finished in the background → "blank page, new chat" on return.
-  it('stays mounted while the v3.0 tab is OPEN, under any other tab, even with NO build running', () => {
+  it('stays mounted while the v5.0 tab is OPEN, under any other tab, even with NO build running', () => {
     expect(shouldRenderV3Surface('nbi_chat', false, true)).toBe(true);  // Free chat active, idle v3 tab open
     expect(shouldRenderV3Surface('studio', false, true)).toBe(true);
     expect(shouldRenderV3Surface('home', false, true)).toBe(true);
@@ -32,7 +32,7 @@ describe('shouldRenderV3Surface (window semantics)', () => {
 });
 
 describe('v3SurfaceDisplayClass', () => {
-  it('is a layout no-op (contents) when v3.0 is the active tab', () => {
+  it('is a layout no-op (contents) when v5.0 is the active tab', () => {
     expect(v3SurfaceDisplayClass(V3_VIEW)).toBe('contents');
   });
 

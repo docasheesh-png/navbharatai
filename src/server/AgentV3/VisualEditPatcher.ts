@@ -2,7 +2,7 @@
 // REAL source file, precisely and safely, using a real AST (ts-morph), never blind string/line
 // replacement. This is what makes the Visual Editor "100% real" rather than editing a disposable
 // compiled copy the next build would silently overwrite (see PROGRESS.md 2026-07-01 for the full
-// architecture discussion — a v3.0 project has no single "the HTML"; the rendered DOM is compiled
+// architecture discussion — a v5.0 project has no single "the HTML"; the rendered DOM is compiled
 // from real .tsx/.jsx source files, so an edit must land in the exact source JSX node it came from).
 //
 // Scope (kept honest, v1): only edits the DIRECT text content of a JSX element that has EXACTLY ONE

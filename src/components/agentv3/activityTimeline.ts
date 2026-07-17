@@ -1,6 +1,6 @@
 // AgentV3 — Claude-style chat timeline grouping (pure, fully unit-testable).
 //
-// THE REDESIGN (admin, 2026-07-02): v3.0's build progress used to be a noisy flat stream —
+// THE REDESIGN (admin, 2026-07-02): v5.0's build progress used to be a noisy flat stream —
 // "⏱️ Estimated build time ~13 min", "✓ src/lib/utils.ts (1/33)" × 33, "⏱ minute 4 — still
 // working…" — every file, timer and heartbeat its own chat line. The admin wants the Claude
 // Code presentation instead: the agent's PROSE stays conversational, and everything the engine

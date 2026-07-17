@@ -2,7 +2,7 @@
  * UsageSink — a single build-level token accumulator (billing accounting fix, 2026-07-10).
  *
  * ROOT CAUSE it fixes: the user charge was derived from ONE `AgentRunner.run()`'s own `usage`. But a
- * real v3.0 build spends most of its tokens OUTSIDE that one object — inside sub-agents (whose usage
+ * real v5.0 build spends most of its tokens OUTSIDE that one object — inside sub-agents (whose usage
  * was dropped), and inside heal/fix/retry/judge/reviewer runs (whose `result` REPLACED the main
  * build's, discarding its billing). So ~89% of real spend was never billed.
  *

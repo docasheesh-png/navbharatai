@@ -1,6 +1,6 @@
 // AgentV3 — Durable git CHECKPOINT history (Phase G1 of the "one body, many organs" rebuild).
 //
-// v3.0 builds make REAL git commits in the sandbox (GitManager.checkpoint → { id, sha, message, ts }),
+// v5.0 builds make REAL git commits in the sandbox (GitManager.checkpoint → { id, sha, message, ts }),
 // but those commits live ONLY in the ephemeral sandbox + the client's session RAM. When the sandbox is
 // recycled or the user returns in a new session / on another device, the checkpoint history is gone —
 // so "git" was not yet a persistent organ of the workspace body.

@@ -1,6 +1,6 @@
 // AgentV3 — Manual IDE edit tracker (Phase S2 of the "one body, many organs" rebuild).
 //
-// Google-AI-Studio behaviour: when the user manually edits files in Code Studio, the NEXT v3.0
+// Google-AI-Studio behaviour: when the user manually edits files in Code Studio, the NEXT v5.0
 // chat turn must KNOW about it and acknowledge it ("I noticed you changed N files…"), then build on
 // top of those edits instead of being blind to them.
 //

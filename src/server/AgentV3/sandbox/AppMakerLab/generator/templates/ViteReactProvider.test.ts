@@ -3,7 +3,7 @@ import * as ts from 'typescript';
 import { ViteReactProvider } from './ViteReactProvider';
 import { hasErrorBoundarySignal } from '../../../../ErrorBoundaryAnalysis';
 
-describe('ViteReactProvider (v3.0 sandbox template) — ships an error boundary by default (C8)', () => {
+describe('ViteReactProvider (v5.0 sandbox template) — ships an error boundary by default (C8)', () => {
   const files = new ViteReactProvider().getFiles([]);
 
   it('includes a real ErrorBoundary component the readiness analysis recognises', () => {

@@ -1,7 +1,7 @@
 /**
  * AgentV3 — new-user free onboarding builds (P9, retention).
  *
- * Gives each NEW user their first N v3.0 builds free (N = AGENTV3_FREE_ONBOARDING_BUILDS,
+ * Gives each NEW user their first N v5.0 builds free (N = AGENTV3_FREE_ONBOARDING_BUILDS,
  * default 0 = OFF). With the cost-ladder, a new user's first app (usually a simple one)
  * builds on Gemini for ~₹0 real cost, so the giveaway is near-free for NavBharatAI but a
  * strong first impression. DORMANT by default: when the limit is 0, nothing is waived and

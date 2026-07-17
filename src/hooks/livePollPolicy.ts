@@ -1,4 +1,4 @@
-// B6 (audit) — the pure timing policy for the v3.0 cross-device live poll (subscribeLive).
+// B6 (audit) — the pure timing policy for the v5.0 cross-device live poll (subscribeLive).
 //
 // Two real gaps this encodes the fix for:
 //   1. PAUSE ON HIDDEN — the poll only checked visibility when STARTING; a poll already running when

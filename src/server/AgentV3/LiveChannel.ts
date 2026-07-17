@@ -12,7 +12,7 @@
 // never to Firestore directly — so there is no client-exposed DB surface to abuse.
 //
 // WORKSPACE SCOPING (2026-07-01 — closes the cross-instance gap documented in the #804 fix): the
-// channel is keyed by userId, but ONE account can have many v3.0 sessions. Events are now stamped
+// channel is keyed by userId, but ONE account can have many v5.0 sessions. Events are now stamped
 // with the workspaceId of the build that produced them, and `close()` DELETES the Firestore doc
 // instead of only releasing the in-memory mirror. Root-caused ghost: a finished/dead build's last
 // 200 events used to sit in `agentv3_live/{userId}` FOREVER; every live-mirror poll starts at
@@ -32,7 +32,7 @@ export interface LiveRead {
   events: unknown[];
   seq: number;
   gap: boolean;
-  /** Which v3.0 session produced these events. Undefined for a pre-upgrade (ghost) doc. */
+  /** Which v5.0 session produced these events. Undefined for a pre-upgrade (ghost) doc. */
   workspaceId?: string;
 }
 

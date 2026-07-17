@@ -25,7 +25,7 @@ describe('agentv3Workspace', () => {
   });
 
   describe('session reuse', () => {
-    it('mints once and reuses the same session id (shared by IDE + v3.0 panel)', () => {
+    it('mints once and reuses the same session id (shared by IDE + v5.0 panel)', () => {
       installLocalStorage();
       const a = getAgentV3SessionId('user1');
       const b = getAgentV3SessionId('user1');
@@ -33,7 +33,7 @@ describe('agentv3Workspace', () => {
       expect(a.length).toBeGreaterThanOrEqual(6);
     });
 
-    it('reuses an id already persisted by the v3.0 panel under the same key', () => {
+    it('reuses an id already persisted by the v5.0 panel under the same key', () => {
       installLocalStorage();
       localStorage.setItem('agentv3_session_user1', 'preexisting-session-123');
       expect(getAgentV3SessionId('user1')).toBe('preexisting-session-123');

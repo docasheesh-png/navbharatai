@@ -1,6 +1,6 @@
 // AgentV3 (Vargen 3.0) — intent classification for cost routing + surgical edit detection.
 //
-// Every v3.0 message currently runs the full Claude native-tool-use agent loop,
+// Every v5.0 message currently runs the full Claude native-tool-use agent loop,
 // which is expensive even for a plain "hello". This pure classifier lets the
 // route answer clearly social/conversational turns cheaply via the existing
 // non-Claude free router and reserve the premium Claude build loop for real
@@ -140,7 +140,7 @@ const PROBLEM_SIGNALS: readonly string[] = [
 
 /**
  * Comparison / explanation questions — the user wants an ANSWER, not a build. These often mention a
- * build-flavored noun in passing — e.g. "compare v3.0 and Claude Code" contains "code", a BUILD_SIGNALS
+ * build-flavored noun in passing — e.g. "compare v5.0 and Claude Code" contains "code", a BUILD_SIGNALS
  * keyword — which previously fell through to the low-confidence 'new_build' default and spent a real
  * ~9-minute build cycle answering what should have been an instant chat reply (confirmed from a real
  * report: the message classified as `{ intent: 'new_build', confidence: 'low', signal: 'build-signal' }`
@@ -521,7 +521,7 @@ export function classifyIntent(message: string): BuildIntent {
   if (matchesSignal(lower, EDIT_SIGNALS)) return 'edit_existing';
 
   // 2.5) A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-
-  //      flavored noun in passing (e.g. "compare v3.0 and Claude Code" contains "code").
+  //      flavored noun in passing (e.g. "compare v5.0 and Claude Code" contains "code").
   if (matchesSignal(lower, INFORMATIONAL_SIGNALS)) return 'chat';
 
   // 3) Long messages, code blocks, file paths or URLs → likely a real task → 'new_build'.

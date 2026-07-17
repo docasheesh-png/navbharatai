@@ -5,7 +5,7 @@
 // actually produced and under which routing.
 //
 // HONEST SCOPE (rule 6): a true bit-for-bit reproducibility SEED is NOT supported across the providers
-// v3.0 routes to (GLM / Kimi / Claude ignore or don't expose a seed), so "pin the seed" cannot mean
+// v5.0 routes to (GLM / Kimi / Claude ignore or don't expose a seed), so "pin the seed" cannot mean
 // deterministic regeneration. We therefore record the deterministic ROUTING inputs (model id, effort,
 // power level, provider ladder, prompt hash) + the output file hashes as a determinism-AUDIT manifest —
 // never a faked seed the providers would ignore.

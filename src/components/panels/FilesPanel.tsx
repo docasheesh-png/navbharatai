@@ -41,7 +41,7 @@ export interface FilesPanelProps {
   /** Phase 2.1 — called when user restores a version; parent updates workspace files */
   onRestoreVersion?: (files: Record<string, string>, commitMessage: string) => void;
   /**
-   * Touch mode (admin 2026-07-07 — the v3.0 mobile footer's Files list): tapping a file opens an
+   * Touch mode (admin 2026-07-07 — the v5.0 mobile footer's Files list): tapping a file opens an
    * inline action menu (Open · Copy file · Copy path · Delete) instead of opening it immediately —
    * hover-revealed actions don't exist on touch, so without this the actions were unreachable on
    * phones. Desktop (default) keeps tap-to-open + hover actions.
@@ -263,7 +263,7 @@ export function FilesPanel({
                 <div className="flex-1 flex items-center justify-center flex-col gap-3 text-center p-8">
                   <FolderOpen className="w-12 h-12 text-white/10" />
                   <p className="text-[11px] text-[#484f58] font-medium">No app generated yet.</p>
-                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI v2.0 — files will appear here.</p>
+                  <p className="text-[9px] text-[#484f58]">Build an app in NavBharatAI v5.0 — files will appear here.</p>
                 </div>
               ) : (
               <div className="p-4 space-y-1">

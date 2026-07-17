@@ -3,7 +3,7 @@ import { Camera, Image as ImageIcon, FileText, Paperclip } from 'lucide-react';
 
 // Shared attach menu (admin 2026-07-12): tapping the 📎 attach button opens a 3-option sheet —
 // Take Photo (camera) / Choose photo or video (gallery) / Choose file — the SAME everywhere
-// (NavBharatAI Free, Pro v3.0, and every Professional AI). Before this, the button opened the file
+// (NavBharatAI Free, Pro v5.0, and every Professional AI). Before this, the button opened the file
 // picker directly, so the camera was never offered. Each option is a real, separate <input>:
 //   • Take Photo         → accept="image/*" capture="environment" → opens the camera on mobile.
 //   • Choose photo/video → accept="image/*,video/*"               → opens the gallery.

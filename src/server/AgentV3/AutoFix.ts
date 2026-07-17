@@ -27,7 +27,7 @@ export function autoFixEnabled(): boolean {
  * The post-build REVIEWER's [CRITICAL]-finding repair (C9) is ON by default — unlike the runtime
  * auto-fix loop above, which stays opt-in. Why the split (build report 2026-07-07): the reviewer
  * found a real [CRITICAL] on a successful build, but the repair was gated on the SAME opt-in
- * AGENTV3_AUTOFIX env (off in prod) — so v3.0 diagnosed its own defect and then knowingly shipped it,
+ * AGENTV3_AUTOFIX env (off in prod) — so v5.0 diagnosed its own defect and then knowingly shipped it,
  * which breaks the "complete app, perfectly" bar. This pass is tightly bounded (fires only when the
  * reviewer reported criticals on an OK build, one pass, 120s hard cap, deadline-headroom gated), so
  * its cost is small and only ever spent when something is genuinely broken.

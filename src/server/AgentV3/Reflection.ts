@@ -1,6 +1,6 @@
 // AgentV3 — Build Reflection (Layer 57 / Self-Reflection, seed).
 //
-// After a v3.0 build finishes, we derive a short, structured reflection from
+// After a v5.0 build finishes, we derive a short, structured reflection from
 // what actually happened during the run (errors hit, fixes applied, outcome)
 // and store it back into the project's WorkspaceMemory as a note. The NEXT
 // build in the same session can then `recall` those lessons when it hits a

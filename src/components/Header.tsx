@@ -8,7 +8,7 @@ import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '.
 // menuItems list (which also feeds the sidebar, where they have a bespoke button).
 // Without this the Header's menuItems.find() returns nothing and the tab never shows.
 const HEADER_TAB_FALLBACK: Record<string, { label: string; icon: any }> = {
-  engine_builder: { label: 'NavBharatAI Pro v3.0', icon: Rocket },
+  engine_builder: { label: 'NavBharatAI Pro v5.0', icon: Rocket },
 };
 
 export const Header = ({

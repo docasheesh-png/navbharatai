@@ -114,12 +114,12 @@ export interface ViewPanelsProps {
   setShowAuth: (v: boolean) => void;
   zipSizeModal: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null;
   setZipSizeModal: (v: { variant: ZipSizeModalVariant; fileName: string; fileSizeMB: number } | null) => void;
-  /** The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the main "Preview"
-   *  menu shows the SAME working v3.0 preview instead of the retired v2.0 generatedCode.
+  /** The v5.0 build's live preview URL + workspace, lifted from AgentV3Panel so the main "Preview"
+   *  menu shows the SAME working v5.0 preview instead of the retired v2.0 generatedCode.
    *  `framework` + `running` (2026-07-01) let the sidebar PreviewSurface reach feature parity with
    *  the in-panel one (auto-resume + framework-aware Diagnose). */
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
-  /** "Fix with AI" clicked from the sidebar preview — prefills the v3.0 chat with the error. */
+  /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
@@ -202,9 +202,9 @@ export function ViewPanels({
 
       {activeView === 'preview' && (
         <div className="flex-1 h-full overflow-hidden">
-          {/* ONE PREVIEW EVERYWHERE (admin 2026-07-07: "3 gate, andar sab same — v3.0 wala hi"):
-              every entry point (the v3.0 panel tab, the footer PREVIEW tab, the slide-menu Preview)
-              renders the SAME v3.0 PreviewSurface. The retired v2.0 PreviewPanel branch (generatedCode,
+          {/* ONE PREVIEW EVERYWHERE (admin 2026-07-07: "3 gate, andar sab same — v5.0 wala hi"):
+              every entry point (the v5.0 panel tab, the footer PREVIEW tab, the slide-menu Preview)
+              renders the SAME v5.0 PreviewSurface. The retired v2.0 PreviewPanel branch (generatedCode,
               which the v3 engine never writes) is removed — with no v3 workspace yet, PreviewSurface
               shows its own honest "it appears the moment the agent starts the app" state. Porting the
               old panel's download/install/tags extras into PreviewSurface is tracked in PROGRESS.md. */}
@@ -250,7 +250,7 @@ export function ViewPanels({
             const next = { ...(files as Record<string, string>) };
             delete next[path];
             setFiles(next as any);
-            // REAL delete: also purge IndexedDB + the v3.0 durable workspace, or the file
+            // REAL delete: also purge IndexedDB + the v5.0 durable workspace, or the file
             // silently resurrects on the next reload (fake delete).
             onFilesRemoved?.([path]);
           }}

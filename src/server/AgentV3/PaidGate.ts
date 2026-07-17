@@ -27,7 +27,7 @@ export interface PaidGateInput {
 }
 
 /**
- * Decide whether a paid-public v3.0 build may start, and on which engine. Pure. See the module header
+ * Decide whether a paid-public v5.0 build may start, and on which engine. Pure. See the module header
  * for the short-circuit order. Never throws.
  */
 export function decidePaidGate(input: PaidGateInput): AffordabilityDecision {

@@ -28,7 +28,7 @@ const TOUR_KEY = 'navbharat_product_tour_v1';
 
 export const DEFAULT_TOUR_STEPS: TourStep[] = [
   { selector: '[data-tour="sidebar"]', view: 'home', title: 'Navigation', body: 'Switch between everything from here — AI builders, your apps, wallet and settings.' },
-  { selector: '[data-tour="chat"]', view: 'nbi_pro_chat', title: 'Build with AI', body: 'Describe the app you want in plain language and NavBharatAI Pro v3.0 builds it for you, end to end.' },
+  { selector: '[data-tour="chat"]', view: 'nbi_pro_chat', title: 'Build with AI', body: 'Describe the app you want in plain language and NavBharatAI Pro v5.0 builds it for you, end to end.' },
   { selector: '[data-tour="preview"]', view: 'nbi_pro_chat', title: 'Live preview', body: 'Watch your app run live as it is built. Switch to Files, Diff and Terminal right here too.' },
   { selector: '[data-tour="deploy"]', view: 'nbi_pro_chat', title: 'Deploy', body: 'When it is ready, publish your app to a permanent public URL with one click.' },
   { selector: '[data-tour="billing"]', view: 'billing', title: 'Wallet & billing', body: 'Track your credits and usage. You only pay for what you build.' },
@@ -44,7 +44,7 @@ export function ProductTour({
   onNavigate?: (view: string) => void;
   steps?: TourStep[];
   /** The app's active view. The launcher shows ONLY on 'home' so its fixed bottom-left button
-   *  never overlaps the controls on other surfaces (e.g. the v3.0 chat composer). Undefined keeps
+   *  never overlaps the controls on other surfaces (e.g. the v5.0 chat composer). Undefined keeps
    *  the launcher visible everywhere (backward-compatible default for standalone use). */
   currentView?: string;
 }) {
@@ -143,7 +143,7 @@ export function ProductTour({
 
   // Launcher (desktop only — the tour spotlights the desktop layout). User-initiated; never auto-runs.
   // Shown ONLY on the home view: its fixed bottom-left button would otherwise float over the controls
-  // on other surfaces (e.g. it overlapped the v3.0 chat composer's buttons). A returning user starts
+  // on other surfaces (e.g. it overlapped the v5.0 chat composer's buttons). A returning user starts
   // the tour from home; once active, the overlay below renders on every view the tour navigates to, so
   // gating only the launcher (not the active overlay) keeps the multi-view walkthrough working.
   if (!active) {

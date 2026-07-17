@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { diffChangedFiles, stripEcho, makeWorkspaceSyncer } from '../src/lib/workspaceSync';
 
-/** Phase S1 — IDE↔v3.0 workspace sync (pure cores + debounced syncer). */
+/** Phase S1 — IDE↔v5.0 workspace sync (pure cores + debounced syncer). */
 
 describe('diffChangedFiles', () => {
   it('returns new and changed files, skips unchanged', () => {

@@ -5,7 +5,7 @@ import { ProductTour } from './components/ProductTour';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
-// AgentV3Panel is rendered via ProV3Surface (the gated v3.0 surface), not directly here.
+// AgentV3Panel is rendered via ProV3Surface (the gated v5.0 surface), not directly here.
 import { TemplatesPanel, CURATED_TEMPLATES } from './components/panels/TemplatesPanel';
 import { GitViewPanel } from './components/panels/GitViewPanel';
 import { DeploySuccessPanel } from './components/panels/DeploySuccessPanel';
@@ -23,11 +23,12 @@ import { v3MobileFooterActive, type V3FooterApi } from './components/agentv3/v3F
 import { shouldRenderV3Surface, v3SurfaceDisplayClass } from './components/agentv3/v3SurfaceMount';
 import { clearStickySession } from './components/agentv3/v3SessionContinuity';
 import { NBIChatPanel } from './components/panels/NBIChatPanel';
+import { OfflineAI } from './components/offline/OfflineAI';
 import { ViewPanels } from './components/panels/ViewPanels';
 import { SidebarNav } from './components/panels/SidebarNav';
 import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
-// AgentV3Launcher removed — v3.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
+// AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { ConnectDomainPanel } from './components/panels/ConnectDomainPanel';
 import { fetchBuildSession } from './services/buildService';
 import {
@@ -56,7 +57,7 @@ import { ProfessionalsView } from './components/professionals/ProfessionalsView'
 import { ProfessionalChat } from './components/professionals/ProfessionalChat';
 import { PROFESSIONAL_CHATS } from './components/professionals/professionalConfigs';
 import { RepoAnalystTool } from './components/repoAnalyst/RepoAnalystTool';
-// EngineerAIChat retired — replaced by NavBharatAI Pro v3.0 (ProV3Surface).
+// EngineerAIChat retired — replaced by NavBharatAI Pro v5.0 (ProV3Surface).
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
@@ -373,8 +374,8 @@ export default function App() {
 
   // hinglishMode → from useSettings() hook
   const [loadingUser, setLoadingUser] = useState(true);
-  // v3.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro v3.0 with the same
-  // project restored (messages/files/preview) — not dumped to Home. We persist ONLY the v3.0 view
+  // v5.0 continuity: a hard browser reload must land BACK in NavBharatAI Pro v5.0 with the same
+  // project restored (messages/files/preview) — not dumped to Home. We persist ONLY the v5.0 view
   // (narrow scope; other views still default to Home on reload) in sessionStorage so it survives a
   // reload within the same tab but not a brand-new tab. This restore path deliberately bypasses
   // toggleTab, which is how AgentV3Panel tells a RELOAD (restore) apart from a fresh OPEN (new chat).
@@ -681,8 +682,8 @@ export default function App() {
   // child→parent tab map: which tab opened each option, so ✕-closing Settings/Professionals also closes
   // the options launched from inside it (admin bug 2026-07-11). Populated in toggleTab, pruned in closeTab.
   const [tabOpeners, setTabOpeners] = useState<Partial<Record<ViewType, ViewType>>>({});
-  // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v3.0 from the menu/
-  // sidebar (a plain open → start a NEW chat). A reload restores the v3.0 view WITHOUT toggleTab, so
+  // Fresh-open nonce: bumped by toggleTab ONLY when the user deliberately OPENS v5.0 from the menu/
+  // sidebar (a plain open → start a NEW chat). A reload restores the v5.0 view WITHOUT toggleTab, so
   // the nonce stays 0 → AgentV3Panel takes the RESTORE path instead. A History reopen sets v3Resume
   // and suppresses the bump (see v3ResumeInFlightRef) so it resumes that saved chat, not a new one.
   const [v3OpenNonce, setV3OpenNonce] = useState(0);
@@ -1150,7 +1151,7 @@ export default function App() {
       fetch('/api/health', { method: 'GET' }).catch(() => {});
     }
 
-    // v3.0 fresh-open signal: a deliberate open of the Pro tab starts a NEW chat. A History reopen
+    // v5.0 fresh-open signal: a deliberate open of the Pro tab starts a NEW chat. A History reopen
     // sets v3Resume first and flags v3ResumeInFlightRef so we DON'T bump the nonce (it must resume,
     // not start fresh). The nonce is never bumped on reload (reload restores the view without calling
     // toggleTab), which is exactly how the panel distinguishes open-new from reload-restore.
@@ -1178,7 +1179,7 @@ export default function App() {
 
     if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
       setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v3.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v3.0'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v5.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`, 'warn');
       return;
     }
 
@@ -1202,7 +1203,7 @@ export default function App() {
     setActiveView(view);
   }, [user, openTabs, activeView, addLog, setShowAuth]);
 
-  // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v3.0 panel inside
+  // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
@@ -1214,8 +1215,8 @@ export default function App() {
     return () => window.removeEventListener('navbharat:navigate', onNavigate as EventListener);
   }, [toggleTab]);
 
-  // Persist ONLY the v3.0 view so a reload lands back in Pro v3.0 (see activeView init). Any other
-  // view clears the flag, so leaving v3.0 and reloading correctly returns to Home.
+  // Persist ONLY the v5.0 view so a reload lands back in Pro v5.0 (see activeView init). Any other
+  // view clears the flag, so leaving v5.0 and reloading correctly returns to Home.
   useEffect(() => {
     try {
       if (activeView === 'nbi_pro_chat') sessionStorage.setItem('nbi_v3_open', '1');
@@ -1333,7 +1334,7 @@ export default function App() {
         // Reset session so memorySummary doesn't bleed into next conversation
         setCurrentSessionId(Date.now().toString());
       } else if (v === 'nbi_pro_chat') {
-        // ✕ CLOSE = one of the only ways the v3.0 chat ends (admin rule 2026-07-05): clear the sticky
+        // ✕ CLOSE = one of the only ways the v5.0 chat ends (admin rule 2026-07-05): clear the sticky
         // session so the NEXT open starts a fresh chat. Everything short of this ✕ (tab switches,
         // reload, phone off) restores the same chat. A still-running build keeps running server-side
         // and lands in ☰ History with all its build files (durable WorkspaceFileStore).
@@ -1511,7 +1512,7 @@ export default function App() {
     if (!user) return;
     const session = sessions.find(s => s.id === currentSessionId);
     if (!session || !session.messages?.length) return;
-    // v3.0 (AgentV3) sessions are single-writer: their transcript lives ONLY in the server
+    // v5.0 (AgentV3) sessions are single-writer: their transcript lives ONLY in the server
     // conversation store, and their chat_sessions row is metadata-only, written by AgentV3Panel.
     // Never let this generic writer touch a v3_ doc — a stale full-doc write here would re-add a
     // messages copy and reintroduce the transcript-corruption class of bugs.
@@ -1558,7 +1559,7 @@ export default function App() {
     if (!user) return;
     const session = sessions.find(s => s.id === currentProSessionId);
     if (!session || !session.messages?.length) return;
-    // v3.0 (AgentV3) docs are single-writer (server transcript + panel-owned metadata row) —
+    // v5.0 (AgentV3) docs are single-writer (server transcript + panel-owned metadata row) —
     // same rule as the NBI writer above: this generic writer must never touch a v3_ doc.
     if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
     clearTimeout(fsProDebounceRef.current);
@@ -1681,8 +1682,8 @@ export default function App() {
     if (!paths.length) return;
     // 1) Clear from durable IDE storage so they don't resurrect on reload.
     for (const p of paths) storageDeleteFile(p).catch(() => {});
-    // 2) Propagate the delete to the v3.0 workspace so v3.0 also forgets the files (best-effort;
-    //    needs a signed-in user, and the server gates on v3.0 being enabled → no-op otherwise).
+    // 2) Propagate the delete to the v5.0 workspace so v5.0 also forgets the files (best-effort;
+    //    needs a signed-in user, and the server gates on v5.0 being enabled → no-op otherwise).
     const uid = user?.uid;
     if (!uid) return;
     try {
@@ -1700,8 +1701,8 @@ export default function App() {
     } catch { /* best-effort — never block the IDE delete */ }
   }, [user]);
 
-  // THE one real file delete — every UI delete (Files panel, v3.0 Files tab, sidebar Files) flows
-  // through here: React state + open-editor fix + IndexedDB + the v3.0 durable workspace. Before
+  // THE one real file delete — every UI delete (Files panel, v5.0 Files tab, sidebar Files) flows
+  // through here: React state + open-editor fix + IndexedDB + the v5.0 durable workspace. Before
   // this, the Files-panel delete only touched React state, so a "deleted" file silently resurrected
   // on the next reload (a fake delete — forbidden by the real-features rule).
   const deleteWorkspaceFiles = useCallback((paths: string[]) => {
@@ -1715,14 +1716,14 @@ export default function App() {
       const remaining = Object.keys(files as Record<string, string>).filter((k) => !paths.includes(k));
       setActiveFile(remaining[0] || '');
     }
-    void handleFilesRemoved(paths); // IndexedDB + v3.0 workspace (durable, best-effort)
+    void handleFilesRemoved(paths); // IndexedDB + v5.0 workspace (durable, best-effort)
   }, [activeFile, files, handleFilesRemoved]);
 
-  // Push the IDE workspace files into the NavBharatAI Pro v3.0 (AgentV3) workspace so v3.0 KNOWS
+  // Push the IDE workspace files into the NavBharatAI Pro v5.0 (AgentV3) workspace so v5.0 KNOWS
   // which files exist (e.g. after a ZIP upload). Best-effort: needs a signed-in user; the server
-  // also gates on v3.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
-  // non-v3.0 users. The workspace id is the SAME one the v3.0 chat panel uses (shared localStorage
-  // session), so the IDE and v3.0 operate on one workspace.
+  // also gates on v5.0 being enabled (returns 404 → no sandbox is spun) so this is a no-op for
+  // non-v5.0 users. The workspace id is the SAME one the v5.0 chat panel uses (shared localStorage
+  // session), so the IDE and v5.0 operate on one workspace.
   const syncFilesToV3 = useCallback(async (filesToSync: Record<string, string>, opts?: { silent?: boolean; source?: 'ide-edit' | 'import' }): Promise<void> => {
     const uid = user?.uid;
     if (!uid) return;
@@ -1743,15 +1744,15 @@ export default function App() {
       if (res.ok) {
         const j = await res.json().catch(() => ({} as any));
         const n = typeof j?.imported === 'number' ? j.imported : paths.length;
-        if (!opts?.silent) addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v3.0 ✓`, 'success');
+        if (!opts?.silent) addToast(`Synced ${n} file${n === 1 ? '' : 's'} to v5.0 ✓`, 'success');
       }
-      // 404 (v3.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
+      // 404 (v5.0 not enabled) / other statuses: silent best-effort — IDE still has the files.
     } catch { /* network/best-effort — never block the upload flow */ }
   }, [user, addToast]);
 
-  // Phase S1 — IDE↔v3.0 edit sync: a debounced, echo-suppressed syncer that durably pushes a user's
-  // Code Studio edits into the v3.0 workspace (silent, best-effort). Re-created when syncFilesToV3
-  // changes (i.e. on sign-in). The IDE edit seam calls onLocalChange; the v3.0→IDE path calls noteRemote.
+  // Phase S1 — IDE↔v5.0 edit sync: a debounced, echo-suppressed syncer that durably pushes a user's
+  // Code Studio edits into the v5.0 workspace (silent, best-effort). Re-created when syncFilesToV3
+  // changes (i.e. on sign-in). The IDE edit seam calls onLocalChange; the v5.0→IDE path calls noteRemote.
   const workspaceSyncerRef = useRef<WorkspaceSyncer | null>(null);
   useEffect(() => {
     workspaceSyncerRef.current = makeWorkspaceSyncer({ sync: (changed) => syncFilesToV3(changed, { silent: true, source: 'ide-edit' }) });
@@ -1909,8 +1910,9 @@ export default function App() {
   const menuItems = useMemo(() => [
     { id: 'home',         label: 'Home',              icon: Bot },
     { id: 'nbi_chat',     label: 'NavBharatAI FREE',  icon: MessageSquare },
-    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v3.0', icon: Bot },
+    { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v5.0', icon: Bot },
     { id: 'professionals', label: 'Professionals',    icon: Briefcase, status: 'New' },
+    { id: 'offline_ai',   label: 'Offline AI',         icon: Smartphone },
     { id: 'preview',      label: 'Preview',           icon: Monitor },
     { id: 'files',        label: 'Files',             icon: FolderOpen },
     { id: 'history',      label: 'History',           icon: History },
@@ -1929,26 +1931,26 @@ export default function App() {
   // getRandomElement → imported from src/lib/chatUtils.ts
   // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
 
-  // A v3.0 session restored from History → handed to AgentV3Panel via this prop;
+  // A v5.0 session restored from History → handed to AgentV3Panel via this prop;
   // the nonce makes each "open chat" re-adopt even if the panel is already mounted.
   const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
-  // The v3.0 build's live preview URL + workspace, lifted from AgentV3Panel so the MAIN slide-out
-  // "Preview" menu renders the SAME working v3.0 preview (was wired to the retired v2.0 generatedCode).
+  // The v5.0 build's live preview URL + workspace, lifted from AgentV3Panel so the MAIN slide-out
+  // "Preview" menu renders the SAME working v5.0 preview (was wired to the retired v2.0 generatedCode).
   // `framework` + `running` are ALSO lifted (2026-07-01) so the sidebar's PreviewSurface can reach full
   // feature parity with the in-panel one — auto-resuming a dead sandbox and the framework-aware
   // Diagnose flow both need them (previously only the in-panel PreviewSurface received these props).
   const [v3Preview, setV3Preview] = useState<{ previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }>({});
-  // Dynamic per-view footer (admin 2026-07-07): while v3.0 is the active view on mobile/tablet, the
-  // bottom nav swaps to v3.0's own items. AgentV3Panel registers its REAL actions here (null when
-  // v3.0 is closed/unmounted — the nav then falls back to the default items, never dead buttons).
+  // Dynamic per-view footer (admin 2026-07-07): while v5.0 is the active view on mobile/tablet, the
+  // bottom nav swaps to v5.0's own items. AgentV3Panel registers its REAL actions here (null when
+  // v5.0 is closed/unmounted — the nav then falls back to the default items, never dead buttons).
   const [v3FooterApi, setV3FooterApi] = useState<V3FooterApi | null>(null);
-  // "Fix with AI" clicked from the SIDEBAR preview (outside the v3.0 panel's own UI) — prefills the
-  // v3.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
+  // "Fix with AI" clicked from the SIDEBAR preview (outside the v5.0 panel's own UI) — prefills the
+  // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
   const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number } | null>(null);
 
   const resumeSession = (session: ChatSession) => {
-    // v3.0 (engine_builder) sessions resume INSIDE v3.0 — adopt the saved sessionId
+    // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
     // (so the backend continues with the same workspace/memory, best-effort) and
     // restore the saved thread. Detected by the agentv3 agent tag or the v3_ id.
     const isV3 = session.agent === 'agentv3'
@@ -1965,8 +1967,8 @@ export default function App() {
       }));
       setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
       v3ResumeInFlightRef.current = true; // resume, not a fresh open — suppress the new-chat bump
-      toggleTab('nbi_pro_chat'); // v3.0 now lives in nbi_pro_chat
-      addLog(`Resumed v3.0 session: ${session.title}`, 'info');
+      toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
+      addLog(`Resumed v5.0 session: ${session.title}`, 'info');
       return;
     }
 
@@ -2450,7 +2452,7 @@ export default function App() {
           // 8.1 — space for bottom nav on mobile (all views including chat). Gated on !focusMode so it
           // stays in lock-step with the bottom nav itself, which is hidden in focus mode (see the mobile
           // <nav> below, also `!focusMode`). Without this, focus mode reserved 56px for a nav that isn't
-          // rendered — leaving an empty dead strip under the v3.0 composer, above the phone browser bar.
+          // rendered — leaving an empty dead strip under the v5.0 composer, above the phone browser bar.
           effectiveDeviceMode === 'mobile' && !focusMode ? "pb-14" : ""
         )}>
           {activeView === 'home' && (
@@ -2552,11 +2554,11 @@ export default function App() {
           )}
 
           {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
-            /* NavBharatAI Pro v3.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
-               real v3.0 builder when it's enabled for this account, else an honest "rolling out"
+            /* NavBharatAI Pro v5.0 — replaces the retired Pro v2.0 builder. ProV3Surface shows the
+               real v5.0 builder when it's enabled for this account, else an honest "rolling out"
                message (never a broken builder). The old ProChatPanel (v2.0) is retired.
 
-               WINDOW SEMANTICS (admin, 2026-07-05 IMG_5715): the surface stays MOUNTED while the v3.0
+               WINDOW SEMANTICS (admin, 2026-07-05 IMG_5715): the surface stays MOUNTED while the v5.0
                tab is OPEN in the tab bar — its chat + live build stream survive switching among any
                number of other tabs (10+ windows), exactly like a real window. The earlier running-only
                keep-alive had an unmount race: the build finishing (or a stream blip) while another tab
@@ -2569,24 +2571,24 @@ export default function App() {
               email={user?.email}
               resume={v3Resume}
               freshOpenNonce={v3OpenNonce}
-              /* In focus mode (header hidden) the v3.0 composer drops its outer frame so the
+              /* In focus mode (header hidden) the v5.0 composer drops its outer frame so the
                  input reads as a clean floating popup — see AgentV3Panel's footer. */
               focusMode={focusMode}
               /* Dynamic footer (admin 2026-07-07): mobile/tablet only — exactly when the bottom nav
-                 is visible, so v3.0's header controls and their footer replacements never both hide. */
+                 is visible, so v5.0's header controls and their footer replacements never both hide. */
               mobileFooter={v3MobileFooterActive(effectiveDeviceMode, focusMode)}
               onFooterApi={setV3FooterApi}
               onFilesSync={(synced) => { const clean = sanitizeFileMap(synced); workspaceSyncerRef.current?.noteRemote(clean); setFiles((prev) => ({ ...prev, ...clean })); }}
-              /* Phase S3 conflict guard: before a v3.0 build starts, force-flush any pending IDE edits to
+              /* Phase S3 conflict guard: before a v5.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
-                 hand edits are what v3.0 reads/acknowledges). Best-effort — never blocks the build. */
+                 hand edits are what v5.0 reads/acknowledges). Best-effort — never blocks the build. */
               onBeforeBuild={() => workspaceSyncerRef.current?.flush() ?? Promise.resolve()}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               pendingFix={v3PendingFix}
-              /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v3.0
+              /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v5.0
                  "Files" tab and the sidebar "Files" are ONE feature with two gates — same component,
-                 same data (uploads + v3.0 builds), same actions. */
+                 same data (uploads + v5.0 builds), same actions. */
               filesPanel={{
                 files,
                 hasGeneratedCode,
@@ -2601,8 +2603,8 @@ export default function App() {
                   setActiveFile(path);
                   toggleTab('studio');
                 },
-                // REAL delete — state + IndexedDB + v3.0 durable workspace (deleteWorkspaceFiles),
-                // so the file never resurrects on reload and v3.0 forgets it too.
+                // REAL delete — state + IndexedDB + v5.0 durable workspace (deleteWorkspaceFiles),
+                // so the file never resurrects on reload and v5.0 forgets it too.
                 onDeleteFile: (path: string) => deleteWorkspaceFiles([path]),
                 onRenameFile: (oldPath: string, newPath: string) => {
                   const prev = files as Record<string, string>;
@@ -2643,8 +2645,8 @@ export default function App() {
           {activeView === 'professionals' && (
             <ProfessionalsView onSelect={(id) => {
               if (id === 'sda_chat') toggleTab('sda_chat');
-              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro v3.0 gate
-              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // legacy id → Pro v3.0
+              else if (id === 'nbi_pro_chat') toggleTab('nbi_pro_chat'); // NavBharatAI Pro v5.0 gate
+              else if (id === 'engineer_ai') toggleTab('nbi_pro_chat'); // legacy id → Pro v5.0
               else if (id === 'teacher_ai') toggleTab('teacher_ai');
               else if (id === 'mentor_ai') toggleTab('mentor_ai');
               else if (id === 'thesis_ai') toggleTab('thesis_ai');
@@ -3094,7 +3096,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro v3.0). UI entry removed. ── */}
+          {/* ── Engineer AI — RETIRED (replaced by NavBharatAI Pro v5.0). UI entry removed. ── */}
 
                     {activeView === 'about' && (
             <AboutPanel
@@ -3190,6 +3192,16 @@ export default function App() {
             />
           )}
 
+            {activeView === 'offline_ai' && (
+              <OfflineAI
+                onNavigate={(target) => {
+                  // Offline AI's "Open →": jump straight to the feature's page/tab (and settings screen).
+                  if (target.view) toggleTab(target.view as ViewType);
+                  if (target.settingsScreen) setSettingsScreen(target.settingsScreen as any);
+                }}
+              />
+            )}
+
             {activeView === 'git' && (
               // Phase 1.7 — extracted to GitViewPanel component
               <GitViewPanel
@@ -3243,8 +3255,8 @@ export default function App() {
             />
           )}
 
-          {/* Separate 'engine_builder' v3.0 view REMOVED — v3.0 is now reached only via the two
-              gates (sidebar "NavBharatAI Pro v3.0" = nbi_pro_chat, and Professionals → Pro v3.0),
+          {/* Separate 'engine_builder' v5.0 view REMOVED — v5.0 is now reached only via the two
+              gates (sidebar "NavBharatAI Pro v5.0" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
 
           {activeView === 'entertainment' && (
@@ -3357,7 +3369,7 @@ export default function App() {
  
               
       {/* AgentV3 (Vargen 3.0) launcher — admin-only, flag-gated; renders nothing when disabled. */}
-      {/* Floating v3.0 launcher REMOVED — v3.0 is reached via the two gates only (see ProV3Surface). */}
+      {/* Floating v5.0 launcher REMOVED — v5.0 is reached via the two gates only (see ProV3Surface). */}
 
       {/* Auth Modal + all overlay modals → AppModals */}
       <AppModals
@@ -3415,12 +3427,12 @@ export default function App() {
       {/* P-UX.4 — Product Tour overlay (dependency-free; renders its own launcher). Navigates via the
           app's guarded toggleTab and gracefully skips any target not present on the current view.
           currentView gates the floating launcher to the home view only, so it never overlaps the
-          controls on other surfaces (e.g. the v3.0 chat composer). */}
+          controls on other surfaces (e.g. the v5.0 chat composer). */}
       <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} currentView={activeView} />
 
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too).
           DYNAMIC PER-VIEW FOOTER (admin 2026-07-07): the bar is ONE component (same design, same
-          gating) but its ITEMS follow the active view. v3.0 active → its own six items (History ·
+          gating) but its ITEMS follow the active view. v5.0 active → its own six items (History ·
           Pro Chat · Preview · Files · Report · More), driven by the REAL panel actions registered
           via onFooterApi. Every other view keeps the default items. */}
       {effectiveDeviceMode === 'mobile' && !focusMode && (
@@ -3474,7 +3486,7 @@ export default function App() {
             { id: 'settings' as ViewType,  icon: menuItems.find(m => m.id === 'settings')?.icon  ?? Settings,    label: 'More' },
           ].map(({ id, icon: Icon, label }) => {
             const isActive = activeView === id;
-            // Preview is v3.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
+            // Preview is v5.0-first (admin 2026-07-07: one preview, three gates): enable it whenever a v3
             // workspace exists, not only for the retired v2 generatedCode path.
             const isDisabled = id === 'preview' ? !(v3Preview.workspaceId || hasGeneratedCode) : (id === 'studio' && !hasGeneratedCode);
             return (

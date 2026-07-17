@@ -1,9 +1,9 @@
-// Shared v3.0 preview surface — the "Live server" + "In-browser" preview the v3.0 build produces.
+// Shared v5.0 preview surface — the "Live server" + "In-browser" preview the v5.0 build produces.
 //
-// Extracted from AgentV3Panel so BOTH the v3.0 panel AND the main slide-out "Preview" menu render the
-// SAME, working v3.0 preview (driven by the live sandbox URL or the in-browser build of the saved
-// files). Previously the main-menu Preview rendered the retired v2.0 `generatedCode`, which a v3.0
-// build never writes — so the preview looked permanently "disconnected" from the v3.0 engine.
+// Extracted from AgentV3Panel so BOTH the v5.0 panel AND the main slide-out "Preview" menu render the
+// SAME, working v5.0 preview (driven by the live sandbox URL or the in-browser build of the saved
+// files). Previously the main-menu Preview rendered the retired v2.0 `generatedCode`, which a v5.0
+// build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from 'lucide-react';
@@ -344,7 +344,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // the REAL AST-based endpoint (never a guess), then reloads the in-browser preview from the freshly
   // saved source so the edit is confirmed against what actually compiled, and notifies the parent
   // (onFileEdited) so Files/Code Studio/Git pick up the change immediately too — same as any other
-  // v3.0 file write.
+  // v5.0 file write.
   const inBrowserIframeRef = useRef<HTMLIFrameElement | null>(null);
   // SECURITY Phase 4 — when a separate preview origin is configured (VITE_PREVIEW_ORIGIN), the
   // in-browser preview loads a tiny host page on THAT origin and receives the built HTML via

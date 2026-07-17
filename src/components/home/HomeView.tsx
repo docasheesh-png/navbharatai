@@ -58,7 +58,7 @@ const PRODUCT_CARDS = [
   },
   {
     id: 'pro',
-    badge: 'Pro v3.0',
+    badge: 'Pro v5.0',
     badgeColor: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',
     gradient: 'from-indigo-600/20 via-purple-500/10 to-transparent',
     border: 'border-indigo-500/20 hover:border-indigo-400/50',
@@ -68,7 +68,7 @@ const PRODUCT_CARDS = [
     Icon: Bot,
     title: 'NavBharatAI Pro',
     subtitle: 'Agentic App Builder',
-    description: 'Describe any app in plain language. Pro v3.0 plans, codes, previews and deploys it — automatically, end-to-end.',
+    description: 'Describe any app in plain language. Pro v5.0 plans, codes, previews and deploys it — automatically, end-to-end.',
     features: ['Full-stack app generation in minutes', 'Live preview + one-click deploy', 'Powered by Claude Opus (best AI)'],
     featureIcon: Zap,
     featureColor: 'text-indigo-400',

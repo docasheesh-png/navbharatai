@@ -1,8 +1,8 @@
 // Server-side vision description — turns an uploaded image or PDF into TEXT that
-// any downstream text model (or the v3.0 build loop) can use, WITHOUT making the
-// expensive model read it. Used by Pro v3.0 so file reading stays cheap: the
+// any downstream text model (or the v5.0 build loop) can use, WITHOUT making the
+// expensive model read it. Used by Pro v5.0 so file reading stays cheap: the
 // cheap providers (Gemini → Grok) describe the file by default, and Claude is
-// used ONLY when the caller asks (v3.0 "Power" / Only-Opus mode).
+// used ONLY when the caller asks (v5.0 "Power" / Only-Opus mode).
 //
 // Documents (Word/Excel/PowerPoint/ZIP/text) are handled by attachmentText.ts;
 // this module covers the multimodal types (images + PDF) that need a vision model.

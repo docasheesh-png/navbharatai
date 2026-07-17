@@ -36,7 +36,7 @@ export interface BuildEstimate {
   complexityScore: number;
 }
 
-// Heuristic constants (milliseconds). RE-CALIBRATED to REAL measured NavBharatAI Pro v3.0 durations
+// Heuristic constants (milliseconds). RE-CALIBRATED to REAL measured NavBharatAI Pro v5.0 durations
 // (autopsy 2026-07-11): a Todo build (15 files) took ~3.7 min end-to-end and a Notes build (20 files)
 // ~4.0 min — with the file-by-file SimpleBuilder fast lane the fixed overhead is small (the reports
 // show npm install ~1s + npm run dev ~9–55s + first preview ~16s ≈ 90–120s, NOT 7 min). The PREVIOUS

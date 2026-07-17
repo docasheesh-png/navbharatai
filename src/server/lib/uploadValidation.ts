@@ -3,7 +3,7 @@
 // Attachments were parsed for text with only a per-document CHARACTER cap — a huge base64 blob or a
 // disallowed/dangerous file type was still decoded and processed. This adds strict, pure validation
 // (decoded-size ceiling + an allowlist of supported types) applied at the shared attachment choke
-// point, so every AI surface (Free/Pro chat, SDA, v3.0) rejects oversized/unsupported files honestly
+// point, so every AI surface (Free/Pro chat, SDA, v5.0) rejects oversized/unsupported files honestly
 // instead of trying to read them. Pure → unit-tested. (Malware scanning needs an external service
 // (ClamAV/VirusTotal) and is intentionally out of scope here — noted in the roadmap.)
 

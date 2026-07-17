@@ -26,7 +26,7 @@ export interface DocsModel {
 
 /** Major surfaces get their own section; everything else is grouped generically. */
 const MAJOR_SURFACES: Record<string, string> = {
-  agentv3: 'NavBharatAI Pro v3.0 (App Builder)',
+  agentv3: 'NavBharatAI Pro v5.0 (App Builder)',
   engineer_ai: 'Engineer AI',
   pro_chat: 'Pro Chat',
   nbi_chat: 'Free Chat (NBI)',

@@ -32,7 +32,7 @@ import {
 interface CodeStudioProps {
   files: Record<string, string>;
   onFilesChange: (files: Record<string, string>) => void;
-  /** Side-effect when files are deleted (clear durable storage; sync deletion to v3.0). */
+  /** Side-effect when files are deleted (clear durable storage; sync deletion to v5.0). */
   onFilesRemoved?: (paths: string[]) => void;
   onRun: (files: Record<string, string>) => void;
   /** The built preview HTML (same best-engine output the Pro preview uses). */
@@ -45,7 +45,7 @@ interface CodeStudioProps {
   activeIntent?: string;
   /** Real compile-error problems from the live esbuild preview bundle (empty = compiled clean). */
   problems?: PreviewProblem[];
-  /** v3.0 identity for the REAL terminal (runs commands in this user's warm sandbox). */
+  /** v5.0 identity for the REAL terminal (runs commands in this user's warm sandbox). */
   v3WorkspaceId?: string;
   v3UserId?: string;
   v3Email?: string;
@@ -684,8 +684,8 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
         );
       case 'extensions': return <ExtensionMarket />;
       case 'ai':
-        // Code Studio's AI chat IS NavBharatAI Pro v3.0 (AgentV3) — the SAME session/memory/file-write
-        // engine as the main v3.0 panel, not the separate "Free" chat AI. Root-caused 2026-07-01: this
+        // Code Studio's AI chat IS NavBharatAI Pro v5.0 (AgentV3) — the SAME session/memory/file-write
+        // engine as the main v5.0 panel, not the separate "Free" chat AI. Root-caused 2026-07-01: this
         // used to render <AIChat> wired to the Free-tier text-only endpoint, which has zero file
         // access and is explicitly instructed server-side to never write code — so it could only talk
         // ABOUT a file, never act on one. v3UserId/v3Email (already threaded in for RealTerminal below)
@@ -911,7 +911,7 @@ export const CodeStudio: React.FC<CodeStudioProps> = React.memo(({
               id="ide-social-chat-trigger"
               onClick={() => { handleScreenChange('ai'); setIsSidebarOpen(true); }}
               className="w-16 h-7 bg-indigo-600 hover:bg-indigo-700 rounded-l-lg flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 active:scale-90 transition-all border-y border-l border-indigo-400/20"
-              title="AI Chat — NavBharatAI Pro v3.0"
+              title="AI Chat — NavBharatAI Pro v5.0"
             >
               <Bot className="w-4 h-4 mr-1" />
               <span className="text-[10px] font-bold">AI</span>

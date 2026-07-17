@@ -5,7 +5,7 @@
 // `gemini-2.0-flash(-001)`, `gemini-1.5-*` — which the providers have since
 // RETIRED. Every image/PDF read therefore 404'd at the provider, every chain
 // fell through all providers, and ALL AI surfaces (Free chat, Pro chat, SDA,
-// Pro v3.0) answered "unable to read files" even though plain text worked
+// Pro v5.0) answered "unable to read files" even though plain text worked
 // (text paths lead with current model ids). Centralising the ids here — with
 // env overrides so the admin can bump models WITHOUT a code change — prevents
 // the same silent rot from recurring in five different files.
@@ -22,7 +22,7 @@ function fromEnvList(envVal: string | undefined, fallback: string[]): string[] {
   return list.length > 0 ? list : fallback;
 }
 
-/** Claude model for cheap file DESCRIPTION (v3.0 attachment describe). Vision + PDF capable. */
+/** Claude model for cheap file DESCRIPTION (v5.0 attachment describe). Vision + PDF capable. */
 export function claudeVisionModel(): string {
   return process.env.VISION_CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
 }

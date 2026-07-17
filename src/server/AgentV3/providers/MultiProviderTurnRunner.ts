@@ -1,6 +1,6 @@
 // AgentV3 — multi-provider cost-routing orchestrator (phase 3).
 //
-// Wraps an ORDERED chain of TurnRunners so v3.0 runs each turn on the cheapest provider
+// Wraps an ORDERED chain of TurnRunners so v5.0 runs each turn on the cheapest provider
 // that can do it, falling through to the next on failure, with the LAST runner as a
 // GUARANTEED backstop (Claude). This is the inverse of makeResilientTurnRunner (which is
 // Claude-primary → text fallback): here the cheap providers (Vertex→Gemini→Grok, each via
@@ -366,7 +366,7 @@ export function makeMultiProviderTurnRunner(
       // Every provider failed (or was known-dead) — surface the final error honestly, and when the
       // cause is a FATAL account problem, say so in plain words (it is the platform, not the app).
       const reason = lastError instanceof Error ? lastError.message : String(lastError);
-      const prefix = alive === 0 ? 'All v3.0 providers are unavailable (known-fatal from earlier in this build)' : `All v3.0 providers failed (${fellBackFrom.join(' → ')})`;
+      const prefix = alive === 0 ? 'All v5.0 providers are unavailable (known-fatal from earlier in this build)' : `All v5.0 providers failed (${fellBackFrom.join(' → ')})`;
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };

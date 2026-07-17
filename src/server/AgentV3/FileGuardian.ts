@@ -1,6 +1,6 @@
 // AgentV3 — File Guardian (R-guardian).
 //
-// Goal (admin ask): the files v3.0 created must STAY. If a file is lost — the ephemeral sandbox was
+// Goal (admin ask): the files v5.0 created must STAY. If a file is lost — the ephemeral sandbox was
 // recycled, or a file went missing — the next build/edit turn auto-recovers it from history (the
 // durable WorkspaceFileStore) WITHOUT the user asking. No fake: it actually writes the files back.
 //

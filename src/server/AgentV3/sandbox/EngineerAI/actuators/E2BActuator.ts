@@ -79,11 +79,11 @@ export function isIgnoredListPath(relPath: string): boolean {
 }
 
 /**
- * A3 (v3.0 redesign — E2B reliability) — resolve the custom E2B image the sandbox should launch from.
+ * A3 (v5.0 redesign — E2B reliability) — resolve the custom E2B image the sandbox should launch from.
  *
  * Root cause the audit found: every sandbox was created from E2B's DEFAULT base image because the
  * committed custom template (`navbharat-builder`, pinned modern Node — see infra/e2b/) was NEVER
- * wired into Sandbox.create(). This is the #1 reason v3.0 builds felt unreliable (wrong runtime).
+ * wired into Sandbox.create(). This is the #1 reason v5.0 builds felt unreliable (wrong runtime).
  *
  * When `E2B_TEMPLATE_ID` is set, that id is passed as SandboxOpts.template so Sandbox.create() launches
  * the pinned image; when unset it returns undefined → no `template` field → E2B's default base, i.e. the

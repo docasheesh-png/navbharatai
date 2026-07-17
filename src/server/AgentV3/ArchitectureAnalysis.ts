@@ -5,7 +5,7 @@
 // are concrete, real defects (a broken local import IS a build failure), found
 // without needing a sandbox — so the team can evaluate and fix its own work even
 // before a build runs. The legacy QualityEngine's evaluators assume a host file
-// path and the wrong repo, so they cannot serve v3.0; this is the native version.
+// path and the wrong repo, so they cannot serve v5.0; this is the native version.
 
 import path from 'path';
 import type { ProjectGraph } from './WorkspaceMemory';

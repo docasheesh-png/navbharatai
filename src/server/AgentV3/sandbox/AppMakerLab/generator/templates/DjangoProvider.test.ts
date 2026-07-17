@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DjangoProvider } from './DjangoProvider';
 
-describe('DjangoProvider (v3.0 sandbox template) — deployable, not just previewable', () => {
+describe('DjangoProvider (v5.0 sandbox template) — deployable, not just previewable', () => {
   const files = new DjangoProvider().getFiles([]);
 
   it('emits the wsgi module the Procfile boots gunicorn against (deploy would 500 without it)', () => {

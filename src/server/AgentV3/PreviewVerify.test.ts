@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from './PreviewVerify';
 
-describe('analyzePreviewHtml — v3.0 sees whether its preview really rendered', () => {
+describe('analyzePreviewHtml — v5.0 sees whether its preview really rendered', () => {
   it('accepts a real rendered app (visible content, no error surface)', () => {
     const html = '<html><body><div id="root"><h1>My Todo App</h1><ul><li>Buy milk</li></ul></div></body></html>';
     const v = analyzePreviewHtml(html);

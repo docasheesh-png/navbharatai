@@ -1,6 +1,6 @@
 // AgentV3 — client-driven queue EXECUTOR decision (FIX #4.3).
 //
-// The serial executor is client-driven (admin choice A): while a v3.0 chat is open, whenever a build
+// The serial executor is client-driven (admin choice A): while a v5.0 chat is open, whenever a build
 // SETTLES and the app is idle, the client claims the next queued command and auto-submits it — so a
 // user's queued roadmap (or the planner/advisor chats' enqueued work) runs one step at a time,
 // hands-free. Closing the tab simply PAUSES the queue; it resumes on reopen (nothing is lost).

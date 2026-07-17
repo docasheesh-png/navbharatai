@@ -1,5 +1,5 @@
 // Compact voice-mode button for the PROFESSIONAL chats ONLY (admin 2026-07-14: voice lives
-// inside professionals — never NavBharatAI Free, never Pro v3.0). Sits in the professional
+// inside professionals — never NavBharatAI Free, never Pro v5.0). Sits in the professional
 // chat input row next to Send; opens the full-screen NavBharatAI Voice surface. Renders
 // NOTHING (takes zero space) unless voice is enabled on the server AND the user is signed in
 // (voice is a paid, logged-in-only feature — the server enforces the same gate on the WS).

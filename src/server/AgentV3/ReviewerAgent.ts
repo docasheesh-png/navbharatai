@@ -149,7 +149,7 @@ export async function reviewBuild(opts: {
     const { ok, summary } = await opts.spawn('reviewer', instruction);
     // VAJRA V4-2 honesty: a reviewer that FAILED (ok:false — e.g. its own prompt hit a provider
     // limit) or whose "summary" is itself a provider-failure error must NOT render as a real review
-    // with a made-up "(85/100)" score (report 2026-07-07: "⚠️ Build Review (85/100): Error: All v3.0
+    // with a made-up "(85/100)" score (report 2026-07-07: "⚠️ Build Review (85/100): Error: All v5.0
     // providers failed…"). Score 0 → formatReview shows nothing; the build stands on its own gates.
     if (ok === false || isReviewFailureSummary(summary)) {
       return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };

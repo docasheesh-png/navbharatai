@@ -6,7 +6,7 @@
 /**
  * Shared creator-attribution instruction injected into EVERY NavBharatAI agent's
  * system prompt — Free Chat, Pro Chat, Engineer AI, Doctor AI (SDA), all the
- * Professionals AIs, and v3.0. This is the SINGLE SOURCE OF TRUTH: update it here and
+ * Professionals AIs, and v5.0. This is the SINGLE SOURCE OF TRUTH: update it here and
  * every agent stays consistent. When a user asks who built the assistant, every agent
  * credits "Dr Asheesh and his team" — phrased a little differently each time, but
  * always the same core fact. The reply text itself is AI-generated at runtime (in the
@@ -28,7 +28,7 @@ export const CREATOR_IDENTITY =
 
 /**
  * CURRENT-DATE + RECENCY directive (admin request 2026-07-12) — injected into every user-facing chat
- * system prompt (NavBharatAI Free, Pro v3.0 chat, and every Professional AI) so the model NEVER
+ * system prompt (NavBharatAI Free, Pro v5.0 chat, and every Professional AI) so the model NEVER
  * presents stale training-cutoff facts as current. ROOT CAUSE it fixes: with no "today" in the prompt,
  * the model answered a time-sensitive question (e.g. the India cricket squad) with a PAST year's data
  * as if it were the present. The real date is computed at call time in IST, so it is always correct.

@@ -178,7 +178,7 @@ export function formatBrainLessons(brain: UserBrain | null | undefined): string 
 }
 
 /**
- * Firestore-backed persistence around the pure core. Follows the established v3.0 store pattern
+ * Firestore-backed persistence around the pure core. Follows the established v5.0 store pattern
  * (VITEST-skip, best-effort, never throws, `firestoreDatabaseId()` on the Firestore handle) — same
  * as FirestoreWorkspaceMemoryStore.
  */

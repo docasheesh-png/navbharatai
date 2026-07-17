@@ -1,6 +1,6 @@
 // AgentV3 — Import/Export RECONCILER (deterministic self-heal for the #1 recurring generator bug).
 //
-// WHY THIS EXISTS (root cause, admin build reports fae70e42 / Notes / Car / Watch): v3.0 repeatedly
+// WHY THIS EXISTS (root cause, admin build reports fae70e42 / Notes / Car / Watch): v5.0 repeatedly
 // generates TEST files (and occasionally source files) that import a component with the WRONG import
 // KIND — a NAMED import for a DEFAULT-exported component, e.g.
 //     src/App.test.tsx:  import { App } from './App'      // App.tsx does `export default App`

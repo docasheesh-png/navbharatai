@@ -12,7 +12,7 @@ const FUNDED = { tokenBalance: 10000, totalTokensUsed: 0, remaining_balance: 100
 const tx = (over: Partial<WalletDebitTx> = {}): WalletDebitTx => ({
   billedInr: 25,
   buildRef: 'ws1_1000',
-  description: 'NavBharatAI Pro v3.0 build',
+  description: 'NavBharatAI Pro v5.0 build',
   ...over,
 });
 

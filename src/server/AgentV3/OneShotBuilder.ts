@@ -26,7 +26,7 @@ export function classifyForOneShot(startTier: StartTier | undefined): boolean {
  * Whether a NEW build should try the deterministic SIMPLE-BUILDER lane first (manifest → shared
  * contract → every file generated in its own focused pass → tsc verify → bounded repair).
  *
- * ROOT CAUSE this fixes (admin, 2026-07-06: "v3.0 complete app bana nahi pa raha"): sonnet-tier NEW
+ * ROOT CAUSE this fixes (admin, 2026-07-06: "v5.0 complete app bana nahi pa raha"): sonnet-tier NEW
  * builds went straight to the free-form multi-agent loop, and two real reports show that path churning
  * on even a landing page — sub-agents re-exploring the project from scratch, creating files beyond
  * scope, deleting and rebuilding them — 98 steps/10 min and 148 steps/29 min, both dead at the wall

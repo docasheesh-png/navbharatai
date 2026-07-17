@@ -286,7 +286,7 @@ export function diffRemovedPaths(current: string[], toRemove: string[]): { remai
 
 /**
  * Remove specific files from the durable workspace set. The authoritative `paths` metadata is
- * updated so loadWorkspaceFiles no longer returns them — i.e. v3.0 genuinely "forgets" the deleted
+ * updated so loadWorkspaceFiles no longer returns them — i.e. v5.0 genuinely "forgets" the deleted
  * files (a fresh / restored session won't have them, and the file-guardian won't resurrect them).
  * Handles delete-all (paths → []). Best-effort: also deletes the orphaned content docs. Returns the
  * number of paths removed from the authoritative list. No-op without Firestore; never throws.

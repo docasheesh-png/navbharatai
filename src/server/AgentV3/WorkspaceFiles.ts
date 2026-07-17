@@ -1,7 +1,7 @@
 // AgentV3 — collect a built app's source files from the sandbox into a deploy-ready
 // map (§12.2). Reuses the EXISTING deploy + git backend: the returned
 // `Record<path, content>` is exactly what `/api/pro/deploy` (Vercel/Netlify/
-// Cloudflare/GitHub Pages) and `/api/github/push-enhanced` already accept — so v3.0
+// Cloudflare/GitHub Pages) and `/api/github/push-enhanced` already accept — so v5.0
 // gets durable deploy + git push without rebuilding any deployment code.
 //
 // PURE over a minimal actuator shape (listFiles + readFile) so it is fully unit-
@@ -124,7 +124,7 @@ function isSafeImportPath(path: string): boolean {
 
 /**
  * Write an imported project (e.g. fetched from GitHub via the existing
- * `/api/github/fetch` route) into the v3.0 sandbox so the agent can edit/update and
+ * `/api/github/fetch` route) into the v5.0 sandbox so the agent can edit/update and
  * then deploy/push it back. Best-effort + bounded: an unsafe path or a failed write
  * is skipped, never fatal. Reuses the same size/exclusion guards as the collector.
  */

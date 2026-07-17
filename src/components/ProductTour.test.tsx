@@ -17,7 +17,7 @@ describe('ProductTour', () => {
     // Home → launcher visible (onboarding entry point).
     expect(renderToStaticMarkup(<ProductTour currentView="home" />)).toContain('Take a quick product tour');
     // Any non-home view → launcher hidden, so its fixed bottom-left button never overlaps that
-    // surface's controls (the v3.0 chat composer was the reported case).
+    // surface's controls (the v5.0 chat composer was the reported case).
     expect(renderToStaticMarkup(<ProductTour currentView="nbi_pro_chat" />)).toBe('');
     expect(renderToStaticMarkup(<ProductTour currentView="billing" />)).toBe('');
   });

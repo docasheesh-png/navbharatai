@@ -1,6 +1,6 @@
 // AgentV3 — Gemini/Vertex tool-use adapter (multi-provider cost routing, phase 1).
 //
-// Translates v3.0's canonical ANTHROPIC transcript + tool definitions INTO the Google
+// Translates v5.0's canonical ANTHROPIC transcript + tool definitions INTO the Google
 // GenAI (`@google/genai`) function-calling shape, and the Gemini reply BACK into an
 // Anthropic-shaped TurnResult — so a cheap Gemini/Vertex model can take a turn in the
 // build loop. PURE and provider-agnostic (no SDK import, no network) so the translation

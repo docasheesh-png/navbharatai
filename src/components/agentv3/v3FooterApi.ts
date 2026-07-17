@@ -1,10 +1,10 @@
 // Dynamic per-view footer (admin 2026-07-07): on mobile/tablet the app's single bottom nav shows
-// VIEW-SPECIFIC options — v3.0 first. When NavBharatAI Pro v3.0 is the active view, the nav swaps
-// its default items (Home / AI / Preview / Studio / More) for v3.0's own six:
+// VIEW-SPECIFIC options — v5.0 first. When NavBharatAI Pro v5.0 is the active view, the nav swaps
+// its default items (Home / AI / Preview / Studio / More) for v5.0's own six:
 // History · Pro Chat · Preview · Files · Build Report · More.
 //
 // The nav bar itself stays ONE component in App.tsx (same design, same gating, same safe-area
-// padding). AgentV3Panel registers this API upward (via onFooterApi) so the nav's v3.0 items drive
+// padding). AgentV3Panel registers this API upward (via onFooterApi) so the nav's v5.0 items drive
 // the panel's real internals — the same openTab/history/report code paths the header uses on
 // desktop. No duplicated logic, no fake buttons.
 
@@ -15,7 +15,7 @@ export interface V3FooterApi {
   section: V3FooterSection;
   /** Open the session-history sheet (same list as the desktop ☰ menu). */
   openHistory: () => void;
-  /** Show the v3.0 chat full-width (collapse the workspace). */
+  /** Show the v5.0 chat full-width (collapse the workspace). */
   openChat: () => void;
   /** Open the live preview surface. */
   openPreview: () => void;
@@ -55,7 +55,7 @@ export function footerSection(showWorkspace: boolean, tab: string): V3FooterSect
 }
 
 /**
- * Should the v3.0 panel run in mobile-footer layout? True exactly when the app's bottom nav is
+ * Should the v5.0 panel run in mobile-footer layout? True exactly when the app's bottom nav is
  * visible — which is now the MOBILE view mode only (tablet & desktop use the side rail, no bottom
  * nav), not focus mode — the same condition App.tsx renders the nav under, so the header controls and
  * their footer replacements can never BOTH disappear. Pure.

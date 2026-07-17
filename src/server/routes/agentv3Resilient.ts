@@ -1,6 +1,6 @@
 // AgentV3 resilient turn runner (composition-root wiring).
 //
-// v3.0's engine speaks the NATIVE Anthropic tool-use API (ClaudeClient) — that
+// v5.0's engine speaks the NATIVE Anthropic tool-use API (ClaudeClient) — that
 // is what enables real app building. But chat must never die just because the
 // Claude provider is misconfigured, throttled, or down. This wrapper tries
 // Claude first and, if that turn fails, falls back to NavBharatAI's existing

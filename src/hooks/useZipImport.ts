@@ -1,6 +1,6 @@
 // useZipImport — the ZIP-import slice, lifted out of the App.tsx God component (P3.1, behavior-
 // preserving). Owns handleZipImport: stream a raw .zip to the server, read the SSE extraction stream,
-// load files into Code Studio in real-time, persist + mirror to the v3.0 workspace, classify the app
+// load files into Code Studio in real-time, persist + mirror to the v5.0 workspace, classify the app
 // (framework / simple-React / static) and post an honest import summary. Code moved BYTE-IDENTICAL —
 // pure relocation, zero logic change. Deps are injected; App.tsx destructures the SAME handleZipImport
 // identifier back, so every file-drop / conflict-resolve caller is unchanged.
@@ -127,7 +127,7 @@ export function useZipImport(deps: ZipImportDeps) {
       // Final state — ensure everything is synced.
       setFiles(loadedFiles as any);
       saveAllFiles(loadedFiles).catch(() => {}); // persist to IndexedDB/Cache API
-      syncFilesToV3(loadedFiles).catch(() => {}); // mirror uploaded files into the v3.0 workspace
+      syncFilesToV3(loadedFiles).catch(() => {}); // mirror uploaded files into the v5.0 workspace
       setHasGeneratedCode(true);  // ← marks workspace as occupied so next prompt = edit, not rebuild
       setIsAppBuilt(true);
 

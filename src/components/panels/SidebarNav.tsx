@@ -40,7 +40,7 @@ export interface SidebarNavProps {
   setIsThemePickerOpen: (v: boolean) => void;
   setShowVishwakarmaChooser: (v: boolean) => void;
   setErrorContext: (v: any) => void;
-  /** Reopen a past chat (routes v3.0 → Pro v3.0, others → their own surface). Unused by this
+  /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
    *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
    *  props interface only so App.tsx's existing call site doesn't need touching. */
   sessions?: ChatSession[];
@@ -305,7 +305,7 @@ export function SidebarNav({
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group ${activeView === 'engine_builder' ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:bg-white/5 hover:text-white'}`}
                   >
                     <Info className="w-4.5 h-4.5 text-indigo-400" />
-                    <span className="text-sm font-bold tracking-tight">App Builder v3.0</span>
+                    <span className="text-sm font-bold tracking-tight">App Builder v5.0</span>
                   </button>
                   {/* Admin access moved to a dedicated URL (admin 2026-07-15): reach the admin login /
                       dashboard at /admin. It's intentionally NOT a menu item so the entry isn't

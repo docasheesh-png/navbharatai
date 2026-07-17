@@ -2,8 +2,8 @@
 // (admin aashishcpmt09 / doc.asheesh, 2026-06-27; TIER→MODEL mapping redefined by the
 // admin 2026-07-13 — see below).
 //
-// NavBharatAI Pro v3.0 runs on NavBharatAI's own Anthropic account (see CLAUDE.md
-// §"NavBharatAI Pro v3.0 — admin-authorized billing override"). The user picks a
+// NavBharatAI Pro v5.0 runs on NavBharatAI's own Anthropic account (see CLAUDE.md
+// §"NavBharatAI Pro v5.0 — admin-authorized billing override"). The user picks a
 // POWER LEVEL; each level PINS the exact model that runs the build — the user's
 // selection is what the backend calls, nothing else (admin fidelity rule 2026-07-13):
 //

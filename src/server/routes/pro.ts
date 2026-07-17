@@ -40,7 +40,7 @@ function stripFileFences(s: string): string {
 
 /**
  * SECURITY MASTER PLAN Phase 1.1 (admin-approved 2026-07-07) — the legacy Pro v2 chat/build routes
- * (`/api/pro-chat`, `/api/pro-build`) are RETIRED. They were superseded by NavBharatAI Pro v3.0
+ * (`/api/pro-chat`, `/api/pro-build`) are RETIRED. They were superseded by NavBharatAI Pro v5.0
  * (AgentV3) and have NO client caller (verified: zero `fetch('/api/pro-chat'|'/api/pro-build')` in
  * the app). They were also UNAUTHENTICATED and spent NavBharatAI's OWN model budget on every call
  * (`aiRouter.route(..., 'navbharat', ...)`), so any anonymous request could burn the platform's
@@ -50,7 +50,7 @@ function stripFileFences(s: string): string {
  * and trivially reversible.
  */
 const PRO_V2_RETIRED = {
-  error: 'This endpoint has been retired. NavBharatAI Pro v3.0 replaces the Pro v2 builder.',
+  error: 'This endpoint has been retired. NavBharatAI Pro v5.0 replaces the Pro v2 builder.',
   code: 'gone',
 } as const;
 
@@ -91,7 +91,7 @@ export function registerProRoutes(app: Express): void {
 
   app.post('/api/pro-chat', async (_req: Request, res: Response) => {
     // RETIRED (Phase 1.1) — was unauthenticated and spent NavBharatAI's own model budget on every
-    // call; no client uses it (superseded by NavBharatAI Pro v3.0). Honest 410 Gone, no model touched.
+    // call; no client uses it (superseded by NavBharatAI Pro v5.0). Honest 410 Gone, no model touched.
     return res.status(410).json(PRO_V2_RETIRED);
   });
 
@@ -105,7 +105,7 @@ export function registerProRoutes(app: Express): void {
 
   app.post('/api/pro-build', async (_req: Request, res: Response) => {
     // RETIRED (Phase 1.1) — was unauthenticated and spent NavBharatAI's own model budget on every
-    // call; no client uses it (superseded by NavBharatAI Pro v3.0). Honest 410 Gone, no model touched.
+    // call; no client uses it (superseded by NavBharatAI Pro v5.0). Honest 410 Gone, no model touched.
     return res.status(410).json(PRO_V2_RETIRED);
   });
 
@@ -114,7 +114,7 @@ export function registerProRoutes(app: Express): void {
     // RETIRED (SEC Phase 5 re-audit) — this was UNAUTHENTICATED and spent NavBharatAI's OWN paid
     // model budget (`aiRouter.route(..., 'navbharat', ...)`) on every call: the exact money-bleed
     // the sibling /api/pro-chat + /api/pro-build routes were retired for, missed in Phase 1.1. No
-    // client calls it (the `/code-review` chat command routes through the v3.0 chat pipeline, not
+    // client calls it (the `/code-review` chat command routes through the v5.0 chat pipeline, not
     // this endpoint). Honest 410 Gone, no model touched.
     return res.status(410).json(PRO_V2_RETIRED);
   });

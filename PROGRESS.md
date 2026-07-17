@@ -17239,3 +17239,27 @@ to trigger the guardian restore; the next report's DATA_LOSS_EVENT counts will c
 1. **GLM 429 saturation (INFRA):** single GLM key overloaded → 63 fallbacks. Real fix = the GLM key pool (`GLM_API_KEY` comma-list, admin infra). Engine mitigation (per-build GLM circuit-breaker after N 429s) is a candidate next fix.
 2. **FEATURE_COVERAGE false-negative (honesty):** the feature-presence detector said "Present: none" for a working Add form + list — to be root-caused in a follow-up autopsy (needs the analyzed DOM; will recur).
 3. **Component create-then-orphan churn:** fast-lane planned components vs full-builder inline App not reconciled → dead ExpenseItem/List/Tracker/ErrorBoundary. Candidate: reconcile the plan manifest with the final wired set.
+
+---
+
+## 2026-07-17 — Deep-test autopsy #2 (expense tracker EDIT: category+filter+localStorage+₹) → DNA fix: FEATURE_COVERAGE false-negative on client-rendered apps
+
+**Build:** the edit succeeded — the running app has the category dropdown, filter, ₹ currency, tags and localStorage persistence (screenshot confirms). ok:true, READY 86/100, ~10 min, weak tier, builtBy GLM, 21 GLM fallbacks. ₹13.79.
+
+**5-bucket ledger:**
+- ✅ Self-healed: DATA_LOSS_EVENT — the sandbox was recycled between builds (live listed 0 files); the durable store restored all 20 (guardian worked). tsc-driven type reconciliation.
+- 🔀 Worked around: GLM 429/timeout (21×, infra); the `id: number` (App.tsx) vs `id: string` (components) mismatch band-aided to `string | number` rather than unified.
+- ⏭️ Skipped: no tests; ErrorBoundary still unused.
+- ❌ Still-broken (1 unresolved) → **FEATURE_COVERAGE false-negative: "4 requested features have NO visible control — Add/Edit/Filter/List. Present: none"** for an app that VISIBLY has all of them — and it became the build's `rootCause` (a lie about a working app).
+- 🥵 Struggle: `edit_file: old_string not found` ×3 (App.tsx — stale model view after prior edits) + `Unknown tool: execute` ×2 (hallucinated tool name).
+
+**Missing subsystem / root cause:** the feature-presence detector reads the preview HTML, but `browseUrl` captured the UN-RENDERED SPA shell (`<div id="root"></div>`) — because its Playwright used `waitUntil:'networkidle'`, which NEVER fires for a Vite dev server (HMR WebSocket stays open) → 15s timeout → curl-shell fallback. A client-rendered React app's controls exist only after JS runs, so probing the shell flags EVERY feature "missing" → systematic false "Present: none" for every React build.
+
+**DNA FIX shipped (two-part, root + honest safety net):**
+1. `browseUrl` (E2BActuator): `waitUntil:'networkidle'` → `'domcontentloaded'` + a 1.8s settle so React actually paints into the root before the snapshot — the rendered DOM is captured, so coverage WORKS (not just suppressed). Also fixes the same shell-capture feeding the preview self-check.
+2. `isUnrenderedSpaShell()` + honesty guard in `FeaturePresence.ts`: if the analyzed HTML is still an un-rendered SPA shell (empty root mount, no controls, ~no text), `checkFeaturePresence` returns EMPTY — never a false "missing/Present: none". Regression-locked (shell detected, rendered app not-a-shell, shell→no false finding, rendered DOM→correct present). Gate: frontend tsc ✅, server tsc ✅, vitest 7156 ✅.
+
+**Open root causes (recorded):**
+1. GLM 429 saturation (infra key pool) — still open.
+2. `edit_file` old_string drift (×3): the model's file view goes stale after successive edits; the whitespace-flexible fallback can't help content drift. Candidate: an anchor/unique-line re-match on failure. Next autopsy.
+3. `Unknown tool: execute` (×2): the cheap model hallucinated a tool name. Candidate: alias common hallucinated names (execute→bash) or a tighter tool-list reminder.

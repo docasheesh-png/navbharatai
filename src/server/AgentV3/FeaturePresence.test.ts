@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { afterEach } from 'vitest';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from './FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled, isUnrenderedSpaShell } from './FeaturePresence';
 
 // The TaskLite prompt (admin report a06e7fd2) — Add / Delete / Mark complete / Filter (All/Active/
 // Completed) / footer stats / a task list.
@@ -28,6 +28,40 @@ describe('checkFeaturePresence — only probes REQUESTED features', () => {
     const r = checkFeaturePresence('Add task and Delete task', html);
     expect(r.present).toContain('Add / create');
     expect(r.missing).toContain('Delete / remove');
+  });
+});
+
+describe('isUnrenderedSpaShell + honesty guard (deep-test build #2 — false "Present: none")', () => {
+  // THE build #2 case: a Vite/React expense tracker rendered fine (Add form, category dropdown, filter,
+  // list) but the preview CAPTURE returned the un-hydrated shell, so every feature probed as absent and
+  // the report lied "4 features have NO visible control — Present: none" (it even became the rootCause).
+  const SHELL = '<!doctype html><html><head><title>App</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>';
+
+  it('detects an un-rendered SPA shell (empty root, no controls, no text)', () => {
+    expect(isUnrenderedSpaShell(SHELL)).toBe(true);
+    expect(isUnrenderedSpaShell('<div id="app"></div>')).toBe(true);
+  });
+
+  it('a RENDERED app (real controls in the root) is NOT a shell', () => {
+    const rendered = '<div id="root"><h1>Expense Tracker</h1><input placeholder="name"/><select><option>Food</option></select><button>Add</button><ul><li>bike</li></ul></div>';
+    expect(isUnrenderedSpaShell(rendered)).toBe(false);
+  });
+
+  it('does NOT judge features off a shell — returns empty instead of a false "Present: none"', () => {
+    const prompt = 'expense tracker: add an expense, filter by category, show the list';
+    const r = checkFeaturePresence(prompt, SHELL);
+    expect(r.probes).toHaveLength(0);   // nothing probed → nothing recorded
+    expect(r.missing).toHaveLength(0);  // never a false "missing"
+    expect(r.present).toHaveLength(0);
+  });
+
+  it('still correctly reports the SAME app when the RENDERED DOM is captured', () => {
+    const prompt = 'expense tracker: add an expense, filter by category, show the list';
+    const rendered = '<div id="root"><input placeholder="Expense name"/><input placeholder="0.00"/><select><option>All Categories</option></select><button>Add</button><button aria-label="delete">✕</button><ul><li>bike ₹100</li></ul></div>';
+    const r = checkFeaturePresence(prompt, rendered);
+    expect(r.present).toContain('Add / create');
+    expect(r.present).toContain('List / items');
+    expect(r.missing).toHaveLength(0);
   });
 });
 

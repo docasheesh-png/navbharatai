@@ -128,12 +128,37 @@ const FEATURES: FeatureDef[] = [
 ];
 
 /**
+ * Is this HTML an UN-rendered SPA shell — an empty root mount, no controls, negligible visible text?
+ *
+ * ROOT CAUSE (deep-test build #2, 2026-07-17): a Vite/React app is CLIENT-rendered — its served HTML is
+ * `<div id="root"></div>` + a script; the inputs/buttons/lists only exist AFTER JS runs in a browser. When
+ * the preview capture returns that shell (the browser DOM wasn't captured — a curl fallback, or a snapshot
+ * that beat React's first paint), EVERY feature probes as absent → a FALSE "Present: none" that even became
+ * the build's rootCause on a fully-working app. Detecting the shell lets the caller stay HONEST ("couldn't
+ * verify the DOM") instead of lying that a working app has no features. Pure.
+ */
+export function isUnrenderedSpaShell(html: string): boolean {
+  if (typeof html !== 'string') return true;
+  const lower = html.toLowerCase();
+  // A known SPA mount point that the framework renders INTO (React root, Next, Gatsby, Vue #app).
+  const hasRootMount = /<(?:div|main|section)\b[^>]*\bid=["'](?:root|app|__next|___gatsby)["']/.test(lower);
+  if (!hasRootMount) return false; // not a recognisable SPA shell → judge the HTML normally
+  const controls = inputCount(lower) + buttonCount(lower)
+    + (lower.match(/<(?:ul|ol|li|select|table|form|h[1-6])\b/g) || []).length;
+  // A rendered app has real controls and/or meaningful visible text; a bare shell has ~neither.
+  return controls === 0 && visibleText(html).length < 40;
+}
+
+/**
  * Check which REQUESTED interactive features are visibly present in the rendered preview HTML.
  * Only features whose keywords appear in the prompt are probed. Pure; never throws.
  */
 export function checkFeaturePresence(prompt: string, html: string): FeaturePresenceResult {
   const empty: FeaturePresenceResult = { probes: [], missing: [], present: [] };
   if (typeof prompt !== 'string' || typeof html !== 'string' || !html.trim()) return empty;
+  // HONESTY GUARD (build #2): never judge features off an un-rendered SPA shell — we literally cannot see
+  // the controls, so claiming they're missing is a false negative. Report nothing (probes:[]) instead.
+  if (isUnrenderedSpaShell(html)) return empty;
   const promptLower = prompt.toLowerCase();
   const htmlLower = html.toLowerCase();
   const textLower = visibleText(html).toLowerCase();

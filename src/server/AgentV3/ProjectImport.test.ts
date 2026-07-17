@@ -13,7 +13,7 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, shouldRetryImportAnonymously } from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -459,6 +459,62 @@ describe('findUnresolvedLocalImports — the agentic missing-files gate (deep-te
     const out = findUnresolvedLocalImports(files);
     expect(out).toHaveLength(1);
     expect(out[0].existsAt).toBeUndefined(); // ambiguous → no suggestion, falls back to "create"
+  });
+});
+
+describe('fixMispathLocalImports — deterministic wrong-import-path repair (deep-test build #1, expense tracker)', () => {
+  // THE build #1 case: App.tsx imported the types module by a WRONG relative path while src/types/index.ts
+  // existed — the fast lane detected it but only told the (throttled) LLM to fix it, so a 1-char path error
+  // escalated to a 10-min rebuild cascade. The engine must fix a wrong path to an EXISTING file itself.
+  it('rewrites a wrong path to the correct relative specifier when the module exists (barrel/index)', () => {
+    const files = {
+      'src/App.tsx': "import { Expense } from '../types';\nExpense;", // wrong: one ../ too many → escapes src/
+      'src/types/index.ts': 'export interface Expense { id: string }',
+    };
+    const { files: out, fixes } = fixMispathLocalImports(files);
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].importedBy).toBe('src/App.tsx');
+    expect(fixes[0].to).toBe('./types');
+    expect(out['src/App.tsx']).toContain("from './types'");
+    // and the fix genuinely resolves now (src/types/index.ts via the barrel)
+    expect(findUnresolvedLocalImports(out)).toEqual([]);
+  });
+
+  it('fixes an over-relative path that escaped src/ (the Kanban mispath) to the correct one', () => {
+    const files = {
+      'src/components/Dashboard.tsx': "import { useBoardStore } from '../../stores/useBoardStore';\nuseBoardStore;",
+      'src/stores/useBoardStore.ts': 'export const useBoardStore = () => ({});',
+    };
+    const { files: out, fixes } = fixMispathLocalImports(files);
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].to).toBe('../stores/useBoardStore');
+    expect(findUnresolvedLocalImports(out)).toEqual([]);
+  });
+
+  it('leaves a genuinely-missing import UNTOUCHED (no existsAt → the repair must create it)', () => {
+    const files = { 'src/ui/Select.tsx': "import s from './Select.module.css';\ns;" };
+    const { files: out, fixes } = fixMispathLocalImports(files);
+    expect(fixes).toEqual([]);
+    expect(out['src/ui/Select.tsx']).toBe(files['src/ui/Select.tsx']); // unchanged
+  });
+
+  it('never touches an AMBIGUOUS tail (two candidates) or a bare package import', () => {
+    const files = {
+      'src/pages/Dashboard.tsx': "import x from '../../widgets/Chart';\nimport React from 'react';\nx;React;",
+      'src/a/widgets/Chart.tsx': 'export default 1;',
+      'src/b/widgets/Chart.tsx': 'export default 1;',
+    };
+    const { fixes } = fixMispathLocalImports(files);
+    expect(fixes).toEqual([]); // ambiguous → no guess; 'react' is a package → ignored
+  });
+
+  it('leaves an already-correct import unchanged (idempotent)', () => {
+    const files = {
+      'src/App.tsx': "import { Expense } from './types';\nExpense;",
+      'src/types/index.ts': 'export interface Expense { id: string }',
+    };
+    const { fixes } = fixMispathLocalImports(files);
+    expect(fixes).toEqual([]);
   });
 });
 

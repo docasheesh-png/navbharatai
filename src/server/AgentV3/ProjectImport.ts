@@ -468,6 +468,65 @@ export function findUnresolvedLocalImports(files: Record<string, string>): Array
   return out;
 }
 
+/** The correct relative import specifier from `fromFile` to a resolved module path (ext + /index stripped). */
+function relImportSpecifier(fromFile: string, existsAt: string): string {
+  const fromDir = fromFile.split('/').slice(0, -1);
+  const target = existsAt.replace(RESOLVE_INDEX_RE, '').replace(RESOLVE_EXT_RE, '').split('/');
+  let i = 0;
+  while (i < fromDir.length && i < target.length && fromDir[i] === target[i]) i++;
+  const ups = fromDir.slice(i).map(() => '..');
+  const downs = target.slice(i);
+  const rel = [...ups, ...downs].join('/');
+  return rel.startsWith('.') ? rel : `./${rel}`;
+}
+
+/**
+ * DETERMINISTIC MISPATH AUTO-FIX (admin deep-test build #1, 2026-07-17 — the expense-tracker report).
+ *
+ * ROOT CAUSE: the fast lane's missing-import gate correctly DETECTS a WRONG-PATH local import to a file
+ * that already exists (`existsAt`), but it only TELLS the LLM to fix it. On that build the repair call
+ * was throttled (GLM 429 storm), so the trivial one-character path error escalated fast-lane → 3 repair
+ * attempts → one-shot (150s timeout) → full builder: ~10 wasted minutes for a correct app that needed
+ * one import path corrected. A wrong path to a KNOWN existing file is deterministically fixable with zero
+ * model calls — so the engine fixes it itself instead of paying a rebuild cascade.
+ *
+ * For every local import (`./ ../ @/`) that resolves to NO file but whose module EXISTS unambiguously at
+ * another path, rewrite the specifier to the correct relative path. Only unambiguous single-target
+ * mispaths are touched (existingModuleByTail already guarantees exactly one match); truly-missing imports
+ * (no existsAt) are left for the repair pass to CREATE. Pure + unit-tested.
+ */
+export function fixMispathLocalImports(files: Record<string, string>): {
+  files: Record<string, string>;
+  fixes: Array<{ importedBy: string; from: string; to: string }>;
+} {
+  const paths = new Set(Object.keys(files));
+  const hasSrc = [...paths].some((p) => p === 'src' || p.startsWith('src/'));
+  const fixes: Array<{ importedBy: string; from: string; to: string }> = [];
+  const out: Record<string, string> = { ...files };
+  // group1 = the import prefix up to and including the opening quote; group2 = specifier; group3 = closing quote.
+  const re = /((?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*)['"])([^'"\n]+)(['"])/g;
+  for (const [path, content] of Object.entries(files)) {
+    if (!/\.(?:m?[jt]sx?)$/i.test(path) || typeof content !== 'string') continue;
+    let changed = false;
+    const next = content.replace(re, (full: string, pre: string, spec: string, close: string) => {
+      let base: string | null = null;
+      if (spec.startsWith('./') || spec.startsWith('../')) base = normalizeRel(`${path.split('/').slice(0, -1).join('/')}/${spec}`);
+      else if (spec.startsWith('@/') && hasSrc) base = normalizeRel(`src/${spec.slice(2)}`);
+      if (!base) return full; // bare package / builtin / other alias — never our path to touch
+      if (LOCAL_RESOLVE_SUFFIXES.some((s) => paths.has(base + s))) return full; // already resolves
+      const existsAt = existingModuleByTail(base, paths);
+      if (!existsAt) return full; // truly missing — the repair pass CREATEs it, we don't invent a path
+      const correct = relImportSpecifier(path, existsAt);
+      if (correct === spec) return full;
+      changed = true;
+      fixes.push({ importedBy: path, from: spec, to: correct });
+      return `${pre}${correct}${close}`;
+    });
+    if (changed) out[path] = next;
+  }
+  return { files: out, fixes };
+}
+
 /**
  * Should a GitHub import RETRY the clone anonymously (without the user's token)? True only when a
  * TOKEN-authenticated clone brought in NOTHING (`!hydrated && addedFileCount === 0`) AND a token was

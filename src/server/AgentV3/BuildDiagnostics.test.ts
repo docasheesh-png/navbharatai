@@ -800,3 +800,32 @@ describe('billing & provider facts in the report (free/paid, builtBy, failures, 
     expect(r.billing).toBeUndefined();
   });
 });
+
+// ShopKhata autopsy 2026-07-17: "Now let me create the App component with routing and error boundary:"
+// was recorded severity=error — \berror\b matched inside "error boundary". Building error-UX is normal
+// work; only a genuine failure phrase may classify a narration as a problem.
+describe('AGENT_NOTE — benign compounds are never problems', () => {
+  it('the exact ShopKhata narration is a plain AGENT_STEP, not an error', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Now let me create the App component with routing and error boundary:', ts: 1 } as AgentEvent);
+    const r = d.report();
+    expect(r.issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(0);
+    expect(r.issues.filter((i) => i.code === 'AGENT_STEP')).toHaveLength(1);
+    expect(r.counts.errors).toBe(0);
+  });
+
+  it('error handling / error messages / warning banner narrations stay info too', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Adding error handling and error messages to the form.', ts: 1 } as AgentEvent);
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'Now the low-stock warning badge on Products.', ts: 2 } as AgentEvent);
+    expect(d.report().issues.filter((i) => i.code === 'AGENT_NOTE')).toHaveLength(0);
+  });
+
+  it('a GENUINE failure line still classifies as a problem (no over-correction)', () => {
+    const d = fresh();
+    d.ingestEvent({ type: 'narration', agent: 'architect', text: 'The dev server failed to start — port 5173 error.', ts: 1 } as AgentEvent);
+    const notes = d.report().issues.filter((i) => i.code === 'AGENT_NOTE');
+    expect(notes).toHaveLength(1);
+    expect(notes[0].severity).toBe('error');
+  });
+});

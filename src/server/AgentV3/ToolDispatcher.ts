@@ -1213,7 +1213,40 @@ export class ToolDispatcher {
           return blockMsg;
         }
         const cmdStartedAt = Date.now();
-        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
+        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
+        // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
+        // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
+        // generate then fails with a validation error whose OWN message says the fix: "run `prisma
+        // format`". ShopKhata burned 3 generate + 2 seed failures re-discovering this. Deterministic
+        // close: on that exact failure class, run prisma format (completes the relation mechanically),
+        // retry the original command ONCE, and report the successful retry honestly. Any other
+        // failure — or a failed retry — falls through to the normal honest error path.
+        if (
+          exitCode !== 0 &&
+          /\bprisma\s+(generate|db\s+push|migrate)\b/.test(command) &&
+          /(missing an opposite relation field|specify the `references` argument|P1012)/i.test(`${stdout}\n${stderr}`)
+        ) {
+          try {
+            const dirMatch = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command);
+            const fmtCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx --no-install prisma format`;
+            const fmt = await this.actuator.runCommand(this.workspaceId, fmtCmd);
+            if (fmt.exitCode === 0) {
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (retry.exitCode === 0) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The Prisma schema had an incomplete relation — completed it with `prisma format` and re-ran the command successfully.', ts: Date.now() });
+                // The formatter rewrote schema.prisma in the sandbox — sync the durable copy so
+                // restores/edits see the completed relation, not the broken original.
+                const schemaPath = `${dirMatch ? `${dirMatch[1].replace(/\/+$/, '')}/` : ''}prisma/schema.prisma`;
+                try {
+                  const fixedSchema = await this.actuator.readFile(this.workspaceId, schemaPath);
+                  this.onFileWrite?.(schemaPath, fixedSchema);
+                  this.state?.recordFileChange({ path: schemaPath, kind: 'modify' }, 'architect');
+                } catch { /* durable sync is best-effort */ }
+              }
+            }
+          } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });

@@ -17344,3 +17344,24 @@ root causes recorded: layout contract (#64/#65 next), prisma-format auto-heal on
 (the CLI's own suggested fix — deterministic), max_tokens-truncation → immediate syntax-check of the
 just-written file, AGENT_NOTE severity keyword misclassification, edit_file old_string drift (other
 session already tracking), GLM per-account throughput ceiling (admin decision).
+
+---
+
+## 2026-07-17 — ShopKhata sibling-sweep (admin: "isi type ke aur bugs scan karo — root cause fix karo"): 4 more classes killed
+
+Full-repo scan for siblings of the ShopKhata failure classes. Found + fixed in one batch:
+1. **Vue + Svelte templates carried the SAME latent dev-server death** — `@vitejs/plugin-vue` 5.x and
+   `@sveltejs/vite-plugin-svelte` 3.x are ESM-only and neither template had `"type": "module"`
+   (Vanilla already did). Added it to both template copies + a vite-family invariant test.
+2. **Truncation guard (the skipped LLM_TRUNCATED signal):** when a turn ends at max_tokens, every file
+   it wrote is now parsed in-process (esbuild `findSyntaxErrors` — the module already existed but only
+   ran at build END, which a user-stop never reaches). A broken file is named back to the model WITH
+   the tool results, so the very next turn rewrites it — no more minute-long tail/wc/cat -A hunts.
+3. **Prisma relation self-heal:** `prisma generate|db push|migrate` failing with the P1012
+   half-relation error now auto-runs `prisma format` (the CLI's own suggested fix) + ONE retry, and
+   syncs the formatted schema to the durable store. Any other failure stays an honest error.
+4. **AGENT_NOTE keyword honesty bug:** benign compounds ("error boundary/handling/messages", "warning
+   badge") are stripped before the problem-keyword test — "Now let me create … error boundary:" can
+   never again be recorded severity=error. Genuine failure lines still classify (test-locked).
+Scan also CONFIRMED already-guarded siblings: ViteConfigGuard (allowedHosts + '@' alias) covers vite
+config rewrites; Vanilla template already had type:module. All with regression tests.

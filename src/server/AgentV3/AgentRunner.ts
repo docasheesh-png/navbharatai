@@ -12,6 +12,7 @@ import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } fr
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
+import { findSyntaxErrors } from './SyntaxCheck';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -665,7 +666,30 @@ export class AgentRunner {
             resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
           });
         }
-        messages.push({ role: 'user', content: resultBlocks });
+        // TRUNCATION GUARD (ShopKhata autopsy 2026-07-17): a turn cut off at max_tokens can write a
+        // file whose tail is missing — the LLM_TRUNCATED warning was recorded but nothing ACTED on it,
+        // so a broken-brace controller shipped and the builder later burned minutes hand-hunting it
+        // with tail/wc/cat -A. Deterministic close: when THIS turn hit the token limit, parse every
+        // file it wrote (esbuild, in-process, free) and hand the exact parse failures back with the
+        // tool results — the very next turn rewrites the broken file instead of discovering it later.
+        let truncationSteer: string | null = null;
+        if (turn.stopReason === 'max_tokens') {
+          try {
+            const written: Record<string, string> = {};
+            for (const tu of turn.toolUses) {
+              if (tu.name !== 'write_file') continue;
+              const inp = tu.input as { path?: unknown; content?: unknown };
+              if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+            }
+            const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
+            if (broken.length > 0) {
+              const list = broken.map((b) => `${b.path}${b.line ? `:${b.line}` : ''} — ${b.message}`).join('\n');
+              events.emit({ type: 'narration', agent: agentRole, text: `⚠️ The last response was cut off at the token limit and ${broken.length} file(s) it wrote do not parse — rewriting them before moving on.`, ts: Date.now() });
+              truncationSteer = `[TRUNCATION GUARD] Your previous response hit the max-token limit and the following file(s) you wrote in it are syntactically BROKEN (they do not parse):\n${list}\n\nRewrite each listed file COMPLETELY with write_file before doing anything else. Keep each response small enough not to hit the token limit again.`;
+            }
+          } catch { /* the guard is best-effort — it must never break a build */ }
+        }
+        messages.push({ role: 'user', content: truncationSteer ? [...resultBlocks, { type: 'text', text: truncationSteer }] : resultBlocks });
         messageTs.push(Date.now());
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.

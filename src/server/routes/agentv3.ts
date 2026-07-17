@@ -230,7 +230,7 @@ import {
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -909,7 +909,21 @@ async function collectFilesWithSavedFallback(
     const live = opts?.liveTimeoutMs
       ? await withTimeout(collectWorkspaceFiles(actuator, workspaceId), opts.liveTimeoutMs, 'collectFiles-live')
       : await collectWorkspaceFiles(actuator, workspaceId);
-    if (Object.keys(live.files).length > 0) return { files: live.files, skipped: live.skipped, source: 'live' };
+    const liveCount = Object.keys(live.files).length;
+    if (liveCount > 0) {
+      // DISPLAY SHRINK GUARD (quiz-app "sari files 0 ho gayi", 2026-07-17): a recycled-then-recreated
+      // sandbox can answer with a NON-empty but PARTIAL listing (a scaffold remnant / 1-2 files) —
+      // which used to win outright, so the Files tab showed 1-2 while the durable store safely held
+      // 27. Same policy as the store's own savePlanForFileSet: when the live listing is drastically
+      // smaller than the durable index, it is a cold/partial sandbox — serve the durable set UNION
+      // the live files (live content wins on overlap, so warm mid-build freshness is never lost).
+      const savedPaths = await listWorkspaceFilePaths(workspaceId).catch(() => [] as string[]);
+      if (savePlanForFileSet(savedPaths.length, liveCount) === 'replace') {
+        return { files: live.files, skipped: live.skipped, source: 'live' };
+      }
+      const savedFull = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+      return { files: { ...savedFull, ...live.files }, skipped: live.skipped, source: 'saved' };
+    }
   } catch { /* live sandbox gone/empty/slow/errored — fall through to the durable saved files */ }
   const saved = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
   return { files: saved, skipped: [], source: 'saved' };

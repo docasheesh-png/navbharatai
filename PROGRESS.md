@@ -17198,3 +17198,22 @@ multiple read→edit→retry rounds — now fixed at write-time / dependency-tim
   express-validator/ws — so a package imported-but-undeclared is auto-added to package.json (reuses the
   existing `applyWellKnownMissingDeps` path). Kills the "socket.io not in package.json → dev server
   failed" wall. 10 new FullStackGuards tests + 1 backend-dep test.
+
+---
+
+## 2026-07-17 — Quiz-app "sari files 0 ho gayi" autopsy: files were SAFE; the DISPLAY lied (fixed)
+
+**Trigger (5th rule):** after two successful "continue" turns on a flaky connection, the admin's Files
+view suddenly showed ~0. **Forensic verdict: NO data was lost.** The attached report proves the durable
+store held all 27 files ("durable store holds 27 file(s)"), the build verified clean (tsc 0, npm run
+build ✓, preview published), and the store is already wipe-proof (savePlanForFileSet shrink-guard from
+an earlier session + GitHub history as the archive).
+
+**Root cause (display, engine-level):** `collectFilesWithSavedFallback` let a NON-empty live sandbox
+listing win outright. A recycled-then-recreated sandbox answers with a PARTIAL listing (scaffold
+remnant / 1-2 files) → the Files tab showed 1-2 while the durable store safely held 27 — a lying
+display (rule 5). **Fix:** the same shrink-guard policy now applies at the DISPLAY: when the live
+listing is drastically smaller than the durable index (savePlanForFileSet → 'merge'), serve the durable
+set UNION the live files (live wins on overlap, so warm mid-build freshness is never lost). Open (rule
+6): the exact zeroing turn's report wasn't captured — the admin re-opens the chat and sends any message
+to trigger the guardian restore; the next report's DATA_LOSS_EVENT counts will confirm store integrity.

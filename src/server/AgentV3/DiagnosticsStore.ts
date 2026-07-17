@@ -231,6 +231,31 @@ export function compactReportForRecord(reportIn: BuildDiagnosticsReport): BuildD
 }
 
 /** Persist a workspace's final diagnostics report. Never blocks a build; never loses silently. */
+/**
+ * GA-1 — delete a workspace's diagnostics: the latest-report doc AND its `history` subcollection, so a
+ * deleted project leaves no orphaned diagnostics docs. (The per-USER `user_diagnostics_v3` "latest" doc
+ * is intentionally NOT touched — it is a single per-user pointer, not per-workspace data.) Best-effort;
+ * never throws; no-op under VITEST.
+ */
+export async function deleteDiagnostics(workspaceId: string): Promise<void> {
+  if (!workspaceId || process.env.VITEST) return;
+  try {
+    const db = getDb();
+    if (!db) return;
+    const root = db.collection(COLLECTION).doc(workspaceId);
+    const hist = root.collection('history');
+    for (let guard = 0; guard < 10000; guard++) {
+      const snap = await hist.limit(300).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      if (snap.size < 300) break;
+    }
+    await root.delete();
+  } catch { /* best-effort — a store hiccup must never break the caller */ }
+}
+
 export async function saveDiagnostics(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
   if (!workspaceId || !report) return;
   if (process.env.VITEST) return; // unit-test contract: no Firestore, no stash (see DiagnosticsStore.test.ts)

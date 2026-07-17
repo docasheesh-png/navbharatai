@@ -104,6 +104,16 @@ class DeploymentStore {
     return out;
   }
 
+  /** GA-1 — delete a workspace's deployment record (so a deleted project leaves no orphaned deployment
+   *  doc). Best-effort; never throws; no-op when Firestore is unavailable. */
+  async delete(workspaceId: string): Promise<void> {
+    const db = this.getDb();
+    if (!db || !workspaceId) return;
+    try {
+      await db.collection('agentv3_deployments').doc(workspaceId).delete();
+    } catch { /* best-effort — a store hiccup must never break the caller */ }
+  }
+
   /** Fetch the latest deployment for a workspace, or null if none / unavailable. */
   async get(workspaceId: string): Promise<DeploymentRecord | null> {
     const db = this.getDb();

@@ -85,6 +85,20 @@ export async function saveWorkspaceMemory(
 }
 
 /** Load a WorkspaceMemory snapshot from Firestore. Returns null when absent or stale. Never throws. */
+/**
+ * GA-1 — delete a workspace's persisted memory doc (so a deleted project leaves no orphaned memory).
+ * Best-effort; never throws; no-op under VITEST / when Firestore is unavailable.
+ */
+export async function deleteWorkspaceMemory(workspaceId: string): Promise<void> {
+  const db = getDb();
+  if (!db || !workspaceId) return;
+  try {
+    await db.collection(COLLECTION).doc(workspaceId).delete();
+  } catch (e) {
+    notePersistenceFailure('workspace_memory', 'write', e);
+  }
+}
+
 export async function loadWorkspaceMemory(
   workspaceId: string,
 ): Promise<MemorySnapshot | null> {

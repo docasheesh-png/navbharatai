@@ -6915,12 +6915,17 @@ export function registerAgentV3Routes(app: Express): void {
       // LLM reviewer text mentioned them — never structured). The bounded LLM SELF-HEAL is gated behind
       // AGENTV3_INTEGRITY_GATE (default OFF — canary first, like LintGate); flip on to auto-fix them.
       try {
-        // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17): `writtenFiles` holds only the
-        // files THIS build wrote — the scaffold's entry/html (now template-owned via the pre-flight) are
-        // NOT in it, which made the orphan-stylesheet check report a FALSE POSITIVE on a correctly-wired
-        // app (main.tsx with the import existed only in the sandbox). Pull the entry/html candidates from
-        // the sandbox when absent, so the analysis judges the app the user actually runs.
-        const integrityFiles = Object.fromEntries(writtenFiles);
+        // FULL-WORKSPACE view for integrity (FitPulse autopsy 2026-07-17, hardened after the edit-build
+        // re-test): `writtenFiles` holds only the files THIS build wrote. On an EDIT build that is 3-4
+        // files — so the mixed-specifier check could not see the OTHER modules importing ThemeContext
+        // (normalize never fired; the duplicate-context crash survived), and on the first pass the
+        // scaffold-owned main.tsx was invisible (orphan-stylesheet FALSE positive). The analysis now
+        // starts from the DURABLE STORE's full project map (the same source the sandbox restore uses),
+        // overlaid with this build's writes (newest content wins), so every integrity check judges the
+        // complete app the user actually runs. Entry/html candidates from the sandbox remain the
+        // fallback for anything not yet persisted.
+        const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+        const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
         for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
           if (integrityFiles[p] === undefined) {
             try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }

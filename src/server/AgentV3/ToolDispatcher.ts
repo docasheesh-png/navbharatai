@@ -3382,6 +3382,44 @@ function flexibleWhitespaceRegex(literal: string): RegExp | null {
   }
 }
 
+/**
+ * When an edit_file `old_string` doesn't match, show the region of the file the model most likely MEANT
+ * to edit — anchored to the closest actual line — instead of always the first 1500 chars.
+ *
+ * ROOT CAUSE (deep-test build #5, 2026-07-17): on a large, growing file (App.tsx reached 600+ lines while
+ * the SVG-charts feature was added) an edit near the END drifts (the model works from a stale view). The
+ * old "not found" error showed only the FILE HEAD (imports + interface) — useless for a target near line
+ * 600 — so the agent had to spend an extra read_file, then re-drifted, then failed again, burning steps
+ * toward the 120-step cap it ultimately hit. Anchoring the preview to the closest real line lets the model
+ * copy the correct current text in ONE retry. Pure + deterministic; bounded so a huge file can't blow the
+ * message. Copy-safe: NO line-number prefixes inside the fenced block (the range is stated in the header),
+ * so the model can copy the shown lines verbatim into a new old_string.
+ */
+export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400): string {
+  const lines = existing.split('\n');
+  // Distinctive anchors from the intended edit: longest trimmed lines first — a token-bearing line like
+  // `const categoryTotals = expenses.reduce(...)` locates the region far better than a bare `}` / `return (`.
+  const anchors = oldStr.split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 8 && /[A-Za-z0-9]/.test(l))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 6);
+  let hit = -1;
+  for (const a of anchors) { const i = lines.findIndex((l) => l.trim() === a); if (i >= 0) { hit = i; break; } }
+  if (hit < 0) for (const a of anchors) { const i = lines.findIndex((l) => l.includes(a)); if (i >= 0) { hit = i; break; } }
+  if (hit < 0) {
+    // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
+    // honestly labelled as such (not the target), so the model re-reads instead of trusting a wrong region.
+    const head = existing.length <= maxChars ? existing : existing.slice(0, maxChars) + '\n…(truncated — call read_file for the region you want)';
+    return `Current file content (top of file — your target text was not located anywhere):\n\`\`\`\n${head}\n\`\`\`\n`;
+  }
+  const from = Math.max(0, hit - windowLines);
+  const to = Math.min(lines.length, hit + windowLines + 1);
+  let window = lines.slice(from, to).join('\n');
+  if (window.length > maxChars) window = window.slice(0, maxChars) + '\n…(truncated — call read_file for more)';
+  return `Current file content around your closest match (lines ${from + 1}-${to}, nearest at line ${hit + 1}):\n\`\`\`\n${window}\n\`\`\`\n`;
+}
+
 /** Result of applying a single edit_file replacement. */
 export interface EditResult {
   /** The full file content after the replacement. */
@@ -3426,16 +3464,13 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   const flexible = flexibleWhitespaceRegex(oldStr);
   const matches = flexible ? [...existing.matchAll(flexible)] : [];
   if (matches.length === 0) {
-    // Give the model the current file so it can craft the correct old_string without
-    // an extra read_file round-trip, which wastes a step.
-    const contentPreview =
-      existing.length <= 1500
-        ? existing
-        : existing.slice(0, 1500) + '\n…(truncated — call read_file for full content)';
+    // Give the model the current text AROUND ITS INTENDED TARGET (not just the file head) so it can craft
+    // the correct old_string in ONE retry without a wasteful read_file round-trip — the step-burn that
+    // helped push deep-test build #5 into its 120-step cap. See nearestEditRegion.
     throw new Error(
       `edit_file: old_string not found in ${path}. ` +
         `The string you supplied does not appear verbatim (or close enough) in the current file. ` +
-        `Current file content:\n\`\`\`\n${contentPreview}\n\`\`\`\n` +
+        `${nearestEditRegion(existing, oldStr)}` +
         `Copy the exact lines you want to change from the content above and retry.`,
     );
   }

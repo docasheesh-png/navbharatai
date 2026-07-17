@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ToolDispatcher, applyEdit, boundedWholeFileDiff, type ActuatorPort } from './ToolDispatcher';
+import { ToolDispatcher, applyEdit, boundedWholeFileDiff, nearestEditRegion, type ActuatorPort } from './ToolDispatcher';
 import { defaultToolCatalog, CATALOG_TOOL_NAMES } from './ToolCatalog';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -1279,6 +1279,54 @@ describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () 
     // file has single-space indent; supplied old_string is differently spaced → flexible path.
     const r = applyEdit('fn(a) {\n  OLD;\n}', 'fn(a) {\n      OLD;\n}', 'fn(a) {\n  x = `${v}`;\n}');
     expect(r.updated).toBe('fn(a) {\n  x = `${v}`;\n}');
+  });
+
+  // Deep-test build #5: a drift-miss on a LARGE file must point the model at its TARGET region, not the
+  // file head — so recovery costs one retry, not an extra read_file + a re-drifted retry (step-burn).
+  it('a "not found" error on a large file previews the TARGET region, not just the file head', () => {
+    const lines: string[] = [];
+    lines.push("import { useState } from 'react'");
+    for (let i = 0; i < 400; i++) lines.push(`  const filler_${i} = ${i};`);
+    lines.push('  const categoryTotals = expenses.reduce((acc, e) => {'); // distinctive target line (~line 402)
+    lines.push('    acc[e.category] = (acc[e.category] || 0) + e.amount;');
+    lines.push('    return acc;');
+    lines.push('  }, {} as Record<string, number>);');
+    for (let i = 0; i < 200; i++) lines.push(`  const tail_${i} = ${i};`);
+    const file = lines.join('\n');
+    // Multi-line old_string (the real build #5 pattern): the model KEPT the distinctive opening line but
+    // its remembered body drifted → exact + whitespace-flexible both miss, but the anchor line still locates it.
+    const drifted = [
+      '  const categoryTotals = expenses.reduce((acc, e) => {',
+      '    acc[e.category] = acc[e.category] + e.amount; // DRIFTED body',
+      '  }, {});',
+    ].join('\n');
+    let msg = '';
+    try { applyEdit(file, drifted, 'x', 'App.tsx'); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toMatch(/not found in App\.tsx/);
+    expect(msg).toContain('categoryTotals');        // the real current region is shown…
+    expect(msg).not.toContain("import { useState }"); // …and the useless file head is NOT what we showed
+    expect(msg).toMatch(/around your closest match \(lines \d+-\d+/);
+  });
+});
+
+describe('nearestEditRegion — anchored edit-miss preview (build #5 step-burn fix)', () => {
+  it('anchors to the closest distinctive line and states the line range', () => {
+    const file = Array.from({ length: 50 }, (_, i) => i === 30 ? '  const specialAnchorToken = compute();' : `  line ${i}`).join('\n');
+    const out = nearestEditRegion(file, '  const specialAnchorToken = compute();', 5);
+    expect(out).toContain('specialAnchorToken');
+    expect(out).toMatch(/lines 2[0-9]-3[0-9]/);       // a window centred on line 31 (1-indexed)
+    expect(out).not.toContain('line 5');              // far-away head lines are excluded
+  });
+  it('falls back to an HONESTLY-labelled head when the target is nowhere in the file', () => {
+    const out = nearestEditRegion('const a = 1;\nconst b = 2;', 'totally different content that does not exist');
+    expect(out).toMatch(/top of file — your target text was not located/);
+  });
+  it('produces a copy-safe block (no line-number prefixes inside the fence)', () => {
+    const file = 'alpha\nbeta\n  const targetLineHere = 1;\ngamma\ndelta';
+    const out = nearestEditRegion(file, '  const targetLineHere = 1;', 2);
+    const fenced = out.split('```')[1];
+    expect(fenced).toContain('const targetLineHere = 1;');
+    expect(fenced).not.toMatch(/^\s*\d+\t/m);          // no "12\t<code>" prefixes that could contaminate a copy
   });
 });
 

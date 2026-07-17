@@ -45,16 +45,43 @@ each **`[LIVE]`** or **`[ASPIRATIONAL]`** — so this document describes the rea
 operating system and sets an honest target for what is not yet built, never a
 fiction (Volume 1 DOC-04, DOC-05, TRUTH-03).
 
-### Role taxonomy (the real nature of each role)
+### Role vs Primitive — the assignment rule
 
-- **AGENT** — a model-driven actor that runs a tool loop and makes judgments
-  (the Architect; the builder and its sub-agents; the reviewer). Few, by design.
+A **Role** is a *responsibility* (what must be done: interpret intent, verify
+types, keep secrets in). A **Primitive** is the *mechanism* a role is implemented
+by. The two are deliberately separate: **every role is assigned to the SIMPLEST
+primitive that satisfies its requirement** (Volume 1 PLAN-06 Least-Power, ARCH-04)
+— minimizing coordination overhead while preserving independent verification and
+separation of concerns. A role is never "an agent" by default; it is an agent only
+if it genuinely needs judgment. This separation is what stops the roster from
+inflating into 30 conversational agents: 30 *roles*, but only a handful of *agent*
+primitives.
+
+### The primitives (fewest that capture a real distinction)
+
+- **AGENT** — a model-driven actor that runs a tool loop and makes *judgments*
+  (the Architect; the builder and its sub-agents; the reviewer). Few, by design —
+  each is a cost, a seam, and a probabilistic decision, so a role becomes an agent
+  only when nothing cheaper suffices.
 - **GATE** — a deterministic (or bounded-model) check that permits or blocks work
-  based on objective evidence. Cannot be self-approved (Volume 1 VERIFY-02).
-- **PHASE** — a stage of the coherent build lifecycle (intent, plan, build,
-  verify, heal, deliver) that sequences agents and gates.
-- **FUNCTION** — a deterministic capability invoked as a tool or transform
-  (workspace memory, dependency reconcile, salvage, redaction).
+  on objective evidence. Cannot be self-approved (Volume 1 VERIFY-02). Preferred
+  over an agent wherever a concern has a computable answer.
+- **SERVICE** — a *stateful, long-lived* component that holds truth or records
+  across a build (the durable workspace store, the diagnostics/observability
+  recorder, workspace memory). Distinguished from a plain function because its
+  state is shared and must stay consistent (Volume 1 MEM-*, LOG-*).
+- **FUNCTION** — a *stateless* deterministic capability invoked as a tool or
+  transform (dependency reconcile, import fixers, salvage, redaction). The default
+  implementation for any computable, non-stateful concern.
+- **PHASE** — a stage of the coherent build lifecycle (understand → build → verify
+  → audit → decide → ship) that *sequences* agents, gates, and services. Not an
+  actor itself; the ordering that makes the pipeline a DAG (deadlock-free).
+
+> **Why not more primitives.** Least-Power applies to this taxonomy too: we use the
+> fewest primitives that capture a *real* operational distinction (judgment vs
+> deterministic check vs stateful truth vs stateless transform vs sequencing), and
+> not one more for symmetry's sake. Each role below is tagged with the single
+> primitive it is assigned to.
 
 ### Status
 
@@ -65,8 +92,10 @@ fiction (Volume 1 DOC-04, DOC-05, TRUTH-03).
 
 # Part I — The Real Agent Roster (the few true agents)
 
-These are the only model-driven **AGENTS**. Everything else is a gate, phase, or
-function they invoke. Keeping the agent count small is the coherence guarantee.
+These are the only model-driven **AGENTS**. Everything else is a gate, service,
+function, or phase they invoke. Keeping the agent count small is the coherence
+guarantee — every other role is assigned to a cheaper, more deterministic
+primitive.
 
 - **The Architect** — the single orchestrating agent that owns a build end to end,
   drives the tool loop, and (when warranted) spawns sub-agents on the shared
@@ -196,7 +225,7 @@ Each role carries the full contract. Fields are terse by design (Volume 1 style)
 - **Audit.** Every step, tool call, and provider recorded.
 - **Anchor.** `AgentRunner`. Laws: PLAN-02, VERIFY-02, EDIT-02, ARCH-13.
 
-### R6 — Repository Intelligence Agent · FUNCTION · [LIVE]
+### R6 — Repository Intelligence Agent · SERVICE · [LIVE]
 - **Mission.** Know the project — its files, symbols, and durable truth — so edits
   are grounded in reality, at any scale.
 - **Responsibilities.** Index files/symbols; retrieve by content; serve the durable
@@ -602,7 +631,7 @@ Each role carries the full contract. Fields are terse by design (Volume 1 style)
 - **Audit.** Every merge/deploy traceable.
 - **Anchor.** Repo flow + cloudbuild. Laws: DEPLOY-01..12, REPO-02/03/14.
 
-### R26 — Observability Agent · FUNCTION · [LIVE]
+### R26 — Observability Agent · SERVICE · [LIVE]
 - **Mission.** Make the engine's behavior visible and honest, richly enough to
   improve it.
 - **Responsibilities.** Record the forensic build report (events, commands,

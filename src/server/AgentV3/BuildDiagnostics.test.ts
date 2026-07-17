@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -666,6 +666,53 @@ describe('isExpectedNonzeroExit — routine non-zero exits that are NOT build fa
     expect(isExpectedNonzeroExit('npm run build', 1)).toBe(false);
     expect(isExpectedNonzeroExit('npx tsc --noEmit', 2)).toBe(false);
     expect(isExpectedNonzeroExit('vite build', 1)).toBe(false);
+  });
+
+  // Deep-test build #3 (2026-07-17): a single-FILE tsc probe ignores tsconfig → spurious TS17004 on a
+  // clean app; it must never count as a build failure (or become rootCause). See isUnconfiguredTscFileProbe.
+  it('a single-FILE tsc probe (ignores tsconfig → spurious JSX errors) is routine', () => {
+    // The EXACT command from the report (exit -1, E2B wrapper "exit status 2").
+    expect(isExpectedNonzeroExit('npx --no-install tsc --noEmit src/App.tsx 2>&1', -1)).toBe(true);
+    expect(isExpectedNonzeroExit('npx --no-install tsc --noEmit src/App.tsx', 2)).toBe(true);
+    expect(isExpectedNonzeroExit('tsc src/main.tsx', 1)).toBe(true);
+    expect(isExpectedNonzeroExit('tsc --noEmit src/a.ts src/b.mts', 2)).toBe(true);
+  });
+  it('the REAL project typecheck (no file operands) is NEVER excused — a type error still counts', () => {
+    expect(isExpectedNonzeroExit('npx tsc --noEmit', 2)).toBe(false);           // the pipeline's real gate
+    expect(isExpectedNonzeroExit('tsc -p tsconfig.json src/App.tsx', 2)).toBe(false); // project mode honours config
+    expect(isExpectedNonzeroExit('tsc --build', 2)).toBe(false);                // build mode honours config
+    expect(isExpectedNonzeroExit('tsc --jsx react-jsx src/App.tsx', 2)).toBe(false); // caller supplied jsx → valid
+  });
+});
+
+describe('isUnconfiguredTscFileProbe — the malformed single-file typecheck detector', () => {
+  it('flags a bare/npx tsc run with source-file operands and no project config', () => {
+    expect(isUnconfiguredTscFileProbe('npx --no-install tsc --noEmit src/App.tsx 2>&1')).toBe(true);
+    expect(isUnconfiguredTscFileProbe('tsc src/App.tsx')).toBe(true);
+    expect(isUnconfiguredTscFileProbe('pnpm tsc --noEmit components/x.jsx')).toBe(true);
+  });
+  it('does NOT flag the config-driven project typecheck or a valid explicit-jsx run', () => {
+    expect(isUnconfiguredTscFileProbe('npx tsc --noEmit')).toBe(false);        // no file operand = real gate
+    expect(isUnconfiguredTscFileProbe('tsc -p tsconfig.json')).toBe(false);
+    expect(isUnconfiguredTscFileProbe('tsc --build')).toBe(false);
+    expect(isUnconfiguredTscFileProbe('tsc --jsx react-jsx src/App.tsx')).toBe(false);
+    expect(isUnconfiguredTscFileProbe('vite build')).toBe(false);              // not tsc at all
+  });
+});
+
+describe('deep-test build #3 — a single-file tsc probe must NOT become the rootCause of a SUCCESSFUL build', () => {
+  it('the spurious tsc probe is recorded as info (not SANDBOX_CMD_FAILED) and never the rootCause', () => {
+    const d = new BuildDiagnostics({ now: (() => { let t = 1000; return () => (t += 1000); })() });
+    // The agent's malformed single-file probe (fails), then the correct project-wide typecheck (passes).
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit src/App.tsx 2>&1', exitCode: -1, stdout: '', stderr: "error TS17004: Cannot use JSX unless the '--jsx' flag is provided." });
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit', exitCode: 0, stdout: '', stderr: '' });
+    d.finish(true, 'done');
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeUndefined(); // not a failure
+    expect(r.counts.errors).toBe(0);
+    // rootCause must reflect the truth (a clean, successful build), never the malformed probe.
+    expect(r.rootCause).not.toMatch(/tsc --noEmit src\/App\.tsx/);
+    expect(r.rootCause).toBe('Build completed successfully with no problems recorded.');
   });
 });
 

@@ -73,8 +73,36 @@ export function fixCjsDefaultImport(path: string, content: string): string {
   return out;
 }
 
+/**
+ * A VITE app's package.json MUST carry "type": "module" (ShopKhata autopsy 2026-07-17). The scaffold's
+ * vite.config.ts imports vite-tsconfig-paths, whose newer 5.x builds are ESM-only; without type:module
+ * Vite loads the bundled config via require() and the dev server dies on BOOT ("resolved to an ESM
+ * file. ESM file cannot be loaded by `require`") — the user sees "No live preview yet" forever. The
+ * template now ships type:module, but a builder that REWRITES package.json (adding deps, monorepo
+ * roots) can silently drop it — this write-time guard re-inserts the invariant where the data enters.
+ * Only fires for a package.json that is actually a Vite app (vite in deps or the dev script) with NO
+ * explicit "type" — an explicit "type": "commonjs" is respected (the author chose it), and backend
+ * package.jsons (express/node, no vite) are never touched. Pure.
+ */
+export function ensureViteTypeModule(path: string, content: string): string {
+  if (!/(^|\/)package\.json$/.test(path) || typeof content !== 'string') return content;
+  try {
+    const pkg = JSON.parse(content) as Record<string, unknown>;
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return content;
+    if (pkg.type !== undefined) return content; // an explicit choice (module OR commonjs) is respected
+    const deps = { ...(pkg.dependencies as object | undefined), ...(pkg.devDependencies as object | undefined) } as Record<string, unknown>;
+    const scripts = (pkg.scripts ?? {}) as Record<string, unknown>;
+    const usesVite = deps.vite !== undefined || /\bvite\b/.test(String(scripts.dev ?? ''));
+    if (!usesVite) return content;
+    // Rebuild with "type" up front (name/version keep their spot; the spread restores everything else).
+    return JSON.stringify({ name: pkg.name, version: pkg.version, type: 'module', ...pkg }, null, 2);
+  } catch {
+    return content; // not valid JSON — never mangle a file we can't parse
+  }
+}
+
 /** Apply every full-stack write-time guard in order. Flag-gated; a disabled flag is a pure pass-through. */
 export function applyFullStackGuards(path: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!fullStackGuardsEnabled(env)) return content;
-  return fixCjsDefaultImport(path, stripPrismaSqliteEnums(path, content));
+  return ensureViteTypeModule(path, fixCjsDefaultImport(path, stripPrismaSqliteEnums(path, content)));
 }

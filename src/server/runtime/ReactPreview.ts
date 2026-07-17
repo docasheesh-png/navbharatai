@@ -63,6 +63,31 @@ const EXTERNAL_REACT_Q = '?external=react,react-dom';
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 const CSS_EXT = ['.css'];
 
+// shadcn/ui token registry for the in-browser Tailwind Play CDN (admin 2026-07-17). Exported so it is
+// unit-testable. The Play CDN ignores the project's tailwind.config.js, so these standard tokens must be
+// declared inline or `@apply border-border` / `bg-background` / `text-foreground` throw "class does not
+// exist" and kill the preview. Every colour maps to a CSS variable (shadcn convention); SHADCN_CSS_VARS
+// supplies safe light-theme defaults so it renders even when the imported app omitted its `:root`.
+export const SHADCN_TW_CONFIG =
+  "tailwind.config={darkMode:['class'],theme:{extend:{colors:{" +
+  "border:'hsl(var(--border))',input:'hsl(var(--input))',ring:'hsl(var(--ring))'," +
+  "background:'hsl(var(--background))',foreground:'hsl(var(--foreground))'," +
+  "primary:{DEFAULT:'hsl(var(--primary))',foreground:'hsl(var(--primary-foreground))'}," +
+  "secondary:{DEFAULT:'hsl(var(--secondary))',foreground:'hsl(var(--secondary-foreground))'}," +
+  "destructive:{DEFAULT:'hsl(var(--destructive))',foreground:'hsl(var(--destructive-foreground))'}," +
+  "muted:{DEFAULT:'hsl(var(--muted))',foreground:'hsl(var(--muted-foreground))'}," +
+  "accent:{DEFAULT:'hsl(var(--accent))',foreground:'hsl(var(--accent-foreground))'}," +
+  "popover:{DEFAULT:'hsl(var(--popover))',foreground:'hsl(var(--popover-foreground))'}," +
+  "card:{DEFAULT:'hsl(var(--card))',foreground:'hsl(var(--card-foreground))'}}," +
+  "borderRadius:{lg:'var(--radius)',md:'calc(var(--radius) - 2px)',sm:'calc(var(--radius) - 4px)'}}}};";
+
+export const SHADCN_CSS_VARS =
+  ':root{--background:0 0% 100%;--foreground:222.2 84% 4.9%;--card:0 0% 100%;--card-foreground:222.2 84% 4.9%;' +
+  '--popover:0 0% 100%;--popover-foreground:222.2 84% 4.9%;--primary:222.2 47.4% 11.2%;--primary-foreground:210 40% 98%;' +
+  '--secondary:210 40% 96.1%;--secondary-foreground:222.2 47.4% 11.2%;--muted:210 40% 96.1%;--muted-foreground:215.4 16.3% 46.9%;' +
+  '--accent:210 40% 96.1%;--accent-foreground:222.2 47.4% 11.2%;--destructive:0 84.2% 60.2%;--destructive-foreground:210 40% 98%;' +
+  '--border:214.3 31.8% 91.4%;--input:214.3 31.8% 91.4%;--ring:222.2 84% 4.9%;--radius:0.5rem}';
+
 /** True if this VFS looks like a frontend React app we can bundle in-browser. */
 export function isReactProject(vfs: VirtualFileSystem): boolean {
   const pkgText = vfs.readText('package.json');
@@ -264,9 +289,20 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string): stri
   // CSS arrives through the runtime loader's injectCss — which appends into the `#__nbai-tw` block below.
   const usesTailwind = Object.values(modules).some((v) => /@tailwind\b|@apply\b/.test(v))
     || vfs.paths().some((p) => /(^|\/)tailwind\.config\.[cm]?[jt]s$/.test(p));
-  const tailwindCdn = usesTailwind ? '<script src="https://cdn.tailwindcss.com"></script>' : '';
+  // shadcn/ui DESIGN-TOKEN CONTRACT for the Tailwind Play CDN (admin 2026-07-17 — "border/colour error
+  // kabhi wapas na aaye"). ROOT CAUSE (mitrify2 import): the Play CDN does NOT read the project's
+  // tailwind.config.js, so a stylesheet using shadcn utilities — `@apply border-border`, `bg-background`,
+  // `text-foreground`, … — failed to compile with "The `border-border` class does not exist" and the
+  // whole preview died. We register the standard shadcn token set in an INLINE config (so every such
+  // utility EXISTS) and supply default CSS variables (so the colours actually render even when the app
+  // forgot its `:root` block; the app's own `:root`, injected after, always wins). Harmless for a
+  // non-shadcn Tailwind app — the extra tokens/vars are simply unused.
+  const tailwindCdn = usesTailwind
+    ? `<script src="https://cdn.tailwindcss.com"></script>\n<script>${SHADCN_TW_CONFIG}</script>`
+    : '';
+  const twCss = usesTailwind ? `${SHADCN_CSS_VARS}\n${css}` : css;
   const styleTag = usesTailwind
-    ? `<style id="__nbai-tw" type="text/tailwindcss">\n${css}\n</style>`
+    ? `<style id="__nbai-tw" type="text/tailwindcss">\n${twCss}\n</style>`
     : (css ? `<style>\n${css}\n</style>` : '');
 
   // The loader runs in the browser. It transpiles each module with Babel (JSX

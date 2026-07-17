@@ -9,6 +9,9 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
+import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors } from './EndgameRepair';
+import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
+import { parseFileBlocks } from './OneShotBuilder';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -372,6 +375,22 @@ export class AgentRunner {
     const weakBuild = this.opts.weakBuild === true;
     const weakCkptCfg = weakCheckpointConfig();
     let checkpointNudges = 0;
+    // Slice 2 — mid-build ERROR-TREND checkpoint (QuizArena autopsy, admin-mandated): every
+    // `interval` steps peek at the tsc error count; two flat/rising non-zero peeks = the builder is
+    // grinding, not converging → fire the endgame repair NOW (once per run) instead of at the cap.
+    const trendCfg = errorTrendConfig();
+    const trendCounts: number[] = [];
+    let trendFired = false;
+    // ONE bounded batch repair call, shared by the trend checkpoint and the step-cap endgame.
+    const endgameBatchRepair = async (errorText: string, files: Array<{ path: string; content: string }>) => {
+      const turn = await client.runTurn({
+        model,
+        system: repairSystemPrompt(dispatcher.frameworkId),
+        messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
+        maxTokens: maxTokensPerTurn,
+      });
+      return parseFileBlocks(turn.text ?? '');
+    };
 
     let steps = 0;
     try {
@@ -670,6 +689,28 @@ export class AgentRunner {
             }
           } catch { /* checkpoint is best-effort — a scan error never blocks a build */ }
         }
+
+        // Slice 2 — error-trend checkpoint (all artifact builds; kill: AGENTV3_ERRTREND_CHECKPOINT=off).
+        if (expectsArtifacts && trendCfg.enabled && !trendFired && endgameRepairEnabled()
+          && steps > 0 && steps % trendCfg.interval === 0) {
+          try {
+            const io = dispatcher.endgameIo();
+            const count = parseTscErrors(await withTimeout(io.runTsc(), 20_000, 'errtrend-tsc')).length;
+            trendCounts.push(count);
+            if (shouldTriggerMidBuildRepair(trendCounts)) {
+              trendFired = true; // once per run — the step-cap endgame remains the final net
+              events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: compile errors are not going down — fixing them all in one pass…', ts: Date.now() });
+              const verdict = await withTimeout(
+                runEndgameRepair({ ...io, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
+                150_000, 'errtrend-repair',
+              );
+              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                // Tell the model the grind is over so it spends the remaining steps on FEATURES.
+                messages.push({ role: 'user', content: `[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.` });
+              }
+            }
+          } catch { /* trend checkpoint is best-effort — never blocks or fails a build */ }
+        }
       }
 
       // Step cap — judge by EVIDENCE, not by how the loop ended. The old unconditional ok:false
@@ -695,6 +736,31 @@ export class AgentRunner {
               ok = false;
               const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
               summary = `Step limit reached (${maxSteps}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+              // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
+              // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
+              // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,
+              // no tokens), then ONE batch LLM call for the residue — and re-earn the readiness
+              // verdict. Only runs on an already-failing build, so it can only improve the outcome.
+              if (endgameRepairEnabled()) {
+                try {
+                  const io = dispatcher.endgameIo();
+                  const verdict = await withTimeout(runEndgameRepair({
+                    ...io,
+                    llmRepair: endgameBatchRepair,
+                    log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
+                  }), 150_000, 'endgame-repair');
+                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                    const after = await dispatcher.assessBuildReadiness();
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings };
+                    if (after.ready) {
+                      ok = true;
+                      summary = `Step limit reached (${maxSteps}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
+                    } else {
+                      summary = `Step limit reached (${maxSteps}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the build is still NOT ready (score ${after.score}/100).${after.blockers.length ? ` Must fix: ${after.blockers.join('; ')}.` : ''}`;
+                    }
+                  }
+                } catch { /* endgame is best-effort — the honest NOT-ready verdict above stands */ }
+              }
             }
           } catch { /* gate is best-effort — a scan error never flips the evidence verdict */ }
         }

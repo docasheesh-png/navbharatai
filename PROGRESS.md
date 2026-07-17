@@ -17078,3 +17078,32 @@ integrity check (orphan CSS / mixed specifiers / focus / duplicate sheets) now j
 app on both fresh and edit builds. Open (rule 6): client-reported in-browser PREVIEW_ERROR arrives
 AFTER build end — no auto-heal hook yet; llmCalls[].model records the REQUESTED model id, not the
 delivered provider's (admin-only telemetry cosmetic).
+
+---
+
+## 2026-07-17 — Endgame Slice 1 shipped: deterministic tsc-error fixers + ONE batch LLM repair at the step-cap exit (QuizArena root cause)
+
+**Trigger (5th rule):** QuizArena died at "Step limit reached (80) — NOT ready 54/100" grinding ~10
+mechanical TypeScript errors ONE per 4-5 step round-trip (unused import, missing FormEvent import,
+export-name mismatch, type-union miss). Admin weighed "800 steps vs checkpoints" and mandated the
+out-of-box path: stop paying an LLM to do grep's job.
+
+- **`EndgameRepair.ts` (pure, 14 tests):** `parseTscErrors` → deterministic layer:
+  TS6133/6192/6196 unused-IMPORT removal (import lines only — other unused code stays for the LLM)
+  + the fast lane's proven reconcilers (`reconcileImportExports` / `addMissingProjectImports` /
+  `fixWrongSourceImports`) over the FULL workspace map → re-tsc → residue goes to ONE batch LLM
+  repair call (all errors + offending files, fast-lane repair prompts) → final tsc verdict.
+  Blank-overwrite guard on LLM output; never throws; bounded by a 150s cap at the call site.
+- **Wiring:** `ToolDispatcher.endgameIo()` (tsc/read-full-map/write with the SAME durable-mirror +
+  state side-effects as a normal write) + `AgentRunner` step-cap NOT-ready branch: run the endgame,
+  then RE-EARN readiness — ready ⇒ ok:true with an honest "endgame repair fixed N errors" summary;
+  still-not-ready ⇒ honest errorsBefore→After count. Kill switch `AGENTV3_ENDGAME_REPAIR=off`
+  (default ON — it only runs on an already-failing build, so it can only improve the outcome).
+- QuizArena's exact 4 error lines are the regression fixtures.
+- **Slice 2 (same PR): mid-build error-trend checkpoint + adaptive step cap.** Every 25 steps
+  (AGENTV3_ERRTREND_INTERVAL; kill AGENTV3_ERRTREND_CHECKPOINT=off) a free tsc peek records the
+  error count; two consecutive non-decreasing non-zero peeks = grinding → the SAME endgame repair
+  fires MID-BUILD (once per run) and a [BUILD CHECKPOINT] steer tells the model to spend remaining
+  steps on features, not error-grinding. Step cap is now complexity-adaptive: sonnet-tier (complex)
+  prompts get 150 (bounded — the admin explicitly rejected a flat 800), others keep 80; an explicit
+  AGENTV3_MAX_STEPS always wins. Slices 3-4 (auto-resume; tsc --watch) queued as tasks #62-63.

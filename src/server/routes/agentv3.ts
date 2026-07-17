@@ -5082,7 +5082,13 @@ export function registerAgentV3Routes(app: Express): void {
       // AgentRunner treats `undefined` as "no cap" (0 would instead stop the build after its very
       // first dollar, since it checks `billed() >= maxBudgetUsd`) — convert the disabled (0) case here.
       const maxBudgetUsdForRunner = budget > 0 ? budget : undefined;
-      const maxSteps = envInt('AGENTV3_MAX_STEPS', 80);
+      // Slice 2 (QuizArena autopsy 2026-07-17) — COMPLEXITY-ADAPTIVE step cap. A 30-file app died at
+      // the flat 80-step cap; a flat raise for everyone (the rejected "800") would just give runaway
+      // loops more rope. When the analyser judged this prompt COMPLEX (sonnet start-tier), the cap
+      // scales to 150 — bounded, and only for builds that genuinely need more room. An explicit
+      // AGENTV3_MAX_STEPS env value always wins (it remains the flat override it has always been).
+      const maxStepsDefault = analysis?.startTier === 'sonnet' ? 150 : 80;
+      const maxSteps = envInt('AGENTV3_MAX_STEPS', maxStepsDefault);
       const subAgentMaxSteps = envInt('AGENTV3_SUBAGENT_MAX_STEPS', 40);
       // How many parallel-safe tools / review sub-agents may run at once in a turn (rate-limit
       // safe default; lower it if Anthropic concurrency limits are hit).

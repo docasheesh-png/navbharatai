@@ -56,6 +56,25 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   firebase: '^10',
   'react-markdown': '^9',
   'react-dropzone': '^14',
+  // Full-stack / backend allowlist (TaskFlow autopsy 2026-07-17): a Node+Express+Prisma app imported
+  // socket.io but never declared it, so the dev server failed on a missing module. These are the
+  // common backend packages a generated full-stack app uses — auto-declared when imported-but-missing.
+  express: '^4',
+  cors: '^2',
+  dotenv: '^16',
+  'cookie-parser': '^1',
+  bcrypt: '^5',
+  bcryptjs: '^2',
+  jsonwebtoken: '^9',
+  'socket.io': '^4',
+  'socket.io-client': '^4',
+  '@prisma/client': '^5',
+  prisma: '^5',
+  morgan: '^1',
+  helmet: '^7',
+  multer: '^1',
+  'express-validator': '^7',
+  ws: '^8',
 };
 
 export interface DependencyAutoFixPlan {

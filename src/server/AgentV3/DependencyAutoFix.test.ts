@@ -87,6 +87,22 @@ describe('applyWellKnownMissingDeps — deterministically add allowlisted missin
     expect(r.files).toBe(bad);
   });
 
+  it('auto-declares a backend package imported but missing (TaskFlow socket.io wall)', () => {
+    const files = {
+      'package.json': JSON.stringify({ name: 'app', dependencies: { express: '^4' } }),
+      'server/socket.ts': `import { Server } from 'socket.io';
+export const io = new Server();`,
+      'server/auth.ts': `import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';`,
+    };
+    const r = applyWellKnownMissingDeps(files);
+    const deps = JSON.parse(r.files['package.json']).dependencies;
+    expect(deps['socket.io']).toBeDefined();
+    expect(deps.bcrypt).toBeDefined();
+    expect(deps.jsonwebtoken).toBeDefined();
+    expect(deps.express).toBe('^4'); // already present — untouched
+  });
+
   it('never throws on malformed input', () => {
     // @ts-expect-error malformed
     expect(() => applyWellKnownMissingDeps(null)).not.toThrow();

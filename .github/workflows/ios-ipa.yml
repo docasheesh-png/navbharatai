@@ -176,12 +176,15 @@ jobs:
           echo "Firebase iOS config in place; Google Sign-In URL scheme = $RID"
 
       # Native "Sign in with Apple" (OPT-IN — off by default so the proven Google-only build is never at
-      # risk). When enabled: (1) declare the com.apple.developer.applesignin entitlement + point the App
-      # target at it, and (2) the Fastfile enables the SAME capability on the App ID via `produce` BEFORE
-      # `sigh`, so the provisioning profile it creates actually includes the entitlement (else export
-      # fails "profile doesn't include com.apple.developer.applesignin"). PREREQUISITE: enable the Apple
-      # provider in Firebase Console → Authentication → Sign-in method first, or Apple login will error at
-      # runtime even with a valid build.
+      # risk). When enabled, this declares the com.apple.developer.applesignin entitlement + points the
+      # App target at it; the Fastfile's `sigh force:true` then regenerates a provisioning profile that
+      # carries the entitlement. PREREQUISITES (one-time, done by hand — see MOBILE_PUBLISHING.md §4.5):
+      #   1. Apple Developer → Identifiers → com.navbharat.ai → "Sign In with Apple" ✅  (so the profile
+      #      sigh creates includes the entitlement — else export fails "profile doesn't include
+      #      com.apple.developer.applesignin"). We do NOT automate this with `produce` (it doesn't accept
+      #      an App Store Connect api_key and failed the build); the App-ID checkbox is reliable.
+      #   2. Firebase Console → Authentication → Sign-in method → Apple → Enable (else Apple login errors
+      #      at runtime even with a perfectly signed build).
       - name: Enable "Sign in with Apple" entitlement (opt-in)
         if: ${{ inputs.apple_signin }}
         run: |

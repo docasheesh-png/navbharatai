@@ -433,7 +433,15 @@ export class ToolDispatcher {
   endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void> } {
     return {
       runTsc: async () => {
-        const r = await this.actuator.runCommand(this.workspaceId, 'npx --no-install tsc --noEmit 2>&1 | head -80');
+        // Slice 4 — INCREMENTAL tsc: the .tsbuildinfo cache makes every peek after the first
+        // ~0.3-0.8s instead of ~2s, so the 25-step trend checkpoint and the endgame re-verifies are
+        // near-free. The cache lives in /tmp (ephemeral, never collected into the durable store).
+        // Deliberately NOT `tsc --watch`: a watcher's log can be read mid-recompile and report a
+        // STALE "clean" — a synchronous incremental run is always honest about the current tree.
+        const r = await this.actuator.runCommand(
+          this.workspaceId,
+          'npx --no-install tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo 2>&1 | head -80',
+        );
         return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
       },
       readFiles: async () => (await collectWorkspaceFiles(this.actuator, this.workspaceId)).files,

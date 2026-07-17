@@ -45,6 +45,7 @@ import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
+import { applyFullStackGuards } from './FullStackGuards';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -52,7 +53,7 @@ import { ensureTsconfigBaseUrl } from './TsconfigGuard';
  * model rewrite of vite.config/tsconfig can never silently re-break the preview or baseUrl-"src" resolution.
  */
 function guardConfigContent(path: string, content: string): string {
-  return ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content)));
+  return applyFullStackGuards(path, ensureTsconfigBaseUrl(path, ensureViteResolveAlias(path, ensureViteAllowedHosts(path, content))));
 }
 import { ViteReactProvider } from './sandbox/AppMakerLab/generator/templates/ViteReactProvider';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';

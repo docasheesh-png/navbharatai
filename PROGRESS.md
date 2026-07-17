@@ -17178,3 +17178,23 @@ construction. It also prepends default shadcn `:root` CSS variables so the colou
 when an imported app omitted its `:root` block (the app's own `:root`, injected after, always wins).
 Harmless for a non-shadcn Tailwind app (unused tokens/vars) and a plain-CSS app is byte-for-byte
 unaffected (test-locked). 4 regression tests encode the exact mitrify2 shape + the no-op cases.
+
+---
+
+## 2026-07-17 — Full-stack scaffold guards (task #66): the exact TaskFlow walls, killed deterministically
+
+Three full-stack failures the builder hit AGAIN in TaskFlow despite a prompt rule — each costing
+multiple read→edit→retry rounds — now fixed at write-time / dependency-time, every app, no LLM step:
+- **Prisma + SQLite enums** (`FullStackGuards.stripPrismaSqliteEnums`, wired into `guardConfigContent`):
+  a schema.prisma whose datasource is sqlite gets its `enum X {…}` blocks stripped and every field of
+  that type rewritten to `String` (`@default(TODO)` → `@default("TODO")`). Postgres/MySQL schemas +
+  enum-free schemas are untouched. Kills "the current connector does not support enums".
+- **CJS-default namespace import** (`FullStackGuards.fixCjsDefaultImport`): `import * as bcrypt from
+  'bcrypt'` → `import bcrypt from 'bcrypt'` for a tight whitelist (bcrypt/bcryptjs/jsonwebtoken), so
+  `bcrypt.hash` resolves. Legit namespace imports (React/fs/local) never touched. Kills
+  "bcrypt.hash is not a function". Kill switch `AGENTV3_FULLSTACK_GUARDS=off`.
+- **Missing backend deps** (`DependencyAutoFix.WELL_KNOWN_DEPS` +16): express/cors/dotenv/cookie-parser/
+  bcrypt/bcryptjs/jsonwebtoken/socket.io(+client)/@prisma/client/prisma/morgan/helmet/multer/
+  express-validator/ws — so a package imported-but-undeclared is auto-added to package.json (reuses the
+  existing `applyWellKnownMissingDeps` path). Kills the "socket.io not in package.json → dev server
+  failed" wall. 10 new FullStackGuards tests + 1 backend-dep test.

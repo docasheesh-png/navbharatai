@@ -172,10 +172,20 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
     try { present = def.present(htmlLower, textLower); } catch { present = false; }
     probes.push({ feature: def.feature, label: def.label, present });
   }
+  const presentProbes = probes.filter((p) => p.present);
+  // CAPTURE-FAILURE GUARD (deep-test build #4, 2026-07-17): when we probed ≥2 requested features and found
+  // ZERO present ("Present: none"), the overwhelmingly likely cause is that the preview capture returned a
+  // pre-render / partial DOM — NOT that a build which rendered and passed its preview self-check genuinely
+  // shipped none of its UI. A REAL missing-feature result is PARTIAL (some present, some missing); an
+  // all-absent result is the capture-miss signature. This backstops isUnrenderedSpaShell for a capture that
+  // isn't a recognisable bare shell (build #4: "renders correctly" at 468s, yet FEATURE_COVERAGE said
+  // Present: none for all 6). Advisory-only, so staying silent can never hide a real failure from the user —
+  // a genuinely blank app is caught by the preview/readiness checks, not by this heuristic. Report nothing.
+  if (probes.length >= 2 && presentProbes.length === 0) return empty;
   return {
     probes,
     missing: probes.filter((p) => !p.present).map((p) => p.label),
-    present: probes.filter((p) => p.present).map((p) => p.label),
+    present: presentProbes.map((p) => p.label),
   };
 }
 

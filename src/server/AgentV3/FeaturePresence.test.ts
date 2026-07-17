@@ -65,6 +65,33 @@ describe('isUnrenderedSpaShell + honesty guard (deep-test build #2 — false "Pr
   });
 });
 
+describe('capture-failure guard (deep-test build #4 — "Present: none" on an app that rendered)', () => {
+  // Build #4: a 6-feature expense tracker rendered ("Preview verified — renders correctly") yet the
+  // preview CAPTURE returned a pre-render/partial DOM that isUnrenderedSpaShell didn't classify as a bare
+  // shell, so every feature probed absent and the report lied "Present: none" — and it became a warning
+  // on a working app. An all-absent result is the capture-miss signature (a real gap is PARTIAL).
+  const prompt = 'expense tracker: add an expense, delete it, edit it, filter by category, search by name, show the list';
+
+  it('reports NOTHING when ≥2 features were probed and ZERO are present (capture miss, not a real gap)', () => {
+    // A partial/pre-render capture with no matching controls at all.
+    const partial = '<div id="root"><div class="loading">Loading…</div></div>';
+    const r = checkFeaturePresence(prompt, partial);
+    expect(r.present).toHaveLength(0);
+    expect(r.missing).toHaveLength(0);  // never a wall of false "missing"
+    expect(r.probes).toHaveLength(0);
+  });
+
+  it('STILL reports a genuine PARTIAL gap (some present, some missing) — the guard only suppresses all-absent', () => {
+    // add + list render, but delete/edit/filter/search do not → a real, actionable finding must survive.
+    const partial = '<div id="root"><input placeholder="Expense name"/><button>Add</button><ul><li>bike ₹100</li></ul></div>';
+    const r = checkFeaturePresence(prompt, partial);
+    expect(r.present).toContain('Add / create');
+    expect(r.present).toContain('List / items');
+    expect(r.missing).toContain('Delete / remove');
+    expect(r.missing.length).toBeGreaterThan(0);
+  });
+});
+
 describe('checkFeaturePresence — the full TaskLite app', () => {
   const goodHtml = [
     '<h1>TaskLite</h1>',

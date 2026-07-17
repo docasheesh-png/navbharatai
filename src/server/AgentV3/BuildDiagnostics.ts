@@ -391,7 +391,12 @@ export class BuildDiagnostics {
     // ss / …), and a health-probe curl hitting a not-yet-ready port all return non-zero WITHOUT anything
     // being wrong. Flagging those made a clean, successful build look error-ridden (a real report showed
     // 12 "errors", 6 of them just `grep`/`curl`/`ss` no-match exits). Admin-authorized 2026-07-03.
-    const failed = rec.exitCode !== 0 && rec.exitCode !== null && !isExpectedNonzeroExit(rec.command, rec.exitCode);
+    const failed = rec.exitCode !== 0 && rec.exitCode !== null
+      && !isExpectedNonzeroExit(rec.command, rec.exitCode)
+      // A project-wide `tsc --noEmit` whose ONLY errors are in TEST files (missing vitest types in the
+      // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
+      // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
+      && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
     const cmdHead = rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     this.record({
@@ -868,6 +873,39 @@ export function isUnconfiguredTscFileProbe(command: string): boolean {
   // that operand is what makes tsc ignore tsconfig. `2>&1`/redirects are not operands (they contain no
   // source extension), and a bare `tsc --noEmit` has no operand at all → not a file probe.
   return cmd.split(/\s+/).some((tok) => !tok.startsWith('-') && /\.(?:tsx?|jsx?|mts|cts)$/.test(tok));
+}
+
+/** A path (as tsc prints it) that belongs to a TEST/spec file, not shipped app source. Pure. */
+function isTestFilePath(path: string): boolean {
+  return /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|\.test-d\.[cm]?tsx?$|(?:^|\/)__tests__\/|(?:^|\/)tests?\/)/i.test(path.trim());
+}
+
+/**
+ * True when a `tsc`/`tsgo` typecheck FAILED but EVERY diagnostic it emitted is in a TEST file — so the
+ * failure says nothing about whether the APP builds/runs.
+ *
+ * ROOT CAUSE (deep-test build #4, 2026-07-17): the project-wide gate `npx tsc --noEmit` exited non-zero
+ * with a single diagnostic — `src/App.test.tsx(1,38): error TS2307: Cannot find module 'vitest'` — because
+ * the sandbox doesn't install the test runner's types. The app's own source compiled clean (the agent's
+ * piped `tsc | grep -v App.test.tsx` returned nothing) and the dev server ran, yet that test-only failure
+ * was recorded as a real SANDBOX_CMD_FAILED and became the `rootCause` of a SUCCESSFUL build — a false
+ * verdict (rule 5 honesty). The app ships without its test files, so a test-only type error is never an
+ * app-build failure. (Distinct from isUnconfiguredTscFileProbe, which is about the wrong INVOCATION; this
+ * is about a correct invocation whose failures are all out-of-app.)
+ *
+ * Conservative by construction: excused ONLY when it is a tsc typecheck, we could parse ≥1 tsc diagnostic
+ * line (`path(line,col): error TS####`), and ALL of them are test files. A single non-test diagnostic, or
+ * an unparseable/empty output, is NOT excused → a genuine app type error still counts. Pure + total.
+ */
+export function isTestOnlyTypecheckFailure(command: string, stdout?: string, stderr?: string): boolean {
+  const cmd = (command || '').trim();
+  if (!/\btsc\b|\btsgo\b/.test(cmd)) return false;                    // only a tsc typecheck qualifies
+  const out = `${stdout ?? ''}\n${stderr ?? ''}`;
+  const diagRe = /^(.+?)\((\d+),(\d+)\):\s+error\s+TS\d+/gm;          // tsc's "path(l,c): error TS####"
+  const paths: string[] = [];
+  for (let m = diagRe.exec(out); m; m = diagRe.exec(out)) paths.push(m[1]);
+  if (paths.length === 0) return false;                              // parsed no diagnostics → don't excuse
+  return paths.every(isTestFilePath);                               // excuse ONLY if every one is a test file
 }
 
 export function deriveRootCause(input: {

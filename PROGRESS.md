@@ -17060,3 +17060,21 @@ GLM cache-hit measured 2.36M/2.77M tokens (85%).
 server-side preview-verify uses the LIVE-SERVER render while users default to the IN-BROWSER preview —
 the verify should ALSO exercise the in-browser bundler path (bigger slice, queued); residual GLM 429
 singles (~2/min under sustained load) are the per-account ceiling, not the storm (cooldown working).
+
+---
+
+## 2026-07-17 — FitPulse edit-build re-test: edit path EXCELLENT, but integrity checks were blind on edit builds (fixed: full durable-store map)
+
+**Trigger (5th rule):** admin ran the requested edit ("rest timer me 30s ka option bhi add karo").
+**What worked:** sandbox-recycle auto-restore (24 files from durable store, DATA_LOSS_EVENT honest),
+surgical edit mode (3 files, 55 steps, 6m33s), tsc self-heal (RestDuration union + type-only import),
+reviewer verified 95/100, GLM led with 86% cache-hit, ₹0 (free-list). **What did NOT:** the
+duplicate-context preview crash SURVIVED — and the report shows why: no INTEGRITY_IMPORTS_NORMALIZED
+event. On an edit build `writtenFiles` = only the 3 edited files, so `findMixedImportSpecifiers`
+never saw the OTHER modules importing ThemeContext — the normalizer had nothing to normalize.
+**Fix (this PR):** the route integrity pass now builds its file set from the DURABLE STORE's full
+project map (same source the sandbox restore uses) overlaid with this build's writes — every
+integrity check (orphan CSS / mixed specifiers / focus / duplicate sheets) now judges the COMPLETE
+app on both fresh and edit builds. Open (rule 6): client-reported in-browser PREVIEW_ERROR arrives
+AFTER build end — no auto-heal hook yet; llmCalls[].model records the REQUESTED model id, not the
+delivered provider's (admin-only telemetry cosmetic).

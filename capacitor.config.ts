@@ -41,7 +41,10 @@ const config: CapacitorConfig = {
     // the web SDK stays the single source of truth for the session — the web login path is untouched.
     FirebaseAuthentication: {
       skipNativeAuth: true,
-      providers: ['google.com'],
+      // 'apple.com' added 2026-07-16 for native "Sign in with Apple" on iOS (App Store guideline 4.8
+      // requires it wherever a third-party login like Google is offered). iOS also needs the "Sign in
+      // with Apple" capability in Xcode + the Apple provider enabled in Firebase (Console-side setup).
+      providers: ['google.com', 'apple.com'],
     },
     // Splash screen: show app icon while loading, auto-hide once React mounts.
     SplashScreen: {

@@ -379,30 +379,55 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
   // "login is not smooth" jolt the admin reported.)
   const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
-    // NATIVE app + Google → use native Google Sign-In (Play Services), NOT the web popup/redirect.
-    // Google disallows OAuth inside embedded WebViews, so the web flow opens an external browser and
-    // breaks on return ("missing initial state"). The native plugin signs in with the device's Google
-    // account and returns a credential we exchange into the Firebase JS SDK — no browser, in-app.
-    const isGoogle = (provider as { providerId?: string })?.providerId === GoogleAuthProvider.PROVIDER_ID;
-    if (isGoogle && Capacitor.isNativePlatform()) {
+    // NATIVE app + Google/Apple → use the device's NATIVE sign-in, NOT the web popup/redirect.
+    // Google disallows OAuth inside embedded WebViews (the web flow opens an external browser and
+    // breaks on return with "missing initial state"), and Apple's Sign in with Apple is a native
+    // capability on iOS. The @capacitor-firebase/authentication plugin runs the native account sheet
+    // and returns a credential we exchange into the Firebase JS SDK (skipNativeAuth: true keeps the
+    // web SDK the single session source) — no browser, fully in-app. The web login path is untouched.
+    const providerId = (provider as { providerId?: string })?.providerId;
+    const isGoogle = providerId === GoogleAuthProvider.PROVIDER_ID;
+    const isApple = providerId === 'apple.com';
+    if (Capacitor.isNativePlatform() && (isGoogle || isApple)) {
       try {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        const nativeResult = await FirebaseAuthentication.signInWithGoogle();
-        const idToken = nativeResult.credential?.idToken;
-        if (!idToken) {
-          throw new Error(
-            'Native Google sign-in returned no ID token — check the Android google-services.json / SHA-1 setup.',
-          );
+        let credential;
+        if (isGoogle) {
+          const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+          const idToken = nativeResult.credential?.idToken;
+          if (!idToken) {
+            throw new Error(
+              'Native Google sign-in returned no ID token — check the iOS GoogleService-Info.plist / Android google-services.json (SHA-1) setup.',
+            );
+          }
+          credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
+        } else {
+          // Apple: the plugin returns an Apple identity token + the raw nonce it used; Firebase's
+          // Apple OAuthProvider verifies the token against that same nonce. Missing token ⇒ the
+          // "Sign in with Apple" capability / Firebase Apple provider isn't set up yet.
+          const nativeResult = await FirebaseAuthentication.signInWithApple();
+          const idToken = nativeResult.credential?.idToken;
+          if (!idToken) {
+            throw new Error(
+              'Native Apple sign-in returned no identity token — enable the "Sign in with Apple" capability (Xcode) and the Apple provider in Firebase.',
+            );
+          }
+          // OAuthProvider is exported by firebase/auth at runtime but the v12 umbrella types don't
+          // surface it to tsc (same as PhoneAuthProvider above) — resolve it dynamically.
+          const { OAuthProvider } = (await import('firebase/auth')) as any;
+          const appleProvider = new OAuthProvider('apple.com');
+          credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
-        const credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
         const result = await signInWithCredential(auth, credential);
         onCredential?.(result);
         onClose();
         return 'ok';
       } catch (nativeErr: any) {
         // The user dismissing the native account sheet must mean CANCEL — never an error banner.
+        // iOS Apple cancel surfaces code 1001 / "AuthorizationError"; Google Android cancel is 12501.
         const msg = String(nativeErr?.message || nativeErr?.code || '').toLowerCase();
-        if (msg.includes('cancel') || msg.includes('canceled') || msg.includes('cancelled') || msg.includes('12501')) {
+        if (msg.includes('cancel') || msg.includes('canceled') || msg.includes('cancelled')
+          || msg.includes('12501') || msg.includes('1001') || msg.includes('com.apple.authenticationservices')) {
           return 'cancelled';
         }
         throw nativeErr;
@@ -448,6 +473,26 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       if (outcome === 'cancelled') setLoading(false);
     } catch (err: any) {
       console.error('[GOOGLE SIGN-IN]', err);
+      setError(describeSocialError(err));
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    // Apple is a Firebase OAuthProvider ('apple.com'). On native iOS the socialSignIn helper routes
+    // through the native "Sign in with Apple" sheet; on web it uses the popup (Apple's web OAuth).
+    // OAuthProvider is resolved dynamically (v12 umbrella types don't surface it — see the note above).
+    const { OAuthProvider } = (await import('firebase/auth')) as any;
+    const provider = new OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    try {
+      const outcome = await socialSignIn(provider);
+      if (outcome === 'cancelled') setLoading(false);
+    } catch (err: any) {
+      console.error('[APPLE SIGN-IN]', err);
       setError(describeSocialError(err));
       setLoading(false);
     }
@@ -829,6 +874,15 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
               Sign in with Google
+            </button>
+            <button
+              type="button"
+              onClick={handleAppleSignIn}
+              disabled={loading}
+              className="w-full py-4 bg-black hover:bg-[#1a1a1a] disabled:opacity-50 text-white border border-white/15 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.53c-.02-2.02 1.65-2.99 1.72-3.04-.94-1.37-2.4-1.56-2.92-1.58-1.24-.13-2.42.73-3.05.73-.63 0-1.6-.71-2.63-.69-1.35.02-2.6.79-3.3 2-1.4 2.44-.36 6.04 1.01 8.02.67.97 1.47 2.05 2.51 2.01 1.01-.04 1.39-.65 2.61-.65 1.22 0 1.56.65 2.63.63 1.09-.02 1.78-.98 2.44-1.96.77-1.12 1.09-2.21 1.11-2.27-.02-.01-2.13-.82-2.15-3.23zM15.04 6.36c.56-.68.94-1.62.83-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.83-.46 2.4-1.14z"/></svg>
+              Sign in with Apple
             </button>
             <button
               type="button"

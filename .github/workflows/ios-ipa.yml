@@ -59,6 +59,10 @@ on:
         description: 'Upload the build to App Store Connect / TestFlight after building'
         type: boolean
         default: false
+      apple_signin:
+        description: 'Enable native "Sign in with Apple" (needs the Firebase Apple provider enabled first; this run will enable the App-ID capability via the API key)'
+        type: boolean
+        default: false
 
 jobs:
   build-ios:
@@ -170,6 +174,45 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes array" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes:0 string $RID" "$PLIST"
           echo "Firebase iOS config in place; Google Sign-In URL scheme = $RID"
+
+      # Native "Sign in with Apple" (OPT-IN — off by default so the proven Google-only build is never at
+      # risk). When enabled: (1) declare the com.apple.developer.applesignin entitlement + point the App
+      # target at it, and (2) the Fastfile enables the SAME capability on the App ID via `produce` BEFORE
+      # `sigh`, so the provisioning profile it creates actually includes the entitlement (else export
+      # fails "profile doesn't include com.apple.developer.applesignin"). PREREQUISITE: enable the Apple
+      # provider in Firebase Console → Authentication → Sign-in method first, or Apple login will error at
+      # runtime even with a valid build.
+      - name: Enable "Sign in with Apple" entitlement (opt-in)
+        if: ${{ inputs.apple_signin }}
+        run: |
+          set -e
+          ENT="ios/App/App/App.entitlements"
+          # Create a minimal, VALID plist if the template didn't ship one (printf → no leading-whitespace
+          # before <?xml, which a heredoc inside this YAML block would have introduced and broken).
+          if [ ! -f "$ENT" ]; then
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict></dict></plist>' > "$ENT"
+          fi
+          # Idempotent add of the applesignin entitlement (array with a single "Default" string).
+          /usr/libexec/PlistBuddy -c "Print :com.apple.developer.applesignin" "$ENT" >/dev/null 2>&1 \
+            || /usr/libexec/PlistBuddy -c "Add :com.apple.developer.applesignin array" "$ENT"
+          /usr/libexec/PlistBuddy -c "Print :com.apple.developer.applesignin:0" "$ENT" >/dev/null 2>&1 \
+            || /usr/libexec/PlistBuddy -c "Add :com.apple.developer.applesignin:0 string Default" "$ENT"
+          # Point every build config of the App target at the entitlements file (xcodeproj gem was
+          # installed in the Firebase-config step above).
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'App' } or abort('App target not found')
+          target.build_configurations.each do |c|
+            c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+          end
+          proj.save
+          puts 'OK: App.entitlements wired to the App target (Sign in with Apple).'
+          RUBY
+          echo "Sign in with Apple entitlement in place."
 
       # App Store REQUIRES a purpose string for every device permission the app can request, or review
       # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the
@@ -284,6 +327,9 @@ jobs:
           IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
           IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           DO_UPLOAD: ${{ inputs.upload }}
+          # Opt-in native Apple sign-in: when true, the Fastfile enables the App-ID capability via produce
+          # before sigh so the profile includes com.apple.developer.applesignin.
+          APPLE_SIGNIN: ${{ inputs.apple_signin }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: "120"

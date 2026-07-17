@@ -17299,3 +17299,48 @@ display bug (shipped earlier today as PR #1471) · 2 struggle points · 1 report
   1" read self-contradictory (the listings are SETS — the sandbox held different extras). Message now
   says "…listed 27 but was missing 1 of the stored file(s) — restoring 1". Sandbox ephemerality itself
   is infra (E2B) — the guardian restore IS the designed systemic answer; nothing further to fix there.
+
+---
+
+## 2026-07-17 — ShopKhata Pro autopsy (monorepo full-stack, first true ladder-climb app): dev-server-death class killed; layout contract = THE missing subsystem
+
+**Build:** ShopKhata Pro (backend/ + frontend/ monorepo: Express+Prisma+SQLite+Socket.IO+multer+
+express-validator, React+recharts+role-based UI). 26m51s / 178 steps vs ~11 min estimate; STOPPED BY
+THE USER; ok:false (correctly NOT billed). Delivery GLM 102 / KIMI 10 / VERTEX 1; failures GLM 181,
+KIMI 2. THE user-visible outcome: **the dev server never booted** — "No live preview yet" + a raw
+vite-tsconfig-paths ESM crash.
+
+**5-bucket ledger:** ✅ self-heal 5 (fast-lane 240s timeout → 15-file salvage handoff WORKED; endgame
+repair fired twice; Dashboard import self-fix; provider failover kept the build alive; secret
+redaction masked JWT_SECRET) · 🔀 workaround 1 (GLM 181-failure key-rotation — open throughput root) ·
+⏭️ skipped 1 (Vertex LLM_TRUNCATED max_tokens recorded but not acted on → likely wrote the broken-brace
+orderController the builder later forensicked with tail/wc/cat -A for minutes) · ❌ still-broken 4
+(dev server dead; monorepo layout vs single-root preview — root scaffold src/main.tsx AND
+frontend/src/main.jsx both alive = INTEGRITY_DUPLICATE_STYLESHEET; prisma generate failed 3× on
+missing opposite-relation fields, seed 2×; orderController syntax error) · 🥵 struggles 3 (2.4×
+estimate overrun; edit_file old_string drift ×3; AGENT_NOTE severity keyword bug — a narration saying
+"error boundary" was recorded severity=error).
+
+**ROOT CAUSE #1 (fixed this PR — dev-server-death class):** OUR OWN scaffold shipped
+`vite-tsconfig-paths ^5.1.4` (newer 5.x = ESM-only) while the scaffold package.json had NO
+`"type": "module"` → Vite require()s the bundled config → boot crash. It only ever worked because the
+E2B-baked node_modules froze a compatible build; the FIRST `npm install` after a package.json change
+(exactly what a full-stack build does) resolved a newer ESM-only version → every such app's preview
+died. Same unpinned-drift class as the retired-model-ids fix. FIX: (1) template package.json now
+carries `"type": "module"` (create-vite standard) + EXACT-pins the plugin 5.1.4, in BOTH template
+copies; (2) new write-time guard `ensureViteTypeModule` (FullStackGuards, wired into
+guardConfigContent): any vite package.json written without an explicit "type" gets "type":"module"
+re-inserted — a builder rewrite can never break config loading again. Explicit "type": "commonjs"
+respected; backend package.jsons untouched. 6 regression tests + template invariant test.
+NOTE (rule 6): the two ViteReactProviderContents.ts template copies have DRIFTED (sandbox copy has
+ErrorBoundary+indexCss; AppMakerLab copy stale) — recorded as centralization debt.
+
+**MISSING SUBSYSTEM (step 2 — the big one, next):** v3.0 has NO full-stack LAYOUT CONTRACT. The
+builder freestyled a backend/+frontend/ monorepo; the platform's preview infra boots ONE root vite
+app on 5173 — so the root scaffold app (still present → duplicate mains) is what the port would serve
+even after the ESM fix, and nothing starts backend+frontend together. This one gap owns tasks #64
+(honest full-stack preview state) + #65 (duplicate-purpose mains) + "backend never started". Open
+root causes recorded: layout contract (#64/#65 next), prisma-format auto-heal on relation errors
+(the CLI's own suggested fix — deterministic), max_tokens-truncation → immediate syntax-check of the
+just-written file, AGENT_NOTE severity keyword misclassification, edit_file old_string drift (other
+session already tracking), GLM per-account throughput ceiling (admin decision).

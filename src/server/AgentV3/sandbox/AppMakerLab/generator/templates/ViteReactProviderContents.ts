@@ -1,6 +1,13 @@
 export const packageJson = JSON.stringify({
   "name": "project",
   "version": "0.1.0",
+  // ShopKhata autopsy 2026-07-17: "type": "module" is LOAD-BEARING, not style. vite.config.ts imports
+  // vite-tsconfig-paths, whose newer 5.x builds are ESM-only; without type:module Vite loads the
+  // bundled config via require() and the whole dev server dies on boot ("resolved to an ESM file.
+  // ESM file cannot be loaded by `require`") — the app never gets a preview. This is also the
+  // create-vite standard. The version is EXACT-pinned for the same reason (Decision-A discipline:
+  // a ^range let a fresh npm install drift onto an incompatible build the baked sandbox never saw).
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -14,7 +21,7 @@ export const packageJson = JSON.stringify({
     "@vitejs/plugin-react": "^4.3.1",
     "typescript": "^5.5.3",
     "vite": "^5.4.1",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "5.1.4"
   }
 }, null, 2);
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   stripPrismaSqliteEnums,
   fixCjsDefaultImport,
+  ensureViteTypeModule,
   applyFullStackGuards,
   fullStackGuardsEnabled,
 } from './FullStackGuards';
@@ -91,5 +92,46 @@ describe('applyFullStackGuards — orchestration + kill switch', () => {
 
   it('default (unset) is ON', () => {
     expect(fullStackGuardsEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
+
+// ShopKhata autopsy 2026-07-17: the dev server NEVER booted — root vite.config.ts crashed with
+// "vite-tsconfig-paths resolved to an ESM file. ESM file cannot be loaded by `require`" because the
+// workspace package.json had no "type": "module". The guard re-inserts the invariant on every vite
+// package.json write, so a builder rewrite can never kill config loading again.
+describe('ensureViteTypeModule — a vite package.json always carries type:module', () => {
+  it('adds type:module to a vite app package.json that lacks it (the ShopKhata wall)', () => {
+    const pkg = JSON.stringify({ name: 'project', version: '0.1.0', scripts: { dev: 'vite' }, devDependencies: { vite: '^5.4.1', 'vite-tsconfig-paths': '5.1.4' } });
+    const out = JSON.parse(ensureViteTypeModule('package.json', pkg));
+    expect(out.type).toBe('module');
+    expect(out.devDependencies.vite).toBe('^5.4.1'); // everything else preserved
+  });
+
+  it('never touches a backend (non-vite) package.json', () => {
+    const backend = JSON.stringify({ name: 'backend', scripts: { dev: 'nodemon src/index.js' }, dependencies: { express: '^4.19.0' } });
+    expect(ensureViteTypeModule('backend/package.json', backend)).toBe(backend);
+  });
+
+  it('respects an explicit "type" — commonjs stays commonjs, module stays byte-for-byte', () => {
+    const cjs = JSON.stringify({ name: 'p', type: 'commonjs', devDependencies: { vite: '^5' } });
+    expect(ensureViteTypeModule('package.json', cjs)).toBe(cjs);
+    const esm = JSON.stringify({ name: 'p', type: 'module', devDependencies: { vite: '^5' } });
+    expect(ensureViteTypeModule('package.json', esm)).toBe(esm);
+  });
+
+  it('detects vite via the dev script alone (deps object absent)', () => {
+    const out = JSON.parse(ensureViteTypeModule('frontend/package.json', JSON.stringify({ name: 'f', scripts: { dev: 'vite --port 5173' } })));
+    expect(out.type).toBe('module');
+  });
+
+  it('leaves invalid JSON and non-package.json paths untouched', () => {
+    expect(ensureViteTypeModule('package.json', '{ broken')).toBe('{ broken');
+    expect(ensureViteTypeModule('src/App.tsx', 'not json')).toBe('not json');
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    const pkg = JSON.stringify({ name: 'p', scripts: { dev: 'vite' } });
+    expect(JSON.parse(applyFullStackGuards('package.json', pkg)).type).toBe('module');
+    expect(applyFullStackGuards('package.json', pkg, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(pkg);
   });
 });

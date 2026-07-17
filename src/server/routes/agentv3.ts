@@ -98,7 +98,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
@@ -6289,8 +6289,28 @@ export function registerAgentV3Routes(app: Express): void {
             try {
               const writtenMap = Object.fromEntries(writtenFiles);
               const withScaffold: Record<string, string> = { ...Object.fromEntries(scaffold.map((sp) => [sp, ''])), ...writtenMap };
-              const unresolved = findUnresolvedLocalImports(withScaffold)
+              let unresolved = findUnresolvedLocalImports(withScaffold)
                 .filter((u) => writtenMap[u.importedBy] !== undefined); // judge only OUR writes
+              // DETERMINISTIC MISPATH AUTO-FIX (deep-test build #1, 2026-07-17): when an unresolved import
+              // is a WRONG PATH to a file that ALREADY EXISTS, fix the path ourselves — zero model calls —
+              // instead of failing verify and paying the repair→one-shot→full-builder cascade (the trivial
+              // one-char path error that cost ~10 min on a throttled build). Only OUR written files with a
+              // single unambiguous target are rewritten; truly-missing imports still fail so the repair CREATEs them.
+              if (unresolved.some((u) => u.existsAt) && process.env.AGENTV3_IMPORT_PATH_AUTOFIX !== 'off') {
+                try {
+                  const { files: fixedFiles, fixes } = fixMispathLocalImports(withScaffold);
+                  const seen = new Set<string>();
+                  const toWrite = fixes
+                    .filter((f) => writtenMap[f.importedBy] !== undefined && !seen.has(f.importedBy) && seen.add(f.importedBy))
+                    .map((f) => ({ path: f.importedBy, content: fixedFiles[f.importedBy] }));
+                  if (toWrite.length > 0) {
+                    await fastWrite(toWrite);
+                    for (const w of toWrite) { writtenFiles.set(w.path, w.content); withScaffold[w.path] = w.content; }
+                    buildDiag.record({ phase: 'build', severity: 'info', code: 'IMPORT_PATH_AUTOFIXED', message: `Auto-fixed ${fixes.length} wrong local import path(s) that pointed at existing files — no rebuild needed.`, autoResolved: true, detail: fixes.map((f) => `${f.importedBy}: "${f.from}" → "${f.to}"`).join('\n') });
+                    unresolved = findUnresolvedLocalImports(withScaffold).filter((u) => writtenFiles.get(u.importedBy) !== undefined);
+                  }
+                } catch { /* auto-fix is best-effort — a failure just falls through to the honest ok:false below */ }
+              }
               if (unresolved.length > 0) {
                 // A mispath (the file EXISTS at existsAt) must be fixed by correcting the import path,
                 // NOT by creating a duplicate file — say so precisely so the repair does the right thing.

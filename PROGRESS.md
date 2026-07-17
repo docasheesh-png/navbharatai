@@ -17217,3 +17217,25 @@ listing is drastically smaller than the durable index (savePlanForFileSet → 'm
 set UNION the live files (live wins on overlap, so warm mid-build freshness is never lost). Open (rule
 6): the exact zeroing turn's report wasn't captured — the admin re-opens the chat and sends any message
 to trigger the guardian restore; the next report's DATA_LOSS_EVENT counts will confirm store integrity.
+
+---
+
+## 2026-07-17 — Deep-test autopsy #1 (expense tracker, weak tier) → DNA fix: deterministic wrong-import-path auto-fix
+
+**Build:** simple expense tracker, weak tier (GLM-led, Haiku backstop), `ok:true` READY 86/100 — but **907s / 176 steps / 344 events** for a TRIVIAL app. builtBy GLM, providerDelivery GLM:71, **providerFailures GLM:63** (429/timeout storm). ₹127.42.
+
+**5-bucket ledger:**
+- ✅ Self-healed: MISSING_EXPORT→HEALED, INTEGRITY_CSS_WIRED (App.css imported by nothing → injected), reviewer C9 auto-fix (4 criticals).
+- 🔀 Worked around: GLM 429 → fell back **63×** (root survived); fast-lane verify failed on a wrong import path → escalated fast-lane→one-shot(150s timeout)→full-builder instead of fixing the path.
+- ⏭️ Skipped: "No tests at all"; app renders `$` (dollars) for an Indian app (currency default).
+- ❌ Still-broken (2 unresolved): MISSING_EXPORT for ExpenseListProps on a dead file (create/delete churn of ExpenseItem/List/Tracker); **FEATURE_COVERAGE false-negative** — reported "Add / List — Present: none" for an app that visibly HAS both (honesty bug).
+- 🥵 Struggle: the whole build-strategy cascade (~10 min) + component create-then-orphan churn + a stale-`old_string` edit_file failure + dev server died mid-build.
+
+**Missing subsystem:** a deterministic-repair gap — a wrong RELATIVE import path to a file that ALREADY EXISTS is trivially fixable, but the engine escalated to a full rebuild. (Plus the fast-lane plan's components and the full-builder's inline App.tsx are never reconciled → orphans.)
+
+**DNA FIX shipped this PR (keystone):** `fixMispathLocalImports()` (pure, in `ProjectImport.ts`) — for any local import (`./ ../ @/`) that resolves to NO file but whose module exists unambiguously elsewhere, rewrite the specifier to the correct relative path. Wired into the fast-lane missing-import gate (`agentv3.ts`): when all unresolved imports are wrong-paths-to-existing-files, the engine fixes them itself (write_file, `IMPORT_PATH_AUTOFIXED` diag), re-checks, and continues — **no LLM, no repair→one-shot→full-builder cascade.** Kill switch `AGENTV3_IMPORT_PATH_AUTOFIX=off`. Truly-missing imports still fail so the repair CREATEs them (unchanged). Regression-locked (5 cases: over-relative fix, barrel/index, genuinely-missing untouched, ambiguous/bare untouched, idempotent). Gate: frontend tsc ✅, server tsc ✅, vitest 6926 ✅.
+
+**Open root causes (recorded, not cosmetically patched):**
+1. **GLM 429 saturation (INFRA):** single GLM key overloaded → 63 fallbacks. Real fix = the GLM key pool (`GLM_API_KEY` comma-list, admin infra). Engine mitigation (per-build GLM circuit-breaker after N 429s) is a candidate next fix.
+2. **FEATURE_COVERAGE false-negative (honesty):** the feature-presence detector said "Present: none" for a working Add form + list — to be root-caused in a follow-up autopsy (needs the analyzed DOM; will recur).
+3. **Component create-then-orphan churn:** fast-lane planned components vs full-builder inline App not reconciled → dead ExpenseItem/List/Tracker/ErrorBoundary. Candidate: reconcile the plan manifest with the final wired set.

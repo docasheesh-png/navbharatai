@@ -351,6 +351,11 @@ export function makeMultiProviderTurnRunner(
             deadForRun.set(name, err instanceof Error ? err.message : String(err));
           } else if (isTimeoutProviderError(err)) {
             timeoutStreak.set(name, (timeoutStreak.get(name) ?? 0) + 1); // bench after 2 in a row
+            // TaskFlow autopsy 2026-07-17: 212 GLM TIMEOUTS in one build — the same cross-instance
+            // blindness the 429 cooldown fixed, in the other transient class. A timeout wastes far
+            // MORE wall-clock than a 429 (the full timeout window burns before the fallback), so the
+            // shared cooldown matters even more here. Same registry, same recovery semantics.
+            cooldowns.strike(name, now());
           } else if (isRateLimitProviderError(err)) {
             rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
             cooldowns.strike(name, now()); // shared memory — concurrent turns/instances stop hammering too

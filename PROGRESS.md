@@ -17131,3 +17131,26 @@ instead of piling up. The cache lives in /tmp (ephemeral; never collected into t
 **Watch-mode was deliberately REJECTED** (the task's original idea): a `tsc --watch` log read
 mid-recompile reports a STALE "clean" — a lying diagnostic breaks rule 2; the synchronous
 incremental run is always honest about the current tree. All four endgame slices (#60-63) done.
+
+---
+
+## 2026-07-17 — TaskFlow (FIRST full-stack deep-test) autopsy: endgame stack PROVEN live + timeout class joins the shared cooldown
+
+**Trigger (5th rule):** admin's TaskFlow build (React+Tailwind+Express+Prisma+SQLite, weak tier).
+Stopped by the admin at 32 min; ₹0 billed (honest). **The new endgame stack fired on a REAL build:**
+at 562s the 25-step trend checkpoint caught the grind → endgame repair: 49 compile errors → 7 fixed
+mechanically (free) → 42 in ONE batch pass. Full-map integrity caught a focus conflict + duplicate
+stylesheet. The engine also self-healed real full-stack walls: Prisma-SQLite enum unsupported,
+bcrypt ESM import, missing socket.io, prisma migrate flow.
+
+**Ledger:** ✅ endgame+checkpoint+integrity all live · ❌ GLM 212 TIMEOUTS (not 429s — the shared
+cooldown only struck on rate-limits, so every runner instance re-burned full timeout windows —
+the #1 wall-clock killer this build) · ❌ in-browser preview can't run a backend app and showed a
+cryptic "import.meta is only valid inside modules" instead of an honest "use Live server" state
+(task #64) · 🔀 duplicate-purpose files shipped (src/index.tsx + src/main.tsx; two axiosConfig.ts —
+task #65) · 🥵 sandbox itself was slow this run (ls 79s, migrate 58s — E2B variance, recorded).
+
+**Fixed now:** TIMEOUTS strike the shared cross-instance cooldown exactly like 429s (same registry,
+same 60s recovery, same per-name key-pool isolation). A timeout wastes far MORE wall-clock than a
+429 — the full window burns before the fallback — so the cross-instance memory matters even more.
+Regression test encodes the TaskFlow shape (2 timeouts → fresh instance skips instantly).

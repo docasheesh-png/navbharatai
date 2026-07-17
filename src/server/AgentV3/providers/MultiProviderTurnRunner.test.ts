@@ -415,4 +415,18 @@ describe('hopelessly-oversized prompts abort the ladder (the 2.2M-token reviewer
     await expect(runner.runTurn(PARAMS)).rejects.toThrow(/too large for every AI provider/);
     expect(haiku.runTurn).not.toHaveBeenCalled(); // the 3 wasted round-trips are gone
   });
+  it('SHARED COOLDOWN — TIMEOUTS strike it too (TaskFlow autopsy: 212 GLM timeouts in one build)', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const glm1 = runnerFail('Request timed out.');
+    const r1 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm1 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r1.runTurn(PARAMS); // timeout #1
+    await r1.runTurn(PARAMS); // timeout #2 → shared cooldown armed
+    expect(cooldowns.until('GLM')).toBeGreaterThan(0);
+    // A FRESH instance (heal gate / next fast-lane call) skips GLM instantly — no more timeout burns.
+    const glm2 = runnerFail('Request timed out.');
+    const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm2 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    expect((await r2.runTurn(PARAMS)).text).toBe('c');
+    expect(glm2.runTurn).not.toHaveBeenCalled();
+  });
 });

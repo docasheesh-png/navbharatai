@@ -501,9 +501,13 @@ export class AgentRunner {
           throw err;
         }
         // #4 — capture the successful model turn (finish reason 'max_tokens' = truncated output).
+        // Quiz-app autopsy 2026-07-17: record the model that ACTUALLY answered (TurnResult.model —
+        // e.g. a GLM rung behind the multi-provider chain), not the requested id, so the report's
+        // llmCalls agree with providerDelivery/builtBy instead of labelling a GLM turn "claude-haiku".
+        // The requested id stays the fallback for runners that don't report their model.
         try {
           this.opts.onLlmCall?.({
-            model, promptPreview, promptChars: promptPreview.length,
+            model: turn.model ?? model, promptPreview, promptChars: promptPreview.length,
             responsePreview: turn.text, responseChars: turn.text.length,
             finishReason: turn.stopReason, toolCalls: turn.toolUses.length,
             inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens,

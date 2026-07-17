@@ -85,6 +85,18 @@ export function isTimeoutProviderError(error: unknown): boolean {
 }
 
 /**
+ * A SERVICE-OVERLOADED failure — the provider's BACKEND is saturated, which every API key of that
+ * provider sees identically (unlike a per-key quota 429, where rotating to the next key genuinely
+ * helps). Real case (quiz-app report 2026-07-17): "429 The service may be temporarily overloaded,
+ * please try again later" ×4 across different GLM keys — key rotation just re-proved the same
+ * saturation. Used to POOL-strike the shared cooldown so the whole provider benches at once. Pure.
+ */
+export function isServiceOverloadedError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  return /temporarily overloaded|service (?:is |may be )?(?:temporarily )?(?:overloaded|unavailable)|overloaded_error|\b(?:503|529)\b/i.test(text);
+}
+
+/**
  * A RATE-LIMIT (429) failure — transient, but STORM-prone. Real case (Kanban build report 2026-07-13):
  * a 59-file build hammered GLM, which returned "429 Rate limit reached" on turn after turn (repeatCount
  * up to 12), and because a 429 is neither fatal nor a timeout it fell through to the next provider EVERY
@@ -299,6 +311,18 @@ export function makeMultiProviderTurnRunner(
   // real build). Default = the process-wide singleton; tests inject a fake registry + clock.
   const cooldowns = opts.cooldowns ?? sharedRateLimitCooldowns;
   const now = opts.now ?? Date.now;
+  // KEY-POOL membership (quiz-app autopsy 2026-07-17): rungs sharing one base name ('GLM', 'GLM#2'
+  // reportAs 'GLM', …) are keys of the SAME provider service. A SERVICE-level failure (timeout /
+  // "temporarily overloaded") looks identical from every key, so per-key strikes alone let a 5-key
+  // pool burn up to 10 full timeout windows before every rung benched (real turns: 76s/68s/50s).
+  // Pool strikes live under a separate `pool:<base>` cooldown key so a per-key quota 429 on one key
+  // can never bench its siblings (key rotation must keep working for genuine per-key limits).
+  const poolSizes = new Map<string, number>();
+  for (const e of chain) {
+    const base = e.reportAs ?? e.name;
+    poolSizes.set(base, (poolSizes.get(base) ?? 0) + 1);
+  }
+  const isPoolMember = (entry: NamedRunner): boolean => (poolSizes.get(entry.reportAs ?? entry.name) ?? 0) >= 2;
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -319,6 +343,10 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name); // SHARED cooldown — another turn/instance already proved it saturated
           continue;
         }
+        if (isPoolMember(chain[i]) && cooldowns.until(`pool:${reportName}`) > now()) {
+          fellBackFrom.push(name); // POOL cooldown — the provider SERVICE is saturated; every key skips
+          continue;
+        }
         const fatalReason = deadForRun.get(name);
         if (fatalReason !== undefined) {
           // Known-fatal from an earlier turn — skipping saves the whole re-grind (the report's build
@@ -333,6 +361,7 @@ export function makeMultiProviderTurnRunner(
           timeoutStreak.delete(name); // a success resets the consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
+          if (isPoolMember(chain[i])) cooldowns.clear(`pool:${reportName}`); // …and the POOL cooldown (service recovered)
           opts.onProviderUsed?.(reportName, [...fellBackFrom]);
           // Billing Phase 3 — attribute this turn's real tokens to the provider that answered.
           // Best-effort + observational: a throw here must never break a delivered turn.
@@ -356,9 +385,17 @@ export function makeMultiProviderTurnRunner(
             // MORE wall-clock than a 429 (the full timeout window burns before the fallback), so the
             // shared cooldown matters even more here. Same registry, same recovery semantics.
             cooldowns.strike(name, now());
+            // Quiz-app autopsy 2026-07-17: a timeout is SERVICE saturation, not one key's quota — strike
+            // the POOL too, so 2 service-level failures across ANY keys bench the whole provider for the
+            // cooldown window (soft — the same registry recovery brings it back automatically).
+            if (isPoolMember(chain[i])) cooldowns.strike(`pool:${reportName}`, now());
           } else if (isRateLimitProviderError(err)) {
             rateLimitStreak.set(name, (rateLimitStreak.get(name) ?? 0) + 1); // bench after 2 consecutive 429s
             cooldowns.strike(name, now()); // shared memory — concurrent turns/instances stop hammering too
+            // A "service overloaded" 429 is service-wide (every key sees the same saturated backend) —
+            // pool-strike it like a timeout. A per-key quota 429 ("rate limit reached for requests") is
+            // NOT pool-struck: the next key genuinely may have quota left, so rotation must keep working.
+            if (isPoolMember(chain[i]) && isServiceOverloadedError(err)) cooldowns.strike(`pool:${reportName}`, now());
           } else if (isHopelesslyOversizedError(err)) {
             // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
             // Abort now instead of replaying the same doomed multi-megabyte request down the chain.

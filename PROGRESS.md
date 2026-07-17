@@ -17263,3 +17263,39 @@ to trigger the guardian restore; the next report's DATA_LOSS_EVENT counts will c
 1. GLM 429 saturation (infra key pool) — still open.
 2. `edit_file` old_string drift (×3): the model's file view goes stale after successive edits; the whitespace-flexible fallback can't help content drift. Candidate: an anchor/unique-line re-match on failure. Next autopsy.
 3. `Unknown tool: execute` (×2): the cheap model hallucinated a tool name. Candidate: alias common hallucinated names (execute→bash) or a tighter tool-list reminder.
+
+---
+
+## 2026-07-17 — Quiz-app 7-item ledger: ALL root causes DNA-fixed (admin: "unka root cause bhi dna level par fix karo!")
+
+The admin asked for the full mistake list from the quiz-app continue report (59 entries) and then
+mandated root-cause fixes for every item. Ledger: 2 self-heal · 1 workaround · 0 skip · 1 user-visible
+display bug (shipped earlier today as PR #1471) · 2 struggle points · 1 report-clarity defect. Fixes:
+
+- **Pre-flight dep sync (item: react-router-dom self-heal that should never be needed).** ROOT: the
+  well-known-dep reconcile ran ONLY in the end-of-build readiness pass — an INTERRUPTED build (internet
+  cut / credit cut / kill) never reached it, so its package.json could ship missing a dep its own
+  imports need; the next session's dev server crashed on it and an LLM round was burned on
+  `npm install react-router-dom`. FIX: the File Guardian turn-start (routes/agentv3.ts) — which already
+  holds the full durable map + live sandbox map — now runs `applyWellKnownMissingDeps` over the union
+  and writes the reconciled package.json to sandbox + durable store BEFORE the dev server or any model
+  sees the workspace. Same kill switch (`AGENTV3_DEP_RECONCILE=off`); readiness pass still backstops.
+  Regression test encodes the exact quiz-app input (App.tsx imports react-router-dom, package.json lacks it).
+- **POOL cooldown (items: GLM 15-failure workaround + 76s/68s/50s latency struggles + estimate overrun).**
+  ROOT: a SERVICE-level failure (timeout / "429 The service may be temporarily overloaded") looks the
+  same from every API key, but strikes were per-key — a 5-key pool could burn up to 10 full timeout
+  windows before every rung benched (~3 min of the 5.5-min build wasted). FIX
+  (MultiProviderTurnRunner): service-level failures now ALSO strike a shared `pool:<base>` cooldown —
+  2 such failures across ANY keys bench the whole pool for the cooldown window (soft, self-recovering,
+  success clears). A per-key QUOTA 429 ("rate limit reached for requests") deliberately never
+  pool-strikes — key rotation must keep working. New classifier `isServiceOverloadedError` + 6 tests
+  (incl. the exact quiz-app 429 text + single-key byte-for-byte no-op). The GLM per-account throughput
+  ceiling itself stays an OPEN root cause (admin routing/keys decision — rule 6).
+- **llmCalls actual-model attribution (report-clarity defect).** ROOT: `onLlmCall` recorded the
+  REQUESTED model id, so the report said `builtBy: GLM` while every llmCalls row read "claude-haiku…" —
+  two telemetry channels disagreeing (rule 5 honesty). FIX (AgentRunner): record `turn.model ?? model`
+  (TurnResult.model = the runner that actually answered; every runner reports it since Fix 65). 2 tests.
+- **DATA_LOSS_EVENT message math (self-heal wording).** "store holds 27; sandbox listed 27 — restoring
+  1" read self-contradictory (the listings are SETS — the sandbox held different extras). Message now
+  says "…listed 27 but was missing 1 of the stored file(s) — restoring 1". Sandbox ephemerality itself
+  is infra (E2B) — the guardian restore IS the designed systemic answer; nothing further to fix there.

@@ -917,3 +917,52 @@ describe('AgentRunner — step-limit auto-resume', () => {
     }
   });
 });
+
+// Quiz-app autopsy 2026-07-17: the report said `builtBy: GLM` while every llmCalls row was labelled
+// "claude-haiku…" — because onLlmCall recorded the REQUESTED model id, not the one that answered
+// (TurnResult.model from the multi-provider chain). The two telemetry channels must agree.
+describe('onLlmCall — actual-model attribution', () => {
+  function runnerWith(client: { runTurn: (p: unknown) => Promise<unknown> }, onLlmCall: (c: { model: string }) => void) {
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const dispatcher = new ToolDispatcher(actuator, 'ws-llm', state, stream);
+    return new AgentRunner({
+      client: client as never,
+      dispatcher,
+      state,
+      events: stream,
+      model: 'claude-haiku-test',
+      system: 'You are the Architect.',
+      tools: defaultToolCatalog(),
+      onLlmCall: onLlmCall as never,
+    });
+  }
+
+  it('records the model that ACTUALLY answered (a GLM rung), not the requested claude id', async () => {
+    const models: string[] = [];
+    const client = {
+      runTurn: async () => ({
+        text: 'done', toolUses: [], stopReason: 'end_turn',
+        usage: { inputTokens: 5, outputTokens: 3, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+        rawContent: [{ type: 'text', text: 'done' }],
+        model: 'glm-4.7', // the chain's cheap rung answered — this is what the report must say
+      }),
+    };
+    await runnerWith(client, (c) => models.push(c.model)).run('build');
+    expect(models).toEqual(['glm-4.7']);
+  });
+
+  it('falls back to the requested id when the runner does not report its model', async () => {
+    const models: string[] = [];
+    const client = {
+      runTurn: async () => ({
+        text: 'done', toolUses: [], stopReason: 'end_turn',
+        usage: { inputTokens: 5, outputTokens: 3, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+        rawContent: [{ type: 'text', text: 'done' }],
+      }),
+    };
+    await runnerWith(client, (c) => models.push(c.model)).run('build');
+    expect(models).toEqual(['claude-haiku-test']);
+  });
+});

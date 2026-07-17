@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
 
 // The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
 // tests so one test's simulated 429 storm can never bench a provider for an unrelated test.
@@ -428,5 +428,99 @@ describe('hopelessly-oversized prompts abort the ladder (the 2.2M-token reviewer
     const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm2 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
     expect((await r2.runTurn(PARAMS)).text).toBe('c');
     expect(glm2.runTurn).not.toHaveBeenCalled();
+  });
+});
+
+// POOL COOLDOWN (quiz-app autopsy 2026-07-17): the real build burned 76s/68s/50s turns because each
+// GLM KEY had to earn its own strikes while the SERVICE itself was saturated ("429 The service may be
+// temporarily overloaded" + timeouts across different keys). Service-level failures now strike a
+// shared `pool:<base>` cooldown so 2 of them — across ANY keys — bench the whole pool at once. A
+// per-key quota 429 must NEVER pool-strike (rotation to the next key genuinely helps there).
+describe('POOL cooldown — service saturation benches the whole key pool', () => {
+  it('classifies service-overloaded vs per-key quota errors', () => {
+    expect(isServiceOverloadedError(new Error('429 The service may be temporarily overloaded, please try again later'))).toBe(true);
+    expect(isServiceOverloadedError(new Error('503 Service Unavailable'))).toBe(true);
+    expect(isServiceOverloadedError(new Error('overloaded_error'))).toBe(true);
+    expect(isServiceOverloadedError(new Error('429 Rate limit reached for requests'))).toBe(false);
+    expect(isServiceOverloadedError(new Error('500 internal server error'))).toBe(false);
+  });
+
+  it('2 timeouts across DIFFERENT keys bench the pool — the next instance skips every key instantly', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const chain1: NamedRunner[] = [
+      { name: 'GLM', runner: runnerFail('Request timed out.') },
+      { name: 'GLM#2', runner: runnerFail('Request timed out.'), reportAs: 'GLM' },
+      { name: 'CLAUDE', runner: runnerOk('backstop') },
+    ];
+    const r1 = makeMultiProviderTurnRunner(chain1, { cooldowns, now });
+    expect((await r1.runTurn(PARAMS)).text).toBe('backstop'); // key1 + key2 each timeout once → 2 POOL strikes
+    expect(cooldowns.until('pool:GLM')).toBeGreaterThan(now());
+    // A FRESH instance (fresh per-instance streaks — the real heal-gate/fast-lane pattern): with only
+    // per-key strikes each key would burn ANOTHER full timeout window; the pool bench skips them all.
+    const key1b = runnerFail('Request timed out.');
+    const key2b = runnerFail('Request timed out.');
+    const r2 = makeMultiProviderTurnRunner(
+      [{ name: 'GLM', runner: key1b }, { name: 'GLM#2', runner: key2b, reportAs: 'GLM' }, { name: 'CLAUDE', runner: runnerOk('backstop') }],
+      { cooldowns, now },
+    );
+    expect((await r2.runTurn(PARAMS)).text).toBe('backstop');
+    expect(key1b.runTurn).not.toHaveBeenCalled();
+    expect(key2b.runTurn).not.toHaveBeenCalled();
+  });
+
+  it('the REAL quiz-app "service may be temporarily overloaded" 429 pool-strikes like a timeout', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const chain: NamedRunner[] = [
+      { name: 'GLM', runner: runnerFail('429 The service may be temporarily overloaded, please try again later') },
+      { name: 'GLM#2', runner: runnerFail('429 The service may be temporarily overloaded, please try again later'), reportAs: 'GLM' },
+      { name: 'CLAUDE', runner: runnerOk('backstop') },
+    ];
+    await makeMultiProviderTurnRunner(chain, { cooldowns, now }).runTurn(PARAMS);
+    expect(cooldowns.until('pool:GLM')).toBeGreaterThan(now());
+  });
+
+  it('a per-key QUOTA 429 never benches the pool — sibling keys keep serving', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const r = makeMultiProviderTurnRunner(
+      [
+        { name: 'GLM', runner: runnerFail('429 Rate limit reached for requests') },
+        { name: 'GLM#2', runner: runnerOk('from key2'), reportAs: 'GLM' },
+        { name: 'CLAUDE', runner: runnerOk('backstop') },
+      ],
+      { cooldowns, now },
+    );
+    expect((await r.runTurn(PARAMS)).text).toBe('from key2');
+    expect((await r.runTurn(PARAMS)).text).toBe('from key2');
+    expect(cooldowns.until('pool:GLM')).toBe(0); // quota 429s never pool-strike
+  });
+
+  it('a pool-member SUCCESS after the bench expires clears the pool for everyone', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    let t = 1_000_000;
+    const now = () => t;
+    cooldowns.strike('pool:GLM', t);
+    cooldowns.strike('pool:GLM', t); // pool benched
+    expect(cooldowns.until('pool:GLM')).toBeGreaterThan(t);
+    t += 61_000; // bench expired — the pool is probed again
+    const r = makeMultiProviderTurnRunner(
+      [{ name: 'GLM', runner: runnerOk('recovered') }, { name: 'GLM#2', runner: runnerOk('x'), reportAs: 'GLM' }, { name: 'CLAUDE', runner: runnerOk('c') }],
+      { cooldowns, now },
+    );
+    expect((await r.runTurn(PARAMS)).text).toBe('recovered');
+    expect(cooldowns.until('pool:GLM')).toBe(0); // service recovered → pool fully cleared
+  });
+
+  it('a SINGLE-key provider never creates pool state (non-pool behavior byte-for-byte)', async () => {
+    const cooldowns = createRateLimitCooldowns(60_000, 2);
+    const now = () => 1_000_000;
+    const glm = runnerFail('Request timed out.');
+    const r = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r.runTurn(PARAMS);
+    await r.runTurn(PARAMS);
+    expect(cooldowns.until('GLM')).toBeGreaterThan(0); // per-key shared cooldown — unchanged
+    expect(cooldowns.until('pool:GLM')).toBe(0); // no pool entry for a 1-key provider
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -697,6 +697,54 @@ describe('isUnconfiguredTscFileProbe — the malformed single-file typecheck det
     expect(isUnconfiguredTscFileProbe('tsc --build')).toBe(false);
     expect(isUnconfiguredTscFileProbe('tsc --jsx react-jsx src/App.tsx')).toBe(false);
     expect(isUnconfiguredTscFileProbe('vite build')).toBe(false);              // not tsc at all
+  });
+});
+
+describe('isTestOnlyTypecheckFailure — a tsc gate failing ONLY on test files is not an app-build failure', () => {
+  it('excuses a project tsc whose sole error is a test file missing vitest types (the build #4 rootCause)', () => {
+    const out = "src/App.test.tsx(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.\n";
+    expect(isTestOnlyTypecheckFailure('npx --no-install tsc --noEmit 2>&1', out, 'exit status 2')).toBe(true);
+  });
+  it('excuses multiple errors when ALL are in test/spec files', () => {
+    const out = [
+      "src/App.test.tsx(1,38): error TS2307: Cannot find module 'vitest'.",
+      "src/components/x.spec.ts(4,2): error TS2614: Module has no exported member 'App'.",
+      "src/__tests__/util.ts(9,1): error TS2304: Cannot find name 'describe'.",
+    ].join('\n');
+    expect(isTestOnlyTypecheckFailure('tsc --noEmit', out)).toBe(true);
+  });
+  it('does NOT excuse when even ONE error is in shipped app source', () => {
+    const out = [
+      "src/App.test.tsx(1,38): error TS2307: Cannot find module 'vitest'.",
+      "src/App.tsx(307,19): error TS2322: Type 'string' is not assignable to type 'number'.", // real app error
+    ].join('\n');
+    expect(isTestOnlyTypecheckFailure('npx tsc --noEmit', out)).toBe(false);
+  });
+  it('does NOT excuse a non-tsc command, or a tsc failure with no parseable diagnostics', () => {
+    expect(isTestOnlyTypecheckFailure('npm run build', 'src/App.test.tsx(1,1): error TS1: x')).toBe(false); // not tsc
+    expect(isTestOnlyTypecheckFailure('tsc --noEmit', 'some opaque crash, no TS#### lines')).toBe(false); // unparseable
+    expect(isTestOnlyTypecheckFailure('tsc --noEmit', '')).toBe(false);
+  });
+});
+
+describe('deep-test build #4 — a test-file-only tsc failure must NOT be the rootCause of a SUCCESSFUL build', () => {
+  it('records the test-only tsc gate as info (not SANDBOX_CMD_FAILED) and keeps the rootCause honest', () => {
+    const d = new BuildDiagnostics({ now: (() => { let t = 1000; return () => (t += 1000); })() });
+    // The EXACT report command: project gate fails only on App.test.tsx (missing vitest types), app is clean.
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit 2>&1', exitCode: -1, stdout: "src/App.test.tsx(1,38): error TS2307: Cannot find module 'vitest'.\n", stderr: 'exit status 2' });
+    d.finish(true, 'done');
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeUndefined();
+    expect(r.counts.errors).toBe(0);
+    expect(r.rootCause).toBe('Build completed successfully with no problems recorded.');
+  });
+  it('a REAL app type error in the same gate still fails the build (guard is not a blanket tsc excuse)', () => {
+    const d = new BuildDiagnostics({ now: (() => { let t = 1000; return () => (t += 1000); })() });
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit 2>&1', exitCode: -1, stdout: "src/App.tsx(307,19): error TS2322: Type 'string' is not assignable to type 'number'.\n", stderr: 'exit status 2' });
+    d.finish(false);
+    const r = d.report();
+    expect(r.issues.find((i) => i.code === 'SANDBOX_CMD_FAILED')).toBeDefined();
+    expect(r.counts.errors).toBeGreaterThanOrEqual(1);
   });
 });
 

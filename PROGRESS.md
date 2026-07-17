@@ -17416,3 +17416,62 @@ line. Full gate green: frontend tsc ✅, server tsc ✅, vitest 7190 pass ✅.
 `edit_file` stale-view drift (agent's old_string stops matching after its own edits — candidate:
 anchor/unique-line re-match or auto-reread-on-miss); the hallucinated `Unknown tool: execute` seen in
 earlier runs (candidate: alias execute→bash).
+
+---
+
+## 2026-07-17 — Deep-test autopsy #4 (build-test loop): two false verdicts on a SUCCESSFUL build
+
+**Trigger:** admin build report (`088bdd3f-…1784307096093.json`) for Prompt #4 (expense-tracker
+"edit-in-place + search + monthly budget" — designed to stress edit-drift AND re-test old fixes #1/#2/#3).
+Build SUCCEEDED (`ok:true`, GLM-delivered 57 turns, dev server up, "Preview verified — renders
+correctly" at 468s). Yet the report carried TWO false verdicts. This build ran 16:39 UTC — after
+Fix #2 (#1474) and Fix #3 (#1481, live ~16:30) had deployed — so it was a real test of both.
+
+**5-bucket ledger:**
+- ✅ self-healed: sandbox data-loss auto-restore (26 files); GLM ×5 failures fell back cleanly; the
+  agent fixed its own onEdit/handleEdit/id-type mismatches across several tsc iterations.
+- 🔀 worked-around: PROVIDER_FALLBACK ×1 (GLM→next). Recorded as debt (GLM 429s, infra/key-pool).
+- ⏭️ skipped: none material.
+- ❌ still-broken (the two lies): (1) `rootCause` = `tsc --noEmit → exit -1` even though the ONLY
+  diagnostic was `src/App.test.tsx: Cannot find module 'vitest'` (app source clean). (2) FEATURE_COVERAGE
+  "6 features … Present: none" on an app that verifiably rendered.
+- 🥵 struggle points: `edit_file` "old_string not found" (drift, ×1 — recovered via grep+read); a NEW
+  `edit_file` failure "Unterminated string in JSON at position 65536" (a tool-call argument truncated at
+  exactly 64 KB — a large single edit exceeded the arg buffer; auto-recovered with a smaller edit).
+
+**Fix 4a — a `tsc` gate failing ONLY on test files is not an app-build failure (`BuildDiagnostics.ts`).**
+The project-wide `tsc --noEmit` gate exited non-zero solely because the sandbox lacks the test runner's
+types (`App.test.tsx` → TS2307 'vitest'); the app ships without its test files and compiled clean. New
+pure `isTestOnlyTypecheckFailure(command, stdout, stderr)` parses tsc's `path(l,c): error TS####` lines
+and excuses the failure ONLY when it is a tsc typecheck, ≥1 diagnostic parsed, and EVERY diagnostic path
+is a test/spec/`__tests__` file. One non-test diagnostic → still a real failure (a genuine app type
+error still counts). Wired into `recordCommand`'s `failed` computation. Sibling of Fix #3 (that was the
+wrong INVOCATION; this is a correct invocation whose failures are all out-of-app).
+
+**Fix 4b — feature-coverage "Present: none" capture-miss guard (`FeaturePresence.ts`).** Fix #2's
+DOM-timing approach (`isUnrenderedSpaShell` + browseUrl `domcontentloaded`+1800ms) was INSUFFICIENT on
+this bigger app: the capture returned a pre-render/partial DOM that wasn't a recognisable bare shell, so
+every probe read absent. Added a timing-INDEPENDENT semantic backstop in `checkFeaturePresence`: when ≥2
+features were probed and ZERO are present, that all-absent result is the capture-miss signature (a real
+gap is PARTIAL — some present, some missing), so report nothing instead of a wall of false "missing". The
+genuine partial-gap path is untouched (test-locked). Advisory-only, so silence can never hide a real
+failure. This fixes the LIE deterministically at the honesty layer without re-touching the fragile E2B
+capture path.
+
+**Regression tests:** `BuildDiagnostics.test.ts` — the exact test-only tsc output excused; multi-file
+all-test excused; one app error → NOT excused; non-tsc/unparseable → NOT excused; end-to-end: test-only
+gate records info + honest rootCause, real app error still fails. `FeaturePresence.test.ts` — all-absent
+capture suppressed; genuine partial gap still reported. Full gate green: frontend tsc ✅, server tsc ✅,
+vitest ✅ (count in commit).
+
+**OPEN root causes (recorded — deeper/infra, not fixed this pass):**
+1. **Preview-capture render race (the underlying cause of 4b's symptom):** browseUrl's fixed 1800ms
+   settle can still beat a cold Vite dev server's first on-demand transform+mount on a larger app. Real
+   root fix = poll the DOM until the root mount has child content (bounded), instead of a fixed sleep —
+   but that touches the E2B actuator and needs sandbox validation before shipping. 4b makes the REPORT
+   honest regardless; this would make the CAPTURE itself reliable. Also: capture the preview HTML into
+   the diagnostics report when FEATURE_COVERAGE fires, so the next occurrence has evidence.
+2. **`edit_file` stale-view drift** (still recurring, ×1 here) — candidate: auto-reread-on-miss / unique
+   anchor re-match.
+3. **64 KB tool-call argument truncation** — a large single `edit_file` arg is cut at 65536 bytes →
+   "Unterminated string in JSON". Candidate: chunk large edits, or raise/stream the tool-arg buffer.

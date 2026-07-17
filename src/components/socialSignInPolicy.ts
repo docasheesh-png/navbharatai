@@ -43,6 +43,42 @@ export interface MinimalAuthLike {
  * race, not the user — treat as success. Still null after the window ⇒ a genuine user cancel,
  * stop quietly exactly as before. Pure over the injected auth; never throws; always unsubscribes.
  */
+/**
+ * ROOT-CAUSE FIX for the "stuck on the login spinner after returning from Google" hang (admin
+ * 2026-07-17, iPhone): on iOS WKWebView the JS-SDK credential exchange (`signInWithCredential`) can
+ * stall on its persistence write and never settle, so the spinner spun forever and the auth modal
+ * never closed. This settles the native exchange WITHOUT ever hanging the UI:
+ *   • the exchange settles OK within `timeoutMs`            → 'ok'
+ *   • it overruns or rejects, but the sign-in actually LANDED (auth.currentUser now, or via the
+ *     auth listener within `graceMs`)                       → 'ok'  (the exchange promise raced its
+ *                                                                     own auth event — a real SDK race)
+ *   • it overruns/rejects and no session ever appears       → 'failed' (caller surfaces an honest error)
+ * Pure over the injected auth + the caller's exchange promise; never throws; always resolves in
+ * bounded time. Unit-tested with fake promises + a fake auth.
+ */
+export async function settleNativeSignIn(
+  exchange: Promise<unknown>,
+  auth: MinimalAuthLike,
+  timeoutMs = 15000,
+  graceMs = 3000,
+): Promise<'ok' | 'failed'> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('exchange-timeout')), Math.max(0, timeoutMs));
+      exchange.then(
+        () => { clearTimeout(timer); resolve(); },
+        (e) => { clearTimeout(timer); reject(e); },
+      );
+    });
+    return 'ok';
+  } catch {
+    // Overran or failed — but the session may have landed anyway (the SDK race). Check now, then briefly.
+    if (auth.currentUser) return 'ok';
+    const landed = await waitForSignedInUser(auth, graceMs);
+    return landed ? 'ok' : 'failed';
+  }
+}
+
 export function waitForSignedInUser(auth: MinimalAuthLike, graceMs = 2500): Promise<unknown | null> {
   if (auth.currentUser) return Promise.resolve(auth.currentUser);
   return new Promise((resolve) => {

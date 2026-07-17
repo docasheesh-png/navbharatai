@@ -6,6 +6,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
+import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
 import { detectChecks, parseCheckOutcome } from './crossLangCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
@@ -1977,6 +1978,30 @@ export class ToolDispatcher {
           (stderr ? `\n[stderr tail]\n${stderr.slice(-800)}` : '');
         this.state?.appendTerminal(detail);
         return detail;
+      }
+
+      case 'typecheck': {
+        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) so a
+        // polyglot app's non-TS code is type/compile-checked too. Detection + parsing are pure
+        // (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a missing toolchain
+        // reports "could not run", never a fake pass. (TS is already covered by the tsc gate.)
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        const configs: Record<string, string> = {};
+        for (const cfg of ['pyproject.toml', 'requirements.txt', 'requirements-dev.txt']) {
+          try { configs[cfg] = await this.actuator.readFile(this.workspaceId, cfg); } catch { /* absent */ }
+        }
+        const plans = detectTypecheckPlan(files, configs);
+        if (plans.length === 0) return 'typecheck: no Python or Java sources detected — nothing beyond tsc to type-check.';
+        const outcomes: TypecheckOutcome[] = [];
+        for (const plan of plans) {
+          let r: { exitCode: number; stdout: string; stderr: string };
+          try { r = await this.actuator.runCommand(this.workspaceId, plan.command); }
+          catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
+          outcomes.push(parseTypecheckOutcome(plan.lang, r.exitCode, r.stdout, r.stderr));
+        }
+        const failing = outcomes.filter((o) => o.ran && !o.ok);
+        if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
+        return typecheckSummary(outcomes);
       }
 
       case 'code_graph': {

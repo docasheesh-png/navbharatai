@@ -425,6 +425,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'typecheck',
+      description:
+        "Type/compile-check the app's NON-TypeScript code (tsc already covers TS/JS). For a polyglot app it " +
+        'auto-detects Python (runs mypy, or a py_compile syntax check) and Java (compiles via Maven/Gradle/javac) ' +
+        'in the sandbox and reports honest per-language error counts + the first errors. If a toolchain is not ' +
+        'available it says the check could not run — never a fake "clean". No arguments. Run it on a full-stack ' +
+        'app with a Python/Java backend before declaring it verified.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'find_dead_code',
       description:
         'Find built-but-unwired modules — files that NOTHING imports and that are not entry points, tests, ' +
@@ -1122,6 +1132,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tests',
   'generate_e2e',
   'run_tests',
+  'typecheck',
   'find_dead_code',
   'architecture_map',
   'api_graph',

@@ -17475,3 +17475,56 @@ vitest ✅ (count in commit).
    anchor re-match.
 3. **64 KB tool-call argument truncation** — a large single `edit_file` arg is cut at 65536 bytes →
    "Unterminated string in JSON". Candidate: chunk large edits, or raise/stream the tool-arg buffer.
+
+---
+
+## 2026-07-17 — Deep-test autopsy #5 (build-test loop): edit-drift step-burn on a large file → 120-step cap
+
+**Trigger:** admin build report (`5140e8d8-…1784309888319.json`) for Prompt #5 (recurring expenses +
+CSV export/import + self-implemented SVG charts — designed to stress edit-drift + the 64 KB edit + old
+fixes). Unlike #3/#4 this was NOT a false verdict — it was a REAL struggle: the build hit the **120-step
+limit** and finished `ok:true` only as "verified READY 84/100 — send another message to keep improving".
+The reviewer ALSO caught a genuine logic bug (recurring filter matched by `date.startsWith(month)` instead
+of a true monthly rule) → that legitimately became the rootCause. The judge working = the system healthy.
+
+**5-bucket ledger:**
+- ✅ self-healed: sandbox recycle auto-restore (26 files); endgame-repair passes cleared 13 compile errors
+  from the duplicate-JSX mess; the app ended compiling + rendering.
+- 🔀 worked-around: none material (GLM led all 135 turns, no fallback).
+- ⏭️ skipped: search + charts flagged by readiness as "not found" (likely genuinely-incomplete under the
+  step cap, not a capture miss — no FEATURE_COVERAGE "Present: none" this time, so Fix 4b held).
+- ❌ still-broken: reviewer-caught recurring-logic bug shipped (honest rootCause — the judge did its job).
+- 🥵 struggle points (the dominant signal): the SVG-charts feature made App.tsx balloon to 600+ lines;
+  the weak-tier model repeatedly misplaced chart render-fns inside JSX, created duplicate JSX it then
+  couldn't cleanly remove, and thrashed — **8 `edit_file` failures** (7× "old_string not found" drift +
+  1× "not unique") plus many read_file re-reads — burning the step budget until it hit 120.
+
+**Root cause fixed (DNA-level, `ToolDispatcher.ts`):** the `edit_file` "old_string not found" error only
+ever showed the **first 1500 chars of the file** (imports + interface). On a 600-line file with the edit
+target near the end, that preview is useless → the agent spent an extra `read_file` to find the region,
+then re-drifted, then failed again — the exact step-burn that pushed this build into its 120-step cap. New
+pure `nearestEditRegion(existing, oldStr)` anchors the preview to the CLOSEST real line (using the
+longest distinctive lines of the intended edit as anchors) and shows a bounded window around it with the
+line range, so the model can copy the correct current text in ONE retry. Copy-safe (no line-number
+prefixes inside the fence). Falls back to an honestly-labelled head when the target is nowhere in the file.
+This changes ONLY the error feedback — matching behaviour is untouched, so it can never mis-apply an edit
+(safe under the 0.01%-doubt rule). It attacks the real "drift wastes steps" root without pretending to fix
+the model's stale-view drift itself (rule 6 — see open item).
+
+**Regression tests (`ToolDispatcher.test.ts`):** a not-found on a 600-line file previews the TARGET region
+(shows `categoryTotals`, not the `import` head) with a stated line range; `nearestEditRegion` anchors +
+states the range, falls back to an honest head when the target is absent, and produces a copy-safe fence.
+Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅ (count in commit).
+
+**OPEN root causes (recorded — deeper, not fully closable in the tool):**
+1. **Model stale-view drift itself** (the upstream cause): a weak-tier model editing a huge single file
+   works from a stale mental model. Real deeper mitigations (future slices, need care): auto-reread the
+   target region on a miss and feed it back automatically; or nudge the builder to split a >~400-line
+   component into files so no single edit target is buried. nearestEditRegion makes each miss cheap; these
+   would reduce misses.
+2. **64 KB tool-call argument truncation** (from build #4, not re-triggered here) — still open.
+3. **AGENT_NOTE debugging narration counted as build errors** — this build showed counts.errors=12 on a
+   successful build, most being the agent's own prose ("there's a syntax error", "the import error is
+   fixed"). Partially real (endgame-repair markers). A future honesty slice: AGENT_NOTE narration should
+   not inflate the error COUNT; keep objective signals (TOOL_ERROR/SANDBOX_CMD_FAILED/BUILD_ERROR) as the
+   error tally. Recorded, not fixed this pass (keeping this PR focused on the dominant struggle).

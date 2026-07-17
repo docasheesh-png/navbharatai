@@ -141,7 +141,7 @@ import { computePlanProgress } from '../AgentV3/PlanProgress';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectModeEnabled, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
-import { saveProjectPlan, loadProjectPlan } from '../AgentV3/ProjectPlanStore';
+import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { analyzePreviewHtml, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
@@ -229,14 +229,16 @@ import {
   saveWorkspaceMemory,
   restoreWorkspaceMemory,
   loadWorkspaceMemory,
+  deleteWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
+import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
@@ -2205,7 +2207,21 @@ export function registerAgentV3Routes(app: Express): void {
         const rec = await store.get(cid).catch(() => null);
         const access = conversationAccess(rec, userId);
         if (access === 'ok') {
-          await store.remove(cid);
+          // GA-1 — cascade purge: delete the conversation AND every per-workspace store it owned
+          // (files/plan/memory/diagnostics/deployment). conversationId === workspaceId (#837), so the
+          // shallow store.remove used to orphan all of that data forever. Best-effort; never throws.
+          const purge = await purgeWorkspace({
+            removeConversation: (id) => store.remove(id),
+            purgeFiles: purgeWorkspaceFiles,
+            deletePlan: deleteProjectPlan,
+            deleteMemory: deleteWorkspaceMemory,
+            deleteDiagnostics: deleteDiagnostics,
+            deleteDeployment: (id) => deploymentStore.delete(id),
+          }, cid);
+          if (!purge.ok) {
+            const failed = purge.stores.filter((s) => !s.ok).map((s) => s.store).join(', ');
+            console.warn(`[AGENTV3] purgeWorkspace ${cid}: some stores failed (${failed}) — conversation removed, orphans may remain.`);
+          }
           removed = true;
         } else if (access === 'forbidden') {
           forbidden = true;

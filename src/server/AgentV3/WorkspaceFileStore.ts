@@ -182,6 +182,33 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
 }
 
 /**
+ * GA-1 — FULL purge of a workspace's persisted files: delete every doc in the `files` subcollection
+ * (in batches) AND the metadata doc, so deleting a project leaves NO orphaned file docs behind (the
+ * shallow conversation delete used to orphan this whole subcollection forever). Best-effort; never
+ * throws; a no-op when Firestore is unavailable (VITEST).
+ */
+export async function purgeWorkspaceFiles(workspaceId: string): Promise<void> {
+  const db = getDb();
+  if (!db || !workspaceId) return;
+  try {
+    const root = db.collection(COLLECTION).doc(workspaceId);
+    const filesCol = root.collection('files');
+    // Delete the subcollection in bounded batches (a subcollection is NOT removed by deleting its parent).
+    for (let guard = 0; guard < 10_000; guard++) {
+      const snap = await filesCol.limit(BATCH).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      if (snap.size < BATCH) break;
+    }
+    await root.delete();
+  } catch (e) {
+    notePersistenceFailure('workspace_files', 'write', e);
+  }
+}
+
+/**
  * Load the last persisted file set for a workspace as { path: content }. Returns {} when absent.
  * Only paths in the authoritative metadata list are returned (so deleted files stay deleted).
  * Never throws.

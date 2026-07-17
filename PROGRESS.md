@@ -17119,3 +17119,15 @@ the ACTUAL cap that was hit. Guards: never for chat runs, never when NOTHING was
 an abort; the wall-clock watchdog still rules over everything, so a runaway cannot loop. 3 behavior
 tests (extends-and-finishes; off-switch restores the old death byte-for-byte; built-nothing never
 extends). Slice 4 (tsc --watch) remains queued as task #63.
+
+---
+
+## 2026-07-17 — Endgame Slice 4: INCREMENTAL tsc (fast, honest compiler feedback)
+
+`endgameIo.runTsc` (used by the 25-step trend checkpoint + every endgame verify) now runs
+`tsc --noEmit --incremental --tsBuildInfoFile /tmp/agentv3.tsbuildinfo`: first run ~2s, every
+subsequent peek ~0.3-0.8s — near-free feedback, so compile errors are caught at checkpoint cadence
+instead of piling up. The cache lives in /tmp (ephemeral; never collected into the durable store).
+**Watch-mode was deliberately REJECTED** (the task's original idea): a `tsc --watch` log read
+mid-recompile reports a STALE "clean" — a lying diagnostic breaks rule 2; the synchronous
+incremental run is always honest about the current tree. All four endgame slices (#60-63) done.

@@ -1443,3 +1443,20 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).not.toContain('never imported/defined');
   });
 });
+
+// Slice 4 (2026-07-17) — endgameIo.runTsc uses INCREMENTAL tsc (cache in /tmp, never the workspace)
+// so trend-checkpoint peeks and endgame re-verifies are near-free after the first run. Watch-mode was
+// deliberately rejected: a watcher log read mid-recompile reports a stale verdict.
+describe('ToolDispatcher.endgameIo — incremental tsc', () => {
+  it('runs tsc with --incremental and keeps the cache OUT of the workspace (/tmp)', async () => {
+    const act = new FakeActuator();
+    const commands: string[] = [];
+    act.runCommand = async (_w: string, command: string) => { commands.push(command); return { exitCode: 0, stdout: 'ok', stderr: '' }; };
+    const d = new ToolDispatcher(act, 'ws-1', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'vite-react');
+    await d.endgameIo().runTsc();
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('--incremental');
+    expect(commands[0]).toContain('--tsBuildInfoFile /tmp/agentv3.tsbuildinfo');
+    expect(commands[0]).toContain('--noEmit');
+  });
+});

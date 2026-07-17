@@ -304,8 +304,12 @@ safely edit, or truly verify it).
   (#1346, 2026-07-14, `apiWiringSummary`), so every build is wiring-checked, not only on demand. **DB schema/FK
   graph ✅:** `schemaGraph.ts` — `analyzeSchemaGraph` (Prisma, #1350) + `analyzeSqlSchema` (SQL-DDL foreign
   keys, #1355) flag a relation/FK to a model/table the schema never defines (breaks `prisma migrate` / the SQL
-  migration), advisory in `evaluate`, conservative (no false positives). **Remaining ❌:** change-propagation
-  blast-radius (given a changed model/endpoint, what depends on it).
+  migration), advisory in `evaluate`, conservative (no false positives). **Change-propagation blast-radius
+  COMPLETE (#1438, 2026-07-16):** all four dimensions now answer "what depends on X" — model/table
+  (`schemaGraph.schemaDependents` + `schema_graph model=`), symbol (`codeGraph.referencesOf`), file
+  (`codeGraph.impactOf` / `WorkspaceMemory.impactRadius`), and now ENDPOINT (`apiGraph.endpointDependents` +
+  the `api_graph endpoint="METHOD /path"` drill-down — the frontend call sites that break if a route is
+  renamed/removed). **GA-5 COMPLETE.**
 - **GA-6** 🟡 — Persistent Engineering Memory. **Producer SHIPPED (#1363, 2026-07-14):** the tech-debt register
   (dedup + age + prioritize, Firestore-backed) had no automatic writer, so it stayed empty; `findingsToDebt`
   now funnels each build's unfixed security findings into it (`recordDebt`), + `engineeringMemoryDigest`.
@@ -357,7 +361,11 @@ safely edit, or truly verify it).
 - **GA-13** 🟡 — Supply-chain & threat: real CVE/OSV vuln scanner + threat-modeling.
   **SCANNER SHIPPED (#1330, 2026-07-13):** `VulnScanner` + the `scan_vulnerabilities` tool scan deps against
   OSV.dev (exact lockfile versions or approx ranges) and report vulnerable packages + advisory IDs — honest
-  "scan unavailable" when OSV is unreachable, never a fake all-clear. **Remaining ❌:** threat-modeling.
+  "scan unavailable" when OSV is unreachable, never a fake all-clear. **Threat-modeling SHIPPED (#1457,
+  2026-07-16):** `threatModelAnalysis.ts` + the `threat_model` tool scan the app's OWN code (high-precision,
+  STRIDE-flavoured) for a client-shipped secret, wildcard-CORS+credentials, SQL string-interpolation, XSS via
+  `dangerouslySetInnerHTML` from a non-constant, and eval on a non-literal — advisory in `evaluate`. **GA-13
+  COMPLETE.**
 - **GA-14** 🟡 — CI/CD intelligence. GENERATION exists: `generate_deploy_artifacts` writes a GitHub Actions
   `ci.yml` + Dockerfile + docker-compose, and (#1284/#1285/#1286, 2026-07-13) all three are now
   **package-manager-correct** — the CI workflow, Dockerfile, and README use the project's real manager
@@ -393,9 +401,18 @@ safely edit, or truly verify it).
   readiness gate. Earlier ❌ was stale. (A dedicated Pro-Chat surface for it remains a future wiring task.)
 
 ### 2D · Quality-by-default scaffolding
-- **U-1** 🟢❌ — Deterministic build harness (pin model/seed, signed manifest) + `LintGate` beside `TscGate`.
-- **U-2 / Cap-3** 🟢🟡 — App-Scaffold-Defaults engine: SEO/OG + PWA manifest+SW + a11y + a
-  starter test **by default** every build.
+- **U-1** 🟢✅ — Deterministic build harness. **SHIPPED (#1440, 2026-07-16):** LintGate already ran beside
+  TscGate; the gap was the signed manifest — `BuildManifest.ts` records the deterministic routing inputs
+  (model/effort/power/prompt-hash/framework) + a sha256 hash of every written file, HMAC-signed by
+  `SECRET_ENCRYPTION_KEY` (honest "unsigned" when absent — never a fake seed the providers ignore), attached
+  to the build diagnostics report. **U-1 COMPLETE.**
+- **U-2 / Cap-3** 🟢✅ — App-Scaffold-Defaults engine: SEO/OG + PWA manifest+SW + a11y + a
+  starter test **by default** every build. **SHIPPED (#1451, 2026-07-16):** the route now force-runs
+  `planAppDefaults` after every successful build (like the auto-test pass) instead of hoping the model calls
+  the tool; the generator gained a real offline-first **service worker** + registration, a maskable **SVG
+  icon** the manifest references (installable), and a **theme-color** — all pure + idempotent, never
+  clobbering an existing file. Every app now ships as an installable offline PWA with SEO by default. **U-2
+  COMPLETE.**
 - **Cap-2** 🟢🟡 — Ship a starter test by default + E2E (Playwright) generation (`generate_tests`
   is on-request today).
 - **U-4** 🟢✅ — Verified recipe modules — COMPLETE (2026-07-14). Deterministic, unit-tested BYO-key
@@ -412,13 +429,22 @@ safely edit, or truly verify it).
 - 🟢❌ Runtime smoke tests (hit routes/API, auth, DB reads) · hydration validation · post-deploy liveness check.
 - 🟢❌ Deterministic dependency reconciler (undeclared import → `package.json`).
 - 🟢🟡 Wire eslint + prettier + `npm audit`/CVE + license-validation gates into the AgentV3 pipeline.
+  **License slice SHIPPED (#1444, 2026-07-16):** `SBOMGenerator.licenseAdvisorySummary` + the `check_licenses`
+  tool flag strong-copyleft (GPL/AGPL) deps (on-demand parity with the CVE `scan_vulnerabilities` tool).
+  ESLint gate + OSV CVE already exist. **Remaining ❌:** auto-running prettier + CVE + license at BUILD-END
+  (vs on-demand) — a small AgentRunner-gate wiring slice.
 - 🟢❌ Perf/bundle-size + Lighthouse gate (blocker for complex apps) · a11y as a blocker for complex apps.
 - 🟢❌ Task-dependency graph (`TodoItem.dependsOn`) for correct big-app build order.
 - 🟢❌ Real interactive clarification round (bounded `ask_user` tool for complex apps).
 
 ### 2F · Toolchain & monorepo
 - **D11** 🟢❌ — Toolchain version pinning (`.nvmrc` / JDK 17 / Python + lockfile integrity).
-- **D12** 🟢⚠️ — Monorepo task-runners (turborepo / nx / pnpm-yarn workspaces, not just npm).
+- **D12** 🟢✅ — Monorepo task-runners (turborepo / nx / pnpm-yarn workspaces, not just npm).
+  **SHIPPED (#1449, 2026-07-16):** `monorepoAnalysis.ts` detects the tool (turbo/nx/rush/lerna/pnpm-workspaces/
+  yarn-npm-workspaces) + resolves the real package dirs, and advises the correct scoped install/build/test
+  (`routePackageCommand` → `turbo run --filter` / `nx run` / `pnpm --filter` / `yarn workspace` / `npm -w`),
+  advisory in `evaluate`. Zero false positives (a single-package repo / nested lockfiles are not a monorepo).
+  **Remaining (minor):** physically executing the live E2B actuator in a subpackage cwd.
 - **P-PIPE-runtime** 🟢❌ — Multi-runtime SDK + package-manager detection (Bun/Python/Java/Rust;
   npm is hard-coded today). Also **AB-6** polyglot build detection (Gradle/webpack).
 

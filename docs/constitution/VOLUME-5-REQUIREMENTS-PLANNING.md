@@ -349,6 +349,104 @@ upfront shortcut is not taken (the Compensation Invariant).
 
 ---
 
+# Part X — Requirement Model, Traceability & Failure Prevention
+
+*This part integrates a second external requirements spec. Per the redesign discipline
+and that spec's own consistency requirement (extend, don't replace; identify and
+resolve conflicts; reuse terminology): its genuinely-additive pieces are integrated
+here, its contradictions corrected, its speed-killing demands rejected with reasoning,
+and one genuine new gap adopted. It **extends** Frameworks 1–6; it does not weaken the
+speed reconciliation.*
+
+## X.1 The Requirement Descriptor — complexity-gated, never a waterfall register
+
+A requirement is described by a schema whose **depth scales with the Planning Budget**
+(Framework 2) — a formal per-requirement register on *every* app is the waterfall trap
+this Constitution rejects (Least-Power, Vol 1 PLAN-06). The schema is never heavier than
+the budget warrants:
+
+| Planning Budget | Requirement descriptor |
+|---|---|
+| **P-Light** `[LIVE]` | just a **named core feature** tracked by feature-presence — no ID ceremony (e.g. "quiz-play", "score-screen") |
+| **P-Moderate** `[LIVE]`/`[ASPIRATIONAL]` | name + intent link + functional description + acceptance expectation + dependencies |
+| **P-Deep** `[ASPIRATIONAL]` | the full descriptor: **id · category · priority** (Framework 1 tier + ranking) **· source · user-intent · functional · non-functional · acceptance criteria · dependencies · risks** (Part V table) **· edge cases · verification strategy** (Framework 5) **· completion definition** (DoD, C20) |
+
+**Rule.** A Unique-ID register on a simple app is *over-planning — a defect* (Framework 2,
+symmetric rule). The full 13-field descriptor applies only at P-Deep, where the app's
+scale earns it.
+
+## X.2 The Traceability Invariant `[LIVE]`/`[ASPIRATIONAL]`
+
+Traceability is **bidirectional** — reusing existing laws, stated as one invariant:
+
+- **Intent → feature (nothing missing).** Every requested core feature is present in the
+  delivered app (feature-presence, VERIFY-07). A missing requested feature is a build
+  failure.
+- **Feature → intent (nothing extra).** Nothing is built that the user did not ask for —
+  no scope creep, no hallucinated requirements (PLAN-10, scope bounded to the request).
+- **Decision → evidence.** Every non-trivial implementation decision has planning
+  evidence recorded (PLAN-11).
+
+`[LIVE]` via feature-presence + scope-bounding; a *formal* per-task traceability record
+is `[ASPIRATIONAL]` and applies only at P-Deep (a P-Light app does not earn a trace
+ledger).
+
+## X.3 The additional planning laws — mapped, corrected, or newly adopted
+
+The second spec's ten planning laws, resolved against the Constitution:
+
+| Spec law | Resolution |
+|---|---|
+| Never implement before understanding | **Corrected** → understand *enough per stage* (Framework 6), not everything upfront |
+| Never assume missing requirements | **Superseded** → the Assumption Governance Framework (Framework 1): assume by governed tier, never at Tier 3 |
+| Every requirement verifiable | Compensation Framework (Framework 5) |
+| Every feature has acceptance criteria | Framework 5 / C19 (`[LIVE]` partial via feature-presence; explicit criteria `[ASPIRATIONAL]`) |
+| Every dependency identified | Dependency graph engine (C13, Vol 3 §25) |
+| Every hidden assumption exposed | Framework 1 — Tier-1+ assumptions MUST be stated |
+| Every ambiguity resolved or documented | Framework 3 — resolve by default+state, or ask |
+| Every plan reviewable | The plan is recorded + auditable (Observability, Vol 3 §17) |
+| Every task traces to user intent | X.2 Traceability Invariant |
+| Every implementation decision has planning evidence | X.2 / PLAN-11 |
+
+## X.4 Failure Prevention — each failure mapped to its mechanism
+
+| Failure to prevent | Prevention mechanism | Status |
+|---|---|---|
+| **Scope creep** | scope bounded to the request (PLAN-10) + Traceability (X.2) | `[LIVE]` |
+| **Missing features** | feature-presence on the rendered app (VERIFY-07) | `[LIVE]` |
+| **Contradictory requirements** | runtime gate (runs or not) + a consequential conflict is surfaced | `[LIVE]`; formal conflict detection `[ASPIRATIONAL]` |
+| **Hallucinated requirements** | Traceability feature→intent (nothing untraceable is built) | `[LIVE]` partial; formal check `[ASPIRATIONAL]` |
+| **Incomplete planning** | Planning Budget — signals promote depth (Framework 2) | `[LIVE]` |
+| **Circular dependencies** | **a cycle-detection pass over the dependency graph** — a genuine new gap adopted from this spec | `[ASPIRATIONAL]` |
+| **Unverifiable features** | the Compensation Invariant — no downstream catcher ⇒ handle upstream (Framework 5) | `[LIVE]` (invariant) |
+| **Unrealistic implementation plans** | complexity/budget adequacy + adaptive step cap (Framework 2, PERF-10) | `[LIVE]` |
+| **Architecture before planning** | the shared contract precedes any sub-agent (PLAN-07) — ordering enforced | `[LIVE]` |
+| **Coding before planning approval** | the **internal Planning Gate** (Vol 4) — *not* a human sign-off ceremony (see X.5) | `[LIVE]` |
+
+## X.5 Rejected with reasoning: the "human approval before coding" ceremony
+
+The spec's "coding before planning approval" implies a **formal approval step** before
+implementation. **This is rejected for the general case**, because:
+
+1. **It kills Goal A.** A human/formal sign-off before every build is precisely the
+   slow, chatty, waterfall experience this Constitution exists to avoid — it would make
+   NavBharatAI feel slower than Lovable/Bolt, against the AIM.
+2. **It is unnecessary.** Correctness is guaranteed *downstream* by the Compensation
+   Invariant + the hard readiness/CI barriers (Framework 5, Vol 4), not by an upfront
+   gate ceremony. Approval-before-coding is *prediction* rigor; we spend rigor on
+   *evidence* (Principle 2).
+
+**The correct principle:** the "approval" that must precede coding is the **internal
+Planning Gate** (Vol 4) — the plan + shared contract must exist — which is deterministic
+and instant, not a human sign-off. A genuine **human** approval is required only at the
+Tier-3 fork (dangerous/irreversible — Framework 1) or a genuinely large P-Deep project
+the user explicitly wants to review — never for an ordinary build. *Trade-off:* we
+accept that a rare wrong plan reaches code, because the downstream gates catch its
+consequences cheaply and iteration is fast (Principle 1) — a far better trade than
+taxing every build with an approval ceremony.
+
+---
+
 # Closing
 
 NavBharatAI understands *enough*, assumes *by governed tier*, plans *proportional to

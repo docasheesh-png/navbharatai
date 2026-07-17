@@ -25,6 +25,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } from './ArchitectureAnalysis';
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
+import { injectAppSignature, hasAppSignature } from './appSignature';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
@@ -237,6 +238,50 @@ export class ToolDispatcher {
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
   private previewFails = 0;
   private previewGaveUp = false;
+
+  /**
+   * "made by NavBharatAI" app-signature toggle (admin 2026-07-16). Default ON (the viral-growth
+   * mechanic): every built app gets a bottom-right badge linking to navbharatai.com. The user can
+   * turn it OFF from Settings → General; the build request carries that choice and the composition
+   * root sets it here before the build runs. See appSignature.ts + injectAppSignatureIntoIndexHtml.
+   */
+  private signatureEnabled = true;
+
+  /** Set by the composition root from the build request's `appSignature` flag (default ON). */
+  setSignatureEnabled(enabled: boolean): void {
+    this.signatureEnabled = enabled !== false;
+  }
+
+  /**
+   * Bake the "made by NavBharatAI" badge into the app's HTML entry so it ships with the live
+   * preview AND any later deploy (both serve the workspace files). Idempotent (never a second
+   * badge) and best-effort — a failure here must NEVER break a build or block the preview (first
+   * absolute rule). No-op when the user turned the signature OFF or the app has no HTML entry
+   * (a pure API/back-end build has no page to sign). Persists through onFileWrite too, so the
+   * durable store (and therefore a deploy) sees the signed index.html, not just the live sandbox.
+   */
+  private async injectAppSignatureIntoIndexHtml(): Promise<void> {
+    if (!this.signatureEnabled) return;
+    const candidates = ['index.html', 'public/index.html'];
+    for (const htmlPath of candidates) {
+      let html: string;
+      try {
+        html = await withTimeout(this.actuator.readFile(this.workspaceId, htmlPath), 5_000, 'signature-read');
+      } catch {
+        continue; // no such HTML entry — try the next candidate
+      }
+      if (!html || hasAppSignature(html)) return; // already signed (idempotent) or empty
+      const signed = injectAppSignature(html);
+      if (signed === html) return;
+      try {
+        await this.actuator.writeFile(this.workspaceId, htmlPath, signed);
+        try { this.onFileWrite?.(htmlPath, signed); } catch { /* durable-store record is best-effort */ }
+      } catch {
+        /* couldn't write (read-only FS / sandbox gone) — leave the app unsigned rather than fail */
+      }
+      return; // signed the first HTML entry we found
+    }
+  }
 
   /**
    * The structured readiness verdict from the most recent `evaluate` run. Captured as a
@@ -2822,6 +2867,11 @@ export class ToolDispatcher {
           return `WARNING: port ${port} did not respond.${healNote} Preview NOT published. If dependencies were still installing, you may call update_preview ONE more time; do not retry beyond that.`;
         }
         this.previewFails = 0;
+        // Bake the "made by NavBharatAI" badge into the app's index.html the moment the preview is
+        // genuinely up (port verified) — so the very preview the user sees, and any later deploy of
+        // these same files, carries the signature. Gated by the user's Settings → General toggle;
+        // best-effort so it can never break/block a working preview.
+        await this.injectAppSignatureIntoIndexHtml();
         this.events?.emit({ type: 'preview', url, ts: Date.now() });
         return `Live preview published at ${url} (port ${port} verified UP)`;
       }

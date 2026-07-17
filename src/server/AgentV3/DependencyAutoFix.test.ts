@@ -109,3 +109,19 @@ import jwt from 'jsonwebtoken';`,
     expect(() => applyWellKnownMissingDeps({})).not.toThrow();
   });
 });
+
+// Quiz-app autopsy 2026-07-17: the interrupted original build shipped a package.json WITHOUT
+// react-router-dom while App.tsx imported it — the next session's dev server crashed on it and an
+// LLM round was spent on `npm install react-router-dom`. This is the exact input the (now also
+// pre-flight, guardian-site) reconcile must fix deterministically.
+describe('quiz-app regression — react-router-dom imported but missing from package.json', () => {
+  it('adds react-router-dom to dependencies', () => {
+    const files = {
+      'package.json': JSON.stringify({ name: 'quiz', dependencies: { react: '^18.0.0', 'react-dom': '^18.0.0' } }),
+      'src/App.tsx': `import { BrowserRouter, Routes, Route } from 'react-router-dom';\nexport default function App() { return null; }`,
+    };
+    const r = applyWellKnownMissingDeps(files);
+    expect(r.added.map((a) => a.package)).toContain('react-router-dom');
+    expect(JSON.parse(r.files['package.json']).dependencies['react-router-dom']).toBeTruthy();
+  });
+});

@@ -231,6 +231,7 @@ import {
   loadWorkspaceMemory,
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
+import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -5336,9 +5337,13 @@ export function registerAgentV3Routes(app: Express): void {
             // in the report's dataLossEvents so the WHY is diagnosable after the fact, not guessed.
             try {
               const existingCount = Object.keys(existing.files).length;
+              // Message math made explicit (quiz-app autopsy 2026-07-17): "store holds 27; sandbox
+              // listed 27 — restoring 1" read as self-contradictory. The listings are SETS, not just
+              // counts — the sandbox can list N files while still MISSING some stored ones (it may
+              // hold different extras). Say the missing count in plain words.
               buildDiag.recordDataLoss(
                 existingCount === 0 ? 'sandbox recycled/empty' : 'files missing from sandbox',
-                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
+                `durable store holds ${Object.keys(saved).length} file(s); the live sandbox listed ${existingCount} but was missing ${plan.count} of the stored file(s) — restoring ${plan.count} (mode: ${plan.mode}). The durable store + GitHub history retained everything; only the ephemeral sandbox lost state.`,
               );
             } catch { /* diagnostics are best-effort */ }
             await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
@@ -5359,6 +5364,29 @@ export function registerAgentV3Routes(app: Express): void {
                 : `🛡️ Recovered ${plan.count} file(s) that were missing — pulled back from history.`,
               ts: Date.now(),
             });
+          }
+          // PRE-FLIGHT DEP SYNC (quiz-app autopsy 2026-07-17): the well-known-dep reconcile used to
+          // run ONLY inside the end-of-build readiness pass — an INTERRUPTED build (internet cut,
+          // credit cut, kill) never reached it, so its package.json could ship without a dependency
+          // its own imports need (react-router-dom in the real case) and the NEXT session's dev
+          // server crashed on it, costing an LLM self-heal round. The guardian turn-start already
+          // holds the full durable map + live sandbox map in memory, so reconciling here is free —
+          // deterministic, before the dev server or any model sees the workspace. Same kill switch
+          // as the readiness-pass reconcile (AGENTV3_DEP_RECONCILE=off); readiness still backstops.
+          if (process.env.AGENTV3_DEP_RECONCILE !== 'off') {
+            try {
+              const union = { ...saved, ...existing.files, ...plan.restore };
+              if (typeof union['package.json'] === 'string') {
+                const depRes = applyWellKnownMissingDeps(union);
+                if (depRes.added.length) {
+                  const newPkg = depRes.files['package.json'];
+                  await writeWorkspaceFiles(actuator, workspaceId, { 'package.json': newPkg });
+                  await mergeWorkspaceFiles(workspaceId, { 'package.json': newPkg }).catch(() => {});
+                  state.recordFileChange({ path: 'package.json', kind: 'modify' }, 'architect');
+                  events.emit({ type: 'narration', agent: 'architect', text: `🔧 Added ${depRes.added.length} missing dependency(ies) to package.json (${depRes.added.map((d) => d.package).join(', ')}) so the app installs and runs.`, ts: Date.now() });
+                }
+              }
+            } catch { /* best-effort — the readiness-pass reconcile still backstops */ }
           }
         } catch { /* best-effort — the guardian never blocks a build */ }
         // Real git repo → real checkpoints/History/restore (best-effort on

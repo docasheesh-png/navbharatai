@@ -399,6 +399,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_e2e',
+      description:
+        'Scaffold an end-to-end (Playwright) test setup for the running app: a playwright.config.ts that ' +
+        'starts your dev server, plus an e2e/smoke.spec.ts that loads the app in a REAL browser and asserts ' +
+        'it renders — failing on a blank screen, a build-error overlay, or a console/page error (render, not ' +
+        'just compile). Adds one nav test per known route, and adds @playwright/test + the test:e2e scripts to ' +
+        'package.json (never clobbering existing files). Use it to give a real app a runnable E2E smoke net.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          app_name: { type: 'string', description: 'Optional app name for the test titles (defaults to "App").' },
+        },
+      },
+    },
+    {
       name: 'run_tests',
       description:
         "Detect and RUN the project's OWN test suite and report honest pass/fail — stronger proof the build " +
@@ -1105,6 +1120,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',
+  'generate_e2e',
   'run_tests',
   'find_dead_code',
   'architecture_map',

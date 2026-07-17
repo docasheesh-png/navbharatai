@@ -17107,3 +17107,15 @@ out-of-box path: stop paying an LLM to do grep's job.
   steps on features, not error-grinding. Step cap is now complexity-adaptive: sonnet-tier (complex)
   prompts get 150 (bounded — the admin explicitly rejected a flat 800), others keep 80; an explicit
   AGENTV3_MAX_STEPS always wins. Slices 3-4 (auto-resume; tsc --watch) queued as tasks #62-63.
+
+---
+
+## 2026-07-17 — Endgame Slice 3: step-limit AUTO-RESUME ("pause, not death")
+
+A NOT-ready artifact build that hits the step cap now EXTENDS (default once, +half the base cap;
+`AGENTV3_STEP_RESUME` 0-3, `off` disables) instead of dying: the model gets a `[BUILD RESUME]` steer
+listing the exact remaining readiness blockers, the loop continues, and the summary honestly reports
+the ACTUAL cap that was hit. Guards: never for chat runs, never when NOTHING was built, never after
+an abort; the wall-clock watchdog still rules over everything, so a runaway cannot loop. 3 behavior
+tests (extends-and-finishes; off-switch restores the old death byte-for-byte; built-nothing never
+extends). Slice 4 (tsc --watch) remains queued as task #63.

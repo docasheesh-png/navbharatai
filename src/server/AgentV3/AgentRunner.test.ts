@@ -536,10 +536,15 @@ describe('AgentRunner — evidence-based step-limit verdict (working app ≠ fai
   });
 
   it('with the readiness gate ON, a NOT-ready capped build stays an honest ok:false', async () => {
-    const result = await cappedRunner({ readiness: false, readinessGate: true }).run('build an app');
-    expect(result.ok).toBe(false);
-    expect(result.summary).toContain('NOT ready');
-    expect(result.summary).toContain('blank preview');
+    process.env.AGENTV3_STEP_RESUME = 'off'; // this test pins the CAP VERDICT wording; Slice 3's resume has its own suite
+    try {
+      const result = await cappedRunner({ readiness: false, readinessGate: true }).run('build an app');
+      expect(result.ok).toBe(false);
+      expect(result.summary).toContain('NOT ready');
+      expect(result.summary).toContain('blank preview');
+    } finally {
+      delete process.env.AGENTV3_STEP_RESUME;
+    }
   });
 
   it('a capped NON-build run (no artifacts expected) keeps the old honest failure', async () => {
@@ -837,5 +842,78 @@ describe('AgentRunner — Full Team mid-build steering (Fix 60)', () => {
     ]);
     await runner.run('build a notes app');
     expect(events.some((e) => e.type === 'narration' && 'text' in e && String((e as { text: string }).text).includes('picked up your message'))).toBe(false);
+  });
+});
+
+// === Slice 3 (QuizArena autopsy 2026-07-17) — step-limit AUTO-RESUME: pause, not death =============
+describe('AgentRunner — step-limit auto-resume', () => {
+  function resumeRunner(script: unknown[], opts: Partial<AgentRunnerOptions> = {}) {
+    const actuator = new FakeActuator();
+    const stream = new AgentEventStream();
+    const events: AgentEvent[] = [];
+    stream.subscribe((e) => events.push(e), false);
+    const state = new WorkspaceState(stream);
+    const dispatcher = new ToolDispatcher(actuator, 'ws-1', state, stream);
+    // Deterministic gates: readiness says NOT ready (so the cap verdict is ok:false), and the
+    // endgame's tsc is clean (so the endgame itself neither rescues nor interferes).
+    let readinessCalls = 0;
+    (dispatcher as unknown as { assessBuildReadiness: () => Promise<unknown> }).assessBuildReadiness =
+      async () => (++readinessCalls === 1
+        ? { score: 40, ready: false, blockers: ['1 broken import(s)'], warnings: [] } // at the cap
+        : { score: 90, ready: true, blockers: [], warnings: [] }); // the extension fixed them
+    (dispatcher as unknown as { endgameIo: () => unknown }).endgameIo = () => ({
+      runTsc: async () => '',
+      readFiles: async () => ({}),
+      writeFile: async () => {},
+    });
+    const client = new ClaudeClient(scriptedClient(script));
+    const runner = new AgentRunner({
+      client, dispatcher, state, events: stream,
+      model: 'claude-sonnet-test', system: 'You are the Architect.', tools: defaultToolCatalog(),
+      maxSteps: 1, expectsArtifacts: true, readinessGate: true,
+      ...opts,
+    });
+    return { runner, events };
+  }
+  const TOOL_TURN = {
+    content: [{ type: 'text', text: 'Building.' }, { type: 'tool_use', id: 'tu1', name: 'write_file', input: { path: 'src/App.tsx', content: 'export default () => null;' } }],
+    stop_reason: 'tool_use',
+    usage: { input_tokens: 10, output_tokens: 5 },
+  };
+  const DONE_TURN = { content: [{ type: 'text', text: 'Finished the blockers.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } };
+
+  it('a NOT-ready build at the cap EXTENDS once, is steered at the blockers, and finishes', async () => {
+    const { runner, events } = resumeRunner([TOOL_TURN, DONE_TURN]);
+    const res = await runner.run('build an app');
+    expect(res.ok).toBe(true); // died at the 1-step cap before this slice — now it finishes
+    expect(res.steps).toBe(2); // one extra turn on the extension
+    const resumeNote = events.find((e) => e.type === 'narration' && String((e as { text?: string }).text).includes('extending once'));
+    expect(resumeNote).toBeTruthy();
+  });
+
+  it('AGENTV3_STEP_RESUME=off restores the old behavior byte-for-byte (dies at the cap)', async () => {
+    process.env.AGENTV3_STEP_RESUME = 'off';
+    try {
+      const { runner } = resumeRunner([TOOL_TURN, DONE_TURN]);
+      const res = await runner.run('build an app');
+      expect(res.ok).toBe(false);
+      expect(res.summary).toContain('Step limit reached (1)');
+      expect(res.steps).toBe(1);
+    } finally {
+      delete process.env.AGENTV3_STEP_RESUME;
+    }
+  });
+
+  it('a build that produced NOTHING never extends (chat-shaped failure stays a failure)', async () => {
+    process.env.AGENTV3_STEP_RESUME = '2';
+    try {
+      const noTool = { content: [{ type: 'text', text: 'just chatting' }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } };
+      const { runner } = resumeRunner([noTool, DONE_TURN]);
+      const res = await runner.run('build an app');
+      expect(res.ok).toBe(false); // builtSomething=false → no extension, honest failure
+      expect(res.steps).toBe(1);
+    } finally {
+      delete process.env.AGENTV3_STEP_RESUME;
+    }
   });
 });

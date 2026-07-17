@@ -254,3 +254,16 @@ export function shouldTriggerMidBuildRepair(counts: number[]): boolean {
   const last = counts[counts.length - 1];
   return prev > 0 && last > 0 && last >= prev;
 }
+
+// === SLICE 3 — STEP-LIMIT AUTO-RESUME (admin-mandated 2026-07-17: "pause, not death") ==============
+// When the cap hits and the build is STILL not ready (even after the endgame repair), the run gets a
+// bounded extension instead of dying: budget = how many times a single build may extend (default 1;
+// each extension adds half the base cap). 0/off disables. A runaway can never loop: the budget is
+// consumed per run and the wall-clock watchdog still rules over everything.
+export function stepResumeBudget(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.AGENTV3_STEP_RESUME ?? '').trim().toLowerCase();
+  if (raw === '') return 1; // unset → the default ONE extension
+  if (raw === 'off') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), 3) : 1;
+}

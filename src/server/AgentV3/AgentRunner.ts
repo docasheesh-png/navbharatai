@@ -9,7 +9,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors } from './EndgameRepair';
+import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 
@@ -381,6 +381,11 @@ export class AgentRunner {
     const trendCfg = errorTrendConfig();
     const trendCounts: number[] = [];
     let trendFired = false;
+    // Slice 3 — step-limit AUTO-RESUME ("pause, not death"): a NOT-ready build at the cap gets a
+    // bounded extension (default 1 × half the base cap; AGENTV3_STEP_RESUME=off disables) instead of
+    // dying. The wall-clock watchdog still rules over everything, so this can never run away.
+    let stepCap = maxSteps;
+    let stepResumesLeft = stepResumeBudget();
     // ONE bounded batch repair call, shared by the trend checkpoint and the step-cap endgame.
     const endgameBatchRepair = async (errorText: string, files: Array<{ path: string; content: string }>) => {
       const turn = await client.runTurn({
@@ -394,7 +399,9 @@ export class AgentRunner {
 
     let steps = 0;
     try {
-      while (steps < maxSteps) {
+      // eslint-disable-next-line no-labels
+      stepResumeLoop: for (;;) {
+      while (steps < stepCap) {
         steps++;
 
         // User pressed Stop (or the build was cancelled) — end honestly between turns.
@@ -723,19 +730,19 @@ export class AgentRunner {
         const builtSomething = totalToolUses > 0;
         let ok = expectsArtifacts && builtSomething;
         let summary = ok
-          ? `Step limit reached (${maxSteps}) — stopping here. Your files are saved; send another message to continue.`
-          : `Step limit reached (${maxSteps}). Stopped without completing.`;
+          ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`
+          : `Step limit reached (${stepCap}). Stopped without completing.`;
         let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
         if (ok && readinessGate) {
           try {
             const readiness = await dispatcher.assessBuildReadiness();
             buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
             if (readiness.ready) {
-              summary = `Step limit reached (${maxSteps}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
+              summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
               ok = false;
               const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
-              summary = `Step limit reached (${maxSteps}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+              summary = `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,
@@ -754,9 +761,9 @@ export class AgentRunner {
                     buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings };
                     if (after.ready) {
                       ok = true;
-                      summary = `Step limit reached (${maxSteps}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
+                      summary = `Step limit reached (${stepCap}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
                     } else {
-                      summary = `Step limit reached (${maxSteps}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the build is still NOT ready (score ${after.score}/100).${after.blockers.length ? ` Must fix: ${after.blockers.join('; ')}.` : ''}`;
+                      summary = `Step limit reached (${stepCap}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the build is still NOT ready (score ${after.score}/100).${after.blockers.length ? ` Must fix: ${after.blockers.join('; ')}.` : ''}`;
                     }
                   }
                 } catch { /* endgame is best-effort — the honest NOT-ready verdict above stands */ }
@@ -771,14 +778,28 @@ export class AgentRunner {
             if (lint.blocked) {
               ok = false;
               const detail = lint.blockers.length ? ` ${lint.blockers.slice(0, 3).join('; ')}.` : '';
-              summary = `Step limit reached (${maxSteps}) — and the lint gate found ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'}.${detail}`;
+              summary = `Step limit reached (${stepCap}) — and the lint gate found ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'}.${detail}`;
             }
           } catch { /* lint gate is best-effort — a scan error never flips the verdict */ }
+        }
+        // Slice 3 — AUTO-RESUME: a NOT-ready artifact build at the cap continues (bounded) instead of
+        // dying; the model is steered at the remaining blockers so the extension is spent finishing,
+        // not wandering. Chat runs / aborted runs / builds that produced nothing never extend.
+        if (!ok && expectsArtifacts && builtSomething && stepResumesLeft > 0 && !this.opts.signal?.aborted) {
+          stepResumesLeft--;
+          stepCap += Math.max(20, Math.ceil(maxSteps / 2));
+          const blockerNote = buildHealth?.blockers.length
+            ? ` Remaining blockers to fix: ${buildHealth.blockers.join('; ')}.`
+            : '';
+          messages.push({ role: 'user', content: `[BUILD RESUME] The step budget was extended ONCE to let you finish — do not start over and do not rebuild what exists.${blockerNote} Fix what is listed, verify with tsc, and finish.` });
+          events.emit({ type: 'narration', agent: agentRole, text: '🔁 The build hit its step budget while unfinished — extending once to complete the remaining blockers…', ts: Date.now() });
+          continue stepResumeLoop;
         }
         await persist(ok ? 'complete' : 'stopped');
         events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
         return { ok, summary, steps, usage, billedUsd: billed() };
       }
+      } // stepResumeLoop
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await persist('error');

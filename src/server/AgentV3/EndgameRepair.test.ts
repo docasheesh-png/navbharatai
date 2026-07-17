@@ -8,6 +8,7 @@ import {
   runEndgameRepair,
   errorTrendConfig,
   shouldTriggerMidBuildRepair,
+  stepResumeBudget,
 } from './EndgameRepair';
 
 // Real output shapes from the QuizArena build report (2026-07-17) — the build that died at the
@@ -209,5 +210,15 @@ describe('Slice 2 — error-trend checkpoint (grind detection)', () => {
     expect(shouldTriggerMidBuildRepair([3, 7])).toBe(true); // rising — worse than grinding
     expect(shouldTriggerMidBuildRepair([5, 0])).toBe(false); // clean — nothing to do
     expect(shouldTriggerMidBuildRepair([0, 0])).toBe(false);
+  });
+});
+
+describe('Slice 3 — stepResumeBudget', () => {
+  it('default 1; off/0 disables; capped at 3 so a misconfig can never loop forever', () => {
+    expect(stepResumeBudget({} as NodeJS.ProcessEnv)).toBe(1);
+    expect(stepResumeBudget({ AGENTV3_STEP_RESUME: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(0);
+    expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '0' } as unknown as NodeJS.ProcessEnv)).toBe(0);
+    expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '2' } as unknown as NodeJS.ProcessEnv)).toBe(2);
+    expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '99' } as unknown as NodeJS.ProcessEnv)).toBe(3);
   });
 });

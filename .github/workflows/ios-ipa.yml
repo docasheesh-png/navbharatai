@@ -175,6 +175,30 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:$n:CFBundleURLSchemes:0 string $RID" "$PLIST"
           echo "Firebase iOS config in place; Google Sign-In URL scheme = $RID"
 
+      # ROOT-CAUSE FIX for "Google login succeeds → redirect back → INFINITE LOADING" (admin iPhone
+      # report 2026-07-17): the GoogleSignIn iOS SDK REQUIRES the app to forward the auth-redirect URL to
+      # GIDSignIn.sharedInstance.handle(url) from application(_:open:options:) — that call is what
+      # completes the sign-in and fires the plugin's callback. Capacitor's generated AppDelegate only
+      # forwards the URL to ApplicationDelegateProxy (and @capacitor-firebase/authentication has NO URL
+      # handler of its own — verified in its source), so the SDK never learned the login finished and the
+      # JS promise hung forever. Because ios/ is regenerated fresh on every build, we inject the wiring
+      # here, exactly like the plist/permissions steps. canImport keeps it compile-safe.
+      - name: Wire the Google Sign-In redirect into AppDelegate (fixes infinite login)
+        run: |
+          set -e
+          AD="ios/App/App/AppDelegate.swift"
+          if grep -q "GIDSignIn.sharedInstance.handle" "$AD"; then
+            echo "AppDelegate already wired — skipping."
+            exit 0
+          fi
+          # 1) Import GoogleSignIn (guarded so the file still compiles if the module ever moves).
+          sed -i '' '1s/^/#if canImport(GoogleSignIn)\nimport GoogleSignIn\n#endif\n/' "$AD"
+          # 2) Hand the redirect URL to GIDSignIn BEFORE the generic Capacitor proxy. Only the real code
+          #    line is matched (leading whitespace + return), never the template's commented example.
+          perl -0pi -e 's/(\n\s*)(return ApplicationDelegateProxy\.shared\.application\(app, open: url, options: options\))/$1#if canImport(GoogleSignIn)$1if GIDSignIn.sharedInstance.handle(url) \{$1    return true$1\}$1#endif$1$2/' "$AD"
+          grep -q "GIDSignIn.sharedInstance.handle" "$AD" || { echo "::error::AppDelegate patch failed — the template changed. Fix the injection."; exit 1; }
+          echo "AppDelegate wired:"; grep -n -A3 "GIDSignIn" "$AD" | head -12
+
       # Native "Sign in with Apple" (OPT-IN — off by default so the proven Google-only build is never at
       # risk). When enabled, this declares the com.apple.developer.applesignin entitlement + points the
       # App target at it; the Fastfile's `sigh force:true` then regenerates a provisioning profile that

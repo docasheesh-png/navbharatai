@@ -18,6 +18,7 @@ import {
   UserCredential,
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
+import { raceNativeAuth } from '../lib/nativeAuthGuard';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -393,7 +394,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
         let credential;
         if (isGoogle) {
-          const nativeResult = await FirebaseAuthentication.signInWithGoogle();
+          // raceNativeAuth (2026-07-17): a wiring/SDK fault once left this promise PENDING FOREVER
+          // (the redirect URL never reached GIDSignIn) — the user saw an infinite spinner. The bridge
+          // now always answers within the window or the user gets an honest, retryable error.
+          const nativeResult = await raceNativeAuth(
+            FirebaseAuthentication.signInWithGoogle(),
+            'Google sign-in timed out — please try again.',
+          );
           const idToken = nativeResult.credential?.idToken;
           if (!idToken) {
             throw new Error(
@@ -405,7 +412,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           // Apple: the plugin returns an Apple identity token + the raw nonce it used; Firebase's
           // Apple OAuthProvider verifies the token against that same nonce. Missing token ⇒ the
           // "Sign in with Apple" capability / Firebase Apple provider isn't set up yet.
-          const nativeResult = await FirebaseAuthentication.signInWithApple();
+          const nativeResult = await raceNativeAuth(
+            FirebaseAuthentication.signInWithApple(),
+            'Apple sign-in timed out — please try again.',
+          );
           const idToken = nativeResult.credential?.idToken;
           if (!idToken) {
             throw new Error(

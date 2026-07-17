@@ -11,6 +11,7 @@ import {
   type ClientProfile,
 } from './clientMemory';
 import { clientProfileStore } from './ClientProfileStore';
+import { retrieveMemoryBlock, rememberTurn } from '../memory/conversationMemory';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import type { ProfessionalConfig } from './types';
 
@@ -148,11 +149,22 @@ export async function runProfessionalChat(
     if (dedupedHistory.some((p) => p.role === m.role && p.content.trim() === content)) continue; // drop exact repeats
     dedupedHistory.push(m);
   }
-  const transcript = dedupedHistory
-    .slice(-20)
+  const recentTurns = dedupedHistory.slice(-20);
+  const transcript = recentTurns
     .map((m) => `${m.role === 'user' ? 'User' : config.name}: ${m.content}`)
     .join('\n');
   let prompt = transcript ? `Conversation so far:\n${transcript}\n\nUser: ${message}` : message;
+
+  // Semantic memory (RAG, admin 2026-07-17): recall past turns that are SEMANTICALLY relevant to this
+  // message but have slid out of the recent-history window above — so the professional remembers things
+  // said long ago, not just the last 20 turns. Gated + best-effort (does nothing unless SEMANTIC_MEMORY
+  // is on, an embedding key exists, and the user is signed in); `recentTurns` are excluded so nothing the
+  // prompt already shows is re-injected. Never blocks/breaks the reply.
+  try {
+    const memoryScope = `professional:${config.id}`;
+    const recalled = await retrieveMemoryBlock(verifiedUserId, memoryScope, message, recentTurns.map((m) => m.content));
+    if (recalled) prompt = `${recalled}\n\n---\n${prompt}`;
+  } catch { /* semantic recall is best-effort */ }
 
   // Live web grounding: when the user's question needs current facts (latest rules/rates/results),
   // fold in real search results so the professional answers from today's data, not its training
@@ -175,6 +187,13 @@ export async function runProfessionalChat(
       await clientProfileStore.save(verifiedUserId, config.id, mergeProfile(profile ?? {}, update, memory.fields));
     }
   }
+  // Semantic memory ingest (RAG): remember this turn (the user's message + the cleaned reply) so a
+  // future, semantically-related question recalls it even after it leaves the recent window. Gated +
+  // best-effort; awaited so a serverless instance isn't torn down mid-write, but it never throws.
+  try {
+    await rememberTurn(verifiedUserId, `professional:${config.id}`, message, reply);
+  } catch { /* best-effort */ }
+
   // reply is empty only when the model's ENTIRE output was machine blocks — never
   // fall back to raw there (that would leak the block into the chat).
   return reply || 'Noted! What would you like to learn next?';

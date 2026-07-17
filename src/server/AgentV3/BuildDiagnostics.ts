@@ -607,8 +607,15 @@ export class BuildDiagnostics {
         // line (no markdown headings/tables, bounded length) can be classified as a problem — a
         // multi-paragraph analysis is a deliverable, not a struggle.
         const statusLike = t.length <= 300 && !/(^|\n)#{1,4}\s|\n\s*\|/.test(t);
-        if (statusLike && /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(t)) {
-          this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(t) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+        // BENIGN COMPOUNDS ARE NOT PROBLEMS (ShopKhata autopsy 2026-07-17): "Now let me create the App
+        // component with routing and error boundary:" was recorded severity=error because \berror\b
+        // matched inside "error boundary". Building error-UX (boundaries, handling, messages, toasts)
+        // is normal work — strip those compounds BEFORE the problem-keyword test so only a genuine
+        // failure phrase can classify a narration as a problem.
+        const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
+          .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+        if (statusLike && /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch)) {
+          this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
         }

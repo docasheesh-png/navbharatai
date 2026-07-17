@@ -1460,3 +1460,48 @@ describe('ToolDispatcher.endgameIo — incremental tsc', () => {
     expect(commands[0]).toContain('--noEmit');
   });
 });
+
+// ShopKhata autopsy 2026-07-17: prisma generate failed 3× (and seed 2×) on an LLM-written
+// HALF-relation — an error whose own message says "run `prisma format`". The dispatcher now does
+// exactly that, once, and retries — deterministically, before any LLM round is burned.
+describe('bash — prisma relation self-heal (format + one retry)', () => {
+  const P1012 = `Error: Prisma schema validation - (get-dmmf wasm)
+Error code: P1012
+error: Error validating field \`user\` in model \`Order\`: The relation field \`user\` on model \`Order\` is missing an opposite relation field on the model \`User\`. Either run \`prisma format\` or add it manually.`;
+
+  function healDispatcher() {
+    const act = new FakeActuator();
+    act.files.set('backend/prisma/schema.prisma', 'model Order { user User? }');
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const d = new ToolDispatcher(act, 'ws-heal', state, stream);
+    return { act, d };
+  }
+
+  it('runs prisma format and retries once on the exact ShopKhata validation failure', async () => {
+    const { act, d } = healDispatcher();
+    const results = [
+      { exitCode: -1, stdout: '', stderr: P1012 },          // original generate fails
+      { exitCode: 0, stdout: 'formatted', stderr: '' },      // prisma format succeeds
+      { exitCode: 0, stdout: 'Generated Prisma Client', stderr: '' }, // retry succeeds
+    ];
+    act.runCommand = async (_ws: string, command: string) => {
+      act.commands.push(command);
+      return results[Math.min(act.commands.length - 1, results.length - 1)];
+    };
+    const out = await d.dispatch(call('bash', { command: 'cd backend && npx --no-install prisma generate' }), 'backend');
+    expect(String(out.content)).toContain('exit=0');
+    expect(String(out.content)).toContain('Generated Prisma Client');
+    expect(act.commands[1]).toContain('prisma format');
+    expect(act.commands[1]).toContain('cd backend');
+    expect(act.commands[2]).toBe('cd backend && npx --no-install prisma generate'); // original retried verbatim
+  });
+
+  it('any OTHER failure never triggers the heal (no blind retries)', async () => {
+    const { act, d } = healDispatcher();
+    act.commandResult = { exitCode: 1, stdout: '', stderr: 'ENOENT: no such file' };
+    const out = await d.dispatch(call('bash', { command: 'cd backend && npx --no-install prisma generate' }), 'backend');
+    expect(String(out.content)).toContain('exit=1');
+    expect(act.commands.filter((c) => c.includes('prisma format'))).toHaveLength(0);
+  });
+});

@@ -3,6 +3,9 @@ import { ITemplateProvider } from './ViteReactProvider';
 const PKG = JSON.stringify({
   name: 'my-svelte-app',
   version: '1.0.0',
+  // ShopKhata-class guard 2026-07-17: @sveltejs/vite-plugin-svelte 3.x is ESM-only — without
+  // type:module Vite require()s the bundled config and the dev server dies on boot.
+  type: 'module',
   scripts: {
     dev: 'vite --host 0.0.0.0 --port 3000',
     build: 'vite build',

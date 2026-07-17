@@ -966,3 +966,38 @@ describe('onLlmCall — actual-model attribution', () => {
     expect(models).toEqual(['claude-haiku-test']);
   });
 });
+
+// ShopKhata autopsy 2026-07-17: a Vertex turn hit max_tokens (LLM_TRUNCATED) and its truncated
+// write shipped a broken-brace controller — the warning was recorded but nothing ACTED on it, and the
+// builder later burned minutes hand-hunting the brace with tail/wc/cat -A. The guard parses every
+// file a truncated turn wrote and hands the exact parse failure back with the tool results.
+describe('truncation guard — a max_tokens turn syntax-checks its own writes', () => {
+  const BROKEN_JS = 'export async function createOrder(req, res) {\n  const x = 1;\n'; // missing braces
+  const VALID_JS = 'export const ok = 1;\n';
+
+  function turnWriting(content: string) {
+    return {
+      content: [
+        { type: 'text', text: 'Writing the controller…' },
+        { type: 'tool_use', id: 'tw1', name: 'write_file', input: { path: 'backend/src/controllers/orderController.js', content } },
+      ],
+      stop_reason: 'max_tokens',
+      usage: { input_tokens: 10, output_tokens: 10 },
+    };
+  }
+  const DONE = { content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } };
+
+  it('a BROKEN file written in a truncated turn triggers the rewrite steer', async () => {
+    const { runner, events } = buildRunner([turnWriting(BROKEN_JS), DONE]);
+    await runner.run('build the backend');
+    const steer = events.find((e) => e.type === 'narration' && /cut off at the token limit/.test((e as { text?: string }).text ?? ''));
+    expect(steer).toBeTruthy();
+  });
+
+  it('a VALID file written in a truncated turn stays silent (no false alarm)', async () => {
+    const { runner, events } = buildRunner([turnWriting(VALID_JS), DONE]);
+    await runner.run('build the backend');
+    const steer = events.find((e) => e.type === 'narration' && /cut off at the token limit/.test((e as { text?: string }).text ?? ''));
+    expect(steer).toBeUndefined();
+  });
+});

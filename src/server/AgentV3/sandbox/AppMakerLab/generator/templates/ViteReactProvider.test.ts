@@ -100,3 +100,18 @@ describe('ViteReactProvider — ships a wired global stylesheet by default', () 
     expect(files['src/main.tsx']).toContain("import './index.css'");
   });
 });
+
+// ShopKhata-class sweep 2026-07-17: EVERY vite-family template must carry type:module — Vue's
+// @vitejs/plugin-vue 5.x and Svelte's vite-plugin-svelte 3.x are ESM-only, so without it Vite
+// require()s the bundled config and the dev server dies on boot (the exact ShopKhata failure).
+describe('vite-family templates — the type:module invariant holds everywhere', () => {
+  it('Vue, Svelte and Vanilla scaffolds all ship "type": "module"', async () => {
+    const { VueProvider } = await import('./VueProvider');
+    const { SvelteProvider } = await import('./SvelteProvider');
+    const { VanillaProvider } = await import('./VanillaProvider');
+    for (const P of [VueProvider, SvelteProvider, VanillaProvider]) {
+      const files = new P().getFiles([]);
+      expect(JSON.parse(files['package.json']).type).toBe('module');
+    }
+  });
+});

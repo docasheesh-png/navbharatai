@@ -17365,3 +17365,54 @@ Full-repo scan for siblings of the ShopKhata failure classes. Found + fixed in o
    never again be recorded severity=error. Genuine failure lines still classify (test-locked).
 Scan also CONFIRMED already-guarded siblings: ViteConfigGuard (allowedHosts + '@' alias) covers vite
 config rewrites; Vanilla template already had type:module. All with regression tests.
+
+---
+
+## 2026-07-17 — Deep-test autopsy #3 (build-test loop): false rootCause from a single-file `tsc` probe
+
+**Trigger:** admin build report (`93605aff-…1784304366287.json`) for Prompt #3 (the expense-tracker
+"Monthly Summary + date field + Prev/Next month" edit). The build SUCCEEDED — `ok:true`, reviewer
+95/100, preview verified, all features implemented — yet the report's headline `rootCause` read:
+`"$ npx --no-install tsc --noEmit src/App.tsx 2>&1 → exit -1 (5s)"`. A false verdict on a working app
+(rule 5 honesty). Admin instruction: DNA-level fix, but SKIP rule-3 sibling hunting (scope this one).
+
+**5-bucket ledger (build ran on GLM-4.7-flash weak/free tier, ~10 min):**
+- ✅ self-healed: sandbox data-loss auto-restore (26 files from durable store); 1 named↔default import
+  auto-fix; the agent recovered from its own bad edits via grep+read.
+- 🔀 worked-around: 0 provider fallbacks (cheap floor led cleanly, no 429s this run).
+- ⏭️ skipped: none material.
+- ❌ still-broken / shipped-imperfect: the **report's rootCause was a lie** (the tsc probe) — the app
+  itself was fine.
+- 🥵 struggle points: **3 consecutive `edit_file` "old_string not found"** on src/App.tsx (stale view
+  after its own earlier edits — recovered via `grep -n handleDelete` + re-read; recorded as an OPEN
+  root cause, not fixed this pass per the no-sibling-hunt scope). FEATURE_COVERAGE "Present: none"
+  appeared again — but that is the ALREADY-FIXED autopsy-#2 SPA-shell false-negative; this run predates
+  #2's deploy, so it is a pre-deploy artifact, not a new bug.
+
+**Root cause (fixed at the DNA level):** `recordCommand` classified `tsc --noEmit src/App.tsx` as a
+real `SANDBOX_CMD_FAILED` (severity error, never auto-resolved), and `deriveRootCause` then picked that
+first-unresolved-non-info issue as the build's rootCause. But **`tsc` given explicit source-file
+operands IGNORES tsconfig.json** (documented tsc behaviour) — it loses `jsx: react-jsx` and emits
+30+ `TS17004 "Cannot use JSX unless the '--jsx' flag is provided"` on an app that typechecks perfectly
+under its real config (the agent's very next project-wide `tsc --noEmit` returned exit 0). The
+malformed probe's failure is self-invalidating, not a build failure.
+
+**Fix (`src/server/AgentV3/BuildDiagnostics.ts`):** new pure `isUnconfiguredTscFileProbe(command)` +
+a branch in `isExpectedNonzeroExit` — a `tsc`/`tsgo` run WITH explicit `.ts/.tsx/.jsx/.mts/.cts`
+operands and NO `-p`/`--project`/`-b`/`--build` and NO `--jsx` is treated as an expected-spurious
+non-zero (like the existing grep/curl/pkill probes). The pipeline's authoritative typecheck —
+project-wide `tsc --noEmit` (no operands) or `tsc -p …` — is NEVER excused, so a genuine type error
+still flags (test-locked: `tsc --noEmit` exit 2 stays a failure). Honest by construction: we decline
+to trust an invocation TypeScript itself makes unreliable; we do not hide a real gate.
+
+**Regression tests (`BuildDiagnostics.test.ts`):** the exact report command
+(`npx --no-install tsc --noEmit src/App.tsx 2>&1`, exit -1) is routine; single-file `.ts/.tsx/.mts`
+probes routine; the real gate `tsc --noEmit` (exit 2) + `-p`/`--build`/`--jsx` runs are NOT excused;
+detector unit tests; and an end-to-end BuildDiagnostics test proving the probe records as info (0
+errors) and the successful build's rootCause is the honest "completed successfully", never the tsc
+line. Full gate green: frontend tsc ✅, server tsc ✅, vitest 7190 pass ✅.
+
+**OPEN root causes (recorded, deferred per no-sibling-hunt scope — pick up when they recur):**
+`edit_file` stale-view drift (agent's old_string stops matching after its own edits — candidate:
+anchor/unique-line re-match or auto-reread-on-miss); the hallucinated `Unknown tool: execute` seen in
+earlier runs (candidate: alias execute→bash).

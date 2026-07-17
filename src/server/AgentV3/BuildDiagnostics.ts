@@ -831,7 +831,43 @@ export function isExpectedNonzeroExit(command: string, exitCode: number | null):
     return exitCode === 1 || exitCode < 0;
   }
   if (base === 'curl') return exitCode === 7 || exitCode === 6 || exitCode === 28 || exitCode < 0;
+  // A single-FILE `tsc` typecheck is a SELF-INVALIDATING probe, not a build failure. See
+  // isUnconfiguredTscFileProbe: passing explicit source-file operands to tsc makes it IGNORE
+  // tsconfig.json (documented tsc behaviour), so `jsx`/`module`/`paths`/`lib` are all lost and it
+  // spuriously errors (classically TS17004 "Cannot use JSX unless the '--jsx' flag is provided") on a
+  // project that typechecks perfectly under its real config. The pipeline's authoritative typecheck is
+  // the project-wide `tsc --noEmit` / `tsc -p …` (no file operands) — that one is NEVER excused here, so
+  // a genuine type error still counts. tsc exits 1/2 on errors; the E2B wrapper can surface -1.
+  if (isUnconfiguredTscFileProbe(last)) return exitCode === 1 || exitCode === 2 || exitCode < 0;
   return false;
+}
+
+/**
+ * True when `command` is a `tsc` (or `tsgo`) invocation given EXPLICIT source-file operands but NO
+ * project config — the invocation that makes TypeScript silently discard tsconfig.json and misreport.
+ *
+ * ROOT CAUSE (deep-test build #3, 2026-07-17): the agent ran `npx --no-install tsc --noEmit src/App.tsx`
+ * to "verify" one file. tsc, when handed file operands, ignores tsconfig entirely, so it lost the
+ * project's `jsx: react-jsx` setting and emitted 30+ TS17004 errors — on an app that compiled cleanly
+ * the moment the agent re-ran the correct project-wide `tsc --noEmit` (exit 0). That spurious failure
+ * was recorded as a real SANDBOX_CMD_FAILED (severity error, never auto-resolved) and became the
+ * `rootCause` of a build that actually SUCCEEDED (ok, review 95/100, preview verified) — a false
+ * verdict (rule 5 honesty). Recognising the malformed probe keeps the report honest. Pure + total.
+ *
+ * Deliberately NOT excused (these are trustworthy — a real error must still count):
+ *   • a project run — `-p`/`--project` or build mode `-b`/`--build` (tsconfig IS honoured);
+ *   • no file operands — the pipeline's real gate `tsc --noEmit` (config-driven, checks the whole app);
+ *   • an explicit `--jsx …` — the caller supplied the missing setting, so the run can be valid.
+ */
+export function isUnconfiguredTscFileProbe(command: string): boolean {
+  const cmd = (command || '').trim();
+  if (!/\btsc\b|\btsgo\b/.test(cmd)) return false;                    // not a tsc invocation
+  if (/(?:^|\s)(?:-p|--project|-b|--build)(?:[=\s]|$)/.test(cmd)) return false; // project/build mode → honours tsconfig
+  if (/(?:^|\s)--jsx(?:[=\s])/.test(cmd)) return false;              // caller supplied jsx → potentially valid
+  // At least one explicit SOURCE-FILE operand (foo.ts / foo.tsx / .jsx / .mts / .cts), not a flag —
+  // that operand is what makes tsc ignore tsconfig. `2>&1`/redirects are not operands (they contain no
+  // source extension), and a bare `tsc --noEmit` has no operand at all → not a file probe.
+  return cmd.split(/\s+/).some((tok) => !tok.startsWith('-') && /\.(?:tsx?|jsx?|mts|cts)$/.test(tok));
 }
 
 export function deriveRootCause(input: {

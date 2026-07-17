@@ -176,6 +176,32 @@ In Xcode:
 
 ---
 
+## 4.5 Native sign-in on iOS (Google + Apple)
+
+The app offers **Google**, **Apple**, and GitHub sign-in. On the installed iOS app, Google and Apple use
+the device's **native** sheet (not a web popup). Here is exactly what is wired vs. what needs a one-time
+console toggle.
+
+**Google (already wired — just rebuild the `.ipa`):** the `ios-ipa.yml` workflow copies
+`ios-config/GoogleService-Info.plist` into the generated project and adds its `REVERSED_CLIENT_ID` as a
+URL scheme, so native Google Sign-In returns to the app. **If Google login "doesn't work" on your
+installed iPhone app, you are almost certainly on an OLD TestFlight build — rebuild via Actions → "Build
+iOS App (.ipa, signed)" and reinstall.** (Nothing in the repo blocks it.)
+
+**Apple (needs 2 one-time toggles, then rebuild with the opt-in flag):**
+1. **Firebase Console → Authentication → Sign-in method → Apple → Enable.** (Without this, Apple login
+   errors at runtime even with a perfect build — the app shows an honest "provider isn't enabled" message.)
+2. **Rebuild with the flag on:** Actions → "Build iOS App (.ipa, signed)" → Run workflow → tick
+   **"Enable native Sign in with Apple"**. That run injects the `com.apple.developer.applesignin`
+   entitlement AND enables the matching capability on the App ID (`com.navbharat.ai`) via your App Store
+   Connect API key (needs the **Admin** role) before creating the provisioning profile — so the signed
+   build actually carries Apple sign-in. Leave the flag OFF for a normal Google-only build (the default).
+
+Apple's App Store guideline **4.8** *requires* "Sign in with Apple" wherever you offer a third-party login
+like Google — so enabling it is also needed to pass review.
+
+---
+
 ## 5. 🚨 Payments policy — read this or the app WILL be rejected
 
 Apple and Google **require their own billing** for digital goods bought *inside* the app (Apple takes 30%,

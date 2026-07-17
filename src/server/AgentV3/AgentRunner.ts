@@ -9,6 +9,9 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
+import { endgameRepairEnabled, runEndgameRepair } from './EndgameRepair';
+import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
+import { parseFileBlocks } from './OneShotBuilder';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -695,6 +698,39 @@ export class AgentRunner {
               ok = false;
               const blockers = readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : '';
               summary = `Step limit reached (${maxSteps}) — and the build is NOT ready (score ${readiness.score}/100).${blockers}`;
+              // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
+              // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
+              // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,
+              // no tokens), then ONE batch LLM call for the residue — and re-earn the readiness
+              // verdict. Only runs on an already-failing build, so it can only improve the outcome.
+              if (endgameRepairEnabled()) {
+                try {
+                  const io = dispatcher.endgameIo();
+                  const verdict = await withTimeout(runEndgameRepair({
+                    ...io,
+                    llmRepair: async (errorText, files) => {
+                      const turn = await client.runTurn({
+                        model,
+                        system: repairSystemPrompt(dispatcher.frameworkId),
+                        messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
+                        maxTokens: maxTokensPerTurn,
+                      });
+                      return parseFileBlocks(turn.text ?? '');
+                    },
+                    log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
+                  }), 150_000, 'endgame-repair');
+                  if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                    const after = await dispatcher.assessBuildReadiness();
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings };
+                    if (after.ready) {
+                      ok = true;
+                      summary = `Step limit reached (${maxSteps}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;
+                    } else {
+                      summary = `Step limit reached (${maxSteps}) — endgame repair cut the compile errors ${verdict.errorsBefore} → ${verdict.errorsAfter}, but the build is still NOT ready (score ${after.score}/100).${after.blockers.length ? ` Must fix: ${after.blockers.join('; ')}.` : ''}`;
+                    }
+                  }
+                } catch { /* endgame is best-effort — the honest NOT-ready verdict above stands */ }
+              }
             }
           } catch { /* gate is best-effort — a scan error never flips the evidence verdict */ }
         }

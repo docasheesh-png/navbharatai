@@ -27,6 +27,7 @@ import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
+import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -415,6 +416,32 @@ export class ToolDispatcher {
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
     }
+  }
+
+  /**
+   * ENDGAME REPAIR I/O (QuizArena autopsy 2026-07-17, Slice 1) — the bounded sandbox surface the
+   * step-cap endgame uses to fix remaining compile errors WITHOUT agent round-trips: run tsc, read
+   * the full project map, persist a repaired file (sandbox + durable mirror + graph/state, the same
+   * side-effects a normal write_file performs, so nothing downstream diverges).
+   */
+  /** Framework id for prompt construction (endgame repair). */
+  get frameworkId(): string {
+    return this.framework ?? 'vite-react';
+  }
+
+  endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void> } {
+    return {
+      runTsc: async () => {
+        const r = await this.actuator.runCommand(this.workspaceId, 'npx --no-install tsc --noEmit 2>&1 | head -80');
+        return `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+      },
+      readFiles: async () => (await collectWorkspaceFiles(this.actuator, this.workspaceId)).files,
+      writeFile: async (path: string, content: string) => {
+        await this.actuator.writeFile(this.workspaceId, path, content);
+        try { this.onFileWrite?.(path, content); } catch { /* durable mirror is best-effort */ }
+        try { this.state?.recordFileChange({ path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+      },
+    };
   }
 
   // PRE-FLIGHT SCAFFOLD (NotesNest autopsy 2026-07-16): both StudySync and NotesNest hit

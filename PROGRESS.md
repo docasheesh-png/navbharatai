@@ -17154,3 +17154,27 @@ task #65) · 🥵 sandbox itself was slow this run (ls 79s, migrate 58s — E2B 
 same 60s recovery, same per-name key-pool isolation). A timeout wastes far MORE wall-clock than a
 429 — the full window burns before the fallback — so the cross-instance memory matters even more.
 Regression test encodes the TaskFlow shape (2 timeouts → fresh instance skips instantly).
+
+---
+
+## 2026-07-17 — mitrify2 import autopsy: the "border-border class does not exist" preview-killer, fixed at the DNA level (every app)
+
+**Trigger (5th rule):** admin imported mitrify2 (a shadcn/Tailwind login page); the in-browser preview
+died with `<css input>:4:1: The `border-border` class does not exist`. Admin mandate: "ye colour
+problem kabhi wapas nahi aani chahiye, na border wali."
+
+**Root cause (engine-level, NOT one app):** the in-browser preview loads the Tailwind **Play CDN**
+(`cdn.tailwindcss.com`) and feeds it the project CSS in `<style type="text/tailwindcss">`. But the Play
+CDN **cannot read the project's tailwind.config.js** — so shadcn design-token utilities (`@apply
+border-border`, `bg-background`, `text-foreground`, `ring-ring`, …) reference colours the CDN's default
+config never defined → compile error → the WHOLE preview dies. This hits EVERY shadcn/Tailwind app,
+built or imported.
+
+**DNA-level fix (`src/server/runtime/ReactPreview.ts`, tested):** whenever an app uses Tailwind, the
+preview now injects an INLINE `tailwind.config` registering the full standard shadcn token set (border/
+input/ring/background/foreground/primary/secondary/destructive/muted/accent/popover/card + their
+-foreground pairs + radius), each mapped to its CSS variable — so every such utility EXISTS by
+construction. It also prepends default shadcn `:root` CSS variables so the colours actually RENDER even
+when an imported app omitted its `:root` block (the app's own `:root`, injected after, always wins).
+Harmless for a non-shadcn Tailwind app (unused tokens/vars) and a plain-CSS app is byte-for-byte
+unaffected (test-locked). 4 regression tests encode the exact mitrify2 shape + the no-op cases.

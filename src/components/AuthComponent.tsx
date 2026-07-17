@@ -24,7 +24,7 @@ import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
-import { popupFailureAction, waitForSignedInUser } from './socialSignInPolicy';
+import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -428,8 +428,17 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           const appleProvider = new OAuthProvider('apple.com');
           credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
-        const result = await signInWithCredential(auth, credential);
-        onCredential?.(result);
+        // Exchange the native credential into the Firebase JS SDK, but NEVER let a stalled WKWebView
+        // persistence write hang the login spinner forever (the "stuck after returning from Google" bug,
+        // admin 2026-07-17). settleNativeSignIn caps the exchange and, if it overruns, still succeeds
+        // when the session actually landed via the auth listener — else it reports a clean failure.
+        let result: UserCredential | null = null;
+        const exchange = signInWithCredential(auth, credential).then((r) => { result = r; });
+        const outcome = await settleNativeSignIn(exchange, auth, 15000, 3000);
+        if (outcome === 'failed') {
+          throw new Error('Sign-in did not complete. Please check your connection and try again.');
+        }
+        if (result) onCredential?.(result);
         onClose();
         return 'ok';
       } catch (nativeErr: any) {

@@ -8,6 +8,29 @@ that handoff from breaking the app or wasting work. They rarely change; the
 living, constantly-updated status (current phase, exact resume point, what's
 done) lives in `PROGRESS.md`, not here.
 
+## THE AIM (admin-mandated, 2026-07-17)
+
+**AIM: Make NavBharatAI the WORLD'S BEST AI app builder.** Every decision, every
+line of code, every law, and every document exists to move the app toward that one
+goal — the strongest, most reliable, most trusted, error-proof app maker on Earth,
+better than every competitor (Lovable, Bolt, v0, Replit, Cursor, …). When choosing
+between options, the tie-breaker is always: *which one makes NavBharatAI the world's
+best?* This aim sits above everything except the absolute rules, which are how the
+aim is protected.
+
+## The external-suggestion rule (admin-mandated, 2026-07-17)
+
+**Laws, specs, blueprints, or ideas suggested from OUTSIDE (e.g. ChatGPT, other
+tools, generic templates) do NOT know this app and MUST NEVER be transcribed
+blindly.** They are raw material, not commands. For every external suggestion:
+**adapt it to NavBharatAI's real, code-anchored requirements — modify, add, or delete
+freely** so that it *improves* the app and never harms it. A suggestion that
+contradicts what actually makes the engine stronger (e.g. a 30-independent-agent
+relay that our coherence architecture rejects) is corrected, not obeyed. The test is
+always the AIM, the absolute rules, and the real codebase — never the prestige of the
+source. Honest adaptation over blind obedience (this is the third absolute rule, no
+sycophancy, applied to external input).
+
 ## The one absolute rule
 
 **The app must never break — no matter how much time or credit it takes.**

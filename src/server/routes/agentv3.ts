@@ -7067,6 +7067,9 @@ export function registerAgentV3Routes(app: Express): void {
           for (const o of integrity.orphanStylesheets) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', message: `"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`, autoResolved: false });
           }
+          for (const e of integrity.duplicateEntryPoints) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_ENTRY', message: `${e.entries.length} files each mount a React root: ${e.entries.join(', ')}. The preview boots one; the others are dead and can serve the wrong app — keep the single served entry and remove the extra root mount(s).`, autoResolved: false });
+          }
           // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
           // that can't fix leaves the honest warnings above and the app still ships.
           if (process.env.AGENTV3_INTEGRITY_GATE === 'on' && result.ok && !abort.signal.aborted) {

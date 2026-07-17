@@ -17528,3 +17528,26 @@ Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅ (count in commit).
    fixed"). Partially real (endgame-repair markers). A future honesty slice: AGENT_NOTE narration should
    not inflate the error COUNT; keep objective signals (TOOL_ERROR/SANDBOX_CMD_FAILED/BUILD_ERROR) as the
    error tally. Recorded, not fixed this pass (keeping this PR focused on the dominant struggle).
+
+---
+
+## 2026-07-17 — Duplicate-entry integrity check (#65): 2+ React roots is a defect (ShopKhata sibling)
+
+**Root cause (ShopKhata autopsy, real evidence):** the full-stack build wrote its own React entry
+`frontend/src/main.jsx` (`createRoot().render`) while the scaffold's own `src/main.tsx` still mounted a
+root — two entry points. The in-browser/live preview boots exactly ONE root app, so the second entry is
+dead code and the WRONG app can be served (the same build's INTEGRITY_DUPLICATE_STYLESHEET even caught
+`./index.css` imported by BOTH mains). No compiler catches this; it is a silent structural defect.
+
+**DNA fix (deterministic, engine-wide):** `findDuplicateEntryPoints()` in `ProjectIntegrityChecks.ts` —
+flags 2+ source files that mount a React root (`createRoot(…).render(` or legacy `ReactDOM.render(`;
+comments stripped so a commented mount never counts). A well-formed app has exactly ONE root mount, so
+this is false-positive-proof (a normal single-entry app is never flagged). Wired into
+`analyzeProjectIntegrity` (ok=false when found), the `integrityRepairInstruction` (names both files:
+"keep the served entry, remove the extra root mount"), and a new `INTEGRITY_DUPLICATE_ENTRY` diagnostic
+in `routes/agentv3.ts` beside the existing stylesheet findings — so it feeds the same bounded self-heal
+and is reported honestly. 5 regression tests encode the exact ShopKhata two-mains shape + legacy render +
+the single-entry no-false-positive + commented-out + ok=false cases. Gate: server tsc clean, full vitest
+green. Complements #68 (the ShopKhata dev-server ESM fix) — together they close the two structural halves
+of the ShopKhata monorepo defect. (The full-stack LAYOUT CONTRACT that PREVENTS the monorepo split
+remains task #64, open.)

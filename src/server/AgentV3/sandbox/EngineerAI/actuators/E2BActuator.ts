@@ -876,12 +876,17 @@ export class E2BActuator implements IEngineerActuator {
       // Rendered DOM via the real headless browser. Runs from TOOLS_DIR (where playwright is
       // installed) with PLAYWRIGHT_BROWSERS_PATH set, exactly like the screenshot scripts — so
       // `require('playwright')` resolves and Chromium actually launches.
+      // waitUntil MUST NOT be 'networkidle' for a Vite/CRA dev server: its HMR WebSocket stays open
+      // forever, so the network is NEVER idle → goto times out at 15s and p.content() captures the
+      // un-hydrated shell (root #root empty) — the exact false "Present: none" from deep-test build #2.
+      // 'domcontentloaded' + a short settle lets React actually paint into the root before we snapshot.
       const playwrightScript = `PLAYWRIGHT_BROWSERS_PATH=${TOOLS_DIR}/.browsers node -e "
 const {chromium}=require('playwright');
 (async()=>{
   const b=await chromium.launch({args:['--no-sandbox','--disable-setuid-sandbox']});
   const p=await b.newPage();
-  await p.goto(${JSON.stringify(url)},{waitUntil:'networkidle',timeout:15000}).catch(()=>{});
+  await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
+  await p.waitForTimeout(1800); // let the SPA client-render into the root mount
   console.log((await p.content()).slice(0,30000));
   await b.close();
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});

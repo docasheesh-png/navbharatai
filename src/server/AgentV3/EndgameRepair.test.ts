@@ -6,6 +6,8 @@ import {
   offendingFileSubset,
   endgameRepairEnabled,
   runEndgameRepair,
+  errorTrendConfig,
+  shouldTriggerMidBuildRepair,
 } from './EndgameRepair';
 
 // Real output shapes from the QuizArena build report (2026-07-17) — the build that died at the
@@ -188,5 +190,24 @@ describe('runEndgameRepair — the two-layer orchestration', () => {
     expect(v.attempted).toBe(true);
     expect(v.clean).toBe(false);
     expect(v.errorsAfter).toBe(1);
+  });
+});
+
+describe('Slice 2 — error-trend checkpoint (grind detection)', () => {
+  it('config: ON by default, interval 25, floor 5, off switch works', () => {
+    expect(errorTrendConfig({} as NodeJS.ProcessEnv)).toEqual({ enabled: true, interval: 25 });
+    expect(errorTrendConfig({ AGENTV3_ERRTREND_CHECKPOINT: 'off' } as unknown as NodeJS.ProcessEnv).enabled).toBe(false);
+    expect(errorTrendConfig({ AGENTV3_ERRTREND_INTERVAL: '40' } as unknown as NodeJS.ProcessEnv).interval).toBe(40);
+    expect(errorTrendConfig({ AGENTV3_ERRTREND_INTERVAL: '1' } as unknown as NodeJS.ProcessEnv).interval).toBe(25);
+  });
+
+  it('fires ONLY on two consecutive non-decreasing non-zero counts', () => {
+    expect(shouldTriggerMidBuildRepair([])).toBe(false);
+    expect(shouldTriggerMidBuildRepair([8])).toBe(false); // one peek is never enough
+    expect(shouldTriggerMidBuildRepair([8, 3])).toBe(false); // converging — let it work
+    expect(shouldTriggerMidBuildRepair([8, 8])).toBe(true); // flat — grinding
+    expect(shouldTriggerMidBuildRepair([3, 7])).toBe(true); // rising — worse than grinding
+    expect(shouldTriggerMidBuildRepair([5, 0])).toBe(false); // clean — nothing to do
+    expect(shouldTriggerMidBuildRepair([0, 0])).toBe(false);
   });
 });

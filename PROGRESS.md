@@ -17099,5 +17099,11 @@ out-of-box path: stop paying an LLM to do grep's job.
   then RE-EARN readiness — ready ⇒ ok:true with an honest "endgame repair fixed N errors" summary;
   still-not-ready ⇒ honest errorsBefore→After count. Kill switch `AGENTV3_ENDGAME_REPAIR=off`
   (default ON — it only runs on an already-failing build, so it can only improve the outcome).
-- QuizArena's exact 4 error lines are the regression fixtures. Slices 2-4 (25-step checkpoint
-  trigger + adaptive cap; step-limit auto-resume; tsc --watch) queued as tasks #61-63.
+- QuizArena's exact 4 error lines are the regression fixtures.
+- **Slice 2 (same PR): mid-build error-trend checkpoint + adaptive step cap.** Every 25 steps
+  (AGENTV3_ERRTREND_INTERVAL; kill AGENTV3_ERRTREND_CHECKPOINT=off) a free tsc peek records the
+  error count; two consecutive non-decreasing non-zero peeks = grinding → the SAME endgame repair
+  fires MID-BUILD (once per run) and a [BUILD CHECKPOINT] steer tells the model to spend remaining
+  steps on features, not error-grinding. Step cap is now complexity-adaptive: sonnet-tier (complex)
+  prompts get 150 (bounded — the admin explicitly rejected a flat 800), others keep 80; an explicit
+  AGENTV3_MAX_STEPS always wins. Slices 3-4 (auto-resume; tsc --watch) queued as tasks #62-63.

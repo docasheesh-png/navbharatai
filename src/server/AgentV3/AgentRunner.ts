@@ -9,7 +9,7 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { endgameRepairEnabled, runEndgameRepair } from './EndgameRepair';
+import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors } from './EndgameRepair';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 
@@ -375,6 +375,22 @@ export class AgentRunner {
     const weakBuild = this.opts.weakBuild === true;
     const weakCkptCfg = weakCheckpointConfig();
     let checkpointNudges = 0;
+    // Slice 2 — mid-build ERROR-TREND checkpoint (QuizArena autopsy, admin-mandated): every
+    // `interval` steps peek at the tsc error count; two flat/rising non-zero peeks = the builder is
+    // grinding, not converging → fire the endgame repair NOW (once per run) instead of at the cap.
+    const trendCfg = errorTrendConfig();
+    const trendCounts: number[] = [];
+    let trendFired = false;
+    // ONE bounded batch repair call, shared by the trend checkpoint and the step-cap endgame.
+    const endgameBatchRepair = async (errorText: string, files: Array<{ path: string; content: string }>) => {
+      const turn = await client.runTurn({
+        model,
+        system: repairSystemPrompt(dispatcher.frameworkId),
+        messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
+        maxTokens: maxTokensPerTurn,
+      });
+      return parseFileBlocks(turn.text ?? '');
+    };
 
     let steps = 0;
     try {
@@ -673,6 +689,28 @@ export class AgentRunner {
             }
           } catch { /* checkpoint is best-effort — a scan error never blocks a build */ }
         }
+
+        // Slice 2 — error-trend checkpoint (all artifact builds; kill: AGENTV3_ERRTREND_CHECKPOINT=off).
+        if (expectsArtifacts && trendCfg.enabled && !trendFired && endgameRepairEnabled()
+          && steps > 0 && steps % trendCfg.interval === 0) {
+          try {
+            const io = dispatcher.endgameIo();
+            const count = parseTscErrors(await withTimeout(io.runTsc(), 20_000, 'errtrend-tsc')).length;
+            trendCounts.push(count);
+            if (shouldTriggerMidBuildRepair(trendCounts)) {
+              trendFired = true; // once per run — the step-cap endgame remains the final net
+              events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: compile errors are not going down — fixing them all in one pass…', ts: Date.now() });
+              const verdict = await withTimeout(
+                runEndgameRepair({ ...io, llmRepair: endgameBatchRepair, log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }) }),
+                150_000, 'errtrend-repair',
+              );
+              if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
+                // Tell the model the grind is over so it spends the remaining steps on FEATURES.
+                messages.push({ role: 'user', content: `[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.` });
+              }
+            }
+          } catch { /* trend checkpoint is best-effort — never blocks or fails a build */ }
+        }
       }
 
       // Step cap — judge by EVIDENCE, not by how the loop ended. The old unconditional ok:false
@@ -708,15 +746,7 @@ export class AgentRunner {
                   const io = dispatcher.endgameIo();
                   const verdict = await withTimeout(runEndgameRepair({
                     ...io,
-                    llmRepair: async (errorText, files) => {
-                      const turn = await client.runTurn({
-                        model,
-                        system: repairSystemPrompt(dispatcher.frameworkId),
-                        messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
-                        maxTokens: maxTokensPerTurn,
-                      });
-                      return parseFileBlocks(turn.text ?? '');
-                    },
+                    llmRepair: endgameBatchRepair,
                     log: (msg) => events.emit({ type: 'narration', agent: agentRole, text: msg, ts: Date.now() }),
                   }), 150_000, 'endgame-repair');
                   if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {

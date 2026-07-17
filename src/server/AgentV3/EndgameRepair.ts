@@ -225,3 +225,32 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     return NO_ATTEMPT; // endgame is best-effort — it must never worsen or hang a build
   }
 }
+
+// === SLICE 2 — MID-BUILD ERROR-TREND CHECKPOINT (admin-mandated 2026-07-17) =======================
+// The admin's alternative to "raise the cap to 800": every ~25 steps peek at the tsc error count.
+// Two consecutive peeks with errors NOT decreasing = the builder is grinding, not converging — fire
+// the SAME two-layer endgame repair immediately (once per run) instead of waiting for the step cap.
+
+export interface ErrorTrendConfig {
+  enabled: boolean;
+  /** Steps between peeks (default 25; floor 5 so a misconfig can't hammer tsc every step). */
+  interval: number;
+}
+
+export function errorTrendConfig(env: NodeJS.ProcessEnv = process.env): ErrorTrendConfig {
+  const enabled = (env.AGENTV3_ERRTREND_CHECKPOINT ?? '').trim().toLowerCase() !== 'off';
+  const n = Number(env.AGENTV3_ERRTREND_INTERVAL);
+  return { enabled, interval: Number.isFinite(n) && n >= 5 ? Math.floor(n) : 25 };
+}
+
+/**
+ * TRUE when the last two checkpoint counts show NO convergence (both > 0, not decreasing).
+ * A single bad peek never fires (files are legitimately half-written mid-build); two flat/rising
+ * peeks = ~2×interval steps with zero progress on compile errors. Pure.
+ */
+export function shouldTriggerMidBuildRepair(counts: number[]): boolean {
+  if (counts.length < 2) return false;
+  const prev = counts[counts.length - 2];
+  const last = counts[counts.length - 1];
+  return prev > 0 && last > 0 && last >= prev;
+}

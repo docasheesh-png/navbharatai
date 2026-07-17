@@ -1,6 +1,6 @@
 // B6 (roadmap Tier 2A) — cross-language typecheck / compile check, not just frontend `tsc`.
 //
-// v3.0 now builds polyglot apps (TS + Python + Java + Go). "Verified" must mean every language in
+// v5.0 now builds polyglot apps (TS + Python + Java + Go). "Verified" must mean every language in
 // the workspace actually compiles — a Java or Python or Go type/compile error is just as fatal as a
 // TS one. This module is PURE: detection reads the file tree + package.json; parsing reads a command's
 // raw output. The ToolDispatcher `typecheck` tool runs each detected check via the sandbox actuator.

@@ -5,8 +5,8 @@
  * `nc -z localhost` health check but returns 502/blank on the PUBLIC preview — the
  * #1 cause of "files built but the preview is blank".
  *
- * This is the v3.0-local copy of the helper (the legacy EngineerAI engine has its
- * own); kept self-contained so the v3.0 actuator never depends on the retired
+ * This is the v5.0-local copy of the helper (the legacy EngineerAI engine has its
+ * own); kept self-contained so the v5.0 actuator never depends on the retired
  * legacy module. PURE + dependency-free so it is unit-testable without the E2B SDK.
  *
  * If the command already binds a host we leave it untouched.
@@ -349,7 +349,7 @@ export function pinDevServerPort(command: string, port: number, framework?: DevF
   if (/\bnext\b/.test(command) || framework === 'next') return `${command} -p ${port}`;
   const isPmDev = /\b(?:npm|pnpm|yarn|bun)\b.*\b(?:run\s+)?(?:dev|serve)\b/.test(command);
   // Vite (invoked directly, resolved from a script, or the unknown-framework default for a pm-run
-  // script — the v3.0 scaffold's case): pin with the Vite-only `--strictPort` so it binds EXACTLY
+  // script — the v5.0 scaffold's case): pin with the Vite-only `--strictPort` so it binds EXACTLY
   // this port or fails loudly instead of silently drifting 5173→5174.
   if (/\bvite\b/.test(command) || framework === 'vite') {
     return `${command} --port ${port} --strictPort`;

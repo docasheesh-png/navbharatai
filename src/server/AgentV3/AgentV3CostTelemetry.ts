@@ -4,7 +4,7 @@
  * The cost-ladder (P2) routes simple apps to cheaper models. To PROVE that saves
  * money without hurting quality — and to satisfy the design doc's P8 gate
  * ("measure cheap-tier quality + fallback rate per task-type before cutover") —
- * every v3.0 build records a dimensioned telemetry row here: its task type, start
+ * every v5.0 build records a dimensioned telemetry row here: its task type, start
  * tier, billed amount, token usage, success, and duration. Aggregated per calendar
  * day with per-task-type and per-start-tier breakdowns so an admin can see, e.g.,
  * "simple_app builds on the gemini tier succeed 96% of the time at ₹X each".

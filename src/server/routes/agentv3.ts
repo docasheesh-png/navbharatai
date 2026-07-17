@@ -249,7 +249,7 @@ import { GrokProvider } from '../AI/Router/providers/GrokProvider';
  * Flag-gated (AGENTV3_ENABLED, default OFF) + allowlist (admin-only now → all
  * logged-in users at GA, D8). The AgentV3 *module* imports nothing from the live
  * Pro/Engineer agent loops; this route is the composition root that wires the
- * v3.0 engine to the shared sandbox actuator (reused infra, not the live loop).
+ * v5.0 engine to the shared sandbox actuator (reused infra, not the live loop).
  *
  * POST /api/agentv3/chat streams the build as NDJSON: one AgentEvent per line
  * (tool_call / tool_result / file_changed / diff / todo_updated / narration /
@@ -334,7 +334,7 @@ export function entitlementEmail(verified: { email: string | null } | null): str
 }
 
 /**
- * SECURITY (C1 fast-follow) — verified identity for READ/mutate v3.0 routes that take the caller from
+ * SECURITY (C1 fast-follow) — verified identity for READ/mutate v5.0 routes that take the caller from
  * the request (conversation list/get/delete, etc.). Returns the uid+email from the VERIFIED Firebase
  * token — never the spoofable query/body `userId` (which let one account read/delete another's build
  * transcripts). Under VITEST the route handlers aren't token-authed, so it falls back to the request
@@ -347,7 +347,7 @@ export function entitlementEmail(verified: { email: string | null } | null): str
  * regression contract behind the "history opens to '0 messages'" fix is locked by a unit test.
  *
  * WHY THE FALLBACK EXISTS (do not revert to verified-only): the 3 conversation routes (list /
- * get-one / delete) were the ONLY v3.0 reads gated on a verified token ALONE. Every OTHER v3.0 route
+ * get-one / delete) were the ONLY v5.0 reads gated on a verified token ALONE. Every OTHER v5.0 route
  * resolves identity as `verifiedUid ?? claimedUid` (workspaceOwnershipOk) — that is how file
  * CONTENTS, memory and the build report all read today. `verifyIdToken` returns null on a TRANSIENT
  * failure for a genuinely signed-in user (a just-expired/again-refreshed token, an admin-SDK
@@ -355,7 +355,7 @@ export function entitlementEmail(verified: { email: string | null } | null): str
  * route 400'd (transcripts vanished from History) and the GET route could not build the real
  * `agentv3-{uid}-{sid}` candidate (404) — the client fell back to the session-switch-erased
  * chat_sessions copy and showed "saved copy has 0 messages" on EVERY item, while files/memory stayed
- * fine. The claimed-userId fallback aligns these reads with the rest of v3.0; access is still gated
+ * fine. The claimed-userId fallback aligns these reads with the rest of v5.0; access is still gated
  * downstream by conversationAccess (the record's userId must match this identity, or be the
  * shared-anon bucket), and opening a single conversation additionally requires its UNGUESSABLE id.
  * The verified token ALWAYS takes precedence when present — the fallback only widens the token-less
@@ -387,7 +387,7 @@ let sharedConversationStore: ConversationStore | null = null;
  * The durable transcript store: Firestore when explicitly enabled (real cross-instance
  * durability in Cloud Run), otherwise the in-memory store (dev/CI, and a safe default so a
  * missing-credentials environment never errors). Singleton. Gated on AGENTV3_PERSIST_FIRESTORE
- * so CI/local stay on the in-memory store, matching the cautious v3.0 flag-gating.
+ * so CI/local stay on the in-memory store, matching the cautious v5.0 flag-gating.
  */
 function getConversationStore(): ConversationStore {
   if (sharedConversationStore) return sharedConversationStore;
@@ -653,7 +653,7 @@ export function emptyBuildFailureSummary(
  * to FIVE runners (main + escalation + retry + preview-heal + auto-fix) — so one session's many messages
  * (and even one message's retries) each became a SEPARATE conversation document → the history menu
  * showed every message as its own "chat", and reopening/continuing landed on a fragmented transcript
- * (so v3.0 behaved like a fresh session on each message and couldn't edit coherently). Deriving the id
+ * (so v5.0 behaved like a fresh session on each message and couldn't edit coherently). Deriving the id
  * from the (session-stable) workspaceId makes all of them share ONE conversation: the first build
  * creates it, every later runner/build appends its turns, and the history shows ONE entry per session
  * with all its messages in order. Pure + exported for testing.
@@ -785,7 +785,7 @@ export function userCostBreakdown(
     billedInr: Math.round(billedUsd * Math.max(0, rate) * 100) / 100,
     usdInrRate: Math.max(0, rate),
     tier: POWER_TIER_DISPLAY[key] ?? 'NavBharatAI',
-    engine: 'NavBharatAI Pro v3.0',
+    engine: 'NavBharatAI Pro v5.0',
   };
 }
 
@@ -940,7 +940,7 @@ function envInt(name: string, fallback: number): number {
 }
 
 // ── TEMPORARY DEBUG (admin test) ────────────────────────────────────────────────
-// When AGENTV3_DEBUG_PROVIDER is enabled, every v3.0 reply is tagged with the
+// When AGENTV3_DEBUG_PROVIDER is enabled, every v5.0 reply is tagged with the
 // provider/model that produced it, so the admin can verify WHERE each reply came
 // from (e.g. confirm Vertex is answering). It is OFF by default, so users never see
 // it; turn it ON by setting the env var on Cloud Run, and OFF again by unsetting it —
@@ -990,7 +990,7 @@ export interface RunningBuild {
   /** The owning account (userId ?? 'anon') — lets the per-account concurrency cap count this account's
    *  live builds even when the registry Map is keyed by workspace (per-workspace locking). */
   userId?: string | null;
-  /** Which v3.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
+  /** Which v5.0 session/project this build belongs to (agentv3-{uid}-{sessionId}). One account can
    *  have several DIFFERENT chat sessions; `runningBuilds` is keyed by userId only (one account can
    *  only build one thing at a time), but the auto-resume/attach and live-mirror paths must still
    *  verify the running build is actually the CALLER's session before replaying/mirroring it — else a
@@ -1127,7 +1127,7 @@ export function statusEntitlement(
 }
 /** Is a build running for this account AND does it belong to `workspaceId`? Use this (not
  *  `isBuildRunning`) for any path that might auto-attach to a build the caller didn't itself start —
- *  otherwise a build genuinely still running in a DIFFERENT v3.0 session under the same account gets
+ *  otherwise a build genuinely still running in a DIFFERENT v5.0 session under the same account gets
  *  silently replayed/mirrored into whatever session is currently open. `workspaceId: null` (unknown)
  *  falls back to the account-wide check for backward compatibility with callers that don't have one.
  *  Takes the `RunningBuild` directly (not a `buildKey` lookup) so it's a pure, unit-testable function —
@@ -1160,7 +1160,7 @@ export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: 
 }
 
 /**
- * The v3.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
+ * The v5.0 BUILD turn-runner. Builds run on CLAUDE ONLY (Haiku → Sonnet → Opus) because only
  * Claude reliably does REAL tool-use (actually calls write_file). Gemini/Vertex HALLUCINATE in
  * the tool loop — they describe creating files but never call the tools, so the build finishes
  * with ZERO real files (and the model later says "I'm an AI, I have no file system"). That is
@@ -1171,11 +1171,11 @@ export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: 
  * for cheap CHAT only, NOT builds. If Claude genuinely fails, the build errors HONESTLY with the
  * real Claude error (bad key / wrong model id / overload) instead of faking files on Gemini.
  * AGENTV3_BUILD_ALLOW_GEMINI=1 re-adds Vertex/Gemini as a last-resort build fallback.
- * Per the v3.0 constitution NavBharatAI pays the Claude cost; the user is billed the
+ * Per the v5.0 constitution NavBharatAI pays the Claude cost; the user is billed the
  * Opus-equivalent markup. Models are env-overridable (AGENTV3_{HAIKU,SONNET,OPUS}_MODEL).
  */
 /**
- * Decide whether the v3.0 build chain leads with Claude. Pure + exported for unit testing.
+ * Decide whether the v5.0 build chain leads with Claude. Pure + exported for unit testing.
  * Explicit opts (escalation passes `true`) win; otherwise Claude-first by default, with
  * AGENTV3_BUILD_CLAUDE_FIRST=0 / "off" as the opt-out to the old cheap-first ladder.
  */
@@ -1223,7 +1223,7 @@ export function selectBuildModel(tier: StartTier | undefined, power: boolean | P
 /**
  * Is this an existing project big enough that the cheap floor + Haiku reliably struggle (huge
  * per-turn context)? Threshold env-tunable via AGENTV3_LARGE_PROJECT_FILES (default 100 files —
- * Mitrify-scale imports are ~300+, fresh v3.0 builds are ~15-60). Pure + exported for testing.
+ * Mitrify-scale imports are ~300+, fresh v5.0 builds are ~15-60). Pure + exported for testing.
  */
 export function isLargeExistingProject(fileCount: number): boolean {
   const threshold = Math.max(1, parseInt(process.env.AGENTV3_LARGE_PROJECT_FILES || '', 10) || 100);
@@ -1298,7 +1298,7 @@ export function parseKeyPool(env: string | undefined): string[] {
 }
 
 /**
- * NavBharatAI Pro v3.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
+ * NavBharatAI Pro v5.0 — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
  *
  * Returns OpenAI-compatible build runners (GLM / Kimi) that LEAD the build chain ONLY when
  * `AGENTV3_CHEAP_FLOOR` is not "off" AND at least one provider's key is present. Otherwise it
@@ -2022,15 +2022,15 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
 let lastDiagProbeTs = 0;
 
 export function registerAgentV3Routes(app: Express): void {
-  // Capability probe — lets the frontend decide whether to show the v3.0 toggle.
+  // Capability probe — lets the frontend decide whether to show the v5.0 toggle.
   app.get('/api/agentv3/status', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     // `workspaceId` is OPTIONAL (older/other callers that only care "is this account building
-    // anything" keep working unchanged). When the caller DOES pass one (the v3.0 panel's
+    // anything" keep working unchanged). When the caller DOES pass one (the v5.0 panel's
     // auto-resume check), `buildRunningHere` answers "is a build running for THIS session" —
     // the account-wide `buildRunning` stays as-is for backward compatibility, but auto-resume
-    // must key off `buildRunningHere`, or a build genuinely still running in a DIFFERENT v3.0
+    // must key off `buildRunningHere`, or a build genuinely still running in a DIFFERENT v5.0
     // session bleeds its progress into whatever session the user currently has open.
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : null;
     // CANDIDATE KEYS (2026-07-06, with the dead-Stop/Resume fix): the running build may live under the
@@ -2087,7 +2087,7 @@ export function registerAgentV3Routes(app: Express): void {
     // never a hard error). The anon bucket is likewise never enumerable (would leak every degraded session).
     if (!userId || userId === 'anon') { res.json({ conversations: [] }); return; }
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     try {
@@ -2120,7 +2120,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.get('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     try {
@@ -2175,7 +2175,7 @@ export function registerAgentV3Routes(app: Express): void {
   app.delete('/api/agentv3/conversations/:id', async (req: Request, res: Response) => {
     const { userId, email } = await resolveReadIdentity(req); // SECURITY (C1 follow-up): verified token, not query.userId
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     try {
@@ -2251,15 +2251,15 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // Build diagnostics — the structured issue report from the user's LAST build (every struggle
-  // v3.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
-  // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v3.0 panel's
+  // v5.0 hit: provider fallbacks, tool errors, "replied without building" nudges, readiness
+  // blockers, sandbox problems). Owner-scoped (keyed by the caller's userId). The v5.0 panel's
   // "Download report" button reads this so the admin can hand the JSON to Claude for fixes.
   app.get('/api/agentv3/diagnostics', async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     // SECURITY Phase 3.2 (IDOR) — a build report is PRIVATE. Until now this route had NO ownership
@@ -2399,7 +2399,7 @@ export function registerAgentV3Routes(app: Express): void {
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
@@ -2426,7 +2426,7 @@ export function registerAgentV3Routes(app: Express): void {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const source: 'in-browser' | 'live' = req.body?.source === 'live' ? 'live' : 'in-browser';
     const message = typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : '';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     try {
@@ -2517,7 +2517,7 @@ export function registerAgentV3Routes(app: Express): void {
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // STREAMED PROGRESS (opt-in via body.stream) — the boot legitimately takes 30-90s on a cold
@@ -2647,7 +2647,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  // PREVIEW HEALTH — v3.0's self-awareness of whether the preview is actually running. Gathers REAL
+  // PREVIEW HEALTH — v5.0's self-awareness of whether the preview is actually running. Gathers REAL
   // signals (durable file count → the app survives years; live backend configured?; a warm sandbox's
   // port probe) and classifies the true state: live / sleeping (idle-recycled — reboots on demand) /
   // crashed / inbrowser_only / empty. Deliberately does NOT create a sandbox just to check (that would
@@ -2658,7 +2658,7 @@ export function registerAgentV3Routes(app: Express): void {
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const framework = typeof req.body?.framework === 'string' ? req.body.framework : 'vite-react';
-    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' }); return; }
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     try {
@@ -2715,7 +2715,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const stopWorkspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
@@ -2763,7 +2763,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const message = sanitizeSteerMessage(req.body?.message);
@@ -2879,7 +2879,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -2907,7 +2907,7 @@ export function registerAgentV3Routes(app: Express): void {
         head: WORK_BRANCH,
         base: access.defaultBranch,
         title: `NavBharatAI: ship ${repo}`,
-        body: `Merging \`${WORK_BRANCH}\` into \`${access.defaultBranch}\` — reviewed & shipped from NavBharatAI Pro v3.0.`,
+        body: `Merging \`${WORK_BRANCH}\` into \`${access.defaultBranch}\` — reviewed & shipped from NavBharatAI Pro v5.0.`,
       });
       res.json({
         merged: flow.merged,
@@ -2934,7 +2934,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     if (!ownRepoStorageEnabled()) {
@@ -2968,7 +2968,7 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
       const firstLine = (head.message.split('\n')[0] || 'last change').slice(0, 120);
-      const revertSha = await client.createCommit(repo, `Revert "${firstLine}"\n\nReverted from NavBharatAI Pro v3.0.`, parentTree, [head.sha]);
+      const revertSha = await client.createCommit(repo, `Revert "${firstLine}"\n\nReverted from NavBharatAI Pro v5.0.`, parentTree, [head.sha]);
       if (!revertSha) {
         res.json({ reverted: false, note: 'Could not create the revert commit.' });
         return;
@@ -2990,7 +2990,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     // SECURITY T0-9: /attach replays a build's full LIVE transcript, so it must match the build under the
@@ -3050,7 +3050,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'NavBharatAI Pro v3.0 is not available for this account.' });
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
       return;
     }
     const sinceSeq = Number.parseInt(typeof req.query.sinceSeq === 'string' ? req.query.sinceSeq : '0', 10) || 0;
@@ -3101,7 +3101,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3119,14 +3119,14 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // Phase G1 — git as the third organ: return a workspace's DURABLE checkpoint history (newest first).
-  // v3.0 builds make real git commits; this surfaces the persisted timeline so the IDE shows the full
+  // v5.0 builds make real git commits; this surfaces the persisted timeline so the IDE shows the full
   // history even across sessions / devices / sandbox recycles (not just the current session's RAM).
   // Ownership-checked; empty list when the workspace has no checkpoints yet.
   app.get('/api/agentv3/checkpoints', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -3149,7 +3149,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -3170,7 +3170,7 @@ export function registerAgentV3Routes(app: Express): void {
     res.json(dormant ?? { available: false, live: false, clean: false, changed: 0, head: '' });
   });
 
-  // REAL Code Studio terminal: run ONE bounded command in the user's own warm v3.0 sandbox. Each
+  // REAL Code Studio terminal: run ONE bounded command in the user's own warm v5.0 sandbox. Each
   // command runs under a hard timeout with capped output (see execInSession) — no persistent shell,
   // no runaway processes. available:false when the sandbox isn't warm (honest, never faked output).
   // Ownership-checked + rate-limited.
@@ -3178,7 +3178,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3215,7 +3215,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
@@ -3238,7 +3238,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     // hasGithub is a boolean hint only — never accept a token in a GET query string.
@@ -3251,14 +3251,14 @@ export function registerAgentV3Routes(app: Express): void {
 
   // §12.2 — deploy/git support: return the built app's source files as a
   // path→content map. This is exactly the shape the EXISTING deploy + git routes
-  // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v3.0 reuses that
+  // accept (`/api/pro/deploy`, `/api/github/push-enhanced`), so v5.0 reuses that
   // backend for durable deploy + GitHub push instead of rebuilding any of it.
   // Read-only; never returns node_modules / build output / live .env secrets.
   app.post('/api/agentv3/workspace-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3294,7 +3294,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3356,13 +3356,13 @@ export function registerAgentV3Routes(app: Express): void {
   // RENDERED preview back into the REAL source file at its exact JSX position, via a real AST
   // (VisualEditPatcher.ts), never a blind string/line replacement. Writes through the SAME durable
   // store + live actuator every other file write uses, so the edit shows up everywhere else (Files,
-  // Code Studio's own editor, Git) exactly like a v3.0-panel edit does — not a disposable, disconnected
+  // Code Studio's own editor, Git) exactly like a v5.0-panel edit does — not a disposable, disconnected
   // copy the next build would silently overwrite.
   app.post('/api/agentv3/visual-edit', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3393,7 +3393,7 @@ export function registerAgentV3Routes(app: Express): void {
       }
       // Write through BOTH the live actuator (so a still-warm sandbox reflects it immediately) and the
       // durable store (so it survives an instance recycle / is what the next preview build reads) —
-      // matching how every other v3.0 file write persists. Actuator write is best-effort: a VFS-tier
+      // matching how every other v5.0 file write persists. Actuator write is best-effort: a VFS-tier
       // or cold sandbox has no live copy to write into, and the durable save below is authoritative.
       try { await actuator.writeFile(workspaceId, filePath, result.newSource); } catch { /* best-effort */ }
       // MERGE, never replace: a single-file edit must UPSERT into the durable index — the old
@@ -3407,14 +3407,14 @@ export function registerAgentV3Routes(app: Express): void {
   });
 
   // §12.2 — import an existing project (e.g. fetched from GitHub via the existing
-  // `/api/github/fetch` route, or any source) into the v3.0 sandbox so the agent can
+  // `/api/github/fetch` route, or any source) into the v5.0 sandbox so the agent can
   // edit/update and then deploy/push it back. Path-safe (no traversal/absolute), and
   // never imports node_modules / .git / live .env secrets.
   app.post('/api/agentv3/import-files', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3444,7 +3444,7 @@ export function registerAgentV3Routes(app: Express): void {
       // Awaited so a subsequent build reads the fresh truth. Best-effort — never blocks the import.
       try { await mergeWorkspaceFiles(workspaceId, files as Record<string, string>); } catch { /* durable persist is best-effort */ }
       // Phase S2 — when this import is a MANUAL IDE EDIT (source: 'ide-edit', sent by the editor's
-      // debounced syncer), record the paths so the NEXT v3.0 build acknowledges them ("I noticed you
+      // debounced syncer), record the paths so the NEXT v5.0 build acknowledges them ("I noticed you
       // edited N files…") and builds on top of them. Bulk repo imports / uploads do NOT set this flag,
       // so they don't spam the next turn with "you edited 500 files". Best-effort — never blocks.
       if (req.body?.source === 'ide-edit') {
@@ -3456,7 +3456,7 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  // Delete files from the v3.0 workspace — keeps v3.0's known file set in sync when the user
+  // Delete files from the v5.0 workspace — keeps v5.0's known file set in sync when the user
   // deletes files in the IDE. Removes the paths from the durable WorkspaceFileStore (the
   // authoritative source for what files exist), so a fresh/restored session won't have them and
   // the file-guardian won't resurrect them. Ownership-checked. Body { workspaceId, userId, email,
@@ -3465,7 +3465,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3501,7 +3501,7 @@ export function registerAgentV3Routes(app: Express): void {
     const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
     const email = typeof req.body?.email === 'string' ? req.body.email : null;
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
@@ -3580,7 +3580,7 @@ export function registerAgentV3Routes(app: Express): void {
       email = await resolveVerifiedEmail(verified.uid);
     }
     if (!isAgentV3Enabled(userId, email)) {
-      res.status(404).json({ error: 'AgentV3 (v3.0) is not enabled.' });
+      res.status(404).json({ error: 'AgentV3 (v5.0) is not enabled.' });
       return;
     }
     // SECURITY Phase 1.3 (bill-or-refuse): a build spends NavBharatAI's paid model budget, so a
@@ -3591,7 +3591,7 @@ export function registerAgentV3Routes(app: Express): void {
     // this path, so a real signed-in user's transient blip self-heals on retry.
     if (buildRequiresSignIn(userId, email)) {
       res.status(401).json({
-        error: 'Please sign in to build with NavBharatAI Pro v3.0 — builds run on a real account so usage can be tracked.',
+        error: 'Please sign in to build with NavBharatAI Pro v5.0 — builds run on a real account so usage can be tracked.',
         code: 'signin',
       });
       return;
@@ -3956,7 +3956,7 @@ export function registerAgentV3Routes(app: Express): void {
     // planning). Those steps can take several seconds, and a multi-second silent gap
     // right after the headers makes a proxy / CDN / Cloud Run ingress (or a cold start)
     // hand the browser an empty 200 — which the client reports as the misleading
-    // "No response from the v3.0 engine … the backend may be unreachable, or v3.0 is
+    // "No response from the v5.0 engine … the backend may be unreachable, or v5.0 is
     // not enabled." This first byte forces the infra to commit to the stream and makes
     // the client register a real event immediately, so a later failure surfaces its
     // OWN honest terminal error instead of the bare "no response" message. A `ping` is
@@ -4135,17 +4135,17 @@ export function registerAgentV3Routes(app: Express): void {
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
         // LIVE WEB GROUNDING (admin 2026-07-12): a plain chat question that needs current facts
-        // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v3.0 answers from
+        // (sports/news/prices/"latest"/"aaj") gets real search results folded in, so v5.0 answers from
         // today's data, not its training cutoff. Gated + bounded + best-effort — normal chat is untouched.
         try {
           const liveBlock = await liveSearchContext(prompt);
           if (liveBlock) chatPrompt = `${liveBlock}\n\n---\n${chatPrompt}`;
         } catch { /* live search is best-effort */ }
-        // v3.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
+        // v5.0 used to answer a plain chat question ("kितni files hai?") completely blind — the chat
         // lane never loaded any workspace context. projectFileCount was already computed above for
         // intent classification (no extra Firestore call needed here).
         const chatWorkspaceContext = chatWorkspaceContextLine(projectFileCount);
-        // v3.0 preview self-awareness: so "kya preview chal raha hai?" is answered from REAL state, not a
+        // v5.0 preview self-awareness: so "kya preview chal raha hai?" is answered from REAL state, not a
         // guess. No sandbox probe here (that would slow every chat message) — classify from the durable
         // file count + whether a live backend exists. This never falsely claims RUNNING; when files exist
         // it honestly says the app is SAVED and reboots on demand (the reopen-years-later guarantee).
@@ -4628,7 +4628,7 @@ export function registerAgentV3Routes(app: Express): void {
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
     // final billing hook can fold them into the user's charge with the same markup as every other
-    // v3.0 call (NavBharatAI-Anthropic-billed). Stays {0,0} unless the blueprint step actually runs.
+    // v5.0 call (NavBharatAI-Anthropic-billed). Stays {0,0} unless the blueprint step actually runs.
     const blueprintUsage = { inputTokens: 0, outputTokens: 0 };
     // BILLING ACCOUNTING (2026-07-10) — ONE build-level token sink. Every token-spending unit of this
     // build feeds it: the fast lane, the main agentic runner, EVERY sub-agent, and every
@@ -4736,7 +4736,7 @@ export function registerAgentV3Routes(app: Express): void {
               const debitRes = await debitWalletForBuild(getDb() as any, userId, {
                 billedInr: watchdogBilledUsd * usdInrRate(),
                 buildRef: `${workspaceId}_${billingCtx.buildStartedAt}`,
-                description: 'NavBharatAI Pro v3.0 build (time-capped)',
+                description: 'NavBharatAI Pro v5.0 build (time-capped)',
               });
               if (debitRes.ok) watchdogWalletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };
             } catch { /* debit failure never blocks finalization (logged nowhere-critical) */ }
@@ -4829,7 +4829,7 @@ export function registerAgentV3Routes(app: Express): void {
       // Claude is the backstop — so builds work even when Claude is out of credits.
       // Cost-ladder routing (P2): the deterministic request analyser picks the
       // cheapest capable START model so a simple app (calculator/todo) builds on
-      // Gemini Flash instead of Pro. Active within v3.0 (itself flag-gated); set
+      // Gemini Flash instead of Pro. Active within v5.0 (itself flag-gated); set
       // AGENTV3_COST_LADDER=off to fall back to the fixed model. Billing is
       // unchanged (Opus-equivalent markup) — this only trims real provider cost.
       // No provider name is surfaced to the user (kept to server telemetry only).
@@ -5098,7 +5098,7 @@ export function registerAgentV3Routes(app: Express): void {
       // get a reply even when no sandbox is available (no E2B key, or a read-only
       // filesystem). If setup fails we tell the user honestly and keep chatting —
       // the build tools will report the real sandbox error only if the user asks
-      // to build. This is what makes v3.0 conversational like Claude Code.
+      // to build. This is what makes v5.0 conversational like Claude Code.
       let git: GitManager | undefined;
       // Deep-test App #7 (2026-07-13): true when the build sandbox could not be set up (E2B down / quota /
       // template). No file can ever be written, so the build MUST end as a failure — not "✓ Done" over an
@@ -5306,7 +5306,7 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `Could not import the repository (${safeM}). Starting with an empty workspace instead.`, ts: Date.now() });
           }
         }
-        // FILE GUARDIAN: the files v3.0 created must STAY. The sandbox is ephemeral, so at the start
+        // FILE GUARDIAN: the files v5.0 created must STAY. The sandbox is ephemeral, so at the start
         // of every turn we compare what's in it against the durable history (WorkspaceFileStore) and
         // AUTO-RECOVER anything that went missing — a one-off deleted file is re-added, and a fully
         // recycled sandbox is restored whole (overwriting bare scaffold placeholders). It runs BEFORE
@@ -5525,7 +5525,7 @@ export function registerAgentV3Routes(app: Express): void {
         const disciplineBlock = weakBuildDisciplineBlock(noClaudeBuild);
         if (disciplineBlock) architectSystem = `${disciplineBlock}\n\n---\n\n${architectSystem}`;
       } catch { /* weak-tier discipline is best-effort — never blocks a build */ }
-      // Phase S2 — IDE↔v3.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
+      // Phase S2 — IDE↔v5.0 awareness (Google-AI-Studio style): if the user MANUALLY edited files in
       // Code Studio since the last build, consume that pending set, tell the agent about it (so it reads
       // and builds ON TOP of those edits, never reverting them), and acknowledge it to the user in chat.
       // Consuming clears the set so the same edits aren't re-announced next turn. Additive + best-effort.
@@ -5702,7 +5702,7 @@ export function registerAgentV3Routes(app: Express): void {
       // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
       // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
-      // The mandatory readiness gate audits code v3.0 BUILT — it must NOT judge a freshly-imported
+      // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
       // existing app (its pre-existing hardcoded keys / SQL patterns are the user's, not this build's,
       // and surfacing "NOT READY 0/100" on their working production app is wrong + alarming).
       const runReadinessGate = readinessGateEnabled() && !isImportTurn;
@@ -6000,7 +6000,7 @@ export function registerAgentV3Routes(app: Express): void {
       // With a plan active, only a CONTINUATION message advances it — a substantive mid-project
       // message (an edit request, a question) takes the normal build path so it is never
       // steamrolled into "build module N". Planner tokens are billed via blueprintUsage (same
-      // markup as every other v3.0 call).
+      // markup as every other v5.0 call).
       let projectPlanRef: ProjectPlan | null = null;
       let projectModuleRef: ProjectModule | null = null;
       if (projectModeEnabled(process.env, { userId, email }) && !planFirst) {
@@ -7018,14 +7018,14 @@ export function registerAgentV3Routes(app: Express): void {
         }
       } catch { /* integrity analysis is best-effort — never blocks a build */ }
 
-      // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v3.0 used to
+      // PREVIEW SELF-CHECK + HEAL (default-on when a browser sandbox is available): v5.0 used to
       // claim "preview published" after only a port check (port-up ≠ the app rendered). Here it
       // actually OPENS the running app in a real browser, READS the rendered DOM + console, and
       // judges honestly whether it works — then makes ONE bounded repair pass if it didn't, and
-      // re-verifies. This is what makes v3.0 AWARE of its own preview and able to fix what it sees.
+      // re-verifies. This is what makes v5.0 AWARE of its own preview and able to fix what it sees.
       // Best-effort, time-budgeted, abortable — it can never break or hang the build. Disable with
       // AGENTV3_PREVIEW_VERIFY=off.
-      // Admin rule (2026-07-07, "preview theek chala to hi paise len"): when v3.0's own eyes — the
+      // Admin rule (2026-07-07, "preview theek chala to hi paise len"): when v5.0's own eyes — the
       // real-browser verification below — conclude the delivered preview does NOT render even after
       // the bounded self-heal, that build is not a delivered app and must not be billed. Server-side
       // verdict only (a client-reported failure can never zero a bill — not spoofable).
@@ -7479,7 +7479,7 @@ export function registerAgentV3Routes(app: Express): void {
           // judge (#876, which only guards CHEAP-floor builds) — the reviewer runs on every agentic
           // build, so this catches a strong build's critical bug too. ONE bounded repair pass —
           // DEFAULT-ON via reviewerAutoFixEnabled() (2026-07-07: gating this on the opt-in
-          // AGENTV3_AUTOFIX meant v3.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
+          // AGENTV3_AUTOFIX meant v5.0 diagnosed its own [CRITICAL] and then knowingly shipped it);
           // best-effort — never blocks/fails the build; the fix's writes are saved.
           const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical').map((i) => i.message.trim()).filter(Boolean);
           // Option 2 (canary, autopsy 2026-07-11): also repair FUNCTIONAL [WARNING] findings — the
@@ -7665,7 +7665,7 @@ export function registerAgentV3Routes(app: Express): void {
                 const pr = await prClient.openPullRequest(
                   ownRepoTarget.repo, ownRepoTarget.workBranch, ownRepoTarget.baseBranch,
                   `NavBharatAI: update ${ownRepoTarget.repo}`,
-                  `Edits by NavBharatAI Pro v3.0 on \`${ownRepoTarget.workBranch}\`. Review and merge into \`${ownRepoTarget.baseBranch}\` when ready.`,
+                  `Edits by NavBharatAI Pro v5.0 on \`${ownRepoTarget.workBranch}\`. Review and merge into \`${ownRepoTarget.baseBranch}\` when ready.`,
                 );
                 if (pr.number) {
                   prNote = `Saved your edits to ‘${ownRepoTarget.workBranch}’ and opened PR #${pr.number} → ‘${ownRepoTarget.baseBranch}’. Your ‘${ownRepoTarget.baseBranch}’ is untouched — review and merge when ready: ${pr.htmlUrl}`;
@@ -7679,7 +7679,7 @@ export function registerAgentV3Routes(app: Express): void {
             if (pushed.pushed) {
               const flow = await mergeViaPullRequest(prClient, repoNameRef, {
                 head: buildBranch, base: repoBranch, title: msg,
-                body: 'Automated build by NavBharatAI Pro v3.0.',
+                body: 'Automated build by NavBharatAI Pro v5.0.',
               });
               if (flow.note) {
                 events.emit({ type: 'narration', agent: 'architect', text: flow.note, ts: Date.now() });
@@ -7801,7 +7801,7 @@ export function registerAgentV3Routes(app: Express): void {
           const debitRes = await debitWalletForBuild(getDb() as any, userId, {
             billedInr: effectiveBilledUsd * usdInrRate(),
             buildRef: `${workspaceId}_${buildStartedAt}`,
-            description: 'NavBharatAI Pro v3.0 build',
+            description: 'NavBharatAI Pro v5.0 build',
           });
           if (debitRes.ok) {
             walletDebit = { tokensDebited: debitRes.tokensDebited, tokenBalance: debitRes.tokenBalance };

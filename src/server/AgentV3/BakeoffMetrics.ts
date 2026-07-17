@@ -1,4 +1,4 @@
-// NavBharatAI Pro v3.0 — cheap-model BAKE-OFF metrics (PR2 of the cost-down plan).
+// NavBharatAI Pro v5.0 — cheap-model BAKE-OFF metrics (PR2 of the cost-down plan).
 //
 // Pure, dependency-free helpers that turn a build's NDJSON event stream into OBJECTIVE metrics, so a
 // candidate cheap model (GLM/Kimi) is judged on what it REALLY did — not on vibes. The decisive
@@ -145,7 +145,7 @@ export function formatReport(aggs: BakeoffAggregate[]): string {
   const pct = (x: number): string => `${Math.round(x * 100)}%`;
   const num = (x: number | null, d = 1): string => (x === null ? 'n/a' : x.toFixed(d));
   const lines: string[] = [];
-  lines.push('NavBharatAI v3.0 — Cheap-model Bake-off');
+  lines.push('NavBharatAI v5.0 — Cheap-model Bake-off');
   lines.push('='.repeat(60));
   for (const a of aggs) {
     lines.push(`\n● ${a.label}  (${a.runs} run${a.runs === 1 ? '' : 's'})`);

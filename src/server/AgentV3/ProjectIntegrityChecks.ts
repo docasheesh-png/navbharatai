@@ -1,6 +1,6 @@
 // AgentV3 — deterministic project-integrity checks for two real defect classes the existing analyzer
 // suite (ArchitectureAnalysis / WorkspaceHealth / deadCode / Readiness) does NOT cover, surfaced by two
-// real v3.0 build reports (Todo + Notes, 2026-07-11):
+// real v5.0 build reports (Todo + Notes, 2026-07-11):
 //
 //  1. FOCUS CONFLICT — more than one component grabs the INITIAL page focus at mount. In the Notes
 //     build both NoteEditor and SearchBar called `.focus()` in a mount effect, so SearchBar (rendered

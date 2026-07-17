@@ -1,6 +1,6 @@
 // AgentV3 — Software Project Mode (SPM): the durable module plan for LARGE builds.
 //
-// Why this exists (admin mandate, 2026-07-04): v3.0 builds every app inside ONE agentic
+// Why this exists (admin mandate, 2026-07-04): v5.0 builds every app inside ONE agentic
 // conversation. That works up to roughly 40–80 files, then five ceilings kill it: the single
 // context window fills, the step cap (80) runs out, the wall clock (30–60 min) expires, the
 // budget cap trips, and verification is tuned for small apps. A 1000–5000-file software project

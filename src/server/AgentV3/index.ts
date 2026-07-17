@@ -1,4 +1,4 @@
-// AgentV3 (Vargen 3.0) — public surface for the v3.0 agent engine.
+// AgentV3 (Vargen 3.0) — public surface for the v5.0 agent engine.
 //
 // P0 ships the type vocabulary, the event spine (AgentEventStream), the state
 // container (WorkspaceState), and the feature flag. The native tool-use build
@@ -143,13 +143,13 @@ export interface AgentV3Status {
   phase: typeof AGENTV3_PHASE;
   /** False until the native build loop ships (P1). Honest: not usable yet. */
   ready: boolean;
-  /** The surfaces v3.0 merges into one synced engine (§3.2). */
+  /** The surfaces v5.0 merges into one synced engine (§3.2). */
   surfaces: string[];
   note: string;
 }
 
 /**
- * Honest engine status. Reflects the real phase of the v3.0 engine.
+ * Honest engine status. Reflects the real phase of the v5.0 engine.
  */
 export function agentV3Status(): AgentV3Status {
   return {

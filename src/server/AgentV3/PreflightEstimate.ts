@@ -1,4 +1,4 @@
-// AgentV3 — pre-flight BUILD-COST ESTIMATE for paid public v3.0 (admin plan 2026-07-06).
+// AgentV3 — pre-flight BUILD-COST ESTIMATE for paid public v5.0 (admin plan 2026-07-06).
 //
 // Purpose: BEFORE a build starts, turn a user's prompt into an estimated billed cost (USD and INR), so
 // the paid-public gate (Affordability.decideAffordability) can compare it against the wallet balance and

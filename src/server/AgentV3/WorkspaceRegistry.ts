@@ -2,7 +2,7 @@ import type { GitManager, CommandRunner } from './GitManager';
 import { wrapBoundedCommand, capOutput, isRunnableCommand, EXEC_TIMEOUT_SEC, type ExecResult } from './execCommand';
 
 /**
- * WorkspaceRegistry — keeps active v3.0 build sessions addressable after the
+ * WorkspaceRegistry — keeps active v5.0 build sessions addressable after the
  * streaming build request, so a separate request can act on the same sandbox
  * (History → restore now; preview refresh / resume later). In-memory singleton
  * with a TTL sweep so abandoned sessions are dropped.

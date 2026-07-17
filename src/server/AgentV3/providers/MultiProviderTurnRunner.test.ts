@@ -125,7 +125,7 @@ describe('makeMultiProviderTurnRunner', () => {
       { name: 'GROK', runner: runnerFail('grok down') },
       { name: 'CLAUDE', runner: runnerFail('claude down') },
     ]);
-    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/All v3.0 providers failed \(GROK → CLAUDE\).*claude down/);
+    await expect(runner.runTurn(PARAMS)).rejects.toThrow(/All v5.0 providers failed \(GROK → CLAUDE\).*claude down/);
   });
 
   it('works with a single backstop runner', async () => {

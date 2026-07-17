@@ -2,7 +2,7 @@
 //
 // Implements the same TurnRunner contract as ClaudeClient, but speaks the OpenAI Chat
 // Completions function-calling API — so a cheaper OpenAI-compatible provider (Grok via
-// the xAI endpoint, or any OpenAI-style model) can take a turn in v3.0's build loop. The
+// the xAI endpoint, or any OpenAI-style model) can take a turn in v5.0's build loop. The
 // Anthropic⇄OpenAI translation lives in OpenAiToolAdapter (pure + tested); this runner is
 // the thin I/O layer: build the request, call the client, parse the reply back to an
 // Anthropic-shaped TurnResult.

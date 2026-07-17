@@ -1,6 +1,6 @@
-// AgentV3 — preview-domain mapping for v3.0-built apps (§12, admin 2026-06-24).
+// AgentV3 — preview-domain mapping for v5.0-built apps (§12, admin 2026-06-24).
 //
-// v3.0-built apps are previewed under the platform's own E2B custom domain
+// v5.0-built apps are previewed under the platform's own E2B custom domain
 // (mitrify.xyz) instead of the raw `*.e2b.app` host. E2B's custom domain is an
 // ADDITIVE alias: the sandbox keeps running on the same infrastructure and the
 // SDK's API endpoint is unchanged — we deliberately do NOT reconfigure the SDK
@@ -27,7 +27,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.E2B_PREVIEW_DOMAIN) {
 }
 
 /**
- * The configured preview domain for v3.0 apps. Override with `E2B_PREVIEW_DOMAIN`;
+ * The configured preview domain for v5.0 apps. Override with `E2B_PREVIEW_DOMAIN`;
  * set it to `e2b.app` to disable the swap entirely (fall back to the raw host).
  */
 export function previewDomain(): string {

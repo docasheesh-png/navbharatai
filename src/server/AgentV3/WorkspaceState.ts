@@ -2,7 +2,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { AgentRole, FileChange, GitCheckpoint, TodoItem, WorkspaceSnapshot } from './types';
 
 /**
- * WorkspaceState — the single source of truth a v3.0 session's surfaces read
+ * WorkspaceState — the single source of truth a v5.0 session's surfaces read
  * from. Tracks the file change log, todos, plan, git checkpoints, and terminal
  * output. Every mutation optionally broadcasts on an AgentEventStream so the
  * surfaces stay in sync with zero drift (NAVBHARATAI_PRO_V3_DESIGN.md §3.2).

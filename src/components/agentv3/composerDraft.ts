@@ -1,4 +1,4 @@
-// B7 (audit Batch 5) — persist the v3.0 chat composer's unsent draft across reloads.
+// B7 (audit Batch 5) — persist the v5.0 chat composer's unsent draft across reloads.
 //
 // ROOT CAUSE of "typing lost on reload": the composer's `prompt` was pure in-memory React state, so a
 // reload (now MORE likely thanks to B8's prompt SW-update reloads, and always possible on a phone

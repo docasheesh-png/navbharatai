@@ -1,7 +1,7 @@
 // Shared attachment-text extraction — turns ANY document the user uploads into
 // plain text the AI can read, on the SERVER, with no per-call API cost. This is
 // the backbone of "send any file in the world" file support for every AI surface
-// (Free chat, Pro chat, Doctor AI / SDA, and Pro v3.0).
+// (Free chat, Pro chat, Doctor AI / SDA, and Pro v5.0).
 //
 // Images and PDFs are NOT handled here — those go to the multimodal/vision
 // providers (Gemini / Vertex / Grok / Claude) which read them natively. This

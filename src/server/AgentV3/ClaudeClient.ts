@@ -3,7 +3,7 @@ import { modelSupportsAdaptiveThinking } from './models';
 import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
 
 /**
- * ClaudeClient — the v3.0 engine's wrapper over the Anthropic SDK for native
+ * ClaudeClient — the v5.0 engine's wrapper over the Anthropic SDK for native
  * tool-use turns (RC-1). One `runTurn()` call = one assistant turn: send the
  * transcript + tool definitions, get back the assistant's text, any `tool_use`
  * blocks, the stop reason, and token usage (for D5 billing).

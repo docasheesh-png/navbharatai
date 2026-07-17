@@ -125,7 +125,7 @@ export interface NarrationLine {
   streaming?: boolean;
 }
 
-/** The full client view a v3.0 build renders — one source for all merged surfaces. */
+/** The full client view a v5.0 build renders — one source for all merged surfaces. */
 export interface AgentV3ClientState {
   /** Architect/agent narration feed (chat-bubble text). */
   narration: NarrationLine[];

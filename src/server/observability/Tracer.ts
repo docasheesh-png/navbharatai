@@ -1,4 +1,4 @@
-// P2.1 — Distributed Tracing (UPGRADE v3.0).
+// P2.1 — Distributed Tracing (UPGRADE v5.0).
 //
 // A real, dependency-free distributed tracer. It produces W3C-style trace/span ids,
 // builds parent→child span trees (HTTP request → AI provider → …), keeps the recent

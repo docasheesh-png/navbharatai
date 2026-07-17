@@ -3,7 +3,7 @@ import type { AgentEvent } from './types';
 export type AgentEventListener = (event: AgentEvent) => void;
 
 /**
- * AgentEventStream — the single broadcast spine all v3.0 surfaces subscribe to
+ * AgentEventStream — the single broadcast spine all v5.0 surfaces subscribe to
  * (Preview, IDE/Code Studio, File explorer, Git, History). One stream → zero
  * drift between panes (NAVBHARATAI_PRO_V3_DESIGN.md §3.2).
  *

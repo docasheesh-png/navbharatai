@@ -168,10 +168,10 @@ describe('TemplateRegistry', () => {
   });
 });
 
-// The LIVE v3.0 flow uses its OWN isolated copy of the sandbox substrate (E2BActuator/ToolDispatcher →
+// The LIVE v5.0 flow uses its OWN isolated copy of the sandbox substrate (E2BActuator/ToolDispatcher →
 // AgentV3/sandbox/.../TemplateRegistry). Protect the enriched Next.js scaffold on the copy that actually
 // runs, so the two copies can never silently drift back to the minimal page+layout output.
-describe('NextjsProvider (LIVE v3.0 sandbox copy)', () => {
+describe('NextjsProvider (LIVE v5.0 sandbox copy)', () => {
   const provider = new LiveNextjsProvider();
 
   it('ships the full App Router scaffold (loading / error / not-found)', () => {
@@ -188,7 +188,7 @@ describe('NextjsProvider (LIVE v3.0 sandbox copy)', () => {
   });
 });
 
-// LIVE v3.0 framework scaffolds must ship a real error boundary (parallel to the Next.js error.tsx) so an
+// LIVE v5.0 framework scaffolds must ship a real error boundary (parallel to the Next.js error.tsx) so an
 // unhandled route error renders a page instead of a blank screen. Guards the enriched sandbox copies.
 describe('LIVE framework scaffolds — error boundaries', () => {
   it('Nuxt ships error.vue with clearError', () => {

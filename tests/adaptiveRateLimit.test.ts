@@ -68,7 +68,7 @@ describe('adaptiveRateLimit — isGuardedPath', () => {
     expect(isGuardedPath('/assets/index.js')).toBe(false);
   });
 
-  it('EXEMPTS the interactive v3.0 build surface (the real-user-blocked bug)', () => {
+  it('EXEMPTS the interactive v5.0 build surface (the real-user-blocked bug)', () => {
     // A single build bursts these — they must never trip the behavioural bot block.
     expect(isGuardedPath('/api/agentv3/chat')).toBe(false);
     expect(isGuardedPath('/api/agentv3/status')).toBe(false);

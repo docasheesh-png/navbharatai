@@ -220,7 +220,7 @@ export function registerBuildRoutes(app: Express): void {
   app.post('/api/guider/plan', async (req: Request, res: Response) => {
     // SECURITY (SEC Phase 5 re-audit) — this endpoint was UNAUTHENTICATED and, when a caller set
     // `agentic:true`, ran an LLM call on NavBharatAI's OWN provider budget (a money-bleed surface,
-    // the sibling of the retired /api/pro-* routes). It has NO client caller (superseded by v3.0), so
+    // the sibling of the retired /api/pro-* routes). It has NO client caller (superseded by v5.0), so
     // it is now a permanent no-op: the same "no confirmation" response it already returns when
     // disabled — never touching a model. Kept as a 200 no-op (not 410) so any stale client degrades
     // gracefully into a normal build instead of erroring.

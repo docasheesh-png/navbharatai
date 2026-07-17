@@ -14,8 +14,8 @@
 //
 // Per-workspace and in-process (registry mirrors WorkspaceRegistry). The legacy
 // global `Memory/ProjectMemoryManager` writes a single shared file in cwd, which
-// is unsafe for v3.0's multi-workspace/multi-user model — this replaces it for
-// the v3.0 engine. A durable backend can swap the Map without changing callers.
+// is unsafe for v5.0's multi-workspace/multi-user model — this replaces it for
+// the v5.0 engine. A durable backend can swap the Map without changing callers.
 
 import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
 import { bm25, type Bm25Doc } from './Bm25';

@@ -8,7 +8,7 @@
 // signatures, component prop types, CSS class names. That is precisely what dependencyContext's own
 // instruction tells the model to use.
 //
-// QUALITY (admin rule: v3.0 may only be ENHANCED): this module extracts that surface from the whole
+// QUALITY (admin rule: v5.0 may only be ENHANCED): this module extracts that surface from the whole
 // file, so it also FIXES a real defect of the old capped dump — `content.slice(0, 4000)` silently cut
 // off any export declared past 4,000 chars, hiding it from consumers. Extraction scans the full file,
 // so every export is visible regardless of position. Shapes that consumers must copy exactly

@@ -5,7 +5,7 @@ import { resolveCanonicalWalletId, walletMergeResolveEnabled } from './walletRes
 // BILLING PHASE 1 (admin plan 2026-07-10) — the missing HALF of the money path.
 //
 // Before this module, `user_token_wallets` was only ever CREDITED (purchase / welcome bonus /
-// promo). A v3.0 build recorded its cost to the display-only monthly total (UserCostStore) and
+// promo). A v5.0 build recorded its cost to the display-only monthly total (UserCostStore) and
 // to telemetry, but NEVER decremented the wallet — so the pre-flight affordability gate compared
 // estimates against a balance that never went down: one recharge was effectively unlimited builds.
 //

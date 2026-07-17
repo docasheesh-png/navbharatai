@@ -1,6 +1,6 @@
 // AgentV3 — Firestore-backed ConversationStore (D7 persistence P-C).
 //
-// The durable backend behind the ConversationStore contract: a v3.0 build survives not just a
+// The durable backend behind the ConversationStore contract: a v5.0 build survives not just a
 // reconnect to the same instance (the in-memory store) but a process restart and horizontal
 // scaling across Cloud Run instances. Mirrors the proven FirestoreJobStore pattern
 // (firebase-admin init + databaseId from firebase-applet-config.json) and is selected at

@@ -1,6 +1,6 @@
 // Bounded command execution for the Code Studio REAL terminal (no fake output).
 //
-// A user terminal runs commands in the user's OWN v3.0 sandbox, but it must never become an
+// A user terminal runs commands in the user's OWN v5.0 sandbox, but it must never become an
 // unbounded shell on NavBharatAI's infra: every command is wrapped with a hard `timeout` (so no
 // runaway/long-running process) and its output is capped. These are pure helpers so the bounding
 // rules are unit-tested independently of the sandbox.

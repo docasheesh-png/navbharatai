@@ -1,6 +1,6 @@
 // Shared client auth headers — one place that attaches the verified Firebase ID token so the
 // server can resolve a REAL identity (SECURITY Phase 1). Extracted so every money/secret-bearing
-// fetch (v3.0 build, Engineer AI, …) sends the token the same way instead of each re-implementing
+// fetch (v5.0 build, Engineer AI, …) sends the token the same way instead of each re-implementing
 // it (and some, like Engineer AI, forgetting it — which left the server unable to verify the caller
 // and forced it onto the spoofable body userId).
 import { auth } from '../App';

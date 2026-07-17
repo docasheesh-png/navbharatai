@@ -10,7 +10,7 @@ interface ProfessionalCard {
 
 const CARDS: ProfessionalCard[] = [
   { id: 'sda_chat', label: 'Doctor AI', description: 'Senior Doctor Assistant — clinical Q&A, case notes, red-flag detection.', icon: Stethoscope, active: true },
-  { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v3.0', description: 'Agentic app builder — describe an app in any language; it plans, builds, previews and ships it.', icon: HardHat, active: true },
+  { id: 'nbi_pro_chat', label: 'NavBharatAI Pro v5.0', description: 'Agentic app builder — describe an app in any language; it plans, builds, previews and ships it.', icon: HardHat, active: true },
   { id: 'lawyer_ai', label: 'Lawyer / Legal', description: 'Explains Indian law & rights, understands notices/clauses, drafts legal notice/RTI/complaints (vet with an advocate).', icon: Scale, active: true },
   { id: 'teacher_ai', label: 'Teacher AI', description: 'Explains concepts, solves doubts step by step, lesson plans, quizzes & exam study plans.', icon: GraduationCap, active: true },
   { id: 'mentor_ai', label: 'Mentor / Career Coach', description: 'Career direction, resume & interview prep, skill roadmaps, job-switch & higher-studies guidance.', icon: Compass, active: true },

@@ -1,4 +1,4 @@
-// P1.3 — Circuit Breaker (UPGRADE v3.0).
+// P1.3 — Circuit Breaker (UPGRADE v5.0).
 //
 // A real per-provider circuit breaker with the three canonical states:
 //

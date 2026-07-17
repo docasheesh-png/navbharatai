@@ -1,6 +1,6 @@
 // AgentV3 — sticky-session continuity (admin rule 2026-07-05, REPLACES the 2026-07-01 always-fresh rule).
 //
-// THE RULE: the v3.0 chat only ever changes/closes via exactly three deliberate actions —
+// THE RULE: the v5.0 chat only ever changes/closes via exactly three deliberate actions —
 //   1. ☰ → "+New chat"            (mints + sticks a new session)
 //   2. ☰ → opening another chat    (sticks that chat's session)
 //   3. the header tab-bar ✕ close  (CLEARS the sticky session → next open is fresh)
@@ -17,7 +17,7 @@
 
 import { normalizeUid } from '../../lib/agentv3Workspace';
 
-/** The per-user storage key holding the sticky (active) v3.0 session id. */
+/** The per-user storage key holding the sticky (active) v5.0 session id. */
 export function v3SessionStorageKey(userId: string | null | undefined): string {
   return `agentv3_session_${userId || 'anon'}`;
 }
@@ -29,7 +29,7 @@ export function readStickySession(userId: string | null | undefined): string {
   try { return sessionStorage.getItem(key) || ''; } catch { return ''; }
 }
 
-/** Clear the sticky session (the ✕ tab-close action) so the next v3.0 open starts fresh. Never throws. */
+/** Clear the sticky session (the ✕ tab-close action) so the next v5.0 open starts fresh. Never throws. */
 export function clearStickySession(userId: string | null | undefined): void {
   const key = v3SessionStorageKey(userId);
   try { localStorage.removeItem(key); } catch { /* storage unavailable */ }

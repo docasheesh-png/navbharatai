@@ -1,6 +1,6 @@
 // AgentV3 (Vargen 3.0) — rebuild a persisted build's chat history on reload (D7, option (a)).
 //
-// When the user reopens v3.0 after a refresh/reconnect, the backend ConversationStore (D7)
+// When the user reopens v5.0 after a refresh/reconnect, the backend ConversationStore (D7)
 // returns the persisted build transcript. This pure module turns that transcript into the wire
 // events needed to RE-DISPLAY the chat — only the architect narration (assistant text); the
 // generated files come back via the existing git/restore path, not from the transcript (the

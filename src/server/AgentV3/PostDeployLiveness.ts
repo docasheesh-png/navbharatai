@@ -1,6 +1,6 @@
 // P-PIPE.116 — post-deploy liveness probe (advisory).
 //
-// After a v3.0 deploy publishes to a permanent URL, the deploy message reported success but never
+// After a v5.0 deploy publishes to a permanent URL, the deploy message reported success but never
 // confirmed the site actually responds. This turns a single bounded GET to the deployed URL into one
 // honest line appended to the deploy message — so the user (and the Monitor role) learns whether the
 // app is live, without ever faking a result.

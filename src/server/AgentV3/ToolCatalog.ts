@@ -3,7 +3,7 @@ import type { ToolName } from './types';
 import { WORKER_ROLES } from './AgentRegistry';
 
 /**
- * ToolCatalog — the native Anthropic tool definitions the v3.0 agent team can
+ * ToolCatalog — the native Anthropic tool definitions the v5.0 agent team can
  * call (RC-1). These are the Claude-Code-class file/exec/search tools. The
  * `task` sub-agent tool is added in P3.5 (multi-agent). Each definition's
  * `input_schema` is what Claude validates its `tool_use` input against.

@@ -2,7 +2,7 @@
 //
 // A persistent per-file content-hash cache so a rebuild can tell exactly which files changed since
 // last time — and, via a lightweight import graph, which files are IMPACTED (a changed file plus
-// everything that imports it, transitively). The v3.0 agent already does surgical edits (it doesn't
+// everything that imports it, transitively). The v5.0 agent already does surgical edits (it doesn't
 // regenerate unchanged files), so this adds the missing persistent signal: an honest "N/M files
 // unchanged" report + a Firestore-backed hash cache that survives server restarts.
 //

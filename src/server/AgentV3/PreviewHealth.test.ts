@@ -5,7 +5,7 @@ const base: PreviewHealthSignals = {
   hasFiles: true, liveBackend: true, livePortUp: null, everPublished: false, lastError: null, booting: false,
 };
 
-describe('classifyPreviewHealth — v3.0 knows the REAL preview state', () => {
+describe('classifyPreviewHealth — v5.0 knows the REAL preview state', () => {
   it('empty when no files exist yet (nothing to preview)', () => {
     const h = classifyPreviewHealth({ ...base, hasFiles: false });
     expect(h.status).toBe('empty');

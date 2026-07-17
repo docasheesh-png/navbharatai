@@ -1,6 +1,6 @@
 // AgentV3 — Conversation persistence (D7).
 //
-// A v3.0 build runs as a growing transcript inside AgentRunner (`messages`). That array
+// A v5.0 build runs as a growing transcript inside AgentRunner (`messages`). That array
 // lives only in memory for the duration of one request, so a dropped connection or a page
 // refresh loses the whole build. ConversationStore makes the transcript DURABLE: each build
 // is a ConversationRecord that is created when the build starts, appended to as the model

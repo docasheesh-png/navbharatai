@@ -1,6 +1,6 @@
 // AgentV3 — deterministic dev-server failure classification + recovery planning.
 //
-// When a v3.0 dev server does NOT come up (the "Closed Port Error: no service on port 5173" the
+// When a v5.0 dev server does NOT come up (the "Closed Port Error: no service on port 5173" the
 // admin hit), the actuator used to just blindly restart ONCE and, on a second failure, give a generic
 // "did not come up — check the logs" line. That is the opposite of production-grade: a missing
 // dependency needs `npm install`, a busy port needs to be freed, a code error needs a SOURCE fix (a

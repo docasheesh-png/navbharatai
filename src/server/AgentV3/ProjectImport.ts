@@ -1,7 +1,7 @@
 // AgentV3 — "Project Landing Pipeline", step 1: turn an uploaded .zip into a clean, safe
 // path→content file map ready for the workspace (admin master plan, 2026-07-04).
 //
-// THE BUG THIS FIXES: a .zip attached in a v3.0 chat message used to flow down the generic
+// THE BUG THIS FIXES: a .zip attached in a v5.0 chat message used to flow down the generic
 // attachment path — its text was extracted into the model's CONTEXT and the archive was never
 // unpacked into the workspace. Files tab: empty. IDE: empty. Preview: nothing to run. This module
 // is the shared extraction/validation half of the pipeline; the chat route (and any future entry
@@ -319,7 +319,7 @@ export function devScriptRunsNodeServer(pkgRaw: string | undefined): boolean {
     || /\bnodemon\b/.test(cmd);
 }
 
-/** Map an imported project's package.json to the framework ids v3.0 already understands. Pure. */
+/** Map an imported project's package.json to the framework ids v5.0 already understands. Pure. */
 export function detectImportedFramework(files: Record<string, string>): string {
   const pkgRaw = files['package.json'];
   if (!pkgRaw) {
@@ -353,7 +353,7 @@ export function detectImportedFramework(files: Record<string, string>): string {
 }
 
 /**
- * Validate that an extracted project is something v3.0 can actually run — fail FAST and honestly
+ * Validate that an extracted project is something v5.0 can actually run — fail FAST and honestly
  * (before any sandbox time is spent) instead of producing a mystery dead preview later.
  */
 export function validateImportedProject(files: Record<string, string>): ImportValidation {

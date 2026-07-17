@@ -48,7 +48,7 @@ export class UserGitHubClient implements PrCapableClient {
       throw new Error(`ensureRepo: unexpected GET /repos response (HTTP ${got.status}).`);
     }
     const created = await this.request<RepoApi>('POST', '/user/repos', {
-      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v3.0',
+      name, private: true, auto_init: true, description: 'Built with NavBharatAI Pro v5.0',
     });
     if (!created.ok || !created.body) {
       throw new Error(`ensureRepo: could not create repo "${name}" in your GitHub account (HTTP ${created.status}).`);

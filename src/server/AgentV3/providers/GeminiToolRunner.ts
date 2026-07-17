@@ -1,7 +1,7 @@
 // AgentV3 — Gemini/Vertex tool-use TurnRunner (multi-provider cost routing, phase 1).
 //
 // Implements the TurnRunner contract over the Google GenAI (`@google/genai`) function-
-// calling API, so a cheap Gemini/Vertex model can take a turn in v3.0's build loop. The
+// calling API, so a cheap Gemini/Vertex model can take a turn in v5.0's build loop. The
 // Anthropic⇄Gemini translation lives in GeminiToolAdapter (pure + tested); this runner is
 // the thin I/O layer. The client is injectable (structural) so it is fully unit-testable
 // without a network call or key. Errors propagate so the orchestrator can fall through.

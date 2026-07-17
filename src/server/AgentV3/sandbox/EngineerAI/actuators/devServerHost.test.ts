@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, buildBuildInstallCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH , buildHttpLivenessCommand } from './devServerHost';
 
-describe('disableDevServerAutoOpen (v3.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
+describe('disableDevServerAutoOpen (v5.0 actuator) — stop xdg-open ENOENT crashing the preview', () => {
   it('prepends BROWSER=none so Vite/CRA skip the browser auto-open spawn', () => {
     expect(disableDevServerAutoOpen('npm run dev -- --host 0.0.0.0 --port 5173')).toBe('BROWSER=none npm run dev -- --host 0.0.0.0 --port 5173');
     expect(disableDevServerAutoOpen('vite --host 0.0.0.0')).toBe('BROWSER=none vite --host 0.0.0.0');
@@ -36,7 +36,7 @@ describe('redirectDevServerOutput — stop the dev server SIGPIPE-killing itself
   });
 });
 
-describe('ensureHostBinding (v3.0 actuator)', () => {
+describe('ensureHostBinding (v5.0 actuator)', () => {
   it('appends --host to a vite package-manager dev script', () => {
     expect(ensureHostBinding('npm run dev')).toBe('npm run dev -- --host 0.0.0.0');
     expect(ensureHostBinding('pnpm run dev')).toBe('pnpm run dev -- --host 0.0.0.0');

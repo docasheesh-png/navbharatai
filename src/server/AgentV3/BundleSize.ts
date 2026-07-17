@@ -1,6 +1,6 @@
 // P-PIPE.78 — bundle-size measurement for a generated app's production build.
 //
-// The v3.0 deploy path already downloads the built dist/ as an in-memory path→Buffer map
+// The v5.0 deploy path already downloads the built dist/ as an in-memory path→Buffer map
 // (E2BActuator.downloadDistFiles) but the deploy message only reported the file COUNT. This module
 // turns that same map — already in memory, zero extra sandbox I/O — into an honest size summary
 // (raw + gzip, plus the largest JS chunk) so the user learns how heavy their shipped app is.

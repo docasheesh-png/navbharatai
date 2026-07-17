@@ -2,7 +2,7 @@
  * Interop-safe loader for the firebase-admin CJS module via dynamic import.
  *
  * THE BUG THIS KILLS (root cause of "admin-unavailable" → every token verify failed →
- * public v3.0 users blocked, 2026-07-09): under Node's ESM dynamic import of this CJS
+ * public v5.0 users blocked, 2026-07-09): under Node's ESM dynamic import of this CJS
  * package, the real module.exports lives under `.default` — the top-level `initializeApp`
  * / `apps` / `auth` / `firestore` are all `undefined`. So `(await import('firebase-admin'))
  * .initializeApp(...)` throws "initializeApp is not a function", which every caller caught

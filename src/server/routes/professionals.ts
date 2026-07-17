@@ -23,7 +23,7 @@ const MAX_PROFESSIONAL_ATTACHMENTS = 4;
  * Attachments: the engine itself is text-only, so files become TEXT before the
  * model sees them — documents (Word/Excel/PowerPoint/ZIP/text/code) via the
  * shared extractor, and images/PDFs via the vision-describe chain. This is the
- * same server-side pattern Pro v3.0 uses, so every professional reads every
+ * same server-side pattern Pro v5.0 uses, so every professional reads every
  * supported format without a per-professional integration.
  */
 export function registerProfessionalsRoutes(app: Express): void {

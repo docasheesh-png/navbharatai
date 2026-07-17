@@ -24,7 +24,7 @@ async function authJsonHeaders(forceRefresh = false): Promise<Record<string, str
 }
 
 /**
- * useAgentV3Build — drives a v3.0 build and keeps the live client state that all
+ * useAgentV3Build — drives a v5.0 build and keeps the live client state that all
  * merged surfaces render from (§3.2). It POSTs the prompt to /api/agentv3/chat,
  * reads the NDJSON stream line by line, and folds each event through the pure
  * agentV3Reducer. Everything the UI shows is REAL engine activity (D9).
@@ -72,7 +72,7 @@ export interface UseAgentV3Build {
   /** Ask the server whether a build is running for this account (sets serverBuildRunning). Pass
    *  `workspaceId` to scope the check to the CALLER's session — omitting it falls back to the
    *  account-wide check, which is what caused a different session's still-running build to
-   *  auto-attach into whatever v3.0 session was currently open. */
+   *  auto-attach into whatever v5.0 session was currently open. */
   checkRunning: (opts?: { userId?: string; email?: string; workspaceId?: string }) => Promise<void>;
   /**
    * D7 — on (re)load, fetch the user's most recent persisted build and re-display its chat history
@@ -83,7 +83,7 @@ export interface UseAgentV3Build {
   loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null>;
   conversationLoadDiag: () => string | null;
   /**
-   * List the user's saved v3.0 conversations (metadata only) for the history menu.
+   * List the user's saved v5.0 conversations (metadata only) for the history menu.
    * Always returns an honest result: `error` is set (and `items` is []) whenever the list
    * could NOT be determined (not signed in, network/server failure) — the caller must NOT
    * treat that the same as a genuinely empty history.
@@ -362,8 +362,8 @@ export function useAgentV3Build(): UseAgentV3Build {
       const sample = (rawSample || buffer).trim();
       setError(
         sample
-          ? `The server did not return v3.0 events. It replied with:\n${sample.slice(0, 300)}`
-          : 'No response from the v3.0 engine.',
+          ? `The server did not return v5.0 events. It replied with:\n${sample.slice(0, 300)}`
+          : 'No response from the v5.0 engine.',
       );
     }
   }, []);
@@ -397,7 +397,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     let idlePolls = 0;
     // BACKGROUND-COST fix (2026-07-05 audit #2): the poll used a FIXED 3s cadence forever, and only an
     // EXPLICIT `running === false` ever wound it down — an omitted/undefined `running` kept a hidden,
-    // idle panel polling every 3s indefinitely (battery + network drain, worse now that the v3.0
+    // idle panel polling every 3s indefinitely (battery + network drain, worse now that the v5.0
     // surface stays mounted as a window). Quiet ticks now back off 3s → 30s (×1.6), any activity snaps
     // back to 3s, and ANY non-`true` running counts toward wind-down.
     let delayMs = LIVE_POLL_FAST_MS;
@@ -450,7 +450,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // `workspaceId` scopes the check to the CALLER's current session — without it, `buildRunningHere`
   // is undefined and we fall back to the account-wide `buildRunning`, but auto-resume should always
   // pass the session it's actually asking about (see AgentV3Panel's auto-resume effect). Root-caused
-  // 2026-07-01: a build genuinely still running in a DIFFERENT v3.0 session under the same account
+  // 2026-07-01: a build genuinely still running in a DIFFERENT v5.0 session under the same account
   // was silently auto-attached into whatever session the user had just opened, because this check
   // only ever asked "is ANY build running for this account" — never "for THIS one".
   const checkRunning = useCallback(async (opts?: { userId?: string; email?: string; workspaceId?: string }) => {
@@ -1099,8 +1099,8 @@ export function useAgentV3Build(): UseAgentV3Build {
           const sample = (rawSample || buffer).trim();
           setError(
             sample
-              ? `The server did not return v3.0 events. It replied with:\n${sample.slice(0, 300)}`
-              : `No response from the v3.0 engine (HTTP ${res.status}). The backend may be unreachable, or v3.0 is not enabled on the server.`,
+              ? `The server did not return v5.0 events. It replied with:\n${sample.slice(0, 300)}`
+              : `No response from the v5.0 engine (HTTP ${res.status}). The backend may be unreachable, or v5.0 is not enabled on the server.`,
           );
         }
       } catch (err) {

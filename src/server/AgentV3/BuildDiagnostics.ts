@@ -1,4 +1,4 @@
-// AgentV3 — Build Diagnostics: a structured, downloadable record of EVERY issue v3.0 hit
+// AgentV3 — Build Diagnostics: a structured, downloadable record of EVERY issue v5.0 hit
 // while building an app, whether it auto-recovered or not.
 //
 // Purpose: give the admin (and Claude) a precise, technical list of where the build engine
@@ -27,7 +27,7 @@ export interface BuildIssue {
   code: string;
   /** Technical, human-readable description. */
   message: string;
-  /** True if v3.0 recovered on its own; false if it remained a problem in the final build. */
+  /** True if v5.0 recovered on its own; false if it remained a problem in the final build. */
   autoResolved: boolean;
   /** Extra context (tool name, provider, file path, raw error) — optional. */
   detail?: string;
@@ -878,7 +878,7 @@ export function dominantDeliveryProvider(delivery: ReadonlyMap<string, number>):
 /** Render a report as a human/Claude-readable plain-text document (for the .txt download). */
 export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
   const lines: string[] = [];
-  lines.push('NavBharatAI Pro v3.0 — Build Diagnostics Report');
+  lines.push('NavBharatAI Pro v5.0 — Build Diagnostics Report');
   lines.push('='.repeat(52));
   lines.push(`Prompt   : ${r.prompt ?? '(n/a)'}`);
   lines.push(`Framework: ${r.framework ?? '(n/a)'}`);
@@ -1055,7 +1055,7 @@ export function capSessionReports<T>(reports: readonly T[], maxBytes = 6_000_000
 
 export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsReport[]): string {
   if (!reports || reports.length === 0) {
-    return 'NavBharatAI Pro v3.0 — Full Session Build Report\n' + '='.repeat(52) + '\nNo builds recorded in this session yet.\n';
+    return 'NavBharatAI Pro v5.0 — Full Session Build Report\n' + '='.repeat(52) + '\nNo builds recorded in this session yet.\n';
   }
   const n = reports.length;
   const totals = reports.reduce(
@@ -1069,7 +1069,7 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
   const firstStart = reports[0]?.startedAt;
   const lastEnd = reports[n - 1]?.endedAt ?? reports[n - 1]?.startedAt;
   const head: string[] = [];
-  head.push('NavBharatAI Pro v3.0 — FULL SESSION BUILD REPORT');
+  head.push('NavBharatAI Pro v5.0 — FULL SESSION BUILD REPORT');
   head.push('='.repeat(52));
   head.push(`Builds in this session : ${n} (oldest → newest)`);
   if (typeof firstStart === 'number' && typeof lastEnd === 'number') {

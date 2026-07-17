@@ -1,4 +1,4 @@
-// P2.2 — External Error Tracking (UPGRADE v3.0).
+// P2.2 — External Error Tracking (UPGRADE v5.0).
 //
 // Real, dependency-free error tracking. Every captured error is emitted as a Cloud
 // Error Reporting-compatible structured log line (the documented `@type:

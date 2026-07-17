@@ -932,12 +932,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               </div>
 
-              {/* ── AgentV3 cost-ladder (v3.0 build cost routing — real telemetry) ── */}
+              {/* ── AgentV3 cost-ladder (v5.0 build cost routing — real telemetry) ── */}
               <div className="bg-[#161b22] border border-white/10 rounded-[1.5rem] p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-indigo-400" />
-                    <h3 className="text-sm font-black text-white uppercase tracking-tight">v3.0 Cost-Ladder (last 30 days)</h3>
+                    <h3 className="text-sm font-black text-white uppercase tracking-tight">v5.0 Cost-Ladder (last 30 days)</h3>
                   </div>
                   <button
                     onClick={fetchCostTelemetry}
@@ -950,15 +950,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 {!costSummary || costSummary.totalBuilds === 0 ? (
                   <p className="text-[10px] text-[#8b949e] uppercase font-bold py-4">
-                    {costLoading ? 'Loading telemetry…' : 'No v3.0 builds recorded yet — data appears once Pro v3.0 builds run.'}
+                    {costLoading ? 'Loading telemetry…' : 'No v5.0 builds recorded yet — data appears once Pro v5.0 builds run.'}
                   </p>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {statCard('v3.0 Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500', Server)}
+                      {statCard('v5.0 Builds', costSummary.totalBuilds.toLocaleString(), `${costSummary.days} day(s)`, 'bg-indigo-500', Server)}
                       {statCard('Success Rate', `${costSummary.overallSuccessPct}%`, `${costSummary.okBuilds} ok`, costSummary.overallSuccessPct >= 80 ? 'bg-emerald-500' : 'bg-amber-500', CheckCircle2)}
                       {statCard('Cheap-Tier Share', `${costSummary.cheapTierSharePct}%`, 'ran on Gemini (cheapest)', 'bg-sky-500', TrendingUp)}
-                      {statCard('Billed (v3.0)', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
+                      {statCard('Billed (v5.0)', `$${costSummary.totalBilledUsd.toFixed(4)}`, `${costSummary.powerBuilds} power builds`, 'bg-pink-500', IndianRupee)}
                     </div>
 
                     {/* T1-admin-dashboard — build-failure analytics: overall failure rate + spike-day alert. */}

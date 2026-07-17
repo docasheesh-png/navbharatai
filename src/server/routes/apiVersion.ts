@@ -1,4 +1,4 @@
-// P1.1 — API Versioning (UPGRADE v3.0).
+// P1.1 — API Versioning (UPGRADE v5.0).
 //
 // Goal: let the HTTP API evolve without breaking existing clients, while never
 // breaking a single current request. We do this purely additively:

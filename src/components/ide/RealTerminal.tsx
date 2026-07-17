@@ -3,7 +3,7 @@ import { Terminal as TerminalIcon, X, Maximize2, Minimize2, Loader2 } from 'luci
 import { auth } from '../../App';
 
 /**
- * REAL Code Studio terminal — runs each command in the user's own warm v3.0 sandbox via
+ * REAL Code Studio terminal — runs each command in the user's own warm v5.0 sandbox via
  * POST /api/agentv3/exec (bounded: hard timeout + capped output, server-side). No simulated output:
  * every line shown is the actual stdout/stderr the sandbox produced. When the sandbox isn't warm,
  * it says so honestly and tells the user to start/continue a build — it never fakes a result.
@@ -23,7 +23,7 @@ const PROMPT = '$';
 
 export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId, email, onClose, isMaximized, onToggleMaximize }) => {
   const [lines, setLines] = useState<Line[]>([
-    { kind: 'info', text: 'NavBharatAI terminal — runs real commands in your v3.0 sandbox (e.g. ls, cat package.json, npm run build). Each command is bounded by a 30s timeout.' },
+    { kind: 'info', text: 'NavBharatAI terminal — runs real commands in your v5.0 sandbox (e.g. ls, cat package.json, npm run build). Each command is bounded by a 30s timeout.' },
   ]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -44,7 +44,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
     append([{ kind: 'cmd', text: `${PROMPT} ${cmd}` }]);
     if (cmd === 'clear') { setLines([]); return; }
     if (!workspaceId || !userId) {
-      append([{ kind: 'err', text: 'Sandbox not active — sign in and start a build in NavBharatAI Pro v3.0 to activate the terminal.' }]);
+      append([{ kind: 'err', text: 'Sandbox not active — sign in and start a build in NavBharatAI Pro v5.0 to activate the terminal.' }]);
       return;
     }
     setRunning(true);
@@ -62,10 +62,10 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
       } else if (j.available === false) {
         // Honest dormant state — not a dead-end. A cold Cloud Run instance (min-instances=0) loses the
         // live sandbox, but the project's files are durably saved. Match the git panel's calm copy:
-        // sending a message in v3.0 chat re-warms the sandbox, then the terminal works again.
+        // sending a message in v5.0 chat re-warms the sandbox, then the terminal works again.
         const msg = j.reason === 'dormant'
-          ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v3.0 chat to bring the sandbox back online, then the terminal works again.`
-          : 'Sandbox not active yet — start a build in NavBharatAI Pro v3.0 chat to bring the terminal online.';
+          ? `Workspace is dormant after a restart — your ${j.savedFileCount} saved file${j.savedFileCount === 1 ? '' : 's'} ${j.savedFileCount === 1 ? 'is' : 'are'} safe. Send a message in NavBharatAI Pro v5.0 chat to bring the sandbox back online, then the terminal works again.`
+          : 'Sandbox not active yet — start a build in NavBharatAI Pro v5.0 chat to bring the terminal online.';
         append([{ kind: 'info', text: msg }]);
       } else {
         if (j.stdout) append([{ kind: 'out', text: String(j.stdout).replace(/\n$/, '') }]);

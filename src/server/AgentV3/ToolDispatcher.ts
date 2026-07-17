@@ -2907,8 +2907,8 @@ export class ToolDispatcher {
             if (!healConfirmedUp) portReady = await pollPort(10_000);
           }
         }
-        // §12: v3.0-built apps are previewed under the platform's E2B custom domain
-        // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v3.0.
+        // §12: v5.0-built apps are previewed under the platform's E2B custom domain
+        // (mitrify.xyz) instead of the raw *.e2b.app host. Idempotent + scoped to v5.0.
         // Bounded too — getPortUrl talks to the sandbox SDK and must not hang the build.
         let rawUrl: string;
         try {

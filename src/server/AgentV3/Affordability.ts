@@ -1,4 +1,4 @@
-// AgentV3 — pre-flight AFFORDABILITY decision for paid public v3.0 builds (admin plan 2026-07-06).
+// AgentV3 — pre-flight AFFORDABILITY decision for paid public v5.0 builds (admin plan 2026-07-06).
 //
 // The rules the admin locked (verbatim intent):
 //   • FREE-LIST (the 3 admin/tester accounts) → PROCEED exactly as today. No billing gate, no routing
@@ -50,7 +50,7 @@ export interface AffordabilityDecision {
 }
 
 /**
- * Decide whether a paid public v3.0 build may start, and on which engine. Pure. See the module header
+ * Decide whether a paid public v5.0 build may start, and on which engine. Pure. See the module header
  * for the exact rules. A non-finite/negative overdraft is treated as 0 (no tolerance).
  */
 export function decideAffordability(input: AffordabilityInput): AffordabilityDecision {

@@ -1,6 +1,6 @@
 // AgentV3 — Preview self-awareness.
 //
-// v3.0 used to claim "preview published" after only a port check (nc -z): port-up ≠ the app actually
+// v5.0 used to claim "preview published" after only a port check (nc -z): port-up ≠ the app actually
 // rendered. Nothing ever VISITED the preview, so a blank/white screen, a React crash-before-render, a
 // Vite error overlay, or a dev-server 404 went completely unnoticed — the agent had no idea whether
 // its app really ran. This module analyses the RENDERED DOM of the preview (captured by navigating a

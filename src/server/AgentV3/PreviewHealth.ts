@@ -1,6 +1,6 @@
-// AgentV3 — Preview Health: v3.0's self-awareness of whether the preview is actually running.
+// AgentV3 — Preview Health: v5.0's self-awareness of whether the preview is actually running.
 //
-// The problem this solves: v3.0 used to have NO idea whether the preview was live. After a build it
+// The problem this solves: v5.0 used to have NO idea whether the preview was live. After a build it
 // published a URL and forgot about it — so when the E2B sandbox idle-recycled (it pauses after ~15
 // min) or the dev server crashed, the URL silently went dead ("Closed Port Error: no service on port
 // 5173") and nothing knew. And when a user reopens an old chat YEARS later, the sandbox is long gone,
@@ -13,7 +13,7 @@
 // distinguishing an EXPECTED idle-recycle ("sleeping", reboot on demand) from a real CRASH ("crashed",
 // heal it). No I/O here, so it is fully unit-testable; the route/actuator feed it real signals.
 
-/** The real state of a workspace's preview, as far as v3.0 can determine. */
+/** The real state of a workspace's preview, as far as v5.0 can determine. */
 export type PreviewStatus =
   | 'live'            // a live server URL is up right now (a port probe succeeded)
   | 'booting'         // a boot / heal is in progress
@@ -80,7 +80,7 @@ export function classifyPreviewHealth(s: PreviewHealthSignals): PreviewHealth {
 }
 
 /**
- * Decide whether v3.0 should AUTOMATICALLY (re)boot the live preview now. Bounded so it can never loop:
+ * Decide whether v5.0 should AUTOMATICALLY (re)boot the live preview now. Bounded so it can never loop:
  * only for a rebootable sleeping/crashed state, only while attempts remain, and only after a cooldown
  * since the last attempt (so a genuinely un-bootable app can't spin the sandbox forever). PURE.
  *
@@ -105,7 +105,7 @@ export function shouldAutoRebootPreview(
 }
 
 /**
- * A one-line context string so EVERY AI in v3.0 answers "is the preview running?" from the REAL state
+ * A one-line context string so EVERY AI in v5.0 answers "is the preview running?" from the REAL state
  * instead of guessing (same pattern as the file-count awareness line). Empty when there is nothing
  * meaningful to add (no files yet). PURE.
  */

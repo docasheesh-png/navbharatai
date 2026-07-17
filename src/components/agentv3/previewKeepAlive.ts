@@ -1,4 +1,4 @@
-// PREVIEW PERSISTENCE (admin 2026-07-07): the v3.0 preview iframe must survive tab switches and
+// PREVIEW PERSISTENCE (admin 2026-07-07): the v5.0 preview iframe must survive tab switches and
 // collapsing back to chat. Same window semantics as v3SurfaceMount.ts, one level down: the panel's
 // right workspace pane and PreviewSurface are hidden with CSS, never unmounted — unmounting tore
 // down the iframe, so every Files/Terminal/chat detour destroyed the rendered preview ("preview

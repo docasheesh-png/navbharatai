@@ -8,7 +8,7 @@ import { Skeleton, SkeletonList } from './ui/Skeleton';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
 
-// NavBharatAI Pro v3.0 (AgentV3) sessions are saved with agent 'agentv3', tab
+// NavBharatAI Pro v5.0 (AgentV3) sessions are saved with agent 'agentv3', tab
 // 'engine_builder', and a doc id prefixed 'v3_'. They are Pro-tier builds and
 // must be classified as Pro (not Free) so they list under the Pro filter and in
 // the app-builder view.

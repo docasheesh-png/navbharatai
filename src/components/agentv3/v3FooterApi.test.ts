@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { footerSection, v3MobileFooterActive , previewReadySignal } from './v3FooterApi';
 
-describe('footerSection (v3.0 mobile footer — active-item highlight from real surface state)', () => {
+describe('footerSection (v5.0 mobile footer — active-item highlight from real surface state)', () => {
   it('chat when the workspace is collapsed (chat is full-width), whatever tab is remembered', () => {
     expect(footerSection(false, 'preview')).toBe('chat');
     expect(footerSection(false, 'files')).toBe('chat');

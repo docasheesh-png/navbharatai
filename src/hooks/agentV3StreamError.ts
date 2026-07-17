@@ -4,7 +4,7 @@
 // node test env (the hook itself needs a DOM to render).
 //
 // ROOT CAUSE it fixes (2026-07-04, admin's imported-GitHub-app report — "network error after ✓ Done
-// · 24 steps"): a v3.0 build emits its terminal `result` ("✓ Done · N steps"), and THEN the server
+// · 24 steps"): a v5.0 build emits its terminal `result` ("✓ Done · N steps"), and THEN the server
 // holds the stream open for up to ~6 min of post-result work — a heavy import's local-Postgres
 // provision + `npm install` + dev-server boot (see the `finally` in routes/agentv3.ts, which awaits
 // `importPreviewBoot` AFTER the result is emitted, before `endBuild`). If the connection is severed

@@ -1,6 +1,6 @@
 // AgentV3 — Project Summary ("What I built", Layer 27 / Product Understanding).
 //
-// After a SUCCESSFUL v3.0 build, we derive a short, friendly summary of what was
+// After a SUCCESSFUL v5.0 build, we derive a short, friendly summary of what was
 // actually created — detected stack/framework, counts of files/components/routes,
 // a few key files, and how to run it — straight from the project graph. The route
 // emits it as a final narration so the user sees a clear, honest recap of the

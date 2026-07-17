@@ -83,20 +83,13 @@ platform :ios do
       File.delete(p12_path) if File.exist?(p12_path) # the private key now lives only in the ephemeral keychain
     end
 
-    # Native "Sign in with Apple" (opt-in via APPLE_SIGNIN=true). The entitlement is injected into the
-    # project by the workflow; for the profile `sigh` creates to actually INCLUDE that entitlement, the
-    # capability must be enabled on the App ID first. `produce enable_services` does that with the same
-    # Admin API key. skip_itc:true → only manage the Developer-portal App ID (never touch App Store
-    # Connect metadata). Idempotent: enabling an already-enabled service is a no-op. Runs BEFORE sigh so
-    # the freshly-created profile carries the capability. Off by default = today's Google-only build.
-    if ENV["APPLE_SIGNIN"] == "true"
-      produce(
-        app_identifier: APP_IDENTIFIER,
-        api_key: api_key,
-        skip_itc: true,
-        enable_services: { apple_sign_in: "on" },
-      )
-    end
+    # Native "Sign in with Apple" (opt-in via APPLE_SIGNIN=true): the workflow injects the entitlement,
+    # and for the profile `sigh` creates to INCLUDE that entitlement the capability must be enabled on the
+    # App ID. That capability is enabled ONCE, by hand, in the Apple Developer portal (Identifiers →
+    # com.navbharat.ai → "Sign In with Apple" ✅) — a single, reliable checkbox. We deliberately do NOT
+    # automate it with `produce enable_services` here: `produce` does not accept an App Store Connect
+    # `api_key` (it authenticates differently), so that call failed the build. With the capability enabled
+    # on the App ID, `sigh force:true` below regenerates a profile that carries com.apple.developer.applesignin.
 
     # App Store provisioning profile for the bundle id (sigh defaults to an App Store distribution profile).
     # force:true so it REGENERATES the profile — a stale cached profile from before Sign in with Apple was

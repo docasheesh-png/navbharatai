@@ -188,14 +188,17 @@ URL scheme, so native Google Sign-In returns to the app. **If Google login "does
 installed iPhone app, you are almost certainly on an OLD TestFlight build — rebuild via Actions → "Build
 iOS App (.ipa, signed)" and reinstall.** (Nothing in the repo blocks it.)
 
-**Apple (needs 2 one-time toggles, then rebuild with the opt-in flag):**
-1. **Firebase Console → Authentication → Sign-in method → Apple → Enable.** (Without this, Apple login
+**Apple (needs 3 one-time toggles, then rebuild with the opt-in flag):**
+1. **Apple Developer → Certificates, Identifiers & Profiles → Identifiers → `com.navbharat.ai` → tick
+   "Sign In with Apple" → Save.** This enables the capability on the App ID so the provisioning profile
+   can carry the `com.apple.developer.applesignin` entitlement. (One reliable checkbox — the build does
+   NOT auto-enable this; `produce` can't authenticate with an App Store Connect API key.)
+2. **Firebase Console → Authentication → Sign-in method → Apple → Enable.** (Without this, Apple login
    errors at runtime even with a perfect build — the app shows an honest "provider isn't enabled" message.)
-2. **Rebuild with the flag on:** Actions → "Build iOS App (.ipa, signed)" → Run workflow → tick
-   **"Enable native Sign in with Apple"**. That run injects the `com.apple.developer.applesignin`
-   entitlement AND enables the matching capability on the App ID (`com.navbharat.ai`) via your App Store
-   Connect API key (needs the **Admin** role) before creating the provisioning profile — so the signed
-   build actually carries Apple sign-in. Leave the flag OFF for a normal Google-only build (the default).
+3. **Rebuild with the flag on:** Actions → "Build iOS App (.ipa, signed)" → Run workflow → tick
+   **"Enable native Sign in with Apple"**. That run injects the entitlement + points the App target at it,
+   and `sigh force:true` regenerates a profile that includes it (step 1 is what makes that profile valid).
+   Leave the flag OFF for a normal Google-only build (the default).
 
 Apple's App Store guideline **4.8** *requires* "Sign in with Apple" wherever you offer a third-party login
 like Google — so enabling it is also needed to pass review.

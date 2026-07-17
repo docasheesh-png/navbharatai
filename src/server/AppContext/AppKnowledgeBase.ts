@@ -416,6 +416,7 @@ NOTE: the one-time connection backend is being finalized; the screen currently g
 • DEPLOYS finished apps to Firebase Hosting — permanent public HTTPS URL.
 • PROVISIONS databases — installs PostgreSQL, generates DATABASE_URL, scaffolds db/auth/storage helpers.
 • GENERATES Vitest unit tests automatically after the app is built.
+• END-TO-END TESTS (Cap-2 — Playwright E2E scaffold): v3.0 can scaffold a real end-to-end test setup — a playwright.config.ts that starts your dev server and an e2e/smoke.spec.ts that loads the running app in a real browser and asserts it renders (failing on a blank screen, a build-error overlay, or a console/page error — render, not just compile), with one nav test per known route. It adds @playwright/test + the test:e2e scripts to package.json and never overwrites existing files. Ask to "add E2E / Playwright tests" for a runnable smoke net you can extend.
 • REMEMBERS decisions across sessions using persistent Firestore memory.
 • CHECKPOINTS code before every edit so you can roll back any change instantly.
 • MULTI-STEP PLANS: breaks large tasks into named steps, shows live progress.

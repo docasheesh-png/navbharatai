@@ -86,6 +86,7 @@ import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
 import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/MockDataGenerator';
@@ -1860,6 +1861,50 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+      }
+
+      case 'generate_e2e': {
+        // Cap-2 — Playwright E2E scaffold: a real end-to-end setup that DRIVES the running app in a browser
+        // and fails on a blank screen / error overlay / console error (render-not-compile). Pure generator
+        // (e2eScaffold.ts); this wires it to the workspace (writes files create-only, adds the dep + scripts).
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        // Derive the dev command + a per-route smoke list from the real project (best-effort).
+        let devCommand = 'npm run dev';
+        try {
+          if (pkgRaw) { const pj = JSON.parse(pkgRaw); if (pj?.scripts?.dev) devCommand = 'npm run dev'; else if (pj?.scripts?.start) devCommand = 'npm start'; }
+        } catch { /* default */ }
+        const routes = getWorkspaceMemory(this.workspaceId).graph().routes || [];
+        const plan = planE2eScaffold({ appName: optStr(input, 'app_name') || undefined, devCommand, routes });
+        const written: string[] = [];
+        for (const [p, content] of Object.entries(plan.files)) {
+          let exists = false;
+          try { await this.actuator.readFile(this.workspaceId, p); exists = true; } catch { exists = false; }
+          if (exists) continue; // never clobber an existing E2E config/spec
+          await this.actuator.writeFile(this.workspaceId, p, content);
+          this.state?.recordFileChange({ path: p, kind: 'create' }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(p, content);
+          written.push(p);
+        }
+        // Add the devDependency + scripts to package.json (best-effort; never clobber an existing entry).
+        if (pkgRaw) {
+          try {
+            const pj = JSON.parse(pkgRaw);
+            pj.devDependencies = pj.devDependencies || {};
+            let changed = false;
+            for (const dep of plan.devDependencies) if (!pj.devDependencies[dep] && !(pj.dependencies && pj.dependencies[dep])) { pj.devDependencies[dep] = '^1.48.0'; changed = true; }
+            pj.scripts = pj.scripts || {};
+            for (const [k, v] of Object.entries(plan.scripts)) if (!pj.scripts[k]) { pj.scripts[k] = v; changed = true; }
+            if (changed) {
+              const next = JSON.stringify(pj, null, 2) + '\n';
+              await this.actuator.writeFile(this.workspaceId, 'package.json', next);
+              getWorkspaceMemory(this.workspaceId).indexFile('package.json', next);
+            }
+          } catch { /* package.json update is best-effort */ }
+        }
+        this.scheduleCheckpoint('generate_e2e');
+        if (written.length === 0) return 'generate_e2e: a Playwright config + smoke spec already exist — nothing to add.';
+        return e2eScaffoldSummary(plan);
       }
 
       case 'run_tests': {

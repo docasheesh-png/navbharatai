@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   findFocusOwners,
   findDuplicateStylesheets,
+  findDuplicateEntryPoints,
   analyzeProjectIntegrity,
   integrityRepairInstruction,
 } from './ProjectIntegrityChecks';
@@ -280,5 +281,60 @@ describe('normalizeImportSpecifiers — the deterministic fix', () => {
     expect(resolveProjectSpecifier(files, 'src/a.tsx', '../../../etc/passwd')).toBe(null);
     expect(relativeSpecifier('src/components/Header.tsx', 'src/context/ThemeContext.tsx')).toBe('../context/ThemeContext');
     expect(relativeSpecifier('src/main.tsx', 'src/lib/index.ts')).toBe('./lib');
+  });
+});
+
+// ShopKhata autopsy 2026-07-17: a full-stack build wrote frontend/src/main.jsx (createRoot().render)
+// while the scaffold's own src/main.tsx still mounted a root — two entry points, so the preview
+// booted the wrong/root app. A well-formed app has exactly ONE root mount; 2+ is a guaranteed defect.
+describe('findDuplicateEntryPoints — duplicate React roots (ShopKhata two-mains)', () => {
+  it('flags 2+ files that mount a root (the exact ShopKhata shape)', () => {
+    const files = {
+      'src/main.tsx': `import { createRoot } from 'react-dom/client';\ncreateRoot(document.getElementById('root')!).render(<App/>);`,
+      'frontend/src/main.jsx': `import ReactDOM from 'react-dom/client';\nReactDOM.createRoot(document.getElementById('root')).render(<App/>);`,
+      'src/App.tsx': `export default function App(){ return null; }`,
+    };
+    const dup = findDuplicateEntryPoints(files);
+    expect(dup).toHaveLength(1);
+    expect(dup[0].entries).toEqual(['frontend/src/main.jsx', 'src/main.tsx']);
+  });
+
+  it('counts the legacy ReactDOM.render entry too', () => {
+    const files = {
+      'src/index.tsx': `import ReactDOM from 'react-dom';\nReactDOM.render(<App/>, document.getElementById('root'));`,
+      'src/main.tsx': `import { createRoot } from 'react-dom/client';\ncreateRoot(el).render(<App/>);`,
+    };
+    expect(findDuplicateEntryPoints(files)).toHaveLength(1);
+  });
+
+  it('a SINGLE entry (the normal app) is NEVER flagged', () => {
+    const files = {
+      'src/main.tsx': `import { createRoot } from 'react-dom/client';\ncreateRoot(el).render(<App/>);`,
+      'src/App.tsx': `export default function App(){ return null; }`,
+      'src/components/Button.tsx': `export const Button = () => null;`,
+    };
+    expect(findDuplicateEntryPoints(files)).toHaveLength(0);
+  });
+
+  it('a commented-out root mount does not count', () => {
+    const files = {
+      'src/main.tsx': `createRoot(el).render(<App/>);`,
+      'src/old.tsx': `// createRoot(el).render(<Old/>);\nexport const x = 1;`,
+    };
+    expect(findDuplicateEntryPoints(files)).toHaveLength(0);
+  });
+
+  it('analyzeProjectIntegrity.ok is false when duplicate entries exist, and the repair names both files', () => {
+    const files = {
+      'src/main.tsx': `createRoot(a).render(<App/>);`,
+      'frontend/src/main.jsx': `createRoot(b).render(<App/>);`,
+    };
+    const report = analyzeProjectIntegrity(files);
+    expect(report.ok).toBe(false);
+    expect(report.duplicateEntryPoints).toHaveLength(1);
+    const instr = integrityRepairInstruction(report);
+    expect(instr).toContain('DUPLICATE ENTRY POINTS');
+    expect(instr).toContain('frontend/src/main.jsx');
+    expect(instr).toContain('src/main.tsx');
   });
 });

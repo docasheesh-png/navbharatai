@@ -34,6 +34,11 @@ export interface OrphanStylesheet {
   stylesheet: string;
 }
 
+export interface DuplicateEntryPoint {
+  /** The source files that each mount a React root (createRoot().render / ReactDOM.render). */
+  entries: string[];
+}
+
 export interface ProjectIntegrityReport {
   /** Components that own initial focus. A conflict exists when this has 2+ entries. */
   focusOwners: FocusOwner[];
@@ -45,7 +50,16 @@ export interface ProjectIntegrityReport {
    * src/index.css was never imported anywhere — the exact inverse of duplicateStylesheets.
    */
   orphanStylesheets: OrphanStylesheet[];
-  /** True when there is no integrity defect (≤1 focus owner, no duplicate AND no orphan stylesheet). */
+  /**
+   * DUPLICATE ENTRY POINTS (ShopKhata autopsy 2026-07-17): a full-stack build wrote its OWN React
+   * entry (frontend/src/main.jsx: createRoot().render) while the scaffold's own src/main.tsx still
+   * mounted a root too — INTEGRITY_DUPLICATE_STYLESHEET even caught "./index.css" imported by BOTH
+   * mains. The preview boots exactly ONE root app; a second root is dead code and can make the WRONG
+   * app serve. A well-formed app has exactly ONE root mount; 2+ is a guaranteed defect no compiler
+   * catches. Present when this has 2+ entries.
+   */
+  duplicateEntryPoints: DuplicateEntryPoint[];
+  /** True when there is no integrity defect (≤1 focus owner; no duplicate/orphan stylesheet; ≤1 entry). */
   ok: boolean;
 }
 
@@ -185,13 +199,39 @@ export function injectGlobalStylesheetImport(
   return { files: out, injected };
 }
 
+/** True when a source file mounts a React root — createRoot(x).render(…) or ReactDOM.render(…). Pure. */
+function mountsReactRoot(raw: string): boolean {
+  const src = stripComments(raw);
+  // createRoot(…).render(  — the container arg + an optional line break before .render (react-dom/client).
+  if (/\bcreateRoot\s*\([\s\S]{0,200}?\)\s*(?:\r?\n\s*)?\.\s*render\s*\(/.test(src)) return true;
+  // Legacy ReactDOM.render(  /  ReactDom.render(  (react-dom).
+  if (/\bReactDOM\s*\.\s*render\s*\(/i.test(src)) return true;
+  return false;
+}
+
+/**
+ * Find DUPLICATE React ENTRY POINTS — 2+ source files that each mount a root. The preview boots exactly
+ * one root; a second is dead code and can make the WRONG app serve (ShopKhata: the scaffold's
+ * src/main.tsx + a generated frontend/src/main.jsx). Zero or one entry = fine. Pure & deterministic.
+ */
+export function findDuplicateEntryPoints(files: Record<string, string>): DuplicateEntryPoint[] {
+  const entries: string[] = [];
+  for (const [path, content] of Object.entries(files)) {
+    if (!isSourceFile(path) || typeof content !== 'string') continue;
+    if (mountsReactRoot(content)) entries.push(path);
+  }
+  return entries.length >= 2 ? [{ entries: entries.sort() }] : [];
+}
+
 /** Run every project-integrity check over the written file set. Pure + deterministic. */
 export function analyzeProjectIntegrity(files: Record<string, string>): ProjectIntegrityReport {
   const focusOwners = findFocusOwners(files);
   const duplicateStylesheets = findDuplicateStylesheets(files);
   const orphanStylesheets = findOrphanStylesheets(files);
-  const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0 && orphanStylesheets.length === 0;
-  return { focusOwners, duplicateStylesheets, orphanStylesheets, ok };
+  const duplicateEntryPoints = findDuplicateEntryPoints(files);
+  const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0
+    && orphanStylesheets.length === 0 && duplicateEntryPoints.length === 0;
+  return { focusOwners, duplicateStylesheets, orphanStylesheets, duplicateEntryPoints, ok };
 }
 
 /**
@@ -222,6 +262,14 @@ export function integrityRepairInstruction(report: ProjectIntegrityReport): stri
       `ORPHAN STYLESHEET — "${o.stylesheet}" exists but is imported by NOTHING (no module imports it and ` +
       `no HTML links it), so the app renders as raw unstyled HTML. Add a side-effect import for it in the ` +
       `entry module (e.g. \`import './index.css'\` in src/main.tsx), or in the one component it belongs to.`,
+    );
+  }
+  for (const d of report.duplicateEntryPoints) {
+    parts.push(
+      `DUPLICATE ENTRY POINTS — ${d.entries.length} files each mount a React root: ${d.entries.join(', ')}. ` +
+      `The preview boots exactly ONE root app, so the others are dead code (and can make the wrong app ` +
+      `serve). Keep the SINGLE entry the app is served from (the root src/main.tsx / src/index.tsx) and ` +
+      `remove the root mount (createRoot().render / ReactDOM.render) from the other file(s).`,
     );
   }
   return parts.join('\n');

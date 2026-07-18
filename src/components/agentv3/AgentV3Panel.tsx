@@ -15,6 +15,8 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from '.
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { FoldableMessage } from './FoldableMessage';
+import { MessageActions } from './MessageActions';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -3542,15 +3544,21 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
 function Bubble({ msg }: { msg: ChatMsg }) {
   if (msg.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm whitespace-pre-wrap break-words">{msg.text}</div>
+      <div className="group flex flex-col items-end">
+        <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
+          <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
+        </div>
+        {/* Copy / fold on every user message (Edit + Unsend attach only to the LAST user message — slice 2). */}
+        <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
+          <MessageActions text={msg.text} />
+        </div>
       </div>
     );
   }
   const isThinking = msg.kind === 'thinking';
   const cursor = msg.streaming ? <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-current animate-pulse" /> : null;
   return (
-    <div className="flex justify-start">
+    <div className="group flex flex-col items-start">
       <div className="max-w-[90%]">
         {msg.agent && msg.agent !== 'architect' && (
           <div className="text-[10px] uppercase tracking-wide text-indigo-400 mb-0.5">{msg.agent}</div>
@@ -3559,12 +3567,20 @@ function Bubble({ msg }: { msg: ChatMsg }) {
           className={
             isThinking
               ? 'text-zinc-500 italic text-xs px-3 py-2 whitespace-pre-wrap break-words'
-              : 'bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words'
+              : 'bg-zinc-900 text-zinc-100 rounded-2xl rounded-bl-sm px-3 py-2 text-sm break-words'
           }
         >
-          <TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}
+          {/* A finished AI reply folds when long + gets a copy action; while streaming it just types out. */}
+          {msg.streaming
+            ? <><TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}</>
+            : <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />}
         </div>
       </div>
+      {!isThinking && !msg.streaming && (
+        <div className="mt-0.5 pl-1 opacity-70 group-hover:opacity-100 transition-opacity">
+          <MessageActions text={msg.text} />
+        </div>
+      )}
     </div>
   );
 }

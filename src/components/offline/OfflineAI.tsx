@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle,
-  Brain, Trash2, CornerDownLeft, Check, Compass,
+  Brain, Trash2, CornerDownLeft, Check, Compass, Wrench, AlertTriangle,
 } from 'lucide-react';
 import {
   answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
-  type NavTarget, type QuickAnswerKind,
+  type NavTarget, type QuickAnswerKind, type DeviceHelp,
 } from '../../lib/offlineAssistant';
 import {
   parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
@@ -62,6 +62,39 @@ const CapPill: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, lab
   <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10 text-[10px] font-bold text-[#c9d1d9]">
     {icon}{label}
   </span>
+);
+
+/** A phone/device-settings help card — a real, generic how-to fix. Honest: it guides, it does not touch
+ *  the phone's settings, and it flags brand variance / destructive steps via the entry's `note`. */
+const DeviceHelpCard: React.FC<{ help: DeviceHelp; index: number }> = ({ help, index }) => (
+  <div
+    style={{ animationDelay: `${Math.min(index, 6) * 40}ms`, animationFillMode: 'both' }}
+    className="bg-gradient-to-br from-sky-500/[0.06] to-transparent border border-sky-500/20 rounded-2xl p-4 space-y-2 animate-in fade-in slide-in-from-bottom-2"
+  >
+    <div className="flex items-start gap-2.5">
+      <div className="w-8 h-8 rounded-xl bg-sky-500/12 border border-sky-400/25 flex items-center justify-center shrink-0">
+        <Wrench className="w-4 h-4 text-sky-300" />
+      </div>
+      <div className="min-w-0">
+        <h3 className="text-sm font-black text-white leading-snug">{help.title}</h3>
+        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-sky-500/12 border border-sky-400/20 text-sky-200 text-[9px] font-black uppercase tracking-widest">{help.category}</span>
+      </div>
+    </div>
+    <p className="text-[11px] text-[#8b949e] leading-relaxed">{help.problem}</p>
+    <ol className="text-[11.5px] text-[#c9d1d9] space-y-1.5 pt-0.5">
+      {help.steps.map((s, i) => (
+        <li key={i} className="flex gap-2">
+          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500/15 text-sky-300 font-black text-[9px] shrink-0 mt-px">{i + 1}</span>
+          <span className="leading-relaxed">{s}</span>
+        </li>
+      ))}
+    </ol>
+    {help.note && (
+      <p className="flex items-start gap-1.5 text-[10px] text-amber-300/80 leading-relaxed pt-1 border-t border-white/5 mt-1">
+        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {help.note}
+      </p>
+    )}
+  </div>
 );
 
 export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
@@ -141,6 +174,7 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
               <CapPill icon={<Compass className="w-3 h-3 text-indigo-300" />} label="Find features" />
               <CapPill icon={<Calculator className="w-3 h-3 text-emerald-300" />} label="Calculate" />
               <CapPill icon={<Clock className="w-3 h-3 text-emerald-300" />} label="Date & time" />
+              <CapPill icon={<Wrench className="w-3 h-3 text-sky-300" />} label="Phone help" />
               <CapPill icon={<Brain className="w-3 h-3 text-violet-300" />} label="Remember (teach me)" />
             </div>
             <p className="text-[10px] text-[#484f58] leading-relaxed">
@@ -233,6 +267,24 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
                   <Chip key={s.query} label={s.label} onClick={() => runQuery(s.query)} icon={<Sparkles className="w-3 h-3 text-indigo-300 shrink-0 group-hover:text-indigo-200" />} />
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Phone help — device-settings fixes (a separate KB). Honest banner: we guide, we don't touch
+              the phone's settings, and exact names vary by brand. */}
+          {answer.deviceMatches && answer.deviceMatches.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 px-1">
+                <Smartphone className="w-3.5 h-3.5 text-sky-300" />
+                <p className="text-[9px] font-black uppercase tracking-widest text-sky-300/80">Phone help</p>
+              </div>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-sky-500/[0.05] border border-sky-500/15">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-300/80 mt-0.5 shrink-0" />
+                <p className="text-[10.5px] text-[#8b949e] leading-relaxed">
+                  These are general Android steps — I can guide you, but I <span className="text-[#c9d1d9] font-semibold">can’t change your phone’s settings myself</span>, and exact names may differ by phone brand (Samsung, Xiaomi, etc.).
+                </p>
+              </div>
+              {answer.deviceMatches.map((h, idx) => <DeviceHelpCard key={h.id} help={h} index={idx} />)}
             </div>
           )}
 

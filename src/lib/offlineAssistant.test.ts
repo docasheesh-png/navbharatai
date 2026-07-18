@@ -133,8 +133,39 @@ describe('offlineAssistant — grounded 100% in the app knowledge base', () => {
     for (const s of SUGGESTED_QUERIES) {
       const a = answerOffline(s.query);
       expect(a.kind, `suggestion "${s.label}" (${s.query}) must resolve`).not.toBe('none');
-      expect(a.matches.length).toBeGreaterThan(0);
+      // A suggestion resolves to an app feature, a device-help fix, or a deterministic answer.
+      expect((a.matches.length + (a.deviceMatches?.length ?? 0)) > 0 || a.kind === 'answer').toBe(true);
     }
+  });
+
+  // ─── Phone / device-settings help ───
+
+  it('answers common phone-settings problems from the device help KB', () => {
+    const cases: [string, string][] = [
+      ['wifi not working', 'wifi_not_connecting'],
+      ['bluetooth not pairing', 'bluetooth_not_pairing'],
+      ['battery draining fast', 'battery_draining'],
+      ['notifications not showing', 'notifications_not_showing'],
+      ['factory reset', 'factory_reset'],
+      ['clear cache', 'clear_app_cache'],
+    ];
+    for (const [q, id] of cases) {
+      const a = answerOffline(q);
+      expect(a.deviceMatches?.some((d) => d.id === id), `"${q}" → ${id}`).toBe(true);
+      expect(a.deviceMatches![0].steps.length, `"${q}" has steps`).toBeGreaterThan(0);
+    }
+  });
+
+  it('device help is typo-tolerant but does NOT fire on ordinary app/navigation queries', () => {
+    expect(answerOffline('blutooth').deviceMatches?.some((d) => d.id === 'bluetooth_not_pairing')).toBe(true);
+    expect(answerOffline('database').deviceMatches ?? []).toEqual([]);
+    expect(answerOffline('how do i deploy').deviceMatches ?? []).toEqual([]);
+    expect(answerOffline('what can this app do').deviceMatches ?? []).toEqual([]);
+  });
+
+  it('the destructive factory-reset entry carries an honest warning note', () => {
+    const fr = answerOffline('factory reset').deviceMatches!.find((d) => d.id === 'factory_reset')!;
+    expect(fr.note).toMatch(/eras|back up|cannot be undone/i);
   });
 
   // ─── On-device quick answers (real math / device clock / honest identity — never a faked fact) ───

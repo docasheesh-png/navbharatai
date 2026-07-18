@@ -16,6 +16,8 @@
 // engine (server + big models) — the UI says so and points the user online for those.
 
 import { APP_KNOWLEDGE_BASE, type AppFeature } from '../server/AppContext/AppKnowledgeBase';
+import { DEVICE_KNOWLEDGE_BASE, type DeviceHelp } from './deviceKnowledgeBase';
+export type { DeviceHelp } from './deviceKnowledgeBase';
 
 export interface OfflineMatch {
   feature: AppFeature;
@@ -36,6 +38,9 @@ export interface OfflineAnswer {
   /** For kind 'answer': which category produced it (drives the UI icon). 'memory' = recalled from what
    *  the user taught this device. */
   answerKind?: QuickAnswerKind | 'memory';
+  /** Phone/device-settings help entries matching the query (a separate KB from the app features). The UI
+   *  renders these as a distinct "Phone help" section with an honest "steps may differ by brand" note. */
+  deviceMatches?: DeviceHelp[];
 }
 
 /**
@@ -178,6 +183,41 @@ export function searchFeatures(query: string, limit = 6): OfflineMatch[] {
 
 function isOverviewQuery(msg: string): boolean {
   return OVERVIEW_SIGNALS.some((s) => msg.includes(s));
+}
+
+/** Score a phone/device-help entry against a query — curated keywords + title, with typo tolerance. Keyed
+ *  on specific device words (wifi, bluetooth, battery, …) so it does not fire on ordinary app queries.
+ *  Pure. */
+export function scoreDeviceHelp(h: DeviceHelp, msg: string): number {
+  let score = 0;
+  for (const kw of h.keywords || []) {
+    if (kw && msg.includes(norm(kw))) score += kw.includes(' ') ? 3 : 2;
+  }
+  if (h.title && msg.includes(norm(h.title))) score += 4;
+  // Typo-tolerant fallback over keyword + title words (scored below an exact keyword hit). We deliberately
+  // do NOT score generic title words (e.g. "not", "working", "phone", "screen") — those are shared across
+  // many entries and would cross-match unrelated problems; curated keywords carry the real signal.
+  const qWords = tokens(msg).filter((w) => w.length >= 4);
+  const targets = new Set<string>();
+  for (const kw of h.keywords || []) for (const t of tokens(kw)) if (t.length >= 4) targets.add(t);
+  for (const t of tokens(h.title)) if (t.length >= 4) targets.add(t);
+  for (const w of qWords) {
+    if (targets.has(w)) continue;
+    for (const t of targets) if (fuzzyTokenHit(w, t)) { score += 1.5; break; }
+  }
+  return score;
+}
+
+/** Rank phone/device-help entries for a query (best first). Requires a real keyword-level signal
+ *  (score ≥ 2) so it never fires on a single generic/fuzzy word crossing over from another entry. Pure. */
+export function searchDeviceHelp(query: string, limit = 4): { help: DeviceHelp; score: number }[] {
+  const msg = norm(query);
+  if (!msg) return [];
+  return DEVICE_KNOWLEDGE_BASE
+    .map((h) => ({ help: h, score: scoreDeviceHelp(h, msg) }))
+    .filter((m) => m.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 /** The curated tour shown for a broad/empty/"what can you do" query — the app's headline surfaces. */
@@ -465,7 +505,12 @@ export function answerOffline(query: string, now: Date = new Date(), memories: U
   }
   // Something the user taught this device (recalled exactly — zero hallucination).
   const recalled = recallMemory(memories, msg);
-  const matches = searchFeatures(msg).map((m) => m.feature);
+  const deviceMatches = searchDeviceHelp(msg).map((m) => m.help);
+  // App-feature matches. When this is clearly a PHONE-settings query (device help matched), keep only
+  // strongly-relevant features (score ≥ 4 — a name or multi-keyword hit) so weak description-word matches
+  // don't dilute the phone answer; otherwise show the normal ranked matches.
+  const featureScored = searchFeatures(msg);
+  const matches = (deviceMatches.length ? featureScored.filter((m) => m.score >= 4) : featureScored).map((m) => m.feature);
   if (recalled) {
     return {
       kind: 'answer',
@@ -473,20 +518,20 @@ export function answerOffline(query: string, now: Date = new Date(), memories: U
       lead: recalled.kind === 'qa' ? 'You taught me this' : 'From what you taught me',
       answerText: recalled.text,
       matches, // still offer any related app features below the taught answer
+      deviceMatches,
     };
   }
-  if (matches.length === 0) {
+  if (matches.length === 0 && deviceMatches.length === 0) {
     return {
       kind: 'none',
-      lead: 'I couldn\'t find that in NavBharatAI. I can help you navigate the app, do quick things offline (a calculation, today\'s date), or remember something if you teach me ("remember …"). For general questions, please go online.',
+      lead: 'I couldn\'t find that. I can help you navigate NavBharatAI, fix a phone-settings problem (Wi-Fi, battery, notifications…), do a quick calculation or the date, or remember something if you teach me ("remember …"). For general questions, please go online.',
       matches: [],
     };
   }
-  return {
-    kind: 'matches',
-    lead: matches.length === 1 ? 'Here it is:' : `Found ${matches.length} matching feature${matches.length > 1 ? 's' : ''}:`,
-    matches,
-  };
+  const lead = deviceMatches.length
+    ? (matches.length ? 'Here\'s help for your phone — plus matching NavBharatAI features:' : 'Here\'s how to sort that on your phone:')
+    : (matches.length === 1 ? 'Here it is:' : `Found ${matches.length} matching feature${matches.length > 1 ? 's' : ''}:`);
+  return { kind: 'matches', lead, matches, deviceMatches };
 }
 
 export interface NavTarget { view?: string; settingsScreen?: string }
@@ -549,9 +594,9 @@ export const SUGGESTED_QUERIES: { label: string; query: string }[] = [
   { label: 'Wallet & billing', query: 'wallet billing' },
   { label: 'Database', query: 'database' },
   { label: 'Deploy', query: 'deploy' },
-  { label: 'Import from GitHub', query: 'import from github' },
+  { label: 'Wi-Fi not working', query: 'wifi not working' },
+  { label: 'Battery draining', query: 'battery draining' },
   { label: 'Voice chat', query: 'voice chat' },
-  { label: 'Professionals', query: 'professionals' },
   { label: 'Download the app', query: 'download app' },
 ];
 

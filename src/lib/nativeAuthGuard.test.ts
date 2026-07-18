@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { raceNativeAuth, NATIVE_AUTH_TIMEOUT_MS, settleWithinOrProceed } from './nativeAuthGuard';
+import { raceNativeAuth, NATIVE_AUTH_TIMEOUT_MS, settleWithinOrProceed, preLoginWebSignOutAllowed } from './nativeAuthGuard';
 
 afterEach(() => vi.useRealTimers());
 
@@ -59,5 +59,15 @@ describe('settleWithinOrProceed — pre-login cleanup must never block the sign-
   it('NEVER rejects — a failing cleanup is swallowed so it cannot fail the login', async () => {
     await expect(settleWithinOrProceed(Promise.reject(new Error('signOut blew up')), 4000))
       .resolves.toBeUndefined();
+  });
+});
+
+describe('preLoginWebSignOutAllowed — no pre-login web signOut on native (build-27 lock poison)', () => {
+  it('is FORBIDDEN on the native app (a hung web signOut would block signInWithCredential)', () => {
+    expect(preLoginWebSignOutAllowed(true)).toBe(false);
+  });
+
+  it('is ALLOWED on the web (clears a stale session that could wedge the popup; signOut is safe there)', () => {
+    expect(preLoginWebSignOutAllowed(false)).toBe(true);
   });
 });

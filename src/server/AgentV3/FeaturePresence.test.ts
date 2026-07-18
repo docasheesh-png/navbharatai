@@ -90,6 +90,19 @@ describe('capture-failure guard (deep-test build #4 — "Present: none" on an ap
     expect(r.missing).toContain('Delete / remove');
     expect(r.missing.length).toBeGreaterThan(0);
   });
+
+  // THE report-1682cd03 case (widened guard): the Hinglish EDIT instruction "rest timer me 30s ka option
+  // bhi add karo" — "add karo" = "please make this change", NOT "build an Add feature" — trips the lone
+  // `add` probe. On a real FitPulse render the workout app shows no generic Add/create control, so the
+  // single probe is absent → the OLD ≥2 guard let it through and it falsely reported "Present: none",
+  // which even became the rootCause of a 95/100 PASSING build. A lone unproven signal must stay silent.
+  it('stays SILENT on a single requested feature that is absent (no corroborating present probe)', () => {
+    const rendered = '<div id="root"><h1>FitPulse</h1><button>30s Rest</button><button>60s Rest</button><div>Workout history</div></div>';
+    const r = checkFeaturePresence('rest timer me 30s ka option bhi add karo', rendered);
+    expect(r.missing).toHaveLength(0);   // never a false "Add / create — Present: none"
+    expect(r.present).toHaveLength(0);
+    expect(featurePresenceSummary(r)).toBe('');  // nothing surfaced to the report
+  });
 });
 
 describe('checkFeaturePresence — the full TaskLite app', () => {

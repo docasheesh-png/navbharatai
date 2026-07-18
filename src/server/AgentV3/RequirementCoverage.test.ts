@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   analyzeRequirementCoverage,
   requirementCoverageSummary,
+  currentRequestForCoverage,
 } from './RequirementCoverage';
 import type { ProjectGraph } from './WorkspaceMemory';
 
@@ -140,6 +141,50 @@ describe('analyzeRequirementCoverage', () => {
 
     const reset = analyzeRequirementCoverage('add a forgot password flow', graph({ files: ['src/ResetPassword.tsx'] }));
     expect(reset.covered).toContain('password reset');
+  });
+});
+
+describe('currentRequestForCoverage — scope coverage to the CURRENT turn (report 1682cd03)', () => {
+  it('is empty for no requests', () => {
+    expect(currentRequestForCoverage([])).toBe('');
+    expect(currentRequestForCoverage(['   ', ''])).toBe('');
+  });
+
+  it('returns the sole request unchanged on a first build (multi-feature spec intact)', () => {
+    const spec = 'Build QuizArena with a login, a blog, a leaderboard and a stats dashboard';
+    expect(currentRequestForCoverage([spec])).toBe(spec);
+  });
+
+  it('returns ONLY the most-recent request on a follow-up/edit turn', () => {
+    const reqs = [
+      'Build FitPulse — a workout tracker with login, a blog feed and exercise logging',
+      'rest timer me 30s ka option bhi add karo',
+    ];
+    expect(currentRequestForCoverage(reqs)).toBe('rest timer me 30s ka option bhi add karo');
+  });
+
+  // THE exact real failure (report 1682cd03): a tiny edit turn on a long-lived app used to re-audit
+  // the ENTIRE original spec against the current graph and falsely flag login/blog "not found" — one
+  // of those advisories even became the rootCause of a 95/100 PASSING build. Scoping to the current
+  // request kills the class: the "add a 30s rest option" edit names neither login nor blog, so neither
+  // can be flagged, while a real gap in the CURRENT ask is still caught.
+  it('does NOT resurrect the original spec\'s features (login/blog) on an unrelated micro-edit', () => {
+    const requests = [
+      'Build FitPulse — a workout tracker with login, a blog feed and exercise logging',
+      'rest timer me 30s ka option bhi add karo',
+    ];
+    const currentApp = graph({
+      components: ['ExerciseList', 'WorkoutHistory', 'ThemeProvider', 'RestTimer'],
+      files: ['src/App.tsx', 'src/hooks/useRestTimer.ts'],
+    });
+    // OLD (buggy) behaviour: auditing the cumulative join WOULD flag login + blog as missing.
+    const cumulative = analyzeRequirementCoverage(requests.join('\n'), currentApp);
+    expect(cumulative.missing).toEqual(expect.arrayContaining(['login / authentication', 'blog / articles']));
+    // NEW behaviour: scope to the current request → neither is even considered.
+    const scoped = analyzeRequirementCoverage(currentRequestForCoverage(requests), currentApp);
+    expect(scoped.missing).not.toContain('login / authentication');
+    expect(scoped.missing).not.toContain('blog / articles');
+    expect(scoped.findings).toHaveLength(0);
   });
 });
 

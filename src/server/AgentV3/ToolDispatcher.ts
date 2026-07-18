@@ -81,7 +81,7 @@ import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
-import { analyzeRequirementCoverage, requirementCoverageSummary } from './RequirementCoverage';
+import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestForCoverage } from './RequirementCoverage';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -1349,11 +1349,15 @@ export class ToolDispatcher {
         // PURE comparison of the user's original request against what was built, so
         // it never throws and never breaks evaluate. Flags a clearly-named feature
         // (login, dashboard, cart, …) that was asked for but has no matching surface.
-        const requestText = mem
+        // ROOT-CAUSE FIX (real report 1682cd03): audit coverage against the CURRENT turn's request,
+        // not the cumulative join of every request the workspace ever saw — otherwise a tiny edit
+        // re-audits the whole original spec and falsely re-flags long-settled features (see
+        // currentRequestForCoverage). A first build has one request episode → unchanged.
+        const requestEpisodes = mem
           .snapshot()
           .episodes.filter((e) => e.kind === 'request')
-          .map((e) => e.text)
-          .join('\n');
+          .map((e) => e.text);
+        const requestText = currentRequestForCoverage(requestEpisodes);
         const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph());
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks

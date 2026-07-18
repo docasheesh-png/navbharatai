@@ -80,6 +80,28 @@ const FEATURES: FeatureSpec[] = [
 ];
 
 /**
+ * The single request to audit coverage against, given every `request` episode in workspace memory.
+ *
+ * ROOT-CAUSE FIX (real report 1682cd03, 2026-07-17): coverage used to run against the CUMULATIVE
+ * join of every request episode the workspace ever saw. On a long-lived app a tiny follow-up edit
+ * ("rest timer me 30s ka option bhi add karo") then re-audited the ENTIRE original build spec against
+ * the app's CURRENT graph — so features from the first build (login, blog) that were dropped, declined,
+ * or built under a non-matching name got falsely re-flagged "Requested feature not found" on an
+ * unrelated micro-edit, and one such advisory even became the build's reported rootCause on a 95/100
+ * PASSING build. The readiness question on an edit turn is "did THIS change land cleanly", not "does the
+ * app re-satisfy its whole original spec". So on a follow-up turn (more than one request episode) we
+ * audit only the MOST RECENT request. A first build has exactly one request episode → this returns that
+ * full spec unchanged, so multi-feature first-build coverage is completely intact. PURE.
+ */
+export function currentRequestForCoverage(requests: ReadonlyArray<string>): string {
+  const reqs = (Array.isArray(requests) ? requests : [])
+    .map((r) => (r || '').toString())
+    .filter((r) => r.trim());
+  if (reqs.length === 0) return '';
+  return reqs[reqs.length - 1];
+}
+
+/**
  * Compare the user's request against what was built. PURE & deterministic.
  * Silent (empty report) when there is no request or nothing has been built yet.
  */

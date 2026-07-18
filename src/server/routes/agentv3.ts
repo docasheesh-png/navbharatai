@@ -120,7 +120,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
 import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
@@ -1413,7 +1413,10 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
       keys.forEach((apiKey, k) => {
         try {
           const client = new OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries: 0 });
-          const runner = sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars);
+          // Proactive pacer (default-OFF, AGENTV3_RATE_PACER=on): pace this provider's calls under its rate
+          // + auto-shrink concurrency on 429/timeout. Keyed by the BASE provider name so all keys of one
+          // provider share one bucket (global per-provider pacing). No-op passthrough when the flag is off.
+          const runner = pacedRunner(sizeGatedRunner(new OpenAiToolRunner(client as unknown as OpenAiChatClient, { model, ...runnerOpts }), floorMaxPromptChars), name);
           runners.push(k === 0 ? { name, runner } : { name: `${name}#${k + 1}`, runner, reportAs: name });
         } catch { /* misconfigured model/key rung — skip; the next rung / Claude still backstops */ }
       });

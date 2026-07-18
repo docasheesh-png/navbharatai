@@ -491,6 +491,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
     }
     try {
+      // STALE-SESSION CLEAR on WEB (admin 2026-07-18: "logout dikhta hai par hua nahi — isliye naya
+      // login nahi hota"). A previous logout that didn't fully settle can leave the web Firebase session
+      // half-dead; signInWithPopup then never resolves (the button spins forever, no new login lands).
+      // The native Google/Apple path already clears the stale session before signing in — mirror that on
+      // web so every sign-in starts from a clean slate. The user is on the login screen, so signing out
+      // any lingering session first is always safe. Best-effort: a signOut failure must never block login.
+      try { await auth.signOut(); } catch { /* no stale web session — fine */ }
       const result = await signInWithPopup(auth, provider);
       onCredential?.(result);
       onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state

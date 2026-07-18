@@ -30,3 +30,23 @@ export function raceNativeAuth<T>(
     );
   });
 }
+
+/**
+ * Race a BEST-EFFORT promise against a timeout that RESOLVES (never rejects) — for pre-login cleanup
+ * that must never block the sign-in. If `promise` doesn't settle within `timeoutMs`, we resolve anyway
+ * and let the caller proceed; a late or failed `promise` is swallowed.
+ *
+ * ROOT-CAUSE of why this exists (admin 2026-07-18, TestFlight build 25): the pre-login "force-logout the
+ * old session" step AWAITED an UNBOUNDED signOut. On the iOS WKWebView that signOut can hang, so the
+ * sign-in never started and the user got an immediate, permanent spinner (Google never opened). Unlike
+ * raceNativeAuth (which REJECTS on timeout to surface an honest error for the sign-in ITSELF), this NEVER
+ * throws — a cleanup step that hangs must silently yield to the real login, not fail it. The timer is
+ * cleared on settle so nothing leaks.
+ */
+export function settleWithinOrProceed(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    const done = () => { clearTimeout(timer); resolve(); };
+    promise.then(done, done);
+  });
+}

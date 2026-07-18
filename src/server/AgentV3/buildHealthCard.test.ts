@@ -29,6 +29,17 @@ describe('buildHealthFromDiagnostics', () => {
     expect(h.score).toBe(75); // 100 - 25
   });
 
+  // Deep-test 2026-07-18: the FINAL syntax re-verify records OUTCOME_SYNTAX_ERROR when the built app
+  // doesn't parse (e.g. a duplicate `handleExportCSV` reintroduced by a late repair). That must flip the
+  // card OFF "READY" even on an ok build — a "READY" app that won't compile is the exact dishonesty.
+  it('an unresolved OUTCOME_SYNTAX_ERROR forces NOT READY (never "READY" for an app that won\'t compile)', () => {
+    const h = buildHealthFromDiagnostics(report([
+      issue({ code: 'OUTCOME_SYNTAX_ERROR', message: "1 file(s) do not parse — Identifier 'handleExportCSV' has already been declared", autoResolved: false }),
+    ]), true);
+    expect(h.ready).toBe(false);
+    expect(h.blockers.join(' ')).toMatch(/handleExportCSV/);
+  });
+
   it('unresolved warnings lower the score but do not block readiness', () => {
     const h = buildHealthFromDiagnostics(report([
       issue({ severity: 'warning', message: 'no error boundary' }),

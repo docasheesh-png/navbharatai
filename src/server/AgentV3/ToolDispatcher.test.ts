@@ -1607,3 +1607,55 @@ error: Error validating field \`user\` in model \`Order\`: The relation field \`
     expect(act.commands.filter((c) => c.includes('prisma format'))).toHaveLength(0);
   });
 });
+
+// TaskForge fresh-build autopsy 2026-07-18: a seed step (`prisma db seed` / `tsx prisma/seed.ts`) that
+// runs BEFORE `prisma generate` fails with "@prisma/client did not initialize yet — run `prisma generate`".
+// TaskForge looped this and burned wall-clock budget. The dispatcher now runs `prisma generate` once and
+// retries the seed — deterministically, before any LLM round.
+describe('bash — prisma client-not-generated self-heal (generate + one retry)', () => {
+  const NOT_GENERATED = `Error: @prisma/client did not initialize yet. Please run "prisma generate" and try to import it again.`;
+
+  function healDispatcher() {
+    const act = new FakeActuator();
+    const stream = new AgentEventStream();
+    const state = new WorkspaceState(stream);
+    const d = new ToolDispatcher(act, 'ws-heal-gen', state, stream);
+    return { act, d };
+  }
+
+  it('runs prisma generate and retries once when the client was not generated before seeding', async () => {
+    const { act, d } = healDispatcher();
+    const results = [
+      { exitCode: 1, stdout: '', stderr: NOT_GENERATED },              // seed fails: client not generated
+      { exitCode: 0, stdout: 'Generated Prisma Client', stderr: '' },   // prisma generate succeeds
+      { exitCode: 0, stdout: 'Seeded 3 users', stderr: '' },            // retry seed succeeds
+    ];
+    act.runCommand = async (_ws: string, command: string) => {
+      act.commands.push(command);
+      return results[Math.min(act.commands.length - 1, results.length - 1)];
+    };
+    const out = await d.dispatch(call('bash', { command: 'cd backend && npx tsx prisma/seed.ts' }), 'backend');
+    expect(String(out.content)).toContain('exit=0');
+    expect(String(out.content)).toContain('Seeded 3 users');
+    expect(act.commands[1]).toContain('prisma generate');
+    expect(act.commands[1]).toContain('cd backend');
+    expect(act.commands[2]).toBe('cd backend && npx tsx prisma/seed.ts'); // original seed retried verbatim
+  });
+
+  it('does NOT self-heal a `prisma generate` command itself (would loop)', async () => {
+    const { act, d } = healDispatcher();
+    act.commandResult = { exitCode: 1, stdout: '', stderr: NOT_GENERATED };
+    const out = await d.dispatch(call('bash', { command: 'cd backend && npx prisma generate' }), 'backend');
+    expect(String(out.content)).toContain('exit=1');
+    // Only the original command ran — no extra `prisma generate` was injected.
+    expect(act.commands).toHaveLength(1);
+  });
+
+  it('any OTHER seed failure never triggers the generate heal', async () => {
+    const { act, d } = healDispatcher();
+    act.commandResult = { exitCode: 1, stdout: '', stderr: 'SyntaxError: Unexpected token in seed.ts' };
+    const out = await d.dispatch(call('bash', { command: 'cd backend && npx tsx prisma/seed.ts' }), 'backend');
+    expect(String(out.content)).toContain('exit=1');
+    expect(act.commands.filter((c) => c.includes('prisma generate'))).toHaveLength(0);
+  });
+});

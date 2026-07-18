@@ -107,7 +107,13 @@ export function findOrphanComponents(graph: ProjectGraph): string[] {
       if (resolved && resolved !== file) importedFiles.add(resolved);
     }
   }
-  const isEntryPoint = (f: string): boolean => /(^|\/)(main|index|App)\.(t|j)sx?$/i.test(f);
+  const isEntryPoint = (f: string): boolean =>
+    /(^|\/)(main|index|App)\.(t|j)sx?$/i.test(f) ||
+    // Next.js App Router SPECIAL files (TaskForge autopsy 2026-07-18): layout/page/loading/error/
+    // not-found/route/template/default/global-error under app/ are wired by Next by FILENAME convention
+    // and never `import`-ed — so they are entry points, NOT "unused components". Without this, a clean
+    // Next.js build false-flags all of them as orphans (readiness reported 14 phantom unused components).
+    /(^|\/)app\/(?:.*\/)?(layout|page|loading|error|not-found|route|template|default|global-error)\.(t|j)sx?$/i.test(f);
   const orphans = new Set<string>();
   for (const sym of graph.symbols) {
     if (!isComponentName(sym.name)) continue;

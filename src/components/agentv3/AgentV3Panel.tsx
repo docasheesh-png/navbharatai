@@ -12,7 +12,7 @@ import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Buil
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
-import { previewVisible, previewMounted, previewWrapClass } from './previewKeepAlive';
+import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
@@ -167,6 +167,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   useEffect(() => {
     if (previewVisible(showWorkspace, tab)) setPreviewEverOpened(true);
   }, [showWorkspace, tab]);
+  // PREVIEW PRE-WARM (admin 2026-07-18): mount + compile the in-browser preview OFF-SCREEN as soon as a
+  // build finishes (or a conversation with files loads), so opening Preview is instant instead of the
+  // multi-minute cold compile the user hit before (the in-iframe whole-app Babel transpile is the real
+  // cost; doing it in the background makes the click feel immediate). Sticky: once pre-warmed it stays
+  // mounted (keep-alive), and the existing reloadSignal keeps it live-synced with later file changes.
+  const [previewPrewarm, setPreviewPrewarm] = useState(false);
+  useEffect(() => {
+    if (shouldPrewarmPreview(running, serverBuildRunning, Object.keys(state.files || {}).length > 0)) {
+      setPreviewPrewarm(true);
+    }
+  }, [running, serverBuildRunning, state.files]);
   // Local-only UI flag for the input-row settings popover (Planning/Thinking/Power). Declared BEFORE the
   // billing-status effect so opening the popover can trigger a fresh powerUnlocked check (admin scenario
   // 2026-07-12: "maine recharge kar liya fir bhi tiers locked" — the user recharges on the Wallet page and
@@ -1103,6 +1114,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setTab('preview');
     setShowWorkspace(false);
     setPreviewEverOpened(false);
+    setPreviewPrewarm(false); // a brand-new chat has no files yet — re-warm when its first build lands
   };
 
   const startNewSession = () => {
@@ -2892,7 +2904,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               the iframe + its rendered app survive tab switches instead of being torn down. First
               mount stays LAZY (previewEverOpened) so a user who never opens Preview never pays the
               in-browser compile / sandbox auto-resume cost. */}
-          {previewMounted(previewEverOpened, showWorkspace, tab) && (
+          {previewMounted(previewEverOpened, showWorkspace, tab, previewPrewarm) && (
             <div className={previewWrapClass(showWorkspace, tab)}>
               <PreviewSurface
                 url={state.previewUrl}

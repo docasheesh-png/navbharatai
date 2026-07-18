@@ -205,9 +205,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // steps as they happen, shown ONLY in the native app. The Google-login hang survived one fix and the
   // next screenshot must answer "WHERE does it stop" with data, not guesses — the trail shows whether
   // the flow died at the Google sheet, the returned token, or the Firebase verify call.
-  const [authTrail, setAuthTrail] = useState<string[]>([]);
+  // Sign-in step tracing. The on-screen "Sign-in progress" box was removed (admin 2026-07-18 — Google/Apple
+  // login confirmed working, the live diagnostic is no longer needed by users). The marks now go only to the
+  // console, so the same step-by-step trace is still available for debugging without cluttering the UI.
   const mark = (step: string) => {
-    try { setAuthTrail((prev) => [...prev.slice(-7), `${new Date().toISOString().slice(11, 19)} ${step}`]); } catch { /* trail is best-effort */ }
+    try { console.log(`[auth] ${step}`); } catch { /* best-effort */ }
   };
 
   const recaptchaRef = useRef<HTMLDivElement>(null);
@@ -1039,17 +1041,6 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-400 text-[10px] font-bold">
               <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">✓</div>
               <span>{successMessage}</span>
-            </div>
-          )}
-
-          {/* Native sign-in trail (native app only): the LIVE step list of the current attempt so a
-              stuck login shows exactly WHERE it stopped — real diagnosis instead of a blind spinner. */}
-          {Capacitor.isNativePlatform() && authTrail.length > 0 && (
-            <div className="p-3 bg-white/5 border border-white/10 rounded-2xl">
-              <p className="text-[8px] font-black uppercase tracking-widest text-[#8b949e] mb-1">Sign-in progress</p>
-              {authTrail.map((t, i) => (
-                <p key={i} className="text-[9px] font-mono text-[#c9d1d9] leading-relaxed break-all">{t}</p>
-              ))}
             </div>
           )}
 

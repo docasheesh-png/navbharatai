@@ -7608,6 +7608,28 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }
 
+      // FINAL SYNTAX RE-VERIFY (deep-test 2026-07-18 — "handleExportCSV already declared"). The syntax gate
+      // above parses the file set ONCE, early. The LATE repair passes that run after it (endgame repair,
+      // reviewer-autofix) can RE-EDIT a file and REINTRODUCE a parse error — e.g. a DUPLICATE
+      // `const handleExportCSV` declaration — that nothing then re-checks, so the build shipped a "READY
+      // 84/100" card while the real in-browser preview died with "Identifier 'handleExportCSV' has already
+      // been declared". Re-parse the FINAL file state (after every repair) with esbuild in-process; an
+      // unhealed parse error is recorded as an UNRESOLVED OUTCOME_SYNTAX_ERROR, so buildHealthFromDiagnostics
+      // (below) counts it as a blocker → ready:false — the card can never say READY for an app that won't
+      // compile. Best-effort, shares the syntax-gate kill switch. It only ever DOWNGRADES an over-optimistic
+      // verdict: findSyntaxErrors flags ONLY files that genuinely do not parse, so a good build is never
+      // falsely blocked. (It does not re-run a repair here — the app is saved and an honest follow-up fixes
+      // it — so a late repair can never loop.)
+      if (process.env.AGENTV3_SYNTAX_GATE !== 'off' && result && result.ok && writtenFiles.size > 0 && !abort.signal.aborted) {
+        try {
+          const finalSyntaxErrors = await findSyntaxErrors(Object.fromEntries(writtenFiles));
+          if (finalSyntaxErrors.length > 0) {
+            buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_SYNTAX_ERROR', message: `${finalSyntaxErrors.length} file(s) do not parse in the final build — the app cannot compile:\n${syntaxRepairInstruction(finalSyntaxErrors)}`, autoResolved: false });
+            events.emit({ type: 'narration', agent: 'architect', text: `⚠️ A syntax error remains in the final build — the app won't compile yet. Your files are saved; send a follow-up and I'll finish the fix.`, ts: Date.now() });
+          }
+        } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
+      }
+
       // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED
       // artifacts but produced ZERO files is a FAILURE — never "✓ Done". The report showed `ok: true` /
       // "Done · 9 steps" over an EMPTY preview because the sandbox could not be set up (SANDBOX_UNAVAILABLE),

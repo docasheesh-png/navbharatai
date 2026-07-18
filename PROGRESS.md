@@ -17623,3 +17623,39 @@ admin *free-list* build, not a welcome-bonus *free-tier* build, the heal gate di
 cheap coders — `freeTierBuildActive` was false — but enforceNoClaude still kept Claude-Sonnet out.)
 
 Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+---
+
+## 2026-07-18 — "READY 84/100" on an app that won't compile (duplicate handleExportCSV)
+
+**Trigger:** admin screenshot + report (`d66f25fc`). The build card showed **"Build health: READY ·
+84/100"**, but the in-browser preview died with **`Identifier 'handleExportCSV' has already been declared
+(231:8)`** — the app literally does not compile. Reported READY over a broken app (rule 5).
+
+**Investigation (evidence, not guesses):**
+- The app has a DUPLICATE `const handleExportCSV` (the builder created it twice during its edits — the
+  same weak-model "duplicate code" class as build #5's duplicate JSX and the duplicate `typecheck` tool).
+- esbuild (the syntax gate's parser) DOES catch a duplicate const (verified empirically), and `edit_file`
+  DOES feed edited files into `writtenFiles` (ToolDispatcher:1127) — so the gate *could* have caught it.
+- ROOT: the SYNTAX GATE parses the file set **once, early**. The LATE repair passes that run after it
+  (endgame repair, reviewer-autofix) re-edited App.tsx and **reintroduced** the duplicate, and **nothing
+  re-checked the final state**. The client's in-browser preview (Babel) caught it *after* the build had
+  already emitted `readiness: buildHealthFromDiagnostics(...)` = READY (agentv3.ts:8163).
+
+**Fix — FINAL SYNTAX RE-VERIFY (`routes/agentv3.ts`, after all repair passes, before health is derived):**
+re-parse the FINAL `writtenFiles` with `findSyntaxErrors` (in-process esbuild); any unhealed parse error is
+recorded as an UNRESOLVED `OUTCOME_SYNTAX_ERROR`, which `buildHealthFromDiagnostics` counts as a blocker →
+`ready:false`. So the card can never say READY for an app that won't compile. Best-effort, shares the
+`AGENTV3_SYNTAX_GATE` kill switch, only ever DOWNGRADES an over-optimistic verdict (findSyntaxErrors flags
+only genuinely-unparseable files → a good build is never falsely blocked), and runs NO extra repair (so a
+late repair can't loop — the app is saved and an honest follow-up finishes the fix).
+
+**Regression test (`buildHealthCard.test.ts`):** an unresolved `OUTCOME_SYNTAX_ERROR` forces the card to
+NOT READY even on an ok build. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**OPEN (recorded, honest):** this fix makes the VERDICT honest (never "READY" when broken). It does NOT
+yet auto-heal a late-reintroduced duplicate, and the deeper root — the weak-model creating duplicate code
+during edits — is the recurring class (build #5 duplicate JSX, this duplicate function). A future slice:
+a targeted duplicate-top-level-declaration guard the builder self-checks after each edit, and/or a final
+re-heal pass. The `AgentRunner` "verified READY (score N/100)" SUMMARY string is separate from the card and
+can still read optimistically on this path — a follow-up should reconcile the summary with the final card.

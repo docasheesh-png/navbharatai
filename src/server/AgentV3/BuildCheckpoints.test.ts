@@ -83,55 +83,33 @@ describe('BuildCheckpoint — Phase B early validation', () => {
     });
   });
 
-  describe('graceful degradation', () => {
-    it('suggests degradation when tool calls exceed threshold', () => {
-      // Simulate many tool calls (e.g., complex build progress)
-      for (let i = 0; i < 65; i++) {
+  // TaskForge autopsy (admin, 2026-07-18): the checkpoint must NEVER drop requested features, emit a
+  // fabricated "token budget getting tight" message, or tell the build to stop — no matter how many tool
+  // calls a (legitimately complex) app takes. That behaviour was removed at the root; these tests lock it out.
+  describe('no feature-dropping / no fabricated budget claim (regression)', () => {
+    it('never returns a degradation suggestion, even far past the old 60-call threshold', () => {
+      // TaskForge (a Linear clone) legitimately runs many tool calls — the old heuristic bailed at 60.
+      for (let i = 0; i < 120; i++) {
         checkpoint.recordToolCall();
       }
       const result = checkpoint.quickCheck(events);
-      expect(result.suggestion).toBeDefined();
-      expect(result.suggestion).toContain('CORE');
+      expect((result as any).suggestion).toBeUndefined();
+      expect(result).not.toHaveProperty('suggestion');
     });
 
-    it('only suggests degradation once', () => {
-      for (let i = 0; i < 65; i++) {
-        checkpoint.recordToolCall();
-      }
-      checkpoint.quickCheck(events); // first time
-      expect(checkpoint.state.suggestedDegradation).toBe(true);
-
-      // Manually advance more tool calls
-      for (let i = 0; i < 20; i++) {
-        checkpoint.recordToolCall();
-      }
-      const result2 = checkpoint.quickCheck(events);
-      expect(result2.suggestion).toBeUndefined(); // already suggested once
+    it('exposes no degradation API surface (degradationHint / shouldSuggestDegradation are gone)', () => {
+      expect((checkpoint as any).degradationHint).toBeUndefined();
+      expect((checkpoint as any).shouldSuggestDegradation).toBeUndefined();
+      expect((checkpoint.state as any).suggestedDegradation).toBeUndefined();
     });
 
-    it('builds degradation hint from feature ranking', () => {
-      const features = {
-        core: ['auth', 'CRUD'],
-        important: ['search'],
-        nice: ['analytics', 'reports'],
-      };
-      const cp = new BuildCheckpoint(workspace, features);
-      for (let i = 0; i < 65; i++) {
-        cp.recordToolCall();
-      }
-      cp.quickCheck(events);
-      const hint = cp.degradationHint();
-      expect(hint).toBeDefined();
-      if (hint) {
-        expect(hint).toContain('analytics');
-        expect(hint).toContain('reports');
-        expect(hint).toContain('CORE');
-      }
-    });
-
-    it('returns undefined degradationHint if not needed', () => {
-      const result = checkpoint.degradationHint();
-      expect(result).toBeUndefined(); // too few calls, no degradation suggested
+    it('still reports honest health on a long build (ok when calls complete, no stop signal)', () => {
+      for (let i = 0; i < 80; i++) checkpoint.recordToolCall();
+      events.emit({ type: 'tool_call' });
+      events.emit({ type: 'tool_result', error: null });
+      const result = checkpoint.quickCheck(events);
+      expect(result.ok).toBe(true);
+      expect(result.broken).toBe(false);
     });
   });
 });

@@ -5861,14 +5861,15 @@ export function registerAgentV3Routes(app: Express): void {
       // Phase B — Checkpoint Loop: early validation + graceful degradation
       // (intelligent scoping): create a checkpoint monitor with feature priorities
       // from the request analyser. Monitors build health every N tool calls.
-      const checkpoint = new BuildCheckpoint(state, analysis?.features);
-      let lastCheckpointHintEmitted = false;
+      const checkpoint = new BuildCheckpoint(state);
       const checkpointListener = (event: AgentEvent) => {
         try {
           if (event.type === 'tool_call') {
             // After each tool call, check if it's time for a checkpoint
             if (checkpoint.recordToolCall()) {
-              // Checkpoint triggered — run the health check
+              // Checkpoint triggered — run the deterministic health check. This NEVER drops
+              // requested features or tells the build to stop (TaskForge autopsy 2026-07-18);
+              // the genuine "too big for one turn" case is owned by the step-limit auto-resume.
               const health = checkpoint.quickCheck(events);
               if (!health.ok && health.broken) {
                 events.emit({
@@ -5876,18 +5877,6 @@ export function registerAgentV3Routes(app: Express): void {
                   text: '⚠️ Build health check detected issues — preparing recovery…',
                   ts: Date.now(),
                 });
-              }
-              // If degradation is suggested and we haven't emitted the hint yet, do it now
-              if (health.suggestion && !lastCheckpointHintEmitted) {
-                lastCheckpointHintEmitted = true;
-                const hint = checkpoint.degradationHint();
-                if (hint) {
-                  events.emit({
-                    type: 'narration', agent: 'architect',
-                    text: hint,
-                    ts: Date.now(),
-                  });
-                }
               }
             }
           }

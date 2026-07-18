@@ -18242,3 +18242,43 @@ e.g. `watch-store-11am-180726-3f9a2c`. Root-cause-safe design:
 
 Gate: frontend + server tsc clean (touched files); full vitest 7390 pass (+ the new pin/search/repo tests);
 2 pre-existing capacitor sandbox-install suite failures are unrelated (present in CI via `npm ci`).
+## 2026-07-18 — Offline AI: on-device chat persistence + delete (Stage-1 LLM roadmap, PR-1)
+
+Admin approved Stage 1 of the on-device "Offline Thinking (beta)" roadmap, and added: the Offline AI must
+REMEMBER users' chats and let the user DELETE them anytime. Honest framing recorded (rule 3): a phone can't
+train model weights — "power/quality badhta rahega" is delivered honestly via (a) on-device memory/context,
+(b) model-tier upgrades, (c) OTA model updates — never fake self-training. This PR-1 ships the foundation
+(no model yet): the deterministic chat now persists on-device and is fully user-deletable.
+
+- `offlineChatStore.ts`: lean, corruption-safe transcript persistence in localStorage (LOCAL ONLY, never
+  uploaded). Messages stored minimally — text + card ids (features/device by id), not the full objects —
+  capped at 80 messages so it can't grow unbounded. `loadChat`/`saveChat`/`clearChat`/`capTranscript`,
+  injectable storage for tests.
+- `OfflineAI.tsx`: loads the saved transcript synchronously on open (lazy useState init, so the save effect
+  can't wipe it on mount), rehydrates each bot turn's cards from the bundled KBs by id, saves on every
+  change, and adds a header "Clear chat" (eraser) control that wipes it from the device. Taught-memory
+  delete (forget one / forget all) already existed — so the user now controls both chat + memory.
+
+Build order recap: PR-1 persistence+delete (this) → PR-2 device/WebGPU detection + beta opt-in screen →
+PR-3 WebLLM + Stage-1 (~0.5B, ~400MB) progressive/resumable download + generation (facts stay on the
+deterministic engine; beta default-off; loads from MLC/HuggingFace CDN so no admin CDN setup for beta).
+Tests: new `offlineChatStore.test.ts` (5). Gate: frontend tsc ✓, server tsc ✓, full vitest 7402 ✓, build ✓.
+
+## 2026-07-18 — Offline AI: device-capability + WebGPU detection (Stage-1 LLM roadmap, PR-2)
+
+PR-2 of the on-device "Offline Thinking (beta)" roadmap: the pure infra that decides which model tier a
+phone can run. Deliberately NO user-facing UI in this PR (rule 2: the beta screen must appear fully working,
+so it lands with the real model in PR-3) — this is a tested library only.
+
+- `offlineDeviceTier.ts`: `recommendTier(signals)` (pure) — no WebGPU → tier 0 (deterministic only, honest
+  "needs WebGPU / update Chrome"); else pick tier by RAM (8→3, 6→2, 4→1, <4→0), fall back to CPU cores when
+  RAM is unknown, then step DOWN if free storage can't hold the model (with 1.3× headroom). `TIER_INFO`
+  carries honest per-tier download size/RAM. `hasWebGpu`/`probeDevice` are guarded browser-glue (missing
+  API → unsupported, never a throw), navigator injectable for tests.
+- Never forces anything: a device that can't run a model cleanly stays on tier 0 (today's deterministic
+  chat), which always works.
+
+Roadmap: PR-1 persistence+delete ✅ → PR-2 device/WebGPU detection ✅ (this) → PR-3 WebLLM + Stage-1
+(~0.5B, ~400MB) progressive/resumable download + generation + the beta opt-in screen (all together so the
+user-facing beta is fully working when it appears). Tests: `offlineDeviceTier.test.ts` (7). Gate: frontend
+tsc ✓, full vitest 7409 ✓.

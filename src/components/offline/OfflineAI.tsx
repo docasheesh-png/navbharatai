@@ -1,17 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Wifi, Smartphone, Send, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle,
-  Brain, Trash2, Bot, ArrowRight, Wrench, AlertTriangle, Globe,
+  Brain, Trash2, Bot, ArrowRight, Wrench, AlertTriangle, Globe, Eraser,
 } from 'lucide-react';
 import {
   howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
   type NavTarget, type QuickAnswerKind, type DeviceHelp,
 } from '../../lib/offlineAssistant';
-import type { AppFeature } from '../../server/AppContext/AppKnowledgeBase';
+import { APP_KNOWLEDGE_BASE, type AppFeature } from '../../server/AppContext/AppKnowledgeBase';
+import { DEVICE_KNOWLEDGE_BASE } from '../../lib/deviceKnowledgeBase';
 import { buildChatReply, teachAck, CHAT_WELCOME } from '../../lib/offlineChat';
 import {
   parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
 } from '../../lib/offlineMemory';
+import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/offlineChatStore';
+
+// Lookup maps to rehydrate a reloaded bot turn's cards from their stored ids (kept out of the component
+// body so they're built once).
+const FEATURE_BY_ID = new Map(APP_KNOWLEDGE_BASE.map((f) => [f.id, f]));
+const DEVICE_BY_ID = new Map(DEVICE_KNOWLEDGE_BASE.map((d) => [d.id, d]));
 
 /**
  * Offline AI — a 100% on-device CHAT assistant (admin 2026-07-16 … 2026-07-18). It talks turn-by-turn
@@ -142,10 +149,40 @@ const DeviceHelpCard: React.FC<{ help: DeviceHelp }> = ({ help }) => (
   </div>
 );
 
+/** Strip a live chat message to its lean persistable form (cards stored by id, not inline). */
+function toPersisted(m: ChatMsg): PersistedChatMsg {
+  return {
+    id: m.id,
+    role: m.role,
+    text: m.text,
+    answerKind: m.answerKind,
+    online: m.online,
+    featureIds: m.features?.map((f) => f.id),
+    deviceIds: m.deviceMatches?.map((d) => d.id),
+  };
+}
+
+/** Rebuild a live chat message from a persisted one, looking up its cards from the bundled KBs by id. */
+function rehydrate(p: PersistedChatMsg): ChatMsg {
+  return {
+    id: p.id,
+    role: p.role,
+    text: p.text,
+    answerKind: p.answerKind as ChatMsg['answerKind'],
+    online: p.online,
+    features: p.featureIds?.map((id) => FEATURE_BY_ID.get(id)).filter(Boolean) as AppFeature[] | undefined,
+    deviceMatches: p.deviceIds?.map((id) => DEVICE_BY_ID.get(id)).filter(Boolean) as DeviceHelp[] | undefined,
+  };
+}
+
 export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   const online = useOnline();
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  // Load the saved on-device transcript once, synchronously, so history is there on open (and the save
+  // effect below never wipes it on mount).
+  const [messages, setMessages] = useState<ChatMsg[]>(() => {
+    try { return loadChat().map(rehydrate); } catch { return []; }
+  });
   const [typing, setTyping] = useState(false);
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
@@ -159,8 +196,11 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   }, []);
   // Auto-scroll to the newest message / typing indicator.
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, typing]);
+  // Persist the transcript on this device (local only) whenever it changes, so the chat survives restarts.
+  useEffect(() => { saveChat(messages.map(toPersisted)); }, [messages]);
 
   const persist = (list: UserMemory[]) => { setMemories(list); saveMemories(list); };
+  const clearChatHistory = () => { setMessages([]); clearChat(); };
 
   const send = (raw?: string) => {
     const text = (raw ?? input).trim();
@@ -207,6 +247,15 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {messages.length > 0 && (
+              <button
+                onClick={clearChatHistory}
+                title="Clear this chat (removes it from this device)"
+                className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-white/[0.03] text-[#8b949e] hover:text-red-300 hover:border-red-400/40 transition-colors"
+              >
+                <Eraser className="w-3.5 h-3.5" />
+              </button>
+            )}
             {memories.length > 0 && (
               <button
                 onClick={() => setShowMemories((v) => !v)}

@@ -66,3 +66,49 @@ export function syntaxRepairInstruction(errors: readonly SyntaxErrorInfo[]): str
     .map((e) => `- ${e.path}${e.line ? ` (line ${e.line}${e.column != null ? `:${e.column}` : ''})` : ''}: ${e.message}`)
     .join('\n');
 }
+
+/**
+ * Parse ONE source file with esbuild and return its FIRST syntax error — or null when it parses clean, or
+ * isn't a parseable JS/TS/JSX/TSX source (a `.d.ts`, a `.json`, a `.css`, …). The primitive behind the
+ * write-time parse guard. Never throws.
+ */
+export async function firstSyntaxError(path: string, content: string): Promise<SyntaxErrorInfo | null> {
+  if (!JS_TS.test(path) || DECL.test(path)) return null; // not a parseable source file → no opinion
+  const errs = await findSyntaxErrors({ [path]: content });
+  return errs[0] ?? null;
+}
+
+/**
+ * WRITE-TIME PARSE GUARD (deep-test 2026-07-18). Default-ON — kill switch `AGENTV3_WRITE_PARSE_GUARD=off`.
+ * The recurring build-breaker: the builder, editing a large file, ADDS a `const handleExportCSV`/`interface`
+ * that ALREADY EXISTS (a duplicate declaration → "already been declared"), or leaves an unwrapped JSX
+ * sibling / a missing `)` — the file stops parsing, the preview dies, yet a later gate only catches it after
+ * the fact. This flag turns on refusing such a write AT WRITE TIME.
+ */
+export function writeParseGuardEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AGENTV3_WRITE_PARSE_GUARD !== 'off';
+}
+
+/**
+ * Decide whether a write/edit must be REFUSED because it would introduce a syntax error. Returns a
+ * model-facing rejection message, or null to allow the write. Pure policy (the esbuild parses are injected
+ * as the already-computed old/new errors) so it is fully unit-testable:
+ *   • allow when the guard is off, or the new content parses clean;
+ *   • allow when the OLD content was ALREADY broken — never block a repair-in-progress on a broken file;
+ *   • otherwise (a CLEAN/new file broken by this change) → REFUSE with the exact location + a fix hint.
+ */
+export function parseGuardDecision(
+  path: string,
+  errOld: SyntaxErrorInfo | null,
+  errNew: SyntaxErrorInfo | null,
+  enabled = true,
+): string | null {
+  if (!enabled || !errNew) return null;   // guard off, or the result parses clean → allow
+  if (errOld) return null;                // was already broken → allow the (repair) write through
+  const loc = errNew.line ? ` (line ${errNew.line}${errNew.column != null ? `:${errNew.column}` : ''})` : '';
+  return `WRITE REJECTED — your change introduces a SYNTAX ERROR in ${path}${loc}: ${errNew.message}\n` +
+    `It was NOT saved (the app would not compile). The most common cause is a DUPLICATE declaration — a ` +
+    `const / function / interface that ALREADY EXISTS in this file. Do NOT add a second copy; EDIT the ` +
+    `existing one instead. Other causes: an unwrapped or unbalanced JSX tag, or a missing ")" / "}". Fix ` +
+    `your change so the file parses cleanly, then retry.`;
+}

@@ -17961,3 +17961,45 @@ re-throws unchanged. Full gate green: server tsc ✅, frontend tsc ✅, vitest �
 
 **Rollout note:** flip `AGENTV3_RATE_PACER=on` (canary) once, watch a few real builds' `deliveredVia` +
 timeout rate, then widen. Both admin-requested fixes (syntax-locator #1, pacer #2) now shipped.
+
+---
+
+## 2026-07-18 — ROOT FIX: write-time parse guard — the builder can no longer SAVE a syntax-broken file
+
+**Trigger:** report `2d933510` (+ the "Unexpected token, expected ','" screenshot). The recurring
+build-breaker, now hit hard: the app kept accumulating **duplicate declarations** (`handleExportCSV` +
+`handleImportCSV` each declared TWICE, lines 136 & 231 / 161 & 255) plus broken JSX (an unwrapped
+`<Sidebar>` sibling, a missing `)`), so App.tsx would not compile and the preview died. The builder
+eventually fixed it by burning ~10 min flailing (grep/awk/python tag-counting again), but the admin's ask
+was explicit: **fix it at the root so this error can NEVER happen again.**
+
+**Root cause of the CLASS:** the builder, editing a large file, ADDS a `const`/`function`/`interface` that
+ALREADY EXISTS (a duplicate declaration — always a hard compile error), or leaves an unbalanced/unwrapped
+JSX structure — and the broken version was **saved to disk anyway**. Every downstream gate (syntax gate,
+final re-verify, preview) only caught it AFTER the fact.
+
+**Fix — WRITE-TIME PARSE GUARD (`SyntaxCheck.ts` + `ToolDispatcher.ts`), default-ON.** `write_file` and
+`edit_file` now refuse a write that would turn a CLEAN (or new) source file into one that does NOT parse:
+- `firstSyntaxError(path, content)` — esbuild parse of the single file (same parser Vite uses).
+- `parseGuardDecision(path, errOld, errNew, enabled)` — PURE policy: allow when off / new parses clean /
+  the file was ALREADY broken (never block a repair-in-progress); otherwise REFUSE with the exact
+  `file:line:col` + a hint ("a DUPLICATE declaration already exists — EDIT the existing one, don't add a
+  second copy; or an unwrapped JSX tag / missing `)`"). The model gets the fix direction immediately.
+- Dispatcher `parseGuardRejection` wires it into both handlers (mirrors the existing
+  `isDestructiveEmptyOverwrite` guard); best-effort — never blocks a write on the guard's own failure.
+- Kill switch `AGENTV3_WRITE_PARSE_GUARD=off`. Safe by construction: only blocks a change that BREAKS a
+  currently-clean file (esbuild = Vite's parser, so "can't parse" ⇒ "won't build"); repairs of
+  already-broken files pass through untouched.
+
+**Why this is the real root fix:** a syntactically-broken version of a working file can no longer be
+saved — so the duplicate-declaration / broken-JSX compile break can never reach the preview at all, and
+the model is redirected to edit the existing symbol the moment it tries to add a duplicate.
+
+**Tests:** `SyntaxCheck.test.ts` — `firstSyntaxError` (dup vs clean vs non-source); `parseGuardDecision`
+(off/clean allow, clean→broken refuse with location+hint, already-broken allow, default-on flag).
+`ToolDispatcher.test.ts` — an edit adding a duplicate `handleExportCSV` is REJECTED and the file on disk is
+unchanged; a broken new file is refused; a valid edit passes; a repair on an already-broken file is
+allowed. Full gate green: server tsc ✅, frontend tsc ✅, vitest 7361 pass ✅.
+
+**Registry note:** admin set `AGENTV3_RATE_PACER=on` in Cloud Run (pacer now live). New flag this fix adds:
+`AGENTV3_WRITE_PARSE_GUARD` (default on).

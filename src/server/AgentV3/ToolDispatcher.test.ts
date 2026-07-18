@@ -83,6 +83,43 @@ describe('ToolDispatcher', () => {
     expect(res.content).toMatch(/parses clean|OK|nothing beyond/i);
   });
 
+  // Deep-test 2026-07-18 (root fix): a write/edit that introduces a DUPLICATE declaration (or any syntax
+  // break) into a CLEAN file must be REFUSED at write time, so a non-compiling version is never saved.
+  describe('write-time parse guard', () => {
+    it('REFUSES an edit that adds a duplicate declaration — the file on disk is unchanged', async () => {
+      act.files.set('src/App.tsx', 'export default function App(){\n  const handleExportCSV=()=>1;\n  return null;\n}');
+      const before = act.files.get('src/App.tsx');
+      const res = await d.dispatch(call('edit_file', {
+        path: 'src/App.tsx',
+        old_string: '  const handleExportCSV=()=>1;',
+        new_string: '  const handleExportCSV=()=>1;\n  const handleExportCSV=()=>2;', // duplicate!
+      }), 'architect');
+      expect(res.content).toMatch(/WRITE REJECTED/);
+      expect(res.content).toMatch(/already been declared|DUPLICATE/i);
+      expect(act.files.get('src/App.tsx')).toBe(before); // NOT saved
+    });
+
+    it('REFUSES creating a new file that does not parse', async () => {
+      const res = await d.dispatch(call('write_file', { path: 'src/Broken.tsx', content: 'export const x = (' }), 'frontend');
+      expect(res.content).toMatch(/WRITE REJECTED/);
+      expect(act.files.has('src/Broken.tsx')).toBe(false);
+    });
+
+    it('ALLOWS a normal, valid edit through', async () => {
+      act.files.set('src/App.tsx', 'export default function App(){\n  const a = 1;\n  return null;\n}');
+      const res = await d.dispatch(call('edit_file', { path: 'src/App.tsx', old_string: 'const a = 1;', new_string: 'const a = 2;' }), 'architect');
+      expect(res.content).not.toMatch(/WRITE REJECTED/);
+      expect(act.files.get('src/App.tsx')).toContain('const a = 2;');
+    });
+
+    it('ALLOWS a repair edit on an ALREADY-broken file (never blocks fixing)', async () => {
+      act.files.set('src/App.tsx', 'export default function App(){\n  const a = (\n  return null;\n}'); // already broken
+      const res = await d.dispatch(call('edit_file', { path: 'src/App.tsx', old_string: 'const a = (', new_string: 'const a = 1;' }), 'architect');
+      expect(res.content).not.toMatch(/WRITE REJECTED/);
+      expect(act.files.get('src/App.tsx')).toContain('const a = 1;');
+    });
+  });
+
   it('write_file creates a file, records the change, emits events', async () => {
     const res = await d.dispatch(call('write_file', { path: 'src/App.tsx', content: 'hello' }), 'frontend');
     expect(res.is_error).toBe(false);
@@ -464,8 +501,8 @@ describe('ToolDispatcher', () => {
   });
 
   it('write_file on an existing path records a modify and nudges toward edit_file', async () => {
-    act.files.set('a.ts', 'old');
-    const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'new' }));
+    act.files.set('a.ts', 'const a = 1;');
+    const res = await d.dispatch(call('write_file', { path: 'a.ts', content: 'const b = 2;' }));
     expect(state.snapshot().files[0].kind).toBe('modify');
     // Overwriting an EXISTING file warns the agent to prefer a surgical edit_file patch.
     expect(res.is_error).toBe(false);

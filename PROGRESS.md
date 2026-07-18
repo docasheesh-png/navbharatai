@@ -17790,3 +17790,35 @@ time, hisaab, quick answer). Tests: +6 cases (arithmetic engine, math answers, m
 date/time from injected clock, greeting/identity white-label, no-hijack of feature/general questions).
 Gate: frontend tsc ✓, server tsc ✓, offlineAssistant 24/24 ✓ (full suite: 7311 passed; the 1 red is the
 pre-existing flaky AIRouter jitter test — passes in isolation, unrelated to this change).
+
+## 2026-07-18 — Offline AI: user can TEACH it (on-device memory, "jo bole woh yaad rakhe")
+
+Admin: "kya user khud train kar sakta hai? jo bhi bate kare woh yaad rakh kar." HONEST framing (rule 3):
+real ML training is impossible offline on-device — so this is NOT faked as "training". Built the real,
+fully-offline thing that delivers the intent: a DETERMINISTIC user-taught memory, stored ON THIS DEVICE
+ONLY (localStorage, never uploaded), recalled EXACTLY (zero hallucination — it only ever repeats what the
+user taught).
+
+- **Teach in plain language** (`offlineMemory.ts` `parseTeaching`, committed on Enter):
+  "remember my gate code is 4821" / "note: …" / "yaad rakho ki …" (free-text fact);
+  "when I ask X answer Y" / "jab main X puchu to Y" (explicit Q→A);
+  "json means …" / "X ka matlab Y" (definition). Guards: a math equation ("2+2=4") and a plain question
+  ("iska matlab kya hai") are NOT treated as teaching.
+- **Recall** (`offlineAssistant.ts` `recallMemory`/`scoreMemory`, wired into `answerOffline` as a new
+  `answerKind:'memory'`): a fact recalls by keyword (typo-tolerant), a Q→A by its trigger. Deterministic —
+  returns the stored text verbatim; unrelated queries never surface a secret (threshold-gated, no fuzzy
+  over-reach). Priority: real math/date > taught memory > app-feature retrieval.
+- **Persistence & safety**: `loadMemories`/`saveMemories` (injectable storage, corruption-safe: malformed
+  or wrong-shape blobs → []); immutable `addMemory` (same-trigger Q→A replaces, identical facts de-dup),
+  capped at 500 items / 2000 chars; `removeMemory`. No dependency cycle — write side in `offlineMemory.ts`,
+  read side (types + recall) in `offlineAssistant.ts`; ONE shared tokenizer/fuzzy (re-exported).
+- **UI** (`OfflineAI.tsx`): the box doubles as a teach box — a live "Press ↵ Enter and I'll remember this"
+  hint when the text is a teaching command, a green "Got it — saved on this device only" confirmation, a
+  🧠 recalled-memory answer card, and a "Things you've taught me (N)" panel to review/delete each item or
+  forget everything. KB `offline_ai` entry + keywords (teach/train/remember/yaad rakho/memory/forget)
+  updated.
+
+Tests: new `offlineMemory.test.ts` (13 cases: parse fact/qa/definition, reject math+questions, keyword
+extraction, immutable add/replace/dedup/cap, remove, exact recall, deterministic no-over-reach, memory
+never beats math, load/save round-trip + corruption safety) + a recall case in the assistant suite. Gate:
+frontend tsc ✓, server tsc ✓, FULL vitest 7325 passed ✓ (flaky AIRouter test green this run too).

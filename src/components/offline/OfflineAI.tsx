@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle } from 'lucide-react';
+import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle, Brain, Trash2, CornerDownLeft, Check } from 'lucide-react';
 import {
   answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
   type NavTarget, type QuickAnswerKind,
 } from '../../lib/offlineAssistant';
+import {
+  parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
+} from '../../lib/offlineMemory';
 
 /**
  * Offline AI — a 100% on-device app guide (admin 2026-07-16, enhanced 2026-07-18). Grounded entirely in
@@ -33,9 +36,10 @@ function useOnline(): boolean {
 }
 
 /** The icon for a deterministic on-device answer, by category. */
-const AnswerIcon: React.FC<{ kind?: QuickAnswerKind }> = ({ kind }) => {
+const AnswerIcon: React.FC<{ kind?: QuickAnswerKind | 'memory' }> = ({ kind }) => {
   if (kind === 'math') return <Calculator className="w-4 h-4 text-emerald-400" />;
   if (kind === 'datetime') return <Clock className="w-4 h-4 text-emerald-400" />;
+  if (kind === 'memory') return <Brain className="w-4 h-4 text-emerald-400" />;
   return <MessageCircle className="w-4 h-4 text-emerald-400" />;
 };
 
@@ -53,10 +57,38 @@ const Chip: React.FC<{ label: string; onClick: () => void; icon?: React.ReactNod
 export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   const [query, setQuery] = useState('');
   const online = useOnline();
-  const answer = useMemo(() => answerOffline(query), [query]);
+
+  // On-device taught memory — loaded from localStorage, persisted on every change (never uploaded).
+  const [memories, setMemories] = useState<UserMemory[]>([]);
+  const [justTaught, setJustTaught] = useState<UserMemory | null>(null);
+  const [showMemories, setShowMemories] = useState(false);
+
+  useEffect(() => { setMemories(loadMemories()); }, []);
+
+  const persist = (list: UserMemory[]) => { setMemories(list); saveMemories(list); };
+
+  // The answer is memory-aware: recall of what the user taught this device happens inside answerOffline.
+  const answer = useMemo(() => answerOffline(query, new Date(), memories), [query, memories]);
+
+  // If the current text is a teaching command ("remember …", "when I ask …"), we offer to save it on
+  // Enter instead of searching — so live typing never stores a half-finished thought.
+  const pendingTeach = useMemo(() => parseTeaching(query), [query]);
 
   // Setting the query re-runs retrieval; used by starter and related chips so the user never retypes.
-  const runQuery = (q: string) => setQuery(q);
+  const runQuery = (q: string) => { setJustTaught(null); setQuery(q); };
+
+  const commitTeach = () => {
+    const parsed = parseTeaching(query);
+    if (!parsed) return;
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const next = addMemory(memories, parsed, id, Date.now());
+    persist(next);
+    setJustTaught(next[next.length - 1]);
+    setQuery('');
+  };
+
+  const forget = (id: string) => persist(removeMemory(memories, id));
+  const forgetAll = () => { persist([]); setShowMemories(false); };
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
@@ -90,34 +122,74 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             I know every feature of NavBharatAI — ask me <span className="text-white font-semibold">“where is X”</span> or
             <span className="text-white font-semibold"> “how do I Y”</span> and I’ll show you the exact place and take you there.
             I can also answer quick things offline — a <span className="text-white font-semibold">calculation</span> or
-            <span className="text-white font-semibold"> today’s date &amp; time</span>.
+            <span className="text-white font-semibold"> today’s date &amp; time</span> — and I’ll
+            <span className="text-white font-semibold"> remember whatever you teach me</span> (say <span className="text-white font-semibold">“remember …”</span>), saved on this device only.
             <span className="text-[#484f58]"> Building apps, full chat and general questions need internet — go online for those.</span>
           </p>
         </div>
 
-        {/* Search */}
-        <div className="relative">
+        {/* Search / teach box — Enter saves a teaching command ("remember …"); otherwise it just searches. */}
+        <form onSubmit={(e) => { e.preventDefault(); commitTeach(); }} className="relative">
           <Search className="w-4 h-4 text-[#484f58] absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask: where is the database? · 15% of 200 · today's date…"
+            onChange={(e) => { setQuery(e.target.value); if (justTaught) setJustTaught(null); }}
+            placeholder="Ask, calculate, or teach me: remember my gate code is 4821…"
             className="w-full bg-[#161b22] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
             autoFocus
           />
-        </div>
+        </form>
 
-        {/* Lead line */}
-        <p className="text-[11px] text-[#8b949e] px-1">{answer.lead}</p>
+        {/* Just taught — honest confirmation that it was saved on-device. */}
+        {justTaught && (
+          <div className="flex items-start gap-3 p-4 rounded-2xl bg-emerald-500/[0.08] border border-emerald-500/25">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
+              <Check className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-white font-bold">Got it — I’ll remember this.</p>
+              <p className="text-[11px] text-[#8b949e] mt-0.5 break-words">
+                {justTaught.kind === 'qa'
+                  ? <>When you ask <span className="text-white font-semibold">“{justTaught.trigger}”</span>, I’ll say <span className="text-white font-semibold">“{justTaught.text}”</span>.</>
+                  : <span className="text-white font-semibold">“{justTaught.text}”</span>}
+                {' '}Saved on this device only.
+              </p>
+            </div>
+          </div>
+        )}
 
-        {/* Deterministic on-device answer (real math / device clock / honest statement — never a faked
-            fact). Shown for kind 'answer'. */}
+        {/* Pending teach hint — the box looks like a teaching command; nudge Enter (suppresses search). */}
+        {!justTaught && pendingTeach && (
+          <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-indigo-500/[0.07] border border-indigo-500/25">
+            <Brain className="w-4 h-4 text-indigo-400 shrink-0" />
+            <p className="text-[12px] text-[#c9d1d9] min-w-0 break-words">
+              Press <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px]"><CornerDownLeft className="w-3 h-3" />Enter</span>
+              {' '}and I’ll remember{' '}
+              {pendingTeach.kind === 'qa'
+                ? <>to answer <span className="text-white font-semibold">“{pendingTeach.text}”</span> when you ask <span className="text-white font-semibold">“{pendingTeach.trigger}”</span>.</>
+                : <><span className="text-white font-semibold">“{pendingTeach.text}”</span>.</>}
+            </p>
+          </div>
+        )}
+
+        {/* Lead line (hidden while a teach hint / confirmation is showing, to avoid mixed signals) */}
+        {!justTaught && !pendingTeach && <p className="text-[11px] text-[#8b949e] px-1">{answer.lead}</p>}
+
+        {/* Everything below is the query result — hidden while the box holds a pending teaching command. */}
+        {!pendingTeach && (<>
+        {/* Deterministic on-device answer (real math / device clock / recalled memory / honest statement —
+            never a faked fact). Shown for kind 'answer'. */}
         {answer.kind === 'answer' && answer.answerText && (
           <div className="flex items-start gap-3 p-4 rounded-2xl bg-emerald-500/[0.06] border border-emerald-500/20">
             <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
               <AnswerIcon kind={answer.answerKind} />
             </div>
-            <p className="text-sm text-white font-semibold leading-relaxed pt-1 break-words min-w-0">{answer.answerText}</p>
+            <div className="min-w-0 pt-0.5">
+              {answer.answerKind === 'memory' && (
+                <p className="text-[9px] font-black uppercase tracking-widest text-emerald-400/70 mb-0.5">You taught me this</p>
+              )}
+              <p className="text-sm text-white font-semibold leading-relaxed break-words">{answer.answerText}</p>
+            </div>
           </div>
         )}
 
@@ -184,6 +256,53 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             );
           })}
         </div>
+        </>)}
+
+        {/* What the user has taught this device — real, on-device, deletable. Honest: stored locally only. */}
+        {memories.length > 0 && (
+          <div className="rounded-2xl bg-[#161b22] border border-white/5 overflow-hidden">
+            <button
+              onClick={() => setShowMemories((v) => !v)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors"
+            >
+              <span className="flex items-center gap-2 text-[12px] font-bold text-white">
+                <Brain className="w-4 h-4 text-emerald-400" />
+                Things you’ve taught me
+                <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-black">{memories.length}</span>
+              </span>
+              <span className="text-[10px] text-[#8b949e]">{showMemories ? 'Hide' : 'Show'}</span>
+            </button>
+            {showMemories && (
+              <div className="px-4 pb-4 space-y-2">
+                <p className="text-[10px] text-[#484f58] leading-relaxed">
+                  Saved on this device only — never uploaded. I recall these exactly, with no internet.
+                </p>
+                {memories.slice().reverse().map((m) => (
+                  <div key={m.id} className="flex items-start justify-between gap-3 p-3 rounded-xl bg-[#0d1117] border border-white/5">
+                    <div className="min-w-0">
+                      {m.kind === 'qa'
+                        ? <p className="text-[12px] text-white break-words"><span className="text-[#8b949e]">Q:</span> {m.trigger} <span className="text-[#8b949e]">→</span> {m.text}</p>
+                        : <p className="text-[12px] text-white break-words">{m.text}</p>}
+                    </div>
+                    <button
+                      onClick={() => forget(m.id)}
+                      title="Forget this"
+                      className="shrink-0 p-1.5 rounded-lg text-[#8b949e] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={forgetAll}
+                  className="text-[10px] font-bold text-red-400/80 hover:text-red-400 transition-colors pt-1"
+                >
+                  Forget everything
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

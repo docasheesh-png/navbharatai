@@ -33,8 +33,27 @@ export interface OfflineAnswer {
   /** For kind 'answer': the computed reply text (never a fabricated fact — only what the device can
    *  truly compute/state offline). Absent for the other kinds. */
   answerText?: string;
-  /** For kind 'answer': which deterministic category produced it (drives the UI icon). */
-  answerKind?: QuickAnswerKind;
+  /** For kind 'answer': which category produced it (drives the UI icon). 'memory' = recalled from what
+   *  the user taught this device. */
+  answerKind?: QuickAnswerKind | 'memory';
+}
+
+/**
+ * A single thing the user TAUGHT the Offline AI, persisted on THIS device only (never uploaded). This is
+ * a deterministic personal memory — not machine-learning training — so recall returns exactly what the
+ * user said, with zero hallucination. A 'qa' has a trigger (what you ask) + text (what it answers); a
+ * 'fact' is a free-text note recalled by keyword.
+ */
+export interface UserMemory {
+  id: string;
+  kind: 'fact' | 'qa';
+  /** For 'qa': the phrase the user asks to get `text` back. */
+  trigger?: string;
+  /** The answer ('qa') or the fact/note ('fact'). */
+  text: string;
+  /** Retrieval keywords (from the trigger for 'qa', from the text for 'fact'). */
+  keywords: string[];
+  createdAt: number;
 }
 
 const norm = (s: string): string => String(s || '').toLowerCase().trim();
@@ -383,13 +402,54 @@ export function quickAnswer(query: string, now: Date = new Date()): QuickAnswer 
   return tryMath(query) || tryDateTime(query, now) || tryConversational(query);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// USER-TAUGHT MEMORY (read side) — recall what the user taught THIS device. Deterministic: returns the
+// exact stored text, never a generated guess. The WRITE side (parsing a teaching command, adding /
+// removing memories) lives in `offlineMemory.ts` to keep this module free of any dependency cycle.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Score a taught memory against a query: a strong boost when the query matches a 'qa' trigger, plus
+ *  keyword overlap with typo tolerance. Pure. */
+export function scoreMemory(m: UserMemory, query: string): number {
+  const q = norm(query);
+  if (!q) return 0;
+  let s = 0;
+  if (m.trigger) {
+    const t = norm(m.trigger);
+    if (t && q === t) s += 10;
+    else if (t && (q.includes(t) || t.includes(q))) s += 6;
+  }
+  const qWords = new Set(tokens(q).filter((w) => w.length >= 3));
+  for (const kw of m.keywords || []) {
+    if (qWords.has(kw)) { s += 2; continue; }
+    for (const w of qWords) if (fuzzyTokenHit(w, kw)) { s += 1; break; }
+  }
+  return s;
+}
+
+/** The single best taught memory for a query (score ≥ threshold), else null. Pure. */
+export function recallMemory(memories: UserMemory[], query: string, threshold = 3): UserMemory | null {
+  let best: UserMemory | null = null;
+  let bestScore = 0;
+  for (const m of memories || []) {
+    const s = scoreMemory(m, query);
+    if (s > bestScore) { bestScore = s; best = m; }
+  }
+  return bestScore >= threshold ? best : null;
+}
+
+// Re-exported so the user-memory (write-side) module shares ONE tokenizer + typo-tolerance impl
+// (rule 4: centralize, never duplicate). `tokenize` splits text into words; `fuzzyWordMatch` is the
+// bounded-edit-distance word matcher used across retrieval and memory recall.
+export { tokens as tokenize, fuzzyTokenHit as fuzzyWordMatch };
+
 /**
- * Answer a user's offline question. First tries a deterministic on-device answer (real math / device
- * clock / an honest statement about NavBharatAI); otherwise answers purely from the app knowledge base.
- * Never invents an open-knowledge fact — returns real features, a real computation, or an honest "not
- * found". Pure given `now`.
+ * Answer a user's offline question. Order: a deterministic on-device answer (real math / device clock /
+ * an honest statement about NavBharatAI) → something the user TAUGHT this device → the app knowledge
+ * base. Never invents an open-knowledge fact — returns real features, a real computation, the user's own
+ * taught text, or an honest "not found". Pure given `now` and `memories`.
  */
-export function answerOffline(query: string, now: Date = new Date()): OfflineAnswer {
+export function answerOffline(query: string, now: Date = new Date(), memories: UserMemory[] = []): OfflineAnswer {
   const msg = norm(query);
   if (!msg || isOverviewQuery(msg)) {
     return {
@@ -403,11 +463,22 @@ export function answerOffline(query: string, now: Date = new Date()): OfflineAns
   if (quick) {
     return { kind: 'answer', lead: quick.lead, answerText: quick.text, answerKind: quick.kind, matches: quick.features ?? [] };
   }
+  // Something the user taught this device (recalled exactly — zero hallucination).
+  const recalled = recallMemory(memories, msg);
   const matches = searchFeatures(msg).map((m) => m.feature);
+  if (recalled) {
+    return {
+      kind: 'answer',
+      answerKind: 'memory',
+      lead: recalled.kind === 'qa' ? 'You taught me this' : 'From what you taught me',
+      answerText: recalled.text,
+      matches, // still offer any related app features below the taught answer
+    };
+  }
   if (matches.length === 0) {
     return {
       kind: 'none',
-      lead: 'I couldn\'t find that in NavBharatAI. I can help you navigate the app or do quick things offline (a calculation, today\'s date). For general questions, please go online.',
+      lead: 'I couldn\'t find that in NavBharatAI. I can help you navigate the app, do quick things offline (a calculation, today\'s date), or remember something if you teach me ("remember …"). For general questions, please go online.',
       matches: [],
     };
   }

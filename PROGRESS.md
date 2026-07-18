@@ -18232,3 +18232,22 @@ Build order recap: PR-1 persistence+delete (this) → PR-2 device/WebGPU detecti
 PR-3 WebLLM + Stage-1 (~0.5B, ~400MB) progressive/resumable download + generation (facts stay on the
 deterministic engine; beta default-off; loads from MLC/HuggingFace CDN so no admin CDN setup for beta).
 Tests: new `offlineChatStore.test.ts` (5). Gate: frontend tsc ✓, server tsc ✓, full vitest 7402 ✓, build ✓.
+
+## 2026-07-18 — Offline AI: device-capability + WebGPU detection (Stage-1 LLM roadmap, PR-2)
+
+PR-2 of the on-device "Offline Thinking (beta)" roadmap: the pure infra that decides which model tier a
+phone can run. Deliberately NO user-facing UI in this PR (rule 2: the beta screen must appear fully working,
+so it lands with the real model in PR-3) — this is a tested library only.
+
+- `offlineDeviceTier.ts`: `recommendTier(signals)` (pure) — no WebGPU → tier 0 (deterministic only, honest
+  "needs WebGPU / update Chrome"); else pick tier by RAM (8→3, 6→2, 4→1, <4→0), fall back to CPU cores when
+  RAM is unknown, then step DOWN if free storage can't hold the model (with 1.3× headroom). `TIER_INFO`
+  carries honest per-tier download size/RAM. `hasWebGpu`/`probeDevice` are guarded browser-glue (missing
+  API → unsupported, never a throw), navigator injectable for tests.
+- Never forces anything: a device that can't run a model cleanly stays on tier 0 (today's deterministic
+  chat), which always works.
+
+Roadmap: PR-1 persistence+delete ✅ → PR-2 device/WebGPU detection ✅ (this) → PR-3 WebLLM + Stage-1
+(~0.5B, ~400MB) progressive/resumable download + generation + the beta opt-in screen (all together so the
+user-facing beta is fully working when it appears). Tests: `offlineDeviceTier.test.ts` (7). Gate: frontend
+tsc ✓, full vitest 7409 ✓.

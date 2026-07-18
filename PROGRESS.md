@@ -17697,3 +17697,40 @@ the package, and a conservative implicit-use allowlist (react/react-dom/framewor
 build tooling) + `@types/*` exclusion means a clean Vite scaffold produces zero findings. 10 new
 regression tests; full suite 7246 pass. Vol 6 closing + Vol 10 §3 updated to record detection
 `[LIVE]`, pruning `[ASPIRATIONAL]`.
+
+---
+
+### 2026-07-18 — Deep-test autopsy: MelodyBox (Vue) — framework-mismatch DNA fix (task #54 loop)
+
+**Report:** buildId 9778dc73, prompt "Vue 3 + Vite music player", `ok:false`, readiness 0/100, BUILD_FAILED,
+billed $0 ("working app or free" ✓), `noClaude:true` (weak tier ✓).
+
+**5-bucket ledger:** ✅ 5 self-healed/correct (self-destruct guard blocked `rm` #56; honest summary override
+#59; readiness gate blocked 0/100 not fake-success; $0 on fail; duplicate-stylesheet integrity fired) ·
+🔀 2 workarounds (GLM 107 failures/429-storm→Vertex/Kimi fallback = provider-health debt; agent `.bak`
+rename hack) · ⏭️ 0 skipped · ❌ 1 still-broken (THE bug) · 🥵 3 struggles (12+min React↔Vue reconcile;
+fast-lane 240s + one-shot 150s both timed out; LLM truncated 6×).
+
+**ROOT CAUSE (❌, DNA-level):** AgentV3's new-build path never read the prompt for a framework. `framework`
+came only from the client FrameworkPicker (`AgentV3Panel.tsx` default 'vite-react'); the prompt text was
+ignored (`routes/agentv3.ts:4352` = `req.body.framework || 'vite-react'`). So "Vue 3 + Vite" scaffolded
+REACT (`main.tsx`/`App.tsx`), the builder wrote Vue files on top (`App.vue`/`main.js`/Pinia/Vue Router) →
+2 entry points, shared `index.css`, 6 unresolved imports → BUILD_FAILED. A working prompt→framework
+detector existed only in the legacy `project/Scaffold.ts` (never wired to AgentV3, wrong ids).
+
+**Missing subsystem (Step 2):** a framework-honoring scaffold — an explicit framework in the prompt must
+select the matching scaffold, not the React default.
+
+**FIX (PR TBD):** new pure `AgentV3/PromptFramework.ts` `detectFrameworkFromPrompt(prompt)` → TemplateRegistry
+id (vue/nuxt/svelte/sveltekit/nextjs/remix/angular/astro) or null (React stays default). Wired at
+`agentv3.ts:4352`: when framework is still the bare 'vite-react' default, an explicit framework in the
+prompt selects the matching scaffold — flows into `ensureWorkspace` (scaffold), the manifest, AND
+`ensureViteReactFoundation` (which no-ops for non-React) together. Explicit client pick always wins; an
+import still overrides. 10 regression tests incl. the exact MelodyBox prompt → 'vue', plus no-false-positive
+guards (value/avenue/view; bare "next" ≠ Next.js).
+
+**Open root causes (recorded, not silently patched):** (a) provider-health — GLM 429-storm (107 failures)
+on the free/weak floor added latency though fallback delivered; the pool-cooldown (#1475) + proactive-pacer
+(admin-chosen) are the path. (b) OPTIONAL future hardening: a post-build "scaffold framework ≠ generated
+files" mismatch detector as defence-in-depth (the prompt→framework fix removes the cause; this would catch
+any residual drift).

@@ -128,6 +128,7 @@ import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
+import { detectFrameworkFromPrompt } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -4350,6 +4351,17 @@ export function registerAgentV3Routes(app: Express): void {
     // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
     // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    // FRAMEWORK-HONORING SCAFFOLD (MelodyBox deep-test root cause, 2026-07-18): the AgentV3 build path
+    // never read the prompt for a framework — `framework` came only from the client FrameworkPicker,
+    // which DEFAULTS to 'vite-react'. So an explicit "Vue 3 + Vite" prompt was scaffolded as React, the
+    // builder wrote Vue files on top, and the app failed with unresolved imports (readiness 0/100). When
+    // the framework is still the bare React default (i.e. the picker was not explicitly changed), let an
+    // explicitly-named front-end framework in the PROMPT select the matching scaffold. An explicit client
+    // pick (anything ≠ 'vite-react') always wins; a project import overrides this again below (L~4409).
+    if (framework === 'vite-react') {
+      const fromPrompt = detectFrameworkFromPrompt(prompt);
+      if (fromPrompt) framework = fromPrompt;
+    }
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
     // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────

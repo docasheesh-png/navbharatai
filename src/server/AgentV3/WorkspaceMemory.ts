@@ -259,6 +259,19 @@ export class WorkspaceMemory {
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
   recordRequest(text: string, ts?: number): void { this.episode('request', text, undefined, ts); }
+  /**
+   * UNSEND — remove the most-recent 'request' episode AND every episode recorded after it in that turn
+   * (its derived error/fix/note/audit), so the unsent message never resurfaces in the agent's memory or
+   * context. Episodes are strictly chronological, so everything from the last 'request' index onward
+   * belongs to that turn. Returns the removed episodes (empty if there was no request). The CALLER must
+   * persist afterward (saveWorkspaceMemory) or a durable copy will re-hydrate it on the next cold load.
+   */
+  removeLastRequestTurn(): Episode[] {
+    for (let i = this.episodes.length - 1; i >= 0; i--) {
+      if (this.episodes[i].kind === 'request') return this.episodes.splice(i);
+    }
+    return [];
+  }
   /** The user's most recent request texts (oldest→newest) — conversational context for intent. */
   recentRequests(limit = 3): string[] {
     return this.episodes.filter((e) => e.kind === 'request').slice(-Math.max(1, limit)).map((e) => e.text);

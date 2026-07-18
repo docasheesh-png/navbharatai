@@ -102,6 +102,13 @@ export interface ConversationStore {
   listByUser(userId: string, limit?: number): Promise<ConversationRecord[]>;
   /** Delete a build. No-op if it does not exist. */
   remove(id: string): Promise<void>;
+  /**
+   * Truncate the transcript to its first `keepCount` messages, dropping the tail. Used by UNSEND to
+   * remove a user message plus everything the model produced after it, so the provider never replays
+   * them on the next turn or on reopen (the transcript IS the provider's memory). `keepCount` is clamped
+   * to [0, current length]. Applies `patch` (status/updatedAt). Throws if id is unknown.
+   */
+  truncateMessages(id: string, keepCount: number, patch: ConversationPatch): Promise<void>;
 }
 
 /**
@@ -193,6 +200,13 @@ export class InMemoryConversationStore implements ConversationStore {
 
   async update(id: string, patch: ConversationPatch): Promise<void> {
     const rec = this.mustGet(id);
+    this.applyPatch(rec, patch);
+    this.records.set(id, rec);
+  }
+
+  async truncateMessages(id: string, keepCount: number, patch: ConversationPatch): Promise<void> {
+    const rec = this.mustGet(id);
+    rec.messages = rec.messages.slice(0, Math.max(0, Math.min(keepCount, rec.messages.length)));
     this.applyPatch(rec, patch);
     this.records.set(id, rec);
   }

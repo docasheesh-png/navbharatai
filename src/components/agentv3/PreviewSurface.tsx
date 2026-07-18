@@ -115,6 +115,11 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   const [viewport, setViewport] = useState<PreviewViewport>('auto');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
+  // Task #64 — honest full-stack state: the in-browser preview compiles only the frontend, so when the
+  // built app also has a backend its API calls fail here. The server reports this on the preview
+  // response so we can show a clear "needs a Live server" banner instead of a silently-broken preview.
+  const [hasBackend, setHasBackend] = useState(false);
+  const [backendReason, setBackendReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string>('');
   // Honest elapsed counter while the in-browser preview loads — "loading vs stuck" must be
@@ -150,7 +155,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // this, "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
   // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
   // from the previous app would otherwise misrepresent the next one.
-  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setErr(''); setViewport('auto'); }, [workspaceId]);
+  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setHasBackend(false); setBackendReason(''); setErr(''); setViewport('auto'); }, [workspaceId]);
 
   const runDiagnose = useCallback(async () => {
     if (!workspaceId) return;
@@ -306,6 +311,8 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       const nextHtml = typeof data.html === 'string' ? data.html : '';
       setHtml(nextHtml);
       setKind(typeof data.kind === 'string' ? data.kind : '');
+      setHasBackend(data.hasBackend === true);
+      setBackendReason(typeof data.backendReason === 'string' ? data.backendReason : '');
       return nextHtml.length > 0;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -626,6 +633,18 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         <div className="px-3 py-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border-b border-emerald-900 flex items-center justify-between gap-2">
           <span>✓ Preview recovered after a deep refresh — no AI fix was needed.</span>
           <button onClick={() => setRecovered(false)} className="shrink-0 text-emerald-500 hover:text-emerald-300">Dismiss</button>
+        </div>
+      )}
+      {mode === 'inbrowser' && hasBackend && (
+        // Task #64 — honest full-stack state. The in-browser preview compiles only the frontend, so an
+        // app with a backend renders here with its data/API features non-functional. Say so plainly and
+        // point to the Live server (which actually boots the backend) instead of a silently-broken app.
+        <div className="px-3 py-1.5 text-[11px] text-sky-200 bg-sky-950/40 border-b border-sky-900 flex items-center justify-between gap-2">
+          <span>
+            ℹ️ This app has {backendReason || 'a backend'} — the in-browser preview shows the frontend
+            only, so its data/API features won't work here. Switch to the Live server to run it fully.
+          </span>
+          <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
         </div>
       )}
       {loading ? (

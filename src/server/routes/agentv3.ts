@@ -127,6 +127,7 @@ import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
+import { detectBackendPresence } from '../AgentV3/BackendPresence';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -3344,6 +3345,12 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(404).json({ error: 'No files to preview yet — build something first.' });
         return;
       }
+      // HONEST FULL-STACK STATE (Task #64): the in-browser preview compiles only the FRONTEND. If the
+      // app also has a backend (a Node/Express API, a database, a Python server, or defined routes) its
+      // API calls silently fail here — the app "looks broken" for a reason the user can't see. Derive it
+      // deterministically from the files so the client can show an honest "needs a Live server" banner
+      // instead of a silently-broken preview. Same value whether the render is cached or fresh.
+      const backend = detectBackendPresence(files);
       // The client's own origin (sent in the body, validated to an http/https URL) is used to load
       // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
       // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
@@ -3365,7 +3372,7 @@ export function registerAgentV3Routes(app: Express): void {
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -3377,7 +3384,7 @@ export function registerAgentV3Routes(app: Express): void {
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }

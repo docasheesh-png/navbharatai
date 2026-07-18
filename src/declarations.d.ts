@@ -560,8 +560,10 @@ declare module 'firebase/auth' {
   export type AuthProvider = any;
   export function signInWithPhoneNumber(auth: any, phone: string, verifier: any): Promise<any>;
   export function setPersistence(auth: any, persistence: any): Promise<void>;
+  export function initializeAuth(app: any, deps?: any): any;
   export const browserLocalPersistence: any;
   export const browserSessionPersistence: any;
+  export const indexedDBLocalPersistence: any;
   export const inMemoryPersistence: any;
   export class RecaptchaVerifier {
     constructor(auth: any, container: any, params?: any);

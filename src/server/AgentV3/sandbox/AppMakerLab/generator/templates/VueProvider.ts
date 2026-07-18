@@ -11,7 +11,12 @@ const PKG = JSON.stringify({
     build: 'vite build',
     preview: 'vite preview',
   },
-  dependencies: { vue: '^3.4.0' },
+  // EventHive-class guard 2026-07-18: ship vue-router + pinia PINNED to their Vue-3-compatible majors
+  // (router 4, pinia 2). A Vue app almost always needs routing + a store, and if the scaffold omits
+  // them the builder bare-installs `npm install vue-router` → npm pulls the LATEST (5.x), whose peer
+  // wants Vite 7/8 while this scaffold ships Vite 5 → ERESOLVE → the dev server never boots. Declaring
+  // the compatible majors up front means a plain `npm install` resolves cleanly. (Mirrors NuxtProvider.)
+  dependencies: { vue: '^3.4.0', 'vue-router': '^4', pinia: '^2' },
   devDependencies: {
     '@vitejs/plugin-vue': '^5.0.0',
     typescript: '^5.3.3',

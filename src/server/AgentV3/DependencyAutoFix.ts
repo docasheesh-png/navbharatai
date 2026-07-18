@@ -75,6 +75,15 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   multer: '^1',
   'express-validator': '^7',
   ws: '^8',
+  // Vue ecosystem (EventHive autopsy 2026-07-18): a full-stack Vue app imported vue-router/pinia but
+  // never declared them, so the reconciler bare-installed `npm install vue-router` → npm pulled the
+  // LATEST (5.x), whose peer wants Vite 7/8 while the Vue scaffold ships Vite 5 → ERESOLVE → dev server
+  // never booted. Pinning the Vue-3-compatible majors here means applyWellKnownMissingDeps declares the
+  // right range in package.json BEFORE the install, so a plain `npm install` resolves cleanly.
+  'vue-router': '^4',
+  pinia: '^2',
+  '@vueuse/core': '^11',
+  'vue-i18n': '^10',
 };
 
 export interface DependencyAutoFixPlan {

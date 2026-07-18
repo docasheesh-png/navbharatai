@@ -118,6 +118,15 @@ describe('VueProvider', () => {
     expect(pkg.dependencies['vue']).toBeDefined();
   });
 
+  it('pins vue-router and pinia to their Vue-3-compatible majors (EventHive dev-server-death fix)', () => {
+    // Assert the LIVE provider that TemplateRegistry actually ships (the AgentV3 sandbox one), not the
+    // legacy duplicate. Shipping vue-router/pinia pre-declared stops the builder bare-installing
+    // `npm install vue-router` → latest 5.x (peer wants Vite 7/8) → ERESOLVE → dead dev server on Vite 5.
+    const pkg = JSON.parse(new LiveVueProvider().getFiles([])['package.json']);
+    expect(pkg.dependencies['vue-router']).toBe('^4');
+    expect(pkg.dependencies['pinia']).toBe('^2');
+  });
+
   it('returns src/App.vue', () => {
     const files = provider.getFiles([]);
     expect(files['src/App.vue']).toBeDefined();

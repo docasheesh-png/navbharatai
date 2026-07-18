@@ -16,6 +16,16 @@ describe('planDependencyAutoFix', () => {
     expect(plan.needsReview).toEqual([]);
   });
 
+  it('pins the Vue ecosystem to Vue-3-compatible majors (EventHive autopsy): vue-router→4, pinia→2', () => {
+    expect(WELL_KNOWN_DEPS['vue-router']).toBe('^4');
+    expect(WELL_KNOWN_DEPS['pinia']).toBe('^2');
+    const plan = planDependencyAutoFix([missing('vue-router'), missing('pinia')]);
+    expect(plan.autofixable).toEqual([
+      { package: 'vue-router', version: '^4' },
+      { package: 'pinia', version: '^2' },
+    ]);
+  });
+
   it('routes an alias-shaped name to needsReview, never auto-suggested (the false-positive guard)', () => {
     const plan = planDependencyAutoFix([missing('components'), missing('lib'), missing('utils'), missing('hooks')]);
     expect(plan.autofixable).toEqual([]);

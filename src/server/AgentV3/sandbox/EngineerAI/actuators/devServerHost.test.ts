@@ -391,6 +391,15 @@ describe('buildBuildInstallCommand', () => {
     expect(cmd).not.toContain('node_modules ]');
     expect(cmd).not.toMatch(/\bif\b/);
   });
+  it('retries with --legacy-peer-deps on an ERESOLVE failure (EventHive dev-server-death defense)', () => {
+    const cmd = buildBuildInstallCommand();
+    // A strict install first, then a `||` fallback that adds --legacy-peer-deps so a peer conflict
+    // (which the agent recovers from manually) can't silently stop the dev server from booting.
+    expect(cmd).toContain('||');
+    expect(cmd).toContain('--legacy-peer-deps');
+    // The strict install still leads — no behaviour change on a clean install.
+    expect(cmd.indexOf('npm install')).toBeLessThan(cmd.indexOf('--legacy-peer-deps'));
+  });
 });
 
 describe('buildPortWaitCommand', () => {

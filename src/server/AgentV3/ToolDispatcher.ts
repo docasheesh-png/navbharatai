@@ -69,7 +69,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand } from './DependencyAutoFix';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1243,7 +1243,13 @@ export class ToolDispatcher {
           return blockMsg;
         }
         const cmdStartedAt = Date.now();
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, command);
+        // Pin bare installs of known-volatile packages to their known-good range BEFORE running
+        // (EventHive/MelodyBox autopsies): a bare `npm install prisma @prisma/client` otherwise pulls the
+        // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
+        // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
+        // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
+        const effectiveCommand = pinKnownDepsInInstallCommand(command);
+        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma

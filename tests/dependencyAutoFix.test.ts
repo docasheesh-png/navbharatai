@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, dependencyAutoFixSummary, WELL_KNOWN_DEPS } from '../src/server/AgentV3/DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, WELL_KNOWN_DEPS, pinKnownDepsInInstallCommand } from '../src/server/AgentV3/DependencyAutoFix';
 import type { DependencyIssue } from '../src/server/AgentV3/DependencyAnalysis';
 
 /** P-PIPE.40 — dependency auto-fix planner (advisory, pure). */
@@ -67,5 +67,49 @@ describe('dependencyAutoFixSummary', () => {
     for (const alias of ['components', 'lib', 'utils', 'hooks', 'api', 'store', 'types', 'pages', 'features', 'styles', 'assets', 'config']) {
       expect(WELL_KNOWN_DEPS[alias]).toBeUndefined();
     }
+  });
+});
+
+describe('pinKnownDepsInInstallCommand (EventHive/MelodyBox: stop bare installs pulling breaking latest)', () => {
+  it('pins a bare Prisma install to the pre-7 major (the exact EventHive failure)', () => {
+    expect(pinKnownDepsInInstallCommand('npm install prisma @prisma/client'))
+      .toBe('npm install prisma@^6 @prisma/client@^6');
+  });
+
+  it('pins a bare vue-router/pinia install to the Vue-3-compatible majors', () => {
+    expect(pinKnownDepsInInstallCommand('npm install vue-router pinia'))
+      .toBe('npm install vue-router@^4 pinia@^2');
+  });
+
+  it('does NOT touch `npx prisma generate` — only install sub-commands are rewritten', () => {
+    expect(pinKnownDepsInInstallCommand('npx prisma generate')).toBe('npx prisma generate');
+    expect(pinKnownDepsInInstallCommand('npx prisma migrate dev --name init')).toBe('npx prisma migrate dev --name init');
+  });
+
+  it('respects an EXPLICIT version (prisma@7) — only bare tokens are pinned', () => {
+    expect(pinKnownDepsInInstallCommand('npm install prisma@7')).toBe('npm install prisma@7');
+  });
+
+  it('handles a && chain: pins the install, leaves the migrate untouched', () => {
+    expect(pinKnownDepsInInstallCommand('npm install prisma @prisma/client && npx prisma migrate dev'))
+      .toBe('npm install prisma@^6 @prisma/client@^6 && npx prisma migrate dev');
+  });
+
+  it('pins across a -D flag and the EventHive-style --legacy-peer-deps fallback chain', () => {
+    expect(pinKnownDepsInInstallCommand('npm install -D prisma')).toBe('npm install -D prisma@^6');
+    expect(pinKnownDepsInInstallCommand('npm install express || npm install express --legacy-peer-deps'))
+      .toBe('npm install express@^4 || npm install express@^4 --legacy-peer-deps');
+  });
+
+  it('leaves unknown packages, non-install commands, and bare `npm install` unchanged', () => {
+    expect(pinKnownDepsInInstallCommand('npm install left-pad')).toBe('npm install left-pad');
+    expect(pinKnownDepsInInstallCommand('npm run build')).toBe('npm run build');
+    expect(pinKnownDepsInInstallCommand('npm install')).toBe('npm install');
+    expect(pinKnownDepsInInstallCommand('npm ci')).toBe('npm ci');
+  });
+
+  it('does not mangle the "prisma" substring inside the scoped @prisma/client token', () => {
+    // token-exact matching: `@prisma/client` → `@prisma/client@^6`, never `@prisma@^6/client`.
+    expect(pinKnownDepsInInstallCommand('npm i @prisma/client')).toBe('npm i @prisma/client@^6');
   });
 });

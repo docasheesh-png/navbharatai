@@ -68,8 +68,13 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   jsonwebtoken: '^9',
   'socket.io': '^4',
   'socket.io-client': '^4',
-  '@prisma/client': '^5',
-  prisma: '^5',
+  // Prisma pinned to the last well-understood pre-7 major (EventHive autopsy 2026-07-18). Prisma 7.8
+  // moved the datasource `url` OUT of schema.prisma into a new `prisma.config.ts` and broke the ESM
+  // seed loader — a bare `npm install prisma` pulled 7.x and bricked the DB setup. 6.x keeps the classic
+  // format the scaffold/guards already generate. See pinKnownDepsInInstallCommand (enforces this on the
+  // agent's bare install, not just the reconciler path).
+  '@prisma/client': '^6',
+  prisma: '^6',
   morgan: '^1',
   helmet: '^7',
   multer: '^1',
@@ -85,6 +90,39 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   '@vueuse/core': '^11',
   'vue-i18n': '^10',
 };
+
+// Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare
+// `npm ci`). Only inside such a sub-command do we treat tokens as package specifiers to pin.
+const INSTALL_SUBCOMMAND_RE = /(?:^|\s)(?:npm\s+(?:install|i|add)|pnpm\s+(?:install|i|add)|yarn\s+add)\b/;
+
+/**
+ * Pin BARE installs of known-volatile packages to their known-good range, in-place in a shell command.
+ *
+ * ROOT CAUSE this closes (EventHive/MelodyBox autopsies): the agent types `npm install prisma vue-router`
+ * and npm resolves the LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then
+ * bricks the build. The reconciler's package.json pin never covers this because the explicit install
+ * overwrites package.json to latest. Rewriting the command itself is the only choke point that catches it.
+ *
+ * SAFE by construction: only EXACT bare package tokens (no `@version`) that are in WELL_KNOWN_DEPS, and
+ * only inside an install sub-command, are pinned. `npx prisma generate` (not an install) is untouched;
+ * `prisma@7` (explicit version) is respected; flags and unknown packages pass through. Pure & deterministic.
+ */
+export function pinKnownDepsInInstallCommand(command: string): string {
+  if (typeof command !== 'string' || !command) return command;
+  if (!INSTALL_SUBCOMMAND_RE.test(command)) return command; // fast path: no install at all
+  // Split on shell separators (keeping them) so each sub-command is judged independently.
+  return command
+    .split(/(\s*(?:&&|\|\||;)\s*)/)
+    .map((segment) => {
+      if (!INSTALL_SUBCOMMAND_RE.test(segment)) return segment; // separators + non-install commands
+      // Tokenize on whitespace (keeping it) and pin exact bare known-dep tokens.
+      return segment
+        .split(/(\s+)/)
+        .map((tok) => (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, tok) ? `${tok}@${WELL_KNOWN_DEPS[tok]}` : tok))
+        .join('');
+    })
+    .join('');
+}
 
 export interface DependencyAutoFixPlan {
   /** Missing packages that are on the well-known allowlist — safe to suggest with an exact version. */

@@ -17964,6 +17964,30 @@ timeout rate, then widen. Both admin-requested fixes (syntax-locator #1, pacer #
 
 ---
 
+### 2026-07-18 — Prisma v7 breaking-config guard: pin bare installs at the source (task #73, EventHive open root cause)
+
+**Closed the last open item from the EventHive autopsy.** Root cause (investigation-confirmed): the agent
+types a bare `npm install prisma @prisma/client`, which runs VERBATIM through `ToolDispatcher.ts` →
+`actuator.runCommand` — npm resolves LATEST → Prisma **7.8**, whose breaking changes (datasource `url`
+moved to a new `prisma.config.ts`; ESM seed crash) the scaffold/guards don't produce. The `WELL_KNOWN_DEPS`
+pin only covered the reconciler's imported-but-undeclared path, NEVER the agent's explicit install (that
+command overwrites package.json to latest). No install-command rewriting existed anywhere → the single
+choke point that catches the agent's own install was missing.
+
+**FIX (PR TBD):** new pure `pinKnownDepsInInstallCommand(command)` (DependencyAutoFix.ts) rewrites a shell
+command in place, pinning BARE installs of any WELL_KNOWN_DEPS package to its known-good range — but ONLY
+exact bare tokens (no `@version`) inside an actual install sub-command. `npx prisma generate` (not an
+install) is untouched; `prisma@7` (explicit) is respected; `&&`/`||` chains judged per-sub-command; the
+`@prisma/client` scoped token is matched exactly (never mangled). Wired at the bash choke point
+(`ToolDispatcher.ts`, just before `runCommand`) — the ONE place that intercepts the agent-typed install.
+Also bumped `@prisma/client`/`prisma` in WELL_KNOWN_DEPS from `^5` → `^6` (last well-understood pre-7 major,
+classic config format the guards already generate). This ALSO hardens the vue-router-5 class at the source
+(complementing the EventHive scaffold pins). 8 regression tests; server tsc + affected suites green.
+
+**Deliberate-adoption note:** this AVOIDS Prisma 7 rather than supporting it (matches the CLAUDE.md "new
+majors adopted deliberately, not blind auto-latest" philosophy — same rationale as GLM_MODEL Decision A).
+Native Prisma-7 support (emit `prisma.config.ts` + adapter, v7-aware schema guard) remains a future
+deliberate upgrade if/when we choose to adopt it.
 ## 2026-07-18 — ROOT FIX: write-time parse guard — the builder can no longer SAVE a syntax-broken file
 
 **Trigger:** report `2d933510` (+ the "Unexpected token, expected ','" screenshot). The recurring

@@ -17869,3 +17869,29 @@ with numbered step chips and gradient "Open" buttons, and a polished violet "Thi
 panel. Only proven in-app animation utilities used (`animate-in fade-in slide-in-from-*`); fixed two
 non-standard classes (`w-4.5`, `WifiOff` not exported). Gate: frontend tsc ✓, server tsc ✓, full vitest
 7325 ✓, and a real `vite build` ✓ (OfflineAI stays its own lazy chunk). Shipping via PR → CI green → merge.
+
+## 2026-07-18 — Offline AI: phone-settings help (device-aware, offline, honest)
+
+Admin: "offline AI ko phone ke baare me aware kar sakte hai? user ko phone settings me problem hai to sab
+bata de." Built a bundled, 100%-offline Phone/Device Help knowledge base (`deviceKnowledgeBase.ts`, ~29
+entries across Connectivity, Location, Notifications, Battery, Storage, Permissions, Display, Sound, Apps,
+System, Security, Account) with real generic-Android step-by-step fixes. HONEST SCOPE (rules 2 & 3): it
+GUIDES — it does NOT read or change the phone's actual settings (a web/Capacitor app can't), never fakes a
+device state, and flags brand variance + destructive steps (factory reset carries an erases-everything
+warning) via each entry's `note`, surfaced as an amber banner + per-card note in the UI.
+
+- Retrieval: `scoreDeviceHelp`/`searchDeviceHelp` in `offlineAssistant.ts` (imports the data KB → no
+  cycle), reusing the shared tokenizer + typo tolerance. Precision-tuned: keyword/title signal only (no
+  generic title-word scoring), inclusion threshold score ≥ 2 → phone queries hit the right fix, ordinary
+  app queries ("database", "how do i deploy", "what can this app do") get ZERO device matches. When device
+  help matches, weak app-feature matches (score < 4) are suppressed so the phone fix stays front-and-centre.
+- `answerOffline` now returns `deviceMatches`; priority unchanged (math/date > taught memory > results),
+  device help joins the results path alongside strong feature matches.
+- UI: a distinct sky-themed "Phone help" section with an honest "I can't change your phone's settings
+  myself / names vary by brand" banner, numbered step cards, category badges, amber warning notes. Added
+  Phone-help capability pill + two phone starter chips (Wi-Fi not working, Battery draining).
+- KB `offline_ai` entry + keywords updated (phone help / settings problem / wifi / battery …).
+
+Tests: +3 cases in `offlineAssistant.test.ts` (common problems resolve to the right entry with steps;
+typo-tolerant but no misfire on app/nav queries; factory-reset honest warning). Gate: frontend tsc ✓,
+server tsc ✓, full vitest 7328 ✓, vite build ✓.

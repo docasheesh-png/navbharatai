@@ -8,6 +8,7 @@ import {
 import { cn } from '../../lib/utils';
 import { svgPreviewSrc } from '../../lib/svgPreview';
 import { motion, AnimatePresence } from 'motion/react';
+import { requiresTypedConfirm, isTypedConfirmValid, canProceedWithDelete, DELETE_CONFIRM_WORD } from '../../lib/deleteConfirm';
 
 interface FileExplorerProps {
   files: Record<string, string>;
@@ -68,6 +69,11 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Paths queued for the confirmation dialog (null = closed). Empty array never opens.
   const [confirmPaths, setConfirmPaths] = useState<string[] | null>(null);
+  // Type-to-confirm text for a BULK delete (2+ files) — the delete stays disabled until this === "delete",
+  // so an accidental click can never wipe every file (admin-mandated 2026-07-17). Reset whenever the
+  // dialog opens or closes so a prior confirmation never carries over to the next delete.
+  const [confirmText, setConfirmText] = useState('');
+  useEffect(() => { setConfirmText(''); }, [confirmPaths]);
 
   const allFilePaths = Object.keys(files);
 
@@ -84,6 +90,9 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   // Perform the delete once confirmed — batch when possible, else per-file.
   const performDelete = (paths: string[]) => {
     if (paths.length === 0) return;
+    // Defense in depth: a bulk delete never proceeds unless the user physically typed "delete" — even if
+    // the button were somehow triggered, the data is not touched until the typed word matches.
+    if (!canProceedWithDelete(paths.length, confirmText)) return;
     if (onFilesDelete) onFilesDelete(paths);
     else paths.forEach(p => onFileDelete(p));
     setSelected(prev => {
@@ -491,6 +500,26 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                     <div className="text-[10px] text-[#484f58] py-0.5">…and {confirmPaths.length - 50} more</div>
                   )}
                 </div>
+                {/* Bulk delete (2+ files) — arm it by TYPING "delete", so one stray click can't wipe every
+                    file. Nothing is deleted until this input matches (admin-mandated 2026-07-17). */}
+                {requiresTypedConfirm(confirmPaths.length) && (
+                  <div className="mb-4">
+                    <label className="block text-[11px] text-[#8b949e] mb-1.5">
+                      Type <span className="font-mono font-black text-red-300">{DELETE_CONFIRM_WORD}</span> to permanently delete these {confirmPaths.length} files:
+                    </label>
+                    <input
+                      autoFocus
+                      value={confirmText}
+                      onChange={(e) => setConfirmText(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && isTypedConfirmValid(confirmText)) performDelete(confirmPaths); }}
+                      placeholder={DELETE_CONFIRM_WORD}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 focus:border-red-500/60 outline-none text-[12px] font-mono text-white placeholder:text-[#484f58] transition-colors"
+                    />
+                  </div>
+                )}
                 <div className="flex items-center justify-end gap-2">
                   <button
                     onClick={() => setConfirmPaths(null)}
@@ -500,7 +529,8 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                   </button>
                   <button
                     onClick={() => performDelete(confirmPaths)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 transition-all active:scale-95"
+                    disabled={!canProceedWithDelete(confirmPaths.length, confirmText)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider bg-red-600 text-white hover:bg-red-700 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-600"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>

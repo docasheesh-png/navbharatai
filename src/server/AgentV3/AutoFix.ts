@@ -50,6 +50,30 @@ export function reviewerWarningAutoFixEnabled(): boolean {
   return process.env.AGENTV3_REVIEW_AUTOFIX_WARNINGS === 'on';
 }
 
+export interface ReviewerAutofixRecord {
+  severity: 'info' | 'warning';
+  code: 'REVIEWER_AUTOFIX' | 'REVIEWER_AUTOFIX_INCOMPLETE';
+  message: string;
+  autoResolved: boolean;
+}
+
+/**
+ * The HONEST diagnostics record for a reviewer-autofix pass.
+ *
+ * ROOT CAUSE (deep-test 2026-07-18): the build route emitted "Auto-fixed ${label} from the reviewer"
+ * UNCONDITIONALLY after the repair runner returned — it never checked whether the repair actually
+ * succeeded. On a build whose repair call FAILED (a duplicate-tool 400 killed the whole provider chain),
+ * the report still claimed "✅ Auto-fixed 3 critical issue(s)" while those 3 criticals were STILL in the
+ * shipped app, and the build stayed ok:true — a fake success (rule 5). This makes the record tell the
+ * truth: only a SUCCESSFUL pass says "Auto-fixed"; a failed pass says the findings MAY STILL BE PRESENT
+ * and is left UNRESOLVED (so it shows up honestly as an unresolved problem, not a green checkmark). Pure.
+ */
+export function reviewerAutofixOutcome(fixOk: boolean, label: string): ReviewerAutofixRecord {
+  return fixOk
+    ? { severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${label} from the reviewer`, autoResolved: true }
+    : { severity: 'warning', code: 'REVIEWER_AUTOFIX_INCOMPLETE', message: `Reviewer auto-fix did NOT complete — ${label} may still be present in the app.`, autoResolved: false };
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);

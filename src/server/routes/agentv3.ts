@@ -186,7 +186,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -7595,8 +7595,15 @@ export function registerAgentV3Routes(app: Express): void {
               // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
               // the exact "49 files → 3" wipe. The store's shrink-guard also blocks the class.
               if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
-              try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEWER_AUTOFIX', message: `Auto-fixed ${label} from the reviewer`, autoResolved: true }); } catch { /* best-effort */ }
-            } catch (e) { console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`); }
+              // HONEST outcome (deep-test 2026-07-18): only claim "Auto-fixed" when the repair actually
+              // SUCCEEDED — a failed pass (e.g. the provider chain 400'd) must NOT report the criticals as
+              // fixed while they still ship. reviewerAutofixOutcome records the truthful line either way.
+              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(fix.ok, label) }); } catch { /* best-effort */ }
+            } catch (e) {
+              console.log(`[AGENTV3] reviewer auto-fix failed: ${e instanceof Error ? e.message : String(e)}`);
+              // A THROWN failure (timeout / abort) also leaves the criticals in place — report it honestly.
+              try { buildDiag.record({ phase: 'build', ...reviewerAutofixOutcome(false, label) }); } catch { /* best-effort */ }
+            }
           }
         } catch { /* reviewer is best-effort (incl. its 90s cap) — never affects the build result */ }
       }

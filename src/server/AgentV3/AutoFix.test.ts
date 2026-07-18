@@ -1,8 +1,26 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors,
-  formatRuntimeErrors, buildRepairPrompt, autoFixWarning, type RuntimeError,
+  formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, type RuntimeError,
 } from './AutoFix';
+
+describe('reviewerAutofixOutcome — never claim "Auto-fixed" when the repair failed (deep-test 2026-07-18)', () => {
+  it('a SUCCESSFUL pass records an honest "Auto-fixed" info line (auto-resolved)', () => {
+    const r = reviewerAutofixOutcome(true, '3 critical issue(s)');
+    expect(r.code).toBe('REVIEWER_AUTOFIX');
+    expect(r.severity).toBe('info');
+    expect(r.autoResolved).toBe(true);
+    expect(r.message).toBe('Auto-fixed 3 critical issue(s) from the reviewer');
+  });
+  it('a FAILED pass NEVER says "Auto-fixed" — it warns the findings may remain, UNRESOLVED', () => {
+    const r = reviewerAutofixOutcome(false, '3 critical issue(s)');
+    expect(r.code).toBe('REVIEWER_AUTOFIX_INCOMPLETE');
+    expect(r.severity).toBe('warning');
+    expect(r.autoResolved).toBe(false);          // shows up as a real unresolved problem, not a green tick
+    expect(r.message).not.toMatch(/Auto-fixed/);  // the exact fake-success string must never appear
+    expect(r.message).toMatch(/may still be present/);
+  });
+});
 
 describe('AutoFix flags (R4 §2.3)', () => {
   const prevOn = process.env.AGENTV3_AUTOFIX;

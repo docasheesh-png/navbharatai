@@ -18,7 +18,7 @@ import {
   UserCredential,
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { raceNativeAuth, settleWithinOrProceed } from '../lib/nativeAuthGuard';
+import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -28,22 +28,31 @@ import { explainAuthReason } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
 
 /**
- * Force-logout the old session BEFORE a new login — but never let it block the sign-in itself.
+ * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
  *
- * ROOT-CAUSE FIX (admin 2026-07-18, TestFlight build 25: "'sign in by Google' se hi infinity loading,
- * Google par hi nahi ja raha" — the spinner started immediately and Google never opened). The prior fix
- * AWAITED `signOutEverywhere()` UNBOUNDED at the top of every sign-in path. On the iOS WKWebView that
- * clear (native `@capacitor-firebase/authentication` signOut and/or the web-SDK signOut) can hang, so the
- * sign-in never started — an immediate, permanent spinner. We STILL clear the old session first (the
- * admin's requirement) but CAP the wait: if it doesn't finish in FORCE_LOGOUT_TIMEOUT_MS we proceed to
- * sign in anyway. Nothing is lost — the sign-in that follows establishes the new session regardless, and a
- * stale web session is overwritten by it. Same "no auth step may hang the UI" law as nativeAuthGuard.
+ * ROOT-CAUSE FIX — the DEEP one (admin 2026-07-18, TestFlight build 27 sign-in trail):
+ *   07:44:23 clearing any old session…
+ *   07:44:27 opening Google sign-in…          (4s gap = the bounded clear TIMED OUT — signOut hung)
+ *   07:44:37 Google returned — token: YES
+ *   07:44:37 verifying with Firebase…
+ *   07:44:55 failed: sign-in did not complete (18s later — signInWithCredential never ran)
+ * On the iOS WKWebView the web-SDK signOut's persistence write can HANG, and a hung signOut HOLDS Firebase
+ * Auth's internal operation queue — so the `signInWithCredential` that follows is stuck behind it forever
+ * and the login "does not complete". The earlier fix (bounding the wait) let Google OPEN, but the still-
+ * pending hung signOut then poisoned the actual sign-in. i.e. the pre-login force-logout is itself what
+ * breaks native login.
+ *
+ * THE FIX: on the NATIVE app, do NOT sign the web-SDK auth instance out before signing in. The native
+ * sign-in (signInWithCredential / signInWithEmailAndPassword / phone credential) REPLACES the old session
+ * on its own, so a pre-logout is unnecessary there — and it's the thing that was breaking login. On WEB a
+ * stale session can wedge signInWithPopup and signOut is safe (normal IndexedDB), so we keep the bounded
+ * clear there. `preLoginWebSignOutAllowed` encodes this decision (tested); the bound is belt-and-braces.
  */
 const FORCE_LOGOUT_TIMEOUT_MS = 4000;
 async function forceLogoutBeforeLogin(): Promise<void> {
-  // signOutEverywhere() is best-effort AND bounded: settleWithinOrProceed resolves the moment the clear
-  // finishes (normal case, <1s) OR after FORCE_LOGOUT_TIMEOUT_MS if it hangs — so the sign-in that follows
-  // ALWAYS runs. It never throws, so a signOut failure/hang can never block login.
+  if (!preLoginWebSignOutAllowed(Capacitor.isNativePlatform())) return; // native: never pre-signout (see above)
+  // WEB: bounded + best-effort. settleWithinOrProceed resolves the moment the clear finishes (normal case)
+  // OR after FORCE_LOGOUT_TIMEOUT_MS if it ever stalls, and never throws — so login is never blocked.
   await settleWithinOrProceed(signOutEverywhere(), FORCE_LOGOUT_TIMEOUT_MS);
 }
 
@@ -358,10 +367,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setLoading(true);
     try {
       // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
-      // automatic force logout") — email/password login and signup both start from a clean slate so a
-      // lingering old session can never block the new one. Best-effort; a signOut failure never blocks auth.
-      mark('clearing any old session…');
-      await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
+      // automatic force logout") — on WEB only. On the native app the pre-login web signOut can hang and
+      // poison the sign-in (see forceLogoutBeforeLogin); the sign-in that follows replaces the old session.
+      if (!Capacitor.isNativePlatform()) mark('clearing any old session…');
+      await forceLogoutBeforeLogin(); // web-only + bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
       // The same no-hang guarantee as social sign-in: an unanswered auth request surfaces an honest
       // timeout instead of an endless spinner (iPhone report 2026-07-17 — the spinner sat on THIS button).
       if (isLogin) {
@@ -435,12 +444,12 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
     // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "jab koi user kisi bhi id se login kare, to
     // old session automatic force logout ho jana chahiye"). Every login — any account, any method — starts
-    // by fully clearing whatever session is still around (native plugin + web SDK, via the one centralized
-    // signOutEverywhere), so a lingering/half-dead old session can never wedge the new sign-in. The user is
-    // on the login screen, so signing out first is always safe. Best-effort: a signOut failure never blocks
-    // the sign-in itself. This single call replaces the old per-branch (native / web) ad-hoc clears.
-    mark('clearing any old session…');
-    await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
+    // by clearing a lingering/half-dead session that could wedge the WEB popup. WEB ONLY: on the native app
+    // the pre-login web signOut can HANG and hold Firebase Auth's queue, blocking the very signInWithCredential
+    // that follows — the build-27 "verifying with Firebase… → sign-in did not complete" failure. The native
+    // sign-in replaces the old session on its own, so we skip the pre-logout there (see forceLogoutBeforeLogin).
+    if (!Capacitor.isNativePlatform()) mark('clearing any old session…');
+    await forceLogoutBeforeLogin(); // web-only + bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
     // NATIVE app + Google/Apple → use the device's NATIVE sign-in, NOT the web popup/redirect.
     // Google disallows OAuth inside embedded WebViews (the web flow opens an external browser and
     // breaks on return with "missing initial state"), and Apple's Sign in with Apple is a native

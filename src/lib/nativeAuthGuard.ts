@@ -50,3 +50,19 @@ export function settleWithinOrProceed(promise: Promise<unknown>, timeoutMs: numb
     promise.then(done, done);
   });
 }
+
+/**
+ * May we sign the WEB-SDK auth instance out right BEFORE a new login? Only on the WEB.
+ *
+ * ROOT CAUSE this encodes (admin 2026-07-18, iOS TestFlight build 27): on the native WKWebView a web-SDK
+ * signOut can hang on its persistence write, and a hung signOut HOLDS Firebase Auth's internal operation
+ * queue — so the `signInWithCredential` that follows is stuck behind it and the login never completes
+ * ("Google returned token: YES → verifying with Firebase… → sign-in did not complete"). The native sign-in
+ * replaces the old session by itself, so a pre-login web signOut is both unnecessary AND harmful there.
+ * On a real browser signOut is safe (normal IndexedDB) and clears a stale session that could wedge the
+ * popup, so it's allowed. Pure so the invariant is locked by a test — never let a pre-login web signOut
+ * back onto the native path.
+ */
+export function preLoginWebSignOutAllowed(isNativePlatform: boolean): boolean {
+  return !isNativePlatform;
+}

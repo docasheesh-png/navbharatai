@@ -580,6 +580,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         }
         mark(`Firebase ✓ signed in${result ? '' : ' (via session listener)'}`);
         if (result) onCredential?.(result);
+        // Flip the APP UI to logged-in DIRECTLY from the sign-in result — never depend solely on the
+        // onAuthStateChanged broadcast. ROOT CAUSE (build 30): the auth listener only fires AFTER the
+        // SDK's session-save await, so a stalled persistence write left a fully-signed-in user looking
+        // logged OUT (modal closed, header still "LOGIN"). The persistence fix (localStorage on native,
+        // lib/firebase.ts) kills the stall itself; this makes the UI honest even if a save ever lags again.
+        const signedInUser = (result as UserCredential | null)?.user ?? (auth as { currentUser?: unknown }).currentUser ?? null;
+        if (signedInUser) setUser(signedInUser);
         onClose();
         return 'ok';
       } catch (nativeErr: any) {

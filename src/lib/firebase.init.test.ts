@@ -36,14 +36,16 @@ describe('firebase auth init — the WKWebView sign-in-hang root fix', () => {
     h.setPersistence.mockClear();
   });
 
-  it('NATIVE app: initializeAuth with indexedDB persistence and NO popup/redirect resolver', async () => {
+  it('NATIVE app: initializeAuth with LOCALSTORAGE persistence and NO popup/redirect resolver', async () => {
     h.native.value = true;
     const mod = await import('./firebase');
     expect(h.initializeAuth).toHaveBeenCalledTimes(1);
     const deps = h.initializeAuth.mock.calls[0][1];
-    // Exactly { persistence: indexedDBLocalPersistence } — a popupRedirectResolver here would
-    // reintroduce the iframe that wedges WKWebView and hangs every sign-in.
-    expect(deps).toEqual({ persistence: 'IDB' });
+    // Exactly { persistence: browserLocalPersistence }. A popupRedirectResolver here would reintroduce
+    // the iframe that wedges WKWebView init; indexedDB persistence here would reintroduce the build-30
+    // failure (WebKit suspends IDB while the native auth sheet backgrounds the WebView, so the session
+    // save hangs and onAuthStateChanged never fires — login succeeded but the app stayed logged out).
+    expect(deps).toEqual({ persistence: 'LOCAL' });
     expect(h.getAuth).not.toHaveBeenCalled();
     // Never enqueue extra ops (setPersistence) on the native instance — persistence is fixed at init.
     expect(h.setPersistence).not.toHaveBeenCalled();

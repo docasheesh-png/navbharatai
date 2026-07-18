@@ -18141,3 +18141,28 @@ is never born:
 Combined with the detector + re-export-repair guidance (same PR), the duplicate-tree class is now blocked at
 BIRTH and cleaned up if any slip through. Still open (deeper origin): framework-from-files on resume so the
 wrong framework can't drive the convention mismatch in the first place — next slice.
+
+### 2026-07-18 — TaskForge FRESH-BUILD autopsy (task #75): Prisma-seed self-heal + Next.js orphan false-positive
+
+The admin re-built TaskForge (Next.js + Prisma) on the fixed engine — the 2-hour failure became a **16m46s
+clean build** (framework=nextjs honored via #1509, **0 duplicate trees** via #1527 — both big fixes verified
+LIVE). The fresh report surfaced three Next.js/Prisma-specific gaps; the two app-affecting ones are fixed:
+
+- ✅ **Prisma "client not generated" self-heal.** A seed step (`prisma db seed` / `tsx prisma/seed.ts`) that
+  ran BEFORE `prisma generate` failed with "@prisma/client did not initialize yet — run `prisma generate`",
+  and TaskForge LOOPED it, burning wall-clock budget. `ToolDispatcher` bash choke point now: on that exact
+  failure class (and only when the command is not itself `prisma generate`), runs `npx prisma generate` once
+  and retries the original command once — the deterministic close, mirroring the existing relation self-heal.
+  Any other failure falls through to the honest error path. Regression tests: heal-on-not-generated,
+  never-heal-a-generate-command (no loop), never-heal-an-unrelated-seed-error.
+- ✅ **Next.js App Router special files no longer false-flagged as orphans.** `findOrphanComponents` treated
+  layout/page/loading/error/not-found/route/template/default/global-error under `app/` as "unused components"
+  (a clean Next.js build reported 14 phantom unused). Those are wired by filename convention, never imported —
+  they ARE entry points. `isEntryPoint` now excludes them; a genuine unused component under `app/` is still
+  caught. Regression tests: special files clean, real orphan under app/ still flagged.
+- ⏭️ **Broken export-name imports (db/UserRole) auto-heal — deferred (honest).** Renamed/removed exports that
+  break importers need ts-morph editing of every importer with real ambiguity risk; rushing a source-rewriting
+  pass risks breaking OTHER apps (rule 1). Recorded as the next careful slice, not silently patched.
+
+Full suite green (7375 tests). Both shipped fixes are engine-level (every Next.js/Prisma build benefits), not
+one-app patches.

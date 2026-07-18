@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   searchFeatures, answerOffline, howToSteps, scoreFeature, navFor,
-  editDistance, relatedFeaturesOf, SUGGESTED_QUERIES,
+  editDistance, relatedFeaturesOf, SUGGESTED_QUERIES, quickAnswer, evalArithmetic,
 } from './offlineAssistant';
 import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
 
@@ -135,5 +135,66 @@ describe('offlineAssistant — grounded 100% in the app knowledge base', () => {
       expect(a.kind, `suggestion "${s.label}" (${s.query}) must resolve`).not.toBe('none');
       expect(a.matches.length).toBeGreaterThan(0);
     }
+  });
+
+  // ─── On-device quick answers (real math / device clock / honest identity — never a faked fact) ───
+
+  it('evalArithmetic computes with correct precedence, and returns null on garbage / divide-by-zero', () => {
+    expect(evalArithmetic('2+2')).toBe(4);
+    expect(evalArithmetic('2+3*4')).toBe(14);       // precedence
+    expect(evalArithmetic('(2+3)*4')).toBe(20);     // parentheses
+    expect(evalArithmetic('2^10')).toBe(1024);      // power
+    expect(evalArithmetic('10/4')).toBe(2.5);
+    expect(evalArithmetic('7%3')).toBe(1);          // modulo
+    expect(evalArithmetic('5/0')).toBeNull();       // divide-by-zero
+    expect(evalArithmetic('2+')).toBeNull();        // incomplete
+    expect(evalArithmetic('hello')).toBeNull();     // not math
+  });
+
+  it('answers a math question with the real computed result (no model, no network)', () => {
+    for (const [q, expected] of [['2+2', '4'], ['15% of 200', '30'], ['(12*5)/4', '15'], ['what is 100 divided by 4', '25'], ['2^10', '1024']] as const) {
+      const a = answerOffline(q);
+      expect(a.kind, `"${q}"`).toBe('answer');
+      expect(a.answerKind).toBe('math');
+      expect(a.answerText).toContain(expected);
+    }
+  });
+
+  it('a math-shaped query never falls through to a feature "not found" (honest calc error instead)', () => {
+    const a = answerOffline('5/0');
+    expect(a.kind).toBe('answer');
+    expect(a.answerKind).toBe('math');
+    expect(a.answerText).toMatch(/valid calculation|divide/i);
+  });
+
+  it('answers date & time from an injected clock (deterministic, real)', () => {
+    const now = new Date('2026-07-18T06:04:00'); // a Saturday
+    const date = answerOffline("what is the date", now);
+    expect(date.kind).toBe('answer');
+    expect(date.answerKind).toBe('datetime');
+    expect(date.answerText).toContain('Saturday');
+    expect(date.answerText).toContain('2026');
+    const time = answerOffline('what time is it', now);
+    expect(time.answerText).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)/);
+  });
+
+  it('greets, thanks, and states identity — branded NavBharatAI, never a third-party model name', () => {
+    for (const q of ['hi', 'namaste', 'thank you', 'who are you']) {
+      const a = answerOffline(q);
+      expect(a.kind, `"${q}"`).toBe('answer');
+      expect(a.answerText).toBeTruthy();
+      // White-label: no underlying provider/model ever leaks to the user.
+      expect(a.answerText!).not.toMatch(/\b(claude|anthropic|gpt|openai|gemini|grok|glm|kimi|llm|model)\b/i);
+    }
+  });
+
+  it('does NOT hijack real feature or general questions as quick answers', () => {
+    // Feature questions still go to retrieval.
+    expect(answerOffline('how do i deploy').kind).toBe('matches');
+    expect(answerOffline('database').kind).toBe('matches');
+    // A sentence that merely contains "hi" is not a greeting.
+    expect(quickAnswer('which app should i build')).toBeNull();
+    // Open-knowledge is never fabricated as an on-device answer.
+    expect(quickAnswer('capital of France')).toBeNull();
   });
 });

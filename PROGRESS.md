@@ -17762,3 +17762,31 @@ KB sync: updated the `offline_ai` entry description for the new user-facing capa
 AppKnowledgeBase rule). Tests: 10 new cases in `src/lib/offlineAssistant.test.ts` (editDistance, typo
 recovery, fuzzy-never-outranks-exact, gibberish-still-none, word-boundary, relatedFeaturesOf, coverage
 tie-break, suggestions resolve). Gate: frontend tsc ✓, server tsc ✓, full vitest 7306 passed ✓.
+
+## 2026-07-18 — Offline AI now answers small questions offline (real, deterministic — no fake brain)
+
+Admin: "kya offline ai question ke answer kar sakta hai? chhoti moti question ka offline answer aa jaye."
+The Offline AI was retrieval-only (feature guide) — typing "2+2" or "hi" returned "not found", and general
+questions falsely matched a random feature. Added an on-device QUICK-ANSWER layer in `offlineAssistant.ts`
+that answers small questions the device can GENUINELY compute with no model and no network. Honest by
+construction (absolute rules 2 & 3): every answer is a true computation or a fixed statement about the
+app — open-knowledge ("capital of France") is deliberately NOT answered here and honestly points online.
+
+- **Math** (`evalArithmetic` — a real recursive-descent parser, NOT eval()/new Function() which the
+  builder's own security scan forbids): "2+2"=4, "2+3*4"=14 (precedence), "(12*5)/4"=15, "2^10"=1024,
+  "15% of 200"=30, word forms ("100 divided by 4", "12 times 3"), divide-by-zero → honest calc error.
+  A math-shaped query NEVER falls through to "feature not found".
+- **Date / time / day** from the device clock (`now` injected for pure testability): "what is the date"
+  → "Today is Saturday, 18 July 2026"; "what time is it" → "It's 6:04 AM".
+- **Greeting / thanks / identity**: "hi", "namaste", "thank you", "who are you" → branded NavBharatAI
+  replies (white-label: a regression test asserts no provider/model name — claude/gpt/gemini/glm/kimi/…
+  — ever leaks). A sentence merely containing "hi" is NOT treated as a greeting.
+- Retrieval still handles feature questions unchanged; the "none" copy now honestly offers the offline
+  quick-answers and points general questions online.
+
+UI (`OfflineAI.tsx`): a distinct emerald answer card (calculator/clock/chat icon by category); intro,
+placeholder and the `offline_ai` KB entry updated for the new capability (+ keywords: calculator, date,
+time, hisaab, quick answer). Tests: +6 cases (arithmetic engine, math answers, math-never-not-found,
+date/time from injected clock, greeting/identity white-label, no-hijack of feature/general questions).
+Gate: frontend tsc ✓, server tsc ✓, offlineAssistant 24/24 ✓ (full suite: 7311 passed; the 1 red is the
+pre-existing flaky AIRouter jitter test — passes in isolation, unrelated to this change).

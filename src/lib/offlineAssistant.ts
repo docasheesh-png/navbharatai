@@ -23,12 +23,18 @@ export interface OfflineMatch {
 }
 
 export interface OfflineAnswer {
-  /** 'overview' — a whole-app tour; 'matches' — features for a specific query; 'none' — nothing found. */
-  kind: 'overview' | 'matches' | 'none';
+  /** 'answer' — a deterministic on-device answer (math/date/greeting/…); 'overview' — a whole-app tour;
+   *  'matches' — features for a specific query; 'none' — nothing found. */
+  kind: 'answer' | 'overview' | 'matches' | 'none';
   /** A short natural lead-in shown above the cards. */
   lead: string;
-  /** The matched features (best first). Empty for 'none'. */
+  /** The matched features (best first). Empty for 'answer'/'none' (an 'answer' may still add a few). */
   matches: AppFeature[];
+  /** For kind 'answer': the computed reply text (never a fabricated fact — only what the device can
+   *  truly compute/state offline). Absent for the other kinds. */
+  answerText?: string;
+  /** For kind 'answer': which deterministic category produced it (drives the UI icon). */
+  answerKind?: QuickAnswerKind;
 }
 
 const norm = (s: string): string => String(s || '').toLowerCase().trim();
@@ -168,11 +174,222 @@ function overviewFeatures(): AppFeature[] {
   return picked.slice(0, 8);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ON-DEVICE QUICK ANSWERS — real, deterministic replies the device can genuinely compute WITHOUT a
+// model or the network (admin ask 2026-07-18: "chhoti moti question ka offline answer aa jaye"). These
+// are NOT a fake "offline AI brain": every answer here is either a true computation (arithmetic, the
+// device clock) or a fixed, honest statement about NavBharatAI itself. Open-knowledge questions ("capital
+// of France") are deliberately NOT answered here — that needs the online engine, and faking it would
+// break the "real features only / be honest" rules. All pure and unit-tested.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+export type QuickAnswerKind = 'math' | 'datetime' | 'greeting' | 'thanks' | 'identity';
+
+export interface QuickAnswer {
+  kind: QuickAnswerKind;
+  lead: string;
+  text: string;
+  /** Optional follow-on features (e.g. for greeting/identity, a few headline surfaces to tap). */
+  features?: AppFeature[];
+}
+
+/** Round away binary-float noise and drop trailing zeros. Pure. */
+function formatNumber(n: number): string {
+  const r = Math.round(n * 1e10) / 1e10;
+  return Object.is(r, -0) ? '0' : String(r);
+}
+
 /**
- * Answer a user's offline question purely from the app knowledge base. Never invents — returns the real
- * features (with their exact path / howToUse / nav) or an honest "not found". Pure.
+ * Evaluate a compact arithmetic string (digits, `. + - * / % ^ ( )`) with correct precedence, via a
+ * small recursive-descent parser. NO eval()/new Function() (those are the exact injection sinks the
+ * builder's own security scan forbids). Returns the number, or null on any parse error / divide-by-zero.
+ * Pure.
  */
-export function answerOffline(query: string): OfflineAnswer {
+export function evalArithmetic(input: string): number | null {
+  const s = input.replace(/\s+/g, '');
+  let i = 0;
+  const peek = () => s[i];
+
+  function parseExpression(): number | null {
+    let left = parseTerm();
+    if (left === null) return null;
+    while (peek() === '+' || peek() === '-') {
+      const op = s[i++];
+      const right = parseTerm();
+      if (right === null) return null;
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+  function parseTerm(): number | null {
+    let left = parseFactor();
+    if (left === null) return null;
+    while (peek() === '*' || peek() === '/' || peek() === '%') {
+      const op = s[i++];
+      const right = parseFactor();
+      if (right === null) return null;
+      if (op === '*') left = left * right;
+      else { if (right === 0) return null; left = op === '/' ? left / right : left % right; }
+    }
+    return left;
+  }
+  function parseFactor(): number | null {
+    const base = parseUnary();
+    if (base === null) return null;
+    if (peek() === '^') {
+      i++;
+      const exp = parseFactor(); // right-associative
+      if (exp === null) return null;
+      return Math.pow(base, exp);
+    }
+    return base;
+  }
+  function parseUnary(): number | null {
+    if (peek() === '+') { i++; return parseUnary(); }
+    if (peek() === '-') { i++; const v = parseUnary(); return v === null ? null : -v; }
+    return parsePrimary();
+  }
+  function parsePrimary(): number | null {
+    if (peek() === '(') {
+      i++;
+      const v = parseExpression();
+      if (v === null || peek() !== ')') return null;
+      i++;
+      return v;
+    }
+    let num = '';
+    while (i < s.length && /[\d.]/.test(s[i])) num += s[i++];
+    if (num === '' || Number.isNaN(Number(num))) return null;
+    return Number(num);
+  }
+
+  const result = parseExpression();
+  if (i !== s.length) return null; // trailing garbage → not a clean expression
+  return result === null || !Number.isFinite(result) ? null : result;
+}
+
+/** Strip a leading natural-language wrapper ("what is", "calculate", "kitna hai", …) off a math query. */
+function stripMathLead(s: string): string {
+  return s
+    .replace(/^(what\s+is|what's|whats|calculate|compute|solve|evaluate|how much is|how much|kitna hai|kitne|kitna|value of)\s+/i, '')
+    .replace(/[?=\s]+$/, '')
+    .trim();
+}
+
+/** Try to answer a math question. Returns a QuickAnswer for any MATH-SHAPED input (so a math query never
+ *  falls through to "feature not found") — including an honest "not a valid calculation" for a bad one —
+ *  or null when the input is not a calculation at all. Pure. */
+function tryMath(raw: string): QuickAnswer | null {
+  let s = stripMathLead(norm(raw));
+  s = s
+    .replace(/\bmultiplied by\b/g, '*').replace(/\bdivided by\b/g, '/').replace(/\bdivide by\b/g, '/')
+    .replace(/\btimes\b/g, '*').replace(/\binto\b/g, '*').replace(/\bplus\b/g, '+')
+    .replace(/\bminus\b/g, '-').replace(/\bmod\b/g, '%');
+
+  // "A % of B" / "A percent of B" → A/100 * B
+  const pct = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:%|percent)\s+of\s+(-?\d+(?:\.\d+)?)$/);
+  if (pct) {
+    const val = (parseFloat(pct[1]) / 100) * parseFloat(pct[2]);
+    return { kind: 'math', lead: 'Calculated on your device', text: `${pct[1]}% of ${pct[2]} = ${formatNumber(val)}` };
+  }
+
+  const compact = s.replace(/\s+/g, '');
+  // Math-shaped = only math characters, at least one digit, and at least one BINARY operator (a leading
+  // unary sign like "-5" alone is not a calculation). Parentheses allowed anywhere.
+  const onlyMathChars = /^[-+*/%^().\d]+$/.test(compact);
+  const hasDigit = /\d/.test(compact);
+  const hasBinaryOp = /[+*/%^]/.test(compact) || /[\d)]-/.test(compact);
+  if (!onlyMathChars || !hasDigit || !hasBinaryOp) return null;
+
+  const val = evalArithmetic(compact);
+  if (val === null) {
+    return { kind: 'math', lead: 'Calculator', text: "That doesn't look like a valid calculation — check for a divide-by-zero or a typo." };
+  }
+  return { kind: 'math', lead: 'Calculated on your device', text: `${compact} = ${formatNumber(val)}` };
+}
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function formatDate(d: Date): string { return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+function formatTime(d: Date): string {
+  let h = d.getHours();
+  const ampm = h < 12 ? 'AM' : 'PM';
+  h = h % 12 || 12;
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`;
+}
+
+const TIME_TRIGGERS = ['what time', 'current time', 'time now', 'time kya', 'kitne baje', 'kitna baje', 'abhi kitne baje', 'what is the time', "what's the time", 'whats the time'];
+const DATE_TRIGGERS = [
+  "today's date", 'todays date', 'today date', 'what is the date', "what's the date", 'whats the date',
+  'what date', 'current date', "aaj ki date", 'aaj ki tareekh', 'aaj ki tarikh', 'date kya', 'taarikh',
+  'what day is it', 'what day is today', 'which day is today', 'what day', 'aaj kaun sa din', 'aaj konsa din',
+  'kaun sa din', 'konsa din', 'din kya hai',
+];
+
+/** Answer a date/time/day question from the device clock (a real, offline-available fact). Pure given `now`. */
+function tryDateTime(raw: string, now: Date): QuickAnswer | null {
+  const s = norm(raw);
+  if (TIME_TRIGGERS.some((t) => s.includes(t))) {
+    return { kind: 'datetime', lead: 'Current time (your device clock)', text: `It's ${formatTime(now)}.` };
+  }
+  if (DATE_TRIGGERS.some((t) => s.includes(t))) {
+    return { kind: 'datetime', lead: "Today's date (your device clock)", text: `Today is ${formatDate(now)}.` };
+  }
+  return null;
+}
+
+const GREETINGS = new Set(['hi', 'hii', 'hiii', 'hey', 'heyy', 'hello', 'helo', 'hlo', 'yo', 'hola', 'namaste', 'namaskar', 'namastey']);
+const THANKS_TRIGGERS = ['thank you', 'thanks', 'thankyou', 'thank u', 'thnx', 'thx', 'dhanyavaad', 'dhanyawad', 'shukriya', 'shukria'];
+const IDENTITY_TRIGGERS = [
+  'who are you', 'what are you', 'who r u', 'who are u', 'tum kaun ho', 'tum kaun', 'aap kaun ho', 'aap kaun',
+  'what is navbharatai', 'what is navbharat', 'navbharatai kya hai', 'kya hai navbharatai', 'about you',
+  'your name', 'tumhara naam', 'who made you', 'who created you', 'kisne banaya',
+];
+
+function tryConversational(raw: string): QuickAnswer | null {
+  const s = norm(raw).replace(/[!.?,]+$/g, '').trim();
+  const words = s.split(/\s+/);
+
+  if (IDENTITY_TRIGGERS.some((t) => s.includes(t))) {
+    return {
+      kind: 'identity',
+      lead: 'About me',
+      text: "I'm NavBharatAI's Offline AI — a 100% on-device guide. I know every feature of NavBharatAI and can answer quick things offline (calculations, date & time, and where to find features). For building apps and full chat, please go online.",
+      features: overviewFeatures().slice(0, 4),
+    };
+  }
+  if (THANKS_TRIGGERS.some((t) => s === t || s.startsWith(t + ' ') || s.includes(' ' + t))) {
+    return { kind: 'thanks', lead: 'Anytime', text: "You're welcome! 😊 Ask me anything about NavBharatAI — I'm here even without internet." };
+  }
+  // Greeting: the message IS a greeting (short), not a sentence that merely contains "hi".
+  if (words.length <= 2 && words.some((w) => GREETINGS.has(w))) {
+    return {
+      kind: 'greeting',
+      lead: 'Hello',
+      text: "Namaste! 🙏 I'm NavBharatAI's on-device guide. Ask me where a feature is, how to do something, or a quick calculation — I work even without internet.",
+      features: overviewFeatures().slice(0, 4),
+    };
+  }
+  return null;
+}
+
+/** The on-device quick-answer resolver: math → date/time → greeting/thanks/identity. Returns null when
+ *  the query is not one of these deterministic categories (the caller then does feature retrieval). Pure
+ *  given `now`. */
+export function quickAnswer(query: string, now: Date = new Date()): QuickAnswer | null {
+  const msg = norm(query);
+  if (!msg) return null;
+  return tryMath(query) || tryDateTime(query, now) || tryConversational(query);
+}
+
+/**
+ * Answer a user's offline question. First tries a deterministic on-device answer (real math / device
+ * clock / an honest statement about NavBharatAI); otherwise answers purely from the app knowledge base.
+ * Never invents an open-knowledge fact — returns real features, a real computation, or an honest "not
+ * found". Pure given `now`.
+ */
+export function answerOffline(query: string, now: Date = new Date()): OfflineAnswer {
   const msg = norm(query);
   if (!msg || isOverviewQuery(msg)) {
     return {
@@ -181,11 +398,16 @@ export function answerOffline(query: string): OfflineAnswer {
       matches: overviewFeatures(),
     };
   }
+  // Deterministic on-device answer (calculation, date/time, greeting, identity) — real, never faked.
+  const quick = quickAnswer(query, now);
+  if (quick) {
+    return { kind: 'answer', lead: quick.lead, answerText: quick.text, answerKind: quick.kind, matches: quick.features ?? [] };
+  }
   const matches = searchFeatures(msg).map((m) => m.feature);
   if (matches.length === 0) {
     return {
       kind: 'none',
-      lead: 'I couldn\'t find that in NavBharatAI. Try different words (e.g. "database", "deploy", "wallet"), or ask "what can this app do".',
+      lead: 'I couldn\'t find that in NavBharatAI. I can help you navigate the app or do quick things offline (a calculation, today\'s date). For general questions, please go online.',
       matches: [],
     };
   }

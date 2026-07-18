@@ -90,7 +90,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     name: 'Offline AI (on-device app guide)',
     path: 'Sidebar menu → Offline AI',
     description:
-      'A 100% on-device assistant that works even with NO internet. It knows every feature of NavBharatAI — where each button/option is, what it does, and how to use it — and answers instantly from the built-in app knowledge, so it never guesses. Ask "where is X" or "how do I Y" and it shows the exact place with step-by-step how-to, plus a direct "Open →" button that takes you straight to that page. Search is TYPO-TOLERANT — a small misspelling (e.g. "databse", "walet", "deploi") still finds the right feature. Every result also lists its Related features as one-tap chips so you can hop across connected screens without retyping, and starter suggestion chips give you a next step from a blank box or an empty result. It shows a live badge telling you whether you are online or using the offline on-device guide. Note: building apps and full Pro chat need the internet — the Offline AI points you online for those. It updates itself automatically: any new NavBharatAI feature becomes answerable here the moment it ships.',
+      'A 100% on-device assistant that works even with NO internet. It knows every feature of NavBharatAI — where each button/option is, what it does, and how to use it — and answers instantly from the built-in app knowledge, so it never guesses. Ask "where is X" or "how do I Y" and it shows the exact place with step-by-step how-to, plus a direct "Open →" button that takes you straight to that page. It also answers small questions fully OFFLINE that the device can truly compute — a CALCULATION (e.g. "2+2", "15% of 200", "(12*5)/4"), today\'s DATE & TIME from your device clock, and greetings / "who are you". These are real computations, never guessed. Search is TYPO-TOLERANT — a small misspelling (e.g. "databse", "walet", "deploi") still finds the right feature. Every result also lists its Related features as one-tap chips so you can hop across connected screens without retyping, and starter suggestion chips give you a next step from a blank box or an empty result. It shows a live badge telling you whether you are online or using the offline on-device guide. Note: building apps, full Pro chat and general-knowledge questions need the internet — the Offline AI answers those honestly by pointing you online, never with a made-up answer. It updates itself automatically: any new NavBharatAI feature becomes answerable here the moment it ships.',
     howToUse:
       'Open the sidebar menu and tap "Offline AI". Type what you are looking for (e.g. "database", "deploy", "wallet") or ask "what can this app do". Tap the "Open →" button on any result to jump straight there. It works the same whether you are online or offline.',
     relatedFeatures: ['support_contact', 'nbi_chat'],
@@ -98,6 +98,8 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'offline', 'offline ai', 'no internet', 'without internet', 'on device', 'on-device', 'app guide',
       'help', 'where is', 'how do i', 'navigation', 'find feature', 'kaha hai', 'kaise kare', 'offline mode',
       'internet nahi', 'bina internet', 'guide', 'assistant', 'app awareness', 'where is the button',
+      'offline calculator', 'calculate offline', 'offline answer', 'offline question', 'date', 'time',
+      'what time', 'todays date', 'calculator', 'hisaab', 'quick answer',
     ],
     nav: { view: 'offline_ai' },
     aiSurface: 'nbi_chat',

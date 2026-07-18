@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2 } from 'lucide-react';
+import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle } from 'lucide-react';
 import {
-  answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES, type NavTarget,
+  answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
+  type NavTarget, type QuickAnswerKind,
 } from '../../lib/offlineAssistant';
 
 /**
@@ -30,6 +31,13 @@ function useOnline(): boolean {
   }, []);
   return online;
 }
+
+/** The icon for a deterministic on-device answer, by category. */
+const AnswerIcon: React.FC<{ kind?: QuickAnswerKind }> = ({ kind }) => {
+  if (kind === 'math') return <Calculator className="w-4 h-4 text-emerald-400" />;
+  if (kind === 'datetime') return <Clock className="w-4 h-4 text-emerald-400" />;
+  return <MessageCircle className="w-4 h-4 text-emerald-400" />;
+};
 
 /** A small pill button used for starter suggestions and related-feature hops. */
 const Chip: React.FC<{ label: string; onClick: () => void; icon?: React.ReactNode }> = ({ label, onClick, icon }) => (
@@ -81,7 +89,9 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
           <p className="text-[11px] text-[#8b949e] leading-relaxed">
             I know every feature of NavBharatAI — ask me <span className="text-white font-semibold">“where is X”</span> or
             <span className="text-white font-semibold"> “how do I Y”</span> and I’ll show you the exact place and take you there.
-            <span className="text-[#484f58]"> Building apps and full Pro chat need internet — go online for those.</span>
+            I can also answer quick things offline — a <span className="text-white font-semibold">calculation</span> or
+            <span className="text-white font-semibold"> today’s date &amp; time</span>.
+            <span className="text-[#484f58]"> Building apps, full chat and general questions need internet — go online for those.</span>
           </p>
         </div>
 
@@ -91,7 +101,7 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask: where is the database? how do I deploy? wallet…"
+            placeholder="Ask: where is the database? · 15% of 200 · today's date…"
             className="w-full bg-[#161b22] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
             autoFocus
           />
@@ -99,6 +109,17 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
 
         {/* Lead line */}
         <p className="text-[11px] text-[#8b949e] px-1">{answer.lead}</p>
+
+        {/* Deterministic on-device answer (real math / device clock / honest statement — never a faked
+            fact). Shown for kind 'answer'. */}
+        {answer.kind === 'answer' && answer.answerText && (
+          <div className="flex items-start gap-3 p-4 rounded-2xl bg-emerald-500/[0.06] border border-emerald-500/20">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
+              <AnswerIcon kind={answer.answerKind} />
+            </div>
+            <p className="text-sm text-white font-semibold leading-relaxed pt-1 break-words min-w-0">{answer.answerText}</p>
+          </div>
+        )}
 
         {/* Starter / recovery suggestions — shown on the overview (blank box) and on an empty result, so
             the user always has a real next tap. Each chip runs a query that resolves to a real KB entry. */}

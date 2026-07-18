@@ -61,20 +61,33 @@ function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; ch
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims?.w, dims?.h]);
 
-  // Auto — the iframe fills the panel exactly as before. `flex` (align-stretch) guarantees the child
-  // iframe reaches full height/width regardless of how percentage heights resolve on this browser.
-  if (!dims) return <div className="flex-1 min-h-0 flex">{children}</div>;
-
+  // CONSTANT tree depth in EVERY mode — stage → footprint → device-box → iframe. Viewport changes flow
+  // ONLY through inline style/className; the tree SHAPE never changes, so switching Auto↔device (or
+  // between devices, or on rotate) never reparents the iframe. ROOT-CAUSE FIX (2026-07-18): the previous
+  // version returned a 1-div tree for Auto and a 3-div tree for a device, so toggling Auto↔device moved
+  // the iframe to a different parent — which React implements as unmount+remount, i.e. a full iframe
+  // RELOAD. On the live sandbox that reloads the running app (losing its SPA route, scroll position and
+  // any typed-in form state); on the in-browser preview it re-imports the CDN bundle (a blank flash).
+  // One stable tree with style-only differences keeps the running preview alive across every switch.
+  //
+  // • Auto: all layers are transparent flex fills — byte-for-byte the old fill behaviour.
+  // • Device: footprint reserves the SCALED on-screen size (so centring never clips); the device-box is
+  //   the TRUE device px the app lays out against (media queries are real), visually scaled to fit. The
+  //   stage top-aligns (items-start) so the top edge is always reachable via the scroll container even in
+  //   the degenerate sub-padding panel where the fit-scale floors at 1.
+  const footprintStyle: React.CSSProperties = dims
+    ? { width: Math.round(dims.w * scale), height: Math.round(dims.h * scale), flexShrink: 0 }
+    : { flex: '1 1 auto', minWidth: 0, minHeight: 0, display: 'flex' };
+  const deviceBoxStyle: React.CSSProperties = dims
+    ? { width: dims.w, height: dims.h, transform: `scale(${scale})`, transformOrigin: 'top left' }
+    : { flex: '1 1 auto', minWidth: 0, minHeight: 0, display: 'flex' };
   return (
-    <div ref={wrapRef} className="flex-1 min-h-0 overflow-auto bg-zinc-950/40 flex items-start justify-center p-3">
-      {/* Outer box reserves the SCALED footprint so centering + scrolling stay correct. */}
-      <div style={{ width: Math.round(dims.w * scale), height: Math.round(dims.h * scale) }} className="shrink-0">
-        {/* Inner box is the TRUE device pixel size — the app inside sees this width (media queries are
-            real); we only visually scale the whole box to fit. */}
-        <div
-          style={{ width: dims.w, height: dims.h, transform: `scale(${scale})`, transformOrigin: 'top left' }}
-          className="overflow-hidden rounded-[14px] ring-1 ring-zinc-700 shadow-2xl bg-white"
-        >
+    <div
+      ref={wrapRef}
+      className={`flex-1 min-h-0 flex ${dims ? 'overflow-auto bg-zinc-950/40 items-start justify-center p-3' : ''}`}
+    >
+      <div style={footprintStyle}>
+        <div style={deviceBoxStyle} className={dims ? 'overflow-hidden rounded-[14px] ring-1 ring-zinc-700 shadow-2xl bg-white' : ''}>
           {children}
         </div>
       </div>
@@ -135,7 +148,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // diagnosis, and — the "+New chat" bug (admin 2026-07-12) — not the previous app's compiled HTML.
   // `html` only ever loads under a truthy workspaceId, so it must die with that workspaceId; without
   // this, "+New chat" reset state.workspaceId to '' but the old app kept rendering in the iframe.
-  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setErr(''); }, [workspaceId]);
+  // Reset the viewport to Auto on a new/changed workspace too — a leftover Mobile/Tablet device frame
+  // from the previous app would otherwise misrepresent the next one.
+  useEffect(() => { setFoundUrl(''); setDiagResult(null); setHtml(''); setKind(''); setErr(''); setViewport('auto'); }, [workspaceId]);
 
   const runDiagnose = useCallback(async () => {
     if (!workspaceId) return;

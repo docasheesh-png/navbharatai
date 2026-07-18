@@ -17734,3 +17734,37 @@ on the free/weak floor added latency though fallback delivered; the pool-cooldow
 (admin-chosen) are the path. (b) OPTIONAL future hardening: a post-build "scaffold framework ≠ generated
 files" mismatch detector as defence-in-depth (the prompt→framework fix removes the cause; this would catch
 any residual drift).
+
+---
+
+### 2026-07-18 — Deep-test autopsy: EventHive (full-stack Vue) — #1509 CONFIRMED + dev-server-death DNA fix
+
+**Report:** buildId 1948f8fc, prompt "EventHive — full-stack Vue+Express+Prisma", framework `"vue"`, mid-build
+snapshot (was on PLAN 9/11, dev-server boot). builtBy GLM (cheap floor), 51 files.
+
+**🎯 [RE-TESTED] — framework fix #1509 CONFIRMED WORKING (the headline):** manifest `framework:"vue"` (MelodyBox
+was `vite-react`), and ZERO React files anywhere (no main.tsx/App.tsx/react). The Vue→React scaffold
+catastrophe did NOT recur — clean Vue scaffold. Live proof the fix holds.
+
+**Other [RE-TESTED] passes:** #57 fast-lane salvage→full-builder; Prisma self-heal ("incomplete relation →
+prisma format → success"); npm peer-conflict self-heal (agent recovered with --legacy-peer-deps); white-label
+(provider names only in admin diagnostics).
+
+**NEW root cause (dev-server-death class):** the full-stack Vue app's dev server didn't boot on 5173. Evidence:
+`npm install vue-router` pulled vue-router@**5.2.0** (peer wants Vite 7/8), but the Vue scaffold ships Vite 5 →
+ERESOLVE. The AGENT recovered with --legacy-peer-deps, but the automated fast-lane install had no such
+fallback. Root cause: (1) `WELL_KNOWN_DEPS` (DependencyAutoFix.ts) had NO vue-router/pinia entries (React's
+`react-router-dom` IS there — Vue was just never added), so the reconciler bare-installed the incompatible
+5.x; (2) `VueProvider` scaffold didn't ship vue-router/pinia (NuxtProvider does); (3) fast-lane installs
+(devServerHost.buildBuildInstallCommand, agentv3.ts fast-reconcile) ran raw `npm install` with no ERESOLVE
+fallback.
+
+**FIX (PR TBD, 3 parts):** (a) VueProvider ships `vue-router@^4` + `pinia@^2` pinned; (b) `WELL_KNOWN_DEPS`
+gains vue-router@^4/pinia@^2/@vueuse/core/vue-i18n so the reconciler declares the compatible major BEFORE
+install; (c) both fast-lane installs get a shell `|| … --legacy-peer-deps` retry (defense-in-depth) so any
+peer conflict can't silently kill the dev server. 4 regression tests. Full suite green.
+
+**Open root cause (recorded):** Prisma v7.8.0 config/seed drift — the scaffold-installed Prisma jumped to v7
+(new prisma.config.ts format + ESM seed crash); WELL_KNOWN_DEPS pins @prisma/client/prisma to ^5 for the
+reconciler path, but an agent-typed bare `npm install @prisma/client` still pulls v7. A Prisma-v7-aware
+scaffold/guard is the next slice. Also: GLM 429/timeout storm again (52 failures) — proactive-pacer still the path.

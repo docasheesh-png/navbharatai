@@ -6321,7 +6321,9 @@ export function registerAgentV3Routes(app: Express): void {
               .slice(0, 20);
             if (missing.length > 0) {
               fastLog(`📦 Installing ${missing.length} missing dependenc${missing.length === 1 ? 'y' : 'ies'} the code imports but package.json omitted: ${missing.join(', ')}`);
-              await dispatcher.dispatch({ id: 'fast-reconcile', name: 'bash', input: { command: `npm install --no-audit --no-fund ${missing.join(' ')}` } }, 'frontend');
+              // `|| … --legacy-peer-deps` retries only if the strict install hits an ERESOLVE peer
+              // conflict (EventHive autopsy) — the automated install is then as forgiving as the agent's.
+              await dispatcher.dispatch({ id: 'fast-reconcile', name: 'bash', input: { command: `npm install --no-audit --no-fund ${missing.join(' ')} || npm install --no-audit --no-fund --legacy-peer-deps ${missing.join(' ')}` } }, 'frontend');
             }
           } catch { /* reconcile is best-effort — a failure just falls back to the plain install above */ }
           await dispatcher.dispatch({ id: 'fast-dev', name: 'bash', input: { command: 'npm run dev' } }, 'frontend');

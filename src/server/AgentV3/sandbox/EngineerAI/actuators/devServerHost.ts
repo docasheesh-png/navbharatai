@@ -296,7 +296,12 @@ export function buildDepsStaleCheckCommand(): string {
  * is correct and cheap; never skip on "node_modules exists". PURE (unit-testable string builder).
  */
 export function buildBuildInstallCommand(): string {
-  return 'npm install --no-audit --no-fund';
+  // EventHive-class defense-in-depth 2026-07-18: an ERESOLVE peer conflict (e.g. an incompatible
+  // transitive major) makes a bare `npm install` exit non-zero, so the dev server never boots even
+  // though the app is otherwise fine. The agent recovers by re-running with --legacy-peer-deps; the
+  // automated fast-lane install must be just as forgiving. A shell `|| … --legacy-peer-deps` retries
+  // ONLY when the strict install fails — no behaviour change on a clean install.
+  return 'npm install --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps';
 }
 
 /**

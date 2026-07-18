@@ -18211,6 +18211,37 @@ a bot without ever inventing a fact.
 - KB `offline_ai` entry retitled "on-device chat". New `offlineChat.test.ts` (10). Gate: frontend tsc ✓,
   server tsc ✓, full vitest 7375 ✓, vite build ✓.
 
+### 2026-07-18 — Two admin-requested Pro v5.0 features: history pin/search + readable GitHub repo names
+
+**1) History list — PIN + SEARCH (delete already existed).** The v5.0 session-history menu now has:
+- **📌 Pin/unpin** per session — a pinned build floats to a "Pinned" section above the date buckets no
+  matter how old, so important builds are always one glance away. Pinning NEVER changes `updatedAt` (it is
+  not activity), so the row keeps its real "time ago". New server field `ConversationRecord.pinned` +
+  `ConversationPatch.pinned` (InMemory + Firestore), pinned-first sort in `listByUser` (both stores; the
+  Firestore path fetches a wider window and re-sorts in memory so a pinned OLD build survives the cap
+  WITHOUT needing a new composite index), new owner-only route `POST /api/agentv3/conversations/:id/pin`
+  (same candidate-id + access checks as delete; preserves updatedAt), client `pinConversation` +
+  optimistic UI with revert-on-failure.
+- **🔎 Search box** — filters the already-loaded list by title instantly, client-side (no server round-trip).
+- Pure, tested helpers `filterSessionsByQuery` + `partitionPinnedSessions` (13 new tests) and a
+  `listByUser` pinned-sort test. `AppKnowledgeBase` updated (pin/search/delete + Hindi keywords).
+
+**2) GitHub repo name — READABLE, not an opaque hash.** User apps were stored as `app-<uid>-<sessionId>`
+(a long opaque string the admin called "tough encrypted form"). Now: `<app-name>-<time>-<ddmmyy>-<uniq>`,
+e.g. `watch-store-11am-180726-3f9a2c`. Root-cause-safe design:
+- Name/time/date come from the build's OWN STABLE identity — its stored `title` + `createdAt` (NOT the
+  current-turn prompt, which changes each turn). This is critical: `ensureRepo` is keyed on the repo name,
+  so an unstable name would spawn a NEW repo every build turn (the exact sprawl the mirror model avoids).
+  On the first turn (no record yet) the current prompt IS the first prompt, so `deriveTitle(prompt)+now`
+  matches the identity the record is about to be created with.
+- Time/date formatted in IST (fixed +5:30, no DST → deterministic without a tz lib) via pure, tested
+  `readableTimeStamp`. A short `sha1(projectId)` suffix keeps it globally unique so two same-named apps
+  built in the same hour never collide into one repo (a data-safety requirement — the readable form is
+  ADAPTED to keep it, per the external-suggestion rule, not blindly transcribed). Legacy `app-<uid>-<id>`
+  shape kept as the fallback when the app name slugs to empty. 8 new tests.
+
+Gate: frontend + server tsc clean (touched files); full vitest 7390 pass (+ the new pin/search/repo tests);
+2 pre-existing capacitor sandbox-install suite failures are unrelated (present in CI via `npm ci`).
 ## 2026-07-18 — Offline AI: on-device chat persistence + delete (Stage-1 LLM roadmap, PR-1)
 
 Admin approved Stage 1 of the on-device "Offline Thinking (beta)" roadmap, and added: the Offline AI must

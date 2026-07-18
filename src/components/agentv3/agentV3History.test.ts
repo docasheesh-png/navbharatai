@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, isEngineInjectedUserText, type PersistedConversation } from './agentV3History';
+import { messageText, conversationToEvents, conversationToUserMessages, cleanRestoredUserPrompt, sessionStatusMeta, sessionDateBucket, groupSessionsByDate, legacyPrependMessages, isEngineInjectedUserText, filterSessionsByQuery, partitionPinnedSessions, type PersistedConversation } from './agentV3History';
 import { agentV3Reducer } from './agentV3Reducer';
 import { initialAgentV3State } from './agentV3Types';
 
@@ -303,6 +303,50 @@ describe('groupSessionsByDate (history-menu grouping — a real session list, no
   it('treats a missing updatedAt as "now" (falls into Today)', () => {
     const groups = groupSessionsByDate<TestSession>([{ id: 'no-ts' }], now);
     expect(groups[0].label).toBe('Today');
+  });
+});
+
+describe('filterSessionsByQuery (history search box)', () => {
+  const items = [
+    { id: 'a', title: 'Watch store landing page' },
+    { id: 'b', title: 'Hospital CRM dashboard' },
+    { id: 'c', title: 'Kanban board' },
+    { id: 'd' }, // no title
+  ];
+  it('returns the list unchanged for an empty/whitespace query', () => {
+    expect(filterSessionsByQuery(items, '')).toBe(items);
+    expect(filterSessionsByQuery(items, '   ')).toBe(items);
+  });
+  it('matches the title case-insensitively as a substring', () => {
+    expect(filterSessionsByQuery(items, 'watch').map((i) => i.id)).toEqual(['a']);
+    expect(filterSessionsByQuery(items, 'crm').map((i) => i.id)).toEqual(['b']);
+    expect(filterSessionsByQuery(items, 'kanban').map((i) => i.id)).toEqual(['c']);
+    // Substring, not word — "dashboard" contains "board", so 'board' matches both b and c.
+    expect(filterSessionsByQuery(items, 'board').map((i) => i.id)).toEqual(['b', 'c']);
+  });
+  it('returns [] when nothing matches, and never throws on a title-less item', () => {
+    expect(filterSessionsByQuery(items, 'zzz')).toEqual([]);
+    expect(filterSessionsByQuery(items, 'a').some((i) => i.id === 'd')).toBe(false);
+  });
+});
+
+describe('partitionPinnedSessions (Pinned section vs the rest)', () => {
+  it('splits pinned from the rest, preserving incoming (newest-first) order within each', () => {
+    const items: Array<{ id: string; pinned?: boolean }> = [
+      { id: 'a', pinned: false },
+      { id: 'b', pinned: true },
+      { id: 'c' },
+      { id: 'd', pinned: true },
+    ];
+    const { pinned, rest } = partitionPinnedSessions(items);
+    expect(pinned.map((i) => i.id)).toEqual(['b', 'd']);
+    expect(rest.map((i) => i.id)).toEqual(['a', 'c']);
+  });
+  it('handles an all-unpinned list (empty pinned) and an all-pinned list (empty rest)', () => {
+    const unpinned: Array<{ id: string; pinned?: boolean }> = [{ id: 'x' }];
+    const allPinned: Array<{ id: string; pinned?: boolean }> = [{ id: 'x', pinned: true }];
+    expect(partitionPinnedSessions(unpinned).pinned).toEqual([]);
+    expect(partitionPinnedSessions(allPinned).rest).toEqual([]);
   });
 });
 

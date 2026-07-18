@@ -91,6 +91,8 @@ export interface UseAgentV3Build {
   listConversations: (opts?: { userId?: string; email?: string }) => Promise<{ items: ConversationMeta[]; error?: string }>;
   /** Delete a saved conversation (history-menu delete action). Returns true on success. */
   deleteConversation: (id: string, opts?: { userId?: string; email?: string }) => Promise<boolean>;
+  /** Pin/unpin a saved build. Returns the new pinned state on success, or null on failure. */
+  pinConversation: (id: string, opts: { userId?: string; email?: string; pinned: boolean }) => Promise<boolean | null>;
   /** Watch a build running on another device/instance (cross-device live mirror). Returns a stop fn.
    *  Pass `workspaceId` so the server (same-instance case) won't mirror a build for a different session. */
   subscribeLive: (opts?: { userId?: string; email?: string; workspaceId?: string }) => (() => void);
@@ -184,6 +186,8 @@ export interface ConversationMeta {
   live?: boolean;
   /** The published app's URL (present exactly when `live` is true). */
   liveUrl?: string;
+  /** User pinned this build — it sorts to the top of the history list (absent/false = normal). */
+  pinned?: boolean;
 }
 
 /**
@@ -601,6 +605,29 @@ export function useAgentV3Build(): UseAgentV3Build {
       return res.ok;
     } catch {
       return false;
+    }
+  }, []);
+
+  // Pin / unpin a saved build so it floats to the top of the history list. Returns the new pinned
+  // state on success (so the caller's optimistic update can reconcile), or null on failure.
+  const pinConversation = useCallback(async (id: string, opts: { userId?: string; email?: string; pinned: boolean }): Promise<boolean | null> => {
+    const uid = opts.userId ?? userIdRef.current;
+    const em = opts.email ?? emailRef.current;
+    if (!uid || !id) return null;
+    try {
+      const params = new URLSearchParams();
+      params.set('userId', uid);
+      if (em) params.set('email', em);
+      const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}/pin?${params.toString()}`, {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ pinned: opts.pinned }),
+      });
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => ({}));
+      return typeof json?.pinned === 'boolean' ? json.pinned : opts.pinned;
+    } catch {
+      return null;
     }
   }, []);
 
@@ -1231,5 +1258,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

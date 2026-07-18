@@ -2129,6 +2129,7 @@ export function registerAgentV3Routes(app: Express): void {
           return {
             id: c.id, title: c.title, status: c.status, workspaceId: c.workspaceId,
             billedUsd: c.billedUsd, createdAt: c.createdAt, updatedAt: c.updatedAt,
+            ...(c.pinned ? { pinned: true } : {}),
             ...(live ? { live: true, liveUrl: dep!.url } : {}),
           };
         }),
@@ -2237,6 +2238,46 @@ export function registerAgentV3Routes(app: Express): void {
         return;
       }
       res.json({ ok: true }); // removed, or already gone — idempotent
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Pin / unpin one persisted build (history-menu "pin" action). Owner-only — the same
+  // conversationAccess() ownership check + candidate-id resolution as delete. Pinning applies a
+  // pinned-only patch that PRESERVES the record's updatedAt (pinning is not "activity"), so a pinned
+  // build keeps its real last-worked time and only its list POSITION changes (pinned float to top).
+  app.post('/api/agentv3/conversations/:id/pin', async (req: Request, res: Response) => {
+    const { userId, email } = await resolveReadIdentity(req); // verified token, not query.userId
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const pinned = req.body?.pinned !== false; // default true; pass { pinned: false } to unpin
+    try {
+      const store = getConversationStore();
+      let updated = false;
+      let forbidden = false;
+      for (const cid of candidateConversationIds(req.params.id, userId)) {
+        const rec = await store.get(cid).catch(() => null);
+        const access = conversationAccess(rec, userId);
+        if (access === 'ok' && rec) {
+          // Preserve updatedAt — pinning must not bump the "last worked on" time or reorder by recency.
+          await store.update(cid, { pinned, updatedAt: rec.updatedAt }).catch(() => { /* best-effort */ });
+          updated = true;
+        } else if (access === 'forbidden') {
+          forbidden = true;
+        }
+      }
+      if (!updated && forbidden) {
+        res.status(403).json({ error: 'This build belongs to another account.' });
+        return;
+      }
+      if (!updated) {
+        res.status(404).json({ error: 'Conversation not found.' });
+        return;
+      }
+      res.json({ ok: true, pinned });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -5194,7 +5235,23 @@ export function registerAgentV3Routes(app: Express): void {
         // build on the existing (Firestore) durability path, never blocking it.
         if (githubStorageActive()) {
           const projectId = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : workspaceId;
-          const repoName = repoNameForProject(userId, projectId);
+          // READABLE repo name (admin 2026-07-18): derive it from the build's OWN stable identity — its
+          // stored title + createdAt — so the GitHub repo is human-readable ("watch-store-11am-180726-3f9a2c")
+          // instead of the old opaque "app-<uid>-<sessionId>". Crucially this stays STABLE across turns: the
+          // current-turn prompt changes each turn, but the stored title/createdAt do not, so ensureRepo keeps
+          // hitting the SAME repo rather than spawning a new one per turn. On the FIRST turn the record may not
+          // exist yet — the current prompt IS the first prompt, so deriveTitle(prompt)+now matches the identity
+          // the record is about to be created with. Best-effort: any lookup failure falls back cleanly.
+          let readableAppName = deriveTitle(prompt);
+          let readableCreatedAt = Date.now();
+          try {
+            const idRec = await getConversationStore().get(workspaceId).catch(() => null);
+            if (idRec) {
+              if (idRec.title) readableAppName = idRec.title;
+              if (typeof idRec.createdAt === 'number' && idRec.createdAt > 0) readableCreatedAt = idRec.createdAt;
+            }
+          } catch { /* readable-name identity lookup is best-effort — prompt + now is a valid fallback */ }
+          const repoName = repoNameForProject(userId, projectId, { appName: readableAppName, createdAtMs: readableCreatedAt });
           const userToken = typeof req.body?.githubToken === 'string' && req.body.githubToken ? req.body.githubToken : '';
           // PREFER THE USER'S OWN GITHUB: when the user signed in with GitHub, store the project in a
           // repo under THEIR account (their code, no lock-in) and run PR/CI/merge there. Best-effort —

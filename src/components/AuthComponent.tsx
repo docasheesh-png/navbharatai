@@ -492,10 +492,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const providerId = (provider as { providerId?: string })?.providerId;
     const isGoogle = providerId === GoogleAuthProvider.PROVIDER_ID;
     const isApple = providerId === 'apple.com';
-    if (Capacitor.isNativePlatform() && (isGoogle || isApple)) {
+    const isGithub = providerId === GithubAuthProvider.PROVIDER_ID;
+    if (Capacitor.isNativePlatform() && (isGoogle || isApple || isGithub)) {
       try {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        // (The old session was already fully cleared by signOutEverywhere() at the top of socialSignIn.)
         let credential;
         if (isGoogle) {
           mark('opening Google sign-in…');
@@ -514,6 +514,30 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             );
           }
           credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
+        } else if (isGithub) {
+          mark('opening GitHub sign-in…');
+          // GitHub on the app (admin 2026-07-18: "github login bhi fix karo"): the web popup flow cannot
+          // run inside the WebView (same class as Google — embedded-webview OAuth is blocked/hangs), so use
+          // the plugin's NATIVE GitHub flow (the Firebase iOS/Android SDK opens an in-app browser sheet).
+          // Same scopes as the web flow so the token can fully drive repo connect (repo/workflow/identity).
+          const nativeResult = await raceNativeAuth(
+            FirebaseAuthentication.signInWithGithub({
+              scopes: ['repo', 'workflow', 'read:user', 'user:email'],
+              customParameters: [{ key: 'allow_signup', value: 'true' }],
+            }),
+            'GitHub sign-in timed out — please try again.',
+          );
+          const accessToken = nativeResult.credential?.accessToken;
+          mark(`GitHub returned — token: ${accessToken ? 'YES' : 'NO'}`);
+          if (!accessToken) {
+            throw new Error(
+              'Native GitHub sign-in returned no access token — check that the GitHub provider is enabled in Firebase.',
+            );
+          }
+          credential = GithubAuthProvider.credential(accessToken);
+          // The GitHub OAuth token powers repo connect — store it exactly like the web flow's
+          // captureGithubToken does (credentialFromResult may not see it on a credential exchange).
+          try { localStorage.setItem('gh_token', accessToken); } catch { /* best-effort */ }
         } else {
           mark('opening Apple sign-in…');
           // Apple: the plugin returns an Apple identity token + the raw nonce it used; Firebase's
@@ -693,6 +717,20 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           return false;
         }
         signedIn = await signInWithEmailAndPassword(auth, email, password);
+      } else if (Capacitor.isNativePlatform()) {
+        // NATIVE: verify ownership via the plugin's native Google sheet (the web popup cannot run in the
+        // WebView, and the native auth instance deliberately has no popup resolver — see lib/firebase.ts).
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        const nativeResult = await raceNativeAuth(
+          FirebaseAuthentication.signInWithGoogle(),
+          'Google verification timed out — please try again.',
+        );
+        const idToken = nativeResult.credential?.idToken;
+        if (!idToken) throw new Error('Google verification returned no token — please try again.');
+        signedIn = await signInWithCredential(
+          auth,
+          GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken),
+        );
       } else {
         const g = new GoogleAuthProvider();
         g.setCustomParameters({ login_hint: email });

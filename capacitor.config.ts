@@ -44,7 +44,9 @@ const config: CapacitorConfig = {
       // 'apple.com' added 2026-07-16 for native "Sign in with Apple" on iOS (App Store guideline 4.8
       // requires it wherever a third-party login like Google is offered). iOS also needs the "Sign in
       // with Apple" capability in Xcode + the Apple provider enabled in Firebase (Console-side setup).
-      providers: ['google.com', 'apple.com'],
+      // 'github.com' added 2026-07-18 (admin: "github login bhi fix karo") — the native GitHub OAuth
+      // flow (Firebase SDK in-app browser sheet); the web popup cannot run inside the WebView.
+      providers: ['google.com', 'apple.com', 'github.com'],
     },
     // Splash screen: show app icon while loading, auto-hide once React mounts.
     SplashScreen: {

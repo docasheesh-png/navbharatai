@@ -17591,6 +17591,25 @@ avoid most 429s before they happen — to ship flag-gated + default-safe, its ow
 
 ---
 
+### 2026-07-18 — Circular-dependency detection: [ASPIRATIONAL] → [LIVE] (task #70, PR #1500)
+
+Closed a genuine honest gap named in Constitution Vol 5 X.4 / Vol 6 C18. Added
+`findCircularDependencies` to `ImportExportAnalysis.ts` — a pure DFS over the project import
+graph that reuses the exported `resolveLocalTarget` resolver (so `node_modules` specifiers form
+no edges; only real project files make graph edges). WHITE/GRAY/BLACK colouring finds back-edges;
+each cycle is normalized (rotated to its smallest node) + de-duplicated; self-imports report as a
+1-node cycle. Surfaced as a non-blocking advisory `INTEGRITY_CIRCULAR_DEP` warning in
+`routes/agentv3.ts`, beside the other integrity diagnostics.
+
+**Advisory-only by design (QA-03, never break a working app):** most JS/TS import cycles are
+benign — ES modules tolerate them and type-only cycles are harmless — so a cycle is recorded for
+the reviewer/repair pass + admin diagnostics but **never fails a build** and is **never
+auto-fixed** (breaking a cycle can change behaviour; we surface it and let the repair pass or the
+user decide). 7 new regression tests (25 pass). Flipped the C18 / Vol 5 failure-map / Vol 10 §3
+backlog tags to `[LIVE]` in the same PR.
+
+---
+
 ## 2026-07-18 — Same report, deeper look: false "Auto-fixed" success on a failed reviewer repair
 
 **Trigger:** admin re-asked "apne last build report dekhi?" on the same `24f5149f` report (after the

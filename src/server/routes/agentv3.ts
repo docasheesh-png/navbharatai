@@ -126,7 +126,7 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
-import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
+import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -7057,6 +7057,16 @@ export function registerAgentV3Routes(app: Express): void {
           }
         }
         const integrity = analyzeProjectIntegrity(integrityFiles);
+        // Advisory-only import-cycle detection (never blocks/fails a build — most JS/TS cycles are
+        // benign; ES modules tolerate them and type-only cycles are harmless). Surfaced so the
+        // reviewer/repair pass and the admin diagnostics can see a genuine runtime-hazard loop; never
+        // auto-"fixed" because breaking a cycle can change behaviour.
+        for (const c of findCircularDependencies(integrityFiles)) {
+          const loop = c.cycle.length === 1
+            ? `${c.cycle[0]} imports itself`
+            : `${c.cycle.join(' → ')} → ${c.cycle[0]}`;
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', message: `Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`, autoResolved: false });
+        }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', message: `${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`, autoResolved: false });

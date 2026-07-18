@@ -213,3 +213,87 @@ export function exportRegenInstruction(targets: readonly ExportRegenTarget[]): s
     return `- ${t.target} MUST provide ${parts.join(' and ')} (imported by ${t.neededBy.slice(0, 4).join(', ')}${t.neededBy.length > 4 ? ', …' : ''})`;
   }).join('\n');
 }
+
+// === CIRCULAR DEPENDENCY DETECTION (theory → live; Vol 5 X.4 / Vol 6 C18 / Vol 7) ================
+// A real defect class no existing check catches: A→B→A (or longer, or a self-import). ADVISORY ONLY
+// — many JS/TS import cycles are BENIGN (ES modules tolerate most; type-only cycles are harmless), so
+// a build is NEVER failed on a cycle (QA-03 — never break a working app). The finding is surfaced for
+// the reviewer/repair to consider; it is never auto-"fixed" (breaking a cycle can change behavior).
+
+export interface CircularDependency {
+  /** The files forming the import cycle, in order, normalized to start at the smallest path. */
+  cycle: string[];
+}
+
+// import X from '…' | import '…' | require('…') | export … from '…'  (specifier in one of 4 groups).
+const CYCLE_IMPORT_RE = /\bimport\b[^'"]*?from\s*['"]([^'"]+)['"]|\bimport\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)|\bexport\b[^'"]*?from\s*['"]([^'"]+)['"]/g;
+
+/** Strip block + line comments so a commented-out import never creates a graph edge. Best-effort. */
+function stripForCycles(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
+/**
+ * Detect circular LOCAL-import dependencies. Reuses resolveLocalTarget, so only PROJECT files form
+ * edges (a package specifier resolves to null and is excluded). Each cycle is normalized (rotated to
+ * its lexicographically-smallest node) and de-duplicated. Pure & deterministic; advisory (non-blocking).
+ */
+export function findCircularDependencies(files: Record<string, string>): CircularDependency[] {
+  const fileSet = new Set(
+    Object.keys(files).filter((p) => CODE_FILE.test(p) && typeof files[p] === 'string'),
+  );
+  // Adjacency: file → sorted unique local import targets (deterministic traversal).
+  const adj = new Map<string, string[]>();
+  for (const path of fileSet) {
+    const src = stripForCycles(files[path]);
+    const targets = new Set<string>();
+    let m: RegExpExecArray | null;
+    CYCLE_IMPORT_RE.lastIndex = 0;
+    while ((m = CYCLE_IMPORT_RE.exec(src)) !== null) {
+      const spec = m[1] ?? m[2] ?? m[3] ?? m[4];
+      if (!spec) continue;
+      const target = resolveLocalTarget(path, spec, fileSet);
+      if (target) targets.add(target);
+    }
+    adj.set(path, [...targets].sort());
+  }
+
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  const pathStack: string[] = [];
+  const seen = new Set<string>();
+  const cycles: CircularDependency[] = [];
+
+  const normalize = (loop: string[]): string[] => {
+    let min = 0;
+    for (let i = 1; i < loop.length; i++) if (loop[i] < loop[min]) min = i;
+    return [...loop.slice(min), ...loop.slice(0, min)];
+  };
+  const record = (loop: string[]): void => {
+    const norm = normalize(loop);
+    const key = norm.join('>');
+    if (!seen.has(key)) { seen.add(key); cycles.push({ cycle: norm }); }
+  };
+
+  const dfs = (node: string): void => {
+    color.set(node, GRAY);
+    pathStack.push(node);
+    for (const next of adj.get(node) ?? []) {
+      if (next === node) { record([node]); continue; } // self-import = 1-node cycle
+      const c = color.get(next) ?? WHITE;
+      if (c === GRAY) {
+        const idx = pathStack.indexOf(next);
+        if (idx !== -1) record(pathStack.slice(idx));
+      } else if (c === WHITE) {
+        dfs(next);
+      }
+    }
+    pathStack.pop();
+    color.set(node, BLACK);
+  };
+
+  for (const node of [...fileSet].sort()) {
+    if ((color.get(node) ?? WHITE) === WHITE) dfs(node);
+  }
+  return cycles;
+}

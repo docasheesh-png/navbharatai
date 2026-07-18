@@ -18040,3 +18040,17 @@ PREVIEW_ERROR still lands in the downloadable report as an error, but the alread
 retroactively downgraded — a follow-up could re-derive the card from the updated report. The three
 step-saving fixes above (write-guard, locator, pacer) are the bigger lever: they stop the build from
 burning its whole step budget before it even reaches the feature, which is why the sidebar didn't finish.
+
+## 2026-07-18 — Pro v5.0 composer ~50% shorter on Android (root-cause: un-stacked left controls)
+
+Admin: "Pro v5.0 me chat box ki vertical height Android app me bahut jyada hai — 50% reduce karo." Root
+cause (not the textarea — it was already a tight 38px): the composer's LEFT column stacked the Build/Plan/
+Advise mode selector (h-6) ON TOP of the settings+attach row (h-8), forcing the whole input row to ~60-64px
+via `items-end`, with dead space above the textarea. Fix (`AgentV3Panel.tsx`): un-stacked the three
+controls into ONE row beside the input (mode + settings + attach, all h-7), and scaled the box down in
+concert — textarea min-height 38→30, py-1.5→py-1, pr-20→pr-16; the six right-side action buttons (send /
+stop / steer / expand across all modes) h-8→h-7, bottom-1→bottom-0.5, right-11→right-9; autogrow max
+recomputed (20×5+8). New input-row height ≈ 34px (was ≈ 64px) ≈ 47% shorter. Geometry verified: buttons
+(h-7 28px + bottom-0.5 2px = 30px) exactly meet the 30px textarea top, so nothing overflows; pr-16 (64px)
+exactly reserves the two right buttons (send right-2 + expand/stop right-9). Dropups still open upward;
+all button variants/modes preserved. Gate: frontend tsc ✓, agentv3 187 ✓, full vitest 7365 ✓, vite build ✓.

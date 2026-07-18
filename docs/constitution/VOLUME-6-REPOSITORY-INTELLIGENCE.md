@@ -221,7 +221,9 @@ small repo, deep only when the signals earn it. Its authority is the **durable s
 already in force.
 
 Where a capability is `[ASPIRATIONAL]` (architecture-pattern recognition, formal impact
-analysis, unused-dependency pruning, a persistent
+analysis, unused-dependency **pruning** — detection is `[LIVE]` (advisory
+`INTEGRITY_UNUSED_DEP`), automatic removal stays a target because a declared dep may be
+used via config/CLI/runtime — a persistent
 enterprise repo graph, deep type/semantic cross-file reasoning), it is named honestly as
 a target, and its absence is compensated by the downstream verification net (Vol 5
 Framework 5) until it is `[LIVE]`. The engine never claims repository intelligence it has

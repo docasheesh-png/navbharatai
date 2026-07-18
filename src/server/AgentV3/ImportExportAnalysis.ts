@@ -297,3 +297,79 @@ export function findCircularDependencies(files: Record<string, string>): Circula
   }
   return cycles;
 }
+
+export interface UnusedDependency {
+  /** A package declared in package.json "dependencies" that no project file statically imports. */
+  name: string;
+}
+
+// Node builtins (with or without the `node:` prefix) are never a package.json dependency.
+const NODE_BUILTINS = new Set([
+  'assert', 'buffer', 'child_process', 'cluster', 'console', 'crypto', 'dgram', 'dns', 'events',
+  'fs', 'http', 'http2', 'https', 'net', 'os', 'path', 'perf_hooks', 'process', 'punycode',
+  'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'timers', 'tls', 'tty', 'url',
+  'util', 'v8', 'vm', 'worker_threads', 'zlib',
+]);
+
+// Packages legitimately used WITHOUT a discoverable static import (JSX runtime / config-only wiring),
+// so a missing import must not be reported as unused. Conservative on purpose — false positives here
+// mislead the user into removing a dep the build needs.
+const IMPLICIT_USE_DEPS = new Set([
+  'react', 'react-dom', 'vue', 'svelte', 'preact', // framework runtimes (JSX/automatic runtime)
+  'typescript', 'tslib', 'vite', 'tailwindcss', 'postcss', 'autoprefixer', // build/config wiring
+]);
+
+/** Reduce an import specifier to its package name: '@scope/x/sub' → '@scope/x', 'x/sub' → 'x'. */
+function packageNameOf(spec: string): string {
+  if (spec.startsWith('@')) return spec.split('/').slice(0, 2).join('/');
+  return spec.split('/')[0];
+}
+
+/**
+ * Detect runtime dependencies declared in package.json that NO project file imports. DETECTION ONLY —
+ * never prunes/removes (a dep can be used via config, CLI, or a runtime string load, so removal is
+ * unsafe) and never fails a build. Only inspects "dependencies" (not devDependencies, which are
+ * build-time and frequently config-only) and excludes a conservative implicit-use allowlist to keep
+ * false positives near zero. Pure & deterministic; advisory.
+ */
+export function findUnusedDependencies(files: Record<string, string>): UnusedDependency[] {
+  const pkgRaw = files['package.json'];
+  if (typeof pkgRaw !== 'string') return [];
+  let declared: string[];
+  try {
+    const pkg = JSON.parse(pkgRaw);
+    const deps = pkg && typeof pkg === 'object' ? pkg.dependencies : null;
+    if (!deps || typeof deps !== 'object') return [];
+    declared = Object.keys(deps);
+  } catch {
+    return []; // malformed package.json — say nothing rather than mislead
+  }
+  if (declared.length === 0) return [];
+
+  const fileSet = new Set(
+    Object.keys(files).filter((p) => CODE_FILE.test(p) && typeof files[p] === 'string'),
+  );
+  // Every bare-package name imported anywhere in the project.
+  const importedPkgs = new Set<string>();
+  for (const path of fileSet) {
+    const src = stripForCycles(files[path]);
+    let m: RegExpExecArray | null;
+    CYCLE_IMPORT_RE.lastIndex = 0;
+    while ((m = CYCLE_IMPORT_RE.exec(src)) !== null) {
+      const spec = m[1] ?? m[2] ?? m[3] ?? m[4];
+      if (!spec) continue;
+      if (spec.startsWith('.') || spec.startsWith('/')) continue; // local import — not a package
+      const bare = spec.startsWith('node:') ? spec.slice(5) : spec;
+      if (NODE_BUILTINS.has(bare)) continue;
+      importedPkgs.add(packageNameOf(bare));
+    }
+  }
+
+  const unused: UnusedDependency[] = [];
+  for (const name of declared) {
+    if (IMPLICIT_USE_DEPS.has(name)) continue;
+    if (name.startsWith('@types/')) continue; // type-only, never statically imported
+    if (!importedPkgs.has(name)) unused.push({ name });
+  }
+  return unused;
+}

@@ -126,7 +126,9 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
-import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
+import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
+import { detectBackendPresence } from '../AgentV3/BackendPresence';
+import { detectFrameworkFromPrompt } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -3344,6 +3346,12 @@ export function registerAgentV3Routes(app: Express): void {
         res.status(404).json({ error: 'No files to preview yet — build something first.' });
         return;
       }
+      // HONEST FULL-STACK STATE (Task #64): the in-browser preview compiles only the FRONTEND. If the
+      // app also has a backend (a Node/Express API, a database, a Python server, or defined routes) its
+      // API calls silently fail here — the app "looks broken" for a reason the user can't see. Derive it
+      // deterministically from the files so the client can show an honest "needs a Live server" banner
+      // instead of a silently-broken preview. Same value whether the render is cached or fresh.
+      const backend = detectBackendPresence(files);
       // The client's own origin (sent in the body, validated to an http/https URL) is used to load
       // the self-hosted preview compiler via an absolute same-origin URL — a root-relative path
       // doesn't resolve inside the sandboxed <iframe srcDoc>, which produced "Could not load the
@@ -3365,7 +3373,7 @@ export function registerAgentV3Routes(app: Express): void {
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
@@ -3377,7 +3385,7 @@ export function registerAgentV3Routes(app: Express): void {
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length });
+      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
     }
@@ -4343,6 +4351,17 @@ export function registerAgentV3Routes(app: Express): void {
     // `let` — a zip import below adopts the DETECTED framework of the imported app (persisted
     // durably by persistSessionTimeline), overriding whatever the client's picker defaulted to.
     let framework = typeof req.body?.framework === 'string' && req.body.framework ? req.body.framework : 'vite-react';
+    // FRAMEWORK-HONORING SCAFFOLD (MelodyBox deep-test root cause, 2026-07-18): the AgentV3 build path
+    // never read the prompt for a framework — `framework` came only from the client FrameworkPicker,
+    // which DEFAULTS to 'vite-react'. So an explicit "Vue 3 + Vite" prompt was scaffolded as React, the
+    // builder wrote Vue files on top, and the app failed with unresolved imports (readiness 0/100). When
+    // the framework is still the bare React default (i.e. the picker was not explicitly changed), let an
+    // explicitly-named front-end framework in the PROMPT select the matching scaffold. An explicit client
+    // pick (anything ≠ 'vite-react') always wins; a project import overrides this again below (L~4409).
+    if (framework === 'vite-react') {
+      const fromPrompt = detectFrameworkFromPrompt(prompt);
+      if (fromPrompt) framework = fromPrompt;
+    }
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
     // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────
@@ -7066,6 +7085,12 @@ export function registerAgentV3Routes(app: Express): void {
             ? `${c.cycle[0]} imports itself`
             : `${c.cycle.join(' → ')} → ${c.cycle[0]}`;
           buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', message: `Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`, autoResolved: false });
+        }
+        // Advisory-only unused-dependency detection (detection, NOT pruning — a declared dep can be
+        // used via config/CLI/runtime, so removing it is unsafe; never blocks/fails a build). Only
+        // runtime "dependencies" are inspected, with a conservative implicit-use allowlist.
+        for (const u of findUnusedDependencies(integrityFiles)) {
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', message: `"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`, autoResolved: false });
         }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {

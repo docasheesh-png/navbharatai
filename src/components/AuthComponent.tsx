@@ -23,6 +23,7 @@ import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
+import { signOutEverywhere } from '../lib/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
 
@@ -208,8 +209,12 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setOtpSending(true);
     setError('');
     setSuccessMessage('');
-    
+
     try {
+      // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
+      // automatic force logout") — starting a phone-OTP login clears any lingering session up front, so
+      // the new sign-in (auto- or manual-verify) always lands. Best-effort; never blocks the OTP send.
+      try { await signOutEverywhere(); } catch { /* no old session — fine */ }
       // 1. Verify and reserve request through the backend security rate limits
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
@@ -332,6 +337,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setError('');
     setLoading(true);
     try {
+      // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
+      // automatic force logout") — email/password login and signup both start from a clean slate so a
+      // lingering old session can never block the new one. Best-effort; a signOut failure never blocks auth.
+      mark('clearing any old session…');
+      try { await signOutEverywhere(); } catch { /* no old session — fine */ }
       // The same no-hang guarantee as social sign-in: an unanswered auth request surfaces an honest
       // timeout instead of an endless spinner (iPhone report 2026-07-17 — the spinner sat on THIS button).
       if (isLogin) {
@@ -403,6 +413,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
   // "login is not smooth" jolt the admin reported.)
   const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
+    // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "jab koi user kisi bhi id se login kare, to
+    // old session automatic force logout ho jana chahiye"). Every login — any account, any method — starts
+    // by fully clearing whatever session is still around (native plugin + web SDK, via the one centralized
+    // signOutEverywhere), so a lingering/half-dead old session can never wedge the new sign-in. The user is
+    // on the login screen, so signing out first is always safe. Best-effort: a signOut failure never blocks
+    // the sign-in itself. This single call replaces the old per-branch (native / web) ad-hoc clears.
+    mark('clearing any old session…');
+    try { await signOutEverywhere(); } catch { /* no old session — fine */ }
     // NATIVE app + Google/Apple → use the device's NATIVE sign-in, NOT the web popup/redirect.
     // Google disallows OAuth inside embedded WebViews (the web flow opens an external browser and
     // breaks on return with "missing initial state"), and Apple's Sign in with Apple is a native
@@ -415,13 +433,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     if (Capacitor.isNativePlatform() && (isGoogle || isApple)) {
       try {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        // STALE-SESSION CLEAR (admin's own diagnosis 2026-07-17: "logout dikhta hai par hua nahi") —
-        // a half-dead previous session (plugin- or SDK-side) can wedge a fresh sign-in. The user is at
-        // the login screen, so clearing both layers first is always safe and gives GIDSignIn/Firebase a
-        // clean slate. Best-effort: a signOut failure must never block the sign-in itself.
-        mark('clearing any stale session…');
-        try { await FirebaseAuthentication.signOut(); } catch { /* no native session — fine */ }
-        try { await auth.signOut(); } catch { /* no web session — fine */ }
+        // (The old session was already fully cleared by signOutEverywhere() at the top of socialSignIn.)
         let credential;
         if (isGoogle) {
           mark('opening Google sign-in…');
@@ -491,6 +503,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
     }
     try {
+      // (The old session was already fully cleared by signOutEverywhere() at the top of socialSignIn.)
       const result = await signInWithPopup(auth, provider);
       onCredential?.(result);
       onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state

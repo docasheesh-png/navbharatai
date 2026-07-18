@@ -310,3 +310,28 @@ describe('WorkspaceMemory — verification ledger (slice 4: no redundant install
     expect(mem.verificationStatus()).toContain('ALREADY INSTALLED');
   });
 });
+
+describe('removeLastRequestTurn (UNSEND — purge the message from agent memory)', () => {
+  it('removes the last request AND everything recorded after it, leaving earlier turns intact', () => {
+    const mem = new WorkspaceMemory();
+    mem.recordRequest('build a fitness app');
+    mem.recordFix('fixed a type error');           // turn 1 derived episode
+    mem.recordRequest('OOPS — sent by mistake');   // turn 2 (to be unsent)
+    mem.recordError('something during the mistaken turn');
+    expect(mem.recentRequests(9)).toEqual(['build a fitness app', 'OOPS — sent by mistake']);
+
+    const removed = mem.removeLastRequestTurn();
+    expect(removed.length).toBe(2); // the mistaken request + its derived error
+    // The mistaken request no longer resurfaces in the agent's context…
+    expect(mem.recentRequests(9)).toEqual(['build a fitness app']);
+    // …but the earlier turn (request + its fix) is untouched.
+    expect(mem.snapshot().episodes.filter((e) => e.kind === 'fix')).toHaveLength(1);
+  });
+
+  it('is a safe no-op when there is no request episode', () => {
+    const mem = new WorkspaceMemory();
+    mem.recordNote('just a note');
+    expect(mem.removeLastRequestTurn()).toEqual([]);
+    expect(mem.snapshot().episodes).toHaveLength(1);
+  });
+})

@@ -71,7 +71,7 @@ import { firebaseConfig } from './config/firebase';
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
-import { auth, db } from './lib/firebase';
+import { auth, db, signOutEverywhere } from './lib/firebase';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 
@@ -3182,7 +3182,7 @@ export default function App() {
                 // IndexedDB ONLY when signOut hangs, and AWAITS that delete before reload,
                 // so the next login's persistence is never corrupted.
                 await performSignOut({
-                  signOut: () => signOut(auth),
+                  signOut: () => signOutEverywhere(), // clears the NATIVE plugin session too (app), not just the web SDK
                   clearStorage: defaultClearAuthStorage,
                   // The GitHub connection must NOT outlive the session — else the next user on this
                   // browser would inherit it (and see/push to this user's GitHub account).

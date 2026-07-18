@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeImportExports, resolveLocalTarget, exportRegenTargets, exportRegenInstruction } from './ImportExportAnalysis';
+import { analyzeImportExports, resolveLocalTarget, exportRegenTargets, exportRegenInstruction, findCircularDependencies } from './ImportExportAnalysis';
 
 describe('resolveLocalTarget', () => {
   const set = new Set(['src/lib/util.ts', 'src/components/Button.tsx', 'src/api/index.ts']);
@@ -153,5 +153,73 @@ describe('exportRegenTargets (deep-test App #7) — group missing exports by the
       'lib.ts': 'export const ok = 1;',
     };
     expect(exportRegenTargets(await analyzeImportExports(files), new Set(Object.keys(files)))).toEqual([]);
+  });
+});
+
+// Circular-dependency detection (theory → live; Vol 5 X.4 / Vol 6 C18 / Vol 7). Advisory, non-blocking.
+describe('findCircularDependencies — local import cycles', () => {
+  it('detects a two-file cycle A→B→A (both files, normalized to smallest first)', () => {
+    const files = {
+      'src/A.ts': `import { b } from './B';\nexport const a = 1;`,
+      'src/B.ts': `import { a } from './A';\nexport const b = 2;`,
+    };
+    const cy = findCircularDependencies(files);
+    expect(cy).toHaveLength(1);
+    expect(cy[0].cycle).toEqual(['src/A.ts', 'src/B.ts']);
+  });
+
+  it('detects a three-file cycle A→B→C→A', () => {
+    const files = {
+      'src/A.ts': `import './B';`,
+      'src/B.ts': `import './C';`,
+      'src/C.ts': `import './A';`,
+    };
+    const cy = findCircularDependencies(files);
+    expect(cy).toHaveLength(1);
+    expect(cy[0].cycle).toEqual(['src/A.ts', 'src/B.ts', 'src/C.ts']);
+  });
+
+  it('detects a self-import as a 1-node cycle', () => {
+    const files = { 'src/A.ts': `import { x } from './A';\nexport const x = 1;` };
+    const cy = findCircularDependencies(files);
+    expect(cy).toEqual([{ cycle: ['src/A.ts'] }]);
+  });
+
+  it('an ACYCLIC graph is never flagged (no false positive)', () => {
+    const files = {
+      'src/A.ts': `import './B';\nimport './C';`,
+      'src/B.ts': `import './C';`,
+      'src/C.ts': `export const c = 1;`,
+    };
+    expect(findCircularDependencies(files)).toHaveLength(0);
+  });
+
+  it('package imports never form edges (only local files can cycle)', () => {
+    const files = {
+      'src/A.ts': `import React from 'react';\nimport _ from 'lodash';\nexport const a = 1;`,
+      'src/B.ts': `import { useState } from 'react';\nexport const b = 2;`,
+    };
+    expect(findCircularDependencies(files)).toHaveLength(0);
+  });
+
+  it('two INDEPENDENT cycles are both reported; an identical cycle is not double-counted', () => {
+    const files = {
+      'src/A.ts': `import './B';`,
+      'src/B.ts': `import './A';`,
+      'src/X.ts': `import './Y';`,
+      'src/Y.ts': `import './X';`,
+    };
+    const cy = findCircularDependencies(files);
+    expect(cy).toHaveLength(2);
+    expect(cy.map((c) => c.cycle)).toContainEqual(['src/A.ts', 'src/B.ts']);
+    expect(cy.map((c) => c.cycle)).toContainEqual(['src/X.ts', 'src/Y.ts']);
+  });
+
+  it('a commented-out import does not create an edge', () => {
+    const files = {
+      'src/A.ts': `import './B';`,
+      'src/B.ts': `// import './A';\n/* import './A'; */\nexport const b = 1;`,
+    };
+    expect(findCircularDependencies(files)).toHaveLength(0);
   });
 });

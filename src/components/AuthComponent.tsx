@@ -18,7 +18,7 @@ import {
   UserCredential,
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { raceNativeAuth } from '../lib/nativeAuthGuard';
+import { raceNativeAuth, settleWithinOrProceed } from '../lib/nativeAuthGuard';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -26,6 +26,26 @@ import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
+
+/**
+ * Force-logout the old session BEFORE a new login — but never let it block the sign-in itself.
+ *
+ * ROOT-CAUSE FIX (admin 2026-07-18, TestFlight build 25: "'sign in by Google' se hi infinity loading,
+ * Google par hi nahi ja raha" — the spinner started immediately and Google never opened). The prior fix
+ * AWAITED `signOutEverywhere()` UNBOUNDED at the top of every sign-in path. On the iOS WKWebView that
+ * clear (native `@capacitor-firebase/authentication` signOut and/or the web-SDK signOut) can hang, so the
+ * sign-in never started — an immediate, permanent spinner. We STILL clear the old session first (the
+ * admin's requirement) but CAP the wait: if it doesn't finish in FORCE_LOGOUT_TIMEOUT_MS we proceed to
+ * sign in anyway. Nothing is lost — the sign-in that follows establishes the new session regardless, and a
+ * stale web session is overwritten by it. Same "no auth step may hang the UI" law as nativeAuthGuard.
+ */
+const FORCE_LOGOUT_TIMEOUT_MS = 4000;
+async function forceLogoutBeforeLogin(): Promise<void> {
+  // signOutEverywhere() is best-effort AND bounded: settleWithinOrProceed resolves the moment the clear
+  // finishes (normal case, <1s) OR after FORCE_LOGOUT_TIMEOUT_MS if it hangs — so the sign-in that follows
+  // ALWAYS runs. It never throws, so a signOut failure/hang can never block login.
+  await settleWithinOrProceed(signOutEverywhere(), FORCE_LOGOUT_TIMEOUT_MS);
+}
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -214,7 +234,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
       // automatic force logout") — starting a phone-OTP login clears any lingering session up front, so
       // the new sign-in (auto- or manual-verify) always lands. Best-effort; never blocks the OTP send.
-      try { await signOutEverywhere(); } catch { /* no old session — fine */ }
+      await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
       // 1. Verify and reserve request through the backend security rate limits
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
@@ -341,7 +361,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       // automatic force logout") — email/password login and signup both start from a clean slate so a
       // lingering old session can never block the new one. Best-effort; a signOut failure never blocks auth.
       mark('clearing any old session…');
-      try { await signOutEverywhere(); } catch { /* no old session — fine */ }
+      await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
       // The same no-hang guarantee as social sign-in: an unanswered auth request surfaces an honest
       // timeout instead of an endless spinner (iPhone report 2026-07-17 — the spinner sat on THIS button).
       if (isLogin) {
@@ -420,7 +440,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     // on the login screen, so signing out first is always safe. Best-effort: a signOut failure never blocks
     // the sign-in itself. This single call replaces the old per-branch (native / web) ad-hoc clears.
     mark('clearing any old session…');
-    try { await signOutEverywhere(); } catch { /* no old session — fine */ }
+    await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
     // NATIVE app + Google/Apple → use the device's NATIVE sign-in, NOT the web popup/redirect.
     // Google disallows OAuth inside embedded WebViews (the web flow opens an external browser and
     // breaks on return with "missing initial state"), and Apple's Sign in with Apple is a native

@@ -17714,6 +17714,7 @@ build and defeated the endgame repair; the pacer keeps requests under the limit 
 
 ---
 
+<<<<<<< Updated upstream
 ### 2026-07-18 — Unused-dependency detection (advisory) — next honest gap → [LIVE] (PR #1503)
 
 Continued closing the Vol 10 §3 backlog. Added `findUnusedDependencies` to
@@ -17895,3 +17896,38 @@ warning) via each entry's `note`, surfaced as an amber banner + per-card note in
 Tests: +3 cases in `offlineAssistant.test.ts` (common problems resolve to the right entry with steps;
 typo-tolerant but no misfire on app/nav queries; factory-reset honest warning). Gate: frontend tsc ✓,
 server tsc ✓, full vitest 7328 ✓, vite build ✓.
+=======
+## 2026-07-18 — Fix (2 of 2): proactive rate-limit PACER (token-bucket + AIMD), flag-gated
+
+**Trigger:** report `e0db3243` — GLM failed 23× with "Request timed out", which defeated the endgame
+repair (16 compile errors left unfixed) and pushed the build into its step cap. The existing 429 handling
+is REACTIVE (fire → get 429/timeout → back off + rotate keys), which wastes a full round-trip per throttle
+and lets a burst of parallel calls stampede a provider into a timeout storm.
+
+**Fix (`RateLimitPacer.ts` + a `pacedRunner` decorator, default-OFF):** a proactive layer with a PURE,
+clock-injected, fully-unit-tested core:
+- **TokenBucket** per provider — paces requests to stay UNDER the provider's per-second rate, so most 429s
+  never happen (no wasted request+backoff).
+- **AimdConcurrency** — additive-increase / multiplicative-decrease: on a 429/timeout it HALVES concurrency
+  (fewer parallel calls → the provider recovers, timeouts stop), on sustained success it slowly ramps back
+  up. Self-tunes to the provider's real capacity, no manual config (the same control law TCP uses).
+- `isThrottleSignal` classifies 429/529/408 + timeout/overload/econnreset as back-off signals.
+- `RateLimitPacer.run(fn)` is the only impure part (real clock + a bounded in-flight gate); it NEVER
+  changes `fn`'s result — a thrown error propagates unchanged so the chain's reactive backoff/rotation
+  still handles a real failure. One shared pacer PER PROVIDER (module registry) so all concurrent builds
+  pace against the same bucket (global pacing).
+
+**Wiring:** a `pacedRunner(inner, providerKey)` decorator (mirrors `forceModelRunner`/`sizeGatedRunner`)
+wraps each cheap-floor (GLM/Kimi) runner in `cheapBuildFloorRunners`, keyed by the base provider name.
+**DEFAULT-OFF** — a no-op passthrough unless `AGENTV3_RATE_PACER=on`, so wiring it changes nothing until
+the flag flips (safe, canary-able rollout; never removes the reactive backoff). Config is env-tunable
+without a deploy: `AGENTV3_PACER_RATE_PER_SEC` (8), `_BURST` (8), `_MIN/_MAX_CONCURRENCY` (2/8).
+
+**Tests:** `RateLimitPacer.test.ts` (11) — bucket burst+refill+cap, AIMD halve-to-floor + additive
+recovery-to-ceiling, throttle classification, flag/config, `run` returns result + backs off only on a
+throttle. `MultiProviderTurnRunner.test.ts` (+3) — `pacedRunner` passthrough when off, paces when on,
+re-throws unchanged. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Rollout note:** flip `AGENTV3_RATE_PACER=on` (canary) once, watch a few real builds' `deliveredVia` +
+timeout rate, then widen. Both admin-requested fixes (syntax-locator #1, pacer #2) now shipped.
+>>>>>>> Stashed changes

@@ -14,6 +14,7 @@
 // injected, so this is fully unit-testable without any provider key.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
+import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 
 export interface NamedRunner {
   /** Bench/identity name, e.g. 'GROK', 'CLAUDE'. UNIQUE per rung — the timeout/429 bench keys on it,
@@ -225,6 +226,23 @@ export function forceModelRunner(runner: TurnRunner, model: string): TurnRunner 
   return {
     runTurn(params: RunTurnParams): Promise<TurnResult> {
       return runner.runTurn({ ...params, model });
+    },
+  };
+}
+
+/**
+ * PROACTIVE PACER decorator (admin-chosen 2026-07-18). Wraps a runner so its calls go through the shared
+ * per-provider token-bucket + AIMD pacer (RateLimitPacer): stay under the provider's rate so most 429s
+ * never happen, and auto-shrink concurrency on a 429/timeout so a stampede can't cause a timeout storm
+ * (deep-test `e0db3243`: GLM timed out 23×). DEFAULT-OFF — when `AGENTV3_RATE_PACER` is not `on` this is a
+ * no-op passthrough, so wiring it changes nothing until the flag flips. Never alters the result: `run`
+ * re-throws any error unchanged, so the chain's own backoff/rotation still handles a real failure.
+ */
+export function pacedRunner(inner: TurnRunner, pacerKey: string): TurnRunner {
+  return {
+    runTurn(params: RunTurnParams): Promise<TurnResult> {
+      if (!pacerEnabled()) return inner.runTurn(params);
+      return getSharedPacer(pacerKey).run(() => inner.runTurn(params));
     },
   };
 }

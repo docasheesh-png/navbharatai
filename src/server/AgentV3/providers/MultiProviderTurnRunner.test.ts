@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { makeMultiProviderTurnRunner, forceModelRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { makeMultiProviderTurnRunner, forceModelRunner, pacedRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
+import { _resetSharedPacers } from '../RateLimitPacer';
 
 // The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
 // tests so one test's simulated 429 storm can never bench a provider for an unrelated test.
@@ -11,6 +12,36 @@ const PARAMS: RunTurnParams = { model: 'm', messages: [{ role: 'user', content: 
 function ok(text: string, model?: string): TurnResult {
   return { text, toolUses: [], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }, rawContent: [{ type: 'text', text }], ...(model ? { model } : {}) };
 }
+describe('pacedRunner — proactive pacer decorator (default-off passthrough)', () => {
+  const prev = process.env.AGENTV3_RATE_PACER;
+  beforeEach(() => { _resetSharedPacers(); });
+  afterAll(() => { if (prev === undefined) delete process.env.AGENTV3_RATE_PACER; else process.env.AGENTV3_RATE_PACER = prev; });
+
+  it('is a no-op passthrough when the flag is OFF (returns the same result, same call)', async () => {
+    delete process.env.AGENTV3_RATE_PACER;
+    const inner = { runTurn: vi.fn().mockResolvedValue(ok('built')) };
+    const wrapped = pacedRunner(inner, 'GLM');
+    const r = await wrapped.runTurn(PARAMS);
+    expect(r.text).toBe('built');
+    expect(inner.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('paces through the shared pacer when ON, still returning the result unchanged', async () => {
+    process.env.AGENTV3_RATE_PACER = 'on';
+    const inner = { runTurn: vi.fn().mockResolvedValue(ok('paced')) };
+    const wrapped = pacedRunner(inner, 'KIMI');
+    const r = await wrapped.runTurn(PARAMS);
+    expect(r.text).toBe('paced');
+    expect(inner.runTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-throws a provider error unchanged when ON (chain backoff/rotation still handles it)', async () => {
+    process.env.AGENTV3_RATE_PACER = 'on';
+    const inner = { runTurn: vi.fn().mockRejectedValue(new Error('Request timed out.')) };
+    await expect(pacedRunner(inner, 'GLM').runTurn(PARAMS)).rejects.toThrow('Request timed out.');
+  });
+});
+
 function runnerOk(text: string): TurnRunner {
   return { runTurn: vi.fn().mockResolvedValue(ok(text)) };
 }

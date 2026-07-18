@@ -1,30 +1,43 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle,
-  Brain, Trash2, CornerDownLeft, Check, Compass, Wrench, AlertTriangle,
+  Wifi, Smartphone, Send, Sparkles, BookOpen, Link2, Calculator, Clock, MessageCircle,
+  Brain, Trash2, Bot, ArrowRight, Wrench, AlertTriangle, Globe,
 } from 'lucide-react';
 import {
-  answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
+  howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES,
   type NavTarget, type QuickAnswerKind, type DeviceHelp,
 } from '../../lib/offlineAssistant';
+import type { AppFeature } from '../../server/AppContext/AppKnowledgeBase';
+import { buildChatReply, teachAck, CHAT_WELCOME } from '../../lib/offlineChat';
 import {
   parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
 } from '../../lib/offlineMemory';
 
 /**
- * Offline AI — a 100% on-device app guide (admin 2026-07-16, enhanced 2026-07-18). Grounded entirely in
- * the bundled AppKnowledgeBase, so it works with NO internet and knows EVERY NavBharatAI feature with
- * zero hallucination. It answers "where is X / how do I Y", shows the exact path + steps and a real
- * "Open →" button; does real on-device quick answers (math / date & time / greetings); and lets the user
- * TEACH it personal facts + Q→A that persist on this device only and recall exactly — never uploaded,
- * never a fabricated fact. App-BUILDING / full Pro chat / general knowledge need the online engine; the
- * UI says so honestly and never fakes those here. This file is presentation only — all logic is pure and
- * lives in ../../lib/offlineAssistant + ../../lib/offlineMemory.
+ * Offline AI — a 100% on-device CHAT assistant (admin 2026-07-16 … 2026-07-18). It talks turn-by-turn
+ * like a bot, but every reply is DETERMINISTIC and grounded in real on-device skills (app guide, math,
+ * date/time, greetings, user-taught memory, phone-settings help). It does NOT run a language model and
+ * does NOT "think" — so it never invents a fact: anything needing real reasoning / open knowledge is
+ * honestly sent online. Works with NO internet. This file is presentation only; all reply logic is pure
+ * and lives in ../../lib/offlineChat + offlineAssistant + offlineMemory.
  */
 export interface OfflineAIProps {
   /** Navigate to an in-app target (wired in App.tsx to toggleTab / setActiveView + setSettingsScreen). */
   onNavigate: (target: NavTarget) => void;
 }
+
+interface ChatMsg {
+  id: string;
+  role: 'user' | 'bot';
+  text: string;
+  answerKind?: QuickAnswerKind | 'memory';
+  features?: AppFeature[];
+  deviceMatches?: DeviceHelp[];
+  online?: boolean;
+}
+
+let msgSeq = 0;
+const uid = () => `m${++msgSeq}_${Math.random().toString(36).slice(2, 7)}`;
 
 function useOnline(): boolean {
   const [online, setOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -38,15 +51,14 @@ function useOnline(): boolean {
   return online;
 }
 
-/** The icon for a deterministic on-device answer, by category. */
+/** Small icon for a deterministic answer, by category. */
 const AnswerIcon: React.FC<{ kind?: QuickAnswerKind | 'memory' }> = ({ kind }) => {
-  if (kind === 'math') return <Calculator className="w-4 h-4 text-emerald-300" />;
-  if (kind === 'datetime') return <Clock className="w-4 h-4 text-emerald-300" />;
-  if (kind === 'memory') return <Brain className="w-4 h-4 text-emerald-300" />;
-  return <MessageCircle className="w-4 h-4 text-emerald-300" />;
+  if (kind === 'math') return <Calculator className="w-3.5 h-3.5 text-emerald-300" />;
+  if (kind === 'datetime') return <Clock className="w-3.5 h-3.5 text-emerald-300" />;
+  if (kind === 'memory') return <Brain className="w-3.5 h-3.5 text-emerald-300" />;
+  return <MessageCircle className="w-3.5 h-3.5 text-emerald-300" />;
 };
 
-/** A small pill button used for starter suggestions and related-feature hops. */
 const Chip: React.FC<{ label: string; onClick: () => void; icon?: React.ReactNode }> = ({ label, onClick, icon }) => (
   <button
     onClick={onClick}
@@ -57,31 +69,64 @@ const Chip: React.FC<{ label: string; onClick: () => void; icon?: React.ReactNod
   </button>
 );
 
-/** A capability pill in the intro strip. */
-const CapPill: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, label }) => (
-  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/10 text-[10px] font-bold text-[#c9d1d9]">
-    {icon}{label}
-  </span>
-);
-
-/** A phone/device-settings help card — a real, generic how-to fix. Honest: it guides, it does not touch
- *  the phone's settings, and it flags brand variance / destructive steps via the entry's `note`. */
-const DeviceHelpCard: React.FC<{ help: DeviceHelp; index: number }> = ({ help, index }) => (
-  <div
-    style={{ animationDelay: `${Math.min(index, 6) * 40}ms`, animationFillMode: 'both' }}
-    className="bg-gradient-to-br from-sky-500/[0.06] to-transparent border border-sky-500/20 rounded-2xl p-4 space-y-2 animate-in fade-in slide-in-from-bottom-2"
-  >
-    <div className="flex items-start gap-2.5">
-      <div className="w-8 h-8 rounded-xl bg-sky-500/12 border border-sky-400/25 flex items-center justify-center shrink-0">
-        <Wrench className="w-4 h-4 text-sky-300" />
+/** An app-guide feature card rendered inside a bot reply (with a working "Open" jump + related hops). */
+const FeatureCard: React.FC<{ feature: AppFeature; onOpen: (t: NavTarget) => void; onRelated: (q: string) => void }> = ({ feature, onOpen, onRelated }) => {
+  const target = navFor(feature);
+  const steps = howToSteps(feature.howToUse).slice(0, 3);
+  const related = relatedFeaturesOf(feature);
+  return (
+    <div className="bg-gradient-to-br from-white/[0.04] to-transparent border border-white/[0.07] rounded-xl p-3 space-y-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h4 className="text-[13px] font-black text-white leading-snug">{feature.name}</h4>
+          <p className="text-[10px] text-indigo-300/90 font-mono mt-0.5 break-words">{feature.path}</p>
+        </div>
+        {target && (
+          <button
+            onClick={() => onOpen(target)}
+            className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all active:scale-95"
+          >
+            Open <ArrowRight className="w-3 h-3" />
+          </button>
+        )}
       </div>
+      <p className="text-[11px] text-[#8b949e] leading-relaxed">{feature.description.split('\n')[0]}</p>
+      {steps.length > 0 && (
+        <ol className="text-[11px] text-[#c9d1d9] space-y-1">
+          {steps.map((s, i) => (
+            <li key={i} className="flex gap-2">
+              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-indigo-500/15 text-indigo-300 font-black text-[9px] shrink-0 mt-px">{i + 1}</span>
+              <span className="leading-relaxed">{s}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {related.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/5">
+          <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-[#484f58] shrink-0"><Link2 className="w-3 h-3" /> Related</span>
+          {related.map((r) => (
+            <button key={r.id} onClick={() => onRelated(r.name)} className="px-2 py-0.5 rounded-full bg-black/20 border border-white/10 hover:border-indigo-400/50 hover:text-white text-[10px] font-semibold text-[#8b949e] transition-all active:scale-95">
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** A phone/device-settings help card — real generic how-to. Honest: guides, doesn't touch settings. */
+const DeviceHelpCard: React.FC<{ help: DeviceHelp }> = ({ help }) => (
+  <div className="bg-gradient-to-br from-sky-500/[0.06] to-transparent border border-sky-500/20 rounded-xl p-3 space-y-1.5">
+    <div className="flex items-start gap-2">
+      <div className="w-7 h-7 rounded-lg bg-sky-500/12 border border-sky-400/25 flex items-center justify-center shrink-0"><Wrench className="w-3.5 h-3.5 text-sky-300" /></div>
       <div className="min-w-0">
-        <h3 className="text-sm font-black text-white leading-snug">{help.title}</h3>
-        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-sky-500/12 border border-sky-400/20 text-sky-200 text-[9px] font-black uppercase tracking-widest">{help.category}</span>
+        <h4 className="text-[13px] font-black text-white leading-snug">{help.title}</h4>
+        <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full bg-sky-500/12 border border-sky-400/20 text-sky-200 text-[9px] font-black uppercase tracking-widest">{help.category}</span>
       </div>
     </div>
     <p className="text-[11px] text-[#8b949e] leading-relaxed">{help.problem}</p>
-    <ol className="text-[11.5px] text-[#c9d1d9] space-y-1.5 pt-0.5">
+    <ol className="text-[11.5px] text-[#c9d1d9] space-y-1.5">
       {help.steps.map((s, i) => (
         <li key={i} className="flex gap-2">
           <span className="flex items-center justify-center w-4 h-4 rounded-full bg-sky-500/15 text-sky-300 font-black text-[9px] shrink-0 mt-px">{i + 1}</span>
@@ -90,7 +135,7 @@ const DeviceHelpCard: React.FC<{ help: DeviceHelp; index: number }> = ({ help, i
       ))}
     </ol>
     {help.note && (
-      <p className="flex items-start gap-1.5 text-[10px] text-amber-300/80 leading-relaxed pt-1 border-t border-white/5 mt-1">
+      <p className="flex items-start gap-1.5 text-[10px] text-amber-300/80 leading-relaxed pt-1 border-t border-white/5">
         <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {help.note}
       </p>
     )}
@@ -98,303 +143,210 @@ const DeviceHelpCard: React.FC<{ help: DeviceHelp; index: number }> = ({ help, i
 );
 
 export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
-  const [query, setQuery] = useState('');
   const online = useOnline();
-
-  // On-device taught memory — loaded from localStorage, persisted on every change (never uploaded).
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [typing, setTyping] = useState(false);
   const [memories, setMemories] = useState<UserMemory[]>([]);
-  const [justTaught, setJustTaught] = useState<UserMemory | null>(null);
   const [showMemories, setShowMemories] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [isTouch, setIsTouch] = useState(false);
 
   useEffect(() => { setMemories(loadMemories()); }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    setIsTouch(window.matchMedia('(pointer: coarse)').matches);
+  }, []);
+  // Auto-scroll to the newest message / typing indicator.
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, typing]);
 
   const persist = (list: UserMemory[]) => { setMemories(list); saveMemories(list); };
 
-  // The answer is memory-aware: recall of what the user taught this device happens inside answerOffline.
-  const answer = useMemo(() => answerOffline(query, new Date(), memories), [query, memories]);
+  const send = (raw?: string) => {
+    const text = (raw ?? input).trim();
+    if (!text || typing) return;
+    setInput('');
+    setMessages((prev) => [...prev, { id: uid(), role: 'user', text }]);
 
-  // If the current text is a teaching command ("remember …", "when I ask …"), we offer to save it on
-  // Enter instead of searching — so live typing never stores a half-finished thought.
-  const pendingTeach = useMemo(() => parseTeaching(query), [query]);
-
-  // Setting the query re-runs retrieval; used by starter and related chips so the user never retypes.
-  const runQuery = (q: string) => { setJustTaught(null); setQuery(q); };
-
-  const commitTeach = () => {
-    const parsed = parseTeaching(query);
-    if (!parsed) return;
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const next = addMemory(memories, parsed, id, Date.now());
-    persist(next);
-    setJustTaught(next[next.length - 1]);
-    setQuery('');
+    // Teaching command → store on-device and confirm; otherwise a normal deterministic reply.
+    const parsed = parseTeaching(text);
+    let bot: ChatMsg;
+    if (parsed) {
+      persist(addMemory(memories, parsed, uid(), Date.now()));
+      bot = { id: uid(), role: 'bot', text: teachAck(parsed), answerKind: 'memory' };
+    } else {
+      const r = buildChatReply(text, new Date(), memories);
+      bot = { id: uid(), role: 'bot', text: r.text, answerKind: r.answerKind, features: r.features, deviceMatches: r.deviceMatches, online: r.online };
+    }
+    // A brief "typing" beat so it reads like a chat (purely cosmetic — the reply is already computed).
+    setTyping(true);
+    window.setTimeout(() => {
+      setMessages((prev) => [...prev, bot]);
+      setTyping(false);
+    }, 280);
   };
 
   const forget = (id: string) => persist(removeMemory(memories, id));
   const forgetAll = () => { persist([]); setShowMemories(false); };
 
-  return (
-    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
-      {/* Ambient top glow */}
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-x-0 -top-24 h-56 bg-[radial-gradient(60%_100%_at_50%_0%,rgba(99,102,241,0.18),transparent_70%)]" />
+  const suggestions = useMemo(() => [{ label: 'What can you do?', query: 'what can you do' }, ...SUGGESTED_QUERIES], []);
 
-        <div className="relative max-w-3xl mx-auto px-4 py-5 space-y-4">
-          {/* Header */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-900/40 ring-1 ring-white/10">
-                <BookOpen className="w-5 h-5 text-white" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-lg font-black tracking-tight leading-none bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">Offline AI</h1>
-                <p className="text-[11px] text-[#8b949e] truncate mt-1">On-device guide, calculator &amp; memory — works without internet</p>
-              </div>
+  return (
+    <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-white">
+      {/* Header */}
+      <div className="shrink-0 relative">
+        <div className="pointer-events-none absolute inset-x-0 -top-16 h-40 bg-[radial-gradient(60%_100%_at_50%_0%,rgba(99,102,241,0.16),transparent_70%)]" />
+        <div className="relative flex items-center justify-between gap-3 px-4 py-3 border-b border-white/5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-900/40 ring-1 ring-white/10">
+              <BookOpen className="w-4 h-4 text-white" />
             </div>
+            <div className="min-w-0">
+              <h1 className="text-sm font-black tracking-tight leading-none bg-gradient-to-r from-white to-indigo-200 bg-clip-text text-transparent">Offline AI</h1>
+              <p className="text-[10px] text-[#8b949e] truncate mt-0.5">On-device chat · works without internet</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {memories.length > 0 && (
+              <button
+                onClick={() => setShowMemories((v) => !v)}
+                title="Things you've taught me"
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-full border text-[10px] font-black ${showMemories ? 'bg-violet-500/15 border-violet-400/40 text-violet-200' : 'bg-white/[0.03] border-white/10 text-[#8b949e] hover:text-white'}`}
+              >
+                <Brain className="w-3.5 h-3.5" />{memories.length}
+              </button>
+            )}
             <span
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border shrink-0 transition-colors ${
-                online ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              }`}
-              title={online ? "You're online — full NavBharatAI is available too" : "You're offline — this on-device guide still works"}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${online ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}
+              title={online ? "You're online — full NavBharatAI is available too" : "You're offline — this on-device chat still works"}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${online ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse`} />
               {online ? <Wifi className="w-3 h-3" /> : <Smartphone className="w-3 h-3" />}
-              {online ? 'On-device' : 'Offline'}
             </span>
           </div>
+        </div>
+      </div>
 
-          {/* Intro card with capability pills — honest about scope */}
-          <div className="rounded-2xl bg-gradient-to-br from-white/[0.05] to-transparent border border-white/10 p-3.5 space-y-2.5">
-            <p className="text-[11.5px] text-[#c9d1d9] leading-relaxed">
-              Ask <span className="text-white font-semibold">“where is X”</span> or <span className="text-white font-semibold">“how do I Y”</span> and I’ll take you there,
-              do a quick <span className="text-white font-semibold">calculation</span> or tell you the <span className="text-white font-semibold">date &amp; time</span>, and
-              <span className="text-white font-semibold"> remember anything you teach me</span> — kept on this device only.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              <CapPill icon={<Compass className="w-3 h-3 text-indigo-300" />} label="Find features" />
-              <CapPill icon={<Calculator className="w-3 h-3 text-emerald-300" />} label="Calculate" />
-              <CapPill icon={<Clock className="w-3 h-3 text-emerald-300" />} label="Date & time" />
-              <CapPill icon={<Wrench className="w-3 h-3 text-sky-300" />} label="Phone help" />
-              <CapPill icon={<Brain className="w-3 h-3 text-violet-300" />} label="Remember (teach me)" />
-            </div>
-            <p className="text-[10px] text-[#484f58] leading-relaxed">
-              Building apps, full chat &amp; general questions need internet — go online for those.
-            </p>
+      {/* Taught-memory panel (toggled from the header) */}
+      {showMemories && memories.length > 0 && (
+        <div className="shrink-0 border-b border-white/5 bg-[#0d1117] px-4 py-3 space-y-2 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-white"><Brain className="w-3.5 h-3.5 text-violet-300" /> Things you've taught me</span>
+            <button onClick={forgetAll} className="text-[10px] font-bold text-red-400/80 hover:text-red-400">Forget all</button>
           </div>
-
-          {/* Search / teach box — Enter saves a teaching command ("remember …"); otherwise it just searches. */}
-          <form onSubmit={(e) => { e.preventDefault(); commitTeach(); }} className="relative group">
-            <div className={`pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r ${pendingTeach ? 'from-violet-500/40 to-indigo-500/40' : 'from-indigo-500/0 to-violet-500/0 group-focus-within:from-indigo-500/40 group-focus-within:to-violet-500/40'} transition-all duration-300 blur-[2px]`} />
-            <div className="relative flex items-center">
-              {pendingTeach ? <Brain className="w-4 h-4 text-violet-300 absolute left-4" /> : <Search className="w-4 h-4 text-[#484f58] absolute left-4 group-focus-within:text-indigo-300 transition-colors" />}
-              <input
-                value={query}
-                onChange={(e) => { setQuery(e.target.value); if (justTaught) setJustTaught(null); }}
-                placeholder="Ask, calculate, or teach me: remember my gate code is 4821…"
-                className="w-full bg-[#161b22] border border-white/10 rounded-2xl pl-11 pr-16 py-3.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-transparent transition-all"
-                autoFocus
-              />
-              {pendingTeach && (
-                <span className="absolute right-3 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/20 border border-violet-400/30 text-violet-200 text-[9px] font-black uppercase tracking-wider">
-                  <CornerDownLeft className="w-3 h-3" /> Save
-                </span>
-              )}
-            </div>
-          </form>
-
-          {/* Just taught — honest confirmation that it was saved on-device. */}
-          {justTaught && (
-            <div className="flex items-start gap-3 p-4 rounded-2xl bg-gradient-to-br from-emerald-500/[0.12] to-emerald-500/[0.03] border border-emerald-500/30 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center shrink-0">
-                <Check className="w-4 h-4 text-emerald-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm text-white font-bold">Got it — I’ll remember this. ✅</p>
-                <p className="text-[11.5px] text-[#8b949e] mt-1 break-words leading-relaxed">
-                  {justTaught.kind === 'qa'
-                    ? <>When you ask <span className="text-emerald-200 font-semibold">“{justTaught.trigger}”</span>, I’ll say <span className="text-emerald-200 font-semibold">“{justTaught.text}”</span>.</>
-                    : <span className="text-emerald-200 font-semibold">“{justTaught.text}”</span>}
-                  {' '}<span className="text-[#484f58]">Saved on this device only.</span>
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Pending teach hint — the box looks like a teaching command; nudge Enter (suppresses search). */}
-          {!justTaught && pendingTeach && (
-            <div className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-br from-violet-500/[0.10] to-indigo-500/[0.04] border border-violet-500/30 animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <div className="w-9 h-9 rounded-xl bg-violet-500/15 border border-violet-400/30 flex items-center justify-center shrink-0">
-                <Brain className="w-4 h-4 text-violet-300" />
-              </div>
-              <p className="text-[12px] text-[#c9d1d9] min-w-0 break-words leading-relaxed">
-                Press <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 text-white font-bold text-[10px]"><CornerDownLeft className="w-3 h-3" />Enter</span>
-                {' '}and I’ll remember{' '}
-                {pendingTeach.kind === 'qa'
-                  ? <>to answer <span className="text-white font-semibold">“{pendingTeach.text}”</span> when you ask <span className="text-white font-semibold">“{pendingTeach.trigger}”</span>.</>
-                  : <><span className="text-white font-semibold">“{pendingTeach.text}”</span>.</>}
+          <p className="text-[10px] text-[#484f58] flex items-center gap-1.5"><Smartphone className="w-3 h-3" /> Saved on this device only — never uploaded.</p>
+          {memories.slice().reverse().map((m) => (
+            <div key={m.id} className="flex items-start justify-between gap-3 p-2.5 rounded-lg bg-black/20 border border-white/5">
+              <p className="text-[12px] text-[#c9d1d9] break-words min-w-0">
+                {m.kind === 'qa' ? <><span className="text-violet-300/80 font-bold">Q</span> {m.trigger} <span className="text-[#484f58]">→</span> {m.text}</> : m.text}
               </p>
+              <button onClick={() => forget(m.id)} title="Forget this" className="shrink-0 p-1 rounded-md text-[#8b949e] hover:text-red-400 hover:bg-red-500/10 active:scale-90"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
-          )}
+          ))}
+        </div>
+      )}
 
-          {/* Lead line (hidden while a teach hint / confirmation is showing, to avoid mixed signals) */}
-          {!justTaught && !pendingTeach && <p className="text-[11px] text-[#8b949e] px-1">{answer.lead}</p>}
-
-          {/* Everything below is the query result — hidden while the box holds a pending teaching command. */}
-          {!pendingTeach && (<>
-          {/* Deterministic on-device answer (real math / device clock / recalled memory / honest statement —
-              never a faked fact). Shown for kind 'answer'. */}
-          {answer.kind === 'answer' && answer.answerText && (
-            <div className="flex items-start gap-3 p-4 rounded-2xl bg-gradient-to-br from-emerald-500/[0.10] to-emerald-500/[0.02] border border-emerald-500/25 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/12 border border-emerald-400/25 flex items-center justify-center shrink-0">
-                <AnswerIcon kind={answer.answerKind} />
-              </div>
-              <div className="min-w-0 pt-0.5">
-                {answer.answerKind === 'memory' && (
-                  <p className="text-[9px] font-black uppercase tracking-widest text-emerald-300/70 mb-1 flex items-center gap-1"><Brain className="w-3 h-3" /> You taught me this</p>
-                )}
-                <p className={`text-white font-semibold leading-relaxed break-words ${answer.answerKind === 'math' ? 'text-base font-mono' : 'text-sm'}`}>{answer.answerText}</p>
-              </div>
+      {/* Transcript */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-3 py-4 space-y-3">
+        {messages.length === 0 && !typing ? (
+          // Welcome state
+          <div className="max-w-2xl mx-auto space-y-4 animate-in fade-in duration-300">
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 ring-1 ring-white/10"><Bot className="w-4 h-4 text-white" /></div>
+              <div className="rounded-2xl rounded-tl-sm bg-[#161b22] border border-white/5 px-4 py-3 text-[13px] text-[#c9d1d9] leading-relaxed">{CHAT_WELCOME}</div>
             </div>
-          )}
-
-          {/* Starter / recovery suggestions — shown on the overview (blank box) and on an empty result, so
-              the user always has a real next tap. Each chip runs a query that resolves to a real KB entry. */}
-          {answer.kind !== 'matches' && (
-            <div className="space-y-1.5">
-              <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58] px-1">Try</p>
+            <div className="pl-10 space-y-1.5">
+              <p className="text-[9px] font-black uppercase tracking-widest text-[#484f58]">Try</p>
               <div className="flex flex-wrap gap-2">
-                {SUGGESTED_QUERIES.map((s) => (
-                  <Chip key={s.query} label={s.label} onClick={() => runQuery(s.query)} icon={<Sparkles className="w-3 h-3 text-indigo-300 shrink-0 group-hover:text-indigo-200" />} />
+                {suggestions.map((s) => (
+                  <Chip key={s.query} label={s.label} onClick={() => send(s.query)} icon={<Sparkles className="w-3 h-3 text-indigo-300 shrink-0" />} />
                 ))}
               </div>
             </div>
-          )}
-
-          {/* Phone help — device-settings fixes (a separate KB). Honest banner: we guide, we don't touch
-              the phone's settings, and exact names vary by brand. */}
-          {answer.deviceMatches && answer.deviceMatches.length > 0 && (
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 px-1">
-                <Smartphone className="w-3.5 h-3.5 text-sky-300" />
-                <p className="text-[9px] font-black uppercase tracking-widest text-sky-300/80">Phone help</p>
-              </div>
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-sky-500/[0.05] border border-sky-500/15">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-300/80 mt-0.5 shrink-0" />
-                <p className="text-[10.5px] text-[#8b949e] leading-relaxed">
-                  These are general Android steps — I can guide you, but I <span className="text-[#c9d1d9] font-semibold">can’t change your phone’s settings myself</span>, and exact names may differ by phone brand (Samsung, Xiaomi, etc.).
-                </p>
-              </div>
-              {answer.deviceMatches.map((h, idx) => <DeviceHelpCard key={h.id} help={h} index={idx} />)}
-            </div>
-          )}
-
-          {/* Result cards */}
-          <div className="space-y-2.5">
-            {answer.matches.map((f, idx) => {
-              const target = navFor(f);
-              const steps = howToSteps(f.howToUse).slice(0, 4);
-              const related = relatedFeaturesOf(f);
-              return (
-                <div
-                  key={f.id}
-                  style={{ animationDelay: `${Math.min(idx, 6) * 40}ms`, animationFillMode: 'both' }}
-                  className="group bg-gradient-to-br from-white/[0.04] to-transparent border border-white/[0.07] hover:border-indigo-400/30 rounded-2xl p-4 space-y-2 transition-all duration-200 animate-in fade-in slide-in-from-bottom-2"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-black text-white">{f.name}</h3>
-                      <p className="text-[10px] text-indigo-300/90 font-mono mt-0.5 break-words">{f.path}</p>
-                    </div>
-                    {target && (
-                      <button
-                        onClick={() => onNavigate(target)}
-                        className="shrink-0 flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md shadow-indigo-900/30"
-                      >
-                        Open <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-[#8b949e] leading-relaxed">{f.description.split('\n')[0]}</p>
-                  {steps.length > 0 && (
-                    <ol className="text-[11px] text-[#c9d1d9] space-y-1 pt-1">
-                      {steps.map((s, i) => (
-                        <li key={i} className="flex gap-2">
-                          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-indigo-500/15 text-indigo-300 font-black text-[9px] shrink-0 mt-px">{i + 1}</span>
-                          <span className="leading-relaxed">{s}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                  {related.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/5 mt-1">
-                      <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-[#484f58] shrink-0">
-                        <Link2 className="w-3 h-3" /> Related
-                      </span>
-                      {related.map((r) => (
-                        <button
-                          key={r.id}
-                          onClick={() => runQuery(r.name)}
-                          className="px-2.5 py-1 rounded-full bg-black/20 border border-white/10 hover:border-indigo-400/50 hover:text-white text-[10px] font-semibold text-[#8b949e] transition-all active:scale-95"
-                        >
-                          {r.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
           </div>
-          </>)}
-
-          {/* What the user has taught this device — real, on-device, deletable. Honest: stored locally only. */}
-          {memories.length > 0 && (
-            <div className="rounded-2xl bg-gradient-to-br from-violet-500/[0.05] to-transparent border border-white/[0.07] overflow-hidden">
-              <button
-                onClick={() => setShowMemories((v) => !v)}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-white/[0.02] transition-colors"
-              >
-                <span className="flex items-center gap-2.5 text-[12px] font-bold text-white">
-                  <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-400/25 flex items-center justify-center shrink-0">
-                    <Brain className="w-3.5 h-3.5 text-violet-300" />
-                  </span>
-                  Things you’ve taught me
-                  <span className="px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-200 text-[10px] font-black">{memories.length}</span>
-                </span>
-                <span className="text-[10px] text-[#8b949e] font-semibold">{showMemories ? 'Hide' : 'Show'}</span>
-              </button>
-              {showMemories && (
-                <div className="px-4 pb-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <p className="text-[10px] text-[#484f58] leading-relaxed flex items-center gap-1.5">
-                    <Smartphone className="w-3 h-3" /> Saved on this device only — never uploaded. I recall these exactly, with no internet.
-                  </p>
-                  {memories.slice().reverse().map((m) => (
-                    <div key={m.id} className="flex items-start justify-between gap-3 p-3 rounded-xl bg-black/20 border border-white/5 hover:border-white/10 transition-colors">
-                      <div className="min-w-0">
-                        {m.kind === 'qa'
-                          ? <p className="text-[12px] text-white break-words leading-relaxed"><span className="text-violet-300/80 font-bold">Q</span> {m.trigger} <span className="text-[#484f58]">→</span> <span className="text-[#c9d1d9]">{m.text}</span></p>
-                          : <p className="text-[12px] text-[#c9d1d9] break-words leading-relaxed">{m.text}</p>}
-                      </div>
-                      <button
-                        onClick={() => forget(m.id)}
-                        title="Forget this"
-                        className="shrink-0 p-1.5 rounded-lg text-[#8b949e] hover:text-red-400 hover:bg-red-500/10 transition-colors active:scale-90"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={forgetAll}
-                    className="text-[10px] font-bold text-red-400/80 hover:text-red-400 transition-colors pt-1"
-                  >
-                    Forget everything
-                  </button>
+        ) : (
+          <div className="max-w-2xl mx-auto space-y-3">
+            {messages.map((m) => (
+              <div key={m.id} className={`flex items-start gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/10 ${m.role === 'user' ? 'bg-zinc-700' : 'bg-gradient-to-br from-indigo-500 to-violet-600'}`}>
+                  {m.role === 'user' ? <span className="text-[11px] font-black text-white">You</span> : <Bot className="w-4 h-4 text-white" />}
                 </div>
-              )}
+                <div className={`min-w-0 max-w-[85%] space-y-2 ${m.role === 'user' ? 'items-end' : ''}`}>
+                  <div className={`inline-block rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed break-words ${m.role === 'user' ? 'rounded-tr-sm bg-indigo-600 text-white' : 'rounded-tl-sm bg-[#161b22] border border-white/5 text-[#c9d1d9]'}`}>
+                    {m.role === 'bot' && m.answerKind && (
+                      <span className="inline-flex items-center gap-1 mr-1.5 align-middle"><AnswerIcon kind={m.answerKind} /></span>
+                    )}
+                    <span className={m.answerKind === 'math' ? 'font-mono font-semibold text-white' : ''}>{m.text}</span>
+                  </div>
+                  {/* Feature cards */}
+                  {m.features && m.features.length > 0 && (
+                    <div className="space-y-2">
+                      {m.features.map((f) => <FeatureCard key={f.id} feature={f} onOpen={onNavigate} onRelated={(q) => send(q)} />)}
+                    </div>
+                  )}
+                  {/* Phone-help cards + honest banner */}
+                  {m.deviceMatches && m.deviceMatches.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2 p-2.5 rounded-lg bg-sky-500/[0.05] border border-sky-500/15">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-300/80 mt-0.5 shrink-0" />
+                        <p className="text-[10.5px] text-[#8b949e] leading-relaxed">General Android steps — I can guide you, but I <span className="text-[#c9d1d9] font-semibold">can't change your phone's settings myself</span>, and names may differ by phone brand.</p>
+                      </div>
+                      {m.deviceMatches.map((h) => <DeviceHelpCard key={h.id} help={h} />)}
+                    </div>
+                  )}
+                  {/* Honest "go online" action */}
+                  {m.online && (
+                    <button
+                      onClick={() => onNavigate({ view: 'nbi_chat' })}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/10 hover:border-indigo-400/50 hover:bg-indigo-500/10 text-[11px] font-bold text-[#c9d1d9] hover:text-white transition-all active:scale-95"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-indigo-300" /> Ask online (needs internet)
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {/* Typing indicator */}
+            {typing && (
+              <div className="flex items-start gap-2.5 animate-in fade-in duration-150">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 ring-1 ring-white/10"><Bot className="w-4 h-4 text-white" /></div>
+                <div className="rounded-2xl rounded-tl-sm bg-[#161b22] border border-white/5 px-4 py-3 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e] animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e] animate-bounce" style={{ animationDelay: '120ms' }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e] animate-bounce" style={{ animationDelay: '240ms' }} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Composer */}
+      <div className="shrink-0 border-t border-white/5 bg-[#0d1117] px-3 py-2.5 pb-[env(safe-area-inset-bottom)]">
+        <form onSubmit={(e) => { e.preventDefault(); send(); }} className="max-w-2xl mx-auto">
+          <div className="relative group">
+            <div className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-indigo-500/0 to-violet-500/0 group-focus-within:from-indigo-500/40 group-focus-within:to-violet-500/40 transition-all duration-300 blur-[2px]" />
+            <div className="relative flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
+                rows={1}
+                placeholder="Message… (ask, calculate, phone help, or teach me “remember …”)"
+                className="flex-1 bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-[#484f58] focus:outline-none focus:border-transparent resize-none max-h-28"
+              />
+              <button
+                type="submit"
+                disabled={!input.trim() || typing}
+                title="Send"
+                className="shrink-0 h-10 w-10 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 rounded-xl text-white transition-all active:scale-95"
+              >
+                <Send className="w-4 h-4" />
+              </button>
             </div>
-          )}
-        </div>
+          </div>
+          <p className="text-[9px] text-[#484f58] text-center mt-1.5">On-device · no internet needed · never makes up facts — real reasoning goes online</p>
+        </form>
       </div>
     </div>
   );

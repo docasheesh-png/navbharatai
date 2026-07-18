@@ -11,7 +11,7 @@
 // App.tsx re-exports from here so every existing `import { auth } from './App'` keeps working.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, indexedDBLocalPersistence, setPersistence, browserLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
+import { getAuth, initializeAuth, setPersistence, browserLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from '../config/firebase';
@@ -29,12 +29,23 @@ export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: fireb
 // no result, an eternal "verifying with Firebase…". This is exactly why the failure survived all three
 // call-site fixes (#1512/#1515/#1516) — the defect is in how the auth INSTANCE is created, not in any flow.
 //
-// The documented Capacitor recipe (per @capacitor-firebase/authentication): on NATIVE, create the
-// instance with `initializeAuth` — explicit `indexedDBLocalPersistence`, and NO popupRedirectResolver
-// (native sign-in uses the plugin + signInWithCredential; it never needs the popup/redirect iframe).
-// WEB is byte-for-byte unchanged: `getAuth` + the localStorage persistence preference, as before.
+// The Capacitor recipe: on NATIVE, create the instance with `initializeAuth` — explicit persistence and
+// NO popupRedirectResolver (native sign-in uses the plugin + signInWithCredential; it never needs the
+// popup/redirect iframe). WEB is byte-for-byte unchanged: `getAuth` + the localStorage preference.
+//
+// PART 2 of the root fix — WHY localStorage and NOT indexedDB on native (build 30 evidence, admin
+// 2026-07-18): with the init fixed, build 30 got a real step further — the Google exchange SUCCEEDED
+// (auth.currentUser was set, the modal auto-closed via the settle guard's currentUser check) but the app
+// STILL showed logged-out and nothing survived a relaunch. That is the signature of the session-SAVE
+// hanging: the SDK sets currentUser, then AWAITS persistence.setCurrentUser(user), and only THEN notifies
+// onAuthStateChanged listeners. On iOS, WebKit suspends IndexedDB transactions when the WebView is
+// backgrounded — and the native Google/Apple/GitHub sheet does exactly that — so the IDB write wedges,
+// the listener notification never fires, and the UI/session never learn about the successful login.
+// localStorage is synchronous and immune to that suspension, so the save completes and onAuthStateChanged
+// fires normally. (Tradeoff, stated honestly: sessions stored under the old IDB key are not read anymore —
+// one extra login after this update, on a path that was broken anyway.)
 export const auth = Capacitor.isNativePlatform()
-  ? initializeAuth(app, { persistence: indexedDBLocalPersistence })
+  ? initializeAuth(app, { persistence: browserLocalPersistence })
   : getAuth(app);
 // WEB ONLY: persist sessions in localStorage (explicit, though the default is already durable).
 // Fire-and-forget by design — both the default (indexedDB) and this are durable, so a pending switch

@@ -66,6 +66,23 @@ describe('ToolDispatcher', () => {
     d = new ToolDispatcher(act, 'ws-1', state, stream);
   });
 
+  // Deep-test 2026-07-18: the typecheck tool must pinpoint a frontend SYNTAX error's exact location so the
+  // model fixes it directly instead of hand-counting <div> tags for 40 steps (the real flail loop).
+  it('typecheck surfaces a frontend syntax error with its EXACT location (the flail fix)', async () => {
+    act.files.set('src/App.tsx', 'export default function App(){ const handleExportCSV=()=>1; const handleExportCSV=()=>2; return null }');
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).toMatch(/SYNTAX ERROR/);
+    expect(res.content).toContain('src/App.tsx');            // names the offending file…
+    expect(res.content).toMatch(/handleExportCSV|already been declared/); // …and the real cause
+    expect(res.content).toMatch(/do NOT hand-count/i);       // steers away from the tag-counting flail
+  });
+  it('typecheck reports frontend clean when every file parses', async () => {
+    act.files.set('src/App.tsx', 'export default function App(){ return null }');
+    const res = await d.dispatch(call('typecheck', {}), 'architect');
+    expect(res.content).not.toMatch(/SYNTAX ERROR/);
+    expect(res.content).toMatch(/parses clean|OK|nothing beyond/i);
+  });
+
   it('write_file creates a file, records the change, emits events', async () => {
     const res = await d.dispatch(call('write_file', { path: 'src/App.tsx', content: 'hello' }), 'frontend');
     expect(res.is_error).toBe(false);

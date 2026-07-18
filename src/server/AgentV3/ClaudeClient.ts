@@ -25,6 +25,25 @@ export interface ClaudeToolDef {
   };
 }
 
+/**
+ * Deduplicate tool definitions by name, keeping the FIRST occurrence. The Anthropic API rejects a
+ * `tools` array with duplicate names as a HARD 400 ("tools: Tool names must be unique.") that kills the
+ * whole provider-fallback chain (deep-test 2026-07-18: a drifted duplicate `typecheck` def took down a
+ * finished build's Claude heal pass — GLM/Kimi tolerate the dup, Anthropic does not). Canonical home is
+ * here, next to ClaudeToolDef; enforced both at tool-array ASSEMBLY (catalogForTools) and at this API
+ * client (runTurn) so no upstream duplicate can ever break a build again. Pure.
+ */
+export function dedupeToolsByName(tools: ClaudeToolDef[]): ClaudeToolDef[] {
+  const seen = new Set<string>();
+  const out: ClaudeToolDef[] = [];
+  for (const t of tools) {
+    if (seen.has(t.name)) continue;
+    seen.add(t.name);
+    out.push(t);
+  }
+  return out;
+}
+
 /** A parsed `tool_use` block the agent must execute. */
 export interface ToolUse {
   id: string;
@@ -301,7 +320,11 @@ export class ClaudeClient implements TurnRunner {
     }
 
     if (hasTools) {
-      const tools = params.tools as ClaudeToolDef[];
+      // INVARIANT: the Anthropic API rejects duplicate tool names as a HARD 400 ("tools: Tool names must
+      // be unique.") that kills the entire provider-fallback chain (deep-test 2026-07-18). Dedupe by name
+      // at this single boundary every provider call passes through, so a duplicate from ANY caller can
+      // never break a build — belt-and-suspenders alongside catalogForTools' own dedupe.
+      const tools = dedupeToolsByName(params.tools as ClaudeToolDef[]);
       if (cache && !params.system) {
         // No system block to carry the breakpoint → mark the last tool instead.
         createParams.tools = tools.map((t, i) =>

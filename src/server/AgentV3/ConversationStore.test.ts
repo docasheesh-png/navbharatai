@@ -64,6 +64,31 @@ describe('InMemoryConversationStore', () => {
     expect(rec?.messages).toHaveLength(1);
   });
 
+  it('truncateMessages drops the tail (UNSEND) so the provider never replays it', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create({ ...base(), messages: [{ role: 'user', content: 'first' }] });
+    await store.appendMessages('build-1', [{ role: 'assistant', content: 'reply-1' }], patch());
+    await store.appendMessages('build-1', [{ role: 'user', content: 'OOPS mistaken msg' }], patch());
+    await store.appendMessages('build-1', [{ role: 'assistant', content: 'reply to the mistake' }], patch());
+    expect((await store.get('build-1'))?.messages).toHaveLength(4);
+    // Unsend the last user message + everything after it → keep the first 2 (user 'first' + its reply).
+    await store.truncateMessages('build-1', 2, patch({ status: 'complete' }));
+    const rec = await store.get('build-1');
+    expect(rec?.messages).toHaveLength(2);
+    expect(JSON.stringify(rec?.messages)).not.toContain('OOPS mistaken msg');
+    expect(rec?.status).toBe('complete');
+  });
+
+  it('truncateMessages clamps out-of-range keepCount and throws on unknown id', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create({ ...base(), messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }] });
+    await store.truncateMessages('build-1', 99, patch()); // clamp high → no-op
+    expect((await store.get('build-1'))?.messages).toHaveLength(2);
+    await store.truncateMessages('build-1', -5, patch()); // clamp low → empty
+    expect((await store.get('build-1'))?.messages).toHaveLength(0);
+    await expect(store.truncateMessages('ghost', 0, patch())).rejects.toThrow(/unknown conversation id/);
+  });
+
   it('throws when appending/updating an unknown id', async () => {
     const store = new InMemoryConversationStore();
     await expect(store.appendMessages('ghost', [], patch())).rejects.toThrow(/unknown conversation id/);

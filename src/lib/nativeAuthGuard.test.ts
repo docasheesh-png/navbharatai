@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { raceNativeAuth, NATIVE_AUTH_TIMEOUT_MS } from './nativeAuthGuard';
+import { raceNativeAuth, NATIVE_AUTH_TIMEOUT_MS, settleWithinOrProceed, preLoginWebSignOutAllowed } from './nativeAuthGuard';
 
 afterEach(() => vi.useRealTimers());
 
@@ -34,5 +34,40 @@ describe('raceNativeAuth — no native sign-in may ever hang the UI', () => {
 
   it('default window is generous (>= 60s) so a slow human login is never cut off', () => {
     expect(NATIVE_AUTH_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+  });
+});
+
+describe('settleWithinOrProceed — pre-login cleanup must never block the sign-in', () => {
+  it('resolves as soon as the cleanup finishes (no needless wait in the normal case)', async () => {
+    vi.useFakeTimers();
+    const settled = settleWithinOrProceed(Promise.resolve(), 4000);
+    await expect(settled).resolves.toBeUndefined();
+  });
+
+  it('a cleanup that NEVER settles (the iOS build-25 hang) still resolves at the timeout — login proceeds', async () => {
+    vi.useFakeTimers();
+    const never = new Promise<void>(() => { /* the real bug: signOut pending forever on WKWebView */ });
+    let resolved = false;
+    const settled = settleWithinOrProceed(never, 4000).then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(resolved).toBe(false);        // hasn't fired early
+    await vi.advanceTimersByTimeAsync(2);
+    await settled;
+    expect(resolved).toBe(true);         // proceeded at the cap
+  });
+
+  it('NEVER rejects — a failing cleanup is swallowed so it cannot fail the login', async () => {
+    await expect(settleWithinOrProceed(Promise.reject(new Error('signOut blew up')), 4000))
+      .resolves.toBeUndefined();
+  });
+});
+
+describe('preLoginWebSignOutAllowed — no pre-login web signOut on native (build-27 lock poison)', () => {
+  it('is FORBIDDEN on the native app (a hung web signOut would block signInWithCredential)', () => {
+    expect(preLoginWebSignOutAllowed(true)).toBe(false);
+  });
+
+  it('is ALLOWED on the web (clears a stale session that could wedge the popup; signOut is safe there)', () => {
+    expect(preLoginWebSignOutAllowed(false)).toBe(true);
   });
 });

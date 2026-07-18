@@ -18,13 +18,76 @@ import {
   UserCredential,
 } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { raceNativeAuth } from '../lib/nativeAuthGuard';
+import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { motion } from 'motion/react';
 import { X, AlertCircle, Loader2, Github } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { firebaseConfig } from '../config/firebase';
+import { signOutEverywhere } from '../lib/firebase';
 import { explainAuthReason } from '../lib/authDiagnostics';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn } from './socialSignInPolicy';
+
+/**
+ * Force-logout the old session BEFORE a new login — WEB ONLY, and never let it block the sign-in.
+ *
+ * ROOT-CAUSE FIX — the DEEP one (admin 2026-07-18, TestFlight build 27 sign-in trail):
+ *   07:44:23 clearing any old session…
+ *   07:44:27 opening Google sign-in…          (4s gap = the bounded clear TIMED OUT — signOut hung)
+ *   07:44:37 Google returned — token: YES
+ *   07:44:37 verifying with Firebase…
+ *   07:44:55 failed: sign-in did not complete (18s later — signInWithCredential never ran)
+ * On the iOS WKWebView the web-SDK signOut's persistence write can HANG, and a hung signOut HOLDS Firebase
+ * Auth's internal operation queue — so the `signInWithCredential` that follows is stuck behind it forever
+ * and the login "does not complete". The earlier fix (bounding the wait) let Google OPEN, but the still-
+ * pending hung signOut then poisoned the actual sign-in. i.e. the pre-login force-logout is itself what
+ * breaks native login.
+ *
+ * THE FIX: on the NATIVE app, do NOT sign the web-SDK auth instance out before signing in. The native
+ * sign-in (signInWithCredential / signInWithEmailAndPassword / phone credential) REPLACES the old session
+ * on its own, so a pre-logout is unnecessary there — and it's the thing that was breaking login. On WEB a
+ * stale session can wedge signInWithPopup and signOut is safe (normal IndexedDB), so we keep the bounded
+ * clear there. `preLoginWebSignOutAllowed` encodes this decision (tested); the bound is belt-and-braces.
+ */
+const FORCE_LOGOUT_TIMEOUT_MS = 4000;
+async function forceLogoutBeforeLogin(): Promise<void> {
+  if (!preLoginWebSignOutAllowed(Capacitor.isNativePlatform())) return; // native: never pre-signout (see above)
+  // WEB: bounded + best-effort. settleWithinOrProceed resolves the moment the clear finishes (normal case)
+  // OR after FORCE_LOGOUT_TIMEOUT_MS if it ever stalls, and never throws — so login is never blocked.
+  await settleWithinOrProceed(signOutEverywhere(), FORCE_LOGOUT_TIMEOUT_MS);
+}
+
+/**
+ * DIAGNOSTIC (admin 2026-07-18, iOS TestFlight builds 27 + 28): the native Google sign-in gets the Google
+ * token ("Google returned — token: YES") but `signInWithCredential` then HANGS ~18s and "does not complete".
+ * Because settleNativeSignIn returns 'failed' ONLY when the auth listener never fires, the stall is in the
+ * Identity Toolkit NETWORK call (before the user is ever set), not in the persistence write. This probe hits
+ * a lightweight, unauthenticated Identity Toolkit endpoint (`createAuthUri`) with a hard 10s timeout and
+ * writes the result into the on-screen sign-in trail, so we can SEE whether the WKWebView can even reach
+ * Google's auth backend:
+ *   • "net probe: HTTP 200 in Nms"  → the network is fine; the SDK exchange itself is the stall (deeper bug)
+ *   • "net probe FAILED … TIMEOUT"  → the WebView cannot reach identitytoolkit.googleapis.com → that IS the
+ *                                      root cause (a WKWebView/ATS/network path issue to hunt next)
+ * Diagnostic ONLY — fired in parallel, it never changes or blocks the real sign-in.
+ */
+async function probeAuthNetwork(apiKey: string, mark: (s: string) => void): Promise<void> {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'probe@navbharatai.com', continueUri: 'https://navbharatai.com' }),
+      signal: ctrl.signal,
+    });
+    mark(`net probe: HTTP ${res.status} in ${Date.now() - started}ms`);
+  } catch (e: any) {
+    const why = e?.name === 'AbortError' ? 'TIMEOUT(10s)' : String(e?.message || e).slice(0, 40);
+    mark(`net probe FAILED in ${Date.now() - started}ms: ${why}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
@@ -208,8 +271,12 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setOtpSending(true);
     setError('');
     setSuccessMessage('');
-    
+
     try {
+      // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
+      // automatic force logout") — starting a phone-OTP login clears any lingering session up front, so
+      // the new sign-in (auto- or manual-verify) always lands. Best-effort; never blocks the OTP send.
+      await forceLogoutBeforeLogin(); // bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
       // 1. Verify and reserve request through the backend security rate limits
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
@@ -332,6 +399,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     setError('');
     setLoading(true);
     try {
+      // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "kisi bhi id se login … old session
+      // automatic force logout") — on WEB only. On the native app the pre-login web signOut can hang and
+      // poison the sign-in (see forceLogoutBeforeLogin); the sign-in that follows replaces the old session.
+      if (!Capacitor.isNativePlatform()) mark('clearing any old session…');
+      await forceLogoutBeforeLogin(); // web-only + bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
       // The same no-hang guarantee as social sign-in: an unanswered auth request surfaces an honest
       // timeout instead of an endless spinner (iPhone report 2026-07-17 — the spinner sat on THIS button).
       if (isLogin) {
@@ -403,6 +475,14 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   // (Previously cancel/double-tap ALSO force-navigated the whole page to Google — the
   // "login is not smooth" jolt the admin reported.)
   const socialSignIn = async (provider: AuthProvider, onCredential?: (r: UserCredential) => void): Promise<'ok' | 'cancelled' | 'redirecting'> => {
+    // FORCE-LOGOUT THE OLD SESSION FIRST (admin 2026-07-18: "jab koi user kisi bhi id se login kare, to
+    // old session automatic force logout ho jana chahiye"). Every login — any account, any method — starts
+    // by clearing a lingering/half-dead session that could wedge the WEB popup. WEB ONLY: on the native app
+    // the pre-login web signOut can HANG and hold Firebase Auth's queue, blocking the very signInWithCredential
+    // that follows — the build-27 "verifying with Firebase… → sign-in did not complete" failure. The native
+    // sign-in replaces the old session on its own, so we skip the pre-logout there (see forceLogoutBeforeLogin).
+    if (!Capacitor.isNativePlatform()) mark('clearing any old session…');
+    await forceLogoutBeforeLogin(); // web-only + bounded — never blocks the sign-in (see forceLogoutBeforeLogin)
     // NATIVE app + Google/Apple → use the device's NATIVE sign-in, NOT the web popup/redirect.
     // Google disallows OAuth inside embedded WebViews (the web flow opens an external browser and
     // breaks on return with "missing initial state"), and Apple's Sign in with Apple is a native
@@ -412,16 +492,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     const providerId = (provider as { providerId?: string })?.providerId;
     const isGoogle = providerId === GoogleAuthProvider.PROVIDER_ID;
     const isApple = providerId === 'apple.com';
-    if (Capacitor.isNativePlatform() && (isGoogle || isApple)) {
+    const isGithub = providerId === GithubAuthProvider.PROVIDER_ID;
+    if (Capacitor.isNativePlatform() && (isGoogle || isApple || isGithub)) {
       try {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-        // STALE-SESSION CLEAR (admin's own diagnosis 2026-07-17: "logout dikhta hai par hua nahi") —
-        // a half-dead previous session (plugin- or SDK-side) can wedge a fresh sign-in. The user is at
-        // the login screen, so clearing both layers first is always safe and gives GIDSignIn/Firebase a
-        // clean slate. Best-effort: a signOut failure must never block the sign-in itself.
-        mark('clearing any stale session…');
-        try { await FirebaseAuthentication.signOut(); } catch { /* no native session — fine */ }
-        try { await auth.signOut(); } catch { /* no web session — fine */ }
         let credential;
         if (isGoogle) {
           mark('opening Google sign-in…');
@@ -440,6 +514,30 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             );
           }
           credential = GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken);
+        } else if (isGithub) {
+          mark('opening GitHub sign-in…');
+          // GitHub on the app (admin 2026-07-18: "github login bhi fix karo"): the web popup flow cannot
+          // run inside the WebView (same class as Google — embedded-webview OAuth is blocked/hangs), so use
+          // the plugin's NATIVE GitHub flow (the Firebase iOS/Android SDK opens an in-app browser sheet).
+          // Same scopes as the web flow so the token can fully drive repo connect (repo/workflow/identity).
+          const nativeResult = await raceNativeAuth(
+            FirebaseAuthentication.signInWithGithub({
+              scopes: ['repo', 'workflow', 'read:user', 'user:email'],
+              customParameters: [{ key: 'allow_signup', value: 'true' }],
+            }),
+            'GitHub sign-in timed out — please try again.',
+          );
+          const accessToken = nativeResult.credential?.accessToken;
+          mark(`GitHub returned — token: ${accessToken ? 'YES' : 'NO'}`);
+          if (!accessToken) {
+            throw new Error(
+              'Native GitHub sign-in returned no access token — check that the GitHub provider is enabled in Firebase.',
+            );
+          }
+          credential = GithubAuthProvider.credential(accessToken);
+          // The GitHub OAuth token powers repo connect — store it exactly like the web flow's
+          // captureGithubToken does (credentialFromResult may not see it on a credential exchange).
+          try { localStorage.setItem('gh_token', accessToken); } catch { /* best-effort */ }
         } else {
           mark('opening Apple sign-in…');
           // Apple: the plugin returns an Apple identity token + the raw nonce it used; Firebase's
@@ -461,6 +559,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           const appleProvider = new OAuthProvider('apple.com');
           credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
+        // DIAGNOSTIC (build 29): fire a parallel, timed reachability probe to Google's auth backend so the
+        // trail shows whether the WebView can reach identitytoolkit at all (see probeAuthNetwork). Never awaited.
+        void probeAuthNetwork(firebaseConfig.apiKey, mark);
         mark('verifying with Firebase…');
         // Exchange the native credential into the Firebase JS SDK, but NEVER let a stalled WKWebView
         // persistence write hang the login spinner forever (the "stuck after returning from Google" bug,
@@ -468,7 +569,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         // when the session actually landed via the auth listener — else it reports a clean failure.
         // (The on-screen trail marks each hop so a stuck attempt shows exactly where it stopped.)
         let result: UserCredential | null = null;
-        const exchange = signInWithCredential(auth, credential).then((r) => { result = r; });
+        const exchange = signInWithCredential(auth, credential).then(
+          (r) => { result = r; },
+          (e) => { mark(`exchange error: ${String(e?.code || e?.message || e).slice(0, 60)}`); throw e; }, // surface the REAL reason (was swallowed)
+        );
         const outcome = await settleNativeSignIn(exchange, auth, 15000, 3000);
         if (outcome === 'failed') {
           mark('failed: sign-in did not complete');
@@ -476,6 +580,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         }
         mark(`Firebase ✓ signed in${result ? '' : ' (via session listener)'}`);
         if (result) onCredential?.(result);
+        // Flip the APP UI to logged-in DIRECTLY from the sign-in result — never depend solely on the
+        // onAuthStateChanged broadcast. ROOT CAUSE (build 30): the auth listener only fires AFTER the
+        // SDK's session-save await, so a stalled persistence write left a fully-signed-in user looking
+        // logged OUT (modal closed, header still "LOGIN"). The persistence fix (localStorage on native,
+        // lib/firebase.ts) kills the stall itself; this makes the UI honest even if a save ever lags again.
+        const signedInUser = (result as UserCredential | null)?.user ?? (auth as { currentUser?: unknown }).currentUser ?? null;
+        if (signedInUser) setUser(signedInUser);
         onClose();
         return 'ok';
       } catch (nativeErr: any) {
@@ -491,6 +602,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
     }
     try {
+      // (The old session was already fully cleared by signOutEverywhere() at the top of socialSignIn.)
       const result = await signInWithPopup(auth, provider);
       onCredential?.(result);
       onClose(); // success — App.tsx onAuthStateChanged also closes/syncs state
@@ -612,6 +724,20 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           return false;
         }
         signedIn = await signInWithEmailAndPassword(auth, email, password);
+      } else if (Capacitor.isNativePlatform()) {
+        // NATIVE: verify ownership via the plugin's native Google sheet (the web popup cannot run in the
+        // WebView, and the native auth instance deliberately has no popup resolver — see lib/firebase.ts).
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        const nativeResult = await raceNativeAuth(
+          FirebaseAuthentication.signInWithGoogle(),
+          'Google verification timed out — please try again.',
+        );
+        const idToken = nativeResult.credential?.idToken;
+        if (!idToken) throw new Error('Google verification returned no token — please try again.');
+        signedIn = await signInWithCredential(
+          auth,
+          GoogleAuthProvider.credential(idToken, nativeResult.credential?.accessToken),
+        );
       } else {
         const g = new GoogleAuthProvider();
         g.setCustomParameters({ login_hint: email });

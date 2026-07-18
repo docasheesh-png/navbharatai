@@ -21,11 +21,30 @@
 #   Repo → Actions → "Build Android App Bundle (.aab, signed)" → Run workflow (main).
 #   When it finishes, download the `navbharatai-release-aab` artifact → upload app-release.aab to
 #   Play Console (first time: create the app, enroll in Play App Signing — recommended).
+#
+# OPTIONAL — AUTO-PUBLISH TO PLAY (skip the manual download+upload):
+#   Check the "upload_to_play" box when running the workflow and the freshly-signed .aab is pushed
+#   straight to Google Play's INTERNAL testing track. One-time setup (all on the web — no Mac/CLI):
+#     A. Google Play Console → Setup → API access → link (or create) a Google Cloud project, then create
+#        a SERVICE ACCOUNT and grant it access. In Play Console → Users and permissions → invite the
+#        service-account email with at least "Release to testing tracks" (Admin is simplest to start).
+#     B. Google Cloud Console → that service account → Keys → Add key → JSON → download the key file.
+#     C. Repo → Settings → Secrets and variables → Actions → add ONE secret:
+#          PLAY_SERVICE_ACCOUNT_JSON = the entire contents of that downloaded JSON key file.
+#   With the secret set + the box checked, the build auto-publishes to the internal track (versionCode
+#   auto-increments per run). Leave the box UNCHECKED (default) to just build the downloadable artifact —
+#   behaviour is then exactly as before. If the box is checked but the secret is missing, the run fails
+#   EARLY with a clear message (it never silently skips the upload).
 
 name: Build Android App Bundle (.aab, signed)
 
 on:
   workflow_dispatch:
+    inputs:
+      upload_to_play:
+        description: 'After building, upload the .aab straight to Google Play (internal testing track). Requires the PLAY_SERVICE_ACCOUNT_JSON secret (see the header for the one-time setup). Leave OFF to just build the downloadable artifact.'
+        type: boolean
+        default: false
 
 jobs:
   build-aab:
@@ -52,6 +71,20 @@ jobs:
             exit 1
           fi
           echo "All signing secrets present."
+
+      # Only when the run asked to upload: fail EARLY and honestly if the Play service-account secret is
+      # missing, instead of building for minutes then dying at the upload step. When upload is OFF (default)
+      # this is skipped entirely and the workflow behaves exactly as before (artifact only).
+      - name: Pre-flight — require the Play service-account secret (only when uploading)
+        if: ${{ inputs.upload_to_play }}
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::upload_to_play is ON but PLAY_SERVICE_ACCOUNT_JSON is not set. Add it in Settings → Secrets and variables → Actions (see this workflow's header for the one-time service-account setup), or re-run with upload_to_play unchecked to just build the downloadable artifact."
+            exit 1
+          fi
+          echo "Play service-account secret present — will upload to the internal track after the build."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -114,10 +147,36 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
+      # OPTIONAL auto-publish: push the freshly-signed .aab straight to Google Play's INTERNAL testing
+      # track. Runs ONLY when the run requested it (upload_to_play) — the pre-flight above already proved
+      # the PLAY_SERVICE_ACCOUNT_JSON secret is present, so this never dies half-way. Play App Signing
+      # re-signs with the app signing key on upload, so the upload-key-signed .aab is exactly what Play
+      # expects. Track = internal (safest — visible only to your internal testers); promote to
+      # closed/production from the Play Console UI. status = completed (the release is live to that track).
+      # SECURITY NOTE: this third-party action receives the Play service-account JSON, so it is pinned to a
+      # full commit SHA (not a mutable tag) for supply-chain safety. The maintained action is
+      # `r0adkll/upload-google-play` — a prior wrong slug (`r0adz0/...`, which does not exist) made GitHub
+      # fail to RESOLVE this step and broke EVERY run of this workflow, because Actions resolves every
+      # `uses:` up front regardless of the `if:` guard — so even artifact-only builds (upload_to_play=false)
+      # died before starting. Pinned to v1.1.5.
+      - name: Upload to Google Play (internal track)
+        if: ${{ inputs.upload_to_play }}
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.navbharat.ai
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+
       - name: Summary
         run: |
           echo "## NavBharatAI signed .aab built ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download the **navbharatai-release-aab** artifact above and upload \`app-release.aab\` to Google Play Console." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.upload_to_play }}" = "true" ]; then
+            echo "🚀 **Auto-uploaded to Google Play** (internal testing track) via the service account. Open Play Console → Testing → Internal testing to see the new release, then promote it when ready." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Download the **navbharatai-release-aab** artifact above and upload \`app-release.aab\` to Google Play Console. (Tip: re-run with **upload_to_play** checked to publish automatically once \`PLAY_SERVICE_ACCOUNT_JSON\` is set.)" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "versionCode = ${{ github.run_number }} (auto-increments each run, as Play requires). Hosted mode: the app loads https://navbharatai.com — auth and all features work unchanged." >> "$GITHUB_STEP_SUMMARY"

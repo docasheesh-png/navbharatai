@@ -198,6 +198,39 @@ export class FirestoreConversationStore implements ConversationStore {
     await ref.set(this.patchToMeta(patch), { merge: true });
   }
 
+  async truncateMessages(id: string, keepCount: number, patch: ConversationPatch): Promise<void> {
+    const ref = this.mainDoc(id);
+    await this.db.runTransaction(async (tx) => {
+      // ALL reads before ANY write (Firestore transaction rule).
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error(`ConversationStore: unknown conversation id "${id}"`);
+      const turnsSnap = await tx.get(this.turnsCol(id).orderBy('seq'));
+      const keep = Math.max(0, keepCount);
+      let acc = 0; // flattened messages surviving so far
+      let lastSurvivingSeq = -1;
+      for (const d of turnsSnap.docs) {
+        const data = d.data() as { seq: number; messages?: unknown[]; ts?: number };
+        const msgs = data.messages ?? [];
+        if (acc >= keep) {
+          tx.delete(d.ref); // this whole turn-doc is past the boundary → drop it
+          continue;
+        }
+        if (acc + msgs.length <= keep) {
+          acc += msgs.length; // whole doc survives
+          lastSurvivingSeq = data.seq;
+          continue;
+        }
+        // Boundary falls INSIDE this doc — keep only its head slice.
+        tx.set(d.ref, { seq: data.seq, messages: msgs.slice(0, keep - acc), ts: data.ts ?? patch.updatedAt });
+        acc = keep;
+        lastSurvivingSeq = data.seq;
+      }
+      // Fix the monotonic seq + count so a future append lands after the survivors, never resurrecting
+      // a deleted doc or leaving a gap.
+      tx.set(ref, { ...this.patchToMeta(patch), nextSeq: lastSurvivingSeq + 1, messageCount: acc }, { merge: true });
+    });
+  }
+
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
     if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     const cap = Math.max(0, limit);

@@ -17681,6 +17681,39 @@ can still read optimistically on this path — a follow-up should reconcile the 
 
 ---
 
+## 2026-07-18 — Fix (1 of 2): frontend SYNTAX LOCATOR — stop the "count the <div> tags" flail
+
+**Trigger:** report `e0db3243` ("slidebar menu banao"). The builder KNEW there was a syntax error but
+couldn't find WHERE, so it spent ~40 steps / 5 minutes hand-counting `<div>` tags with grep/awk/python
+(writing broken one-liners that themselves errored) and never converged — burning the whole step budget.
+
+**Root cause (two parts):**
+1. The `typecheck` TOOL the model could call **skipped TS/JSX entirely** ("TS is already covered by the
+   tsc gate") — so calling it on a JSX parse error returned "no Python or Java sources… nothing to check."
+   And the raw `tsc | head` the model ran by hand masks the exit code and never crisply pinpoints a tag
+   imbalance. So the model had NO reliable syntax-error locator and resorted to counting tags.
+2. **A duplicate-shadow bug:** there were TWO `case 'typecheck':` in the SAME dispatcher switch (line 928).
+   The FIRST (Python/Java-only, skips TS) shadowed the SECOND (the better TS+Python+Java+Go handler),
+   making the better one DEAD, unreachable code (same class as the earlier duplicate `typecheck` tool DEF).
+
+**Fix (`ToolDispatcher.ts` + `ToolCatalog.ts`):**
+- Enhanced the ACTIVE `typecheck` handler to run `findSyntaxErrors` (esbuild, in-process) on the frontend
+  JS/TS/JSX/TSX files (bounded to 20) and surface the EXACT `file:line:column` of every unparseable file
+  FIRST: "SYNTAX ERROR(S) — fix these EXACT locations (do NOT hand-count tags/braces): …". Best-effort;
+  never breaks the tool; still runs the Python/Java checks after.
+- Removed the dead shadowed second `typecheck` handler + its now-unused `crossLangCheck` imports.
+- Rewrote the `typecheck` tool DESCRIPTION so the model reaches for it to LOCATE a compile/syntax error
+  ("gives you the precise location in one step … NEVER hand-count `<div>` tags or braces with grep/awk").
+
+**Regression tests (`ToolDispatcher.test.ts`):** `typecheck` on an App.tsx with a duplicate declaration
+returns the exact file + cause + the "do NOT hand-count" steer; a clean file reports frontend-clean.
+Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Next (2 of 2):** the rate-limit PACER (token-bucket per key + AIMD) — GLM timed out 23× in this same
+build and defeated the endgame repair; the pacer keeps requests under the limit so that stops happening.
+
+---
+
 ### 2026-07-18 — Unused-dependency detection (advisory) — next honest gap → [LIVE] (PR #1503)
 
 Continued closing the Vol 10 §3 backlog. Added `findUnusedDependencies` to
@@ -17768,3 +17801,163 @@ peer conflict can't silently kill the dev server. 4 regression tests. Full suite
 (new prisma.config.ts format + ESM seed crash); WELL_KNOWN_DEPS pins @prisma/client/prisma to ^5 for the
 reconciler path, but an agent-typed bare `npm install @prisma/client` still pulls v7. A Prisma-v7-aware
 scaffold/guard is the next slice. Also: GLM 429/timeout storm again (52 failures) — proactive-pacer still the path.
+## 2026-07-18 — Offline AI enhanced: typo-tolerant retrieval + related hops + starter chips
+
+Admin: "Offline ai, ko aur enhance karo!" — the Offline AI is the 100% on-device app guide
+(`src/lib/offlineAssistant.ts` retrieval + `src/components/offline/OfflineAI.tsx` UI), grounded entirely
+in `AppKnowledgeBase` (183 entries). Because it runs offline, there is NO server fallback — any query the
+exact matcher misses was a dead end. Enhanced with real, tested, additive improvements:
+
+- **Typo-tolerant fuzzy fallback** (`editDistance` bounded Levenshtein + `fuzzyTokenHit`): near-miss words
+  like "databse" / "walet" / "deploi" now still find the right feature. Scored at 1.5 — strictly BELOW an
+  exact single-keyword hit (2) — so it is a pure recovery tier: every query that already worked ranks
+  identically. Gibberish still returns an honest "none" (no over-matching).
+- **Description scoring bugfix (root cause)**: the code comment claimed "word-boundary hit" but used
+  `descr.includes(w)` (substring) — so "star" falsely matched inside "restart". Now a real word-boundary
+  token check. This dropped one stale substring point on the Billing entry, which exposed a latent tie…
+- **Coverage tie-breaker** (`matchCoverage`): on a score tie, the feature covering MORE of the user's
+  distinct words wins (breadth of relevance), instead of the previous accidental tie-break by KB position.
+  Fixes "where is the wallet and billing" → now surfaces Billing (matches wallet+billing), not the Offline
+  AI's own entry (which only caught the generic word "where").
+- **Related-feature chips** (`relatedFeaturesOf`): each result now shows its real related KB features as
+  one-tap chips — hop across connected screens without retyping. Drops dangling ids, never self, real data.
+- **Starter/recovery suggestion chips** (`SUGGESTED_QUERIES`): a blank box or empty result now always
+  offers a real next tap; every suggestion is verified to resolve to a non-empty KB result.
+
+KB sync: updated the `offline_ai` entry description for the new user-facing capabilities (per the
+AppKnowledgeBase rule). Tests: 10 new cases in `src/lib/offlineAssistant.test.ts` (editDistance, typo
+recovery, fuzzy-never-outranks-exact, gibberish-still-none, word-boundary, relatedFeaturesOf, coverage
+tie-break, suggestions resolve). Gate: frontend tsc ✓, server tsc ✓, full vitest 7306 passed ✓.
+
+## 2026-07-18 — Offline AI now answers small questions offline (real, deterministic — no fake brain)
+
+Admin: "kya offline ai question ke answer kar sakta hai? chhoti moti question ka offline answer aa jaye."
+The Offline AI was retrieval-only (feature guide) — typing "2+2" or "hi" returned "not found", and general
+questions falsely matched a random feature. Added an on-device QUICK-ANSWER layer in `offlineAssistant.ts`
+that answers small questions the device can GENUINELY compute with no model and no network. Honest by
+construction (absolute rules 2 & 3): every answer is a true computation or a fixed statement about the
+app — open-knowledge ("capital of France") is deliberately NOT answered here and honestly points online.
+
+- **Math** (`evalArithmetic` — a real recursive-descent parser, NOT eval()/new Function() which the
+  builder's own security scan forbids): "2+2"=4, "2+3*4"=14 (precedence), "(12*5)/4"=15, "2^10"=1024,
+  "15% of 200"=30, word forms ("100 divided by 4", "12 times 3"), divide-by-zero → honest calc error.
+  A math-shaped query NEVER falls through to "feature not found".
+- **Date / time / day** from the device clock (`now` injected for pure testability): "what is the date"
+  → "Today is Saturday, 18 July 2026"; "what time is it" → "It's 6:04 AM".
+- **Greeting / thanks / identity**: "hi", "namaste", "thank you", "who are you" → branded NavBharatAI
+  replies (white-label: a regression test asserts no provider/model name — claude/gpt/gemini/glm/kimi/…
+  — ever leaks). A sentence merely containing "hi" is NOT treated as a greeting.
+- Retrieval still handles feature questions unchanged; the "none" copy now honestly offers the offline
+  quick-answers and points general questions online.
+
+UI (`OfflineAI.tsx`): a distinct emerald answer card (calculator/clock/chat icon by category); intro,
+placeholder and the `offline_ai` KB entry updated for the new capability (+ keywords: calculator, date,
+time, hisaab, quick answer). Tests: +6 cases (arithmetic engine, math answers, math-never-not-found,
+date/time from injected clock, greeting/identity white-label, no-hijack of feature/general questions).
+Gate: frontend tsc ✓, server tsc ✓, offlineAssistant 24/24 ✓ (full suite: 7311 passed; the 1 red is the
+pre-existing flaky AIRouter jitter test — passes in isolation, unrelated to this change).
+
+## 2026-07-18 — Offline AI: user can TEACH it (on-device memory, "jo bole woh yaad rakhe")
+
+Admin: "kya user khud train kar sakta hai? jo bhi bate kare woh yaad rakh kar." HONEST framing (rule 3):
+real ML training is impossible offline on-device — so this is NOT faked as "training". Built the real,
+fully-offline thing that delivers the intent: a DETERMINISTIC user-taught memory, stored ON THIS DEVICE
+ONLY (localStorage, never uploaded), recalled EXACTLY (zero hallucination — it only ever repeats what the
+user taught).
+
+- **Teach in plain language** (`offlineMemory.ts` `parseTeaching`, committed on Enter):
+  "remember my gate code is 4821" / "note: …" / "yaad rakho ki …" (free-text fact);
+  "when I ask X answer Y" / "jab main X puchu to Y" (explicit Q→A);
+  "json means …" / "X ka matlab Y" (definition). Guards: a math equation ("2+2=4") and a plain question
+  ("iska matlab kya hai") are NOT treated as teaching.
+- **Recall** (`offlineAssistant.ts` `recallMemory`/`scoreMemory`, wired into `answerOffline` as a new
+  `answerKind:'memory'`): a fact recalls by keyword (typo-tolerant), a Q→A by its trigger. Deterministic —
+  returns the stored text verbatim; unrelated queries never surface a secret (threshold-gated, no fuzzy
+  over-reach). Priority: real math/date > taught memory > app-feature retrieval.
+- **Persistence & safety**: `loadMemories`/`saveMemories` (injectable storage, corruption-safe: malformed
+  or wrong-shape blobs → []); immutable `addMemory` (same-trigger Q→A replaces, identical facts de-dup),
+  capped at 500 items / 2000 chars; `removeMemory`. No dependency cycle — write side in `offlineMemory.ts`,
+  read side (types + recall) in `offlineAssistant.ts`; ONE shared tokenizer/fuzzy (re-exported).
+- **UI** (`OfflineAI.tsx`): the box doubles as a teach box — a live "Press ↵ Enter and I'll remember this"
+  hint when the text is a teaching command, a green "Got it — saved on this device only" confirmation, a
+  🧠 recalled-memory answer card, and a "Things you've taught me (N)" panel to review/delete each item or
+  forget everything. KB `offline_ai` entry + keywords (teach/train/remember/yaad rakho/memory/forget)
+  updated.
+
+Tests: new `offlineMemory.test.ts` (13 cases: parse fact/qa/definition, reject math+questions, keyword
+extraction, immutable add/replace/dedup/cap, remove, exact recall, deterministic no-over-reach, memory
+never beats math, load/save round-trip + corruption safety) + a recall case in the assistant suite. Gate:
+frontend tsc ✓, server tsc ✓, FULL vitest 7325 passed ✓ (flaky AIRouter test green this run too).
+
+## 2026-07-18 — Offline AI: UI/UX beautified (gradient design pass, logic untouched)
+
+Admin: "UI aur UX ko aur enhance aur beautiful bana ke" + merge. Presentation-only pass on
+`OfflineAI.tsx` (all pure logic in offlineAssistant/offlineMemory unchanged): gradient hero header with
+ambient radial glow + gradient-clip title, a pulsing live on-device/offline status dot, an intro card with
+capability pills (Find features · Calculate · Date & time · Remember), a focus-glow search/teach box that
+flips its icon to a Brain + shows a "↵ Save" affordance when the text is a teaching command, gradient
+emerald answer cards (math result in mono; a "You taught me this" ribbon for recalled memory), a violet
+teach-hint + emerald saved-confirmation with entrance animations, staggered fade/slide-in feature cards
+with numbered step chips and gradient "Open" buttons, and a polished violet "Things you've taught me"
+panel. Only proven in-app animation utilities used (`animate-in fade-in slide-in-from-*`); fixed two
+non-standard classes (`w-4.5`, `WifiOff` not exported). Gate: frontend tsc ✓, server tsc ✓, full vitest
+7325 ✓, and a real `vite build` ✓ (OfflineAI stays its own lazy chunk). Shipping via PR → CI green → merge.
+
+## 2026-07-18 — Offline AI: phone-settings help (device-aware, offline, honest)
+
+Admin: "offline AI ko phone ke baare me aware kar sakte hai? user ko phone settings me problem hai to sab
+bata de." Built a bundled, 100%-offline Phone/Device Help knowledge base (`deviceKnowledgeBase.ts`, ~29
+entries across Connectivity, Location, Notifications, Battery, Storage, Permissions, Display, Sound, Apps,
+System, Security, Account) with real generic-Android step-by-step fixes. HONEST SCOPE (rules 2 & 3): it
+GUIDES — it does NOT read or change the phone's actual settings (a web/Capacitor app can't), never fakes a
+device state, and flags brand variance + destructive steps (factory reset carries an erases-everything
+warning) via each entry's `note`, surfaced as an amber banner + per-card note in the UI.
+
+- Retrieval: `scoreDeviceHelp`/`searchDeviceHelp` in `offlineAssistant.ts` (imports the data KB → no
+  cycle), reusing the shared tokenizer + typo tolerance. Precision-tuned: keyword/title signal only (no
+  generic title-word scoring), inclusion threshold score ≥ 2 → phone queries hit the right fix, ordinary
+  app queries ("database", "how do i deploy", "what can this app do") get ZERO device matches. When device
+  help matches, weak app-feature matches (score < 4) are suppressed so the phone fix stays front-and-centre.
+- `answerOffline` now returns `deviceMatches`; priority unchanged (math/date > taught memory > results),
+  device help joins the results path alongside strong feature matches.
+- UI: a distinct sky-themed "Phone help" section with an honest "I can't change your phone's settings
+  myself / names vary by brand" banner, numbered step cards, category badges, amber warning notes. Added
+  Phone-help capability pill + two phone starter chips (Wi-Fi not working, Battery draining).
+- KB `offline_ai` entry + keywords updated (phone help / settings problem / wifi / battery …).
+
+Tests: +3 cases in `offlineAssistant.test.ts` (common problems resolve to the right entry with steps;
+typo-tolerant but no misfire on app/nav queries; factory-reset honest warning). Gate: frontend tsc ✓,
+server tsc ✓, full vitest 7328 ✓, vite build ✓.
+## 2026-07-18 — Fix (2 of 2): proactive rate-limit PACER (token-bucket + AIMD), flag-gated
+
+**Trigger:** report `e0db3243` — GLM failed 23× with "Request timed out", which defeated the endgame
+repair (16 compile errors left unfixed) and pushed the build into its step cap. The existing 429 handling
+is REACTIVE (fire → get 429/timeout → back off + rotate keys), which wastes a full round-trip per throttle
+and lets a burst of parallel calls stampede a provider into a timeout storm.
+
+**Fix (`RateLimitPacer.ts` + a `pacedRunner` decorator, default-OFF):** a proactive layer with a PURE,
+clock-injected, fully-unit-tested core:
+- **TokenBucket** per provider — paces requests to stay UNDER the provider's per-second rate, so most 429s
+  never happen (no wasted request+backoff).
+- **AimdConcurrency** — additive-increase / multiplicative-decrease: on a 429/timeout it HALVES concurrency
+  (fewer parallel calls → the provider recovers, timeouts stop), on sustained success it slowly ramps back
+  up. Self-tunes to the provider's real capacity, no manual config (the same control law TCP uses).
+- `isThrottleSignal` classifies 429/529/408 + timeout/overload/econnreset as back-off signals.
+- `RateLimitPacer.run(fn)` is the only impure part (real clock + a bounded in-flight gate); it NEVER
+  changes `fn`'s result — a thrown error propagates unchanged so the chain's reactive backoff/rotation
+  still handles a real failure. One shared pacer PER PROVIDER (module registry) so all concurrent builds
+  pace against the same bucket (global pacing).
+
+**Wiring:** a `pacedRunner(inner, providerKey)` decorator (mirrors `forceModelRunner`/`sizeGatedRunner`)
+wraps each cheap-floor (GLM/Kimi) runner in `cheapBuildFloorRunners`, keyed by the base provider name.
+**DEFAULT-OFF** — a no-op passthrough unless `AGENTV3_RATE_PACER=on`, so wiring it changes nothing until
+the flag flips (safe, canary-able rollout; never removes the reactive backoff). Config is env-tunable
+without a deploy: `AGENTV3_PACER_RATE_PER_SEC` (8), `_BURST` (8), `_MIN/_MAX_CONCURRENCY` (2/8).
+
+**Tests:** `RateLimitPacer.test.ts` (11) — bucket burst+refill+cap, AIMD halve-to-floor + additive
+recovery-to-ceiling, throttle classification, flag/config, `run` returns result + backs off only on a
+throttle. `MultiProviderTurnRunner.test.ts` (+3) — `pacedRunner` passthrough when off, paces when on,
+re-throws unchanged. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Rollout note:** flip `AGENTV3_RATE_PACER=on` (canary) once, watch a few real builds' `deliveredVia` +
+timeout rate, then widen. Both admin-requested fixes (syntax-locator #1, pacer #2) now shipped.

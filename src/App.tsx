@@ -65,13 +65,14 @@ import { triggerCashfreeCheckout } from './services/paymentService';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, getRedirectResult, GithubAuthProvider, User as FirebaseUser, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from './config/firebase';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
 // initializeApp there with a stale JSON config either crashed with app/duplicate-app or, load-order
 // depending, put the WRONG cross-origin authDomain on the default app — silently breaking the first
 // Google sign-in). Re-exported here so every existing `import { auth, db } from './App'` still works.
-import { auth, db } from './lib/firebase';
+import { auth, db, signOutEverywhere } from './lib/firebase';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
 
@@ -1053,6 +1054,10 @@ export default function App() {
     // that started it is gone on return — getRedirectResult MUST run here at the app
     // root to complete it. For a GitHub redirect we also capture the OAuth token so
     // NavBharatAI can connect to the user's repos.
+    // WEB ONLY: the native app never uses the redirect flow (it signs in via the native plugin), and its
+    // auth instance is deliberately created WITHOUT the popup/redirect resolver (src/lib/firebase.ts —
+    // the WKWebView init-hang root fix), so calling getRedirectResult there would throw on every launch.
+    if (Capacitor.isNativePlatform()) return;
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
@@ -3182,7 +3187,7 @@ export default function App() {
                 // IndexedDB ONLY when signOut hangs, and AWAITS that delete before reload,
                 // so the next login's persistence is never corrupted.
                 await performSignOut({
-                  signOut: () => signOut(auth),
+                  signOut: () => signOutEverywhere(), // clears the NATIVE plugin session too (app), not just the web SDK
                   clearStorage: defaultClearAuthStorage,
                   // The GitHub connection must NOT outlive the session — else the next user on this
                   // browser would inherit it (and see/push to this user's GitHub account).

@@ -11,14 +11,69 @@
 // App.tsx re-exports from here so every existing `import { auth } from './App'` keeps working.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, initializeAuth, setPersistence, browserLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from '../config/firebase';
 
 export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
-export const auth = getAuth(app);
-// Persist sessions in localStorage (explicit, though the default is already durable). Fire-and-forget
-// by design — both the default (indexedDB) and this are durable, so a pending switch never loses a
-// sign-in; a failure (private mode) just keeps the default and is logged, never thrown.
-setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('[firebase] setPersistence failed (keeping default persistence):', e?.message || e));
+
+// ROOT-CAUSE FIX — iOS "Google returned token: YES → verifying with Firebase… → never completes"
+// (admin 2026-07-18, TestFlight builds 25–29). The build-29 diagnostic PROVED the network is fine
+// (`net probe: HTTP 200 in 1171ms` to identitytoolkit) and that `signInWithCredential` neither resolves
+// NOR rejects. That signature is the well-known Firebase JS SDK ✕ Capacitor WKWebView incompatibility:
+// `getAuth()` wires the DEFAULT browser integrations (the popup/redirect resolver with its hidden iframe
+// to authDomain + browser persistence heuristics), and inside a `capacitor://localhost` WebView that
+// machinery can never finish initializing — so the auth instance's internal operation queue never opens,
+// and EVERY sign-in op (Google credential exchange, email, phone) queues behind it forever: no error,
+// no result, an eternal "verifying with Firebase…". This is exactly why the failure survived all three
+// call-site fixes (#1512/#1515/#1516) — the defect is in how the auth INSTANCE is created, not in any flow.
+//
+// The Capacitor recipe: on NATIVE, create the instance with `initializeAuth` — explicit persistence and
+// NO popupRedirectResolver (native sign-in uses the plugin + signInWithCredential; it never needs the
+// popup/redirect iframe). WEB is byte-for-byte unchanged: `getAuth` + the localStorage preference.
+//
+// PART 2 of the root fix — WHY localStorage and NOT indexedDB on native (build 30 evidence, admin
+// 2026-07-18): with the init fixed, build 30 got a real step further — the Google exchange SUCCEEDED
+// (auth.currentUser was set, the modal auto-closed via the settle guard's currentUser check) but the app
+// STILL showed logged-out and nothing survived a relaunch. That is the signature of the session-SAVE
+// hanging: the SDK sets currentUser, then AWAITS persistence.setCurrentUser(user), and only THEN notifies
+// onAuthStateChanged listeners. On iOS, WebKit suspends IndexedDB transactions when the WebView is
+// backgrounded — and the native Google/Apple/GitHub sheet does exactly that — so the IDB write wedges,
+// the listener notification never fires, and the UI/session never learn about the successful login.
+// localStorage is synchronous and immune to that suspension, so the save completes and onAuthStateChanged
+// fires normally. (Tradeoff, stated honestly: sessions stored under the old IDB key are not read anymore —
+// one extra login after this update, on a path that was broken anyway.)
+export const auth = Capacitor.isNativePlatform()
+  ? initializeAuth(app, { persistence: browserLocalPersistence })
+  : getAuth(app);
+// WEB ONLY: persist sessions in localStorage (explicit, though the default is already durable).
+// Fire-and-forget by design — both the default (indexedDB) and this are durable, so a pending switch
+// never loses a sign-in; a failure (private mode) just keeps the default and is logged, never thrown.
+// (On native the persistence was fixed at init above — never enqueue extra ops on the native instance.)
+if (!Capacitor.isNativePlatform()) {
+  setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('[firebase] setPersistence failed (keeping default persistence):', e?.message || e));
+}
 export const db = getFirestore(app, firebaseConfig.firestoreDbId);
+
+/**
+ * FULL client sign-out — clears the session on EVERY layer, so "logout" truly logs out.
+ *
+ * ROOT-CAUSE FIX (admin 2026-07-18: "app me bhi logout hota hi nahi"): in the Capacitor app the sign-in
+ * runs through the NATIVE `@capacitor-firebase/authentication` plugin, which holds its OWN session
+ * (GIDSignIn on iOS / Google Sign-In on Android) ON TOP of the web SDK's. `performSignOut` only cleared
+ * the web SDK (`signOut(auth)`), so the native plugin session lingered — the user looked logged out but a
+ * stale native session survived (and only got cleared by the NEXT sign-in). This signs out the native
+ * plugin first (app only — the dynamic import never loads on web), THEN the web SDK, so logout is complete
+ * on both app and browser. Best-effort on the native leg: a plugin signOut failure must never block the
+ * web signOut that actually flips the app to logged-out.
+ */
+export async function signOutEverywhere(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+      await FirebaseAuthentication.signOut();
+    } catch { /* no native plugin session (or web) — fine */ }
+  }
+  await fbSignOut(auth);
+}

@@ -17551,3 +17551,40 @@ the single-entry no-false-positive + commented-out + ok=false cases. Gate: serve
 green. Complements #68 (the ShopKhata dev-server ESM fix) — together they close the two structural halves
 of the ShopKhata monorepo defect. (The full-stack LAYOUT CONTRACT that PREVENTS the monorepo split
 remains task #64, open.)
+
+---
+
+## 2026-07-18 — Build-killer autopsy: duplicate tool name → hard 400 killed the whole provider chain
+
+**Trigger:** admin build report (`24f5149f-…`, prompt "mobile friendly banao"). GLM delivered the build
+fine (51 turns, app made mobile-friendly), but a follow-up Claude call died and cascaded the ENTIRE
+fallback chain: `All v5.0 providers failed (VERTEX → GEMINI → CLAUDE_HAIKU). Last error: 400 ...
+"tools: Tool names must be unique." (claude-sonnet-4-6)`. (Also confirmed autopsy #5 is LIVE: the
+edit_file misses now show "Current file content around your closest match" — the anchored preview.)
+
+**Root cause (CLAUDE.md rule 2 — duplicated code that drifted):** `defaultToolCatalog()` defined the
+`typecheck` tool TWICE (two drifted polyglot-typecheck descriptions), and the `CATALOG_TOOL_NAMES`
+allow-list listed `typecheck` twice. `catalogForTools()` filters the catalog by the allowed names, so
+BOTH `typecheck` defs passed through → the `tools` array sent to the model had a duplicate name. GLM/Kimi
+tolerate that; the **Anthropic API rejects it as a hard 400** that aborts the turn — and because it's
+deterministic, every provider in the Claude family (Vertex-Claude, direct Haiku) hit the same wall, so
+the whole fallback chain failed. It only surfaced now because this build's heal/review path made a Claude
+call (the cheap floor had masked the latent dup all along).
+
+**Fix (root + two invariant chokepoints):**
+1. Removed the duplicate `typecheck` tool def and the duplicate name in `CATALOG_TOOL_NAMES` (root).
+2. `catalogForTools()` now runs `dedupeToolsByName()` on its output — assembly can never emit a dup.
+3. `ClaudeClient.runTurn` dedupes the `tools` array at the API boundary EVERY provider call passes through
+   — so a duplicate from ANY caller (not just catalogForTools) can never 400-kill a build again.
+   `dedupeToolsByName` is defined once in ClaudeClient (next to `ClaudeToolDef`) and imported by
+   ToolCatalog — one shared implementation (no new drift). Same defensive pattern as the earlier
+   adaptive-thinking-on-Haiku 400 gate.
+
+**Regression tests (`ToolCatalog.test.ts`):** `defaultToolCatalog()` has no duplicate names;
+`CATALOG_TOOL_NAMES` has none; `catalogForTools` returns unique names even given a repeated allowed name;
+the architect's real tool set (the exact failing path) assembles unique with `typecheck` present once;
+`dedupeToolsByName` keeps the first occurrence. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Note on rate limits (separate work, admin-chosen 2026-07-18):** the admin picked "Proactive pacer +
+AIMD" as the next hardening slice (token-bucket per key + adaptive concurrency in front of GLM/Kimi) to
+avoid most 429s before they happen — to ship flag-gated + default-safe, its own PR.

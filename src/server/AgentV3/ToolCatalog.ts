@@ -1,4 +1,4 @@
-import type { ClaudeToolDef } from './ClaudeClient';
+import { dedupeToolsByName, type ClaudeToolDef } from './ClaudeClient';
 import type { ToolName } from './types';
 import { WORKER_ROLES } from './AgentRegistry';
 
@@ -422,16 +422,6 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'the sandbox, then returns parsed counts (passed/failed/total) and the names of failing tests. Takes ' +
         'no arguments. If it reports failures, fix them and run it again; if it reports no suite, seed real ' +
         'tests with generate_tests first — never claim the build is verified without running its tests.',
-      input_schema: { type: 'object', properties: {} },
-    },
-    {
-      name: 'typecheck',
-      description:
-        "Type/compile-check the app's NON-TypeScript code (tsc already covers TS/JS). For a polyglot app it " +
-        'auto-detects Python (runs mypy, or a py_compile syntax check) and Java (compiles via Maven/Gradle/javac) ' +
-        'in the sandbox and reports honest per-language error counts + the first errors. If a toolchain is not ' +
-        'available it says the check could not run — never a fake "clean". No arguments. Run it on a full-stack ' +
-        'app with a Python/Java backend before declaring it verified.',
       input_schema: { type: 'object', properties: {} },
     },
     {
@@ -1137,7 +1127,6 @@ export const CATALOG_TOOL_NAMES = [
   'architecture_map',
   'api_graph',
   'code_graph',
-  'typecheck',
   'check_toolchain',
   'check_package',
   'lint',
@@ -1258,11 +1247,11 @@ export function consensusToolDef(): ClaudeToolDef {
   };
 }
 
-/** Build the tool definitions for a given allowed-tool list (incl. `task`). */
+/** Build the tool definitions for a given allowed-tool list (incl. `task`). Never returns duplicate names. */
 export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());
-  return base;
+  return dedupeToolsByName(base);
 }

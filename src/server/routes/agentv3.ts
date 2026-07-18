@@ -209,6 +209,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
+import { loadUserVaultSecrets } from '../lib/secrets';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
@@ -5576,6 +5577,13 @@ export function registerAgentV3Routes(app: Express): void {
       // "made by NavBharatAI" signature: default ON, off only when the user toggled it off in
       // Settings → General. The dispatcher bakes the badge into index.html on preview publish.
       dispatcher.setSignatureEnabled(appSignatureEnabled);
+      // Vault → App pipe (admin 2026-07-17): inject the user's OWN saved keys (Settings → Secrets & Keys)
+      // into the .env of the app they build, so an app that needs an API key runs with the real key the
+      // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
+      // (loadUserVaultSecrets never reads process.env, so NavBharatAI's platform keys can never leak in).
+      try {
+        if (userId) dispatcher.setUserSecrets(await loadUserVaultSecrets(userId));
+      } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
 
       // Surgical edit mode (gold standard): when the user is editing an existing

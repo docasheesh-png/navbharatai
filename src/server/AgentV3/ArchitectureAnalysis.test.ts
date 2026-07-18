@@ -153,6 +153,31 @@ describe('findOrphanComponents (P-REPORT.5 — "components exist but the app sti
     expect(findOrphanComponents(g)).toEqual([]);
   });
 
+  it('does NOT flag Next.js App Router special files (layout/page/error/…) as orphans (TaskForge autopsy)', () => {
+    // Next wires these by FILENAME convention — they are never `import`-ed, but are true entry points.
+    // Before the fix, a clean Next.js build false-flagged all of them as phantom "unused components".
+    const g = graphOf({
+      'src/app/layout.tsx': "export default function RootLayout({ children }){ return children; }",
+      'src/app/page.tsx': "export default function HomePage(){ return null; }",
+      'src/app/error.tsx': "'use client';\nexport default function Error(){ return null; }",
+      'src/app/not-found.tsx': "export default function NotFound(){ return null; }",
+      'src/app/loading.tsx': "export default function Loading(){ return null; }",
+      'src/app/dashboard/page.tsx': "export default function DashboardPage(){ return null; }",
+      'src/app/dashboard/layout.tsx': "export default function DashboardLayout({ children }){ return children; }",
+    });
+    expect(findOrphanComponents(g)).toEqual([]);
+  });
+
+  it('STILL flags a genuine orphan component that happens to live under app/ (not a special file)', () => {
+    // A real unused component under app/ must still be caught — the exclusion is filename-scoped, not
+    // "anything under app/". Here Sidebar is a normal component nobody imports.
+    const g = graphOf({
+      'src/app/page.tsx': "export default function HomePage(){ return null; }",
+      'src/app/components/Sidebar.tsx': "export function Sidebar(){ return null; }",
+    });
+    expect(findOrphanComponents(g).some((o) => o.includes('Sidebar.tsx'))).toBe(true);
+  });
+
   it('is included in analyzeArchitecture()\'s report and architectureSummary()\'s text', () => {
     const g = graphOf({
       'src/App.tsx': "export function App(){ return null; }",

@@ -1339,6 +1339,34 @@ export class ToolDispatcher {
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
         }
+        // PRISMA CLIENT-NOT-GENERATED SELF-HEAL (TaskForge fresh-build autopsy 2026-07-18): a seed step
+        // (`prisma db seed`, `tsx prisma/seed.ts`, `ts-node seed`, `node dist/seed.js`, …) that RUNS BEFORE
+        // `prisma generate` fails with "@prisma/client did not initialize yet — please run `prisma generate`"
+        // / "@prisma/client has not been generated" / "did you mean `prisma generate`". TaskForge looped this
+        // seed failure and burned wall-clock budget re-discovering the ordering. Deterministic close: on that
+        // exact failure class (and only when the command is NOT itself a `prisma generate`), run
+        // `npx prisma generate` once, then retry the original command ONCE. Any other failure — or a failed
+        // retry — falls through to the normal honest error path. Mirrors the relation self-heal above.
+        if (
+          exitCode !== 0 &&
+          !/\bprisma\s+generate\b/.test(command) &&
+          /(@prisma\/client did not initialize|@prisma\/client has not been (generated|initialized)|did you mean to run [`']?prisma generate|Please run [`']?prisma generate|Cannot find module ['"]?\.prisma\/client|the client hasn'?t been generated)/i.test(
+            `${stdout}\n${stderr}`,
+          )
+        ) {
+          try {
+            const dirMatch = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command);
+            const genCmd = `${dirMatch ? `cd ${dirMatch[1]} && ` : ''}npx prisma generate`;
+            const gen = await this.actuator.runCommand(this.workspaceId, genCmd);
+            if (gen.exitCode === 0) {
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (retry.exitCode === 0) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database client had not been generated yet — generated it and re-ran the step successfully.', ts: Date.now() });
+              }
+            }
+          } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
           this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });

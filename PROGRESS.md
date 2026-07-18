@@ -18142,6 +18142,58 @@ Combined with the detector + re-export-repair guidance (same PR), the duplicate-
 BIRTH and cleaned up if any slip through. Still open (deeper origin): framework-from-files on resume so the
 wrong framework can't drive the convention mismatch in the first place — next slice.
 
+### 2026-07-18 — TaskForge FRESH-BUILD autopsy (task #75): Prisma-seed self-heal + Next.js orphan false-positive
+
+The admin re-built TaskForge (Next.js + Prisma) on the fixed engine — the 2-hour failure became a **16m46s
+clean build** (framework=nextjs honored via #1509, **0 duplicate trees** via #1527 — both big fixes verified
+LIVE). The fresh report surfaced three Next.js/Prisma-specific gaps; the two app-affecting ones are fixed:
+
+- ✅ **Prisma "client not generated" self-heal.** A seed step (`prisma db seed` / `tsx prisma/seed.ts`) that
+  ran BEFORE `prisma generate` failed with "@prisma/client did not initialize yet — run `prisma generate`",
+  and TaskForge LOOPED it, burning wall-clock budget. `ToolDispatcher` bash choke point now: on that exact
+  failure class (and only when the command is not itself `prisma generate`), runs `npx prisma generate` once
+  and retries the original command once — the deterministic close, mirroring the existing relation self-heal.
+  Any other failure falls through to the honest error path. Regression tests: heal-on-not-generated,
+  never-heal-a-generate-command (no loop), never-heal-an-unrelated-seed-error.
+- ✅ **Next.js App Router special files no longer false-flagged as orphans.** `findOrphanComponents` treated
+  layout/page/loading/error/not-found/route/template/default/global-error under `app/` as "unused components"
+  (a clean Next.js build reported 14 phantom unused). Those are wired by filename convention, never imported —
+  they ARE entry points. `isEntryPoint` now excludes them; a genuine unused component under `app/` is still
+  caught. Regression tests: special files clean, real orphan under app/ still flagged.
+- ⏭️ **Broken export-name imports (db/UserRole) auto-heal — deferred (honest).** Renamed/removed exports that
+  break importers need ts-morph editing of every importer with real ambiguity risk; rushing a source-rewriting
+  pass risks breaking OTHER apps (rule 1). Recorded as the next careful slice, not silently patched.
+
+Full suite green (7375 tests). Both shipped fixes are engine-level (every Next.js/Prisma build benefits), not
+one-app patches.
+
+### 2026-07-18 — TaskForge autopsy: killed the fake "Token budget getting tight" feature-drop (admin-reported)
+
+The admin re-read the TaskForge build stream and flagged this ACTUAL v5.0 response emitted mid-build:
+"⚠️ Token budget getting tight (75 tool calls so far). Prioritize CORE… OK to SKIP: light/dark theme…
+Finish the core app working, then stop." (I first mis-diagnosed it as an injected message — corrected: it
+was real `BuildCheckpoints.degradationHint()` output, emitted as a user-facing narration event.)
+
+**Autopsy — one root cause, three constitution violations:**
+- ❌ **Fake status (rule 3):** `shouldSuggestDegradation()` was a bare `toolCalls > 60` heuristic — it never
+  read wallet balance, token spend, or model budget. "Token budget getting tight" was fabricated. The code
+  comment even admitted "For now: heuristic — if tools calls past 60."
+- ❌ **Dropped requested/paid features + complexity-blind (rule 2 + THE AIM + rule 5):** a fixed 60-call
+  threshold fired for EVERY app, so the MORE complex the app (TaskForge, a Linear clone, legitimately needs
+  far more than 60 calls), the SOONER it was told to abandon features and STOP. Backwards from "big complex
+  apps must struggle as little as small ones."
+- ❌ **White-label/UX leak:** the raw hint went to the user as a narration event — the user watched the
+  builder announce it was skipping their dark-mode and stopping.
+
+**Root-cause fix (removed the class, not the symptom):** deleted the feature-dropping degradation entirely —
+`shouldSuggestDegradation`, `degradationHint`, `suggestedDegradation`, the `features` ctor arg, and the
+user-facing hint emission in `routes/agentv3.ts`. The genuine "too big for one turn" case is already owned,
+honestly and completely, by the **step-limit auto-resume** (pause-not-death → continue next turn → full app
+delivered across turns) + the up-front **affordability gate**. `BuildCheckpoint` now does ONLY deterministic
+health monitoring (broken/stuck detection). Regression tests lock the bad behaviour out (no suggestion past
+120 calls; no degradation API surface; honest health on long builds). `FeatureRanking`/`rankFeatures` remain
+in `RequestAnalyser` (harmless; available for honest core-first PROMPT steering later — never a fake-budget
+mid-build stop).
 ## 2026-07-18 — Offline AI is now a CONVERSATIONAL CHAT (bot-like, deterministic, honest)
 
 Admin: "kya offline AI chat me bot ke jaise respond kar sakta hai, soch sakta hai?" Honest answer given

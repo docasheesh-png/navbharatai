@@ -1,13 +1,29 @@
-// Build Checkpoints (Phase B) — Early validation every N tool calls
-// Detects broken builds early, suggests graceful degradation if token budget runs low
+// Build Checkpoints (Phase B) — Early health validation every N tool calls.
+//
+// TaskForge autopsy (admin, 2026-07-18): this module ALSO used to emit a "graceful degradation"
+// hint — "⚠️ Token budget getting tight (N tool calls so far)… OK to SKIP: <nice features>… Finish
+// the core app working, then stop." That behaviour was REMOVED at the root because it violated three
+// pillars of the constitution at once:
+//   1. HONESTY (rule 3 / no-fake-status): it claimed "token budget getting tight" while measuring NOTHING
+//      of the kind — it was a bare `toolCalls > 60` heuristic. It never read wallet balance, real token
+//      spend, or the model budget. A fabricated status.
+//   2. REAL FEATURES ONLY (rule 2) + THE AIM: it told the builder to DROP user-requested (and paid-for)
+//      features and STOP at a fixed 60-call mark. Worse, it was complexity-BLIND — a large full-stack app
+//      (TaskForge, a Linear clone) legitimately needs far more than 60 tool calls, so the MORE complex the
+//      app, the SOONER it was told to abandon features. Exactly backwards from "big complex apps must
+//      struggle as little as small ones."
+//   3. WHITE-LABEL / UX: the raw hint was pushed to the user as a `narration` event, so the user watched
+//      "the world's best app builder" announce it was giving up on their dark-mode and stopping.
+// The genuine "this app is too big for a single turn" case is already owned — honestly and completely — by
+// the step-limit AUTO-RESUME (pause, not death → continue next turn → full app delivered across turns) and
+// the up-front affordability gate. Dropping requested features was never the right answer, so it is gone.
+// This checkpoint now does ONLY deterministic health monitoring.
 
 import type { WorkspaceState, AgentEventStream, AgentEvent } from './index';
-import type { FeatureRanking } from './RequestAnalyser';
 
 export interface CheckpointState {
   toolCalls: number; // total tool calls in this build
   lastCheckpointCall: number; // tool call count at last checkpoint
-  suggestedDegradation: boolean; // true if model should drop nice-to-have features
 }
 
 /**
@@ -16,25 +32,21 @@ export interface CheckpointState {
  *
  * CHECKPOINT_INTERVAL = 15 tool calls (a balance: early detection without constant checks).
  * When checkpoint fires:
- * 1. Check preview (can render?)
- * 2. Check for errors in recent events
- * 3. If degradation needed (tokens running low): suggest dropping NICE features
- * 4. If broken: log for escalation
+ * 1. Check for errors in recent events
+ * 2. Check for stuck calls (pending >> completed)
+ * It never drops features and never tells the build to stop (see the file header).
  */
 export const CHECKPOINT_INTERVAL = 15;
 
 export class BuildCheckpoint {
   readonly state: CheckpointState;
   readonly workspace: WorkspaceState;
-  readonly features?: FeatureRanking;
 
-  constructor(workspace: WorkspaceState, features?: FeatureRanking) {
+  constructor(workspace: WorkspaceState) {
     this.workspace = workspace;
-    this.features = features;
     this.state = {
       toolCalls: 0,
       lastCheckpointCall: 0,
-      suggestedDegradation: false,
     };
   }
 
@@ -53,13 +65,12 @@ export class BuildCheckpoint {
 
   /**
    * Checkpoint validation — called after every CHECKPOINT_INTERVAL tool calls.
-   * Returns an object with: ok (build is progressing), broken (should escalate),
-   * suggestion (hint for the model).
+   * Returns an object with: ok (build is progressing) and broken (should escalate).
+   * Pure signal only — no feature-dropping, no "stop" instruction, no fabricated budget claim.
    */
   quickCheck(events: AgentEventStream): {
     ok: boolean;
     broken: boolean;
-    suggestion?: string;
   } {
     const recentEvents = events.snapshot().slice(-20); // last 20 events
 
@@ -77,40 +88,6 @@ export class BuildCheckpoint {
     const broken = hasErrors || stuckRatio > 1.5;
     const ok = !broken && completedCalls > 0;
 
-    // Suggestion: if token budget estimate shows <30% remaining, suggest degradation
-    const suggestion = this.shouldSuggestDegradation()
-      ? 'Tokens running low. Focus on CORE features only — skip NICE-to-have (analytics, reports, advanced filtering).'
-      : undefined;
-
-    if (suggestion) this.state.suggestedDegradation = true;
-
-    return { ok, broken, suggestion };
-  }
-
-  /** Estimate: should we suggest dropping NICE features? (deterministic, no LLM) */
-  private shouldSuggestDegradation(): boolean {
-    // In a real impl, check tokens-used vs. max-budget from workspace + model.
-    // For now: heuristic — if tools calls past 60 (est ~2500-3000 tokens on a typical build),
-    // suggest degradation. Refine when proper token accounting is in workspace.
-    return this.state.toolCalls > 60 && !this.state.suggestedDegradation;
-  }
-
-  /**
-   * Build a hint for the model when degradation is suggested.
-   * Incorporates the actual NICE features so the model knows what to drop.
-   */
-  degradationHint(): string | undefined {
-    if (!this.state.suggestedDegradation || !this.features?.nice.length) {
-      return undefined;
-    }
-    return (
-      `⚠️ Token budget getting tight (${this.state.toolCalls} tool calls so far). ` +
-      `Prioritize CORE features:\n` +
-      `CORE: ${(this.features.core || []).join(', ') || 'auth, CRUD, navigation'}\n` +
-      `IMPORTANT: ${(this.features.important || []).join(', ') || 'search, export'}\n\n` +
-      `OK to SKIP (will implement after if needed):\n` +
-      `NICE: ${this.features.nice.join(', ')}\n\n` +
-      `Finish the core app working, then stop.`
-    );
+    return { ok, broken };
   }
 }

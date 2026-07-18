@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { searchFeatures, answerOffline, howToSteps, scoreFeature, navFor } from './offlineAssistant';
+import {
+  searchFeatures, answerOffline, howToSteps, scoreFeature, navFor,
+  editDistance, relatedFeaturesOf, SUGGESTED_QUERIES,
+} from './offlineAssistant';
 import { APP_KNOWLEDGE_BASE } from '../server/AppContext/AppKnowledgeBase';
 
 describe('offlineAssistant — grounded 100% in the app knowledge base', () => {
@@ -57,5 +60,80 @@ describe('offlineAssistant — grounded 100% in the app knowledge base', () => {
     expect(howToSteps('1. Open settings 2. Tap database 3. Save').length).toBe(3);
     expect(howToSteps('Open the menu. Tap Files. Done.').length).toBe(3);
     expect(howToSteps('')).toEqual([]);
+  });
+
+  // ─── Enhancement 2026-07-18: typo tolerance, related hops, starter suggestions ───
+
+  it('editDistance is a real bounded Levenshtein (exact within budget, sentinel past it)', () => {
+    expect(editDistance('database', 'database')).toBe(0);
+    expect(editDistance('databse', 'database', 2)).toBe(1); // one deletion
+    expect(editDistance('walet', 'wallet', 2)).toBe(1);
+    expect(editDistance('cat', 'dog', 2)).toBe(3); // far apart → returns max+1 sentinel
+  });
+
+  it('recovers a misspelled query the exact matcher would have missed (offline has no fallback)', () => {
+    for (const typo of ['databse', 'walet', 'deploi']) {
+      const a = answerOffline(typo);
+      expect(a.kind, `"${typo}" should still find something`).toBe('matches');
+      expect(a.matches.length).toBeGreaterThan(0);
+    }
+    // "databse" surfaces the database feature.
+    expect(answerOffline('databse').matches.some((f) => /database/i.test(f.name) || f.keywords.includes('database'))).toBe(true);
+  });
+
+  it('a typo-tolerant (fuzzy) hit never outranks a real exact hit', () => {
+    // Deterministic: an exact single-keyword hit scores 2; a one-typo fuzzy hit scores 1.5 (< 2), so a
+    // real match can never be buried under a near-miss.
+    const f: any = {
+      id: 'x', name: 'X', path: '', description: '', howToUse: '', relatedFeatures: [], keywords: ['deploy'],
+    };
+    expect(scoreFeature(f, 'deploy')).toBe(2);   // exact single keyword
+    expect(scoreFeature(f, 'deploi')).toBe(1.5); // fuzzy fallback only
+    expect(scoreFeature(f, 'deploy')).toBeGreaterThan(scoreFeature(f, 'deploi'));
+  });
+
+  it('still returns an honest "none" for true gibberish — fuzzy does not over-match', () => {
+    const a = answerOffline('qqzzxx wwvvbb pplkjhh');
+    expect(a.kind).toBe('none');
+    expect(a.matches).toEqual([]);
+  });
+
+  it('description scoring is word-boundary, not substring ("star" is NOT a word in "restart")', () => {
+    const f: any = {
+      id: 't', name: 'ZZZ', path: '', description: 'restart the workspace', howToUse: '',
+      relatedFeatures: [], keywords: [],
+    };
+    // "restart" contains the substring "star" — a substring matcher would falsely score this.
+    expect(scoreFeature(f, 'star')).toBe(0);
+    expect(scoreFeature(f, 'workspace')).toBe(1); // real word-boundary hit
+  });
+
+  it('relatedFeaturesOf resolves only REAL related KB entries (drops dangling ids, never self)', () => {
+    const feat = APP_KNOWLEDGE_BASE.find((f) => (f.relatedFeatures || []).length > 0)!;
+    const related = relatedFeaturesOf(feat);
+    const ids = new Set(APP_KNOWLEDGE_BASE.map((f) => f.id));
+    for (const r of related) {
+      expect(ids.has(r.id)).toBe(true);
+      expect(r.id).not.toBe(feat.id);
+    }
+    // A dangling id is dropped rather than fabricated.
+    const withDangling: any = { ...feat, relatedFeatures: ['___not_a_real_id___'] };
+    expect(relatedFeaturesOf(withDangling)).toEqual([]);
+  });
+
+  it('on a score tie, the feature covering MORE of the query wins (relevance breadth)', () => {
+    // "where is the wallet and billing" must surface Billing (matches wallet+billing), not a feature
+    // that only caught the generic word "where".
+    const r = searchFeatures('where is the wallet and billing');
+    expect(r[0].feature.id).toBe('billing');
+  });
+
+  it('every starter suggestion resolves to a real, non-empty result', () => {
+    expect(SUGGESTED_QUERIES.length).toBeGreaterThan(3);
+    for (const s of SUGGESTED_QUERIES) {
+      const a = answerOffline(s.query);
+      expect(a.kind, `suggestion "${s.label}" (${s.query}) must resolve`).not.toBe('none');
+      expect(a.matches.length).toBeGreaterThan(0);
+    }
   });
 });

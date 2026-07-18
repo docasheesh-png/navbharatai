@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen } from 'lucide-react';
-import { answerOffline, howToSteps, navFor, type NavTarget } from '../../lib/offlineAssistant';
+import { Wifi, Smartphone, Search, ArrowRight, Sparkles, BookOpen, Link2 } from 'lucide-react';
+import {
+  answerOffline, howToSteps, navFor, relatedFeaturesOf, SUGGESTED_QUERIES, type NavTarget,
+} from '../../lib/offlineAssistant';
 
 /**
- * Offline AI — a 100% on-device app guide (admin 2026-07-16). Grounded entirely in the bundled
- * AppKnowledgeBase, so it works with NO internet and knows EVERY NavBharatAI feature with zero
- * hallucination. It answers "where is X / how do I Y", shows the exact path + steps, and — for
- * reachable surfaces — a real "Open →" button that navigates there. New features become answerable
- * automatically (their KB entry is added per CLAUDE.md). App-BUILDING / full Pro chat need the online
- * engine; the UI says so honestly and never fakes those here.
+ * Offline AI — a 100% on-device app guide (admin 2026-07-16, enhanced 2026-07-18). Grounded entirely in
+ * the bundled AppKnowledgeBase, so it works with NO internet and knows EVERY NavBharatAI feature with
+ * zero hallucination. It answers "where is X / how do I Y", shows the exact path + steps, and — for
+ * reachable surfaces — a real "Open →" button that navigates there. Retrieval is typo-tolerant (a small
+ * misspelling still finds the right feature), each result shows its related features as one-tap chips,
+ * and starter chips give the user a next step even from a blank or empty-result screen. New features
+ * become answerable automatically (their KB entry is added per CLAUDE.md). App-BUILDING / full Pro chat
+ * need the online engine; the UI says so honestly and never fakes those here.
  */
 export interface OfflineAIProps {
   /** Navigate to an in-app target (wired in App.tsx to toggleTab / setActiveView + setSettingsScreen). */
@@ -27,10 +31,24 @@ function useOnline(): boolean {
   return online;
 }
 
+/** A small pill button used for starter suggestions and related-feature hops. */
+const Chip: React.FC<{ label: string; onClick: () => void; icon?: React.ReactNode }> = ({ label, onClick, icon }) => (
+  <button
+    onClick={onClick}
+    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#161b22] border border-white/10 hover:border-indigo-500/50 hover:bg-indigo-600/10 text-[11px] font-semibold text-[#c9d1d9] transition-all active:scale-95"
+  >
+    {icon}
+    <span className="truncate max-w-[180px]">{label}</span>
+  </button>
+);
+
 export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   const [query, setQuery] = useState('');
   const online = useOnline();
   const answer = useMemo(() => answerOffline(query), [query]);
+
+  // Setting the query re-runs retrieval; used by starter and related chips so the user never retypes.
+  const runQuery = (q: string) => setQuery(q);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar bg-[#0d1117] text-white">
@@ -82,11 +100,22 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
         {/* Lead line */}
         <p className="text-[11px] text-[#8b949e] px-1">{answer.lead}</p>
 
+        {/* Starter / recovery suggestions — shown on the overview (blank box) and on an empty result, so
+            the user always has a real next tap. Each chip runs a query that resolves to a real KB entry. */}
+        {answer.kind !== 'matches' && (
+          <div className="flex flex-wrap gap-2">
+            {SUGGESTED_QUERIES.map((s) => (
+              <Chip key={s.query} label={s.label} onClick={() => runQuery(s.query)} icon={<Sparkles className="w-3 h-3 text-indigo-400 shrink-0" />} />
+            ))}
+          </div>
+        )}
+
         {/* Result cards */}
         <div className="space-y-2.5">
           {answer.matches.map((f) => {
             const target = navFor(f);
             const steps = howToSteps(f.howToUse).slice(0, 4);
+            const related = relatedFeaturesOf(f);
             return (
               <div key={f.id} className="bg-[#161b22] border border-white/5 rounded-2xl p-4 space-y-2">
                 <div className="flex items-start justify-between gap-3">
@@ -113,6 +142,22 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
                       </li>
                     ))}
                   </ol>
+                )}
+                {related.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-white/5 mt-1">
+                    <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-[#484f58] shrink-0">
+                      <Link2 className="w-3 h-3" /> Related
+                    </span>
+                    {related.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => runQuery(r.name)}
+                        className="px-2.5 py-1 rounded-full bg-[#0d1117] border border-white/10 hover:border-indigo-500/50 hover:text-white text-[10px] font-semibold text-[#8b949e] transition-all active:scale-95"
+                      >
+                        {r.name}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             );

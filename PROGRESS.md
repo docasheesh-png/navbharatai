@@ -17734,3 +17734,31 @@ on the free/weak floor added latency though fallback delivered; the pool-cooldow
 (admin-chosen) are the path. (b) OPTIONAL future hardening: a post-build "scaffold framework ≠ generated
 files" mismatch detector as defence-in-depth (the prompt→framework fix removes the cause; this would catch
 any residual drift).
+
+## 2026-07-18 — Offline AI enhanced: typo-tolerant retrieval + related hops + starter chips
+
+Admin: "Offline ai, ko aur enhance karo!" — the Offline AI is the 100% on-device app guide
+(`src/lib/offlineAssistant.ts` retrieval + `src/components/offline/OfflineAI.tsx` UI), grounded entirely
+in `AppKnowledgeBase` (183 entries). Because it runs offline, there is NO server fallback — any query the
+exact matcher misses was a dead end. Enhanced with real, tested, additive improvements:
+
+- **Typo-tolerant fuzzy fallback** (`editDistance` bounded Levenshtein + `fuzzyTokenHit`): near-miss words
+  like "databse" / "walet" / "deploi" now still find the right feature. Scored at 1.5 — strictly BELOW an
+  exact single-keyword hit (2) — so it is a pure recovery tier: every query that already worked ranks
+  identically. Gibberish still returns an honest "none" (no over-matching).
+- **Description scoring bugfix (root cause)**: the code comment claimed "word-boundary hit" but used
+  `descr.includes(w)` (substring) — so "star" falsely matched inside "restart". Now a real word-boundary
+  token check. This dropped one stale substring point on the Billing entry, which exposed a latent tie…
+- **Coverage tie-breaker** (`matchCoverage`): on a score tie, the feature covering MORE of the user's
+  distinct words wins (breadth of relevance), instead of the previous accidental tie-break by KB position.
+  Fixes "where is the wallet and billing" → now surfaces Billing (matches wallet+billing), not the Offline
+  AI's own entry (which only caught the generic word "where").
+- **Related-feature chips** (`relatedFeaturesOf`): each result now shows its real related KB features as
+  one-tap chips — hop across connected screens without retyping. Drops dangling ids, never self, real data.
+- **Starter/recovery suggestion chips** (`SUGGESTED_QUERIES`): a blank box or empty result now always
+  offers a real next tap; every suggestion is verified to resolve to a non-empty KB result.
+
+KB sync: updated the `offline_ai` entry description for the new user-facing capabilities (per the
+AppKnowledgeBase rule). Tests: 10 new cases in `src/lib/offlineAssistant.test.ts` (editDistance, typo
+recovery, fuzzy-never-outranks-exact, gibberish-still-none, word-boundary, relatedFeaturesOf, coverage
+tie-break, suggestions resolve). Gate: frontend tsc ✓, server tsc ✓, full vitest 7306 passed ✓.

@@ -1,5 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { findSyntaxErrors, syntaxRepairInstruction } from './SyntaxCheck';
+import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, parseGuardDecision, writeParseGuardEnabled, type SyntaxErrorInfo } from './SyntaxCheck';
+
+describe('firstSyntaxError — single-file parse for the write guard', () => {
+  it('returns the error for a duplicate declaration, null for clean code', async () => {
+    const dup = 'export default function App(){ const x=()=>1; const x=()=>2; return null }';
+    const e = await firstSyntaxError('src/App.tsx', dup);
+    expect(e?.message).toMatch(/already been declared/i);
+    expect(await firstSyntaxError('src/App.tsx', 'export default function App(){ return null }')).toBeNull();
+  });
+  it('has no opinion on non-parseable sources (.d.ts / .css / .json)', async () => {
+    expect(await firstSyntaxError('src/x.d.ts', 'garbage <<<')).toBeNull();
+    expect(await firstSyntaxError('src/x.css', '.a { color }')).toBeNull();
+  });
+});
+
+describe('parseGuardDecision — refuse a write that breaks a CLEAN file, allow repairs', () => {
+  const err = (message: string): SyntaxErrorInfo => ({ path: 'src/App.tsx', message, line: 231, column: 8 });
+  it('allows when disabled, or when the new content parses clean', () => {
+    expect(parseGuardDecision('src/App.tsx', null, err('x'), false)).toBeNull();
+    expect(parseGuardDecision('src/App.tsx', null, null, true)).toBeNull();
+  });
+  it('REFUSES a clean → broken change, naming the location + duplicate hint', () => {
+    const msg = parseGuardDecision('src/App.tsx', null, err("The symbol \"handleExportCSV\" has already been declared"), true);
+    expect(msg).toMatch(/WRITE REJECTED/);
+    expect(msg).toMatch(/231:8/);
+    expect(msg).toMatch(/DUPLICATE declaration/);
+    expect(msg).toMatch(/EDIT the/);
+  });
+  it('ALLOWS a repair on an already-broken file (old was broken → never block)', () => {
+    expect(parseGuardDecision('src/App.tsx', err('old broke'), err('still broken'), true)).toBeNull();
+  });
+  it('the guard is default-ON (kill switch AGENTV3_WRITE_PARSE_GUARD=off)', () => {
+    expect(writeParseGuardEnabled({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(writeParseGuardEnabled({ AGENTV3_WRITE_PARSE_GUARD: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(false);
+  });
+});
 
 describe('findSyntaxErrors (deterministic parse gate — deep-test App #6)', () => {
   it('flags the EXACT App #6 corruption: a CSS declaration injected inside JSX', async () => {

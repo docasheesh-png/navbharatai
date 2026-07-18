@@ -7229,6 +7229,12 @@ export function registerAgentV3Routes(app: Express): void {
           // Out of repair budget OR the wall-clock cap is near → stop and report honestly.
           if (attempt >= healMax || abort.signal.aborted || (effectiveBuildSeconds > 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 60_000)) {
             previewVerifiedFailed = true; // the eyes saw it NOT render, and the heal budget is spent — billing zeroes below
+            // RUNTIME HONESTY (deep-test 2026-07-18 — "onLinkClick is not a function"): the live preview
+            // genuinely did NOT render / crashed at RUNTIME and the heal budget is spent. Record it as an
+            // UNRESOLVED ERROR so buildHealthFromDiagnostics marks the build NOT READY — a crashing app must
+            // never show "READY". (The syntax gate catches a COMPILE break; this catches the RUNTIME class
+            // — an uncaught TypeError / a missing prop called as a function — that the parser can't see.)
+            buildDiag.record({ phase: 'preview', severity: 'error', code: 'OUTCOME_PREVIEW_FAILED', message: `The live preview did not render/run cleanly after ${healMax} repair attempt(s): ${problems.slice(0, 3).join('; ')}`.slice(0, 500), autoResolved: false });
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ I checked the live preview and it did not fully render: ${problems.slice(0, 3).join('; ')}. Your files are saved — send a follow-up and I'll fix it.`, ts: Date.now() });
             break;
           }

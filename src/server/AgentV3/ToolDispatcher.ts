@@ -8,7 +8,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
-import { findSyntaxErrors, syntaxRepairInstruction } from './SyntaxCheck';
+import { findSyntaxErrors, syntaxRepairInstruction, firstSyntaxError, writeParseGuardEnabled, parseGuardDecision } from './SyntaxCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -431,6 +431,28 @@ export class ToolDispatcher {
   /** Framework id for prompt construction (endgame repair). */
   get frameworkId(): string {
     return this.framework ?? 'vite-react';
+  }
+
+  /**
+   * WRITE-TIME PARSE GUARD (deep-test 2026-07-18). Returns a rejection message when writing `newContent`
+   * to `path` would turn a previously-CLEAN (or new) source file into one that does NOT parse — the exact
+   * recurring break (a DUPLICATE `handleExportCSV` declaration, an unwrapped JSX sibling, a missing `)`).
+   * Returns null (allow) when the guard is off, the file isn't parseable source, the new content parses,
+   * or the file was ALREADY broken (so a repair-in-progress is never blocked). Best-effort: if the parse
+   * itself throws, allow the write (never block on the guard's own failure). Records a blocked-write audit.
+   */
+  private async parseGuardRejection(path: string, oldContent: string, newContent: string): Promise<string | null> {
+    if (!writeParseGuardEnabled()) return null;
+    try {
+      const errNew = await firstSyntaxError(path, newContent);
+      if (!errNew) return null; // parses clean → nothing to block (skips the second parse in the common case)
+      const errOld = await firstSyntaxError(path, oldContent);
+      const rejection = parseGuardDecision(path, errOld, errNew, true);
+      if (rejection) {
+        try { getWorkspaceMemory(this.workspaceId).recordError(`[BLOCKED-SYNTAX] refused write that would break ${path}: ${errNew.message}`); } catch { /* audit best-effort */ }
+      }
+      return rejection;
+    } catch { return null; /* never block a write on the guard's own failure */ }
   }
 
   endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void> } {
@@ -967,6 +989,9 @@ export class ToolDispatcher {
           );
           return blockMsg;
         }
+        // Parse guard: refuse a write that would break a clean file (duplicate declaration / broken JSX).
+        const writeParseReject = await this.parseGuardRejection(path, existingContent, content);
+        if (writeParseReject) return writeParseReject;
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
@@ -1123,6 +1148,10 @@ export class ToolDispatcher {
           );
           return emptyOverwriteMessage(path);
         }
+        // Parse guard: refuse an edit that would break a clean file (duplicate declaration / broken JSX),
+        // so a syntactically-broken version is never saved — the model gets the exact spot + a fix hint.
+        const editParseReject = await this.parseGuardRejection(path, existing, updated);
+        if (editParseReject) return editParseReject;
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);

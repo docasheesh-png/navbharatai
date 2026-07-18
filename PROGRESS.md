@@ -17988,3 +17988,93 @@ classic config format the guards already generate). This ALSO hardens the vue-ro
 majors adopted deliberately, not blind auto-latest" philosophy — same rationale as GLM_MODEL Decision A).
 Native Prisma-7 support (emit `prisma.config.ts` + adapter, v7-aware schema guard) remains a future
 deliberate upgrade if/when we choose to adopt it.
+## 2026-07-18 — ROOT FIX: write-time parse guard — the builder can no longer SAVE a syntax-broken file
+
+**Trigger:** report `2d933510` (+ the "Unexpected token, expected ','" screenshot). The recurring
+build-breaker, now hit hard: the app kept accumulating **duplicate declarations** (`handleExportCSV` +
+`handleImportCSV` each declared TWICE, lines 136 & 231 / 161 & 255) plus broken JSX (an unwrapped
+`<Sidebar>` sibling, a missing `)`), so App.tsx would not compile and the preview died. The builder
+eventually fixed it by burning ~10 min flailing (grep/awk/python tag-counting again), but the admin's ask
+was explicit: **fix it at the root so this error can NEVER happen again.**
+
+**Root cause of the CLASS:** the builder, editing a large file, ADDS a `const`/`function`/`interface` that
+ALREADY EXISTS (a duplicate declaration — always a hard compile error), or leaves an unbalanced/unwrapped
+JSX structure — and the broken version was **saved to disk anyway**. Every downstream gate (syntax gate,
+final re-verify, preview) only caught it AFTER the fact.
+
+**Fix — WRITE-TIME PARSE GUARD (`SyntaxCheck.ts` + `ToolDispatcher.ts`), default-ON.** `write_file` and
+`edit_file` now refuse a write that would turn a CLEAN (or new) source file into one that does NOT parse:
+- `firstSyntaxError(path, content)` — esbuild parse of the single file (same parser Vite uses).
+- `parseGuardDecision(path, errOld, errNew, enabled)` — PURE policy: allow when off / new parses clean /
+  the file was ALREADY broken (never block a repair-in-progress); otherwise REFUSE with the exact
+  `file:line:col` + a hint ("a DUPLICATE declaration already exists — EDIT the existing one, don't add a
+  second copy; or an unwrapped JSX tag / missing `)`"). The model gets the fix direction immediately.
+- Dispatcher `parseGuardRejection` wires it into both handlers (mirrors the existing
+  `isDestructiveEmptyOverwrite` guard); best-effort — never blocks a write on the guard's own failure.
+- Kill switch `AGENTV3_WRITE_PARSE_GUARD=off`. Safe by construction: only blocks a change that BREAKS a
+  currently-clean file (esbuild = Vite's parser, so "can't parse" ⇒ "won't build"); repairs of
+  already-broken files pass through untouched.
+
+**Why this is the real root fix:** a syntactically-broken version of a working file can no longer be
+saved — so the duplicate-declaration / broken-JSX compile break can never reach the preview at all, and
+the model is redirected to edit the existing symbol the moment it tries to add a duplicate.
+
+**Tests:** `SyntaxCheck.test.ts` — `firstSyntaxError` (dup vs clean vs non-source); `parseGuardDecision`
+(off/clean allow, clean→broken refuse with location+hint, already-broken allow, default-on flag).
+`ToolDispatcher.test.ts` — an edit adding a duplicate `handleExportCSV` is REJECTED and the file on disk is
+unchanged; a broken new file is refused; a valid edit passes; a repair on an already-broken file is
+allowed. Full gate green: server tsc ✅, frontend tsc ✅, vitest 7361 pass ✅.
+
+**Registry note:** admin set `AGENTV3_RATE_PACER=on` in Cloud Run (pacer now live). New flag this fix adds:
+`AGENTV3_WRITE_PARSE_GUARD` (default on).
+
+---
+
+## 2026-07-18 — RUNTIME honesty gate: a crashing preview can no longer show "READY"
+
+**Trigger:** the full autopsy of report `2d933510` (admin: "you fixed one error, there are many, the sidebar
+didn't even build"). Correct. The build wasted its 150 steps on the duplicate-declaration detour + awk
+tag-counting flail + 18 GLM timeouts/429s, then ran out of steps mid-sidebar-wiring, leaving
+**`onLinkClick is not a function`** — a RUNTIME crash (a prop called as a function but never passed). The
+sidebar genuinely did not work, yet the build reported **"READY 84/100"**.
+
+**Autopsy → each error class and its fix:** duplicate declarations → #1523 write-guard (can't be saved
+now); awk/tag-counting flail → #1505 syntax-locator; GLM 18× timeout/429 storm → #1520 pacer (now ON);
+JSX/compile break → #1502 + #1505. The ONE class left: the RUNTIME crash + "READY" over it.
+
+**Root cause of the honesty gap:** the preview self-check DOES open the app in a real browser and capture
+console errors, and on a final unhealed failure it set `previewVerifiedFailed = true` — but that flag ONLY
+zeroed the BILL (`zeroBillForUnrenderedPreview`). It recorded the failure as a `PREVIEW_NOT_RENDERED`
+**warning**, and `buildHealthFromDiagnostics` only treats unresolved **errors** as blockers — so a runtime
+crash never flipped the card off "READY". (The syntax gate catches a COMPILE break; nothing caught the
+RUNTIME class the parser can't see.)
+
+**Fix (`routes/agentv3.ts`):** at the moment the eyes confirm the preview failed and the heal budget is
+spent (`previewVerifiedFailed = true`), also record an UNRESOLVED **error** `OUTCOME_PREVIEW_FAILED` with
+the console error(s). `buildHealthFromDiagnostics` counts it as a blocker → `ready:false`. Now a build
+whose live preview crashes at runtime shows NOT READY, consistent with the (already-correct) bill zeroing.
+Mirrors #1502's compile-honesty, for the runtime class.
+
+**Test (`buildHealthCard.test.ts`):** an unresolved `OUTCOME_PREVIEW_FAILED` (onLinkClick crash) forces the
+card NOT READY. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Residual (honest):** this fires when the preview self-check RUNS. If a crash is introduced by the very
+last edit before a step/time cap (self-check skipped for lack of headroom), the client-reported
+PREVIEW_ERROR still lands in the downloadable report as an error, but the already-sent health card isn't
+retroactively downgraded — a follow-up could re-derive the card from the updated report. The three
+step-saving fixes above (write-guard, locator, pacer) are the bigger lever: they stop the build from
+burning its whole step budget before it even reaches the feature, which is why the sidebar didn't finish.
+
+## 2026-07-18 — Pro v5.0 composer ~50% shorter on Android (root-cause: un-stacked left controls)
+
+Admin: "Pro v5.0 me chat box ki vertical height Android app me bahut jyada hai — 50% reduce karo." Root
+cause (not the textarea — it was already a tight 38px): the composer's LEFT column stacked the Build/Plan/
+Advise mode selector (h-6) ON TOP of the settings+attach row (h-8), forcing the whole input row to ~60-64px
+via `items-end`, with dead space above the textarea. Fix (`AgentV3Panel.tsx`): un-stacked the three
+controls into ONE row beside the input (mode + settings + attach, all h-7), and scaled the box down in
+concert — textarea min-height 38→30, py-1.5→py-1, pr-20→pr-16; the six right-side action buttons (send /
+stop / steer / expand across all modes) h-8→h-7, bottom-1→bottom-0.5, right-11→right-9; autogrow max
+recomputed (20×5+8). New input-row height ≈ 34px (was ≈ 64px) ≈ 47% shorter. Geometry verified: buttons
+(h-7 28px + bottom-0.5 2px = 30px) exactly meet the 30px textarea top, so nothing overflows; pr-16 (64px)
+exactly reserves the two right buttons (send right-2 + expand/stop right-9). Dropups still open upward;
+all button variants/modes preserved. Gate: frontend tsc ✓, agentv3 187 ✓, full vitest 7365 ✓, vite build ✓.

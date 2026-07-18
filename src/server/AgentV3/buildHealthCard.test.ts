@@ -40,6 +40,16 @@ describe('buildHealthFromDiagnostics', () => {
     expect(h.blockers.join(' ')).toMatch(/handleExportCSV/);
   });
 
+  // Deep-test 2026-07-18: a RUNTIME crash the parser can't see ("onLinkClick is not a function") — the
+  // preview self-check records OUTCOME_PREVIEW_FAILED. That must also flip the card OFF "READY".
+  it('an unresolved OUTCOME_PREVIEW_FAILED forces NOT READY (a crashing app is never "READY")', () => {
+    const h = buildHealthFromDiagnostics(report([
+      issue({ code: 'OUTCOME_PREVIEW_FAILED', message: 'The live preview did not render/run cleanly: console: onLinkClick is not a function', autoResolved: false }),
+    ]), true);
+    expect(h.ready).toBe(false);
+    expect(h.blockers.join(' ')).toMatch(/onLinkClick/);
+  });
+
   it('unresolved warnings lower the score but do not block readiness', () => {
     const h = buildHealthFromDiagnostics(report([
       issue({ severity: 'warning', message: 'no error boundary' }),

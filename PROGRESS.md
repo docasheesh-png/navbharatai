@@ -18166,3 +18166,31 @@ LIVE). The fresh report surfaced three Next.js/Prisma-specific gaps; the two app
 
 Full suite green (7375 tests). Both shipped fixes are engine-level (every Next.js/Prisma build benefits), not
 one-app patches.
+
+### 2026-07-18 — TaskForge autopsy: killed the fake "Token budget getting tight" feature-drop (admin-reported)
+
+The admin re-read the TaskForge build stream and flagged this ACTUAL v5.0 response emitted mid-build:
+"⚠️ Token budget getting tight (75 tool calls so far). Prioritize CORE… OK to SKIP: light/dark theme…
+Finish the core app working, then stop." (I first mis-diagnosed it as an injected message — corrected: it
+was real `BuildCheckpoints.degradationHint()` output, emitted as a user-facing narration event.)
+
+**Autopsy — one root cause, three constitution violations:**
+- ❌ **Fake status (rule 3):** `shouldSuggestDegradation()` was a bare `toolCalls > 60` heuristic — it never
+  read wallet balance, token spend, or model budget. "Token budget getting tight" was fabricated. The code
+  comment even admitted "For now: heuristic — if tools calls past 60."
+- ❌ **Dropped requested/paid features + complexity-blind (rule 2 + THE AIM + rule 5):** a fixed 60-call
+  threshold fired for EVERY app, so the MORE complex the app (TaskForge, a Linear clone, legitimately needs
+  far more than 60 calls), the SOONER it was told to abandon features and STOP. Backwards from "big complex
+  apps must struggle as little as small ones."
+- ❌ **White-label/UX leak:** the raw hint went to the user as a narration event — the user watched the
+  builder announce it was skipping their dark-mode and stopping.
+
+**Root-cause fix (removed the class, not the symptom):** deleted the feature-dropping degradation entirely —
+`shouldSuggestDegradation`, `degradationHint`, `suggestedDegradation`, the `features` ctor arg, and the
+user-facing hint emission in `routes/agentv3.ts`. The genuine "too big for one turn" case is already owned,
+honestly and completely, by the **step-limit auto-resume** (pause-not-death → continue next turn → full app
+delivered across turns) + the up-front **affordability gate**. `BuildCheckpoint` now does ONLY deterministic
+health monitoring (broken/stuck detection). Regression tests lock the bad behaviour out (no suggestion past
+120 calls; no degradation API surface; honest health on long builds). `FeatureRanking`/`rankFeatures` remain
+in `RequestAnalyser` (harmless; available for honest core-first PROMPT steering later — never a fake-budget
+mid-build stop).

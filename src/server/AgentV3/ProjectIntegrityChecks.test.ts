@@ -3,6 +3,7 @@ import {
   findFocusOwners,
   findDuplicateStylesheets,
   findDuplicateEntryPoints,
+  findDuplicateComponentModules,
   analyzeProjectIntegrity,
   integrityRepairInstruction,
 } from './ProjectIntegrityChecks';
@@ -336,5 +337,65 @@ describe('findDuplicateEntryPoints — duplicate React roots (ShopKhata two-main
     expect(instr).toContain('DUPLICATE ENTRY POINTS');
     expect(instr).toContain('frontend/src/main.jsx');
     expect(instr).toContain('src/main.tsx');
+  });
+});
+
+// THE bug (TaskForge autopsy, 2026-07-18): a Next.js-shaped app driven as vite-react → the builder wrote
+// the SAME components under app/, src/app/, AND src/components/, interfaces drifted, tsc errored, and the
+// agent could not delete the dead directory (self-destruct guard) → 2-hour loop → timeout.
+describe('findDuplicateComponentModules — same module under 2+ convention roots (TaskForge)', () => {
+  const stub = 'export const X = 1;';
+
+  it('THE case: IssueBoard/Column.tsx under app/ and src/ is one duplicate module', () => {
+    const files = {
+      'app/components/IssueBoard/Column.tsx': stub,
+      'src/components/IssueBoard/Column.tsx': stub,
+    };
+    const dups = findDuplicateComponentModules(files);
+    expect(dups).toHaveLength(1);
+    expect(dups[0].module).toBe('components/IssueBoard/Column.tsx');
+    expect(dups[0].copies).toEqual(['app/components/IssueBoard/Column.tsx', 'src/components/IssueBoard/Column.tsx']);
+  });
+
+  it('groups all three roots (app/, src/app/, src/) for the same module', () => {
+    const files = {
+      'app/components/Dashboard.tsx': stub,
+      'src/app/components/Dashboard.tsx': stub,
+      'src/components/Dashboard.tsx': stub,
+    };
+    const dups = findDuplicateComponentModules(files);
+    expect(dups).toHaveLength(1);
+    expect(dups[0].copies).toHaveLength(3);
+  });
+
+  it('does NOT flag distinct modules that merely share a basename in unrelated feature dirs', () => {
+    // src/features/a/index.ts vs src/features/b/index.ts → different convention-relative paths, no collision.
+    const files = {
+      'src/features/a/index.ts': stub,
+      'src/features/b/index.ts': stub,
+    };
+    expect(findDuplicateComponentModules(files)).toHaveLength(0);
+  });
+
+  it('a single copy under one root is not a duplicate', () => {
+    expect(findDuplicateComponentModules({ 'src/components/Column.tsx': stub })).toHaveLength(0);
+  });
+
+  it('files outside any convention root are ignored (no false positives)', () => {
+    expect(findDuplicateComponentModules({ 'lib/util.ts': stub, 'scripts/util.ts': stub })).toHaveLength(0);
+  });
+
+  it('analyzeProjectIntegrity.ok is false and the repair tells the agent to make re-export stubs', () => {
+    const files = {
+      'app/components/IssueBoard/Column.tsx': stub,
+      'src/components/IssueBoard/Column.tsx': stub,
+    };
+    const report = analyzeProjectIntegrity(files);
+    expect(report.ok).toBe(false);
+    expect(report.duplicateComponentModules).toHaveLength(1);
+    const instr = integrityRepairInstruction(report);
+    expect(instr).toContain('DUPLICATE MODULE');
+    expect(instr).toContain('re-export');
+    expect(instr).toContain('delete the directory'); // guard-safe guidance present (do NOT delete)
   });
 });

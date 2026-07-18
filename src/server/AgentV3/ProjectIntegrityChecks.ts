@@ -39,6 +39,13 @@ export interface DuplicateEntryPoint {
   entries: string[];
 }
 
+export interface DuplicateComponentModule {
+  /** The convention-root-relative module path shared by the copies, e.g. "components/IssueBoard/Column.tsx". */
+  module: string;
+  /** The 2+ concrete file paths that are copies of this module across different roots (sorted). */
+  copies: string[];
+}
+
 export interface ProjectIntegrityReport {
   /** Components that own initial focus. A conflict exists when this has 2+ entries. */
   focusOwners: FocusOwner[];
@@ -59,7 +66,17 @@ export interface ProjectIntegrityReport {
    * catches. Present when this has 2+ entries.
    */
   duplicateEntryPoints: DuplicateEntryPoint[];
-  /** True when there is no integrity defect (≤1 focus owner; no duplicate/orphan stylesheet; ≤1 entry). */
+  /**
+   * DUPLICATE COMPONENT MODULES (TaskForge autopsy 2026-07-18): the SAME module exists under two or more
+   * convention roots — e.g. `IssueBoard/Column.tsx` present at BOTH `app/components/…` (Next.js `app/`
+   * convention) and `src/components/…` (Vite convention). This happens when the app is driven with the
+   * wrong framework (a Next.js-shaped app built as vite-react), so the builder writes parallel trees whose
+   * interfaces then drift and produce compile errors the agent CANNOT clean up (the self-destruct guard
+   * blocks deleting a directory of its own source) — the exact loop that burned 2 hours. Present when any
+   * module has 2+ copies across different roots.
+   */
+  duplicateComponentModules: DuplicateComponentModule[];
+  /** True when there is no integrity defect (≤1 focus owner; no duplicate/orphan stylesheet; ≤1 entry; no duplicate module). */
   ok: boolean;
 }
 
@@ -223,15 +240,83 @@ export function findDuplicateEntryPoints(files: Record<string, string>): Duplica
   return entries.length >= 2 ? [{ entries: entries.sort() }] : [];
 }
 
+// Convention roots a front-end app may put source under. Checked LONGEST-FIRST so `src/app/x` strips
+// `src/app/` (not `src/`) — otherwise a `src/app/` file and an `app/` file wouldn't share a key.
+const CONVENTION_ROOTS = ['src/app/', 'src/', 'app/'];
+
+/** The path with its leading convention root removed, or null when the file isn't under one. */
+export function conventionRelative(path: string): string | null {
+  for (const root of CONVENTION_ROOTS) {
+    if (path.startsWith(root)) return path.slice(root.length);
+  }
+  return null;
+}
+
+/**
+ * The same module's paths under the OTHER convention roots — e.g. for `app/components/X.tsx` returns
+ * `['src/app/components/X.tsx', 'src/components/X.tsx']`. Empty when the path isn't under a convention
+ * root. Used at write time to refuse creating a parallel copy of a module that already exists. Pure.
+ */
+export function conventionRootAlternatives(path: string): string[] {
+  const rel = conventionRelative(path);
+  if (rel === null) return [];
+  const out: string[] = [];
+  for (const root of CONVENTION_ROOTS) {
+    const alt = root + rel;
+    if (alt !== path) out.push(alt);
+  }
+  return out;
+}
+
+/**
+ * Given a path being written and the set of paths that ALREADY exist, return the existing copy of the
+ * same module under a DIFFERENT convention root (the write would duplicate it), or null. Pure & testable.
+ */
+export function duplicateModuleTarget(path: string, existingPaths: Iterable<string>): string | null {
+  if (!isSourceFile(path)) return null;
+  const alts = new Set(conventionRootAlternatives(path));
+  if (alts.size === 0) return null;
+  for (const p of existingPaths) {
+    if (p !== path && alts.has(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Find modules that exist under 2+ convention roots (TaskForge autopsy). Keys each source file by its
+ * convention-root-relative path (`app/components/IssueBoard/Column.tsx` and `src/components/IssueBoard/
+ * Column.tsx` both key to `components/IssueBoard/Column.tsx`); any key with 2+ concrete files is a
+ * cross-root duplicate. Precise by construction — two files only collide when they share the SAME
+ * sub-path under DIFFERENT roots, so unrelated `feature-a/utils/index.ts` vs `feature-b/utils/index.ts`
+ * never match. Pure & deterministic.
+ */
+export function findDuplicateComponentModules(files: Record<string, string>): DuplicateComponentModule[] {
+  const groups = new Map<string, string[]>();
+  for (const path of Object.keys(files)) {
+    if (!isSourceFile(path) || typeof files[path] !== 'string') continue;
+    const rel = conventionRelative(path);
+    if (!rel) continue;
+    const bucket = groups.get(rel);
+    if (bucket) bucket.push(path); else groups.set(rel, [path]);
+  }
+  const out: DuplicateComponentModule[] = [];
+  for (const [module, copies] of groups) {
+    if (copies.length >= 2) out.push({ module, copies: copies.sort() });
+  }
+  return out.sort((a, b) => a.module.localeCompare(b.module));
+}
+
 /** Run every project-integrity check over the written file set. Pure + deterministic. */
 export function analyzeProjectIntegrity(files: Record<string, string>): ProjectIntegrityReport {
   const focusOwners = findFocusOwners(files);
   const duplicateStylesheets = findDuplicateStylesheets(files);
   const orphanStylesheets = findOrphanStylesheets(files);
   const duplicateEntryPoints = findDuplicateEntryPoints(files);
+  const duplicateComponentModules = findDuplicateComponentModules(files);
   const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0
-    && orphanStylesheets.length === 0 && duplicateEntryPoints.length === 0;
-  return { focusOwners, duplicateStylesheets, orphanStylesheets, duplicateEntryPoints, ok };
+    && orphanStylesheets.length === 0 && duplicateEntryPoints.length === 0
+    && duplicateComponentModules.length === 0;
+  return { focusOwners, duplicateStylesheets, orphanStylesheets, duplicateEntryPoints, duplicateComponentModules, ok };
 }
 
 /**
@@ -270,6 +355,17 @@ export function integrityRepairInstruction(report: ProjectIntegrityReport): stri
       `The preview boots exactly ONE root app, so the others are dead code (and can make the wrong app ` +
       `serve). Keep the SINGLE entry the app is served from (the root src/main.tsx / src/index.tsx) and ` +
       `remove the root mount (createRoot().render / ReactDOM.render) from the other file(s).`,
+    );
+  }
+  for (const d of report.duplicateComponentModules) {
+    parts.push(
+      `DUPLICATE MODULE — "${d.module}" exists in ${d.copies.length} places: ${d.copies.join(', ')}. ` +
+      `These are copies of the same component under different convention roots (a Next.js \`app/\` tree ` +
+      `and a Vite \`src/\` tree), and their interfaces drift and break the build. Keep the ONE copy the ` +
+      `app's entry actually imports (the canonical file) and, for each OTHER copy, replace its whole ` +
+      `contents with a re-export from the canonical one (e.g. \`export * from '<relative path to canonical>';\`) ` +
+      `— a valid, guard-safe edit that removes the drift. Do NOT try to delete the directory (governance ` +
+      `refuses a source-dir delete); a re-export stub is the correct fix.`,
     );
   }
   return parts.join('\n');

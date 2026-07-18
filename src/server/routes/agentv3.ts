@@ -7110,6 +7110,9 @@ export function registerAgentV3Routes(app: Express): void {
           for (const e of integrity.duplicateEntryPoints) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_ENTRY', message: `${e.entries.length} files each mount a React root: ${e.entries.join(', ')}. The preview boots one; the others are dead and can serve the wrong app — keep the single served entry and remove the extra root mount(s).`, autoResolved: false });
           }
+          for (const d of integrity.duplicateComponentModules) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_MODULE', message: `"${d.module}" exists in ${d.copies.length} places across different convention roots: ${d.copies.join(', ')}. Their interfaces drift and break the build (TaskForge autopsy). Keep the copy the app's entry imports; make each other copy a re-export stub from it (never delete the directory — governance refuses that).`, autoResolved: false });
+          }
           // Bounded LLM self-heal (flag-gated, default OFF). Never blocks or fails the build — a heal
           // that can't fix leaves the honest warnings above and the app still ships.
           if (process.env.AGENTV3_INTEGRITY_GATE === 'on' && result.ok && !abort.signal.aborted) {

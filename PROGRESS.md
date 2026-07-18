@@ -18078,3 +18078,66 @@ recomputed (20×5+8). New input-row height ≈ 34px (was ≈ 64px) ≈ 47% short
 (h-7 28px + bottom-0.5 2px = 30px) exactly meet the 30px textarea top, so nothing overflows; pr-16 (64px)
 exactly reserves the two right buttons (send right-2 + expand/stop right-9). Dropups still open upward;
 all button variants/modes preserved. Gate: frontend tsc ✓, agentv3 187 ✓, full vitest 7365 ✓, vite build ✓.
+
+---
+
+### 2026-07-18 — TaskForge autopsy: duplicate-component-module detector + guard-safe repair guidance (task #74)
+
+**The 2-hour failure.** A Linear-style app (framework recorded `vite-react`, but Next.js-shaped) had the SAME
+components under THREE convention roots — `app/components/IssueBoard/*`, `src/app/components/*`, and
+`src/components/IssueBoard/*` — whose interfaces drifted and broke tsc. The agent PROVED the root `app/`
+copies were dead (grep → nothing imports them), tried to delete → the self-destruct guard (#56) refused a
+source-dir delete, tried tsconfig-exclude → tsc still compiled them, and finally froze ("per governance
+rules, I cannot delete or blank out source files"). Result: 2× BUILD_TIMEOUT → user killed it after ~2h.
+GLM 429 storm (60) piled on.
+
+**Root-cause chain (investigation-confirmed):** (1) framework mismatch (Next.js prompt → vite-react on a
+resumed "continue" turn, because framework is never re-derived from the workspace files/record — only
+`req.body.framework || 'vite-react'`, and `detectFrameworkFromPrompt("continue")` = null) → the builder wrote
+parallel `app/` + `src/` trees; (2) the guard correctly protects live source but left the agent unable to
+remove its own provably-dead duplicate cruft → an unrecoverable loop.
+
+**FIX SHIPPED (this PR — the safe, self-contained half):** new pure `findDuplicateComponentModules(files)`
+in `ProjectIntegrityChecks.ts` — keys each source file by its convention-root-relative path (`app/`, `src/`,
+`src/app/` stripped) so a same sub-path under different roots is caught precisely (no generic-basename false
+positives). Wired into `analyzeProjectIntegrity` (`ok=false`), an advisory `INTEGRITY_DUPLICATE_MODULE`
+diagnostic, and — the key un-trap — `integrityRepairInstruction`, which now tells the bounded integrity
+repair pass to **consolidate each non-canonical copy into a re-export stub** (`export * from '<canonical>'`):
+a VALID, guard-safe edit that removes the drift WITHOUT deleting a directory. So the repair gate can now fix
+this deterministically instead of the agent looping for hours. 6 regression tests (39 in the suite).
+
+**Guard is NOT relaxed (deliberate, no sycophancy):** the self-destruct guard runs only in the `bash` tool
+case; engine-side fixers already write via `actuator.writeFile` and bypass it by construction. Relaxing the
+guard would reopen the StudySync/PaisaTrack self-destruct class — rejected.
+
+**OPEN follow-ups (recorded, not silently patched):**
+- **Fix B (prevention):** derive framework from the workspace FILES (next.config / `app/`-router + `next`
+  dep → nextjs; vue/svelte deps → those) on a resumed/edit turn, so a Next.js app is never driven as
+  vite-react and the parallel trees are never created. Needs careful route surgery (framework feeds the
+  scaffold) — next slice.
+- **Auto-prune of provably-dead duplicates** deferred on purpose: safe automatic source-deletion needs
+  alias-aware (`@/`) reachability, and rushing a source-deleting pass risks breaking OTHER apps (rule 1).
+  The re-export-stub repair above is the safe interim.
+- Provider 429 storm — the rate-pacer (#1520, another session) is the path.
+
+### 2026-07-18 — TaskForge PREVENTION (admin: "duplicate file bani hi kyu — isko fix karo")
+
+The admin's correct root-cause push (no-sycophancy): the delete-block was the symptom; the real bug is that
+the parallel duplicate files were CREATED at all. Added a **write-time duplicate-module guard** so a duplicate
+is never born:
+- New pure `conventionRootAlternatives(path)` + `duplicateModuleTarget(path, existingPaths)` in
+  `ProjectIntegrityChecks.ts` — the same-module-under-a-different-root check, testable.
+- `ToolDispatcher.write_file`: on a fresh CREATE of a source file whose module already exists under another
+  convention root (app/ vs src/ vs src/app/), REFUSE with guidance to edit the existing canonical file (uses
+  the in-memory graph, no I/O; a stale graph only ever misses a dup — never wrongly refuses).
+- `ToolDispatcher.write_files_batch`: parity — drops any batched file that would duplicate an existing OR
+  earlier-in-batch module, with a `[DUPLICATE MODULE BLOCKED]` note. So the fast-lane (where the parallel
+  trees originated) can't create them.
+- `systemPrompt.ts`: an explicit rule — ONE directory convention for the whole app; never write the same
+  module under two roots; edit-in-place if it exists.
+- Kill switch `AGENTV3_DUP_MODULE_GUARD=off`. Edits-in-place always allowed. 4 new prevention tests
+  (184 in the integrity+dispatcher suites).
+
+Combined with the detector + re-export-repair guidance (same PR), the duplicate-tree class is now blocked at
+BIRTH and cleaned up if any slip through. Still open (deeper origin): framework-from-files on resume so the
+wrong framework can't drive the convention mismatch in the first place — next slice.

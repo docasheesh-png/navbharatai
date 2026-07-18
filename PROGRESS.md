@@ -17767,3 +17767,105 @@ on the free/weak floor added latency though fallback delivered; the pool-cooldow
 (admin-chosen) are the path. (b) OPTIONAL future hardening: a post-build "scaffold framework ≠ generated
 files" mismatch detector as defence-in-depth (the prompt→framework fix removes the cause; this would catch
 any residual drift).
+
+## 2026-07-18 — Offline AI enhanced: typo-tolerant retrieval + related hops + starter chips
+
+Admin: "Offline ai, ko aur enhance karo!" — the Offline AI is the 100% on-device app guide
+(`src/lib/offlineAssistant.ts` retrieval + `src/components/offline/OfflineAI.tsx` UI), grounded entirely
+in `AppKnowledgeBase` (183 entries). Because it runs offline, there is NO server fallback — any query the
+exact matcher misses was a dead end. Enhanced with real, tested, additive improvements:
+
+- **Typo-tolerant fuzzy fallback** (`editDistance` bounded Levenshtein + `fuzzyTokenHit`): near-miss words
+  like "databse" / "walet" / "deploi" now still find the right feature. Scored at 1.5 — strictly BELOW an
+  exact single-keyword hit (2) — so it is a pure recovery tier: every query that already worked ranks
+  identically. Gibberish still returns an honest "none" (no over-matching).
+- **Description scoring bugfix (root cause)**: the code comment claimed "word-boundary hit" but used
+  `descr.includes(w)` (substring) — so "star" falsely matched inside "restart". Now a real word-boundary
+  token check. This dropped one stale substring point on the Billing entry, which exposed a latent tie…
+- **Coverage tie-breaker** (`matchCoverage`): on a score tie, the feature covering MORE of the user's
+  distinct words wins (breadth of relevance), instead of the previous accidental tie-break by KB position.
+  Fixes "where is the wallet and billing" → now surfaces Billing (matches wallet+billing), not the Offline
+  AI's own entry (which only caught the generic word "where").
+- **Related-feature chips** (`relatedFeaturesOf`): each result now shows its real related KB features as
+  one-tap chips — hop across connected screens without retyping. Drops dangling ids, never self, real data.
+- **Starter/recovery suggestion chips** (`SUGGESTED_QUERIES`): a blank box or empty result now always
+  offers a real next tap; every suggestion is verified to resolve to a non-empty KB result.
+
+KB sync: updated the `offline_ai` entry description for the new user-facing capabilities (per the
+AppKnowledgeBase rule). Tests: 10 new cases in `src/lib/offlineAssistant.test.ts` (editDistance, typo
+recovery, fuzzy-never-outranks-exact, gibberish-still-none, word-boundary, relatedFeaturesOf, coverage
+tie-break, suggestions resolve). Gate: frontend tsc ✓, server tsc ✓, full vitest 7306 passed ✓.
+
+## 2026-07-18 — Offline AI now answers small questions offline (real, deterministic — no fake brain)
+
+Admin: "kya offline ai question ke answer kar sakta hai? chhoti moti question ka offline answer aa jaye."
+The Offline AI was retrieval-only (feature guide) — typing "2+2" or "hi" returned "not found", and general
+questions falsely matched a random feature. Added an on-device QUICK-ANSWER layer in `offlineAssistant.ts`
+that answers small questions the device can GENUINELY compute with no model and no network. Honest by
+construction (absolute rules 2 & 3): every answer is a true computation or a fixed statement about the
+app — open-knowledge ("capital of France") is deliberately NOT answered here and honestly points online.
+
+- **Math** (`evalArithmetic` — a real recursive-descent parser, NOT eval()/new Function() which the
+  builder's own security scan forbids): "2+2"=4, "2+3*4"=14 (precedence), "(12*5)/4"=15, "2^10"=1024,
+  "15% of 200"=30, word forms ("100 divided by 4", "12 times 3"), divide-by-zero → honest calc error.
+  A math-shaped query NEVER falls through to "feature not found".
+- **Date / time / day** from the device clock (`now` injected for pure testability): "what is the date"
+  → "Today is Saturday, 18 July 2026"; "what time is it" → "It's 6:04 AM".
+- **Greeting / thanks / identity**: "hi", "namaste", "thank you", "who are you" → branded NavBharatAI
+  replies (white-label: a regression test asserts no provider/model name — claude/gpt/gemini/glm/kimi/…
+  — ever leaks). A sentence merely containing "hi" is NOT treated as a greeting.
+- Retrieval still handles feature questions unchanged; the "none" copy now honestly offers the offline
+  quick-answers and points general questions online.
+
+UI (`OfflineAI.tsx`): a distinct emerald answer card (calculator/clock/chat icon by category); intro,
+placeholder and the `offline_ai` KB entry updated for the new capability (+ keywords: calculator, date,
+time, hisaab, quick answer). Tests: +6 cases (arithmetic engine, math answers, math-never-not-found,
+date/time from injected clock, greeting/identity white-label, no-hijack of feature/general questions).
+Gate: frontend tsc ✓, server tsc ✓, offlineAssistant 24/24 ✓ (full suite: 7311 passed; the 1 red is the
+pre-existing flaky AIRouter jitter test — passes in isolation, unrelated to this change).
+
+## 2026-07-18 — Offline AI: user can TEACH it (on-device memory, "jo bole woh yaad rakhe")
+
+Admin: "kya user khud train kar sakta hai? jo bhi bate kare woh yaad rakh kar." HONEST framing (rule 3):
+real ML training is impossible offline on-device — so this is NOT faked as "training". Built the real,
+fully-offline thing that delivers the intent: a DETERMINISTIC user-taught memory, stored ON THIS DEVICE
+ONLY (localStorage, never uploaded), recalled EXACTLY (zero hallucination — it only ever repeats what the
+user taught).
+
+- **Teach in plain language** (`offlineMemory.ts` `parseTeaching`, committed on Enter):
+  "remember my gate code is 4821" / "note: …" / "yaad rakho ki …" (free-text fact);
+  "when I ask X answer Y" / "jab main X puchu to Y" (explicit Q→A);
+  "json means …" / "X ka matlab Y" (definition). Guards: a math equation ("2+2=4") and a plain question
+  ("iska matlab kya hai") are NOT treated as teaching.
+- **Recall** (`offlineAssistant.ts` `recallMemory`/`scoreMemory`, wired into `answerOffline` as a new
+  `answerKind:'memory'`): a fact recalls by keyword (typo-tolerant), a Q→A by its trigger. Deterministic —
+  returns the stored text verbatim; unrelated queries never surface a secret (threshold-gated, no fuzzy
+  over-reach). Priority: real math/date > taught memory > app-feature retrieval.
+- **Persistence & safety**: `loadMemories`/`saveMemories` (injectable storage, corruption-safe: malformed
+  or wrong-shape blobs → []); immutable `addMemory` (same-trigger Q→A replaces, identical facts de-dup),
+  capped at 500 items / 2000 chars; `removeMemory`. No dependency cycle — write side in `offlineMemory.ts`,
+  read side (types + recall) in `offlineAssistant.ts`; ONE shared tokenizer/fuzzy (re-exported).
+- **UI** (`OfflineAI.tsx`): the box doubles as a teach box — a live "Press ↵ Enter and I'll remember this"
+  hint when the text is a teaching command, a green "Got it — saved on this device only" confirmation, a
+  🧠 recalled-memory answer card, and a "Things you've taught me (N)" panel to review/delete each item or
+  forget everything. KB `offline_ai` entry + keywords (teach/train/remember/yaad rakho/memory/forget)
+  updated.
+
+Tests: new `offlineMemory.test.ts` (13 cases: parse fact/qa/definition, reject math+questions, keyword
+extraction, immutable add/replace/dedup/cap, remove, exact recall, deterministic no-over-reach, memory
+never beats math, load/save round-trip + corruption safety) + a recall case in the assistant suite. Gate:
+frontend tsc ✓, server tsc ✓, FULL vitest 7325 passed ✓ (flaky AIRouter test green this run too).
+
+## 2026-07-18 — Offline AI: UI/UX beautified (gradient design pass, logic untouched)
+
+Admin: "UI aur UX ko aur enhance aur beautiful bana ke" + merge. Presentation-only pass on
+`OfflineAI.tsx` (all pure logic in offlineAssistant/offlineMemory unchanged): gradient hero header with
+ambient radial glow + gradient-clip title, a pulsing live on-device/offline status dot, an intro card with
+capability pills (Find features · Calculate · Date & time · Remember), a focus-glow search/teach box that
+flips its icon to a Brain + shows a "↵ Save" affordance when the text is a teaching command, gradient
+emerald answer cards (math result in mono; a "You taught me this" ribbon for recalled memory), a violet
+teach-hint + emerald saved-confirmation with entrance animations, staggered fade/slide-in feature cards
+with numbered step chips and gradient "Open" buttons, and a polished violet "Things you've taught me"
+panel. Only proven in-app animation utilities used (`animate-in fade-in slide-in-from-*`); fixed two
+non-standard classes (`w-4.5`, `WifiOff` not exported). Gate: frontend tsc ✓, server tsc ✓, full vitest
+7325 ✓, and a real `vite build` ✓ (OfflineAI stays its own lazy chunk). Shipping via PR → CI green → merge.

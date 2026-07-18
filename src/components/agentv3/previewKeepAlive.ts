@@ -15,10 +15,22 @@ export function previewVisible(showWorkspace: boolean, tab: string): boolean {
 
 /**
  * Should PreviewSurface be in the tree? True once the preview has EVER been opened this session
- * (keep-alive), or when it is becoming visible for the first time. Pure + unit-testable.
+ * (keep-alive), or when it is becoming visible for the first time, or when it is being PRE-WARMED
+ * (mounted off-screen after a build so opening Preview is instant). Pure + unit-testable.
  */
-export function previewMounted(everOpened: boolean, showWorkspace: boolean, tab: string): boolean {
-  return everOpened || previewVisible(showWorkspace, tab);
+export function previewMounted(everOpened: boolean, showWorkspace: boolean, tab: string, prewarm = false): boolean {
+  return everOpened || prewarm || previewVisible(showWorkspace, tab);
+}
+
+/**
+ * Should the preview be PRE-WARMED — mounted and compiled OFF-SCREEN before the user ever clicks
+ * Preview — so opening it is instant instead of a multi-minute cold compile? True once a build is
+ * idle (neither the client nor the server build is running) and it produced files. The heavy cost
+ * (the in-iframe whole-app transpile) then happens in the background during/after the build; the
+ * existing reloadSignal keeps the mounted preview live-synced. Pure + unit-testable.
+ */
+export function shouldPrewarmPreview(clientBuildRunning: boolean, serverBuildRunning: boolean, hasFiles: boolean): boolean {
+  return !clientBuildRunning && !serverBuildRunning && hasFiles;
 }
 
 /** Tailwind class for the keep-alive wrapper: hidden (display:none) keeps the iframe alive off-screen. */

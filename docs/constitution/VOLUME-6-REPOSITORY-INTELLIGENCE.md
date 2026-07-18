@@ -128,10 +128,15 @@ Flag declared packages no module imports. Not done today; the inverse (missing d
 handled (`DependencyAutoFix`). A pruning pass is a target — bounded and advisory (never
 auto-removes a dep a build might need at runtime). *Laws:* EDIT-11, QA-03.
 
-### C18 — Circular Dependency Detection · [ASPIRATIONAL]
-A cycle-detection pass over the import/dependency graph (adopted from Vol 5 X.4). Not
-built yet; a genuine target — a real defect class no current check catches. *Anchor:*
-open (extends the dependency graph engine, Vol 3 §25). *Laws:* EDIT-06, ARCH-08.
+### C18 — Circular Dependency Detection · [LIVE]
+A cycle-detection pass over the import/dependency graph (adopted from Vol 5 X.4). Built:
+a pure DFS over the project import graph finds every import cycle, reusing the existing
+local-specifier resolver so `node_modules` edges are excluded. Advisory-only by design —
+most JS/TS cycles are benign (ES modules tolerate them; type-only cycles are harmless), so
+a cycle is surfaced as a non-blocking `INTEGRITY_CIRCULAR_DEP` warning for the reviewer /
+admin diagnostics and is never auto-fixed (breaking a cycle can change behaviour). *Anchor:*
+`ImportExportAnalysis.ts → findCircularDependencies`, wired in `routes/agentv3.ts`. *Laws:*
+EDIT-06, ARCH-08, QA-03.
 
 ### C19 — Incremental Repository Learning · [LIVE]/[ASPIRATIONAL]
 Learn the repo progressively: each turn re-indexes changed files; content retrieval +
@@ -182,7 +187,7 @@ repository reasoning:
 | **Context drift** | durable truth as shared memory; union reconcile; shrink-guard (C13/C20) | `[LIVE]` |
 | **Repository corruption** | single-flight checkpoints; never destroy source; idempotent writes | `[LIVE]` |
 | **Cross-file regressions** | full-map analysis + full test/analyzer suite green before ship | `[LIVE]` |
-| **Circular references** | cycle-detection pass (C18) | `[ASPIRATIONAL]` |
+| **Circular references** | cycle-detection pass (C18) | `[LIVE]` (advisory `INTEGRITY_CIRCULAR_DEP`) |
 | **Hidden side effects** | orphan-stylesheet + integrity checks catch some; general side-effect analysis | `[LIVE]` partial; general `[ASPIRATIONAL]` |
 
 ---
@@ -216,7 +221,7 @@ small repo, deep only when the signals earn it. Its authority is the **durable s
 already in force.
 
 Where a capability is `[ASPIRATIONAL]` (architecture-pattern recognition, formal impact
-analysis, unused-dependency pruning, **circular-dependency detection**, a persistent
+analysis, unused-dependency pruning, a persistent
 enterprise repo graph, deep type/semantic cross-file reasoning), it is named honestly as
 a target, and its absence is compensated by the downstream verification net (Vol 5
 Framework 5) until it is `[LIVE]`. The engine never claims repository intelligence it has

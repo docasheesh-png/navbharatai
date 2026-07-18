@@ -417,7 +417,7 @@ The second spec's ten planning laws, resolved against the Constitution:
 | **Contradictory requirements** | runtime gate (runs or not) + a consequential conflict is surfaced | `[LIVE]`; formal conflict detection `[ASPIRATIONAL]` |
 | **Hallucinated requirements** | Traceability feature→intent (nothing untraceable is built) | `[LIVE]` partial; formal check `[ASPIRATIONAL]` |
 | **Incomplete planning** | Planning Budget — signals promote depth (Framework 2) | `[LIVE]` |
-| **Circular dependencies** | **a cycle-detection pass over the dependency graph** — a genuine new gap adopted from this spec | `[ASPIRATIONAL]` |
+| **Circular dependencies** | **a cycle-detection pass over the dependency graph** (advisory `INTEGRITY_CIRCULAR_DEP`; see Vol 6 C18) | `[LIVE]` |
 | **Unverifiable features** | the Compensation Invariant — no downstream catcher ⇒ handle upstream (Framework 5) | `[LIVE]` (invariant) |
 | **Unrealistic implementation plans** | complexity/budget adequacy + adaptive step cap (Framework 2, PERF-10) | `[LIVE]` |
 | **Architecture before planning** | the shared contract precedes any sub-agent (PLAN-07) — ordering enforced | `[LIVE]` |

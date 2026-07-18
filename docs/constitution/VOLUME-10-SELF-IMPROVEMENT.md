@@ -48,9 +48,10 @@ server).
 ### §3 — Close the aspirational gaps `[LIVE]` (process) / `[ASPIRATIONAL]` (targets)
 Every `[ASPIRATIONAL]` marker across this Constitution is **mandated work**, tracked until
 `[LIVE]`. The engine (and its sessions) treat the honest gap list as the improvement
-backlog — circular-dependency detection, full-stack layout contract, API/DB runtime
-verification, formal impact analysis, and the rest. Naming a gap honestly is step one of
-closing it (DOC-05).
+backlog — full-stack layout contract, API/DB runtime
+verification, formal impact analysis, and the rest (circular-dependency detection was one
+such gap, now closed `[LIVE]` — advisory `INTEGRITY_CIRCULAR_DEP`, Vol 6 C18). Naming a gap
+honestly is step one of closing it (DOC-05).
 
 ### §4 — Additive, reversible, non-regressive `[LIVE]`
 Every self-improvement is shipped additively, flag-gated, and proven non-regressive

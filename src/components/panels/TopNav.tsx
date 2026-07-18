@@ -6,6 +6,7 @@ import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut } from 'firebase/auth';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../../lib/signOutFlow';
+import { signOutEverywhere } from '../../lib/firebase';
 
 interface MenuItem {
   id: string;
@@ -69,7 +70,8 @@ export function TopNav({
     // Centralized teardown (src/lib/signOutFlow.ts) — deletes Firebase's IndexedDB ONLY when
     // signOut hangs (awaited before reload), so a clean logout never corrupts the next login.
     await performSignOut({
-      signOut: () => signOut(auth),
+      signOut: () => signOutEverywhere(), // clears the native plugin session too (app), not just the web SDK
+
       clearStorage: defaultClearAuthStorage,
       deleteAuthDb: () => deleteFirebaseAuthDb(),
       reload: () => window.location.reload(),

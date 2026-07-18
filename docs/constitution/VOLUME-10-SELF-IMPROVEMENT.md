@@ -49,8 +49,10 @@ server).
 Every `[ASPIRATIONAL]` marker across this Constitution is **mandated work**, tracked until
 `[LIVE]`. The engine (and its sessions) treat the honest gap list as the improvement
 backlog — full-stack layout contract, API/DB runtime
-verification, formal impact analysis, and the rest (circular-dependency detection was one
-such gap, now closed `[LIVE]` — advisory `INTEGRITY_CIRCULAR_DEP`, Vol 6 C18). Naming a gap
+verification, formal impact analysis, and the rest (two such gaps closed recently: circular-
+dependency detection `[LIVE]` — advisory `INTEGRITY_CIRCULAR_DEP`, Vol 6 C18; and
+unused-dependency **detection** `[LIVE]` — advisory `INTEGRITY_UNUSED_DEP`, with automatic
+pruning kept `[ASPIRATIONAL]` as unsafe). Naming a gap
 honestly is step one of closing it (DOC-05).
 
 ### §4 — Additive, reversible, non-regressive `[LIVE]`

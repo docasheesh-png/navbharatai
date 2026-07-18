@@ -17678,3 +17678,22 @@ during edits — is the recurring class (build #5 duplicate JSX, this duplicate 
 a targeted duplicate-top-level-declaration guard the builder self-checks after each edit, and/or a final
 re-heal pass. The `AgentRunner` "verified READY (score N/100)" SUMMARY string is separate from the card and
 can still read optimistically on this path — a follow-up should reconcile the summary with the final card.
+
+---
+
+### 2026-07-18 — Unused-dependency detection (advisory) — next honest gap → [LIVE] (PR #1503)
+
+Continued closing the Vol 10 §3 backlog. Added `findUnusedDependencies` to
+`ImportExportAnalysis.ts` — a pure scan flagging packages declared in `package.json`
+`dependencies` that no project file statically imports, reusing the existing import-specifier
+machinery + `resolveLocalTarget` (local imports and node builtins excluded). Surfaced as an
+advisory `INTEGRITY_UNUSED_DEP` warning beside `INTEGRITY_CIRCULAR_DEP`.
+
+**DETECTION only, never pruning (EDIT-11, QA-03):** a declared dep can be used via config/CLI/
+runtime string-load, so automatic removal is unsafe — the finding never fails a build and is
+never auto-removed (pruning stays `[ASPIRATIONAL]`). False positives kept near zero: only
+runtime `dependencies` inspected (not devDependencies), scoped/subpath specifiers normalize to
+the package, and a conservative implicit-use allowlist (react/react-dom/framework runtimes +
+build tooling) + `@types/*` exclusion means a clean Vite scaffold produces zero findings. 10 new
+regression tests; full suite 7246 pass. Vol 6 closing + Vol 10 §3 updated to record detection
+`[LIVE]`, pruning `[ASPIRATIONAL]`.

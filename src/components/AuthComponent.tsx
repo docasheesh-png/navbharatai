@@ -57,6 +57,39 @@ async function forceLogoutBeforeLogin(): Promise<void> {
 }
 
 /**
+ * DIAGNOSTIC (admin 2026-07-18, iOS TestFlight builds 27 + 28): the native Google sign-in gets the Google
+ * token ("Google returned — token: YES") but `signInWithCredential` then HANGS ~18s and "does not complete".
+ * Because settleNativeSignIn returns 'failed' ONLY when the auth listener never fires, the stall is in the
+ * Identity Toolkit NETWORK call (before the user is ever set), not in the persistence write. This probe hits
+ * a lightweight, unauthenticated Identity Toolkit endpoint (`createAuthUri`) with a hard 10s timeout and
+ * writes the result into the on-screen sign-in trail, so we can SEE whether the WKWebView can even reach
+ * Google's auth backend:
+ *   • "net probe: HTTP 200 in Nms"  → the network is fine; the SDK exchange itself is the stall (deeper bug)
+ *   • "net probe FAILED … TIMEOUT"  → the WebView cannot reach identitytoolkit.googleapis.com → that IS the
+ *                                      root cause (a WKWebView/ATS/network path issue to hunt next)
+ * Diagnostic ONLY — fired in parallel, it never changes or blocks the real sign-in.
+ */
+async function probeAuthNetwork(apiKey: string, mark: (s: string) => void): Promise<void> {
+  const started = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'probe@navbharatai.com', continueUri: 'https://navbharatai.com' }),
+      signal: ctrl.signal,
+    });
+    mark(`net probe: HTTP ${res.status} in ${Date.now() - started}ms`);
+  } catch (e: any) {
+    const why = e?.name === 'AbortError' ? 'TIMEOUT(10s)' : String(e?.message || e).slice(0, 40);
+    mark(`net probe FAILED in ${Date.now() - started}ms: ${why}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Temporary diagnostic: hit the Identity Toolkit sign-up endpoint directly from
  * the app (so it carries the app's referer + key) and return the RAW server
  * response. This reveals the real reason behind a bare auth/internal-error —
@@ -502,6 +535,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           const appleProvider = new OAuthProvider('apple.com');
           credential = appleProvider.credential({ idToken, rawNonce: nativeResult.credential?.nonce });
         }
+        // DIAGNOSTIC (build 29): fire a parallel, timed reachability probe to Google's auth backend so the
+        // trail shows whether the WebView can reach identitytoolkit at all (see probeAuthNetwork). Never awaited.
+        void probeAuthNetwork(firebaseConfig.apiKey, mark);
         mark('verifying with Firebase…');
         // Exchange the native credential into the Firebase JS SDK, but NEVER let a stalled WKWebView
         // persistence write hang the login spinner forever (the "stuck after returning from Google" bug,
@@ -509,7 +545,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         // when the session actually landed via the auth listener — else it reports a clean failure.
         // (The on-screen trail marks each hop so a stuck attempt shows exactly where it stopped.)
         let result: UserCredential | null = null;
-        const exchange = signInWithCredential(auth, credential).then((r) => { result = r; });
+        const exchange = signInWithCredential(auth, credential).then(
+          (r) => { result = r; },
+          (e) => { mark(`exchange error: ${String(e?.code || e?.message || e).slice(0, 60)}`); throw e; }, // surface the REAL reason (was swallowed)
+        );
         const outcome = await settleNativeSignIn(exchange, auth, 15000, 3000);
         if (outcome === 'failed') {
           mark('failed: sign-in did not complete');

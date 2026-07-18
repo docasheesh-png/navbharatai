@@ -6,13 +6,14 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye } from 'lucide-react';
+import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2 } from 'lucide-react';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
 import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
+import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -25,6 +26,60 @@ async function authJsonHeaders(): Promise<Record<string, string>> {
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="text-zinc-500 text-sm text-center leading-relaxed">{children}</div>;
+}
+
+// RESPONSIVE VIEWPORTS (admin 2026-07-17): the preview can render at a REAL device width so the built
+// app's OWN @media breakpoints fire exactly as they would on that device — not a cosmetic label. An
+// <iframe>'s content viewport equals the iframe element's width, so constraining that width to 390px
+// genuinely makes a `@media (max-width: …)` rule match. Works identically for BOTH previews (the live
+// sandbox URL and the in-browser build) because both are just iframes. "Auto" fills the panel (today's
+// behavior). Device modes show the true device pixel box, visually scaled to fit the panel when needed
+// (the scale is cosmetic — the app still LAYS OUT at the true device width, so the test stays honest).
+// The viewport model + sizing math live in ./previewViewport (pure, unit-tested).
+
+/**
+ * Wrap a preview <iframe> so it renders at the chosen viewport. In 'auto' it fills the panel (unchanged
+ * behavior). In a device mode it constrains the iframe to the true device pixel size (so the app's
+ * media queries respond for real) and scales the whole device box down to fit the panel when it's
+ * larger than the available room. The child iframe must be `w-full h-full` to fill the box.
+ */
+function ResponsiveFrame({ viewport, children }: { viewport: PreviewViewport; children: React.ReactNode }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const dims = viewport === 'auto' ? null : DEVICE_DIMS[viewport];
+
+  useEffect(() => {
+    if (!dims) { setScale(1); return; }
+    const el = wrapRef.current;
+    if (!el) return;
+    // 24px accounts for the padding around the device so it never touches the panel edges.
+    const recompute = () => setScale(computeDeviceScale(el.clientWidth - 24, el.clientHeight - 24, dims.w, dims.h));
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dims?.w, dims?.h]);
+
+  // Auto — the iframe fills the panel exactly as before. `flex` (align-stretch) guarantees the child
+  // iframe reaches full height/width regardless of how percentage heights resolve on this browser.
+  if (!dims) return <div className="flex-1 min-h-0 flex">{children}</div>;
+
+  return (
+    <div ref={wrapRef} className="flex-1 min-h-0 overflow-auto bg-zinc-950/40 flex items-start justify-center p-3">
+      {/* Outer box reserves the SCALED footprint so centering + scrolling stay correct. */}
+      <div style={{ width: Math.round(dims.w * scale), height: Math.round(dims.h * scale) }} className="shrink-0">
+        {/* Inner box is the TRUE device pixel size — the app inside sees this width (media queries are
+            real); we only visually scale the whole box to fit. */}
+        <div
+          style={{ width: dims.w, height: dims.h, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+          className="overflow-hidden rounded-[14px] ring-1 ring-zinc-700 shadow-2xl bg-white"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -42,6 +97,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // an explicit opt-in toggle the user picks (or auto-selects via Diagnose). Root cause: the live URL
   // dies on sandbox idle-pause / recycle, so defaulting to it made the preview flaky.
   const [mode, setMode] = useState<'live' | 'inbrowser'>('inbrowser');
+  // Chosen responsive viewport — shared across BOTH previews (live + in-browser), so switching the
+  // preview source keeps the device you were testing at. 'auto' = fill the panel (default).
+  const [viewport, setViewport] = useState<PreviewViewport>('auto');
   const [html, setHtml] = useState<string>('');
   const [kind, setKind] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -408,11 +466,35 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     </div>
   );
 
+  // Responsive viewport switcher — REAL device-width rendering (not a label), shown on BOTH previews.
+  const viewportSwitcher = (
+    <div className="flex items-center gap-0.5 rounded border border-zinc-700 p-0.5">
+      {([
+        ['auto', Maximize2, 'Auto — fills the panel (responsive to the available width)'],
+        ['mobile', Smartphone, DEVICE_DIMS.mobile.label],
+        ['tablet', Tablet, DEVICE_DIMS.tablet.label],
+        ['desktop', Monitor, DEVICE_DIMS.desktop.label],
+      ] as const).map(([v, Icon, tip]) => (
+        <button
+          key={v}
+          onClick={() => setViewport(v)}
+          className={`p-1 rounded transition-colors ${viewport === v ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+          title={tip}
+          aria-label={tip}
+          aria-pressed={viewport === v}
+        >
+          <Icon className="w-3.5 h-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+
   if (mode === 'live' && effectiveUrl) {
     return (
       <div className="h-full flex flex-col">
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
           {switcher}
+          {viewportSwitcher}
           <span className="truncate flex-1">{effectiveUrl}</span>
           <button onClick={() => setLiveReloadKey((k) => k + 1)} className="flex items-center gap-1 hover:text-zinc-200" title="Reload the live preview (reconnect to the sandbox)"><RotateCcw className="w-3.5 h-3.5" /></button>
           <a href={effectiveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-zinc-200" title="Open in new tab"><ExternalLink className="w-3.5 h-3.5" /></a>
@@ -422,7 +504,9 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
             <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
           </div>
         )}
-        <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="flex-1 w-full bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        <ResponsiveFrame viewport={viewport}>
+          <iframe key={liveReloadKey} title="Live preview" src={effectiveUrl} onLoad={() => setLiveLoading(false)} className="w-full h-full bg-white border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        </ResponsiveFrame>
       </div>
     );
   }
@@ -500,6 +584,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 text-xs text-zinc-400">
         {switcher}
+        {viewportSwitcher}
         <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
         {savingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />}
         {!!html && !err && (
@@ -566,31 +651,35 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         // so the untrusted app runs in an isolated origin. `allow-same-origin` is safe now — it's the
         // preview origin's (empty) localStorage, never the platform's Firebase token — and `import()`
         // still works because the preview origin is a real https origin.
-        <iframe
-          ref={inBrowserIframeRef}
-          title="In-browser preview"
-          src={previewSandboxUrl}
-          onLoad={() => {
-            // Hand the built HTML to the isolated host once it's loaded (the effect below re-posts on
-            // every subsequent html change, since a static `src` iframe won't auto-reload like srcDoc).
-            try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
-          }}
-          className="flex-1 w-full bg-white"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
+        <ResponsiveFrame viewport={viewport}>
+          <iframe
+            ref={inBrowserIframeRef}
+            title="In-browser preview"
+            src={previewSandboxUrl}
+            onLoad={() => {
+              // Hand the built HTML to the isolated host once it's loaded (the effect below re-posts on
+              // every subsequent html change, since a static `src` iframe won't auto-reload like srcDoc).
+              try { inBrowserIframeRef.current?.contentWindow?.postMessage({ [PREVIEW_HTML_MESSAGE]: html }, new URL(previewSandboxUrl).origin); } catch { /* best-effort */ }
+            }}
+            className="w-full h-full bg-white border-0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </ResponsiveFrame>
       ) : html ? (
         // DEFAULT (no separate preview origin configured) — same-origin srcDoc. allow-same-origin is
         // REQUIRED here: without it the srcDoc has an opaque origin and the dynamic ES-module import()
         // (how the preview loads React from the CDN) is blocked → "Missing dependency react". Safe under
         // the allowlist (trusted admins only); Phase 4 cross-origin isolation activates once
         // VITE_PREVIEW_ORIGIN is set. The live-server iframe above already sets allow-same-origin.
-        <iframe
-          ref={inBrowserIframeRef}
-          title="In-browser preview"
-          srcDoc={html}
-          className="flex-1 w-full bg-white"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
+        <ResponsiveFrame viewport={viewport}>
+          <iframe
+            ref={inBrowserIframeRef}
+            title="In-browser preview"
+            srcDoc={html}
+            className="w-full h-full bg-white border-0"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </ResponsiveFrame>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
           <Empty>{workspaceId ? 'Loading your saved files into the preview…' : 'No live preview yet — it appears the moment the agent starts the app.'}</Empty>

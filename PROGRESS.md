@@ -17588,3 +17588,38 @@ the architect's real tool set (the exact failing path) assembles unique with `ty
 **Note on rate limits (separate work, admin-chosen 2026-07-18):** the admin picked "Proactive pacer +
 AIMD" as the next hardening slice (token-bucket per key + adaptive concurrency in front of GLM/Kimi) to
 avoid most 429s before they happen — to ship flag-gated + default-safe, its own PR.
+
+---
+
+## 2026-07-18 — Same report, deeper look: false "Auto-fixed" success on a failed reviewer repair
+
+**Trigger:** admin re-asked "apne last build report dekhi?" on the same `24f5149f` report (after the
+tool-uniqueness 400 fix). Re-reading it end-to-end surfaced a second, independent honesty bug the first
+pass glossed over.
+
+**What actually happened in that build (timeline):** GLM built the mobile-friendly app (weak/free-list,
+`noClaude:true`). The post-build reviewer scored it **65/100 and found 3 CRITICAL issues**. The C9
+reviewer-autofix gate fired ("🔧 Reviewer found 3 critical issue(s) — fixing them now…"), its repair call
+**FAILED** (the duplicate-tool 400), and yet the very next line recorded **"✅ Auto-fixed 3 critical
+issue(s) from the reviewer"** — while the build stayed `ok:true`. So the app shipped with 3 unfixed
+critical mobile issues, reported as fixed. A fake success (rule 5).
+
+**Root cause:** in `routes/agentv3.ts` the `REVIEWER_AUTOFIX "Auto-fixed …"` record was emitted
+UNCONDITIONALLY after `critFixRunner.run()` returned — it never checked `fix.ok`. A failed repair (or a
+thrown/timed-out one, where the record wasn't emitted at all) both misreported the outcome.
+
+**Fix:** new pure `reviewerAutofixOutcome(fixOk, label)` (`AutoFix.ts`) — a SUCCESSFUL pass records the
+"Auto-fixed" info line; a FAILED pass records `REVIEWER_AUTOFIX_INCOMPLETE` (severity warning,
+autoResolved:false → shows up as a real unresolved problem, never a green tick) saying the findings may
+still be present. Wired at BOTH the returned-`!ok` path and the thrown-failure catch. Regression tests
+lock: success says "Auto-fixed"; failure never contains "Auto-fixed" and stays unresolved.
+
+**Honest correction (no sycophancy):** I initially also flagged "a Sonnet call ran on a weak build" as a
+violation. On closer inspection that was OVER-called: `enforceNoClaude` DID hold — the `claude-sonnet-4-6`
+in the error is only the nominal requested-model LABEL; the ACTUAL provider chain was
+VERTEX → GEMINI → CLAUDE_HAIKU (all authorized on weak), and no Sonnet/Opus was delivered (`noClaude:true`
+stands). So there was no Claude-money leak. (Minor nicety, not a correctness/cost bug: because this was an
+admin *free-list* build, not a welcome-bonus *free-tier* build, the heal gate didn't lead with the GLM/Kimi
+cheap coders — `freeTierBuildActive` was false — but enforceNoClaude still kept Claude-Sonnet out.)
+
+Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.

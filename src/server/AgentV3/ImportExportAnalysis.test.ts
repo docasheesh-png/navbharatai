@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeImportExports, resolveLocalTarget, exportRegenTargets, exportRegenInstruction, findCircularDependencies } from './ImportExportAnalysis';
+import { analyzeImportExports, resolveLocalTarget, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies } from './ImportExportAnalysis';
 
 describe('resolveLocalTarget', () => {
   const set = new Set(['src/lib/util.ts', 'src/components/Button.tsx', 'src/api/index.ts']);
@@ -221,5 +221,81 @@ describe('findCircularDependencies — local import cycles', () => {
       'src/B.ts': `// import './A';\n/* import './A'; */\nexport const b = 1;`,
     };
     expect(findCircularDependencies(files)).toHaveLength(0);
+  });
+});
+
+describe('findUnusedDependencies', () => {
+  it('a dependency declared but never imported is reported', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { lodash: '^4', axios: '^1' } }),
+      'src/main.ts': `import axios from 'axios';\nconsole.log(axios);`,
+    };
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'lodash' }]);
+  });
+
+  it('a dependency that IS imported (bare) is not reported', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { axios: '^1' } }),
+      'src/main.ts': `import axios from 'axios';`,
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('a scoped dep imported via a subpath is not reported (normalized to the package)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { '@tanstack/react-query': '^5' } }),
+      'src/main.ts': `import { QueryClient } from '@tanstack/react-query/build/modern';`,
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('a plain dep imported via a subpath is not reported (react-dom/client)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { 'react-dom': '^18', 'date-fns': '^3' } }),
+      'src/main.ts': `import { createRoot } from 'react-dom/client';\nimport { format } from 'date-fns/format';`,
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('implicit-use framework runtimes (react/react-dom) are never reported', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { react: '^18', 'react-dom': '^18' } }),
+      'src/App.tsx': `export const App = () => <div>hi</div>;`, // JSX, no explicit react import
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('no package.json → empty (no crash)', () => {
+    expect(findUnusedDependencies({ 'src/main.ts': `import x from 'x';` })).toHaveLength(0);
+  });
+
+  it('malformed package.json → empty (no crash)', () => {
+    const files = { 'package.json': `{ not valid json `, 'src/main.ts': `` };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('an unused devDependency is NOT reported (only runtime dependencies inspected)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: {}, devDependencies: { vitest: '^2' } }),
+      'src/main.ts': ``,
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('a dep loaded via require() is not reported', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { express: '^4' } }),
+      'server.js': `const express = require('express');`,
+    };
+    expect(findUnusedDependencies(files)).toHaveLength(0);
+  });
+
+  it('a node builtin in a subpath import never counts as a package', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { chalk: '^5' } }),
+      'src/main.ts': `import { readFile } from 'node:fs/promises';\nimport path from 'path';`,
+    };
+    // chalk is declared, never imported → reported; the node builtins are ignored, no crash.
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'chalk' }]);
   });
 });

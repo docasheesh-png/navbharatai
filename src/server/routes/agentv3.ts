@@ -126,7 +126,7 @@ import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, 
 import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
-import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
+import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -7066,6 +7066,12 @@ export function registerAgentV3Routes(app: Express): void {
             ? `${c.cycle[0]} imports itself`
             : `${c.cycle.join(' → ')} → ${c.cycle[0]}`;
           buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', message: `Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`, autoResolved: false });
+        }
+        // Advisory-only unused-dependency detection (detection, NOT pruning — a declared dep can be
+        // used via config/CLI/runtime, so removing it is unsafe; never blocks/fails a build). Only
+        // runtime "dependencies" are inspected, with a conservative implicit-use allowlist.
+        for (const u of findUnusedDependencies(integrityFiles)) {
+          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', message: `"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`, autoResolved: false });
         }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {

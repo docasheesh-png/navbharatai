@@ -17822,3 +17822,17 @@ Tests: new `offlineMemory.test.ts` (13 cases: parse fact/qa/definition, reject m
 extraction, immutable add/replace/dedup/cap, remove, exact recall, deterministic no-over-reach, memory
 never beats math, load/save round-trip + corruption safety) + a recall case in the assistant suite. Gate:
 frontend tsc ✓, server tsc ✓, FULL vitest 7325 passed ✓ (flaky AIRouter test green this run too).
+
+## 2026-07-18 — Offline AI: UI/UX beautified (gradient design pass, logic untouched)
+
+Admin: "UI aur UX ko aur enhance aur beautiful bana ke" + merge. Presentation-only pass on
+`OfflineAI.tsx` (all pure logic in offlineAssistant/offlineMemory unchanged): gradient hero header with
+ambient radial glow + gradient-clip title, a pulsing live on-device/offline status dot, an intro card with
+capability pills (Find features · Calculate · Date & time · Remember), a focus-glow search/teach box that
+flips its icon to a Brain + shows a "↵ Save" affordance when the text is a teaching command, gradient
+emerald answer cards (math result in mono; a "You taught me this" ribbon for recalled memory), a violet
+teach-hint + emerald saved-confirmation with entrance animations, staggered fade/slide-in feature cards
+with numbered step chips and gradient "Open" buttons, and a polished violet "Things you've taught me"
+panel. Only proven in-app animation utilities used (`animate-in fade-in slide-in-from-*`); fixed two
+non-standard classes (`w-4.5`, `WifiOff` not exported). Gate: frontend tsc ✓, server tsc ✓, full vitest
+7325 ✓, and a real `vite build` ✓ (OfflineAI stays its own lazy chunk). Shipping via PR → CI green → merge.

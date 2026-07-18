@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Menu, ChevronLeft, X, LogOut, Rocket } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from '../lib/signOutFlow';
+import { signOutEverywhere } from '../lib/firebase';
 
 // Views that can be opened as a header tab but are intentionally NOT in the shared
 // menuItems list (which also feeds the sidebar, where they have a bespoke button).
@@ -129,7 +130,8 @@ export const Header = ({
                 // signOut hangs (awaited before reload) — so a clean logout leaves the next
                 // login's persistence intact (root-cause fix for "logout ke baad login nahi hota").
                 await performSignOut({
-                  signOut: () => signOut(auth),
+                  signOut: () => signOutEverywhere(), // clears the native plugin session too (app), not just the web SDK
+
                   clearStorage: defaultClearAuthStorage,
                   deleteAuthDb: () => deleteFirebaseAuthDb(),
                   reload: () => window.location.reload(),

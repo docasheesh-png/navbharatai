@@ -11,8 +11,9 @@
 // App.tsx re-exports from here so every existing `import { auth } from './App'` keeps working.
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence, signOut as fbSignOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
 import { firebaseConfig } from '../config/firebase';
 
 export const app = initializeApp({ ...firebaseConfig, firestoreDatabaseId: firebaseConfig.firestoreDbId });
@@ -22,3 +23,25 @@ export const auth = getAuth(app);
 // sign-in; a failure (private mode) just keeps the default and is logged, never thrown.
 setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('[firebase] setPersistence failed (keeping default persistence):', e?.message || e));
 export const db = getFirestore(app, firebaseConfig.firestoreDbId);
+
+/**
+ * FULL client sign-out — clears the session on EVERY layer, so "logout" truly logs out.
+ *
+ * ROOT-CAUSE FIX (admin 2026-07-18: "app me bhi logout hota hi nahi"): in the Capacitor app the sign-in
+ * runs through the NATIVE `@capacitor-firebase/authentication` plugin, which holds its OWN session
+ * (GIDSignIn on iOS / Google Sign-In on Android) ON TOP of the web SDK's. `performSignOut` only cleared
+ * the web SDK (`signOut(auth)`), so the native plugin session lingered — the user looked logged out but a
+ * stale native session survived (and only got cleared by the NEXT sign-in). This signs out the native
+ * plugin first (app only — the dynamic import never loads on web), THEN the web SDK, so logout is complete
+ * on both app and browser. Best-effort on the native leg: a plugin signOut failure must never block the
+ * web signOut that actually flips the app to logged-out.
+ */
+export async function signOutEverywhere(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+      await FirebaseAuthentication.signOut();
+    } catch { /* no native plugin session (or web) — fine */ }
+  }
+  await fbSignOut(auth);
+}

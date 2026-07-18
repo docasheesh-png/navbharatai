@@ -8,7 +8,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
-import { detectChecks, parseCheckOutcome } from './crossLangCheck';
+import { findSyntaxErrors, syntaxRepairInstruction } from './SyntaxCheck';
 import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner';
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
@@ -1988,24 +1988,45 @@ export class ToolDispatcher {
         // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) so a
         // polyglot app's non-TS code is type/compile-checked too. Detection + parsing are pure
         // (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a missing toolchain
-        // reports "could not run", never a fake pass. (TS is already covered by the tsc gate.)
+        // reports "could not run", never a fake pass.
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        // FRONTEND SYNTAX LOCATOR (deep-test 2026-07-18). A model verifying "does it compile?" runs
+        // `tsc` by hand — but `tsc | head` masks the exit code and tsc never crisply pinpoints a JSX PARSE
+        // error (an unbalanced tag, a duplicate declaration), so the model burned ~40 steps hand-counting
+        // <div> tags with grep/awk/python and never converged. esbuild reports the EXACT file:line:col for
+        // every unparseable frontend file — surface it FIRST so the model fixes the precise location in one
+        // step instead of flailing. Best-effort (bounded to 20 frontend files); never breaks typecheck.
+        let syntaxHeader = '';
+        try {
+          const jsFiles = files.filter((f) => /\.(mjs|cjs|jsx?|tsx?)$/i.test(f) && !/\.d\.ts$/i.test(f)).slice(0, 20);
+          const fileMap: Record<string, string> = {};
+          for (const p of jsFiles) { try { fileMap[p] = await this.actuator.readFile(this.workspaceId, p); } catch { /* skip unreadable */ } }
+          const se = await findSyntaxErrors(fileMap);
+          if (se.length > 0) {
+            getWorkspaceMemory(this.workspaceId).recordError(`syntax: ${se.length} file(s) do not parse.`);
+            syntaxHeader = `SYNTAX ERROR(S) — the app will NOT compile. Fix these EXACT locations (do NOT hand-count tags/braces):\n${syntaxRepairInstruction(se)}\n\n`;
+          }
+        } catch { /* frontend syntax locator is best-effort — never breaks the tool */ }
         const configs: Record<string, string> = {};
         for (const cfg of ['pyproject.toml', 'requirements.txt', 'requirements-dev.txt']) {
           try { configs[cfg] = await this.actuator.readFile(this.workspaceId, cfg); } catch { /* absent */ }
         }
         const plans = detectTypecheckPlan(files, configs);
-        if (plans.length === 0) return 'typecheck: no Python or Java sources detected — nothing beyond tsc to type-check.';
-        const outcomes: TypecheckOutcome[] = [];
-        for (const plan of plans) {
-          let r: { exitCode: number; stdout: string; stderr: string };
-          try { r = await this.actuator.runCommand(this.workspaceId, plan.command); }
-          catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
-          outcomes.push(parseTypecheckOutcome(plan.lang, r.exitCode, r.stdout, r.stderr));
+        let crossLang = '';
+        if (plans.length > 0) {
+          const outcomes: TypecheckOutcome[] = [];
+          for (const plan of plans) {
+            let r: { exitCode: number; stdout: string; stderr: string };
+            try { r = await this.actuator.runCommand(this.workspaceId, plan.command); }
+            catch (e) { r = { exitCode: 1, stdout: '', stderr: e instanceof Error ? e.message : String(e) }; }
+            outcomes.push(parseTypecheckOutcome(plan.lang, r.exitCode, r.stdout, r.stderr));
+          }
+          const failing = outcomes.filter((o) => o.ran && !o.ok);
+          if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
+          crossLang = typecheckSummary(outcomes);
         }
-        const failing = outcomes.filter((o) => o.ran && !o.ok);
-        if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
-        return typecheckSummary(outcomes);
+        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java sources to check.');
+        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python or Java sources detected — nothing beyond the tsc gate.';
       }
 
       case 'code_graph': {
@@ -2105,40 +2126,6 @@ export class ToolDispatcher {
         }
         this.state?.appendTerminal(lines.join('\n'));
         return lines.join('\n');
-      }
-
-      case 'typecheck': {
-        // B6 — cross-language compile/typecheck (TS + Python + Java + Go), not just frontend tsc.
-        // "Verified" must mean every language in the workspace compiles. Detection/parsing are pure
-        // (crossLangCheck.ts); this runs each detected check in the sandbox and aggregates honestly.
-        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
-        let pkgRaw: string | undefined;
-        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
-        const plans = detectChecks(files, pkgRaw);
-        if (!plans.length) {
-          const msg = 'typecheck: no compilable sources detected (no tsconfig+TS, Python, Maven/Gradle JVM, or Go). Nothing to type-check.';
-          this.state?.appendTerminal(msg);
-          return msg;
-        }
-        const mem = getWorkspaceMemory(this.workspaceId);
-        const parts: string[] = [];
-        let allOk = true;
-        for (const plan of plans) {
-          const started = Date.now();
-          const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
-          try { this.onCommand?.({ command: plan.command, exitCode, stdout, stderr, durationMs: Date.now() - started }); } catch { /* diagnostics best-effort */ }
-          const outcome = parseCheckOutcome(plan, exitCode, stdout, stderr);
-          if (!outcome.ok) allOk = false;
-          if (outcome.ok) mem.recordAudit(`typecheck PASS — ${outcome.summary} (${plan.command})`);
-          else mem.recordError(`typecheck FAIL — ${outcome.summary}${outcome.firstErrors.length ? '\n' + outcome.firstErrors.join('\n') : ''}`);
-          parts.push(
-            `${outcome.summary} — ${plan.command}` +
-            (outcome.firstErrors.length ? `\n  ${outcome.firstErrors.join('\n  ')}` : ''),
-          );
-        }
-        const detail = `${allOk ? 'ALL LANGUAGES OK' : 'TYPECHECK FAILED'} (${plans.length} language${plans.length === 1 ? '' : 's'})\n` + parts.join('\n');
-        this.state?.appendTerminal(detail);
-        return detail;
       }
 
       case 'lint': {

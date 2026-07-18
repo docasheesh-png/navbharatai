@@ -17678,3 +17678,36 @@ during edits — is the recurring class (build #5 duplicate JSX, this duplicate 
 a targeted duplicate-top-level-declaration guard the builder self-checks after each edit, and/or a final
 re-heal pass. The `AgentRunner` "verified READY (score N/100)" SUMMARY string is separate from the card and
 can still read optimistically on this path — a follow-up should reconcile the summary with the final card.
+
+---
+
+## 2026-07-18 — Fix (1 of 2): frontend SYNTAX LOCATOR — stop the "count the <div> tags" flail
+
+**Trigger:** report `e0db3243` ("slidebar menu banao"). The builder KNEW there was a syntax error but
+couldn't find WHERE, so it spent ~40 steps / 5 minutes hand-counting `<div>` tags with grep/awk/python
+(writing broken one-liners that themselves errored) and never converged — burning the whole step budget.
+
+**Root cause (two parts):**
+1. The `typecheck` TOOL the model could call **skipped TS/JSX entirely** ("TS is already covered by the
+   tsc gate") — so calling it on a JSX parse error returned "no Python or Java sources… nothing to check."
+   And the raw `tsc | head` the model ran by hand masks the exit code and never crisply pinpoints a tag
+   imbalance. So the model had NO reliable syntax-error locator and resorted to counting tags.
+2. **A duplicate-shadow bug:** there were TWO `case 'typecheck':` in the SAME dispatcher switch (line 928).
+   The FIRST (Python/Java-only, skips TS) shadowed the SECOND (the better TS+Python+Java+Go handler),
+   making the better one DEAD, unreachable code (same class as the earlier duplicate `typecheck` tool DEF).
+
+**Fix (`ToolDispatcher.ts` + `ToolCatalog.ts`):**
+- Enhanced the ACTIVE `typecheck` handler to run `findSyntaxErrors` (esbuild, in-process) on the frontend
+  JS/TS/JSX/TSX files (bounded to 20) and surface the EXACT `file:line:column` of every unparseable file
+  FIRST: "SYNTAX ERROR(S) — fix these EXACT locations (do NOT hand-count tags/braces): …". Best-effort;
+  never breaks the tool; still runs the Python/Java checks after.
+- Removed the dead shadowed second `typecheck` handler + its now-unused `crossLangCheck` imports.
+- Rewrote the `typecheck` tool DESCRIPTION so the model reaches for it to LOCATE a compile/syntax error
+  ("gives you the precise location in one step … NEVER hand-count `<div>` tags or braces with grep/awk").
+
+**Regression tests (`ToolDispatcher.test.ts`):** `typecheck` on an App.tsx with a duplicate declaration
+returns the exact file + cause + the "do NOT hand-count" steer; a clean file reports frontend-clean.
+Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Next (2 of 2):** the rate-limit PACER (token-bucket per key + AIMD) — GLM timed out 23× in this same
+build and defeated the endgame repair; the pacer keeps requests under the limit so that stops happening.

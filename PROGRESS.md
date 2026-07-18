@@ -18141,3 +18141,20 @@ is never born:
 Combined with the detector + re-export-repair guidance (same PR), the duplicate-tree class is now blocked at
 BIRTH and cleaned up if any slip through. Still open (deeper origin): framework-from-files on resume so the
 wrong framework can't drive the convention mismatch in the first place — next slice.
+
+## 2026-07-18 — Offline AI is now a CONVERSATIONAL CHAT (bot-like, deterministic, honest)
+
+Admin: "kya offline AI chat me bot ke jaise respond kar sakta hai, soch sakta hai?" Honest answer given
+(rule 3): real offline "thinking" needs an on-device LLM (big download, weak, and it HALLUCINATES — breaks
+our no-fake law), so NOT that. Admin chose option (A): a deterministic conversational layer that FEELS like
+a bot without ever inventing a fact.
+
+- New `offlineChat.ts` (`buildChatReply`, `teachAck`, `CHAT_WELCOME`): wraps the existing on-device skills
+  into turn-by-turn replies. A feature card shows ONLY on a keyword-strong match (score ≥ 3); a weak
+  coincidental graze ("capital of france" → an accounting feature) does NOT surface a misleading card — the
+  bot honestly offers "Ask online". Open-knowledge is never fabricated.
+- `OfflineAI.tsx` rebuilt as a chat: user/bot bubbles, brief typing indicator (cosmetic), welcome +
+  suggestion chips, feature/phone cards inside replies, honest "Ask online" button, taught-memory panel as
+  a header toggle; teaching is conversational.
+- KB `offline_ai` entry retitled "on-device chat". New `offlineChat.test.ts` (10). Gate: frontend tsc ✓,
+  server tsc ✓, full vitest 7375 ✓, vite build ✓.

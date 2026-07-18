@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as crypto from 'crypto';
-import { GitHubAppClient, githubConfigFromEnv, repoNameForProject, type GitHubConfig } from './GitHubAppClient';
+import { GitHubAppClient, githubConfigFromEnv, repoNameForProject, readableTimeStamp, type GitHubConfig } from './GitHubAppClient';
 
 // A real RSA keypair so the JWT signature can be genuinely verified.
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -157,12 +157,46 @@ describe('mergePullRequest', () => {
 });
 
 describe('repoNameForProject + config', () => {
-  it('makes a deterministic, GitHub-safe repo name', () => {
+  it('makes a deterministic, GitHub-safe repo name (legacy shape)', () => {
     const a = repoNameForProject('User_1', 'My Todo App!');
     expect(a).toBe(repoNameForProject('User_1', 'My Todo App!'));
     expect(a).toMatch(/^app-[a-z0-9_-]+$/);
     expect(a).not.toContain(' ');
     expect(a).not.toContain('!');
+  });
+
+  describe('readable repo name (admin 2026-07-18: name-time-ddmmyy, not an opaque hash)', () => {
+    // 18 Jul 2026, 05:30 UTC == 11:00 IST → the admin's example "…-11am-180726".
+    const createdAtMs = Date.UTC(2026, 6, 18, 5, 30, 0);
+    it('produces a human-readable <name>-<time>-<ddmmyy>-<uniq> in IST', () => {
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store landing page', createdAtMs });
+      expect(name).toMatch(/^watch-store-landing-page-11am-180726-[0-9a-f]{6}$/);
+      expect(name).not.toContain(' ');
+    });
+    it('is STABLE across turns — same identity → same name (so ensureRepo never spawns a new repo)', () => {
+      const a = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store', createdAtMs });
+      const b = repoNameForProject('uid-9', 'sess-abc', { appName: 'Watch store', createdAtMs });
+      expect(a).toBe(b);
+    });
+    it('the uniq suffix is keyed on projectId — different sessions never collide into one repo', () => {
+      const a = repoNameForProject('uid-9', 'sess-A', { appName: 'Watch', createdAtMs });
+      const b = repoNameForProject('uid-9', 'sess-B', { appName: 'Watch', createdAtMs });
+      expect(a).not.toBe(b); // same name + hour, different project → distinct repos (no data mixing)
+    });
+    it('falls back to the legacy shape when the app name slugs to empty', () => {
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: '!!!', createdAtMs });
+      expect(name).toMatch(/^app-uid-9-sess-abc$/);
+    });
+    it('bounds the total length to a GitHub-safe 90 chars', () => {
+      const name = repoNameForProject('uid-9', 'sess-abc', { appName: 'x'.repeat(200), createdAtMs });
+      expect(name.length).toBeLessThanOrEqual(90);
+    });
+  });
+
+  it('readableTimeStamp formats an epoch as <12h><am|pm>-<ddmmyy> in IST', () => {
+    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 5, 30, 0))).toBe('11am-180726'); // 11:00 IST
+    expect(readableTimeStamp(Date.UTC(2026, 6, 18, 18, 30, 0))).toBe('12am-190726'); // 00:00 IST next day
+    expect(readableTimeStamp(Date.UTC(2026, 0, 1, 6, 30, 0))).toBe('12pm-010126'); // 12:00 IST noon
   });
 
   it('githubConfigFromEnv returns null unless all 3 vars are set, and normalises \\n', () => {

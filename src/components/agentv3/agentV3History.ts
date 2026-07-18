@@ -283,6 +283,31 @@ export function sessionDateBucket(ts: number, now: number): string {
   return 'Older';
 }
 
+/**
+ * Filter saved sessions by a free-text query, matched case-insensitively against the session TITLE
+ * (the only human-readable field on a list item). An empty/whitespace query returns the list
+ * unchanged. Pure — the history search box calls this over the already-loaded list (instant, no
+ * server round-trip). Kept generic so it works on both ConversationMeta and PersistedConversation.
+ */
+export function filterSessionsByQuery<T extends { title?: string }>(items: T[], query: string): T[] {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((it) => (it.title || '').toLowerCase().includes(q));
+}
+
+/**
+ * Split saved sessions into pinned vs the rest, PRESERVING the incoming order within each group
+ * (the API returns newest-updated first, so pinned items also stay newest-first). Pinned sessions
+ * render in their own section above the date-bucketed rest so a user's important builds are always
+ * one glance away regardless of age. Pure.
+ */
+export function partitionPinnedSessions<T extends { pinned?: boolean }>(items: T[]): { pinned: T[]; rest: T[] } {
+  const pinned: T[] = [];
+  const rest: T[] = [];
+  for (const it of items) (it.pinned ? pinned : rest).push(it);
+  return { pinned, rest };
+}
+
 /** Group saved sessions (already sorted newest-first by the API) into ordered date buckets. Pure. */
 export function groupSessionsByDate<T extends { updatedAt?: number }>(items: T[], now: number): Array<{ label: string; items: T[] }> {
   const order = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];

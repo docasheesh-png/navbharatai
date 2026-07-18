@@ -56,6 +56,8 @@ interface ConversationMeta {
   finalState?: Record<string, unknown>;
   /** The framework this session builds with. */
   framework?: string;
+  /** User pinned this build to the top of their history list (absent/false = normal). */
+  pinned?: boolean;
 }
 
 export class FirestoreConversationStore implements ConversationStore {
@@ -234,15 +236,24 @@ export class FirestoreConversationStore implements ConversationStore {
   async listByUser(userId: string, limit = 50): Promise<ConversationRecord[]> {
     if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     const cap = Math.max(0, limit);
+    // Pinned builds float to the FRONT (so a pinned older build survives the cap), then newest-updated
+    // first within each group — the reference order the InMemory store + UI use. We deliberately do NOT
+    // add a (userId, pinned, updatedAt) composite index for this: instead we fetch a wider window
+    // ordered by recency and re-sort pinned-first in memory. This keeps pinned builds visible as long as
+    // they are within the user's `fetch` most-recent builds (ample for real users) with zero index churn.
+    const sortPinnedFirst = (recs: ConversationRecord[]): ConversationRecord[] =>
+      recs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    const fetch = Math.max(cap, 100);
     // List view: transcript omitted (empty messages) — call get(id) for the full build.
     try {
       const q = await this.db
         .collection(COLLECTION)
         .where('userId', '==', userId)
         .orderBy('updatedAt', 'desc')
-        .limit(cap)
+        .limit(fetch)
         .get();
-      return q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, []));
+      const recs = sortPinnedFirst(q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, [])));
+      return cap > 0 ? recs.slice(0, cap) : recs;
     } catch {
       // FALLBACK — the (userId ASC, updatedAt DESC) composite index may not be deployed yet. Without
       // it the ordered query THROWS ("query requires an index"), the route returns 500, and the
@@ -254,8 +265,7 @@ export class FirestoreConversationStore implements ConversationStore {
         .where('userId', '==', userId)
         .limit(Math.max(cap, 200))
         .get();
-      const recs = q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, []));
-      recs.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      const recs = sortPinnedFirst(q.docs.map((d) => this.toRecord(d.id, d.data() as ConversationMeta, [])));
       return cap > 0 ? recs.slice(0, cap) : recs;
     }
   }
@@ -286,6 +296,7 @@ export class FirestoreConversationStore implements ConversationStore {
       ...(timeline ? { timeline } : {}),
       ...(meta.finalState ? { finalState: meta.finalState } : {}),
       ...(meta.framework ? { framework: meta.framework } : {}),
+      ...(meta.pinned ? { pinned: true } : {}),
     };
   }
 
@@ -297,6 +308,7 @@ export class FirestoreConversationStore implements ConversationStore {
     if (patch.billedUsd !== undefined) out.billedUsd = patch.billedUsd;
     if (patch.finalState !== undefined) out.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) out.framework = patch.framework;
+    if (patch.pinned !== undefined) out.pinned = patch.pinned;
     return out;
   }
 }

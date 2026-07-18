@@ -62,11 +62,59 @@ export function githubStorageActive(): boolean {
   return process.env.GITHUB_STORAGE_ENABLED === 'true' && githubStorageEnabled();
 }
 
-/** A deterministic, GitHub-safe repo name for a user's project (alnum, -, _ only; bounded). */
-export function repoNameForProject(userId: string | null | undefined, projectId: string): string {
-  const safe = (s: string) => (s || '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase();
-  const u = safe(userId || 'anon').slice(0, 24) || 'anon';
-  const p = safe(projectId).slice(0, 60) || 'app';
+/** Slugify any string into a GitHub-safe segment (alnum, -, _ only; collapsed; lowercased). */
+function slugSegment(s: string): string {
+  return (s || '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+}
+
+/**
+ * Format an epoch-ms as a readable `<12h-clock><am|pm>-<ddmmyy>` stamp in IST (Asia/Kolkata, a fixed
+ * +5:30 offset with no DST, so this is deterministic without a timezone library). e.g. an 11:00 IST
+ * build on 18 Jul 2026 → `11am-180726`. Exported + pure so it is unit-testable.
+ */
+export function readableTimeStamp(epochMs: number): string {
+  const ist = new Date(epochMs + 5.5 * 3_600_000); // shift the instant so UTC getters read IST wall-clock
+  const dd = String(ist.getUTCDate()).padStart(2, '0');
+  const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
+  const yy = String(ist.getUTCFullYear()).slice(-2);
+  let h = ist.getUTCHours();
+  const ampm = h < 12 ? 'am' : 'pm';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}${ampm}-${dd}${mm}${yy}`;
+}
+
+/** A short, STABLE, collision-resistant token derived from the project id (6 hex of sha1). Pure. */
+function projectUniqSuffix(projectId: string): string {
+  return crypto.createHash('sha1').update(projectId || 'app').digest('hex').slice(0, 6);
+}
+
+/**
+ * A deterministic, GitHub-safe repo name for a user's project (alnum, -, _ only; bounded).
+ *
+ * TWO shapes:
+ *  - LEGACY (no `readable` arg): `app-<uid>-<projectId>` — the opaque, hard-to-read form.
+ *  - READABLE (admin 2026-07-18): `<app-name>-<time>-<ddmmyy>-<uniq>`, e.g. `watch-store-11am-180726-3f9a2c`.
+ *    The name/time/date come from the build's OWN stable identity (its stored title + createdAt — NOT
+ *    the current turn's prompt, which changes per turn), so the name is READABLE yet STABLE across
+ *    every build turn (the storage layer's ensureRepo is keyed on the name, so an unstable name would
+ *    spawn a NEW repo each turn — the very sprawl this must avoid). A short sha1(projectId) suffix keeps
+ *    it globally unique (two same-named apps built in the same hour never collide into one repo — a
+ *    data-safety requirement, so the readable form is adapted to keep it, not blindly transcribed).
+ */
+export function repoNameForProject(
+  userId: string | null | undefined,
+  projectId: string,
+  readable?: { appName: string; createdAtMs: number },
+): string {
+  const appName = readable ? slugSegment(readable.appName).slice(0, 40) : '';
+  if (readable && appName) {
+    const stamp = readableTimeStamp(readable.createdAtMs);
+    const uniq = projectUniqSuffix(projectId);
+    return `${appName}-${stamp}-${uniq}`.slice(0, 90);
+  }
+  const u = slugSegment(userId || 'anon').slice(0, 24) || 'anon';
+  const p = slugSegment(projectId).slice(0, 60) || 'app';
   return `app-${u}-${p}`.slice(0, 90);
 }
 

@@ -108,6 +108,23 @@ describe('InMemoryConversationStore', () => {
     expect(await store.listByUser('nobody')).toEqual([]);
   });
 
+  it('sorts PINNED builds to the front (surviving the cap), then most-recent within each group', async () => {
+    const store = new InMemoryConversationStore();
+    await store.create(base({ id: 'a', userId: 'u1', createdAt: 100 }));
+    await store.create(base({ id: 'b', userId: 'u1', createdAt: 200 }));
+    await store.create(base({ id: 'c', userId: 'u1', createdAt: 300 })); // newest by recency
+    // Pin the OLDEST ('a', updatedAt 100). It must jump to the front despite being least-recent.
+    await store.update('a', patch({ pinned: true, updatedAt: 100 }));
+    const list = await store.listByUser('u1');
+    expect(list.map((r) => r.id)).toEqual(['a', 'c', 'b']); // pinned first, then recency
+    expect(list[0].pinned).toBe(true);
+    // The pinned build survives even a cap that would otherwise exclude it by recency.
+    expect((await store.listByUser('u1', 1)).map((r) => r.id)).toEqual(['a']);
+    // Unpinning drops it back to its recency slot.
+    await store.update('a', patch({ pinned: false, updatedAt: 100 }));
+    expect((await store.listByUser('u1')).map((r) => r.id)).toEqual(['c', 'b', 'a']);
+  });
+
   // SECURITY Phase 3.1 — the shared-anon bucket must NEVER be enumerable (it holds every user's
   // identity-degraded sessions; listing it leaks their workspaceIds/sessionIds — the key to the
   // diagnostics/decision IDORs). Anon records stay reachable only by their exact unguessable id.

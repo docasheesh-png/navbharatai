@@ -48,6 +48,11 @@ export interface ConversationRecord {
   finalState?: Record<string, unknown>;
   /** The framework this session builds with — restored so follow-up builds stay correct. */
   framework?: string;
+  /**
+   * User pinned this build to the top of their history list. Absent/false = normal. Pinning never
+   * changes `updatedAt` (it is not "activity"), so a pinned build keeps its real last-worked time.
+   */
+  pinned?: boolean;
 }
 
 /** Fields a caller provides to start a persisted build. */
@@ -73,6 +78,8 @@ export interface ConversationPatch {
   finalState?: Record<string, unknown>;
   /** Persist the session's framework so a reopened session's follow-up builds stay correct. */
   framework?: string;
+  /** Pin/unpin this build in the user's history list. */
+  pinned?: boolean;
 }
 
 /**
@@ -215,7 +222,9 @@ export class InMemoryConversationStore implements ConversationStore {
     if (!isEnumerableUserId(userId)) return []; // never enumerate the shared-anon bucket (Phase 3.1)
     return [...this.records.values()]
       .filter((r) => r.userId === userId)
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+      // Pinned builds sort to the FRONT (so they survive the `limit` slice regardless of age),
+      // then most-recently-updated first within each group — the reference order the route + UI use.
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt)
       .slice(0, Math.max(0, limit))
       .map(cloneRecord);
   }
@@ -244,6 +253,7 @@ export class InMemoryConversationStore implements ConversationStore {
     }
     if (patch.finalState !== undefined) rec.finalState = { ...patch.finalState };
     if (patch.framework !== undefined) rec.framework = patch.framework;
+    if (patch.pinned !== undefined) rec.pinned = patch.pinned;
     rec.updatedAt = patch.updatedAt;
   }
 }

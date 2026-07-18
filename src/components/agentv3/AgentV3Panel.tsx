@@ -7,11 +7,12 @@ import {
   SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
+  Star, Search,
 } from 'lucide-react';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
-import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages } from './agentV3History';
+import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
@@ -77,7 +78,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
@@ -1144,6 +1145,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+  const [pinningHistoryId, setPinningHistoryId] = useState<string | null>(null);
+  // Instant client-side history search: filters the already-loaded list by title (no server call).
+  const [historyQuery, setHistoryQuery] = useState('');
   // LOUD open-failure: opening a history chat must NEVER silently do nothing (the admin read the
   // resulting no-op as "click hi nahi ho raha"). Any failed open sets this and a dismissible toast
   // shows the real reason.
@@ -1472,6 +1476,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       }
     } finally {
       setDeletingHistoryId(null);
+    }
+  };
+  // Pin / unpin a saved session. Optimistic: flip the local `pinned` flag immediately (so the row
+  // jumps to/from the Pinned section without a reload), then persist. On failure, revert. Pinning
+  // never changes updatedAt, so the row keeps its real "time ago".
+  const handleTogglePin = async (e: React.MouseEvent, c: ConversationMeta) => {
+    e.stopPropagation();
+    if (pinningHistoryId) return;
+    const next = !c.pinned;
+    setPinningHistoryId(c.id);
+    setHistoryItems((prev) => prev.map((item) => (item.id === c.id ? { ...item, pinned: next } : item)));
+    try {
+      const result = await pinConversation(c.id, { userId, email, pinned: next });
+      if (result === null) {
+        // Persist failed — revert the optimistic flip so the UI never lies about pinned state.
+        setHistoryItems((prev) => prev.map((item) => (item.id === c.id ? { ...item, pinned: c.pinned } : item)));
+      }
+    } finally {
+      setPinningHistoryId(null);
     }
   };
   const relTime = (ts?: number): string => {
@@ -1963,6 +1986,73 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   // Shared session-history list — rendered by BOTH the desktop ☰ dropdown and the mobile footer's
   // History sheet, so there is exactly ONE history UI (same data, same live dots, same actions).
+  // One saved-session row (shared by the Pinned section + the date-bucketed groups). It carries
+  // TWO trailing actions — PIN and DELETE — as siblings of the full-width open <button> (valid HTML,
+  // never nested interactives; the iOS tap fix below still holds).
+  const renderSessionRow = (c: ConversationMeta) => {
+    const meta = sessionStatusMeta(c.status, c.live);
+    const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
+    const isDeleting = deletingHistoryId === c.id;
+    const isPinning = pinningHistoryId === c.id;
+    // MOBILE TAP FIX (kept): the open action is a REAL full-width <button> (guaranteed tap→click on
+    // iOS + keyboard support); the pin/delete actions are SIBLING buttons, visible on touch and
+    // hover-revealed on desktop. A pinned row keeps its pin visible so it can always be un-pinned.
+    return (
+      <div key={c.id} className={`relative group ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
+        <button
+          type="button"
+          onClick={() => { if (!isDeleting) openConversation(c.id); }}
+          disabled={isDeleting}
+          title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
+          className={`w-full flex items-center gap-2 pl-3 pr-16 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
+        >
+          <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
+            {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
+                like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
+            <span
+              className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
+              title={meta.live ? 'Live — this app is published' : meta.label}
+            />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="flex items-center gap-1 min-w-0">
+              {c.pinned && <Star className="w-3 h-3 shrink-0 text-indigo-400 fill-indigo-400" />}
+              <span className="block truncate">{c.title || 'Untitled build'}</span>
+            </span>
+            <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+              {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
+              {c.deadTranscript
+                ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
+                : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
+              {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
+            </span>
+          </span>
+        </button>
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={(e) => handleTogglePin(e, c)}
+            disabled={isPinning || isDeleting}
+            title={c.pinned ? 'Unpin this session' : 'Pin this session to the top'}
+            aria-label={c.pinned ? 'Unpin this session' : 'Pin this session'}
+            className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 opacity-100' : 'text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
+          >
+            {isPinning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => handleDeleteConversation(e, c)}
+            disabled={running || isDeleting}
+            title="Delete this session"
+            aria-label="Delete this session"
+            className="p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+          >
+            {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+    );
+  };
   const historyListBody = (
     <>
       {tapDebug && (
@@ -1977,6 +2067,31 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         <Plus className="w-4 h-4 text-indigo-400" /> New chat
       </button>
       <div className="my-1 border-t border-zinc-800" />
+      {!historyLoading && !historyError && historyItems.length > 0 && (
+        <div className="px-2 pb-1.5">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+            <input
+              type="text"
+              value={historyQuery}
+              onChange={(e) => setHistoryQuery(e.target.value)}
+              placeholder="Search sessions…"
+              aria-label="Search sessions"
+              className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+            />
+            {historyQuery && (
+              <button
+                type="button"
+                onClick={() => setHistoryQuery('')}
+                aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-zinc-500 hover:text-zinc-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {historyLoading ? (
         <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
       ) : historyError ? (
@@ -1995,68 +2110,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         </div>
       ) : historyItems.length === 0 ? (
         <div className="px-3 py-4 text-xs text-zinc-500 text-center">No saved sessions yet.<br />Every build you start is saved here automatically.</div>
-      ) : (
-        groupSessionsByDate(historyItems, Date.now()).map((group) => (
-          <div key={group.label}>
-            <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
-            {group.items.map((c) => {
-              const meta = sessionStatusMeta(c.status, c.live);
-              const isActive = !!c.workspaceId && c.workspaceId === state.workspaceId;
-              const isDeleting = deletingHistoryId === c.id;
-              // MOBILE TAP FIX: this row used to be a <div role="button"> with a NESTED
-              // delete <button> inside it. On iOS Safari, tapping a non-interactive div
-              // inside a scrollable (overflow-y-auto) menu is often treated as scroll
-              // intent and never dispatches a click — so on phones "clicking an old chat
-              // did nothing" while desktop mouse clicks worked. The open action is now a
-              // REAL full-width <button> (guaranteed tap → click on iOS, keyboard support
-              // for free), and delete is a SIBLING absolutely-positioned button (valid
-              // HTML — no nested interactive). Delete was also opacity-0 until :hover,
-              // which doesn't exist on touch — an invisible tap-eater on the row's right
-              // edge; it now stays visible on touch layouts and hover-reveals on desktop.
-              return (
-                <div key={c.id} className={`relative group ${isDeleting ? 'opacity-40 pointer-events-none' : ''}`}>
-                  <button
-                    type="button"
-                    onClick={() => { if (!isDeleting) openConversation(c.id); }}
-                    disabled={isDeleting}
-                    title={c.deadTranscript ? 'Transcript lost to an old bug — files/memory intact' : (c.title || 'Untitled build')}
-                    className={`w-full flex items-center gap-2 pl-3 pr-9 py-2 text-left text-sm touch-manipulation ${isActive ? 'bg-indigo-500/10 text-white' : c.deadTranscript ? 'text-zinc-500 hover:bg-zinc-800 active:bg-zinc-800' : 'text-zinc-300 hover:bg-zinc-800 active:bg-zinc-800'}`}
-                  >
-                    <span className="relative shrink-0 flex items-center justify-center w-3.5 h-3.5">
-                      {/* Live = the app has an ACTIVE published deployment (server-verified) — soft glow halo,
-                          like a broadcast "on air" light. Static (running's pulse stays the only animation). */}
-                      <span
-                        className={`w-2 h-2 rounded-full ${c.deadTranscript ? 'bg-zinc-700' : meta.dot} ${meta.pulse && !c.deadTranscript ? 'animate-pulse' : ''} ${meta.live && !c.deadTranscript ? 'ring-2 ring-green-400/30 shadow-[0_0_6px_rgba(74,222,128,0.8)]' : ''}`}
-                        title={meta.live ? 'Live — this app is published' : meta.label}
-                      />
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block truncate">{c.title || 'Untitled build'}</span>
-                      <span className="flex items-center gap-1.5 text-[10px] text-zinc-600">
-                        {isActive && <span className="text-indigo-400 font-semibold">Current session ·</span>}
-                        {c.deadTranscript
-                          ? <span className="text-amber-600/80">Transcript lost (old bug) — files safe</span>
-                          : meta.label && <span className={meta.live ? 'text-green-400 font-semibold' : ''}>{meta.label}</span>}
-                        {c.updatedAt ? <span>· {relTime(c.updatedAt)}</span> : null}
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeleteConversation(e, c)}
-                    disabled={running || isDeleting}
-                    title="Delete this session"
-                    aria-label="Delete this session"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
-                  >
-                    {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-                  </button>
+      ) : (() => {
+        // Instant client-side search, then pinned-first: the Pinned section sits above the normal
+        // date buckets so a user's important builds are always one glance away regardless of age.
+        const filtered = filterSessionsByQuery(historyItems, historyQuery);
+        if (filtered.length === 0) {
+          return <div className="px-3 py-4 text-xs text-zinc-500 text-center">No sessions match “{historyQuery.trim()}”.</div>;
+        }
+        const { pinned, rest } = partitionPinnedSessions(filtered);
+        return (
+          <>
+            {pinned.length > 0 && (
+              <div>
+                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-indigo-400/80 flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-current" /> Pinned
                 </div>
-              );
-            })}
-          </div>
-        ))
-      )}
+                {pinned.map(renderSessionRow)}
+              </div>
+            )}
+            {groupSessionsByDate(rest, Date.now()).map((group) => (
+              <div key={group.label}>
+                <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{group.label}</div>
+                {group.items.map(renderSessionRow)}
+              </div>
+            ))}
+          </>
+        );
+      })()}
     </>
   );
 

@@ -153,11 +153,15 @@ jobs:
       # re-signs with the app signing key on upload, so the upload-key-signed .aab is exactly what Play
       # expects. Track = internal (safest — visible only to your internal testers); promote to
       # closed/production from the Play Console UI. status = completed (the release is live to that track).
-      # SECURITY NOTE: this third-party action receives the Play service-account JSON; for a hardened
-      # supply chain, pin `r0adz0/upload-google-play` to a full commit SHA instead of the @v1 tag.
+      # SECURITY NOTE: this third-party action receives the Play service-account JSON, so it is pinned to a
+      # full commit SHA (not a mutable tag) for supply-chain safety. The maintained action is
+      # `r0adkll/upload-google-play` — a prior wrong slug (`r0adz0/...`, which does not exist) made GitHub
+      # fail to RESOLVE this step and broke EVERY run of this workflow, because Actions resolves every
+      # `uses:` up front regardless of the `if:` guard — so even artifact-only builds (upload_to_play=false)
+      # died before starting. Pinned to v1.1.5.
       - name: Upload to Google Play (internal track)
         if: ${{ inputs.upload_to_play }}
-        uses: r0adz0/upload-google-play@v1
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.navbharat.ai

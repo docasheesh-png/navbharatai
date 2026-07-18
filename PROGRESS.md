@@ -18003,3 +18003,40 @@ allowed. Full gate green: server tsc ✅, frontend tsc ✅, vitest 7361 pass ✅
 
 **Registry note:** admin set `AGENTV3_RATE_PACER=on` in Cloud Run (pacer now live). New flag this fix adds:
 `AGENTV3_WRITE_PARSE_GUARD` (default on).
+
+---
+
+## 2026-07-18 — RUNTIME honesty gate: a crashing preview can no longer show "READY"
+
+**Trigger:** the full autopsy of report `2d933510` (admin: "you fixed one error, there are many, the sidebar
+didn't even build"). Correct. The build wasted its 150 steps on the duplicate-declaration detour + awk
+tag-counting flail + 18 GLM timeouts/429s, then ran out of steps mid-sidebar-wiring, leaving
+**`onLinkClick is not a function`** — a RUNTIME crash (a prop called as a function but never passed). The
+sidebar genuinely did not work, yet the build reported **"READY 84/100"**.
+
+**Autopsy → each error class and its fix:** duplicate declarations → #1523 write-guard (can't be saved
+now); awk/tag-counting flail → #1505 syntax-locator; GLM 18× timeout/429 storm → #1520 pacer (now ON);
+JSX/compile break → #1502 + #1505. The ONE class left: the RUNTIME crash + "READY" over it.
+
+**Root cause of the honesty gap:** the preview self-check DOES open the app in a real browser and capture
+console errors, and on a final unhealed failure it set `previewVerifiedFailed = true` — but that flag ONLY
+zeroed the BILL (`zeroBillForUnrenderedPreview`). It recorded the failure as a `PREVIEW_NOT_RENDERED`
+**warning**, and `buildHealthFromDiagnostics` only treats unresolved **errors** as blockers — so a runtime
+crash never flipped the card off "READY". (The syntax gate catches a COMPILE break; nothing caught the
+RUNTIME class the parser can't see.)
+
+**Fix (`routes/agentv3.ts`):** at the moment the eyes confirm the preview failed and the heal budget is
+spent (`previewVerifiedFailed = true`), also record an UNRESOLVED **error** `OUTCOME_PREVIEW_FAILED` with
+the console error(s). `buildHealthFromDiagnostics` counts it as a blocker → `ready:false`. Now a build
+whose live preview crashes at runtime shows NOT READY, consistent with the (already-correct) bill zeroing.
+Mirrors #1502's compile-honesty, for the runtime class.
+
+**Test (`buildHealthCard.test.ts`):** an unresolved `OUTCOME_PREVIEW_FAILED` (onLinkClick crash) forces the
+card NOT READY. Full gate green: server tsc ✅, frontend tsc ✅, vitest ✅.
+
+**Residual (honest):** this fires when the preview self-check RUNS. If a crash is introduced by the very
+last edit before a step/time cap (self-check skipped for lack of headroom), the client-reported
+PREVIEW_ERROR still lands in the downloadable report as an error, but the already-sent health card isn't
+retroactively downgraded — a follow-up could re-derive the card from the updated report. The three
+step-saving fixes above (write-guard, locator, pacer) are the bigger lever: they stop the build from
+burning its whole step budget before it even reaches the feature, which is why the sidebar didn't finish.

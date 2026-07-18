@@ -4,6 +4,8 @@ import {
   findDuplicateStylesheets,
   findDuplicateEntryPoints,
   findDuplicateComponentModules,
+  conventionRootAlternatives,
+  duplicateModuleTarget,
   analyzeProjectIntegrity,
   integrityRepairInstruction,
 } from './ProjectIntegrityChecks';
@@ -397,5 +399,34 @@ describe('findDuplicateComponentModules — same module under 2+ convention root
     expect(instr).toContain('DUPLICATE MODULE');
     expect(instr).toContain('re-export');
     expect(instr).toContain('delete the directory'); // guard-safe guidance present (do NOT delete)
+  });
+});
+
+// PREVENTION (TaskForge — the admin's point: fix WHY duplicates get created, not just cleanup). The
+// write-time guard uses these pure helpers to refuse creating a parallel copy of an existing module.
+describe('conventionRootAlternatives / duplicateModuleTarget — write-time duplicate prevention', () => {
+  it('lists the same module under the other convention roots', () => {
+    expect(conventionRootAlternatives('app/components/IssueBoard/Column.tsx')).toEqual([
+      'src/app/components/IssueBoard/Column.tsx',
+      'src/components/IssueBoard/Column.tsx',
+    ]);
+    expect(conventionRootAlternatives('lib/x.ts')).toEqual([]); // not under a convention root
+  });
+
+  it('flags a write that duplicates an existing module under a different root', () => {
+    const existing = ['src/components/IssueBoard/Column.tsx', 'src/App.tsx'];
+    expect(duplicateModuleTarget('app/components/IssueBoard/Column.tsx', existing))
+      .toBe('src/components/IssueBoard/Column.tsx');
+  });
+
+  it('does NOT flag a brand-new module or an in-place edit of the same path', () => {
+    expect(duplicateModuleTarget('src/components/New.tsx', ['src/App.tsx'])).toBeNull();
+    // same exact path present → that's an edit, not a cross-root duplicate:
+    expect(duplicateModuleTarget('src/components/Column.tsx', ['src/components/Column.tsx'])).toBeNull();
+  });
+
+  it('does NOT flag non-source files or files outside a convention root', () => {
+    expect(duplicateModuleTarget('app/data/x.json', ['src/data/x.json'])).toBeNull(); // not a source file
+    expect(duplicateModuleTarget('lib/util.ts', ['scripts/util.ts'])).toBeNull(); // no convention root
   });
 });

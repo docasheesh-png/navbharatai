@@ -245,9 +245,39 @@ export function findDuplicateEntryPoints(files: Record<string, string>): Duplica
 const CONVENTION_ROOTS = ['src/app/', 'src/', 'app/'];
 
 /** The path with its leading convention root removed, or null when the file isn't under one. */
-function conventionRelative(path: string): string | null {
+export function conventionRelative(path: string): string | null {
   for (const root of CONVENTION_ROOTS) {
     if (path.startsWith(root)) return path.slice(root.length);
+  }
+  return null;
+}
+
+/**
+ * The same module's paths under the OTHER convention roots — e.g. for `app/components/X.tsx` returns
+ * `['src/app/components/X.tsx', 'src/components/X.tsx']`. Empty when the path isn't under a convention
+ * root. Used at write time to refuse creating a parallel copy of a module that already exists. Pure.
+ */
+export function conventionRootAlternatives(path: string): string[] {
+  const rel = conventionRelative(path);
+  if (rel === null) return [];
+  const out: string[] = [];
+  for (const root of CONVENTION_ROOTS) {
+    const alt = root + rel;
+    if (alt !== path) out.push(alt);
+  }
+  return out;
+}
+
+/**
+ * Given a path being written and the set of paths that ALREADY exist, return the existing copy of the
+ * same module under a DIFFERENT convention root (the write would duplicate it), or null. Pure & testable.
+ */
+export function duplicateModuleTarget(path: string, existingPaths: Iterable<string>): string | null {
+  if (!isSourceFile(path)) return null;
+  const alts = new Set(conventionRootAlternatives(path));
+  if (alts.size === 0) return null;
+  for (const p of existingPaths) {
+    if (p !== path && alts.has(p)) return p;
   }
   return null;
 }

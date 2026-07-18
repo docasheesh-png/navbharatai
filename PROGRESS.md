@@ -18119,3 +18119,25 @@ guard would reopen the StudySync/PaisaTrack self-destruct class — rejected.
   alias-aware (`@/`) reachability, and rushing a source-deleting pass risks breaking OTHER apps (rule 1).
   The re-export-stub repair above is the safe interim.
 - Provider 429 storm — the rate-pacer (#1520, another session) is the path.
+
+### 2026-07-18 — TaskForge PREVENTION (admin: "duplicate file bani hi kyu — isko fix karo")
+
+The admin's correct root-cause push (no-sycophancy): the delete-block was the symptom; the real bug is that
+the parallel duplicate files were CREATED at all. Added a **write-time duplicate-module guard** so a duplicate
+is never born:
+- New pure `conventionRootAlternatives(path)` + `duplicateModuleTarget(path, existingPaths)` in
+  `ProjectIntegrityChecks.ts` — the same-module-under-a-different-root check, testable.
+- `ToolDispatcher.write_file`: on a fresh CREATE of a source file whose module already exists under another
+  convention root (app/ vs src/ vs src/app/), REFUSE with guidance to edit the existing canonical file (uses
+  the in-memory graph, no I/O; a stale graph only ever misses a dup — never wrongly refuses).
+- `ToolDispatcher.write_files_batch`: parity — drops any batched file that would duplicate an existing OR
+  earlier-in-batch module, with a `[DUPLICATE MODULE BLOCKED]` note. So the fast-lane (where the parallel
+  trees originated) can't create them.
+- `systemPrompt.ts`: an explicit rule — ONE directory convention for the whole app; never write the same
+  module under two roots; edit-in-place if it exists.
+- Kill switch `AGENTV3_DUP_MODULE_GUARD=off`. Edits-in-place always allowed. 4 new prevention tests
+  (184 in the integrity+dispatcher suites).
+
+Combined with the detector + re-export-repair guidance (same PR), the duplicate-tree class is now blocked at
+BIRTH and cleaned up if any slip through. Still open (deeper origin): framework-from-files on resume so the
+wrong framework can't drive the convention mismatch in the first place — next slice.

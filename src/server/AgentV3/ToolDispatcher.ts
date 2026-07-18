@@ -47,6 +47,7 @@ import { previewGuard, previewGuardMessage } from './PreviewGuard';
 import { ensureViteAllowedHosts, ensureViteResolveAlias } from './ViteConfigGuard';
 import { ensureTsconfigBaseUrl } from './TsconfigGuard';
 import { applyFullStackGuards } from './FullStackGuards';
+import { duplicateModuleTarget, conventionRelative } from './ProjectIntegrityChecks';
 
 /**
  * Deterministic config backstops applied to EVERY file write (each no-ops for a non-matching path):
@@ -941,6 +942,27 @@ export class ToolDispatcher {
     };
   }
 
+  /**
+   * Refuse CREATING a parallel copy of a module that already exists under a different convention root
+   * (app/ vs src/ vs src/app/) — the TaskForge duplicate-tree origin. Returns a refusal message, or null
+   * when the write is fine. Uses the in-memory graph (no I/O); a stale/incomplete graph only ever misses
+   * a duplicate (safe), never wrongly refuses. Kill switch: AGENTV3_DUP_MODULE_GUARD=off.
+   */
+  private duplicateModuleRefusal(path: string): string | null {
+    if (process.env.AGENTV3_DUP_MODULE_GUARD === 'off') return null;
+    let known: string[] = [];
+    try { known = getWorkspaceMemory(this.workspaceId).graph().files; } catch { return null; }
+    const dup = duplicateModuleTarget(path, known);
+    if (!dup) return null;
+    try {
+      getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-DUPLICATE-MODULE] refused parallel copy ${path} (module already at ${dup})`);
+    } catch { /* audit best-effort */ }
+    return `❌ A copy of this module already exists at "${dup}". Do NOT create a second copy at "${path}" ` +
+      `under a different directory convention (app/ vs src/ vs src/app/) — two copies of the same component ` +
+      `drift apart and break the build. EDIT the existing file at "${dup}" in place, or import from it. Use ` +
+      `ONE directory convention for the whole app.`;
+  }
+
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
     // Pre-flight: the very first tool touch of a run guarantees the framework scaffold exists in
     // the sandbox (non-destructive; ~one readFile probe when already scaffolded). Kills the whole
@@ -988,6 +1010,15 @@ export class ToolDispatcher {
             `[BLOCKED-DESTRUCTIVE] refused empty-overwrite of source file: ${path}`,
           );
           return blockMsg;
+        }
+        // DUPLICATE-MODULE guard (TaskForge autopsy 2026-07-18): the ORIGIN of the 2-hour failure was the
+        // builder CREATING the same component under two convention roots (app/ AND src/), whose interfaces
+        // then drift and break the build. Refuse to create a parallel copy of a module that already exists
+        // under a different root — the duplicate is never born, so it can never drift. Only on a fresh
+        // create (an edit-in-place is always allowed); kill switch AGENTV3_DUP_MODULE_GUARD=off.
+        if (kind === 'create') {
+          const dup = this.duplicateModuleRefusal(path);
+          if (dup) return dup;
         }
         // Parse guard: refuse a write that would break a clean file (duplicate declaration / broken JSX).
         const writeParseReject = await this.parseGuardRejection(path, existingContent, content);
@@ -1063,6 +1094,28 @@ export class ToolDispatcher {
         // readable, deterministic result summary — writes are order-independent across distinct paths.
         const sorted = topoSortBatch([...dedupedByPath.values()]);
         const batchMem = getWorkspaceMemory(this.workspaceId);
+        // DUPLICATE-MODULE guard (batch parity, TaskForge autopsy 2026-07-18): drop any batched file that
+        // would create a SECOND copy of a module already present — in the workspace OR earlier in THIS
+        // batch — under a different convention root (app/ vs src/ vs src/app/). The parallel copy is never
+        // written, so it can never drift and break the build. An edit of an existing exact path is always
+        // kept. Kill switch AGENTV3_DUP_MODULE_GUARD=off (parity with write_file).
+        const dupGuardOn = process.env.AGENTV3_DUP_MODULE_GUARD !== 'off';
+        const dupSkipped: string[] = [];
+        let toWrite = sorted;
+        if (dupGuardOn) {
+          const known = new Set<string>();
+          try { for (const f of batchMem.graph().files) known.add(f); } catch { /* best-effort */ }
+          toWrite = sorted.filter((file) => {
+            if (known.has(file.path)) return true; // modify of an existing exact path — always allowed
+            const dup = duplicateModuleTarget(file.path, known);
+            if (dup) { dupSkipped.push(`${file.path} (already at ${dup})`); return false; }
+            known.add(file.path); // this new module now exists for the rest of the batch
+            return true;
+          });
+          for (const s of dupSkipped) {
+            try { batchMem.recordAudit(`[BLOCKED-DUPLICATE-MODULE] skipped parallel copy in batch: ${s}`); } catch { /* best-effort */ }
+          }
+        }
         // Write every file in bounded parallel (mirrors fastWrite's mapWithConcurrency(files, 6, …)).
         // A serial loop cost 2 remote round-trips PER file (create-vs-modify probe + write) — ~6-12s
         // for a 20-file batch, the single biggest "why is it so slow" in a large build. Distinct paths
@@ -1071,7 +1124,7 @@ export class ToolDispatcher {
         // siblings — so bounded concurrency is safe. mapWithConcurrency is order-preserving, so the
         // summary arrays below stay in topo order. JS is single-threaded, so the in-worker hooks never
         // interleave mid-statement.
-        const perFile = await mapWithConcurrency(sorted, 6, async (file) => {
+        const perFile = await mapWithConcurrency(toWrite, 6, async (file) => {
           // Detect create-vs-modify like write_file does, so the recorded change + the UI diff are
           // honest and an accidental wholesale overwrite of an existing file is not silently a "create".
           let kind: 'create' | 'modify' = 'create';
@@ -1126,7 +1179,10 @@ export class ToolDispatcher {
         const blockedWarning = blocked.length
           ? `\n[GOVERNANCE BLOCKED] ${blocked.length} file(s) were NOT written — refused to blank populated source (${blocked.slice(0, 8).join(', ')}${blocked.length > 8 ? '…' : ''}). Write their FULL new content, or leave them untouched.`
           : '';
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}`;
+        const dupWarning = dupSkipped.length
+          ? `\n[DUPLICATE MODULE BLOCKED] ${dupSkipped.length} file(s) were NOT written — they would create a SECOND copy of a module that already exists under a different directory convention (${dupSkipped.slice(0, 8).join('; ')}${dupSkipped.length > 8 ? '…' : ''}). Two copies drift and break the build — EDIT the existing file(s) in place. Use ONE directory convention for the whole app.`
+          : '';
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}`;
       }
 
       case 'edit_file': {

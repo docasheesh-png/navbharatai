@@ -18359,3 +18359,24 @@ is corrected; an already-good `^6.19.3` is left byte-identical. 4 new tests. Ful
 
 **Open root causes recorded (rule 6 — not cosmetically patched):** the GLM 429 storm (#1520 pacer), the
 in-browser-preview package.json sync gap, and the Prisma relation self-heal breadth. Next slices.
+
+### 2026-07-18 — Perf/cost: system-prompt cache-prefix optimization (flag-gated, DEFAULT OFF)
+
+The biggest COGS lever from the perf/cost audit. The ~46KB STATIC architect build-prompt is an ideal
+Anthropic prompt-cache target, but the route prepends ~12 per-request/per-day context blocks (today's date,
+user prefs, ADRs, grounding, …) to its HEAD. The cache breakpoint sits on the whole system block and cache
+matching is PREFIX-based, so a head that changes every request (the date alone changes daily) busts the cache
+for the entire 46KB static body on every build.
+
+Fix (opt-in `AGENTV3_CACHE_PREFIX=on`, default OFF): pure `splitCachedSystem` (systemPromptCache.ts, 6 tests)
+splits the accumulated volatile prefix back OUT of the cached system block and moves it into the per-turn
+USER message (applied at buildPrompt init). The model receives identical content — only relocated — so quality
+is unchanged, but the large static body becomes a stable cache prefix (cache reads ≈ 0.1× input rate).
+Implementation is byte-for-byte dormant when the flag is off: capture the static body before the prepends,
+and only when the flag is `on` run the split (`architectSystem`→static, preamble→buildPrompt). Ships DORMANT
+so the admin flips it, watches quality + the deliveredVia/cost telemetry, then makes it default. Safety: the
+splitter is a NO-OP if the assembled system doesn't end with the static body (never corrupts the prompt).
+
+Also this session (perf/cost): #1535 Gemini/Vertex per-call timeout + concurrent vision-describe (merged);
+the vision concurrency TEST was flaky on CI (asserted wall-clock overlap — non-deterministic) → replaced with
+a deterministic order+presence assertion (merged in #1536).

@@ -1115,6 +1115,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_sso',
+      description:
+        'Add real Single Sign-On (OpenID Connect) — works with any OIDC provider (Google/Okta/Auth0/Azure AD/' +
+        'Keycloak). Emits a discovery-based OIDC client + /auth/sso/login and /auth/sso/callback routes with ' +
+        'state+nonce (CSRF + replay protection); after login req.session.user has { id, email, name }. ' +
+        'Bring-Your-Own credentials (OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET/REDIRECT_URI) pasted into .env, never ' +
+        'stored. Needs a session (express-session). Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1664,6 +1674,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_i18n',
   'generate_ui_states',
   'generate_image_optimization',
+  'generate_sso',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

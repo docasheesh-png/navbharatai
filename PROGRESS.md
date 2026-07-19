@@ -19279,3 +19279,23 @@ Continued Tier-2. Closes the audit's Performance ❌ "Image optimization" + lazy
 
 Batched onto PR #1608 (T1.4 + i18n + ui-states + image-opt, CI in background). Next: SSO/ABAC (enterprise),
 observability logger injection.
+
+---
+
+## 2026-07-19 — T2.7 `generate_sso` — real OpenID Connect SSO (enterprise)
+
+Continued Tier-2. Closes the audit's Enterprise ❌ "SSO".
+
+**Shipped (real OIDC, BYO credentials):**
+- `src/server/lib/SsoGenerator.ts` — `generateSsoIntegration()` emits `server/lib/sso.ts` (lazy provider
+  discovery from the issuer URL via `openid-client` + authorization-code client) and
+  `server/routes/sso.routes.ts` (`/auth/sso/login` with state+nonce, `/auth/sso/callback` doing the verified
+  code→token exchange → `req.session.user = { id, email, name }`, `/logout`). Works with any OIDC provider
+  (Google/Okta/Auth0/Azure AD/Keycloak). Blank `.env.example` (OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET/
+  REDIRECT_URI), never overwrites an existing one; credentials never stored. Deps: openid-client +
+  express-session.
+- Wired as the `generate_sso` tool. Gate green: server `tsc` + `vitest` SsoGenerator 4/4 + ToolCatalog 5/5 +
+  ToolDispatcher 145/145.
+
+Batched onto PR #1608 (CI in background). Next: `generate_abac` (attribute policy over RBAC) to complete the
+enterprise pair, then observability logger injection.

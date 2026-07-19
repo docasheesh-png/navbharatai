@@ -127,6 +127,7 @@ import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/Requiremen
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
+import { generateSsoIntegration } from '../lib/SsoGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -3011,6 +3012,27 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('image-optimization');
         const ioDeps = io.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired image optimization:\n${ioWritten.join('\n')}\nAdd the dependencies: ${ioDeps}\n\n${io.instructions}`;
+      }
+
+      case 'generate_sso': {
+        // T2.7 recipe — real OIDC SSO (any provider). Pure generator in SsoGenerator.ts. BYO credentials;
+        // never overwrites an existing .env.example.
+        const sso = generateSsoIntegration();
+        const ssoWritten: string[] = [];
+        for (const [path, content] of Object.entries(sso.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); ssoWritten.push(`Kept existing ${path} (add: ${sso.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ssoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('sso');
+        const ssoDeps = sso.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired OIDC SSO:\n${ssoWritten.join('\n')}\nAdd the dependencies: ${ssoDeps}\n\n${sso.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

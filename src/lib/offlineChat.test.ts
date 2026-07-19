@@ -21,6 +21,15 @@ describe('offlineChat — deterministic conversational replies (bot-like, never 
     expect(buildChatReply('hi').answerKind).toBe('greeting');
   });
 
+  it('a greeting is TEXT ONLY — no feature/phone cards dumped under it (regression: "hi" wall of cards)', () => {
+    for (const q of ['hi', 'namaste', 'thank you', 'who are you', '2+2', 'what is the date']) {
+      const r = buildChatReply(q);
+      expect(r.answerKind, `"${q}" is a deterministic answer`).toBeTruthy();
+      expect(r.features, `"${q}" must not show feature cards`).toEqual([]);
+      expect(r.deviceMatches, `"${q}" must not show phone cards`).toEqual([]);
+    }
+  });
+
   it('answers an app-navigation question with feature cards (no online needed)', () => {
     const r = buildChatReply('how do i deploy');
     expect(r.features.length).toBeGreaterThan(0);

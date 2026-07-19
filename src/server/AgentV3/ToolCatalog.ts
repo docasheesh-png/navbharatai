@@ -926,6 +926,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_ratelimit',
+      description:
+        'Add real API rate limiting to the app (express-rate-limit): an apiLimiter middleware you mount with ' +
+        'app.use("/api", apiLimiter), to stop abuse/brute-force/request storms. Store = "memory" (single ' +
+        'instance, no infra) or "redis" (a shared counter across all instances once horizontally scaled — ' +
+        'Bring-Your-Own Redis via REDIS_URL). NavBharatAI never stores the URL. Never overwrites an existing ' +
+        '.env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          store: { type: 'string', enum: ['memory', 'redis'], description: 'The counter store: in-memory (single instance) or Redis (distributed).' },
+        },
+        required: ['store'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1232,6 +1248,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_map',
   'generate_jobs',
   'generate_sms',
+  'generate_ratelimit',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

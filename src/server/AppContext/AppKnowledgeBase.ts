@@ -275,6 +275,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'rebuilds everything', 'wipes my app', 'deleted my files', 'edit_file', 'minimum changes',
       'edit karo', 'badlo', 'change karo', 'thik karo', 'wapas se bana diya', 'pura dobara bana diya',
       'java', 'spring boot', 'springboot', 'go', 'golang', 'backend', 'jvm', 'maven', 'mongodb', 'mongo', 'redis',
+      'solid', 'solidjs', 'solid.js', 'solid js', // SolidJS + Vite frontend scaffold (fine-grained reactive)
       'polyglot', 'fullstack', 'full stack', 'rest api', 'microservice', 'java app', 'go app', 'java banao', 'backend banao',
       // Bring-Your-Own integration recipes the builder can wire (users ask "can you add X to my app?")
       'add integration', 'integrate', 'byo', 'bring your own', 'add feature to app', 'connect service',

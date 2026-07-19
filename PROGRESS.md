@@ -18408,3 +18408,26 @@ Two central, single-point DNA fixes (neither touches `writtenFiles`, so empty-bu
 Tests: 11 new pure-helper cases (root-only match, the exact partial-save bug, AI-rewrite wins, no false
 carry). Gate: server tsc 0, frontend tsc 0, full AgentV3 suite 3239 pass. Remaining LearnLoop open root
 causes: #1 GLM 429/timeout storm, #3 Prisma relation self-heal breadth (next).
+
+---
+
+## 2026-07-19 — LearnLoop OPEN root cause #3 FIXED: Prisma relation self-heal widened beyond P1012/format
+
+Closes autopsy open root cause #3. Evidence (agent map): the inline Prisma relation self-heal
+(`ToolDispatcher.ts` bash case) only ran `npx prisma format`, which mechanically completes exactly ONE
+error class — a missing opposite relation field. Every other common schema-validation failure (ambiguous
+relation, missing `fields`/`references` on `@relation`, missing `@id`/unique criteria, referenced field
+not `@unique`, SQLite `enum` unsupported, unset `DATABASE_URL`) fired the same P1012 but `prisma format`
+could not fix it → the retry failed and the raw error was returned, so the builder re-discovered the fix
+by trial and error (the LearnLoop/ShopKhata Prisma struggle).
+
+Fix (bounded, honest, guidance-only — never edits the schema, so it cannot break a build): new pure
+module `prismaRepairHint.ts` maps a failed Prisma command's output to ONE deterministic, targeted fix
+instruction for the recognised error class (7 specific rules + a generic P1012 fallback; returns null for
+non-Prisma output so an unrelated "must be unique" never triggers). `ToolDispatcher` appends the hint to
+the bash tool result on any failed command whose output is a recognised Prisma schema error, so the
+builder converges in ONE directed turn. Kill switch `AGENTV3_PRISMA_HINT=off`. The existing `prisma
+format` auto-fix (format-fixable class) and the client-not-generated self-heal are unchanged.
+
+Tests: 11 new pure-helper cases (each error class + specific-wins-over-generic + non-Prisma null). Gate:
+server tsc 0, ToolDispatcher suite 144 pass. Remaining LearnLoop open root cause: #1 GLM 429/timeout storm.

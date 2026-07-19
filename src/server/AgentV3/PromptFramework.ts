@@ -38,6 +38,9 @@ const RULES: FrameworkRule[] = [
   // SolidJS — REQUIRE the "js"/".js" (bare "solid" is a common English word, e.g. "a solid app",
   // and would false-positive onto the Solid scaffold).
   { id: 'solid', re: /\bsolid\.?js\b|\bsolidjs\b|\bsolid\sjs\b/i },
+  // Lit — NEVER match bare "lit" (a common English word, e.g. "a lit party app"). Only clean signals:
+  // LitElement / lit-html / lit.dev, or an explicit "web component(s)" request (Lit is the default there).
+  { id: 'lit', re: /\blit-?html\b|\blit-?element\b|\blit\.(?:js|dev)\b|\bweb\s?components?\b/i },
   // Vue — the base library, checked after Nuxt. Pinia / Vue Router are strong Vue-only signals.
   { id: 'vue', re: /\bvue(\.js|js|\s?[23])?\b|\bpinia\b|\bvue-?router\b/i },
 ];

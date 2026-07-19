@@ -148,6 +148,8 @@ const CATALOG: Array<{ slot: EntitySlot; name: string; re: RegExp }> = [
   { slot: 'framework', name: 'SvelteKit', re: aliasRe(['sveltekit', 'svelte kit']) },
   { slot: 'framework', name: 'SolidJS', re: aliasRe(['solidjs', 'solid.js', 'solid js']) },
   { slot: 'framework', name: 'Preact', re: aliasRe(['preact']) },
+  // "lit" alone is a common word — only the unambiguous Lit signals (never bare "lit").
+  { slot: 'framework', name: 'Lit', re: aliasRe(['litelement', 'lit-html', 'lit.dev']) },
   { slot: 'framework', name: 'NestJS', re: aliasRe(['nestjs', 'nest.js']) },
   { slot: 'framework', name: 'FastAPI', re: aliasRe(['fastapi']) },
   { slot: 'framework', name: 'Django', re: aliasRe(['django']) },

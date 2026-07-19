@@ -144,6 +144,7 @@ import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
+import { generateCaptchaIntegration } from '../lib/CaptchaGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
@@ -3865,6 +3866,27 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('moderation integration');
         const mdDepLine = mdcfg.dependency ? `\nAdd the dependency: ${mdcfg.dependency.name}@${mdcfg.dependency.version}` : '\n(No npm dependency needed — the moderation REST API is called with the built-in fetch.)';
         return `Wired ${mdProvider} content moderation:\n${mdWritten.join('\n')}${mdDepLine}\n\n${mdcfg.instructions}`;
+      }
+
+      case 'generate_captcha': {
+        // U-4 recipe — CAPTCHA/bot-protection verify (Turnstile/hCaptcha/reCAPTCHA): a server verifyCaptcha(token)
+        // that checks the token against the provider siteverify endpoint (fetch, no dependency), fails CLOSED.
+        // Pure generator in CaptchaGenerator.ts. Keeps an existing .env.example.
+        const cpcfg = generateCaptchaIntegration();
+        const cpWritten: string[] = [];
+        for (const [path, content] of Object.entries(cpcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); cpWritten.push(`Kept existing ${path} (add: ${cpcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('captcha verification');
+        return `Wired CAPTCHA verification:\n${cpWritten.join('\n')}\n(No npm dependency needed — provider siteverify via fetch.)\n\n${cpcfg.instructions}`;
       }
 
       case 'generate_cache': {

@@ -989,6 +989,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_geocoding',
+      description:
+        'Add real geocoding (address ⇄ coordinates) to the app (Bring-Your-Own key): a server geocode(' +
+        'address) + reverseGeocode(lat, lng) helper for "google" or "mapbox" — the backend counterpart to ' +
+        'generate_map, behind delivery, store locators and address validation. Server-side (the key never ' +
+        'reaches the browser); no npm dependency (REST via fetch). The user pastes their key into .env; ' +
+        'NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['google', 'mapbox'], description: 'The geocoding provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1299,6 +1315,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_error_tracking',
   'generate_feature_flags',
   'generate_ai',
+  'generate_geocoding',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

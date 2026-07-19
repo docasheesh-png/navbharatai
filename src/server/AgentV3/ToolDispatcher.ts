@@ -105,6 +105,7 @@ import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, typ
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { dependencyHealthVerdict } from './DependencyHealthGate';
+import { injectHealthEndpoint } from './ObservabilityInjector';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
@@ -457,6 +458,31 @@ export class ToolDispatcher {
 
         return dependencyHealthVerdict({ vulnFindings, vulnSummary, copyleftStrong, licenseSummary }).summary;
       })(), 45_000, 'assessDependencyHealthGate');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Cap-4 injection — deterministically add a `/health` route to an Express server entry that lacks one, then
+   * persist it through the SAME durable write path a normal write_file uses (sandbox + durable mirror +
+   * graph/UI), so nothing downstream diverges. Returns a short honest note when it injected, '' otherwise
+   * (no Express entry, already has a health route, or an ambiguous/multi-entry project — the pure injector
+   * declines those). Best-effort + timeout-bounded — a read/write error degrades to '' and never fails a
+   * build. AgentRunner only calls this when AGENTV3_OBSERVABILITY_INJECT is enabled.
+   */
+  async injectObservability(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+        const result = injectHealthEndpoint(files);
+        if (!result) return '';
+        await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
+        try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
+        try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`observability: injected /health route (on ${result.appVar}) into ${result.path}.`); } catch { /* audit best-effort */ }
+        return `🩺 Observability: added a /health route to ${result.path} so deploy/uptime probes have an endpoint to check.`;
+      })(), 20_000, 'injectObservability');
     } catch {
       return '';
     }

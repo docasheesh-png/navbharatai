@@ -1289,6 +1289,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_captcha',
+      description:
+        'Add real CAPTCHA / bot-protection verification to the app (server/lib/captcha.ts): a dependency-free ' +
+        'verifyCaptcha(token, ip?) that checks the client token SERVER-SIDE against Cloudflare Turnstile, ' +
+        'hCaptcha, or Google reCAPTCHA v2/v3 (selected by CAPTCHA_PROVIDER; secret in CAPTCHA_SECRET), ' +
+        'enforcing the reCAPTCHA v3 score threshold. Use on public forms (signup/login/contact) — the client ' +
+        'widget alone is not enough, a bot can forge the token. FAILS CLOSED (an unverifiable token is ' +
+        'rejected) so an outage never lets bots through. No npm dependency; the user pastes the secret into ' +
+        '.env; never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_cache',
       description:
         'Add real key/value caching to the app (Bring-Your-Own infra): a server cacheGet/cacheSet(key, value, ' +
@@ -1884,6 +1896,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_geocoding',
   'generate_translation',
   'generate_moderation',
+  'generate_captcha',
   'generate_cache',
   'generate_retry',
   'generate_newsletter',

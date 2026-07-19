@@ -15,11 +15,22 @@ describe('assessReadiness', () => {
     expect(r.blockers).toEqual([]);
   });
 
-  it('an unresolved import is a hard blocker (not ready)', () => {
+  it('an unresolved import is a hard blocker (not ready) AND names the specifier so it can be diagnosed', () => {
     const r = assessReadiness({ ...cleanArch, unresolvedImports: ['a.ts -> ./missing'] }, []);
     expect(r.ready).toBe(false);
     expect(r.score).toBeLessThan(100);
     expect(r.blockers.join(' ')).toContain('unresolved');
+    // ShopSphere autopsy: the blocker must include WHICH import (not just a count) — undiagnosable otherwise.
+    expect(r.blockers.join(' ')).toContain('a.ts -> ./missing');
+  });
+
+  it('lists up to 3 unresolved specifiers with an ellipsis for the rest', () => {
+    const r = assessReadiness({ ...cleanArch, unresolvedImports: ['a -> ./1', 'b -> ./2', 'c -> ./3', 'd -> ./4'] }, []);
+    const blocker = r.blockers.find((b) => b.includes('unresolved import'))!;
+    expect(blocker).toContain('a -> ./1');
+    expect(blocker).toContain('c -> ./3');
+    expect(blocker).toContain('…');
+    expect(blocker).not.toContain('d -> ./4'); // capped at 3 + ellipsis
   });
 
   it('a server-only Node builtin in front-end code is a hard blocker (browser-build-breaker, not READY)', () => {

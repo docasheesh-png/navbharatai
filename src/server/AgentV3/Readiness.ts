@@ -65,7 +65,11 @@ export function assessReadiness(
 
   if (arch.unresolvedImports.length) {
     score -= PENALTY.unresolvedImport * arch.unresolvedImports.length;
-    blockers.push(`${arch.unresolvedImports.length} unresolved import(s) — the build will fail`);
+    // Surface WHICH imports are unresolved (like the sibling node-builtin blocker below), not just the
+    // count — a bare count is undiagnosable (ShopSphere autopsy: "1 unresolved import" with no specifier
+    // could not be diagnosed from the report). arch.unresolvedImports items are "file -> spec" strings.
+    const sample = arch.unresolvedImports.slice(0, 3).join(', ');
+    blockers.push(`${arch.unresolvedImports.length} unresolved import(s) — the build will fail: ${sample}${arch.unresolvedImports.length > 3 ? ', …' : ''}`);
   }
   if (arch.nodeBuiltinsInFrontend.length) {
     // A server-only Node builtin (fs/child_process/net/…) imported by front-end code breaks the

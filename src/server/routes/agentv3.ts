@@ -544,6 +544,21 @@ async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<
   return workspaceOwnershipOk(verifiedUid, claimedUid, workspaceId);
 }
 
+/**
+ * SECURITY (T0-9 convergence, 2026-07-19) — STRICT owner gate for the DESTRUCTIVE writes (exec,
+ * delete-files, import-files, visual-edit). Unlike `assertWorkspaceOwner` (which keeps a claimed-uid
+ * fallback so a token-blip BUILD never hard-breaks), these highest-stakes operations demand the VERIFIED
+ * uid own a real workspace: a token-less caller who merely LEARNED `agentv3-victim-{sid}` can no longer
+ * run an arbitrary command or delete files on it by claiming the victim's uid. Anon workspaces stay
+ * reachable by their unguessable sid (capability model unchanged), and a legit owner with a transient
+ * token blip self-heals (403 → the client refreshes its token and retries — and these are explicit,
+ * user-initiated actions, not the automatic build loop). Reuses the tested `verifiedWorkspaceReadOk`
+ * (verified-owner-or-anon-capability), so the strict rule is identical to the private-report read gate.
+ */
+async function assertVerifiedWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
+  return verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId);
+}
+
 export function deriveWorkspaceId(userId: string | null, sessionId: unknown): string {
   const uid = userId && /^[A-Za-z0-9_-]{1,64}$/.test(userId) ? userId : 'anon';
   if (typeof sessionId === 'string' && SESSION_ID_RE.test(sessionId)) {
@@ -3277,7 +3292,7 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — exec runs arbitrary commands
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -3470,7 +3485,7 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'workspaceId, file and newText are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — visual-edit writes files
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -3523,7 +3538,7 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'files (a path→content object) is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — import-files writes files
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -3574,7 +3589,7 @@ export function registerAgentV3Routes(app: Express): void {
       res.status(400).json({ error: 'paths (a non-empty string[]) is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { // T0-9: strict — delete-files removes files
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }

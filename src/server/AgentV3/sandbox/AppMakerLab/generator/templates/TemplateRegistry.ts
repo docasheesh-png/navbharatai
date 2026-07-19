@@ -7,6 +7,7 @@ import { SvelteKitProvider } from './SvelteKitProvider';
 import { SolidProvider } from './SolidProvider';
 import { PreactProvider } from './PreactProvider';
 import { LitProvider } from './LitProvider';
+import { AlpineProvider } from './AlpineProvider';
 import { NodeExpressProvider } from './NodeExpressProvider';
 import { NestJSProvider } from './NestJSProvider';
 import { FastifyProvider } from './FastifyProvider';
@@ -49,6 +50,7 @@ export class TemplateRegistry {
     'solid': new SolidProvider(),
     'preact': new PreactProvider(),
     'lit': new LitProvider(),
+    'alpine': new AlpineProvider(),
     'astro': new AstroProvider(),
     'angular': new AngularProvider(),
     'vanilla': new VanillaProvider(),

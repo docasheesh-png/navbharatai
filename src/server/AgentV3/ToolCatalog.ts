@@ -926,6 +926,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_password',
+      description:
+        'Add real secure password hashing to the app (server/lib/password.ts, bcryptjs): hashPassword(plain) ' +
+        '(bcrypt cost 12, per-password salt) to store at signup — NEVER plaintext or a fast MD5/SHA hash — ' +
+        'verifyPassword(plain, hash) (constant-time, fails safe) to gate login, and needsRehash(hash) to ' +
+        'transparently upgrade older hashes. Complements generate_auth (issue the JWT/session only AFTER ' +
+        'verifyPassword). bcryptjs is pure JS (no native build). Adds the bcryptjs dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_ratelimit',
       description:
         'Add real API rate limiting to the app (express-rate-limit): an apiLimiter middleware you mount with ' +
@@ -1771,6 +1781,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_map',
   'generate_jobs',
   'generate_sms',
+  'generate_password',
   'generate_ratelimit',
   'generate_error_tracking',
   'generate_feature_flags',

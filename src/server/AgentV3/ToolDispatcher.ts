@@ -165,6 +165,7 @@ import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
+import { generateSeoIntegration } from '../lib/SeoGenerator';
 import { generateWebhookIntegration } from '../lib/WebhookGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
@@ -4258,6 +4259,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('security headers');
         return `Wired security headers:\n${shWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${shcfg.instructions}`;
+      }
+
+      case 'generate_seo': {
+        // U-4 recipe — SEO essentials (server/lib/seo.ts): buildMetaTags (OpenGraph/Twitter, escaped) +
+        // buildSitemap + buildRobotsTxt. Dependency-free. Pure generator in SeoGenerator.ts. No env keys.
+        const seocfg = generateSeoIntegration();
+        const seoWritten: string[] = [];
+        for (const [path, content] of Object.entries(seocfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          seoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('seo');
+        return `Wired SEO essentials:\n${seoWritten.join('\n')}\n(No npm dependency needed — escaped meta/sitemap/robots builders.)\n\n${seocfg.instructions}`;
       }
 
       case 'generate_webhook': {

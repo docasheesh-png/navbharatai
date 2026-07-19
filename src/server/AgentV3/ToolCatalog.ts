@@ -1507,6 +1507,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_seo',
+      description:
+        'Add real SEO essentials to the app (server/lib/seo.ts): dependency-free buildMetaTags({ title, ' +
+        'description, url, image }) → <head> title + description + canonical + OpenGraph + Twitter-card tags ' +
+        '(so a shared link shows a proper preview on WhatsApp/LinkedIn/Twitter), buildSitemap(entries) → a ' +
+        'valid /sitemap.xml, and buildRobotsTxt({ sitemapUrl, disallow }) → /robots.txt. Every value is ' +
+        'escaped for its context, so a title with <, > or & never breaks the tag or the XML (nor injects ' +
+        'markup). Use on any public site for discoverability. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_image',
       description:
         'Add real image processing to the app (server/lib/image.ts, sharp): resizeImage(buffer, { width }) to ' +
@@ -1901,6 +1912,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_file_upload',
   'generate_graceful_shutdown',
   'generate_security_headers',
+  'generate_seo',
   'generate_webhook',
   'generate_qr',
   'generate_pdf',

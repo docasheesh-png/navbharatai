@@ -1333,6 +1333,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_datetime',
+      description:
+        'Add real IST date/time formatting to the app (server/lib/datetime.ts): dependency-free ' +
+        'formatIstDateTime/formatIstDate/formatIstTime that render any timestamp in IST (Asia/Kolkata) ' +
+        'regardless of the server timezone — fixing the common UTC-server bug where times show 5.5h off — plus ' +
+        'relativeTime(ts) for a "2 hours ago" label. Accepts a Date, ISO string or epoch-ms; guards invalid ' +
+        'dates. Use on order/appointment/"posted at" labels. Built on native Intl; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_notify',
       description:
         'Add real team notifications to the app (Bring-Your-Own webhook): a server notify(message) helper for ' +
@@ -1835,6 +1845,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_currency',
   'generate_money_format',
   'generate_weather',
+  'generate_datetime',
   'generate_notify',
   'generate_env_validation',
   'generate_cors',

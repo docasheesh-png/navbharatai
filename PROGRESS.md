@@ -18796,3 +18796,14 @@ Open ShopSphere items still to address: B (.env DATABASE_URL sqlite vs schema po
 F (salvage→sandbox sync: architect read_file on a salvaged file said "does not exist"), G (GLM fast-lane
 429-storm + 200s latencies → fast-lane 240s timeout at 25/39; proactive pacer), H (intent misclassified as
 DEPLOY/SHIP). And the network-error-halts-a-long-build robustness (resume path) if it recurs.
+
+## 2026-07-19 — ShopSphere autopsy fix H: "production-<quality>" no longer misread as a deploy request
+
+Finding H: the full-builder got a "CONVERSATION PHASE — DEPLOY/SHIP: the user wants to publish" posture on a
+FRESH build. Root cause: `DialogueStateManager.DEPLOY_RE` matched the bare word `production`, and the
+ShopSphere prompt ended with "Production-clean, mobile-responsive" — a QUALITY bar, not a deploy request. So
+`inferPhase` returned `deployed` and the builder was told to publish instead of build. Fix: a negative
+lookahead on `production` that ignores the quality compounds (`production-clean/ready/grade/quality/level/
+worthy/ise/ize`) while still catching a real "deploy to production". New test file (9 cases: the exact
+ShopSphere ending → building; quality compounds → building; real deploy words → deployed; other phases
+intact). Gate: server tsc 0, DialogueStateManager 9 pass. Shipped with fix A in the same ShopSphere PR.

@@ -19106,3 +19106,27 @@ workspaces stay reachable by their unguessable sid (unchanged); a legit owner wi
 self-heals (403 → client token-refresh + retry — these are explicit user actions, not the auto build loop).
 Structural regression guard added (the 4 handlers must use the strict guard; the strict guard is
 verified-only). Frontend + server tsc clean; full suite 7725 passed.
+
+---
+
+## 2026-07-19 — T1.3 (slice 1) `generate_rbac` — role-based access control recipe
+
+After #1598 merged (T-SPEED.1 streaming preview + T1.1 deep schema + T1.2 generate_crud), continued the
+Tier-1 conveyor with the first product-scaffold slice. Cross-matched live: no admin/dashboard/rbac/roles/
+settings recipe existed, and `AuthCodeGenerator` had no role logic — so "Roles" (audit Feature-Completeness
+❌) was genuinely unbuilt. New `generate_rbac` closes it.
+
+**Shipped (pure, dependency-free, real code):**
+- `src/server/lib/RbacGenerator.ts` — `generateRbac(roles)` (ordered highest → lowest) emits:
+  - `server/lib/roles.ts` — a `Role` union + rank map + rank-aware `hasRole(userRole, required)` (a higher
+    role satisfies a lower requirement) + `isRole` guard. Role names sanitized to safe literals, de-duped,
+    fallback `["admin","user"]` on empty.
+  - `server/middleware/requireRole.ts` — an Express guard: 401 unauthenticated, 403 when the role is below
+    the requirement. Pairs with `generate_auth` (populates `req.user.role`) and `generate_crud`'s `protected`.
+- Wired as the `generate_rbac` tool: ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case (standard
+  create/modify → recordFileChange → indexFile → checkpoint flow).
+- Gate green: server `tsc` + `vitest` RbacGenerator 5/5 + ToolCatalog 5/5 + ToolDispatcher 145/145. No
+  AppKnowledgeBase entry — consistent with the sibling `generate_*` recipes (engine builder tool).
+
+Fresh branch off `e0420bb` (post-#1598 main), its own PR (option-1 small-verified-merges). Next Tier-1
+slices: `generate_admin` / `generate_dashboard` (build on this RBAC), then T1.4 smart clarification.

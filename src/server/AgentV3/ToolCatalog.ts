@@ -971,6 +971,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_rbac',
+      description:
+        'Add real role-based access control (RBAC): an ordered Role hierarchy + a hasRole() check + a ' +
+        'requireRole(role) Express guard (401 unauthenticated, 403 when the role is too low; a higher role ' +
+        'satisfies a lower requirement). Pass roles HIGHEST → LOWEST (e.g. ["admin","editor","viewer"]). ' +
+        "Pairs with generate_auth (which sets req.user.role) and generate_crud's protected routes. Dependency-free.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          roles: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Role names ordered highest → lowest privilege (e.g. ["admin","editor","viewer"]).',
+          },
+        },
+        required: ['roles'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1512,6 +1531,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_crud',
+  'generate_rbac',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

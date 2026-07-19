@@ -319,7 +319,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'currency', 'exchange rate', 'convert currency', 'forex', 'multi currency',
       'money format', 'format money', 'rupee format', 'inr format', 'lakh', 'crore', 'amount in words', 'rupees in words', 'indian number format', 'price format', 'format amount',
       'weather', 'weather api', 'openweathermap', 'weatherapi', 'forecast',
-      'date format', 'time format', 'ist', 'timezone', 'asia/kolkata', 'format date', 'relative time', 'time ago', 'posted at', 'datetime', 'date time',
+      'date format', 'time format', 'ist timezone', 'indian standard time', 'timezone', 'asia/kolkata', 'format date', 'relative time', 'time ago', 'posted at', 'datetime', 'date time',
       'notifications', 'slack', 'discord', 'team notification', 'slack alert', 'webhook notify',
       'env validation', 'validate env', 'required env', 'missing env var', 'env check', 'fail fast', 'startup check', 'environment variable validation',
       'cors', 'cross origin', 'blocked by cors', 'cors policy', 'cors error', 'allowed origins', 'preflight', 'access control allow origin',

@@ -127,8 +127,20 @@ const OVERVIEW_SIGNALS = [
  *  always scored BELOW the exact tiers (so a real hit can never be outranked by a fuzzy one). Pure. */
 export function scoreFeature(f: AppFeature, msg: string): number {
   let score = 0;
+  // Keyword match: a MULTI-WORD phrase is a strong, intentional signal, so a substring hit counts (+3). A
+  // SINGLE-WORD keyword must match on a WORD BOUNDARY (a query token), never as a substring — otherwise a
+  // short keyword like "ist" (IST timezone) falsely fires inside "min-IST-er", or "pr" inside "PRime",
+  // surfacing a misleading card for an unrelated question. This mirrors the description matching below,
+  // which already deliberately uses token-set membership for exactly this reason.
+  const msgTokens = new Set(tokens(msg));
   for (const kw of f.keywords || []) {
-    if (kw && msg.includes(norm(kw))) score += kw.includes(' ') ? 3 : 2;
+    if (!kw) continue;
+    const n = norm(kw);
+    if (kw.includes(' ')) {
+      if (msg.includes(n)) score += 3;
+    } else if (msgTokens.has(n)) {
+      score += 2;
+    }
   }
   if (f.name && msg.includes(norm(f.name))) score += 4;
   // A word-boundary hit on any query token inside the description is a weak signal. (Word-boundary via a

@@ -1119,6 +1119,27 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_env_validation',
+      description:
+        'Add a real fail-fast environment-variable validator to the app (server/lib/env.ts): validateEnv + ' +
+        'requireEnv check every required env var is set and non-empty AT STARTUP and throw ONE clear error ' +
+        'naming any that are missing — so a misconfigured deploy crashes immediately with an actionable ' +
+        'message instead of a cryptic 500 deep inside a request. Pass "keys" = the env vars the app needs ' +
+        '(e.g. the keys the other generators told the user to set). Unlike generate_env_example (which only ' +
+        'documents keys) this ENFORCES them. Adds no dependency and no new env keys; never writes .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          keys: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The required environment-variable names to enforce at startup (e.g. ["DATABASE_URL", "STRIPE_SECRET_KEY"]).',
+          },
+        },
+        required: ['keys'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1437,6 +1458,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_currency',
   'generate_weather',
   'generate_notify',
+  'generate_env_validation',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

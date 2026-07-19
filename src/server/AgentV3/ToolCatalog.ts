@@ -1102,6 +1102,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_notify',
+      description:
+        'Add real team notifications to the app (Bring-Your-Own webhook): a server notify(message) helper for ' +
+        '"slack" or "discord" that posts to a channel — a new order, signup, failed payment or support ' +
+        'request straight into your team chat. Server-side (the webhook URL never reaches the browser); no npm ' +
+        'dependency (incoming webhook via fetch); never throws so a notification failure can\'t break the ' +
+        'request. The user pastes the webhook URL into .env; NavBharatAI never stores it. Never overwrites an ' +
+        'existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['slack', 'discord'], description: 'The team-chat provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1419,6 +1436,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_newsletter',
   'generate_currency',
   'generate_weather',
+  'generate_notify',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

@@ -127,6 +127,7 @@ import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
+import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3480,6 +3481,28 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('weather integration');
         return `Wired ${weProvider} weather:\n${weWritten.join('\n')}\n(No npm dependency needed — the weather REST API is called with the built-in fetch.)\n\n${wecfg.instructions}`;
+      }
+
+      case 'generate_notify': {
+        // U-4 recipe — real BYO team notifications (Slack/Discord incoming webhooks): a server notify(message)
+        // helper (webhook POST via fetch, no dependency). Pure generator in NotifyGenerator.ts.
+        const noProvider = optStr(input, 'provider');
+        if (!isNotifyProvider(noProvider)) return 'generate_notify: pass provider = "slack" | "discord".';
+        const nocfg = generateNotifyIntegration(noProvider);
+        const noWritten: string[] = [];
+        for (const [path, content] of Object.entries(nocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); noWritten.push(`Kept existing ${path} (add: ${nocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          noWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notify integration');
+        return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

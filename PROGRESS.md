@@ -18745,3 +18745,31 @@ payments/email/storage/realtime/search/auth/database recipes. Full suite grew 75
 these four (the only failing suites throughout remained the pre-existing `src/server/sonic/*` optional-dep
 load failures — unrelated, identical on clean `main`). No new `tsc` errors. No AppKnowledgeBase entries —
 consistent with the sibling recipes; the "named tech" capability already recognizes SMS/analytics/maps/etc.
+
+---
+
+## 2026-07-19 — U-4 verified-recipe track: feature flags + AI/LLM (autonomous cycle, cont.)
+
+Two more real, fully-wired, unit-tested BYO-keys integrations, closing out a 9-recipe expansion of the
+verified-recipe track this session. Same discipline as the rest (pure builder unit-tested for the generated
+output; `generate_*` agent tool; keys pasted into `.env` and NEVER stored; `.env.example` blank + never
+overwritten; real complete code, no stubs; branch → gate → PR → CI green → squash-merge).
+
+- **#1567 — feature flags (`generate_feature_flags`):** LaunchDarkly (@launchdarkly/node-server-sdk) +
+  Unleash (unleash-client, open-source). Per-user `isFeatureEnabled(flag, userKey)` for gradual rollouts /
+  A-B / instant kill switches. A missing flag OR an unreachable service falls back to false — never breaks.
+- **#1568 — AI/LLM text generation (`generate_ai`):** OpenAI (Chat Completions) + Anthropic (Messages).
+  Server `generateText` + `chat` on the USER'S OWN key; the model is env-driven (OPENAI_MODEL /
+  ANTHROPIC_MODEL) so it never goes stale. ⚠️ Uses the user's own provider account — NavBharatAI's own AI
+  account is NEVER spent on a user app (per the account-spend rule).
+
+**Full session recap — the builder's BYO-integration library gained 9 recipes:** phone-OTP (MSG91/Twilio),
+product analytics (PostHog/Mixpanel), interactive maps (Google Maps/Mapbox), background jobs (BullMQ/pg-boss),
+transactional SMS (Twilio/Vonage), API rate limiting (memory/Redis), error tracking (Sentry/Rollbar), feature
+flags (LaunchDarkly/Unleash) and AI/LLM (OpenAI/Anthropic) — on top of the earlier payments/email/storage/
+realtime/search/auth/database recipes. Also this session: 4 backend-hardening advisory dimensions
+(observability #1548, graceful-shutdown #1549, security-headers #1550, CVE+license build-end gate #1551) and
+Cap-4 observability injection (/health #1554 + error-handler #1555). Full suite grew 7470 → 7599 passing
+across the whole run; the only failing suites throughout remained the pre-existing `src/server/sonic/*`
+optional-dep load failures (unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-
+only or default-off-gated or purely additive — none can break a build.

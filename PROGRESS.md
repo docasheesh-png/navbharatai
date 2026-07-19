@@ -18584,3 +18584,29 @@ stripe webhook route; NEW-F kimi/vertex LLM_TRUNCATED (max_tokens) on large file
 the same GLM-429-storm + no-package.json symptoms as pre-fix — the 3 prior fixes (#1541/#1543/#1544) may
 not have propagated to the serving Cloud Run revision when the build started (merges finished 11:07 IST,
 build started 11:22 IST; 3 back-to-back deploys can queue) — a clean re-run is needed to validate them.
+
+---
+
+## 2026-07-19 — CargoPilot autopsy DNA slice 2: framework-core-deps guard + npm masked-failure honesty (the FATAL fix)
+
+Closes CargoPilot NEW-A (the fatal one) + NEW-B. Evidence: after react-leaflet@5 ERESOLVE, the
+`--legacy-peer-deps` recovery churned node_modules until a bare `npm install` PRUNED the `next` package
+(`sh: 1: next: not found`) → dev server / `next build` dead → preview failed. Compounding it, every
+install was `… 2>&1 | tail -30`, so npm's real ERESOLVE exit was MASKED as exit 0 and the build proceeded
+on a broken tree, discovering the damage only much later.
+
+Two DNA fixes (both pure + wired at the ToolDispatcher choke points, env kill-switched):
+- **Framework core-deps guard** (`ensureFrameworkCoreDeps` + `FRAMEWORK_CORE_DEPS`): a written
+  package.json can never DROP the framework's own runtime deps (nextjs → next/react/react-dom, vite →
+  react/react-dom, vue → vue). ADD-ONLY — a dep present in deps OR devDeps at any version is untouched;
+  only a fully-absent one is re-added at the scaffold-matching major. So a later `npm install` can never
+  prune the framework binary. Wired into `pinPackageJsonContent` (kill switch `AGENTV3_PKG_PIN_GUARD=off`).
+- **npm masked-failure honesty** (`npmInstallMaskedFailure`): when an install piped to `tail`/`head`
+  reports exit 0 but the output shows an npm failure (ERESOLVE / "npm error" / "code E*"), the bash tool
+  result now appends an honest "[install honesty] ⚠️ this install actually FAILED …" note so the builder
+  re-runs it truthfully instead of trusting the fake success. Kill switch `AGENTV3_NPM_HONESTY=off`.
+
+Tests: 7 new (re-add dropped `next`, add-only never downgrades, devDeps counts as present, unknown
+framework no-op; exact masked-ERESOLVE flagged, clean install not flagged, non-piped not flagged). Gate:
+server tsc 0, DependencyAutoFix 24 + ToolDispatcher 144 pass. Remaining CargoPilot opens: NEW-E (Next
+App-Router `export const config` deprecation), NEW-F (kimi/vertex max_tokens truncation).

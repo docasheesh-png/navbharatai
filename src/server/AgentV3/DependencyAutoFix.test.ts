@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ name: 'app', version: '0.1.0', dependencies: deps, ...extra }, null, 2);
@@ -29,6 +29,53 @@ describe('pinKnownDepsInInstallCommand — react-leaflet peer-conflict pin (Carg
 
   it('leaves an explicitly-versioned react-leaflet untouched', () => {
     expect(pinKnownDepsInInstallCommand('npm install react-leaflet@5')).toBe('npm install react-leaflet@5');
+  });
+});
+
+describe('ensureFrameworkCoreDeps — the framework binary can never vanish (CargoPilot dev-server-death)', () => {
+  it('re-adds `next` when a rewritten Next.js package.json dropped it (the exact failure)', () => {
+    const pj = JSON.stringify({ name: 'app', dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', stripe: '^16' } }, null, 2);
+    const r = ensureFrameworkCoreDeps(pj, 'nextjs');
+    expect(r.added).toContain('next@^14');
+    expect(JSON.parse(r.content).dependencies.next).toBe('^14');
+    // untouched deps preserved, react not re-added (already present)
+    expect(JSON.parse(r.content).dependencies.stripe).toBe('^16');
+    expect(r.added).not.toContain('react@^18');
+  });
+
+  it('is ADD-ONLY — never downgrades an existing (even newer) core dep', () => {
+    const pj = JSON.stringify({ name: 'app', dependencies: { next: '^15', react: '^19', 'react-dom': '^19' } }, null, 2);
+    const r = ensureFrameworkCoreDeps(pj, 'nextjs');
+    expect(r.added).toEqual([]);
+    expect(r.content).toBe(pj); // byte-identical — nothing to do
+  });
+
+  it('counts a core dep in devDependencies as present (does not duplicate it)', () => {
+    const pj = JSON.stringify({ name: 'app', dependencies: {}, devDependencies: { vite: '^5', react: '^18', 'react-dom': '^18' } }, null, 2);
+    const r = ensureFrameworkCoreDeps(pj, 'vite-react');
+    expect(r.added).toEqual([]);
+  });
+
+  it('no-ops for an unknown framework and for non-JSON input', () => {
+    expect(ensureFrameworkCoreDeps('{}', 'brand-new-framework').added).toEqual([]);
+    expect(ensureFrameworkCoreDeps('not json', 'nextjs').added).toEqual([]);
+    expect(ensureFrameworkCoreDeps('{}', undefined).added).toEqual([]);
+  });
+});
+
+describe('npmInstallMaskedFailure — an exit-0 pipe can hide a real npm failure (CargoPilot)', () => {
+  it('flags the EXACT masked ERESOLVE the build swallowed', () => {
+    const cmd = 'npm install react-leaflet 2>&1 | tail -30';
+    const out = 'npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\nnpm error peer react@"^19.0.0" from react-leaflet@5.0.0';
+    expect(npmInstallMaskedFailure(cmd, out)).toBe(true);
+  });
+
+  it('does NOT flag a clean piped install', () => {
+    expect(npmInstallMaskedFailure('npm install 2>&1 | tail -20', 'added 71 packages, and audited 100 packages in 18s')).toBe(false);
+  });
+
+  it('does NOT flag an install that is NOT piped (the real exit code is already visible)', () => {
+    expect(npmInstallMaskedFailure('npm install react-leaflet', 'npm error code ERESOLVE')).toBe(false);
   });
 });
 

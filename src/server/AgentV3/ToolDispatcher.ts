@@ -118,6 +118,7 @@ import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
+import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3267,6 +3268,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('error-tracking integration');
         const etDeps = etcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${etProvider} error tracking:\n${etWritten.join('\n')}\nAdd the dependencies: ${etDeps}\n\n${etcfg.instructions}`;
+      }
+
+      case 'generate_feature_flags': {
+        // U-4 recipe — real BYO server-side feature flags (LaunchDarkly/Unleash): a per-user
+        // isFeatureEnabled(flag, userKey) helper for gradual rollouts / A-B / kill switches. Pure generator
+        // in FeatureFlagGenerator.ts.
+        const ffProvider = optStr(input, 'provider');
+        if (!isFeatureFlagProvider(ffProvider)) return 'generate_feature_flags: pass provider = "launchdarkly" | "unleash".';
+        const ffcfg = generateFeatureFlagIntegration(ffProvider);
+        const ffWritten: string[] = [];
+        for (const [path, content] of Object.entries(ffcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); ffWritten.push(`Kept existing ${path} (add: ${ffcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ffWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('feature-flags integration');
+        return `Wired ${ffProvider} feature flags:\n${ffWritten.join('\n')}\nAdd the dependency: ${ffcfg.dependency.name}@${ffcfg.dependency.version}\n\n${ffcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

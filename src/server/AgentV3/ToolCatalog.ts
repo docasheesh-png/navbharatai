@@ -957,6 +957,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_feature_flags',
+      description:
+        'Add real server-side feature flags to the app (Bring-Your-Own key): a per-user isFeatureEnabled(flag, ' +
+        'userKey) helper for "launchdarkly" or "unleash" — ship a feature dark, roll it out gradually (5% → ' +
+        '100%), A/B test, or kill a broken feature instantly without a redeploy. A missing flag or unreachable ' +
+        'service falls back to false, so the app never breaks. The user pastes their SDK key into .env; ' +
+        'NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['launchdarkly', 'unleash'], description: 'The feature-flag provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1265,6 +1281,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_sms',
   'generate_ratelimit',
   'generate_error_tracking',
+  'generate_feature_flags',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

@@ -92,6 +92,17 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     startCommand: 'npm run dev',
   },
   {
+    id: 'preact',
+    name: 'Preact + Vite',
+    description: 'Fast ~3KB React alternative — same API, tiny footprint',
+    category: 'frontend',
+    language: 'TypeScript',
+    color: '#673AB8',
+    iconChar: '⚛️',
+    devPort: 5173,
+    startCommand: 'npm run dev',
+  },
+  {
     id: 'sveltekit',
     name: 'SvelteKit',
     description: 'Full-stack Svelte framework with file-based routing',

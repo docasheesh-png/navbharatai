@@ -32,6 +32,9 @@ const RULES: FrameworkRule[] = [
   { id: 'remix', re: /\bremix(\.run|\srun)?\b/i },
   { id: 'angular', re: /\bangular(js|\s?\d+)?\b/i },
   { id: 'astro', re: /\bastro\b/i },
+  // Preact — "preact" is not a common English word, so a bare match is safe. Checked before React so
+  // "Preact app" never falls through to the React default.
+  { id: 'preact', re: /\bpreact(\.js|js)?\b/i },
   // SolidJS — REQUIRE the "js"/".js" (bare "solid" is a common English word, e.g. "a solid app",
   // and would false-positive onto the Solid scaffold).
   { id: 'solid', re: /\bsolid\.?js\b|\bsolidjs\b|\bsolid\sjs\b/i },

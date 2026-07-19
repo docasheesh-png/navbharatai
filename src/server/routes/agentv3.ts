@@ -123,7 +123,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
+import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
@@ -8169,11 +8169,17 @@ export function registerAgentV3Routes(app: Express): void {
         // U-1 — record the signed determinism-audit manifest (routing inputs + sha256 of every written
         // file, HMAC-signed by SECRET_ENCRYPTION_KEY when present). Best-effort; never blocks the report.
         try {
+          // HONEST manifest identity (ShopSphere autopsy 2026-07-19): record the model that ACTUALLY
+          // delivered (the ledger's dominant-provider model), not the nominal Claude fallback id — a
+          // weak GLM build must never read as `claude-sonnet-4-6`. deliveredVia carries the provider.
+          const deliveredViaProvider = dominantProvider(providerTurns);
+          const deliveredModel = deliveredModelId(providerLedger.entries(), deliveredViaProvider);
           const manifest = signManifest(
             buildBuildManifest({
               buildId,
               promptHash,
-              model: String(model),
+              model: deliveredModel || String(model),
+              deliveredVia: deliveredViaProvider,
               effort: powerSpecResolved?.effort,
               powerLevel: powerLevelReqEffective,
               framework,

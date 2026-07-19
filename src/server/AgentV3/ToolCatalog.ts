@@ -1005,6 +1005,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_translation',
+      description:
+        'Add real machine translation to the app (Bring-Your-Own key): a server translate(text, target, ' +
+        'source?) helper for "google" or "deepl" — make the app multilingual (great for India\'s languages: ' +
+        'English ⇄ Hindi/Tamil/Bengali/…). Server-side (the key never reaches the browser); no npm dependency ' +
+        '(REST via fetch); a failed call returns the original text so it never breaks. The user pastes their ' +
+        'key into .env; NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['google', 'deepl'], description: 'The translation provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1316,6 +1332,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_feature_flags',
   'generate_ai',
   'generate_geocoding',
+  'generate_translation',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

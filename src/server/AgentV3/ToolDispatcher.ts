@@ -121,6 +121,7 @@ import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../li
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
+import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3338,6 +3339,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('geocoding integration');
         const gcDepLine = gccfg.dependency ? `\nAdd the dependency: ${gccfg.dependency.name}@${gccfg.dependency.version}` : '\n(No npm dependency needed — the geocoding REST API is called with the built-in fetch.)';
         return `Wired ${gcProvider} geocoding:\n${gcWritten.join('\n')}${gcDepLine}\n\n${gccfg.instructions}`;
+      }
+
+      case 'generate_translation': {
+        // U-4 recipe — real BYO text translation (Google Translate/DeepL): a server translate(text, target,
+        // source?) helper (REST via fetch, no dependency). Pure generator in TranslationGenerator.ts.
+        const trProvider = optStr(input, 'provider');
+        if (!isTranslationProvider(trProvider)) return 'generate_translation: pass provider = "google" | "deepl".';
+        const trcfg = generateTranslationIntegration(trProvider);
+        const trWritten: string[] = [];
+        for (const [path, content] of Object.entries(trcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); trWritten.push(`Kept existing ${path} (add: ${trcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          trWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('translation integration');
+        const trDepLine = trcfg.dependency ? `\nAdd the dependency: ${trcfg.dependency.name}@${trcfg.dependency.version}` : '\n(No npm dependency needed — the translation REST API is called with the built-in fetch.)';
+        return `Wired ${trProvider} translation:\n${trWritten.join('\n')}${trDepLine}\n\n${trcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -547,21 +547,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverBuildRunning, running, userId, email, resumeBuild]);
 
-  // TAB SWITCH resilience: a backgrounded tab (esp. mobile Safari) suspends timers and
-  // can silently drop the event stream. When the tab becomes visible again, immediately
-  // reconcile with the server — re-attach a still-running build (via the auto-resume
-  // effect above) so the build never looks "stopped" after a tab switch.
+  // CONNECTION-DROP resilience: the build runs (and is buffered) server-side, so a lost CLIENT
+  // connection must NEVER look like the app "stopped". Three real drop signals must each trigger an
+  // immediate reconcile → re-attach of the still-running build (via the auto-resume effect above):
+  //   • visibilitychange — a backgrounded tab / minimized app (mobile Safari/webview suspends timers
+  //     and drops the stream); recover the instant it returns to the foreground.
+  //   • ONLINE — a brief network cut (even 0.01s) while the tab stays VISIBLE never fires
+  //     visibilitychange, so before this the ONLY recovery was start()'s bounded retry loop; once that
+  //     gave up the user was stuck on a "network error" even though the network came back and the
+  //     server build is alive. The `online` event fires exactly when connectivity is restored → reconcile.
+  //   • FOCUS — window refocus (alt-tab / app switch on desktop) that doesn't flip document visibility.
+  // Reconcile whenever we are NOT actively streaming OR an error is showing (a surfaced drop error must
+  // be cleared by a successful re-attach — resume() calls setError(null)). checkRunning is a cheap,
+  // idempotent GET; the auto-resume effect's own guards prevent any double-attach.
   const [liveNonce, setLiveNonce] = useState(0);
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!running) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
-      setLiveNonce((n) => n + 1); // re-arm the cross-device live poll when the tab is shown again
+    const reconcile = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return; // still backgrounded
+      if (!running || error) checkRunning({ userId, email, workspaceId: expectedWorkspaceId() });
+      setLiveNonce((n) => n + 1); // re-arm the cross-device live poll
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', reconcile);
+    window.addEventListener('online', reconcile);
+    window.addEventListener('focus', reconcile);
+    return () => {
+      document.removeEventListener('visibilitychange', reconcile);
+      window.removeEventListener('online', reconcile);
+      window.removeEventListener('focus', reconcile);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, userId, email, checkRunning]);
+  }, [running, error, userId, email, checkRunning]);
 
   // CROSS-DEVICE LIVE MIRROR (Slice B): while this panel is OPEN + VISIBLE and NOT running a build
   // locally, watch the shared LiveChannel so a build started on ANOTHER device shows its activity

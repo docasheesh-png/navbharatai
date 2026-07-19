@@ -2512,6 +2512,13 @@ export function registerAgentV3Routes(app: Express): void {
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // SECURITY (T0-9): the per-USER "latest report" slot is keyed off the VERIFIED uid, NEVER the claimed
+    // body.userId. Since assertWorkspaceOwner passes for ANY caller on an agentv3-anon-* workspace, keying
+    // that slot by the claim let an attacker (owning their own anon workspace) set body.userId=<victim> and
+    // OVERWRITE the victim's downloadable "latest build report" with attacker-supplied content. The
+    // workspace-keyed durable copies below stay workspace-scoped (already ownership-checked); only this
+    // user-keyed copy was spoofable. An anon caller has no verified uid → the shared 'anon' slot, as before.
+    const reportUid = (await verifiedIdentity(req))?.uid ?? null;
     try {
       const append = (report: BuildDiagnosticsReport): BuildDiagnosticsReport => {
         const rec = { ts: Date.now(), source, message };
@@ -2524,8 +2531,8 @@ export function registerAgentV3Routes(app: Express): void {
         return { ...report, previewErrors, issues, counts: { ...report.counts, total: issues.length, errors: report.counts.errors + 1, unresolved: report.counts.unresolved + 1 } };
       };
       // Update the in-memory copy (same instance) if present.
-      const mem = lastDiagnostics.get(userId ?? 'anon');
-      if (mem) lastDiagnostics.set(userId ?? 'anon', append(mem));
+      const mem = lastDiagnostics.get(reportUid ?? 'anon');
+      if (mem) lastDiagnostics.set(reportUid ?? 'anon', append(mem));
       // Update the durable copy so the download/copy reflects it even after an instance rotation.
       //
       // EVIDENCE MUST NEVER FORK (jungle-game reports, 2026-07-12): when the durable read returned
@@ -2553,10 +2560,10 @@ export function registerAgentV3Routes(app: Express): void {
         // the build settled still reaches the userId-keyed copy the report UI falls back to — but ONLY
         // when this workspace IS the user's latest build (same/newer startedAt). This prevents a late
         // preview error from an OLDER workspace regressing the per-user copy to a stale build.
-        const perUser = await loadLatestForUser(userId).catch(() => null);
+        const perUser = await loadLatestForUser(reportUid).catch(() => null);
         if (!perUser || (withPreviewError.startedAt ?? 0) >= (perUser.startedAt ?? 0)) {
-          await saveLatestForUser(userId, withPreviewError).catch((e) => {
-            console.error(`[DIAGNOSTICS] preview-error append: saveLatestForUser failed (user=${userId ?? 'anon'}): ${e instanceof Error ? e.message : String(e)}`);
+          await saveLatestForUser(reportUid, withPreviewError).catch((e) => {
+            console.error(`[DIAGNOSTICS] preview-error append: saveLatestForUser failed (user=${reportUid ?? 'anon'}): ${e instanceof Error ? e.message : String(e)}`);
           });
         }
         res.json({ ok: true });
@@ -3708,7 +3715,11 @@ export function registerAgentV3Routes(app: Express): void {
       const { assessPrompt, evaluateAbuse, JAILBREAK_KINDS } = await import('../AgentV3/AbuseDetector');
       const abuse = assessPrompt(prompt);
       if (abuse.isAbusive) {
-        const abuserUid = (req.body?.userId as string) || 'anon';
+        // SECURITY (T0-9): attribute abuse to the VERIFIED identity already resolved above (`userId`),
+        // NEVER the spoofable `req.body.userId`. Keying the ledger off the claim let an authenticated
+        // attacker (a) accrue jailbreak violations under a victim's uid to get the VICTIM hard-blocked
+        // (targeted DoS), and (b) evade their own accumulating block by rotating the claimed uid.
+        const abuserUid = userId || 'anon';
         const nowIso = new Date().toISOString();
         audit('ABUSE_DETECTED', { uid: abuserUid, score: abuse.score, signals: abuse.signals.map((s) => s.kind) }, 'warn');
         const isJailbreak = abuse.signals.some((s) => JAILBREAK_KINDS.has(s.kind));

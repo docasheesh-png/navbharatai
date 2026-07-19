@@ -18872,3 +18872,30 @@ line that never reached the shipped health card.
   regression-tested. Prod default unchanged (AGENTV3_AUTOFIX off → block skipped entirely).
 
 Gate: frontend + server tsc clean; full suite 7712 passed.
+
+---
+
+## 2026-07-19 — T0-9 identity re-audit: 2 confirmed claimed-identity risks fixed
+
+A full re-audit of every AgentV3 route's identity handling (claimed-vs-verified) found the build-lifecycle
+routes already clean (Slices 1–4: /chat build identity + billing email, /conversations enumeration, /stop
+/steer /attach /live build matching, /diagnostics + /decision-trace strict verified reads). Two CONFIRMED
+residual risks remained — both the SAME class (a spoofable `req.body.userId` used in a security decision when
+the verified identity was already in scope) — now fixed:
+
+- **/chat abuse ledger (agentv3.ts ~3711):** the adversarial-abuse ledger + hard-block keyed off the claimed
+  `req.body.userId`, not the VERIFIED `userId` already resolved at the top of the handler. An authenticated
+  attacker could (a) accrue jailbreak violations under a VICTIM's uid to get the victim hard-blocked
+  (targeted DoS) and (b) evade their own accumulating block by rotating the claimed uid. Now attributes to
+  the verified `userId`.
+- **/preview-error per-user report slot (agentv3.ts ~2527/2556):** the per-USER "latest build report" copy
+  was written under the claimed `body.userId` AFTER an ownership check that passes for any caller on an
+  `agentv3-anon-*` workspace — so an attacker owning their own anon workspace could set `body.userId=<victim>`
+  and OVERWRITE the victim's downloadable latest report with attacker-supplied content (cross-user report
+  poisoning). Now keyed off `verifiedIdentity(req)?.uid` (`reportUid`); the workspace-keyed durable copies
+  were already ownership-scoped and are unchanged.
+
+Locked with a structural regression guard in `agentv3.test.ts` (both sinks must use the verified identity;
+fails if either regresses to `req.body.userId`). CONVERGENCE TARGETS remaining (ad-hoc but currently safe —
+the ~17 `assertWorkspaceOwner` write routes' claimed-uid fallback, the `isAgentV3Enabled(claimed,…)` feature
+gates) recorded for a follow-up slice. Frontend + server tsc clean; full suite 7720 passed.

@@ -18559,3 +18559,76 @@ onto `main` as each parent merged, so every PR diff stayed clean (only its own f
 Verification across the increment: full suite grew 7470 → 7502 passing (the only failing suites throughout
 were the pre-existing `src/server/sonic/*` load failures from the missing optional `@aws-sdk/
 client-bedrock-runtime` dep — identical on clean `main`, unrelated to these changes). No new `tsc` errors.
+---
+
+## 2026-07-19 — CargoPilot (App #11) autopsy — DNA fixes slice 1: react-leaflet pin + Prisma one-to-one hint
+
+App #11 (CargoPilot, Next.js 14 + Prisma + Postgres) BUILD_FAILED after 26 min. Full forensic autopsy in
+chat. The build's FATAL chain: LLM ran `npm install ... react-leaflet ...` → npm pulled react-leaflet@5
+(peer REQUIRES react@^19) → ERESOLVE on the react@18 Next app → the `--legacy-peer-deps` recovery churned
+node_modules until the `next` binary itself was pruned (`sh: 1: next: not found`, `ls node_modules/.bin/next`
+→ absent) → `next build`/dev dead → preview failed ("No package.json found"/"preview did not start").
+
+Slice 1 (2 clean, evidenced DNA fixes shipped now; both correct regardless of deploy state):
+- **react-leaflet peer-conflict pin** (same class as the Prisma-7 pin): added `react-leaflet: ^4` +
+  `leaflet: ^1` to `WELL_KNOWN_DEPS` so `pinKnownDepsInInstallCommand` rewrites the bare install to the
+  react-18-compatible major before it can ERESOLVE. Test uses the EXACT CargoPilot command.
+- **Prisma one-to-one hint gap**: #1543's rules missed the very common P1012 "A one-to-one relation must
+  use unique fields on the defining side / add an `@unique` attribute" phrasing (CargoPilot hit it at
+  schema.prisma:55) — it fell through to the generic hint. Added a specific `one-to-one-needs-unique` rule.
+
+Open (next slices, recorded honestly): NEW-A the node_modules/`next`-binary-vanished dev-server-death
+class (the fatal one — needs a post-install framework-binary guard); NEW-B `2>&1 | tail` masks npm's real
+exit code so an ERESOLVE reports exit 0; NEW-E Next.js App-Router `export const config` deprecation in the
+stripe webhook route; NEW-F kimi/vertex LLM_TRUNCATED (max_tokens) on large files. ALSO: the build showed
+the same GLM-429-storm + no-package.json symptoms as pre-fix — the 3 prior fixes (#1541/#1543/#1544) may
+not have propagated to the serving Cloud Run revision when the build started (merges finished 11:07 IST,
+build started 11:22 IST; 3 back-to-back deploys can queue) — a clean re-run is needed to validate them.
+
+---
+
+## 2026-07-19 — CargoPilot autopsy DNA slice 2: framework-core-deps guard + npm masked-failure honesty (the FATAL fix)
+
+Closes CargoPilot NEW-A (the fatal one) + NEW-B. Evidence: after react-leaflet@5 ERESOLVE, the
+`--legacy-peer-deps` recovery churned node_modules until a bare `npm install` PRUNED the `next` package
+(`sh: 1: next: not found`) → dev server / `next build` dead → preview failed. Compounding it, every
+install was `… 2>&1 | tail -30`, so npm's real ERESOLVE exit was MASKED as exit 0 and the build proceeded
+on a broken tree, discovering the damage only much later.
+
+Two DNA fixes (both pure + wired at the ToolDispatcher choke points, env kill-switched):
+- **Framework core-deps guard** (`ensureFrameworkCoreDeps` + `FRAMEWORK_CORE_DEPS`): a written
+  package.json can never DROP the framework's own runtime deps (nextjs → next/react/react-dom, vite →
+  react/react-dom, vue → vue). ADD-ONLY — a dep present in deps OR devDeps at any version is untouched;
+  only a fully-absent one is re-added at the scaffold-matching major. So a later `npm install` can never
+  prune the framework binary. Wired into `pinPackageJsonContent` (kill switch `AGENTV3_PKG_PIN_GUARD=off`).
+- **npm masked-failure honesty** (`npmInstallMaskedFailure`): when an install piped to `tail`/`head`
+  reports exit 0 but the output shows an npm failure (ERESOLVE / "npm error" / "code E*"), the bash tool
+  result now appends an honest "[install honesty] ⚠️ this install actually FAILED …" note so the builder
+  re-runs it truthfully instead of trusting the fake success. Kill switch `AGENTV3_NPM_HONESTY=off`.
+
+Tests: 7 new (re-add dropped `next`, add-only never downgrades, devDeps counts as present, unknown
+framework no-op; exact masked-ERESOLVE flagged, clean install not flagged, non-piped not flagged). Gate:
+server tsc 0, DependencyAutoFix 24 + ToolDispatcher 144 pass. Remaining CargoPilot opens: NEW-E (Next
+App-Router `export const config` deprecation), NEW-F (kimi/vertex max_tokens truncation).
+
+---
+
+## 2026-07-19 — CargoPilot autopsy DNA slice 3: Next.js App-Router build-error hints (NEW-E)
+
+Closes CargoPilot NEW-E. Evidence: the stripe webhook route used the Pages-router `export const config =
+{ api: { bodyParser: false } }`, which is invalid in the App Router → `next build` failed ("Page config in
+app/api/webhooks/stripe/route.ts is deprecated. Replace `export const config=…`"). New pure module
+`frameworkBuildHints.ts` (`nextBuildRepairHint`) maps a failed `next build` output to ONE targeted fix
+instruction for the recognised class (App-Router config deprecation → remove it + use `await req.text()`
+for raw bodies + `export const runtime`; getServerSideProps-in-app → Server Component/route handler; a
+hook component missing `"use client"` → add the directive). ToolDispatcher appends it — and, because
+`next build … | tail` can hide the failure behind exit 0, it also fires when the output shows "Build error
+occurred"/"Failed to compile". Guidance only. Kill switch `AGENTV3_NEXT_HINT=off`. 5 new tests (exact
+CargoPilot error + siblings + null on unrecognised). Gate: server tsc 0, frameworkBuildHints 5 +
+ToolDispatcher 144 pass.
+
+NOTE (branch/CI): #1553's push (commit 3ac508b) did not trigger a CI run (the pull_request event didn't
+fire on that force-push). Consolidating slices 1+2+3 onto branch and re-pushing to fire a synchronize run;
+#1553 becomes the single cohesive "CargoPilot autopsy fixes" PR. Remaining CargoPilot open: NEW-F
+(kimi/vertex max_tokens truncation) and NEW-G (app/middleware.ts must be at project root — silent
+route-guard failure, needs a different detector).

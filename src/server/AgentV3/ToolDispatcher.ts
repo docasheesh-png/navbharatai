@@ -74,8 +74,9 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
+import { nextBuildRepairHint } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1161,17 +1162,36 @@ export class ToolDispatcher {
     if (process.env.AGENTV3_PKG_PIN_GUARD === 'off') return content;
     if (!/(^|\/)package\.json$/.test(path)) return content;
     try {
-      const pinned = pinKnownDepsInPackageJson(content);
-      if (pinned.changed.length === 0) return content;
-      try {
-        getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
-      } catch { /* audit best-effort */ }
-      this.events?.emit({
-        type: 'narration', agent: 'architect',
-        text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
-        ts: Date.now(),
-      });
-      return pinned.content;
+      let out = content;
+      const pinned = pinKnownDepsInPackageJson(out);
+      if (pinned.changed.length > 0) {
+        out = pinned.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
+        } catch { /* audit best-effort */ }
+        this.events?.emit({
+          type: 'narration', agent: 'architect',
+          text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
+          ts: Date.now(),
+        });
+      }
+      // FRAMEWORK CORE-DEPS GUARD (CargoPilot autopsy 2026-07-19): a written package.json must never
+      // DROP the framework's own runtime deps (next/react/vite/…). If it does, a later `npm install`
+      // prunes the framework binary from node_modules (`next: not found`) and the dev server dies.
+      // Re-add any fully-absent core dep so the binary can never vanish. Add-only, never downgrades.
+      const core = ensureFrameworkCoreDeps(out, this.framework);
+      if (core.added.length > 0) {
+        out = core.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-CORE] restored framework core deps in ${path}: ${core.added.join('; ')}`);
+        } catch { /* audit best-effort */ }
+        this.events?.emit({
+          type: 'narration', agent: 'architect',
+          text: `🔧 Kept the framework's core dependencies in package.json (${core.added.join('; ')}) so the dev server can't lose its own runtime.`,
+          ts: Date.now(),
+        });
+      }
+      return out;
     } catch {
       return content; // never let a pin failure block a write
     }
@@ -1613,6 +1633,29 @@ export class ToolDispatcher {
             const hint = prismaRepairHint(`${stdout}\n${stderr}`);
             if (hint) out = `${out}\n\n[schema-repair hint] ${hint}`;
           } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
+        // NEXT.JS BUILD-ERROR HINT (CargoPilot autopsy 2026-07-19): a `next build` that fails with a
+        // framework-specific error (App-Router `export const config` deprecation, getServerSideProps in
+        // app/, a missing "use client" directive) gets a targeted fix instruction appended so the builder
+        // converges in one directed turn. Guidance only — never edits code. Also runs when the piped exit
+        // is 0 but the output shows "Build error occurred" (next build hides its failure behind `| tail`).
+        if (process.env.AGENTV3_NEXT_HINT !== 'off' && (exitCode !== 0 || /Build error occurred|Failed to compile/i.test(`${stdout}\n${stderr}`))) {
+          try {
+            const nHint = nextBuildRepairHint(`${stdout}\n${stderr}`);
+            if (nHint) out = `${out}\n\n[next-build hint] ${nHint}`;
+          } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
+        // NPM MASKED-FAILURE HONESTY (CargoPilot autopsy 2026-07-19): `npm install … 2>&1 | tail -30`
+        // reports the PIPE's exit 0 while npm actually FAILED (e.g. ERESOLVE) — so a broken install
+        // looks successful and the build proceeds on a corrupt dependency tree until it dies later
+        // (missing `next` binary). When the output betrays an npm failure behind an exit-0 pipe, say so
+        // plainly so the builder re-runs it honestly instead of trusting the fake success.
+        if (exitCode === 0 && process.env.AGENTV3_NPM_HONESTY !== 'off') {
+          try {
+            if (npmInstallMaskedFailure(command, `${stdout}\n${stderr}`)) {
+              out = `${out}\n\n[install honesty] ⚠️ This install is piped to \`tail\`/\`head\`, so the shell reported exit 0 but npm actually FAILED (see the npm error above). The dependency tree is NOT installed. Re-run the install WITHOUT the \`| tail\`/\`| head\` so the real exit code is visible, and resolve the peer conflict (add \`--legacy-peer-deps\`, or pin the offending package to a compatible major) before continuing.`;
+            }
+          } catch { /* honesty hint is best-effort — never blocks the build */ }
         }
         if (risk.level !== 'none') {
           getWorkspaceMemory(this.workspaceId).recordAudit(

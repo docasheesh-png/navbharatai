@@ -18610,3 +18610,25 @@ Tests: 7 new (re-add dropped `next`, add-only never downgrades, devDeps counts a
 framework no-op; exact masked-ERESOLVE flagged, clean install not flagged, non-piped not flagged). Gate:
 server tsc 0, DependencyAutoFix 24 + ToolDispatcher 144 pass. Remaining CargoPilot opens: NEW-E (Next
 App-Router `export const config` deprecation), NEW-F (kimi/vertex max_tokens truncation).
+
+---
+
+## 2026-07-19 — CargoPilot autopsy DNA slice 3: Next.js App-Router build-error hints (NEW-E)
+
+Closes CargoPilot NEW-E. Evidence: the stripe webhook route used the Pages-router `export const config =
+{ api: { bodyParser: false } }`, which is invalid in the App Router → `next build` failed ("Page config in
+app/api/webhooks/stripe/route.ts is deprecated. Replace `export const config=…`"). New pure module
+`frameworkBuildHints.ts` (`nextBuildRepairHint`) maps a failed `next build` output to ONE targeted fix
+instruction for the recognised class (App-Router config deprecation → remove it + use `await req.text()`
+for raw bodies + `export const runtime`; getServerSideProps-in-app → Server Component/route handler; a
+hook component missing `"use client"` → add the directive). ToolDispatcher appends it — and, because
+`next build … | tail` can hide the failure behind exit 0, it also fires when the output shows "Build error
+occurred"/"Failed to compile". Guidance only. Kill switch `AGENTV3_NEXT_HINT=off`. 5 new tests (exact
+CargoPilot error + siblings + null on unrecognised). Gate: server tsc 0, frameworkBuildHints 5 +
+ToolDispatcher 144 pass.
+
+NOTE (branch/CI): #1553's push (commit 3ac508b) did not trigger a CI run (the pull_request event didn't
+fire on that force-push). Consolidating slices 1+2+3 onto branch and re-pushing to fire a synchronize run;
+#1553 becomes the single cohesive "CargoPilot autopsy fixes" PR. Remaining CargoPilot open: NEW-F
+(kimi/vertex max_tokens truncation) and NEW-G (app/middleware.ts must be at project root — silent
+route-guard failure, needs a different detector).

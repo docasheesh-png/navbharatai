@@ -76,6 +76,7 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
+import { nextBuildRepairHint } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1605,6 +1606,17 @@ export class ToolDispatcher {
           try {
             const hint = prismaRepairHint(`${stdout}\n${stderr}`);
             if (hint) out = `${out}\n\n[schema-repair hint] ${hint}`;
+          } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
+        // NEXT.JS BUILD-ERROR HINT (CargoPilot autopsy 2026-07-19): a `next build` that fails with a
+        // framework-specific error (App-Router `export const config` deprecation, getServerSideProps in
+        // app/, a missing "use client" directive) gets a targeted fix instruction appended so the builder
+        // converges in one directed turn. Guidance only — never edits code. Also runs when the piped exit
+        // is 0 but the output shows "Build error occurred" (next build hides its failure behind `| tail`).
+        if (process.env.AGENTV3_NEXT_HINT !== 'off' && (exitCode !== 0 || /Build error occurred|Failed to compile/i.test(`${stdout}\n${stderr}`))) {
+          try {
+            const nHint = nextBuildRepairHint(`${stdout}\n${stderr}`);
+            if (nHint) out = `${out}\n\n[next-build hint] ${nHint}`;
           } catch { /* hint is best-effort — the raw error is still reported */ }
         }
         // NPM MASKED-FAILURE HONESTY (CargoPilot autopsy 2026-07-19): `npm install … 2>&1 | tail -30`

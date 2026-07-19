@@ -18927,3 +18927,38 @@ audit columns (exactly the audit's Cat-5 ❌ cluster). Upgraded it to a real rel
 
 Batched onto the same feature branch as T-SPEED.1 (single-branch session constraint) → PR #1598 now covers
 "speed + deep schema". Next on the conveyor: T1.2 (`generate_crud` — validation/pagination/filter/sort/RBAC).
+
+---
+
+## 2026-07-19 — T1.2 `generate_crud` — full CRUD REST resource recipe (roadmap Tier-1, item 2)
+
+Cross-matched the recipe pattern (`src/server/lib/*Generator.ts` → `{files, dependencies, instructions}`,
+wired via ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). The audit's biggest ❌ cluster was
+Backend request-quality (3/17): no validation, pagination, filtering, sorting, or a real error contract — the
+LLM hand-wrote each endpoint. New `generate_crud` closes it with ONE recipe.
+
+**Shipped (real, complete code — no stubs; pairs with T1.1's Prisma schema):**
+- `src/server/lib/CrudGenerator.ts` — pure `generateCrudResource(entity, { protected? })` emitting, on Prisma:
+  - `server/validation/<r>.schema.ts` — a zod create schema (email→`.email()`, int→`.number().int()`, etc.;
+    auto-managed `id`/`created_at`/`updated_at`/`deleted_at` excluded) + a `.partial()` update schema.
+  - `server/routes/<r>.routes.ts` — an Express router: LIST with pagination (`?page,?limit`≤100), allow-listed
+    exact-match filtering (`?field=value`) and sorting (`?sort=field:asc|desc`), get-by-id, validated
+    create/update, and **SOFT delete** (sets `deletedAt`, excluded from reads) — all via `asyncHandler` so
+    errors reach the handler. 404s on missing/soft-deleted rows.
+  - `server/lib/prisma.ts` — one shared PrismaClient. `server/middleware/errorHandler.ts` — the central error
+    contract (zod→400 with issues, `.status`→that code, else 500 with a generic message).
+  - `protected: true` → also emits `server/middleware/requireAuth.ts` and guards every mutation with an
+    authenticated `req.user` (pairs with `generate_auth`); default is an open resource that works standalone.
+  - Field-kind inference REUSES `fieldKind` from MigrationGenerator (one source of truth, rule 3/4) — a `<x>_id`
+    stays a string, etc.
+- Wired as the `generate_crud` tool: ToolCatalog def (name/description/input_schema with `name`+`fields`+
+  `protected`) + `CATALOG_TOOL_NAMES` + a ToolDispatcher case that writes each file with the standard
+  create/modify → `recordFileChange` → `indexFile` → checkpoint flow and reports the deps to add.
+- Closes audit Cat-6 gaps: validation ✅, pagination ✅, filtering ✅, sorting ✅, backend error handling ✅,
+  authorization ✅ (opt-in). (GraphQL/gRPC/OAuth/refresh-token remain separate fast-follows.)
+- No AppKnowledgeBase entry — consistent with the sibling `generate_*` recipes (engine builder tool, not a
+  user-navigable screen). Gate green: server `tsc` + `vitest` CrudGenerator 6/6 + ToolDispatcher 144/144 +
+  ToolCatalog 5/5.
+
+Batched onto PR #1598 (now "speed + deep schema + CRUD recipe"). Next on the conveyor: T1.3 (product
+scaffolds — admin/dashboard/roles) or T1.4 (smart clarification), per the roadmap.

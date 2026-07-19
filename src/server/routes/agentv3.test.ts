@@ -1661,3 +1661,31 @@ describe('T0-9 — abuse ledger + preview-error report slot must use the VERIFIE
     expect(handler).not.toContain('loadLatestForUser(userId)');
   });
 });
+
+// T0-9 convergence (2026-07-19): the 4 DESTRUCTIVE write routes (exec, delete-files, import-files,
+// visual-edit) must use the STRICT assertVerifiedWorkspaceOwner (verified-owner-or-anon-capability, no
+// claimed-uid fallback), so a token-less caller who merely learned agentv3-victim-{sid} can't run a command
+// or delete files by claiming the victim's uid. The other write routes keep the lenient never-break guard.
+describe('T0-9 — destructive write routes require a VERIFIED workspace owner (no claimed-uid fallback)', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+  const handlerOf = (path: string): string => {
+    const i = SRC.indexOf(`app.post('${path}'`);
+    return i === -1 ? '' : SRC.slice(i, i + 1600);
+  };
+
+  for (const path of ['/api/agentv3/exec', '/api/agentv3/delete-files', '/api/agentv3/import-files', '/api/agentv3/visual-edit']) {
+    it(`${path} uses the strict assertVerifiedWorkspaceOwner, not the lenient assertWorkspaceOwner`, () => {
+      const h = handlerOf(path);
+      expect(h.length).toBeGreaterThan(0);
+      expect(h).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
+      expect(h).not.toContain('assertWorkspaceOwner(req, workspaceId)'); // must not use the claimed-fallback guard
+    });
+  }
+
+  it('the strict guard is verified-only (delegates to verifiedWorkspaceReadOk, no claimed-uid input)', () => {
+    const i = SRC.indexOf('async function assertVerifiedWorkspaceOwner(');
+    const fn = SRC.slice(i, i + 260);
+    expect(fn).toContain('verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)');
+    expect(fn).not.toContain('req.body?.userId'); // never reads a claimed identity
+  });
+});

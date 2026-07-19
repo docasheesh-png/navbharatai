@@ -18899,3 +18899,21 @@ Locked with a structural regression guard in `agentv3.test.ts` (both sinks must 
 fails if either regresses to `req.body.userId`). CONVERGENCE TARGETS remaining (ad-hoc but currently safe —
 the ~17 `assertWorkspaceOwner` write routes' claimed-uid fallback, the `isAgentV3Enabled(claimed,…)` feature
 gates) recorded for a follow-up slice. Frontend + server tsc clean; full suite 7720 passed.
+
+## 2026-07-19 — T0-9 convergence: destructive writes now require a VERIFIED owner
+
+Follow-up to the T0-9 re-audit. The audit's convergence targets (the ~17 `assertWorkspaceOwner` write
+routes) keep a claimed-uid fallback so a token-blip BUILD never hard-breaks — a documented never-break
+tradeoff, and `workspaceOwnershipOk` already gives the verified token precedence (a verified-but-mismatched
+attacker is already rejected). Forcing verified on ALL of them, or on the `isAgentV3Enabled` feature gates,
+would break ANON builds, so those stay as-is (accepted, capability-gated).
+
+But the 4 DESTRUCTIVE writes — `exec` (arbitrary command), `delete-files`, `import-files`, `visual-edit` —
+are the highest-stakes ops, and the audit explicitly recommended tightening them. New strict guard
+`assertVerifiedWorkspaceOwner` (reuses the tested `verifiedWorkspaceReadOk`: verified-owner-or-anon-sid-
+capability, NO claimed-uid fallback) now gates those 4. So a token-less caller who merely learned
+`agentv3-victim-{sid}` can no longer run a command or delete files on it by claiming the victim's uid. Anon
+workspaces stay reachable by their unguessable sid (unchanged); a legit owner with a transient token blip
+self-heals (403 → client token-refresh + retry — these are explicit user actions, not the auto build loop).
+Structural regression guard added (the 4 handlers must use the strict guard; the strict guard is
+verified-only). Frontend + server tsc clean; full suite 7725 passed.

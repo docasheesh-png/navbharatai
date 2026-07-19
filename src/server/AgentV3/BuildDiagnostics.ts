@@ -12,6 +12,7 @@
 
 import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
+import { isDeadSandboxSignal } from './sandbox/EngineerAI/actuators/sandboxHealth';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -399,6 +400,28 @@ export class BuildDiagnostics {
       && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
     const cmdHead = rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
+    // HONESTY (ShopSphere autopsy 2026-07-19): an `exit -1 (0s, empty)` means the command COULD NOT RUN
+    // because the sandbox was reaped/expired/unreachable — an INFRASTRUCTURE condition, NOT an app-build
+    // error. Reported as SANDBOX_CMD_FAILED it read like the app failed to compile (`tsc → exit -1`,
+    // `tsconfig.json does not exist`) and could become the build's rootCause, falsely blaming the app.
+    // Classify it distinctly so the report tells the truth and deriveRootCause never blames the app.
+    const deadSandbox = failed && isDeadSandboxSignal({
+      exitCode: rec.exitCode ?? 0,
+      durationMs: rec.durationMs,
+      stdout: rec.stdout,
+      stderr: rec.stderr,
+    });
+    if (deadSandbox) {
+      this.record({
+        phase: 'build',
+        severity: 'warning',
+        code: 'SANDBOX_UNAVAILABLE',
+        message: `$ ${cmdHead} → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.`,
+        autoResolved: false,
+        detail: capTail(rec.stderr || rec.stdout, 400) || undefined,
+      });
+      return;
+    }
     this.record({
       phase: 'build',
       severity: failed ? 'error' : 'info',
@@ -922,11 +945,19 @@ export function deriveRootCause(input: {
     if (m) return `Critical issue found by review: ${m[1].trim()}`;
   }
   if (errors && errors.length > 0) return `Error: ${errors[0].message.split('\n')[0].slice(0, 300)}`;
-  const problem = issues.find((i) => i.severity !== 'info' && !i.autoResolved)
-    ?? issues.find((i) => i.severity === 'error')
-    ?? issues.find((i) => i.severity !== 'info');
+  // Sandbox-unavailability is INFRA, never the app's fault — exclude it from the app-problem pick so a
+  // dead sandbox can't masquerade as "tsc failed" (ShopSphere autopsy). It is surfaced honestly below.
+  const isInfra = (i: BuildIssue): boolean => i.code === 'SANDBOX_UNAVAILABLE';
+  const problem = issues.find((i) => i.severity !== 'info' && !i.autoResolved && !isInfra(i))
+    ?? issues.find((i) => i.severity === 'error' && !isInfra(i))
+    ?? issues.find((i) => i.severity !== 'info' && !isInfra(i));
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';
+  // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly
+  // instead of the generic "no specific error" (which reads like the app silently failed).
+  if (issues.some(isInfra)) {
+    return 'The build sandbox became unavailable mid-build (reaped/expired/unreachable), so the app could not be finished or verified. This is an infrastructure condition, not a defect in the generated app.';
+  }
   if (ok === false) return 'Build did not succeed, but no specific error was captured.';
   return undefined; // still running / nothing to report yet
 }

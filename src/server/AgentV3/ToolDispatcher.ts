@@ -123,6 +123,7 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
+import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
@@ -2967,6 +2968,23 @@ export class ToolDispatcher {
         this.scheduleCheckpoint(`crud resource (${crudName})`);
         const crudDeps = crud.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
+      }
+
+      case 'generate_pagination': {
+        // U-4 recipe — safe list pagination (server/lib/pagination.ts): parsePagination (clamps limit/page,
+        // DoS-safe) + pageMeta. Dependency-free. Pure generator in PaginationGenerator.ts. No env keys.
+        const pgcfg = generatePaginationIntegration();
+        const pgWritten: string[] = [];
+        for (const [path, content] of Object.entries(pgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pagination');
+        return `Wired list pagination:\n${pgWritten.join('\n')}\n(No npm dependency needed — plain query clamping + page math.)\n\n${pgcfg.instructions}`;
       }
 
       case 'generate_rbac': {

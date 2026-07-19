@@ -19244,3 +19244,21 @@ identity (Hindi ships as a first-class language).
 English-only source rule governs NavBharatAI's own code, not generated multilingual app content.) Batched onto
 PR #1608 (T1.4 + i18n, CI in background). Next Tier-2: frontend UX states (loading/skeleton/optimistic),
 performance gate + image-opt, SSO/ABAC, observability injection.
+
+---
+
+## 2026-07-19 — T2.5 (cont.) `generate_ui_states` — React UI-states pack
+
+Continued Tier-2 (CI-in-background mode — no blocking on green). Closes the audit's Frontend ❌ cluster
+(loading states, skeleton, optimistic updates, error boundaries were all LLM-authored ad hoc).
+
+**Shipped (pure, dependency-free React helpers):**
+- `src/server/lib/UiStatesGenerator.ts` — `generateUiStates(include?)` emits: `Spinner` + `Skeleton` (CSS
+  keyframes shipped in `ui.css`), `EmptyState`, a class `ErrorBoundary` (getDerivedStateFromError — the
+  correct React pattern), `useAsync` (loading/error/data for every fetch), and `useOptimisticList`
+  (optimistic add/remove that ROLLS BACK on failure so the UI never lies). Optional `include` subset filter.
+- Wired as the `generate_ui_states` tool. Gate green: server `tsc` + `vitest` UiStatesGenerator 6/6 +
+  ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Batched onto PR #1608 (T1.4 + i18n + ui-states, CI in background). Next Tier-2: image-optimization,
+SSO/ABAC, observability logger injection.

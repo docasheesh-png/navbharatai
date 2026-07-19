@@ -1088,6 +1088,24 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_ui_states',
+      description:
+        'Add a dependency-free React UI-states pack: a Spinner + Skeleton (loading placeholders), EmptyState, an ' +
+        'ErrorBoundary (class boundary with fallback), a useAsync hook (loading/error/data for every fetch), and ' +
+        'useOptimisticList (optimistic add/remove that rolls back on failure). Optionally pass include to emit a ' +
+        'subset. Reuse them everywhere so the app has honest loading / empty / error states.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset by name (e.g. ["Spinner","useAsync"]); default = the full pack.',
+          },
+        },
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1635,6 +1653,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_backup',
   'analyze_requirements',
   'generate_i18n',
+  'generate_ui_states',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

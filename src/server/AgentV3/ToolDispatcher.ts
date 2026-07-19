@@ -125,6 +125,7 @@ import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
+import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2973,6 +2974,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('i18n');
         const i18nDeps = i18nCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired i18n:\n${i18nWritten.join('\n')}\nAdd the dependencies: ${i18nDeps}\n\n${i18nCfg.instructions}`;
+      }
+
+      case 'generate_ui_states': {
+        // T2.5 recipe — a dependency-free React UI-states pack (spinner/skeleton/empty/error-boundary +
+        // useAsync + useOptimisticList). Pure generator in UiStatesGenerator.ts.
+        const uiRec = (input as Record<string, unknown>) || {};
+        const uiInclude = Array.isArray(uiRec.include) ? uiRec.include.filter((s): s is string => typeof s === 'string') : undefined;
+        const ui = generateUiStates(uiInclude);
+        const uiWritten: string[] = [];
+        for (const [path, content] of Object.entries(ui.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          uiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ui-states');
+        return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

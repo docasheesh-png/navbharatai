@@ -80,7 +80,7 @@ export interface IEngineerActuator {
   getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
   /**
    * Return the persistent sandbox ID backing this workspace, or null when there
    * is no real sandbox (LocalActuator). The client stores this and sends it back

@@ -1,8 +1,50 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   autoFixEnabled, reviewerAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors,
-  formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, type RuntimeError,
+  formatRuntimeErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome,
+  runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError,
 } from './AutoFix';
+
+describe('runtime-verification honesty records (rule 5 — checked-clean vs couldn\'t-check vs errors-remain)', () => {
+  it('runtimeVerifiedRecord: an honest POSITIVE — captured a real session, no errors (info, resolved)', () => {
+    const r = runtimeVerifiedRecord();
+    expect(r.phase).toBe('autofix');
+    expect(r.code).toBe('RUNTIME_VERIFIED');
+    expect(r.severity).toBe('info');
+    expect(r.autoResolved).toBe(true);
+    expect(r.message).toMatch(/no actionable console errors/i);
+  });
+
+  it('runtimeUncheckedRecord: could NOT capture → honest WARN, NEVER a clean guarantee (unresolved)', () => {
+    const r = runtimeUncheckedRecord();
+    expect(r.code).toBe('RUNTIME_UNCHECKED');
+    expect(r.severity).toBe('warning');
+    expect(r.autoResolved).toBe(false); // surfaces as a real unresolved caveat, not a green tick
+    expect(r.message).toMatch(/not verified/i);
+    expect(r.message).toMatch(/not a clean-runtime guarantee/i);
+    expect(r.message).not.toMatch(/\bclean\b(?!-runtime)/i); // must never imply the runtime is clean
+  });
+
+  it('runtimeErrorsRemainRecord: residual errors are recorded DURABLY (warning) with the real count', () => {
+    const errs: RuntimeError[] = [
+      { t: 1, kind: 'error', text: 'x is not a function' },
+      { t: 2, kind: 'error', text: 'Failed to fetch' },
+    ];
+    const r = runtimeErrorsRemainRecord(errs);
+    expect(r.code).toBe('RUNTIME_ERRORS_REMAIN');
+    expect(r.severity).toBe('warning');
+    expect(r.autoResolved).toBe(false);
+    expect(r.message).toMatch(/^2 runtime error/);
+    expect(r.message).toMatch(/may still be present/i);
+  });
+
+  it('all three verdicts are advisory (never severity "error") — the runtime loop never blocks a build', () => {
+    for (const r of [runtimeVerifiedRecord(), runtimeUncheckedRecord(), runtimeErrorsRemainRecord([])]) {
+      expect(r.severity).not.toBe('error');
+      expect(r.phase).toBe('autofix');
+    }
+  });
+});
 
 describe('reviewerAutofixOutcome — never claim "Auto-fixed" when the repair failed (deep-test 2026-07-18)', () => {
   it('a SUCCESSFUL pass records an honest "Auto-fixed" info line (auto-resolved)', () => {

@@ -314,8 +314,10 @@ export class DockerActuator implements IEngineerActuator {
   async getConsoleErrors(
     _workspaceId: string,
     _sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
-    return { errors: [] };
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured: boolean }> {
+    // Docker actuator has no browser console capture — captured:false so an empty result reads as "runtime
+    // unchecked", not a false "runtime clean".
+    return { errors: [], captured: false };
   }
 
   async getSandboxId(workspaceId: string): Promise<string | null> {

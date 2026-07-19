@@ -188,7 +188,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -7475,12 +7475,17 @@ export function registerAgentV3Routes(app: Express): void {
         // Advancing window: each capture only considers errors NEWER than the previous fix attempt,
         // so a repaired error logged before the fix is never re-detected and we cannot loop on it.
         let sinceMs = Date.now() - 180_000;
+        // Honesty tracking (rule 5): did we EVER actually capture the browser console? An empty capture
+        // only means "runtime clean" if a real session was read; otherwise it's "runtime UNCHECKED".
+        let captureAvailable = false;
         for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
           let captured: RuntimeError[] = [];
           try {
-            captured = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
-          } catch { break; /* console capture needs a real sandbox — skip silently */ }
-          if (captured.length === 0) break; // ran clean — nothing to fix
+            const cap = await actuator.getConsoleErrors!(workspaceId, sinceMs);
+            if (cap.captured !== false) captureAvailable = true; // undefined = back-compat "assume captured"
+            captured = filterActionableErrors(cap.errors);
+          } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
+          if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
@@ -7498,11 +7503,26 @@ export function registerAgentV3Routes(app: Express): void {
           }
           sinceMs = fixStart; // next check only sees errors from the post-fix reload
         }
-        // Honest final check: if errors remain after the repair budget is spent, WARN — never claim clean.
+        // Honest final verdict — RECORDED DURABLY to the diagnostics (so it folds into the shipped health
+        // card via buildHealthFromDiagnostics), not just an ephemeral narration line that vanished:
+        //   • errors remain → WARN they may still be present   • couldn't capture → "runtime UNCHECKED"
+        //   • captured & clean → honest "runtime verified"     (all advisory — the loop never blocks a build)
+        let remaining: RuntimeError[] = [];
         try {
-          const remaining = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
-          if (remaining.length) events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
-        } catch { /* best-effort */ }
+          const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
+          if (fin.captured !== false) captureAvailable = true;
+          remaining = filterActionableErrors(fin.errors);
+        } catch { /* best-effort — availability stays whatever the loop proved */ }
+        try {
+          if (remaining.length) {
+            events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
+            buildDiag.record(runtimeErrorsRemainRecord(remaining));
+          } else if (!captureAvailable) {
+            buildDiag.record(runtimeUncheckedRecord());
+          } else {
+            buildDiag.record(runtimeVerifiedRecord());
+          }
+        } catch { /* diagnostics recording is best-effort — never breaks a build */ }
       }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below

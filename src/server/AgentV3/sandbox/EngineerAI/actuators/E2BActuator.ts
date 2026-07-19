@@ -1060,13 +1060,15 @@ const {chromium}=require('playwright');
   async getConsoleErrors(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured: boolean }> {
     const sandbox = await this.getSandbox(workspaceId);
     let raw = '';
     try {
       raw = await withTimeout(sandbox.files.read(CONSOLE_LOG), 15_000, 'files.read(console)');
     } catch {
-      return { errors: [] }; // no browser session yet / no errors logged / read stalled
+      // No CONSOLE_LOG (no live browser session was ever opened) / read stalled → we did NOT actually
+      // capture the console. captured:false so the caller records "runtime unchecked", not a false clean.
+      return { errors: [], captured: false };
     }
     const errors: { t: number; kind: string; text: string }[] = [];
     for (const line of raw.split('\n')) {
@@ -1079,8 +1081,9 @@ const {chromium}=require('playwright');
         }
       } catch { /* skip malformed line */ }
     }
-    // Cap to the most recent 20 to keep the AI prompt bounded
-    return { errors: errors.slice(-20) };
+    // The log file existed and was read → the console WAS captured (empty errors here = genuinely clean).
+    // Cap to the most recent 20 to keep the AI prompt bounded.
+    return { errors: errors.slice(-20), captured: true };
   }
 
   async getSandboxId(workspaceId: string): Promise<string | null> {

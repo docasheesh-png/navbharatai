@@ -191,9 +191,10 @@ export class LocalActuator implements IEngineerActuator {
   async getConsoleErrors(
     _workspaceId: string,
     _sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }> {
-    // No browser session in LocalActuator — nothing to report.
-    return { errors: [] };
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured: boolean }> {
+    // No browser session in LocalActuator — it can never capture the console, so captured:false (an empty
+    // result here means "not checked", not "runtime clean").
+    return { errors: [], captured: false };
   }
 
   async getSandboxId(_workspaceId: string): Promise<string | null> {

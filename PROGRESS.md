@@ -18844,3 +18844,31 @@ the only failing suites throughout remained the pre-existing `src/server/sonic/*
 (unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-only / default-off-gated /
 purely additive — none can break a build. All server-side recipes keep the secret server-side; a browser
 never sees a provider key.
+
+---
+
+## 2026-07-19 — T1-autofix-loop deepened: honest runtime-verification verdict (rule 5)
+
+The runtime-error auto-fix loop (AutoFix.ts + the AGENTV3_AUTOFIX block in routes/agentv3.ts) already
+existed (opt-in, default off) — this DEEPENS it for honesty rather than rebuilding it (safeguard #6/#7).
+
+**Root cause (rule 5 — the report must tell the truth):** the loop treated an EMPTY console-error capture
+as "ran clean" and `break`-ed silently — but an empty result ALSO happens when the browser console could
+not be captured at all (no live preview session / a stub sandbox). So "runtime UNCHECKED" was silently
+reported as "runtime clean", and residual errors after the repair budget were only an ephemeral narration
+line that never reached the shipped health card.
+
+**Fix:**
+- Actuator contract gains an availability signal `getConsoleErrors → { errors, captured? }`. Real E2B reports
+  `captured:true` only when the CONSOLE_LOG was actually read (empty then = genuinely clean) and `false` when
+  no session existed; Local/Docker stubs report `captured:false`. Applied to the tree the AgentV3 route uses
+  (`AgentV3/sandbox/EngineerAI/actuators/*`) + the ToolDispatcher Actuator interface. (The parallel legacy
+  EngineerAI actuator tree has no consumer that reads empty-as-clean, so it was left untouched — rule 2.)
+- The loop now tracks whether capture was EVER available and records ONE durable, honest `buildDiag` verdict
+  (phase 'autofix', advisory — never blocks): `RUNTIME_VERIFIED` (captured + clean), `RUNTIME_UNCHECKED`
+  (couldn't capture — explicitly NOT a clean guarantee), or `RUNTIME_ERRORS_REMAIN` (residual after budget,
+  now durable so `buildHealthFromDiagnostics` folds it into the health card, not just a vanished narration).
+- Pure helpers `runtimeVerifiedRecord` / `runtimeUncheckedRecord` / `runtimeErrorsRemainRecord` in AutoFix.ts,
+  regression-tested. Prod default unchanged (AGENTV3_AUTOFIX off → block skipped entirely).
+
+Gate: frontend + server tsc clean; full suite 7712 passed.

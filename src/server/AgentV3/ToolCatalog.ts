@@ -1433,6 +1433,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_csv',
+      description:
+        'Add real CSV import/export to the app (server/lib/csv.ts, papaparse): a server toCsv(rows) → ' +
+        'Excel-ready CSV string + parseCsv(text) → objects. Quoting/escaping of commas, quotes and newlines ' +
+        'is RFC-4180 correct, so data never corrupts. Use for report/table export, bulk product/contact/order ' +
+        'import and data migration. Server-side; adds the papaparse dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_qr',
       description:
         'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
@@ -1782,6 +1791,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_security_headers',
   'generate_qr',
   'generate_pdf',
+  'generate_csv',
   'generate_image',
   'generate_mobile_export',
   'generate_desktop_export',

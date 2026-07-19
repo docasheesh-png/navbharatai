@@ -864,6 +864,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_analytics',
+      description:
+        'Add real product analytics to the app (Bring-Your-Own keys): a server capture helper (private key) + ' +
+        'a client init/track/identify helper (public key, no-ops safely if no key is set), for "posthog" or ' +
+        '"mixpanel". The user pastes their token into .env; NavBharatAI never stores it. Never overwrites an ' +
+        'existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['posthog', 'mixpanel'], description: 'The analytics provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1166,6 +1181,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_realtime',
   'generate_search',
   'generate_otp',
+  'generate_analytics',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

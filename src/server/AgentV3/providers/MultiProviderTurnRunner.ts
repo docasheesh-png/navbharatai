@@ -271,24 +271,81 @@ export interface RateLimitCooldowns {
   reset(): void;
 }
 
-export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2): RateLimitCooldowns {
+/**
+ * CIRCUIT-BREAKER options layered ON TOP of the short cooldown (CollabDesk/PaisaTrack GLM-storm autopsy
+ * 2026-07-19). The short cooldown recovers a saturated provider after ~60s, so a genuinely rate-limited
+ * provider is RE-PROBED every minute and storms again (79 GLM 429s in one build). The breaker tracks the
+ * ROLLING 429 RATE: once `breakerTripAfter` strikes land within `breakerWindowMs`, the name is benched
+ * for the much longer `breakerMs` and is NOT auto-recovered by the short 60s cycle — so the WHOLE build
+ * leads with the next provider (Kimi) instead of poking the throttled one turn after turn. Time-based
+ * recovery only (after `breakerMs` it is tried again); a single success does NOT un-trip a proven-
+ * saturated provider. Disabled when `breakerTripAfter` or `breakerMs` is 0 (existing 2-arg callers).
+ */
+export interface CircuitBreakerOptions {
+  /** Strikes within the window that trip the long breaker. 0 = breaker disabled. */
+  breakerTripAfter?: number;
+  /** Rolling window (ms) over which strikes are counted toward the trip threshold. */
+  breakerWindowMs?: number;
+  /** How long (ms) a tripped name stays benched — long enough to stop the per-minute re-probe storm. */
+  breakerMs?: number;
+}
+
+export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, breaker: CircuitBreakerOptions = {}): RateLimitCooldowns {
   const strikes = new Map<string, number>();
   const untilMs = new Map<string, number>();
+  // Circuit breaker: rolling strike timestamps + the long "breaker open" expiry per name.
+  const strikeTimes = new Map<string, number[]>();
+  const breakerUntil = new Map<string, number>();
+  const tripAfter = Math.max(0, Math.floor(breaker.breakerTripAfter ?? 0));
+  const windowMs = Math.max(0, breaker.breakerWindowMs ?? 120_000);
+  const openMs = Math.max(0, breaker.breakerMs ?? 0);
+  const breakerOn = tripAfter > 0 && openMs > 0;
   return {
-    until: (name) => untilMs.get(name) ?? 0,
+    // The effective bench is the LATER of the short cooldown and the long breaker window.
+    until: (name) => Math.max(untilMs.get(name) ?? 0, breakerUntil.get(name) ?? 0),
     strike(name, nowMs) {
       const n = (strikes.get(name) ?? 0) + 1;
       strikes.set(name, n);
       if (cooldownMs > 0 && n >= benchAfter) untilMs.set(name, nowMs + cooldownMs);
+      if (breakerOn) {
+        // Keep only strikes inside the rolling window, add this one, and trip if the rate crosses.
+        const recent = (strikeTimes.get(name) ?? []).filter((t) => t >= nowMs - windowMs);
+        recent.push(nowMs);
+        strikeTimes.set(name, recent);
+        if (recent.length >= tripAfter) breakerUntil.set(name, nowMs + openMs);
+      }
     },
     clear(name) {
+      // A success clears the SHORT cooldown + consecutive streak. The breaker is deliberately STICKY —
+      // one call sneaking through does not prove a saturated provider recovered; it re-opens only by
+      // time (breakerMs), so the build stays off the throttled provider instead of re-storming it.
       strikes.delete(name);
       untilMs.delete(name);
     },
     reset() {
       strikes.clear();
       untilMs.clear();
+      strikeTimes.clear();
+      breakerUntil.clear();
     },
+  };
+}
+
+/**
+ * Circuit-breaker config for the production singleton, from env. DEFAULT ON (admin-requested 2026-07-19
+ * as the code-side GLM-storm fix on top of the pacer + key-pool). `AGENTV3_CIRCUIT_BREAKER=off` disables
+ * it (breaker trip = 0 → pure short-cooldown behaviour). Thresholds are tunable without a deploy.
+ */
+export function circuitBreakerConfig(env: NodeJS.ProcessEnv = process.env): CircuitBreakerOptions {
+  if ((env.AGENTV3_CIRCUIT_BREAKER ?? '').trim().toLowerCase() === 'off') return { breakerTripAfter: 0 };
+  const num = (name: string, def: number): number => {
+    const n = Number((env[name] ?? '').trim());
+    return Number.isFinite(n) && n > 0 ? n : def;
+  };
+  return {
+    breakerTripAfter: num('AGENTV3_CIRCUIT_BREAKER_TRIP', 8),
+    breakerWindowMs: num('AGENTV3_CIRCUIT_BREAKER_WINDOW_MS', 120_000),
+    breakerMs: num('AGENTV3_CIRCUIT_BREAKER_MS', 300_000),
   };
 }
 
@@ -319,8 +376,9 @@ export function rateLimitBenchAfter(): number {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
 }
 
-/** The production singleton — one shared memory across every runner instance in the process. */
-export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs(), rateLimitBenchAfter());
+/** The production singleton — one shared memory across every runner instance in the process. Carries the
+ *  short cooldown AND the per-build circuit breaker (default-on; `AGENTV3_CIRCUIT_BREAKER=off` disables). */
+export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs(), rateLimitBenchAfter(), circuitBreakerConfig());
 
 /**
  * Build a TurnRunner that tries each runner in `chain` order and returns the first that

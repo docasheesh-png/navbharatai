@@ -18962,3 +18962,129 @@ LLM hand-wrote each endpoint. New `generate_crud` closes it with ONE recipe.
 
 Batched onto PR #1598 (now "speed + deep schema + CRUD recipe"). Next on the conveyor: T1.3 (product
 scaffolds — admin/dashboard/roles) or T1.4 (smart clarification), per the roadmap.
+## 2026-07-19 — ShopSphere (App #12, Nuxt) autopsy — fix A: framework-aware simple-build prompt
+
+App #12 (ShopSphere, multi-vendor marketplace, Nuxt 3) — Nuxt was correctly DETECTED (#1509 works), but the
+build's per-file simple-build prompt injected a 100%-REACT export/import convention into a NUXT build
+(`fileSystemPrompt`/`repairSystemPrompt` appended `EXPORT_IMPORT_CONVENTION`, whose text says "A React
+COMPONENT file → export default … import React …"). So the model wrote React-style components, invented Nuxt
+modules that weren't requested (`useSupabaseClient`, `useI18n`, `#auth`, `<Icon>` — the app is Prisma/Postgres,
+not Supabase), and duplicate-imported the same type (`OrderStatus` twice) — cross-file drift by construction.
+
+Fix A: `exportImportConvention(framework)` (pure, exported) picks the convention by framework — Vue/Nuxt
+(SFC + `<script setup>` + auto-imports + Pinia; explicitly "do NOT invent `useSupabaseClient`/`#auth`/`<Icon>`";
+"import each type EXACTLY ONCE"), Svelte/SvelteKit (`.svelte` + `export let` + `$lib`), React family
+(unchanged), and a framework-neutral fallback (Angular/Solid/Astro/unknown). Wired into both
+`fileSystemPrompt` and `repairSystemPrompt`. This folds in ShopSphere findings D (hallucinated modules) and
+E (duplicate imports) as prompt-level guards. Tests: 5 new. Gate: server tsc 0, SimpleBuilder 65 pass.
+
+WHY the report was partial (admin observed live): the build HALTED on a client↔server "network error" at
+~145 steps (~1m12s into the full builder, after 35 files) — a stream disconnect, not an engine bug — so the
+diagnostics were incomplete and the full-builder + gates never got to fix the fast-lane's C/D/E issues.
+Open ShopSphere items still to address: B (.env DATABASE_URL sqlite vs schema postgresql mismatch),
+F (salvage→sandbox sync: architect read_file on a salvaged file said "does not exist"), G (GLM fast-lane
+429-storm + 200s latencies → fast-lane 240s timeout at 25/39; proactive pacer), H (intent misclassified as
+DEPLOY/SHIP). And the network-error-halts-a-long-build robustness (resume path) if it recurs.
+
+## 2026-07-19 — ShopSphere autopsy fix H: "production-<quality>" no longer misread as a deploy request
+
+Finding H: the full-builder got a "CONVERSATION PHASE — DEPLOY/SHIP: the user wants to publish" posture on a
+FRESH build. Root cause: `DialogueStateManager.DEPLOY_RE` matched the bare word `production`, and the
+ShopSphere prompt ended with "Production-clean, mobile-responsive" — a QUALITY bar, not a deploy request. So
+`inferPhase` returned `deployed` and the builder was told to publish instead of build. Fix: a negative
+lookahead on `production` that ignores the quality compounds (`production-clean/ready/grade/quality/level/
+worthy/ise/ize`) while still catching a real "deploy to production". New test file (9 cases: the exact
+ShopSphere ending → building; quality compounds → building; real deploy words → deployed; other phases
+intact). Gate: server tsc 0, DialogueStateManager 9 pass. Shipped with fix A in the same ShopSphere PR.
+
+---
+
+## 2026-07-19 — U-4 verified-recipe track: 6 more BYO integrations (autonomous cycle, cont.)
+
+Continued the recipe conveyor after the AI/LLM + geocoding + translation recipes, adding six more real,
+fully-wired, unit-tested Bring-Your-Own integrations. Same discipline throughout (pure builder unit-tested
+for the generated output; `generate_*` agent tool = ToolDispatcher case + ToolCatalog def +
+CATALOG_TOOL_NAMES; keys/webhooks pasted into `.env` and NEVER stored; `.env.example` blank + never
+overwritten; real complete code, no stubs; branch → gate → PR → CI green → squash-merge). Built as stacked
+chains and unwound with `git rebase --onto` so every PR diff stayed clean (only its own files).
+
+- **#1573 — content moderation (`generate_moderation`):** OpenAI Moderation (free endpoint) + Perspective
+  (TOXICITY, tunable threshold). Server moderate(text) → { flagged, score }; fails OPEN so a moderation
+  outage never blocks the app. Catch toxic UGC before it is shown/stored.
+- **#1575 — object cache (`generate_cache`):** Redis over TCP (ioredis) + Upstash over HTTP (@upstash/redis,
+  serverless/edge). cacheGet/cacheSet(TTL)/cacheDel, JSON-serialised.
+- **#1576 — newsletter/mailing-list (`generate_newsletter`):** Mailchimp (data-center derived from the key)
+  + Brevo. Server subscribe(email, name?); distinct from generate_email (transactional send).
+- **#1577 — currency conversion (`generate_currency`):** ExchangeRate-API (/pair, any pair) + Fixer
+  (EUR-base cross-rate computed for you). getRate/convert.
+- **#1578 — weather (`generate_weather`):** OpenWeatherMap (metric) + WeatherAPI. getWeather(city) →
+  { tempC, description, humidity }; null on failure.
+- **#1579 — team notifications (`generate_notify`):** Slack + Discord incoming webhooks. notify(message);
+  never throws, so a notification failure can't break the request that triggered it.
+
+**Full session recap — the builder's BYO-integration library gained 17 recipes:** phone-OTP, product
+analytics, interactive maps, background jobs, transactional SMS, API rate limiting, error tracking, feature
+flags, AI/LLM, geocoding, translation, content moderation, object caching, newsletter signup, currency
+conversion, weather and team notifications — on top of the earlier payments/email/storage/realtime/search/
+auth/database recipes. Also this session: 4 backend-hardening advisory dimensions (observability #1548,
+graceful-shutdown #1549, security-headers #1550, CVE+license build-end gate #1551) and Cap-4 observability
+injection (/health #1554 + error-handler #1555). Full suite grew 7470 → 7639 passing across the entire run;
+the only failing suites throughout remained the pre-existing `src/server/sonic/*` optional-dep load failures
+(unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-only / default-off-gated /
+purely additive — none can break a build. All server-side recipes keep the secret server-side; a browser
+never sees a provider key.
+
+---
+
+## 2026-07-19 — T1-autofix-loop deepened: honest runtime-verification verdict (rule 5)
+
+The runtime-error auto-fix loop (AutoFix.ts + the AGENTV3_AUTOFIX block in routes/agentv3.ts) already
+existed (opt-in, default off) — this DEEPENS it for honesty rather than rebuilding it (safeguard #6/#7).
+
+**Root cause (rule 5 — the report must tell the truth):** the loop treated an EMPTY console-error capture
+as "ran clean" and `break`-ed silently — but an empty result ALSO happens when the browser console could
+not be captured at all (no live preview session / a stub sandbox). So "runtime UNCHECKED" was silently
+reported as "runtime clean", and residual errors after the repair budget were only an ephemeral narration
+line that never reached the shipped health card.
+
+**Fix:**
+- Actuator contract gains an availability signal `getConsoleErrors → { errors, captured? }`. Real E2B reports
+  `captured:true` only when the CONSOLE_LOG was actually read (empty then = genuinely clean) and `false` when
+  no session existed; Local/Docker stubs report `captured:false`. Applied to the tree the AgentV3 route uses
+  (`AgentV3/sandbox/EngineerAI/actuators/*`) + the ToolDispatcher Actuator interface. (The parallel legacy
+  EngineerAI actuator tree has no consumer that reads empty-as-clean, so it was left untouched — rule 2.)
+- The loop now tracks whether capture was EVER available and records ONE durable, honest `buildDiag` verdict
+  (phase 'autofix', advisory — never blocks): `RUNTIME_VERIFIED` (captured + clean), `RUNTIME_UNCHECKED`
+  (couldn't capture — explicitly NOT a clean guarantee), or `RUNTIME_ERRORS_REMAIN` (residual after budget,
+  now durable so `buildHealthFromDiagnostics` folds it into the health card, not just a vanished narration).
+- Pure helpers `runtimeVerifiedRecord` / `runtimeUncheckedRecord` / `runtimeErrorsRemainRecord` in AutoFix.ts,
+  regression-tested. Prod default unchanged (AGENTV3_AUTOFIX off → block skipped entirely).
+
+Gate: frontend + server tsc clean; full suite 7712 passed.
+
+---
+
+## 2026-07-19 — T0-9 identity re-audit: 2 confirmed claimed-identity risks fixed
+
+A full re-audit of every AgentV3 route's identity handling (claimed-vs-verified) found the build-lifecycle
+routes already clean (Slices 1–4: /chat build identity + billing email, /conversations enumeration, /stop
+/steer /attach /live build matching, /diagnostics + /decision-trace strict verified reads). Two CONFIRMED
+residual risks remained — both the SAME class (a spoofable `req.body.userId` used in a security decision when
+the verified identity was already in scope) — now fixed:
+
+- **/chat abuse ledger (agentv3.ts ~3711):** the adversarial-abuse ledger + hard-block keyed off the claimed
+  `req.body.userId`, not the VERIFIED `userId` already resolved at the top of the handler. An authenticated
+  attacker could (a) accrue jailbreak violations under a VICTIM's uid to get the victim hard-blocked
+  (targeted DoS) and (b) evade their own accumulating block by rotating the claimed uid. Now attributes to
+  the verified `userId`.
+- **/preview-error per-user report slot (agentv3.ts ~2527/2556):** the per-USER "latest build report" copy
+  was written under the claimed `body.userId` AFTER an ownership check that passes for any caller on an
+  `agentv3-anon-*` workspace — so an attacker owning their own anon workspace could set `body.userId=<victim>`
+  and OVERWRITE the victim's downloadable latest report with attacker-supplied content (cross-user report
+  poisoning). Now keyed off `verifiedIdentity(req)?.uid` (`reportUid`); the workspace-keyed durable copies
+  were already ownership-scoped and are unchanged.
+
+Locked with a structural regression guard in `agentv3.test.ts` (both sinks must use the verified identity;
+fails if either regresses to `req.body.userId`). CONVERGENCE TARGETS remaining (ad-hoc but currently safe —
+the ~17 `assertWorkspaceOwner` write routes' claimed-uid fallback, the `isAgentV3Enabled(claimed,…)` feature
+gates) recorded for a follow-up slice. Frontend + server tsc clean; full suite 7720 passed.

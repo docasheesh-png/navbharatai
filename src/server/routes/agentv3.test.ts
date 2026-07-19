@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
@@ -1624,5 +1626,38 @@ describe('statusEntitlement (T0-9 — /status money facts from the VERIFIED iden
     expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(true);
     process.env.AGENTV3_PAID_PUBLIC = 'false';
     expect(statusEntitlement({ uid: 'u', email: null }, null).billed).toBe(false);
+  });
+});
+
+// T0-9 identity convergence (2026-07-19 re-audit): two CONFIRMED claimed-identity risks were fixed —
+// (A) the /chat abuse ledger + hard-block keyed off the spoofable req.body.userId (victim-framing DoS +
+// self-block evasion), and (B) the /preview-error per-USER "latest report" slot written under the claimed
+// body.userId after an anon-workspace ownership pass (cross-user report poisoning). Both now use the
+// VERIFIED identity. This structural guard reads the route source and fails if either sink regresses back
+// to a client-claimed identity (the route is impure/HTTP; a source assertion is the proportionate lock,
+// same style as the tool-wiring guard).
+describe('T0-9 — abuse ledger + preview-error report slot must use the VERIFIED identity, never req.body.userId', () => {
+  const SRC = readFileSync(fileURLToPath(new URL('./agentv3.ts', import.meta.url)), 'utf8');
+
+  it('the abuse ledger attributes to the verified `userId`, not the spoofable req.body.userId', () => {
+    expect(SRC).toContain('const abuserUid = userId ||'); // verified identity resolved earlier in /chat
+    // must not re-introduce a claimed body.userId as the abuse-attribution uid
+    expect(SRC).not.toMatch(/abuserUid\s*=\s*\(?\s*req\.body\??\.userId/);
+  });
+
+  it('the preview-error per-user report slot is keyed off verifiedIdentity(req), not the claim', () => {
+    // Scope to the /preview-error handler ONLY — elsewhere (e.g. /chat) saveLatestForUser(userId, …) is
+    // correct because THAT `userId` is already the verified identity; here it was the claimed body.userId.
+    const start = SRC.indexOf("app.post('/api/agentv3/preview-error'");
+    const end = SRC.indexOf("app.get('/api/agentv3/preview-status'", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const handler = SRC.slice(start, end);
+    expect(handler).toContain('const reportUid = (await verifiedIdentity(req))?.uid ?? null;');
+    expect(handler).toContain('saveLatestForUser(reportUid,');
+    expect(handler).toContain('loadLatestForUser(reportUid)');
+    // within THIS handler the per-user sinks must never key off the spoofable claimed userId
+    expect(handler).not.toContain('saveLatestForUser(userId,');
+    expect(handler).not.toContain('loadLatestForUser(userId)');
   });
 });

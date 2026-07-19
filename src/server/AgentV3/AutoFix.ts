@@ -150,3 +150,62 @@ export function autoFixWarning(errors: RuntimeError[]): string {
     'The app was built, but please review these — they were detected in the browser at runtime.',
   ].join('\n');
 }
+
+/**
+ * The HONEST runtime-verification verdict, recorded durably to the build diagnostics (so it folds into
+ * the shipped health card) instead of a one-off narration line.
+ *
+ * ROOT CAUSE (rule 5 — the report must tell the truth): the loop treated an EMPTY console-error capture
+ * as "ran clean", but an empty result also happens when the browser console could NOT be captured at all
+ * (no live preview session / a stub sandbox) — so "runtime UNCHECKED" was silently reported as
+ * "runtime clean", and residual errors after the repair budget were only an ephemeral narration line that
+ * never reached the health card. `captured` (from the actuator) distinguishes "checked & clean" from
+ * "couldn't check", and these records make each of the three real outcomes honest and durable. Pure.
+ *
+ * Shape matches BuildDiagnostics.record's BuildIssue (phase 'autofix'); kept structural to avoid a
+ * circular import. All are advisory (warning/info) — the runtime loop never blocks a build.
+ */
+export interface RuntimeVerifyRecord {
+  phase: 'autofix';
+  severity: 'info' | 'warning';
+  code: 'RUNTIME_VERIFIED' | 'RUNTIME_UNCHECKED' | 'RUNTIME_ERRORS_REMAIN';
+  message: string;
+  autoResolved: boolean;
+}
+
+/** The app ran in a real browser session and no actionable console errors remained — an honest positive. */
+export function runtimeVerifiedRecord(): RuntimeVerifyRecord {
+  return {
+    phase: 'autofix',
+    severity: 'info',
+    code: 'RUNTIME_VERIFIED',
+    message: 'Runtime verified — the app ran in the browser with no actionable console errors after build.',
+    autoResolved: true,
+  };
+}
+
+/** The browser console could not be captured, so runtime was NOT verified — never a clean guarantee. */
+export function runtimeUncheckedRecord(): RuntimeVerifyRecord {
+  return {
+    phase: 'autofix',
+    severity: 'warning',
+    code: 'RUNTIME_UNCHECKED',
+    message:
+      'Runtime was NOT verified — the browser console could not be captured (no live preview session), so ' +
+      'runtime errors, if any, were not detected. This is not a clean-runtime guarantee.',
+    autoResolved: false,
+  };
+}
+
+/** Actionable runtime errors survived the repair budget — the build shipped but they may still be present. */
+export function runtimeErrorsRemainRecord(errors: RuntimeError[]): RuntimeVerifyRecord {
+  return {
+    phase: 'autofix',
+    severity: 'warning',
+    code: 'RUNTIME_ERRORS_REMAIN',
+    message:
+      `${errors.length} runtime error(s) remained after the auto-fix budget was spent — the app was built, ` +
+      'but these were detected in the browser at runtime and may still be present.',
+    autoResolved: false,
+  };
+}

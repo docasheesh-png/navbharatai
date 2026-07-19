@@ -177,6 +177,24 @@ describe('findOrphanStylesheets — a stylesheet wired into nothing ships an uns
     };
     expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'src/index.css' }]);
   });
+
+  it('a stylesheet wired in nuxt.config `css: []` is NOT orphan (ShopSphere/Nuxt autopsy 2026-07-19)', () => {
+    const files = {
+      'assets/css/main.css': 'body {}',
+      // Nuxt wires CSS by declaration, not by `import` — the `~/` alias resolves to the same filename key.
+      'nuxt.config.ts': `export default defineNuxtConfig({\n  css: ['~/assets/css/main.css'],\n});`,
+      'app.vue': `<template><NuxtPage /></template>`,
+    };
+    expect(findOrphanStylesheets(files)).toHaveLength(0);
+  });
+
+  it('a commented-out css entry in a config file does NOT count as wired', () => {
+    const files = {
+      'assets/css/main.css': 'body {}',
+      'nuxt.config.ts': `export default defineNuxtConfig({\n  // css: ['~/assets/css/main.css'],\n});`,
+    };
+    expect(findOrphanStylesheets(files)).toEqual([{ stylesheet: 'assets/css/main.css' }]);
+  });
 });
 
 describe('injectGlobalStylesheetImport — the deterministic fix', () => {

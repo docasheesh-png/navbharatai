@@ -310,7 +310,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   warnings/formatting never block. Set to `off`/unset to disable if it ever over-blocks a working app.),
   `AGENTV3_COST_ROUTING` + `AGENTV3_COST_ROUTING_USERS` (set `on`, canary → `aashishcpmt09@gmail.com`, by the
   admin 2026-07-12 — the free-tier cheap-routing master switch, live for the admin's account only for now),
-  `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below)
+  `AGENTV3_INTEGRITY_GATE` (`on`, canary — see the values section below),
+  `AGENTV3_AUTOFIX` (set `on` by the admin 2026-07-19 — turns on the post-build **runtime-error auto-fix
+  loop**: after a build that renders, captured browser console errors feed a bounded repair pass (default
+  **1** attempt, `AGENTV3_AUTOFIX_ATTEMPTS` caps at 3). It runs an EXTRA LLM pass, so it only fires when
+  runtime errors are actually detected — a clean build costs nothing extra. Model follows the routing
+  policy: free/weak = GLM/Kimi cheap coders, **no Sonnet/Opus**; paid = Claude-first (Sonnet); Opus tiers
+  = Opus. Paid builds bill the extra pass to the user. Never blocks a build; records an honest
+  RUNTIME_VERIFIED / RUNTIME_UNCHECKED / RUNTIME_ERRORS_REMAIN verdict (#1596). Set `off`/unset to disable.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is
@@ -451,6 +458,13 @@ completes the NEXT task, with one eye on CI in the background.** Push → start 
 a background timer/notification brings you back to merge each PR the moment its check is green. You are
 never idle-waiting on a progress bar — your attention is on the next unit of work, CI just pings you when
 it's ready.
+**THE FULL LOOP (admin verbatim, 2026-07-19): CI background me chalti hai — green ka wait NAHI karna hai.
+CI run hote hi turant naya (next) kaam shuru karo, cycle me. Aur jab CI GREEN ho jaaye, tab ek checkpoint
+par ruk kar us PR ko merge karo, phir wapas apne purane checkpoint (jahaan next-kaam paused tha) se kaam
+continue karo.** In plain terms: the green-notification is a brief, cheap interrupt — you pause the task
+in flight ONLY long enough to land that one merge at its checkpoint, then immediately resume the paused
+task from exactly where you left it. You never stop the conveyor to watch a run go green, and you never
+abandon the in-flight task after merging — merge, then straight back to the paused checkpoint.
 When the work is large or spans many PRs, MANY CI runs will queue up — that is expected and fine.
 Do NOT sit and watch any single CI run. The rule, every time you push:
 - **Push → then IMMEDIATELY move to the next unit of work** (investigate, design, or start the next

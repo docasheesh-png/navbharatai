@@ -27,6 +27,29 @@ export function isDeadSandboxError(errMessage: string | null | undefined): boole
   return DEAD_PATTERNS.some((re) => re.test(errMessage));
 }
 
+/**
+ * Recover the REAL exit code from a thrown command error. E2B's `commands.run` REJECTS on a non-zero
+ * exit (a CommandExitError carrying `.exitCode` and a message like "exit status 2"), so a genuine
+ * command failure (e.g. `tsc --noEmit` finding type errors → exit 2) would otherwise be flattened to
+ * the sentinel -1 and read like the sandbox never ran it (PaisaTrack autopsy 2026-07-19: a real tsc
+ * exit-2 was reported as `exit -1`, a dead-sandbox look-alike). Prefer the error's own `exitCode`; else
+ * parse "exit status N" from the message. Returns -1 ONLY when the program truly never ran (SDK/network
+ * throw with no exit info) — exactly the case the dead-sandbox detector then handles. PURE.
+ */
+export function resolveThrownCommandExit(err: unknown): number {
+  const e = err as { exitCode?: unknown; message?: unknown } | null | undefined;
+  if (e && typeof e.exitCode === 'number' && Number.isInteger(e.exitCode) && e.exitCode >= 0) {
+    return e.exitCode;
+  }
+  const msg = e && typeof e.message === 'string' ? e.message : '';
+  const m = /exit\s+status\s+(\d+)/i.exec(msg) || /exit\s+code[:\s]+(\d+)/i.exec(msg);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return -1; // truly could not run (no exit info) — the dead-sandbox path owns this
+}
+
 export interface CommandFailureSignal {
   /** Exit code. <0 means the SDK threw (the program never ran) rather than the program exiting nonzero. */
   exitCode: number;

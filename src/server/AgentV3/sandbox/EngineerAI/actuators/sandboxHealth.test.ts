@@ -1,5 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { isDeadSandboxError, isDeadSandboxSignal } from './sandboxHealth';
+import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit } from './sandboxHealth';
+
+describe('resolveThrownCommandExit — a rejected command keeps its REAL exit code (PaisaTrack autopsy)', () => {
+  it("uses the error's own exitCode (E2B CommandExitError) — a tsc exit 2 stays 2, not -1", () => {
+    expect(resolveThrownCommandExit({ exitCode: 2, message: 'exit status 2' })).toBe(2);
+    expect(resolveThrownCommandExit({ exitCode: 1 })).toBe(1);
+  });
+
+  it('parses "exit status N" from the message when no numeric exitCode is present', () => {
+    expect(resolveThrownCommandExit({ message: 'Command failed with exit status 2' })).toBe(2);
+    expect(resolveThrownCommandExit({ message: 'process exited: exit code 127' })).toBe(127);
+  });
+
+  it('returns -1 ONLY when the program truly never ran (no exit info — the dead-sandbox case)', () => {
+    expect(resolveThrownCommandExit({ message: 'fetch failed: ECONNRESET' })).toBe(-1);
+    expect(resolveThrownCommandExit(new Error('sandbox not found'))).toBe(-1);
+    expect(resolveThrownCommandExit(null)).toBe(-1);
+    expect(resolveThrownCommandExit({ exitCode: -1 })).toBe(-1);
+  });
+
+  it('a recovered real exit code makes isDeadSandboxSignal correctly return FALSE (not a dead sandbox)', () => {
+    const realExit = resolveThrownCommandExit({ exitCode: 2, message: 'exit status 2' });
+    expect(isDeadSandboxSignal({ exitCode: realExit, durationMs: 1000, stdout: '', stderr: 'error TS2532' })).toBe(false);
+  });
+});
 
 describe('isDeadSandboxError', () => {
   it('detects reaped / not-running / expired sandboxes', () => {

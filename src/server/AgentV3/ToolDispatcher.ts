@@ -82,6 +82,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
@@ -123,6 +124,18 @@ import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/Fe
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
+import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
+import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
+import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
+import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
+import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
+import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
+import { generateEnvValidation } from '../lib/EnvValidationGenerator';
+import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateValidationIntegration } from '../lib/ValidationGenerator';
+import { generateLoggingIntegration } from '../lib/LoggingGenerator';
+import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
+import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -196,11 +209,17 @@ export interface ActuatorPort {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
-  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  /**
+   * Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`.
+   * `captured` reports whether a real browser session was actually read: `true` = the console was
+   * captured (an empty `errors` then genuinely means "ran clean"); `false` = no live session, so an empty
+   * `errors` means "could NOT check", NOT "clean"; omitted = unknown (treated as captured for back-compat).
+   * This lets the auto-fix loop tell an honest "runtime clean" from an honest "runtime unchecked".
+   */
   getConsoleErrors?(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }
@@ -2032,7 +2051,13 @@ export class ToolDispatcher {
           analyzeJsxComponents(astFiles),
           analyzeUndefinedHooks(astFiles),
         ]);
-        if (hooksRep.violations.length) {
+        // FRAMEWORK-GATE the React-SPECIFIC analyzers (ShopSphere/Nuxt autopsy 2026-07-19): Rules-of-Hooks,
+        // JSX-component and undefined-hook analysis are about REACT — a Vue/Nuxt `useFetch`/`useProducts`
+        // composable is NOT a React hook, and a Nuxt AUTO-IMPORTED composable is NOT "never imported". Run
+        // against a non-React app these produced FALSE high-severity BLOCKERS that failed a correct build.
+        // Import/export consistency stays (it is framework-neutral: a written import must resolve anywhere).
+        const reactLint = isReactFamilyFramework(this.framework);
+        if (reactLint && hooksRep.violations.length) {
           const sample = hooksRep.violations.slice(0, 3).map((v) => `${v.hook}@${v.file}:${v.line}`).join(', ');
           extra.push({ severity: 'high', label: `${hooksRep.violations.length} React Rules-of-Hooks violation(s) (crash at runtime): ${sample}${hooksRep.violations.length > 3 ? ', …' : ''}` });
         }
@@ -2040,11 +2065,11 @@ export class ToolDispatcher {
           const sample = importRep.mismatches.slice(0, 3).map((m) => `${m.imported}←${m.from}@${m.file}:${m.line}`).join(', ');
           extra.push({ severity: 'high', label: `${importRep.mismatches.length} broken import(s) — a name is imported that the module does not export (the build fails): ${sample}${importRep.mismatches.length > 3 ? ', …' : ''}` });
         }
-        if (jsxRep.undefinedComponents.length) {
+        if (reactLint && jsxRep.undefinedComponents.length) {
           const sample = jsxRep.undefinedComponents.slice(0, 3).map((c) => `<${c.component}>@${c.file}:${c.line}`).join(', ');
           extra.push({ severity: 'high', label: `${jsxRep.undefinedComponents.length} undefined JSX component(s) — used but never imported/defined (crash at runtime): ${sample}${jsxRep.undefinedComponents.length > 3 ? ', …' : ''}` });
         }
-        if (undefHookRep.undefinedHooks.length) {
+        if (reactLint && undefHookRep.undefinedHooks.length) {
           const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
           extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
         }
@@ -3394,6 +3419,252 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('translation integration');
         const trDepLine = trcfg.dependency ? `\nAdd the dependency: ${trcfg.dependency.name}@${trcfg.dependency.version}` : '\n(No npm dependency needed — the translation REST API is called with the built-in fetch.)';
         return `Wired ${trProvider} translation:\n${trWritten.join('\n')}${trDepLine}\n\n${trcfg.instructions}`;
+      }
+
+      case 'generate_moderation': {
+        // U-4 recipe — real BYO content moderation (OpenAI Moderation/Perspective): a server moderate(text)
+        // -> { flagged, score } helper (REST via fetch, no dependency). Pure generator in ModerationGenerator.ts.
+        const mdProvider = optStr(input, 'provider');
+        if (!isModerationProvider(mdProvider)) return 'generate_moderation: pass provider = "openai" | "perspective".';
+        const mdcfg = generateModerationIntegration(mdProvider);
+        const mdWritten: string[] = [];
+        for (const [path, content] of Object.entries(mdcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); mdWritten.push(`Kept existing ${path} (add: ${mdcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('moderation integration');
+        const mdDepLine = mdcfg.dependency ? `\nAdd the dependency: ${mdcfg.dependency.name}@${mdcfg.dependency.version}` : '\n(No npm dependency needed — the moderation REST API is called with the built-in fetch.)';
+        return `Wired ${mdProvider} content moderation:\n${mdWritten.join('\n')}${mdDepLine}\n\n${mdcfg.instructions}`;
+      }
+
+      case 'generate_cache': {
+        // U-4 recipe — real BYO key/value caching (Redis over TCP / Upstash over HTTP): a server
+        // cacheGet/cacheSet(TTL)/cacheDel helper. Pure generator in CacheGenerator.ts.
+        const caProvider = optStr(input, 'provider');
+        if (!isCacheProvider(caProvider)) return 'generate_cache: pass provider = "redis" | "upstash".';
+        const cacfg = generateCacheIntegration(caProvider);
+        const caWritten: string[] = [];
+        for (const [path, content] of Object.entries(cacfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); caWritten.push(`Kept existing ${path} (add: ${cacfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          caWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cache integration');
+        return `Wired ${caProvider} caching:\n${caWritten.join('\n')}\nAdd the dependency: ${cacfg.dependency.name}@${cacfg.dependency.version}\n\n${cacfg.instructions}`;
+      }
+
+      case 'generate_newsletter': {
+        // U-4 recipe — real BYO newsletter/mailing-list signup (Mailchimp/Brevo): a server subscribe(email,
+        // name?) helper (REST via fetch, no dependency). Distinct from generate_email (transactional send).
+        // Pure generator in NewsletterGenerator.ts.
+        const nlProvider = optStr(input, 'provider');
+        if (!isNewsletterProvider(nlProvider)) return 'generate_newsletter: pass provider = "mailchimp" | "brevo".';
+        const nlcfg = generateNewsletterIntegration(nlProvider);
+        const nlWritten: string[] = [];
+        for (const [path, content] of Object.entries(nlcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); nlWritten.push(`Kept existing ${path} (add: ${nlcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          nlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('newsletter integration');
+        const nlDepLine = nlcfg.dependency ? `\nAdd the dependency: ${nlcfg.dependency.name}@${nlcfg.dependency.version}` : '\n(No npm dependency needed — the provider REST API is called with the built-in fetch.)';
+        return `Wired ${nlProvider} newsletter signup:\n${nlWritten.join('\n')}${nlDepLine}\n\n${nlcfg.instructions}`;
+      }
+
+      case 'generate_currency': {
+        // U-4 recipe — real BYO currency conversion (ExchangeRate-API/Fixer): a server getRate + convert
+        // helper (REST via fetch, no dependency). Pure generator in CurrencyGenerator.ts.
+        const cuProvider = optStr(input, 'provider');
+        if (!isCurrencyProvider(cuProvider)) return 'generate_currency: pass provider = "exchangerate" | "fixer".';
+        const cucfg = generateCurrencyIntegration(cuProvider);
+        const cuWritten: string[] = [];
+        for (const [path, content] of Object.entries(cucfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); cuWritten.push(`Kept existing ${path} (add: ${cucfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cuWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('currency integration');
+        return `Wired ${cuProvider} currency conversion:\n${cuWritten.join('\n')}\n(No npm dependency needed — the exchange-rate REST API is called with the built-in fetch.)\n\n${cucfg.instructions}`;
+      }
+
+      case 'generate_weather': {
+        // U-4 recipe — real BYO current-weather lookup (OpenWeatherMap/WeatherAPI): a server getWeather(city)
+        // helper (REST via fetch, no dependency). Pure generator in WeatherGenerator.ts.
+        const weProvider = optStr(input, 'provider');
+        if (!isWeatherProvider(weProvider)) return 'generate_weather: pass provider = "openweathermap" | "weatherapi".';
+        const wecfg = generateWeatherIntegration(weProvider);
+        const weWritten: string[] = [];
+        for (const [path, content] of Object.entries(wecfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); weWritten.push(`Kept existing ${path} (add: ${wecfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          weWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('weather integration');
+        return `Wired ${weProvider} weather:\n${weWritten.join('\n')}\n(No npm dependency needed — the weather REST API is called with the built-in fetch.)\n\n${wecfg.instructions}`;
+      }
+
+      case 'generate_notify': {
+        // U-4 recipe — real BYO team notifications (Slack/Discord incoming webhooks): a server notify(message)
+        // helper (webhook POST via fetch, no dependency). Pure generator in NotifyGenerator.ts.
+        const noProvider = optStr(input, 'provider');
+        if (!isNotifyProvider(noProvider)) return 'generate_notify: pass provider = "slack" | "discord".';
+        const nocfg = generateNotifyIntegration(noProvider);
+        const noWritten: string[] = [];
+        for (const [path, content] of Object.entries(nocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); noWritten.push(`Kept existing ${path} (add: ${nocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          noWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notify integration');
+        return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
+      }
+
+      case 'generate_env_validation': {
+        // U-4 recipe — real fail-fast env validator (server/lib/env.ts). Adds no env keys, no .env.example.
+        // Pure generator in EnvValidationGenerator.ts.
+        const rawKeys = input.keys;
+        const keys = Array.isArray(rawKeys) ? rawKeys.filter((k): k is string => typeof k === 'string') : [];
+        const evcfg = generateEnvValidation(keys);
+        const evWritten: string[] = [];
+        for (const [path, content] of Object.entries(evcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          evWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('env validation');
+        const evKeyLine = evcfg.validatedKeys.length ? `\nValidated keys: ${evcfg.validatedKeys.join(', ')}` : '';
+        return `Wired fail-fast env validation:\n${evWritten.join('\n')}${evKeyLine}\n(No npm dependency needed — plain process.env.)\n\n${evcfg.instructions}`;
+      }
+
+      case 'generate_cors': {
+        // U-4 recipe — safe allowlist CORS middleware (server/lib/cors.ts). Dependency-free. Pure generator
+        // in CorsGenerator.ts. Never overwrites an existing .env.example.
+        const cocfg = generateCorsIntegration();
+        const coWritten: string[] = [];
+        for (const [path, content] of Object.entries(cocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); coWritten.push(`Kept existing ${path} (add: ${cocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          coWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cors config');
+        return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
+      }
+
+      case 'generate_validation': {
+        // U-4 recipe — real request validation (zod): validateBody + validate() middleware (server/lib/
+        // validate.ts). Pure generator in ValidationGenerator.ts. No env keys, no .env.example.
+        const vacfg = generateValidationIntegration();
+        const vaWritten: string[] = [];
+        for (const [path, content] of Object.entries(vacfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          vaWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('request validation');
+        return `Wired request validation:\n${vaWritten.join('\n')}\nAdd the dependency: ${vacfg.dependency.name}@${vacfg.dependency.version}\n\n${vacfg.instructions}`;
+      }
+
+      case 'generate_logging': {
+        // U-4 recipe — structured logging (pino): a configured logger + a secret-safe request-logger
+        // middleware (server/lib/logger.ts). Pure generator in LoggingGenerator.ts. Never overwrites .env.example.
+        const lgcfg = generateLoggingIntegration();
+        const lgWritten: string[] = [];
+        for (const [path, content] of Object.entries(lgcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); lgWritten.push(`Kept existing ${path} (add: ${lgcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('logging');
+        return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
+      }
+
+      case 'generate_graceful_shutdown': {
+        // U-4 recipe — graceful shutdown (SIGTERM drain, server/lib/shutdown.ts). Dependency-free. Pure
+        // generator in GracefulShutdownGenerator.ts. Writes no .env.example.
+        const gscfg = generateGracefulShutdownIntegration();
+        const gsWritten: string[] = [];
+        for (const [path, content] of Object.entries(gscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graceful shutdown');
+        return `Wired graceful shutdown:\n${gsWritten.join('\n')}\n(No npm dependency needed — Node signals + server.close().)\n\n${gscfg.instructions}`;
+      }
+
+      case 'generate_security_headers': {
+        // U-4 recipe — safe security headers middleware (server/lib/securityHeaders.ts). Dependency-free,
+        // CSP left commented (a wrong CSP breaks the app). Pure generator in SecurityHeadersGenerator.ts.
+        const shcfg = generateSecurityHeadersIntegration();
+        const shWritten: string[] = [];
+        for (const [path, content] of Object.entries(shcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          shWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('security headers');
+        return `Wired security headers:\n${shWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${shcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -1050,6 +1050,178 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_moderation',
+      description:
+        'Add real content moderation to the app (Bring-Your-Own key): a server moderate(text) → { flagged, ' +
+        'score } helper for "openai" (free Moderation endpoint) or "perspective" (TOXICITY, tunable ' +
+        'threshold) — catch toxic/unsafe user-generated content (comments, chat, reviews) before it is shown ' +
+        'or stored. Server-side (the key never reaches the browser); no npm dependency (REST via fetch); fails ' +
+        'open so a moderation outage never blocks the app. The user pastes their key into .env; NavBharatAI ' +
+        'never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['openai', 'perspective'], description: 'The moderation provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_cache',
+      description:
+        'Add real key/value caching to the app (Bring-Your-Own infra): a server cacheGet/cacheSet(key, value, ' +
+        'ttlSeconds)/cacheDel helper for "redis" (over TCP, any Redis) or "upstash" (over HTTP, for ' +
+        'serverless/edge). Cache expensive DB queries/API responses to make the app fast. Values are JSON-' +
+        'serialised. The user points REDIS_URL / Upstash REST creds at their own infra in .env; NavBharatAI ' +
+        'never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['redis', 'upstash'], description: 'The cache backend: Redis over TCP or Upstash over HTTP.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_newsletter',
+      description:
+        'Add a real newsletter / mailing-list signup to the app (Bring-Your-Own key): a server subscribe(' +
+        'email, name?) helper for "mailchimp" or "brevo" that adds a contact to a list — the "join our ' +
+        'newsletter / waitlist" capability. Distinct from generate_email (which SENDS one-off emails). ' +
+        'Server-side (the key never reaches the browser); no npm dependency (REST via fetch). The user pastes ' +
+        'their key + list id into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['mailchimp', 'brevo'], description: 'The mailing-list provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_currency',
+      description:
+        'Add real currency conversion to the app (Bring-Your-Own key): a server getRate(from, to) + convert(' +
+        'amount, from, to) helper for "exchangerate" (any pair directly) or "fixer" (EUR-base cross-rate, ' +
+        'computed for you) — behind multi-currency pricing, international checkout and finance dashboards. ' +
+        'Server-side (the key never reaches the browser); no npm dependency (REST via fetch). The user pastes ' +
+        'their key into .env; NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['exchangerate', 'fixer'], description: 'The exchange-rate provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_weather',
+      description:
+        'Add real current-weather lookup to the app (Bring-Your-Own key): a server getWeather(city) → ' +
+        '{ tempC, description, humidity } helper for "openweathermap" or "weatherapi" — behind delivery ETAs, ' +
+        'travel, agri/logistics and dashboard features. Server-side (the key never reaches the browser); no ' +
+        'npm dependency (REST via fetch); returns null on failure so it never breaks. The user pastes their ' +
+        'key into .env; NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['openweathermap', 'weatherapi'], description: 'The weather provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_notify',
+      description:
+        'Add real team notifications to the app (Bring-Your-Own webhook): a server notify(message) helper for ' +
+        '"slack" or "discord" that posts to a channel — a new order, signup, failed payment or support ' +
+        'request straight into your team chat. Server-side (the webhook URL never reaches the browser); no npm ' +
+        'dependency (incoming webhook via fetch); never throws so a notification failure can\'t break the ' +
+        'request. The user pastes the webhook URL into .env; NavBharatAI never stores it. Never overwrites an ' +
+        'existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['slack', 'discord'], description: 'The team-chat provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
+      name: 'generate_env_validation',
+      description:
+        'Add a real fail-fast environment-variable validator to the app (server/lib/env.ts): validateEnv + ' +
+        'requireEnv check every required env var is set and non-empty AT STARTUP and throw ONE clear error ' +
+        'naming any that are missing — so a misconfigured deploy crashes immediately with an actionable ' +
+        'message instead of a cryptic 500 deep inside a request. Pass "keys" = the env vars the app needs ' +
+        '(e.g. the keys the other generators told the user to set). Unlike generate_env_example (which only ' +
+        'documents keys) this ENFORCES them. Adds no dependency and no new env keys; never writes .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          keys: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The required environment-variable names to enforce at startup (e.g. ["DATABASE_URL", "STRIPE_SECRET_KEY"]).',
+          },
+        },
+        required: ['keys'],
+      },
+    },
+    {
+      name: 'generate_cors',
+      description:
+        'Add a safe CORS configuration to the app (server/lib/cors.ts): a dependency-free corsMiddleware that ' +
+        'allows credentialed cross-origin requests ONLY from an allowlist (ALLOWED_ORIGINS, comma-separated) ' +
+        'and echoes back the exact matching origin — NEVER a wildcard "*", the dangerous anti-pattern the ' +
+        'threat-model flags. Fixes the common fullstack blocker where the browser refuses the frontend→backend ' +
+        'call. Handles the OPTIONS preflight. The user sets ALLOWED_ORIGINS in .env; NavBharatAI never stores ' +
+        'it. Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_validation',
+      description:
+        'Add real request/input validation to the app (server/lib/validate.ts, zod): a typed validateBody() ' +
+        'helper + an Express validate(schema) middleware that reject a malformed body with a clear 400 listing ' +
+        'exactly which fields are wrong, BEFORE the handler runs — so bad input never crashes a route or ' +
+        'reaches the database. Use whenever a route accepts a body (signup, forms, APIs). Adds the zod ' +
+        'dependency; introduces no env keys and never writes .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_logging',
+      description:
+        'Add real structured logging to the app (server/lib/logger.ts, pino): a configured JSON logger + an ' +
+        'Express requestLogger middleware that logs method/url/status/duration for every request (never ' +
+        'headers or body, so secrets never leak). Replaces console.log with searchable, level-filtered, ' +
+        'shippable logs — real observability in production. Adds the pino dependency; LOG_LEVEL tunes ' +
+        'verbosity. Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_graceful_shutdown',
+      description:
+        'Add real graceful shutdown to the app (server/lib/shutdown.ts): installGracefulShutdown(server) traps ' +
+        'the SIGTERM every deploy/restart sends — stops accepting new connections, lets in-flight requests ' +
+        'finish, runs optional cleanup (close the DB pool), then exits, with a hard timeout so a stuck ' +
+        'connection can never hang the deploy. Prevents dropped requests and cut DB connections on restart ' +
+        '(the actionable counterpart to the graceful-shutdown advisory). Dependency-free; SHUTDOWN_TIMEOUT_MS ' +
+        'tunes the timeout. Writes no .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_security_headers',
+      description:
+        'Add real security headers to the app (server/lib/securityHeaders.ts): a dependency-free middleware ' +
+        'that sets the safe browser hardening headers (X-Content-Type-Options nosniff, X-Frame-Options ' +
+        'SAMEORIGIN, Referrer-Policy, HSTS, Permissions-Policy) — defending against clickjacking, MIME-' +
+        'sniffing and referrer leakage WITHOUT breaking a normal app. The actionable counterpart to the ' +
+        'security-headers advisory. A Content-Security-Policy is included as a commented, opt-in block (a ' +
+        'wrong CSP breaks the app, so it needs per-app tuning). No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1363,6 +1535,18 @@ export const CATALOG_TOOL_NAMES = [
   'generate_ai',
   'generate_geocoding',
   'generate_translation',
+  'generate_moderation',
+  'generate_cache',
+  'generate_newsletter',
+  'generate_currency',
+  'generate_weather',
+  'generate_notify',
+  'generate_env_validation',
+  'generate_cors',
+  'generate_validation',
+  'generate_logging',
+  'generate_graceful_shutdown',
+  'generate_security_headers',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

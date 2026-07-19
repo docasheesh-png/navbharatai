@@ -164,7 +164,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Output ONLY that one file block — no prose, no explanation, no markdown fences.',
     '- Write the COMPLETE, real file — no TODOs, no placeholders, no "..." stubs.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
-    ...EXPORT_IMPORT_CONVENTION,
+    ...exportImportConvention(framework),
     ...DESIGN_CONTRACT,
   ].join('\n');
 }
@@ -192,7 +192,7 @@ export const DESIGN_CONTRACT: string[] = [
  * against a NAMED `export function useNotes` (TS2613/TS2614), which the build then has to repair every
  * time. A single deterministic convention makes producers and consumers agree by construction.
  */
-const EXPORT_IMPORT_CONVENTION: string[] = [
+const REACT_CONVENTION: string[] = [
   'EXPORT/IMPORT CONVENTION — follow EXACTLY so every import matches the matching export across files:',
   '  • A React COMPONENT file (App, Button, NoteCard, Sidebar, pages, …) → `export default` the component,',
   '    and import it as DEFAULT: `import NoteCard from "./NoteCard"`.',
@@ -211,6 +211,64 @@ const EXPORT_IMPORT_CONVENTION: string[] = [
   '    `import React from "react"`. Hooks files are usually .ts (no JSX) so React is NOT auto-in-scope.',
   '  • `key` is React\'s special prop for list items only — NEVER add it to a component\'s props interface.',
 ];
+
+// Vue 3 / Nuxt 3 — SFCs + auto-imports + Pinia. CargoPilot-sibling autopsy (ShopSphere, App #12):
+// the React convention above was fed to a NUXT build, so the model wrote `export default` components,
+// invented Nuxt modules (`useSupabaseClient`, `#auth`, `<Icon>`) and duplicate-imported the same type.
+const VUE_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION (Vue 3 / Nuxt) — follow EXACTLY so files agree by construction:',
+  '  • Components are Single-File Components (`.vue`) with `<script setup lang="ts">`. NEVER `export default`',
+  '    a component, NEVER `import React`, NEVER JSX — use the SFC `<template>`.',
+  '  • In NUXT, components in `components/`, composables in `composables/`, and Pinia stores are',
+  '    AUTO-IMPORTED — do NOT write manual imports for them; use them directly (`<ProductCard />`,',
+  '    `useCart()`, `useCartStore()`). In a plain Vite+Vue app import components by DEFAULT',
+  '    (`import ProductCard from "@/components/ProductCard.vue"`) and use the `@/` alias.',
+  '  • Utilities / types / interfaces → NAMED exports (`export function formatPrice`, `export interface',
+  '    Product`); import them NAMED (Nuxt `~/`, Vite `@/`). Pinia store:',
+  '    `export const useCartStore = defineStore("cart", () => { … })`; call it `useCartStore()`.',
+  '  • DO NOT invent modules/composables that were not requested — no `useSupabaseClient`, `useI18n`,',
+  '    `#auth`, `useSession`, `<Icon>` unless the app explicitly uses that module. For auth/session use the',
+  '    app\'s OWN Nitro server routes (`server/api/**`) + a Pinia store, not a third-party auth module.',
+  'PROP & TYPE CONTRACTS (get them right the FIRST time):',
+  '  • `defineProps<{ … }>()` types must EXACTLY match what the parent passes (same names + types).',
+  '  • Import each symbol/type EXACTLY ONCE — never import the same name (e.g. `OrderStatus`) on two',
+  '    import lines, and never import a value AND its type name twice.',
+];
+
+// Svelte / SvelteKit — .svelte SFCs, `export let` props, $lib alias, writable stores.
+const SVELTE_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION (Svelte / SvelteKit) — follow EXACTLY:',
+  '  • Components are `.svelte` files; declare props with `export let name` (typed). NEVER `export default`',
+  '    a component, NEVER `import React`, NEVER JSX.',
+  '  • Import a component by DEFAULT WITH its extension: `import Card from "$lib/Card.svelte"`.',
+  '  • Utilities / types / stores → NAMED exports; import from the `$lib` alias',
+  '    (`import { formatDate } from "$lib/utils"`). Store: `export const cart = writable([])`; read it in',
+  '    markup with the `$cart` auto-subscription.',
+  'PROP & TYPE CONTRACTS: the props a parent passes MUST match the child\'s `export let` names + types.',
+  '  Import each symbol/type EXACTLY ONCE.',
+];
+
+// Framework-neutral fallback (Angular, Solid, unknown) — the invariant without React/Vue specifics.
+const GENERIC_CONVENTION: string[] = [
+  'EXPORT/IMPORT CONVENTION — follow EXACTLY so every import matches its export across files:',
+  '  • Use this framework\'s IDIOMATIC component + module style (do NOT assume React/JSX). Match the',
+  '    producer\'s export style at every consumer: never default-import a named export or vice-versa.',
+  '  • Utilities / types / stores → NAMED exports, imported named via the app\'s configured path alias.',
+  '  • Do NOT invent packages/modules/helpers that were not requested. Import each symbol/type ONCE.',
+];
+
+/**
+ * The export/import convention to inject, chosen by FRAMEWORK. The convention used to be React-only and
+ * was fed verbatim to Vue/Nuxt and Svelte builds (ShopSphere autopsy 2026-07-19: a Nuxt app got told to
+ * `export default` its components and `import React`), so producers and consumers drifted. Pure.
+ */
+export function exportImportConvention(framework: string): string[] {
+  const fw = (framework || '').toLowerCase();
+  if (/vue|nuxt/.test(fw)) return VUE_CONVENTION;
+  if (/svelte/.test(fw)) return SVELTE_CONVENTION;
+  if (/angular|solid|qwik|astro/.test(fw)) return GENERIC_CONVENTION;
+  return REACT_CONVENTION; // react, vite-react, next, remix, gatsby, … (the default family)
+}
 
 /**
  * LENS A — SHARED CONTRACTS FIRST. The deepest cause of cross-file drift is that each file is
@@ -392,7 +450,7 @@ export function repairSystemPrompt(framework: string, strategy: RepairStrategy =
       '  if the change is large. Never bend the contract to a file; bend the file to the contract.',
     );
   }
-  base.push(...EXPORT_IMPORT_CONVENTION);
+  base.push(...exportImportConvention(framework));
   return base.join('\n');
 }
 

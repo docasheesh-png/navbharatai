@@ -319,6 +319,36 @@ const IMPLICIT_USE_DEPS = new Set([
   'typescript', 'tslib', 'vite', 'tailwindcss', 'postcss', 'autoprefixer', // build/config wiring
 ]);
 
+// Packages a META-FRAMEWORK provides implicitly, so an app never needs to import them by hand — reporting
+// them as "unused" is a false positive that pushes the user to remove a dep the framework requires.
+// Applied ONLY when that framework is detected (see frameworkProvidedDeps). ShopSphere/Nuxt autopsy
+// 2026-07-19: `vue-router` was falsely flagged unused — Nuxt owns routing and auto-imports `useRouter`/
+// `<NuxtLink>`, so no project file imports `vue-router` directly even though the app depends on it.
+const NUXT_PROVIDED_DEPS = new Set([
+  'nuxt', 'vue', 'vue-router', 'vue-server-renderer', '@vue/server-renderer',
+  'h3', 'ofetch', 'nitropack', 'unhead', '@unhead/vue', 'ufo', 'pathe', 'consola', 'defu',
+]);
+const SVELTEKIT_PROVIDED_DEPS = new Set(['@sveltejs/kit', 'svelte', 'vite']);
+
+/** True when the workspace is a Nuxt app (a nuxt.config.* file, or `nuxt` declared in package.json). */
+function isNuxtProject(files: Record<string, string>, declared: string[]): boolean {
+  if (declared.includes('nuxt')) return true;
+  return Object.keys(files).some((p) => /(^|\/)nuxt\.config\.[cm]?[jt]s$/i.test(p));
+}
+
+/** True when the workspace is a SvelteKit app (a svelte.config.*, or `@sveltejs/kit` declared). */
+function isSvelteKitProject(files: Record<string, string>, declared: string[]): boolean {
+  if (declared.includes('@sveltejs/kit')) return true;
+  return Object.keys(files).some((p) => /(^|\/)svelte\.config\.[cm]?[jt]s$/i.test(p));
+}
+
+/** The set of framework-provided packages to never flag as unused, given the detected meta-framework. */
+function frameworkProvidedDeps(files: Record<string, string>, declared: string[]): Set<string> {
+  if (isNuxtProject(files, declared)) return NUXT_PROVIDED_DEPS;
+  if (isSvelteKitProject(files, declared)) return SVELTEKIT_PROVIDED_DEPS;
+  return new Set();
+}
+
 /** Reduce an import specifier to its package name: '@scope/x/sub' → '@scope/x', 'x/sub' → 'x'. */
 function packageNameOf(spec: string): string {
   if (spec.startsWith('@')) return spec.split('/').slice(0, 2).join('/');
@@ -365,9 +395,11 @@ export function findUnusedDependencies(files: Record<string, string>): UnusedDep
     }
   }
 
+  const provided = frameworkProvidedDeps(files, declared);
   const unused: UnusedDependency[] = [];
   for (const name of declared) {
     if (IMPLICIT_USE_DEPS.has(name)) continue;
+    if (provided.has(name)) continue; // auto-provided by the meta-framework (Nuxt/SvelteKit) — not unused
     if (name.startsWith('@types/')) continue; // type-only, never statically imported
     if (!importedPkgs.has(name)) unused.push({ name });
   }

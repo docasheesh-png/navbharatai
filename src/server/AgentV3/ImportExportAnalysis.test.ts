@@ -265,6 +265,25 @@ describe('findUnusedDependencies', () => {
     expect(findUnusedDependencies(files)).toHaveLength(0);
   });
 
+  it('Nuxt-provided deps (vue-router) are NOT reported when a nuxt.config is present (ShopSphere autopsy)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { nuxt: '^3', 'vue-router': '^4', lodash: '^4' } }),
+      'nuxt.config.ts': `export default defineNuxtConfig({});`,
+      // Nuxt auto-imports useRouter/<NuxtLink> — no file imports 'vue-router' directly, but it is NOT unused.
+      'pages/index.vue': `<script setup>const r = useRouter();</script>`,
+    };
+    // vue-router is framework-provided → not flagged; lodash is genuinely unused → still flagged.
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'lodash' }]);
+  });
+
+  it('vue-router IS reported when there is no Nuxt (a plain Vue app must import it)', () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { vue: '^3', 'vue-router': '^4' } }),
+      'src/main.ts': `import { createApp } from 'vue';`, // vue-router declared but never imported, no Nuxt
+    };
+    expect(findUnusedDependencies(files)).toEqual([{ name: 'vue-router' }]);
+  });
+
   it('no package.json → empty (no crash)', () => {
     expect(findUnusedDependencies({ 'src/main.ts': `import x from 'x';` })).toHaveLength(0);
   });

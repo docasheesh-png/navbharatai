@@ -81,6 +81,26 @@ describe('BuildDiagnostics', () => {
     expect(r.counts.autoResolved).toBe(1);
   });
 
+  it('classifies a dead-sandbox "exit -1 (0s, empty)" as SANDBOX_UNAVAILABLE, not an app-build error (ShopSphere autopsy)', () => {
+    const d = fresh();
+    // The exact shape of the 81 dead-sandbox commands: the SDK threw, program never ran → exit -1, 0ms, empty.
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit 2>&1', exitCode: -1, stdout: '', stderr: '', durationMs: 0 });
+    const r = d.report();
+    const issue = r.issues.find((i) => i.code === 'SANDBOX_UNAVAILABLE');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.message).toMatch(/sandbox was unavailable/i);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(false); // NOT blamed on the app
+  });
+
+  it('a REAL command failure (nonzero exit WITH output) still records as SANDBOX_CMD_FAILED', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'error TS2304: Cannot find name X', durationMs: 4200 });
+    const r = d.report();
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(true);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_UNAVAILABLE')).toBe(false); // a genuine failure is not excused
+  });
+
   it('derives a TOOL_ERROR from a failed tool_result event', () => {
     const d = fresh();
     d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: false, summary: 'npm install failed: ERESOLVE', ts: 1 } as AgentEvent);
@@ -108,6 +128,25 @@ describe('BuildDiagnostics', () => {
     expect(r.ok).toBe(true);
     expect(r.issues.every((i) => i.autoResolved)).toBe(true);
     expect(r.counts.unresolved).toBe(0);
+  });
+
+  it('finish(ok=true) back-fills recovered SANDBOX_CMD_FAILED as auto-resolved (PaisaTrack: no phantom unresolved)', () => {
+    const d = fresh();
+    // Two intermediate `tsc → exit 2` failures the agent then fixed; the build ultimately SUCCEEDED.
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.finish(true, 'Build complete.');
+    const r = d.report();
+    expect(r.ok).toBe(true);
+    expect(r.counts.unresolved).toBe(0); // recovered → not a phantom "unresolved" on a passing build
+    expect(r.issues.filter((i) => i.code === 'SANDBOX_CMD_FAILED').every((i) => i.autoResolved)).toBe(true);
+  });
+
+  it('finish(ok=false) keeps SANDBOX_CMD_FAILED unresolved (a genuinely failed build still names it)', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'build failed', durationMs: 3000 });
+    d.finish(false, 'failed');
+    expect(d.report().counts.unresolved).toBeGreaterThanOrEqual(1);
   });
 
   it('finish(ok=false) keeps tool errors/nudges UNRESOLVED', () => {
@@ -301,6 +340,43 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
       { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'npm install failed', autoResolved: false },
     ];
     expect(deriveRootCause({ issues })).toBe('npm install failed');
+  });
+
+  it('names INFRA honestly when the only failure is a dead sandbox — never blames the app (ShopSphere autopsy)', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: '$ npx --no-install tsc --noEmit → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.', autoResolved: false },
+    ];
+    const rc = deriveRootCause({ issues, ok: false });
+    expect(rc).toMatch(/sandbox became unavailable/i);
+    expect(rc).toMatch(/infrastructure condition/i);
+    expect(rc).not.toMatch(/tsc/); // must NOT surface the raw "tsc → exit -1" as if the app failed to compile
+  });
+
+  it('a REAL app error still wins over a co-occurring sandbox-unavailable event', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ npm run build → exit 1 (TS2304)', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: 'sandbox went away', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: false })).toContain('npm run build');
+  });
+
+  it('a fast-lane handoff (SIMPLE_BUILD_OUTCOME) is NOT a terminal outcome — no false "BUILD_FAILED" (CollabDesk autopsy)', () => {
+    // The fast lane timed out and handed off to the full builder; the report was captured MID-full-builder.
+    // The handoff must NOT read as the build's rootCause — a cut/partial snapshot should say "still running",
+    // never "BUILD_FAILED" for a build that was progressing fine.
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_FALLBACK', message: 'Simple build timed out after generating 8 file(s) — the full builder continues from them.', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues })).toBeUndefined(); // ok not yet set → honest "still running", not a failure
+  });
+
+  it('the FULL builder\'s real OUTCOME_ still wins once it settles', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'OUTCOME_BUILD_SUCCESS', message: 'Build outcome: BUILD_SUCCESS', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build outcome: BUILD_SUCCESS');
   });
 
   it('reports an honest "no problems" once the build settled clean', () => {

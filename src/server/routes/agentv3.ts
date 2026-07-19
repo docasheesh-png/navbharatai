@@ -123,7 +123,7 @@ import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/G
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, type NamedRunner } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, type BuildDiagnosticsReport } from '../AgentV3/BuildDiagnostics';
-import { buildBuildManifest, signManifest } from '../AgentV3/BuildManifest';
+import { buildBuildManifest, deliveredModelId, signManifest } from '../AgentV3/BuildManifest';
 import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
@@ -188,7 +188,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -2512,6 +2512,13 @@ export function registerAgentV3Routes(app: Express): void {
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' }); return; }
     if (!workspaceId || !message) { res.status(400).json({ error: 'workspaceId and message are required.' }); return; }
     if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    // SECURITY (T0-9): the per-USER "latest report" slot is keyed off the VERIFIED uid, NEVER the claimed
+    // body.userId. Since assertWorkspaceOwner passes for ANY caller on an agentv3-anon-* workspace, keying
+    // that slot by the claim let an attacker (owning their own anon workspace) set body.userId=<victim> and
+    // OVERWRITE the victim's downloadable "latest build report" with attacker-supplied content. The
+    // workspace-keyed durable copies below stay workspace-scoped (already ownership-checked); only this
+    // user-keyed copy was spoofable. An anon caller has no verified uid → the shared 'anon' slot, as before.
+    const reportUid = (await verifiedIdentity(req))?.uid ?? null;
     try {
       const append = (report: BuildDiagnosticsReport): BuildDiagnosticsReport => {
         const rec = { ts: Date.now(), source, message };
@@ -2524,8 +2531,8 @@ export function registerAgentV3Routes(app: Express): void {
         return { ...report, previewErrors, issues, counts: { ...report.counts, total: issues.length, errors: report.counts.errors + 1, unresolved: report.counts.unresolved + 1 } };
       };
       // Update the in-memory copy (same instance) if present.
-      const mem = lastDiagnostics.get(userId ?? 'anon');
-      if (mem) lastDiagnostics.set(userId ?? 'anon', append(mem));
+      const mem = lastDiagnostics.get(reportUid ?? 'anon');
+      if (mem) lastDiagnostics.set(reportUid ?? 'anon', append(mem));
       // Update the durable copy so the download/copy reflects it even after an instance rotation.
       //
       // EVIDENCE MUST NEVER FORK (jungle-game reports, 2026-07-12): when the durable read returned
@@ -2553,10 +2560,10 @@ export function registerAgentV3Routes(app: Express): void {
         // the build settled still reaches the userId-keyed copy the report UI falls back to — but ONLY
         // when this workspace IS the user's latest build (same/newer startedAt). This prevents a late
         // preview error from an OLDER workspace regressing the per-user copy to a stale build.
-        const perUser = await loadLatestForUser(userId).catch(() => null);
+        const perUser = await loadLatestForUser(reportUid).catch(() => null);
         if (!perUser || (withPreviewError.startedAt ?? 0) >= (perUser.startedAt ?? 0)) {
-          await saveLatestForUser(userId, withPreviewError).catch((e) => {
-            console.error(`[DIAGNOSTICS] preview-error append: saveLatestForUser failed (user=${userId ?? 'anon'}): ${e instanceof Error ? e.message : String(e)}`);
+          await saveLatestForUser(reportUid, withPreviewError).catch((e) => {
+            console.error(`[DIAGNOSTICS] preview-error append: saveLatestForUser failed (user=${reportUid ?? 'anon'}): ${e instanceof Error ? e.message : String(e)}`);
           });
         }
         res.json({ ok: true });
@@ -3708,7 +3715,11 @@ export function registerAgentV3Routes(app: Express): void {
       const { assessPrompt, evaluateAbuse, JAILBREAK_KINDS } = await import('../AgentV3/AbuseDetector');
       const abuse = assessPrompt(prompt);
       if (abuse.isAbusive) {
-        const abuserUid = (req.body?.userId as string) || 'anon';
+        // SECURITY (T0-9): attribute abuse to the VERIFIED identity already resolved above (`userId`),
+        // NEVER the spoofable `req.body.userId`. Keying the ledger off the claim let an authenticated
+        // attacker (a) accrue jailbreak violations under a victim's uid to get the VICTIM hard-blocked
+        // (targeted DoS), and (b) evade their own accumulating block by rotating the claimed uid.
+        const abuserUid = userId || 'anon';
         const nowIso = new Date().toISOString();
         audit('ABUSE_DETECTED', { uid: abuserUid, score: abuse.score, signals: abuse.signals.map((s) => s.kind) }, 'warn');
         const isJailbreak = abuse.signals.some((s) => JAILBREAK_KINDS.has(s.kind));
@@ -6599,7 +6610,19 @@ export function registerAgentV3Routes(app: Express): void {
         }
         // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
-        if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
+        // A fast-lane FALLBACK (`!sb.ok` — timed out / verify-failed) is a HANDOFF to the full builder,
+        // NOT a terminal build outcome. Recording it as `OUTCOME_BUILD_FAILED` made a mid-build snapshot
+        // or a cut/partial report show a FALSE "BUILD_FAILED" rootCause while the full builder was still
+        // successfully finishing the app (CollabDesk/SvelteKit autopsy 2026-07-19: a 48-file build that
+        // progressed fine for 10+ more min after the fast-lane timeout carried a stale "BUILD_FAILED"
+        // rootCause because the report was captured before the full builder emitted its own outcome).
+        // Only a SUCCESSFUL fast lane is terminal (the app is done); a fallback's outcome is informational
+        // (SIMPLE_BUILD_FALLBACK already frames the handoff) and must NOT feed deriveRootCause.
+        if (sb.outcome) {
+          buildDiag.record(sb.ok
+            ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+        }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
         // to complete — not alien clutter to re-plan around or delete. Without this framing the full
@@ -7488,12 +7511,17 @@ export function registerAgentV3Routes(app: Express): void {
         // Advancing window: each capture only considers errors NEWER than the previous fix attempt,
         // so a repaired error logged before the fix is never re-detected and we cannot loop on it.
         let sinceMs = Date.now() - 180_000;
+        // Honesty tracking (rule 5): did we EVER actually capture the browser console? An empty capture
+        // only means "runtime clean" if a real session was read; otherwise it's "runtime UNCHECKED".
+        let captureAvailable = false;
         for (let attempt = 1; attempt <= maxAttempts && !abort.signal.aborted; attempt++) {
           let captured: RuntimeError[] = [];
           try {
-            captured = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
-          } catch { break; /* console capture needs a real sandbox — skip silently */ }
-          if (captured.length === 0) break; // ran clean — nothing to fix
+            const cap = await actuator.getConsoleErrors!(workspaceId, sinceMs);
+            if (cap.captured !== false) captureAvailable = true; // undefined = back-compat "assume captured"
+            captured = filterActionableErrors(cap.errors);
+          } catch { break; /* console capture needs a real sandbox — availability stays unproven */ }
+          if (captured.length === 0) break; // captured, but no actionable errors — nothing to fix
           events.emit({ type: 'narration', agent: 'architect', text: `🔧 Detected ${captured.length} runtime error(s) — auto-fixing (attempt ${attempt}/${maxAttempts})…`, ts: Date.now() });
           const fixStart = Date.now();
           const fixRunner = new AgentRunner({
@@ -7511,11 +7539,26 @@ export function registerAgentV3Routes(app: Express): void {
           }
           sinceMs = fixStart; // next check only sees errors from the post-fix reload
         }
-        // Honest final check: if errors remain after the repair budget is spent, WARN — never claim clean.
+        // Honest final verdict — RECORDED DURABLY to the diagnostics (so it folds into the shipped health
+        // card via buildHealthFromDiagnostics), not just an ephemeral narration line that vanished:
+        //   • errors remain → WARN they may still be present   • couldn't capture → "runtime UNCHECKED"
+        //   • captured & clean → honest "runtime verified"     (all advisory — the loop never blocks a build)
+        let remaining: RuntimeError[] = [];
         try {
-          const remaining = filterActionableErrors((await actuator.getConsoleErrors!(workspaceId, sinceMs)).errors);
-          if (remaining.length) events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
-        } catch { /* best-effort */ }
+          const fin = await actuator.getConsoleErrors!(workspaceId, sinceMs);
+          if (fin.captured !== false) captureAvailable = true;
+          remaining = filterActionableErrors(fin.errors);
+        } catch { /* best-effort — availability stays whatever the loop proved */ }
+        try {
+          if (remaining.length) {
+            events.emit({ type: 'narration', agent: 'architect', text: autoFixWarning(remaining), ts: Date.now() });
+            buildDiag.record(runtimeErrorsRemainRecord(remaining));
+          } else if (!captureAvailable) {
+            buildDiag.record(runtimeUncheckedRecord());
+          } else {
+            buildDiag.record(runtimeVerifiedRecord());
+          }
+        } catch { /* diagnostics recording is best-effort — never breaks a build */ }
       }
 
       // The core build is now SETTLED (generation + verify/repair + heal + autofix). Everything below
@@ -8182,11 +8225,17 @@ export function registerAgentV3Routes(app: Express): void {
         // U-1 — record the signed determinism-audit manifest (routing inputs + sha256 of every written
         // file, HMAC-signed by SECRET_ENCRYPTION_KEY when present). Best-effort; never blocks the report.
         try {
+          // HONEST manifest identity (ShopSphere autopsy 2026-07-19): record the model that ACTUALLY
+          // delivered (the ledger's dominant-provider model), not the nominal Claude fallback id — a
+          // weak GLM build must never read as `claude-sonnet-4-6`. deliveredVia carries the provider.
+          const deliveredViaProvider = dominantProvider(providerTurns);
+          const deliveredModel = deliveredModelId(providerLedger.entries(), deliveredViaProvider);
           const manifest = signManifest(
             buildBuildManifest({
               buildId,
               promptHash,
-              model: String(model),
+              model: deliveredModel || String(model),
+              deliveredVia: deliveredViaProvider,
               effort: powerSpecResolved?.effort,
               powerLevel: powerLevelReqEffective,
               framework,

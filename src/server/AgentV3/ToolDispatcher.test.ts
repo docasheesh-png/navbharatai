@@ -1544,6 +1544,23 @@ describe('ToolDispatcher — evaluate integration (AST build-breakers → readin
     expect(out).not.toContain('broken import');
     expect(out).not.toContain('never imported/defined');
   });
+
+  it('framework-gates the React analyzers — a Nuxt app is NOT falsely blocked (ShopSphere autopsy)', async () => {
+    // ShopSphere (App #12, Nuxt): a Nuxt `useProducts()` AUTO-IMPORTED composable was flagged "hook called
+    // but never imported" and its `useX` composables as "Rules-of-Hooks violations" → the readiness gate
+    // FAILED an otherwise-correct build. These analyzers are React-only; a Nuxt dispatcher must not raise them.
+    // (act, ws, state, stream, then 7 undefined ctor args, then framework='nuxt'.)
+    const a = new FakeActuator();
+    const s = new AgentEventStream();
+    const dd = new ToolDispatcher(a, 'ws-eval-nuxt', new WorkspaceState(s), s, undefined, undefined, undefined, undefined, undefined, undefined, undefined, 'nuxt');
+    await write(dd, 'package.json', JSON.stringify({ dependencies: { nuxt: '^3' } }));
+    // Same shapes that trip the React analyzers: an unimported `useX()` call + a bare component tag.
+    await write(dd, 'pages/index.vue', '<script setup>\nconst products = useProducts();\nif (products) { const x = useState(0); }\n</script>');
+    const out = await evalText(dd);
+    expect(out).not.toContain('Rules-of-Hooks violation');
+    expect(out).not.toContain('never imported/defined');
+    expect(out).not.toContain('undefined JSX component');
+  });
 });
 
 // Slice 4 (2026-07-17) — endgameIo.runTsc uses INCREMENTAL tsc (cache in /tmp, never the workspace)

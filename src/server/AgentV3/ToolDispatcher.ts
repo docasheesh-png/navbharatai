@@ -82,6 +82,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { analyzeHooksRules } from './HooksRulesAnalysis';
+import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
@@ -2037,7 +2038,13 @@ export class ToolDispatcher {
           analyzeJsxComponents(astFiles),
           analyzeUndefinedHooks(astFiles),
         ]);
-        if (hooksRep.violations.length) {
+        // FRAMEWORK-GATE the React-SPECIFIC analyzers (ShopSphere/Nuxt autopsy 2026-07-19): Rules-of-Hooks,
+        // JSX-component and undefined-hook analysis are about REACT — a Vue/Nuxt `useFetch`/`useProducts`
+        // composable is NOT a React hook, and a Nuxt AUTO-IMPORTED composable is NOT "never imported". Run
+        // against a non-React app these produced FALSE high-severity BLOCKERS that failed a correct build.
+        // Import/export consistency stays (it is framework-neutral: a written import must resolve anywhere).
+        const reactLint = isReactFamilyFramework(this.framework);
+        if (reactLint && hooksRep.violations.length) {
           const sample = hooksRep.violations.slice(0, 3).map((v) => `${v.hook}@${v.file}:${v.line}`).join(', ');
           extra.push({ severity: 'high', label: `${hooksRep.violations.length} React Rules-of-Hooks violation(s) (crash at runtime): ${sample}${hooksRep.violations.length > 3 ? ', …' : ''}` });
         }
@@ -2045,11 +2052,11 @@ export class ToolDispatcher {
           const sample = importRep.mismatches.slice(0, 3).map((m) => `${m.imported}←${m.from}@${m.file}:${m.line}`).join(', ');
           extra.push({ severity: 'high', label: `${importRep.mismatches.length} broken import(s) — a name is imported that the module does not export (the build fails): ${sample}${importRep.mismatches.length > 3 ? ', …' : ''}` });
         }
-        if (jsxRep.undefinedComponents.length) {
+        if (reactLint && jsxRep.undefinedComponents.length) {
           const sample = jsxRep.undefinedComponents.slice(0, 3).map((c) => `<${c.component}>@${c.file}:${c.line}`).join(', ');
           extra.push({ severity: 'high', label: `${jsxRep.undefinedComponents.length} undefined JSX component(s) — used but never imported/defined (crash at runtime): ${sample}${jsxRep.undefinedComponents.length > 3 ? ', …' : ''}` });
         }
-        if (undefHookRep.undefinedHooks.length) {
+        if (reactLint && undefHookRep.undefinedHooks.length) {
           const sample = undefHookRep.undefinedHooks.slice(0, 3).map((h) => `${h.hook}()@${h.file}:${h.line}`).join(', ');
           extra.push({ severity: 'high', label: `${undefHookRep.undefinedHooks.length} hook(s) called but never imported/defined (crash at runtime): ${sample}${undefHookRep.undefinedHooks.length > 3 ? ', …' : ''}` });
         }

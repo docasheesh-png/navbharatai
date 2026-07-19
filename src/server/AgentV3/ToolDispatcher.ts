@@ -117,6 +117,7 @@ import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
+import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3243,6 +3244,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('rate-limit integration');
         const rlDeps = rlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${rlStore}-store API rate limiting:\n${rlWritten.join('\n')}\nAdd the dependencies: ${rlDeps}\n\n${rlcfg.instructions}`;
+      }
+
+      case 'generate_error_tracking': {
+        // U-4 recipe — real BYO error/exception tracking (Sentry/Rollbar): a server + client init +
+        // captureError helper. Pure generator in ErrorTrackingGenerator.ts.
+        const etProvider = optStr(input, 'provider');
+        if (!isErrorTrackingProvider(etProvider)) return 'generate_error_tracking: pass provider = "sentry" | "rollbar".';
+        const etcfg = generateErrorTrackingIntegration(etProvider);
+        const etWritten: string[] = [];
+        for (const [path, content] of Object.entries(etcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); etWritten.push(`Kept existing ${path} (add: ${etcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          etWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('error-tracking integration');
+        const etDeps = etcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${etProvider} error tracking:\n${etWritten.join('\n')}\nAdd the dependencies: ${etDeps}\n\n${etcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

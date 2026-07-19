@@ -942,6 +942,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_error_tracking',
+      description:
+        'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
+        'captureError helper for "sentry" or "rollbar", so crashes become alerts with stack traces instead of ' +
+        'going unnoticed. The server DSN/token is a secret; the client DSN/token is a public browser value. ' +
+        'The user pastes them into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['sentry', 'rollbar'], description: 'The error-tracking provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1249,6 +1264,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_jobs',
   'generate_sms',
   'generate_ratelimit',
+  'generate_error_tracking',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

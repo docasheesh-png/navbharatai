@@ -1685,19 +1685,23 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   const buildModel = (envName: string): string =>
     process.env[envName] || process.env.AGENTV3_BUILD_MODEL || opts?.geminiModel || 'gemini-2.5-pro';
   const cheap: NamedRunner[] = [];
+  // Per-call timeout for the Gemini/Vertex runners — the Google GenAI SDK is constructed without an
+  // http timeout, so a stalled call would otherwise block the whole build (every other provider family
+  // already has a timeout). Default 120s (matches the Claude LLM timeout); AGENTV3_GEMINI_TIMEOUT_MS overrides.
+  const geminiTimeoutMs = Math.max(0, parseInt(process.env.AGENTV3_GEMINI_TIMEOUT_MS || '', 10) || 120_000);
   // Vertex (function-calling, via the Cloud Run service account / ADC).
   const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
   if (project) {
     try {
       const vertex = new GoogleGenAI({ vertexai: true, project, location: process.env.GOOGLE_CLOUD_REGION || 'us-central1' });
-      cheap.push({ name: 'VERTEX', runner: new GeminiToolRunner(vertex as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_VERTEX_BUILD_MODEL') }) });
+      cheap.push({ name: 'VERTEX', runner: new GeminiToolRunner(vertex as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_VERTEX_BUILD_MODEL'), timeoutMs: geminiTimeoutMs }) });
     } catch { /* not constructable in this env — skip */ }
   }
   // Gemini direct (GEMINI_API_KEY).
   if (process.env.GEMINI_API_KEY) {
     try {
       const gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL') }) });
+      cheap.push({ name: 'GEMINI', runner: new GeminiToolRunner(gemini as unknown as GeminiGenAiClient, { model: buildModel('AGENTV3_GEMINI_BUILD_MODEL'), timeoutMs: geminiTimeoutMs }) });
     } catch { /* skip */ }
   }
   // Bound Claude's retry ladder on the BUILD hot path. Claude now LEADS every build turn

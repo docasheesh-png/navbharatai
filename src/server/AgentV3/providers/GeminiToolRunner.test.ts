@@ -65,6 +65,19 @@ describe('GeminiToolRunner', () => {
     await expect(new GeminiToolRunner(client).runTurn(params())).rejects.toThrow('gemini 503');
   });
 
+  it('rejects when the call exceeds timeoutMs — a stalled Vertex/Gemini cannot block the build', async () => {
+    const gen = vi.fn().mockReturnValue(new Promise(() => { /* never resolves */ }));
+    const client = { models: { generateContent: gen } } as unknown as GeminiGenAiClient;
+    const runner = new GeminiToolRunner(client, { timeoutMs: 20 });
+    await expect(runner.runTurn(params())).rejects.toThrow(/exceeded 20ms/);
+  });
+
+  it('timeoutMs:0 disables the bound (a fast call still returns normally)', async () => {
+    const { client } = clientReturning({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] });
+    const res = await new GeminiToolRunner(client, { timeoutMs: 0 }).runTurn(params());
+    expect(res.text).toBe('ok');
+  });
+
   it('uses the turn maxTokens else the option default', async () => {
     const { client, gen } = clientReturning({ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] });
     const runner = new GeminiToolRunner(client, { defaultMaxTokens: 4096 });

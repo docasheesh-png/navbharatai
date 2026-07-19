@@ -18282,3 +18282,39 @@ Roadmap: PR-1 persistence+delete ✅ → PR-2 device/WebGPU detection ✅ (this)
 (~0.5B, ~400MB) progressive/resumable download + generation + the beta opt-in screen (all together so the
 user-facing beta is fully working when it appears). Tests: `offlineDeviceTier.test.ts` (7). Gate: frontend
 tsc ✓, full vitest 7409 ✓.
+
+### 2026-07-18 — Perf/cost audit (admin's ChatGPT suggestion, adapted not transcribed) + 2 safe wins shipped
+
+The admin passed a ChatGPT "make NavBharatAI fast + affordable" prompt. Per the external-suggestion rule, it
+was AUDITED against the real code (3 parallel Explore passes), not transcribed. Findings:
+
+**Already implemented (do NOT rebuild):** Anthropic prompt caching (system+tools+transcript, default ON,
+cache-discount billing — `ClaudeClient.ts`); complexity model routing (`RequestAnalyser` + `selectBuildModel`
++ GLM/Kimi cheap-floor + evaluate-gated escalation); aux calls already cheap-routed (classify/vision/plan/
+judge/chat); NDJSON streaming (mature); input trimming (`compactTranscriptForModel` + file-tree summary +
+bulk-data ban); provider timeouts for Claude/GLM/Kimi/Grok; rate cards + USD-INR are env constants/cached.
+
+**Rejected as inapplicable (honest):** Redis (wrong for money on multi-instance Cloud Run; in-process caches
+suffice) — NOT added; "add SSE" (already NDJSON); "DB indexes/connection pooling/SQL batch" (Firestore, not
+SQL — hot-path reads are single-doc getDoc, already optimal); "cache rate cards" (already constants).
+
+**2 SAFE wins SHIPPED (zero quality/billing risk):**
+- **Gemini/Vertex per-call timeout** — the ONLY provider family with no timeout; a stalled Vertex call could
+  block the whole build. `GeminiToolRunner` now bounds each call (portable `withTimeout` race, default 120s =
+  Claude's, `AGENTV3_GEMINI_TIMEOUT_MS` override, 0=disable) → a hung call rejects and falls through to the
+  Claude backstop like every other provider. Wired at both Vertex + Gemini construction sites.
+- **Vision-describe fan-out** — `describeVisionAttachments` ran N attachments sequentially (N× latency); the
+  per-attachment describes are independent, so they now run under `Promise.all` (inner provider fallback stays
+  sequential per attachment; input order preserved → byte-identical output, only wall-clock changes).
+- Tests: Gemini timeout (rejects on overrun / 0 disables), vision concurrency+order. Full suite 7411 pass.
+
+**Proposed, NOT done — need admin sign-off (touch quality/billing, per the prompt's own rule):**
+1. 🔴 Biggest cost lever: the ~46KB static system prompt's cache is BUSTED every request because per-request/
+   per-day blocks (date/prefs/grounding) are PREPENDED to it (`agentv3.ts:5644-5828`). Fix = keep the static
+   body as a stable cache prefix (two approaches: split system into [static-cached, volatile] blocks, or move
+   volatile context into the first user message). Quality-neutral in content but reorders what the model sees
+   → confirm approach + ship flag-gated.
+2. Explicit "concise output / no preamble" builder instruction (output-token save) — quality-sensitive.
+3. Wallet doc read 2-3× sequentially per build (uncached, money path) → read once + thread through the gates
+   (correctness unchanged, fewer reads); + parallelize the independent pre-flight gates before first byte.
+   Money path → confirm.

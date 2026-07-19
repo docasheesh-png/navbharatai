@@ -1161,6 +1161,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_logging',
+      description:
+        'Add real structured logging to the app (server/lib/logger.ts, pino): a configured JSON logger + an ' +
+        'Express requestLogger middleware that logs method/url/status/duration for every request (never ' +
+        'headers or body, so secrets never leak). Replaces console.log with searchable, level-filtered, ' +
+        'shippable logs — real observability in production. Adds the pino dependency; LOG_LEVEL tunes ' +
+        'verbosity. Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1482,6 +1492,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_env_validation',
   'generate_cors',
   'generate_validation',
+  'generate_logging',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

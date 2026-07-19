@@ -1464,6 +1464,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_markdown',
+      description:
+        'Add real Markdown → SAFE HTML rendering to the app (server/lib/markdown.ts, marked + sanitize-html): ' +
+        'renderMarkdown(md) renders Markdown AND sanitizes the output in ONE call, so untrusted Markdown (a ' +
+        'comment, a wiki edit) can never inject <script> or an onerror handler — safe by construction, no ' +
+        'separate sanitize step to forget. Keeps a rich subset (headings, lists, TABLES, code blocks, images, ' +
+        'links forced to safe protocols + rel="noopener"). Use for blogs, docs, comments, product descriptions. ' +
+        'Adds the marked + sanitize-html dependencies; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_logging',
       description:
         'Add real structured logging to the app (server/lib/logger.ts, pino): a configured JSON logger + an ' +
@@ -1897,6 +1908,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_slug',
   'generate_validation',
   'generate_sanitize_html',
+  'generate_markdown',
   'generate_logging',
   'generate_file_upload',
   'generate_graceful_shutdown',

@@ -143,6 +143,7 @@ import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenera
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
+import { generateQrIntegration } from '../lib/QrGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
@@ -3812,6 +3813,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('request validation');
         return `Wired request validation:\n${vaWritten.join('\n')}\nAdd the dependency: ${vacfg.dependency.name}@${vacfg.dependency.version}\n\n${vacfg.instructions}`;
+      }
+
+      case 'generate_qr': {
+        // U-4 recipe — real QR generation (qrcode): a server generateQr(text) → PNG data-URL + generateQrSvg
+        // (server/lib/qr.ts). Pure generator in QrGenerator.ts. No env keys.
+        const qrcfg = generateQrIntegration();
+        const qrWritten: string[] = [];
+        for (const [path, content] of Object.entries(qrcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          qrWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('qr generation');
+        return `Wired QR code generation:\n${qrWritten.join('\n')}\nAdd the dependency: ${qrcfg.dependency.name}@${qrcfg.dependency.version}\n\n${qrcfg.instructions}`;
       }
 
       case 'generate_logging': {

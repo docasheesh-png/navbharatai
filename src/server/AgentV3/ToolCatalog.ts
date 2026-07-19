@@ -1434,6 +1434,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_webhook',
+      description:
+        'Add real incoming-webhook signature verification to the app (server/lib/webhook.ts): a dependency-free ' +
+        'verifyWebhookSignature(rawBody, header, secret) that HMAC-SHA256s the RAW body and compares in ' +
+        'CONSTANT TIME (crypto.timingSafeEqual), tolerating the "sha256=<hex>" header form — so a forged ' +
+        '"payment succeeded" callback is rejected. Essential for payment webhooks (Cashfree/Razorpay/Stripe), ' +
+        'GitHub/Shopify/WhatsApp callbacks. Call it on every webhook route before trusting the payload; the ' +
+        'app supplies the provider secret via .env. No dependency (node:crypto); no env keys invented.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pdf',
       description:
         'Add real PDF generation to the app (server/lib/pdf.ts, pdfkit): a server createInvoicePdf(...) ready ' +
@@ -1791,6 +1802,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_logging',
   'generate_graceful_shutdown',
   'generate_security_headers',
+  'generate_webhook',
   'generate_qr',
   'generate_pdf',
   'generate_image',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson } from './DependencyAutoFix';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ name: 'app', version: '0.1.0', dependencies: deps, ...extra }, null, 2);
@@ -123,5 +123,37 @@ describe('quiz-app regression — react-router-dom imported but missing from pac
     const r = applyWellKnownMissingDeps(files);
     expect(r.added.map((a) => a.package)).toContain('react-router-dom');
     expect(JSON.parse(r.files['package.json']).dependencies['react-router-dom']).toBeTruthy();
+  });
+});
+
+describe('pinKnownDepsInPackageJson (LearnLoop autopsy — force Prisma → ^6 in the written package.json)', () => {
+  it('rewrites a breaking-major Prisma pin (^7 / latest) down to the known-good major', () => {
+    const src = JSON.stringify({ name: 'app', dependencies: { prisma: '^7', '@prisma/client': 'latest', react: '^18' } }, null, 2);
+    const { content, changed } = pinKnownDepsInPackageJson(src);
+    const pkg = JSON.parse(content);
+    expect(pkg.dependencies.prisma).toBe('^6');
+    expect(pkg.dependencies['@prisma/client']).toBe('^6');
+    expect(pkg.dependencies.react).toBe('^18'); // untouched — not a force-pinned dep
+    expect(changed.length).toBe(2);
+  });
+
+  it('leaves an already-good major (^6.19.3) alone (no churn)', () => {
+    const src = JSON.stringify({ dependencies: { prisma: '6.19.3', '@prisma/client': '^6' } }, null, 2);
+    const { content, changed } = pinKnownDepsInPackageJson(src);
+    expect(changed).toEqual([]);
+    expect(content).toBe(src); // byte-identical when nothing changed
+  });
+
+  it('pins a Prisma dep declared under devDependencies too', () => {
+    const src = JSON.stringify({ devDependencies: { prisma: '^7.8.0' } }, null, 2);
+    const { content, changed } = pinKnownDepsInPackageJson(src);
+    expect(JSON.parse(content).devDependencies.prisma).toBe('^6');
+    expect(changed.length).toBe(1);
+  });
+
+  it('returns the input unchanged for non-JSON / a package.json without the force-pinned deps', () => {
+    expect(pinKnownDepsInPackageJson('not json {').changed).toEqual([]);
+    const clean = JSON.stringify({ dependencies: { react: '^18' } }, null, 2);
+    expect(pinKnownDepsInPackageJson(clean)).toEqual({ content: clean, changed: [] });
   });
 });

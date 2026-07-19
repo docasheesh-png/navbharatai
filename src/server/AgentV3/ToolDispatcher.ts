@@ -71,7 +71,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson } from './DependencyAutoFix';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1015,6 +1015,33 @@ export class ToolDispatcher {
       `ONE directory convention for the whole app.`;
   }
 
+  /**
+   * Force known-breaking dep versions (Prisma → ^6) to their known-good major when the agent WRITES a
+   * package.json — the sibling choke point to pinKnownDepsInInstallCommand (#1526), which only catches
+   * explicit install commands. Path-gated (fast no-op for every non-package.json write), best-effort,
+   * and emits an honest narration when it corrects a version. LearnLoop autopsy 2026-07-18. Kill switch
+   * AGENTV3_PKG_PIN_GUARD=off.
+   */
+  private pinPackageJsonContent(path: string, content: string): string {
+    if (process.env.AGENTV3_PKG_PIN_GUARD === 'off') return content;
+    if (!/(^|\/)package\.json$/.test(path)) return content;
+    try {
+      const pinned = pinKnownDepsInPackageJson(content);
+      if (pinned.changed.length === 0) return content;
+      try {
+        getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-PIN] pinned breaking deps in ${path}: ${pinned.changed.join('; ')}`);
+      } catch { /* audit best-effort */ }
+      this.events?.emit({
+        type: 'narration', agent: 'architect',
+        text: `🔧 Pinned known-breaking dependencies in package.json to their stable version (${pinned.changed.join('; ')}) so the install can't pull a version that bricks the build.`,
+        ts: Date.now(),
+      });
+      return pinned.content;
+    } catch {
+      return content; // never let a pin failure block a write
+    }
+  }
+
   private async run(call: ToolUse, agent: AgentRole): Promise<string> {
     // Pre-flight: the very first tool touch of a run guarantees the framework scaffold exists in
     // the sandbox (non-destructive; ~one readFile probe when already scaffolded). Kills the whole
@@ -1043,7 +1070,12 @@ export class ToolDispatcher {
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        const content = guardConfigContent(path, reqStr(input, 'content'));
+        let content = guardConfigContent(path, reqStr(input, 'content'));
+        // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
+        // to their known-good major IN the written package.json, so a later plain `npm install` (which
+        // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
+        // version. This is the sibling choke point to the install-command pin (#1526).
+        content = this.pinPackageJsonContent(path, content);
         let kind: 'create' | 'modify' = 'create';
         let existingContent = '';
         try {
@@ -1194,10 +1226,13 @@ export class ToolDispatcher {
           // Forensic edit-discipline (parity with write_file): a batched wholesale rewrite that is
           // materially smaller than the file it replaced likely DROPPED code — flag it honestly below.
           const shrink = kind === 'modify' && assessFullRewrite(priorContent, file.content).level === 'shrink';
-          await this.actuator.writeFile(this.workspaceId, file.path, file.content);
+          // PACKAGE.JSON DEP PIN (parity with write_file, LearnLoop autopsy 2026-07-18): force known-
+          // breaking deps to their known-good major so a later plain `npm install` can't pull a breaker.
+          const writtenContent = this.pinPackageJsonContent(file.path, file.content);
+          await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
-          this.onFileWrite?.(file.path, file.content);
+          this.onFileWrite?.(file.path, writtenContent);
           this.state?.recordFileChange({ path: file.path, kind }, agent);
           // E7 — stream each batched write to the Diff tab too (reusing the probe content we already
           // read for the create-vs-modify verdict, so no extra round-trip). Bounded per file.

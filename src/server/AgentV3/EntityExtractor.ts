@@ -147,6 +147,7 @@ const CATALOG: Array<{ slot: EntitySlot; name: string; re: RegExp }> = [
   { slot: 'framework', name: 'Nuxt', re: aliasRe(['nuxt']) },
   { slot: 'framework', name: 'SvelteKit', re: aliasRe(['sveltekit', 'svelte kit']) },
   { slot: 'framework', name: 'SolidJS', re: aliasRe(['solidjs', 'solid.js', 'solid js']) },
+  { slot: 'framework', name: 'Preact', re: aliasRe(['preact']) },
   { slot: 'framework', name: 'NestJS', re: aliasRe(['nestjs', 'nest.js']) },
   { slot: 'framework', name: 'FastAPI', re: aliasRe(['fastapi']) },
   { slot: 'framework', name: 'Django', re: aliasRe(['django']) },

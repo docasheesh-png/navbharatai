@@ -1134,6 +1134,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_metrics',
+      description:
+        'Add real Prometheus metrics (prom-client): a registry with default process metrics + an HTTP request ' +
+        'counter and duration histogram + a middleware that records count/latency per request, and a GET ' +
+        '/metrics scrape endpoint (Prometheus text format). Complements generate_observability (structured ' +
+        'logging). Point Prometheus/Grafana at /metrics. Adds the prom-client dependency.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1685,6 +1694,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_image_optimization',
   'generate_sso',
   'generate_abac',
+  'generate_metrics',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

@@ -119,6 +119,7 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
+import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3291,6 +3292,28 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('feature-flags integration');
         return `Wired ${ffProvider} feature flags:\n${ffWritten.join('\n')}\nAdd the dependency: ${ffcfg.dependency.name}@${ffcfg.dependency.version}\n\n${ffcfg.instructions}`;
+      }
+
+      case 'generate_ai': {
+        // U-4 recipe — real BYO AI text generation on the USER's own key (OpenAI/Anthropic): a server
+        // generateText + chat helper. Never uses NavBharatAI's own AI account. Pure generator in AiGenerator.ts.
+        const aiProvider = optStr(input, 'provider');
+        if (!isAiProvider(aiProvider)) return 'generate_ai: pass provider = "openai" | "anthropic".';
+        const aicfg = generateAiIntegration(aiProvider);
+        const aiWritten: string[] = [];
+        for (const [path, content] of Object.entries(aicfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); aiWritten.push(`Kept existing ${path} (add: ${aicfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          aiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ai integration');
+        return `Wired ${aiProvider} AI text generation (on the user's own key):\n${aiWritten.join('\n')}\nAdd the dependency: ${aicfg.dependency.name}@${aicfg.dependency.version}\n\n${aicfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

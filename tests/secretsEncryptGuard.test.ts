@@ -35,7 +35,7 @@ describe('encrypt() refuses the hardcoded fallback in production (Phase 2.2)', (
     process.env.NODE_ENV = 'production';
     const { encrypt, decrypt } = await freshSecrets();
     const ct = encrypt('secret-value');
-    expect(ct).toMatch(/^v\d+:[0-9a-f]+:[0-9a-f]+$/);
+    expect(ct).toMatch(/^g\d+:[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/); // authenticated GCM
     expect(decrypt(ct)).toBe('secret-value');
   });
 

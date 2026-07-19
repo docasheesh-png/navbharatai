@@ -6,6 +6,7 @@ import { welcomeGrantTokens, buildInitialWallet } from '../lib/welcomeBonus';
 import { requireUserMatch } from '../lib/authMiddleware';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { resolveCanonicalWalletId, walletMergeResolveEnabled } from '../lib/walletResolve';
+import { sendSafeError } from '../lib/httpError';
 
 /** Resolve a login uid to its canonical wallet id (follows `mergedInto`). No-op unless
  *  WALLET_MERGE_RESOLVE=on, so a merged/retired account transparently reads its unified wallet. */
@@ -98,7 +99,7 @@ export function registerWalletRoutes(app: Express): void {
       }
     } catch (err: any) {
       console.error('[API WALLET GET ERROR]:', err);
-      return res.status(500).json({ error: err.message || 'Unknown internal wallet error' });
+      return sendSafeError(res, 500, 'Unable to load your wallet right now. Please try again.', err, 'wallet get');
     }
   });
 
@@ -120,7 +121,7 @@ export function registerWalletRoutes(app: Express): void {
         logs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json(logs);
       } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
+        return sendSafeError(res, 500, 'Unable to load your usage logs right now. Please try again.', fallbackErr, 'wallet logs');
       }
     }
   });
@@ -143,7 +144,7 @@ export function registerWalletRoutes(app: Express): void {
         txs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return res.json(txs);
       } catch (fallbackErr: any) {
-        return res.status(500).json({ error: fallbackErr.message });
+        return sendSafeError(res, 500, 'Unable to load your transactions right now. Please try again.', fallbackErr, 'wallet transactions');
       }
     }
   });

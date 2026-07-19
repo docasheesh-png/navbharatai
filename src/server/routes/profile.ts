@@ -13,6 +13,7 @@ import type { Express, Request, Response } from 'express';
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
 import { verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
+import { sendSafeError } from '../lib/httpError';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { userBuildHistoryStore, type BuildHistoryQuery } from '../lib/UserBuildHistoryStore';
 import { userCostStore } from '../lib/UserCostStore';
@@ -159,7 +160,7 @@ export function registerProfileRoutes(app: Express): void {
       const report = await deleteUserData(db, identity.uid);
       return res.json({ ok: true, message: 'Your account data has been permanently erased.', ...report });
     } catch (err: any) {
-      return res.status(500).json({ error: err?.message || 'Deletion failed' });
+      return sendSafeError(res, 500, 'Deletion failed. Please try again.', err, 'account deletion');
     }
   });
 }

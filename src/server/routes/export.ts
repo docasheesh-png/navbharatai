@@ -10,6 +10,7 @@ import type { Express, Request, Response } from 'express';
 import * as XLSX from 'xlsx';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
+import { sendSafeError } from '../lib/httpError';
 import { userCostStore } from '../lib/UserCostStore';
 
 export type ExportFormat = 'csv' | 'json' | 'xlsx';
@@ -76,7 +77,7 @@ export function registerExportRoutes(app: Express): void {
       const records = await userBuildHistoryStore.list(userId, {});
       sendExport(res, parseFormat(req.query.format), records as unknown as Record<string, unknown>[], 'build-history');
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Export failed' });
+      sendSafeError(res, 500, 'Export failed. Please try again.', err, 'export build-history');
     }
   });
 
@@ -90,7 +91,7 @@ export function registerExportRoutes(app: Express): void {
       const rows = doc ? [doc as unknown as Record<string, unknown>] : [];
       sendExport(res, parseFormat(req.query.format), rows, 'usage');
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Export failed' });
+      sendSafeError(res, 500, 'Export failed. Please try again.', err, 'export usage');
     }
   });
 }

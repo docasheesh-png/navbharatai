@@ -4,6 +4,7 @@ import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChat, type ProfessionalTurn } from '../professionals/engine';
 import { buildDocumentContext, isVisionAttachment, type RawAttachment } from '../lib/attachmentText';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { sendSafeError } from '../lib/httpError';
 import {
   professionalPaidEnabled, professionalFreeDailyLimit, professionalPassPriceInr,
   professionalPassDays, isProfessionalFreeUser,
@@ -124,7 +125,7 @@ export function registerProfessionalsRoutes(app: Express): void {
       }
       res.json({ reply, professionalId: config.id });
     } catch (err: any) {
-      res.status(503).json({ error: err?.message || 'The assistant is busy. Please try again.' });
+      sendSafeError(res, 503, 'The assistant is busy. Please try again.', err, 'professional chat');
     }
   });
 }

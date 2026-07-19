@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
+import { sendSafeError } from '../lib/httpError';
 
 // Production redirect URI is hardcoded per the original code's explicit directive.
 const GITHUB_REDIRECT_URI = 'https://navbharatai.com/api/github/callback';
@@ -259,7 +260,7 @@ export function registerGithubAuthRoutes(app: Express): void {
       });
       res.json(response.data);
     } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.message });
+      sendSafeError(res, err.response?.status || 500, 'Could not load your GitHub profile.', err, 'github user');
     }
   });
 
@@ -273,7 +274,7 @@ export function registerGithubAuthRoutes(app: Express): void {
       });
       res.json(response.data);
     } catch (err: any) {
-      res.status(err.response?.status || 500).json({ error: err.message });
+      sendSafeError(res, err.response?.status || 500, 'Could not load your GitHub repositories.', err, 'github repos');
     }
   });
 }

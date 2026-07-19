@@ -19130,3 +19130,65 @@ settings recipe existed, and `AuthCodeGenerator` had no role logic — so "Roles
 
 Fresh branch off `e0420bb` (post-#1598 main), its own PR (option-1 small-verified-merges). Next Tier-1
 slices: `generate_admin` / `generate_dashboard` (build on this RBAC), then T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 2) `generate_admin` — React admin page recipe
+
+After #1603 (generate_rbac) merged, continued the product-scaffold conveyor. Cross-matched live: no admin
+recipe existed, but a frontend-emitting recipe precedent does (`RealtimeGenerator` emits client React code),
+and `generate_crud` exposes `/api/<resource>` endpoints — so an admin UI can bind straight to them.
+
+**Shipped (pure, dependency-free, real React code):**
+- `src/server/lib/AdminGenerator.ts` — `generateAdmin(entity)` emits one page `src/admin/<Model>Admin.tsx`:
+  a paginated table (columns = id + writable fields + createdAt) that reads `GET /api/<route>?page&limit`,
+  a per-row Delete calling `DELETE /api/<route>/:id` then refetching, and honest loading / error / empty
+  states. Plain React + fetch — no new deps.
+- Wired as the `generate_admin` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). It
+  pairs with `generate_crud` (the endpoints) and `generate_rbac` (guard the route with `requireRole('admin')`).
+- Closes the "Admin" Feature-Completeness gap. Gate green: server `tsc` + `vitest` AdminGenerator 4/4 +
+  ToolCatalog 5/5 + ToolDispatcher 145/145. No AppKnowledgeBase entry — consistent with sibling recipes.
+
+Fresh branch off `c252958` (post-#1603 main), own PR (option-1). Next: `generate_dashboard` (stats summary),
+then T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 3) `generate_dashboard` + CI-background working mode (admin-clarified)
+
+Admin clarified the working mode: **CI ALWAYS runs in the background — do NOT wait for green; complete the
+next step immediately** (the CLAUDE.md "CI runs in the background, always advance" rule). So from here the
+conveyor keeps building while each push's CI bakes in the background; a background timer merges each PR the
+moment it's green. Given the single-branch session constraint, later slices extend the open PR (#1604) rather
+than blocking on its CI.
+
+**Shipped `generate_dashboard` (pure, dependency-free, real code):**
+- `src/server/lib/DashboardGenerator.ts` — `generateDashboard(models)` emits:
+  - `server/routes/dashboard.routes.ts` — `GET /api/dashboard/stats`, aggregating per-resource `total` +
+    `recent` (created in the last 7 days), soft-deleted rows excluded, on Prisma; reuses generate_crud's
+    shared Prisma client + asyncHandler/error handler. De-dupes models.
+  - `src/pages/Dashboard.tsx` — a React page of stat tiles (total + "+N this week"), with loading/error states.
+- Wired as the `generate_dashboard` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case).
+- Closes the "Dashboard" Feature-Completeness gap. Gate green: server `tsc` + `vitest` DashboardGenerator 4/4
+  + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+**Product-scaffold cluster (T1.3) now complete: roles (rbac) + admin + dashboard**, all pairing with
+generate_crud/generate_migration. Extends PR #1604 (CI in background). Next: T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 4) `generate_backup` — data-export endpoint
+
+Continued the conveyor (CI-in-background mode). Closes the "Backup"/in-app "Export" Feature-Completeness ❌.
+
+**Shipped (pure, dependency-free):**
+- `src/server/lib/BackupGenerator.ts` — `generateBackup(models)` emits `server/routes/backup.routes.ts`:
+  `GET /api/admin/backup` streams a downloadable JSON snapshot (`{ exportedAt, data }`, `Content-Disposition:
+  attachment`) of every row of each model on Prisma; reuses generate_crud's shared client + error handler;
+  de-dupes models. Guard behind `requireRole('admin')` — it exposes ALL data.
+- Wired as the `generate_backup` tool. Gate green: server `tsc` + `vitest` BackupGenerator 3/3 + ToolCatalog
+  5/5 + ToolDispatcher 145/145.
+
+Extends PR #1604 (admin + dashboard + backup, CI in background). The `generate_crud` → migration → rbac →
+admin → dashboard → backup set now forms a coherent "data + admin" backend toolkit the builder can assemble.
+Next: T1.4 smart clarification.

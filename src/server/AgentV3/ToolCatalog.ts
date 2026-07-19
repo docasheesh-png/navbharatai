@@ -990,6 +990,70 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_admin',
+      description:
+        'Generate a COMPLETE React admin page for one resource, bound to the generate_crud REST endpoints ' +
+        '(/api/<resource>): a paginated table of rows, per-row delete, and honest loading/error/empty states. ' +
+        'Pass the resource name + fields (the table columns). Dependency-free (plain React + fetch). Guard the ' +
+        "route with generate_rbac's requireRole('admin') for a real admin area. Use after generate_crud.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Resource/model name (e.g. "Post").' },
+          fields: {
+            type: 'array',
+            description: 'The resource fields shown as table columns.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Field name.' },
+                type: { type: 'string', description: 'Optional type hint.' },
+              },
+              required: ['name'],
+            },
+          },
+        },
+        required: ['name', 'fields'],
+      },
+    },
+    {
+      name: 'generate_dashboard',
+      description:
+        'Generate a stats dashboard: a server endpoint (GET /api/dashboard/stats) that aggregates per-resource ' +
+        'counts (total + created-in-the-last-7-days, soft-deleted excluded) on Prisma, and a React page ' +
+        '(src/pages/Dashboard.tsx) of stat tiles. Pass the resource/model names to summarize. Reuses ' +
+        "generate_crud's Prisma client + error handler. Guard the route with generate_rbac's requireRole('admin').",
+      input_schema: {
+        type: 'object',
+        properties: {
+          models: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Resource/model names to summarize (e.g. ["Post","User"]).',
+          },
+        },
+        required: ['models'],
+      },
+    },
+    {
+      name: 'generate_backup',
+      description:
+        'Generate a data-export ("backup") endpoint: GET /api/admin/backup downloads a JSON snapshot of every ' +
+        'row of the given resources, on Prisma. Pass the resource/model names to export. Reuses generate_crud\'s ' +
+        "Prisma client + error handler. Guard it with generate_rbac's requireRole('admin') — it exposes ALL data.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          models: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Resource/model names to export (e.g. ["Post","User"]).',
+          },
+        },
+        required: ['models'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1532,6 +1596,9 @@ export const CATALOG_TOOL_NAMES = [
   'generate_migration',
   'generate_crud',
   'generate_rbac',
+  'generate_admin',
+  'generate_dashboard',
+  'generate_backup',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

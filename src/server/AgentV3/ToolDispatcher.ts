@@ -120,6 +120,9 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
+import { generateAdmin } from '../lib/AdminGenerator';
+import { generateDashboard } from '../lib/DashboardGenerator';
+import { generateBackup } from '../lib/BackupGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2870,6 +2873,75 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('rbac');
         return `Wired RBAC:\n${rbacWritten.join('\n')}\n\n${rbac.instructions}`;
+      }
+
+      case 'generate_admin': {
+        // T1.3 recipe — a React admin page (paginated table + delete) bound to generate_crud's endpoints.
+        // Pure generator in AdminGenerator.ts; guard the route with generate_rbac's requireRole('admin').
+        const adminRec = (input as Record<string, unknown>) || {};
+        const adminName = typeof adminRec.name === 'string' ? adminRec.name : '';
+        if (!adminName) return 'generate_admin: pass the resource "name" (e.g. "Post") and its "fields".';
+        const adminRawFields = Array.isArray(adminRec.fields) ? adminRec.fields : [];
+        const adminFields = adminRawFields
+          .map((f: unknown) => {
+            if (typeof f !== 'object' || f === null) return null;
+            const fo = f as Record<string, unknown>;
+            const fname = typeof fo.name === 'string' ? fo.name : '';
+            return fname ? { name: fname, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+          })
+          .filter((f): f is { name: string; type: string | undefined } => f !== null);
+        const admin = generateAdmin({ name: adminName, fields: adminFields });
+        const adminWritten: string[] = [];
+        for (const [path, content] of Object.entries(admin.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          adminWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`admin (${adminName})`);
+        return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
+      }
+
+      case 'generate_dashboard': {
+        // T1.3 recipe — a stats dashboard (GET /api/dashboard/stats aggregation + React tiles page).
+        // Pure generator in DashboardGenerator.ts; reuses generate_crud's prisma client + error handler.
+        const dashRec = (input as Record<string, unknown>) || {};
+        const dashModels = Array.isArray(dashRec.models) ? dashRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (dashModels.length === 0) return 'generate_dashboard: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const dash = generateDashboard(dashModels);
+        const dashWritten: string[] = [];
+        for (const [path, content] of Object.entries(dash.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dashWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('dashboard');
+        return `Wired a dashboard:\n${dashWritten.join('\n')}\n\n${dash.instructions}`;
+      }
+
+      case 'generate_backup': {
+        // T1.3 recipe — a JSON data-export ("backup") endpoint. Pure generator in BackupGenerator.ts;
+        // reuses generate_crud's prisma client + error handler. Guard with generate_rbac's requireRole('admin').
+        const bkRec = (input as Record<string, unknown>) || {};
+        const bkModels = Array.isArray(bkRec.models) ? bkRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (bkModels.length === 0) return 'generate_backup: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const bk = generateBackup(bkModels);
+        const bkWritten: string[] = [];
+        for (const [path, content] of Object.entries(bk.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          bkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('backup');
+        return `Wired a backup endpoint:\n${bkWritten.join('\n')}\n\n${bk.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

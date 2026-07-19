@@ -141,6 +141,7 @@ import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
+import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
@@ -3780,6 +3781,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('weather integration');
         return `Wired ${weProvider} weather:\n${weWritten.join('\n')}\n(No npm dependency needed — the weather REST API is called with the built-in fetch.)\n\n${wecfg.instructions}`;
+      }
+
+      case 'generate_datetime': {
+        // U-4 recipe — IST-pinned date/time formatting (server/lib/datetime.ts). Dependency-free (Intl,
+        // timeZone Asia/Kolkata) + relativeTime. Pure generator in DateTimeGenerator.ts. No env keys.
+        const dtcfg = generateDateTimeIntegration();
+        const dtWritten: string[] = [];
+        for (const [path, content] of Object.entries(dtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('datetime formatting');
+        return `Wired IST date/time formatting:\n${dtWritten.join('\n')}\n(No npm dependency needed — native Intl, Asia/Kolkata.)\n\n${dtcfg.instructions}`;
       }
 
       case 'generate_notify': {

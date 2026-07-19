@@ -18380,3 +18380,15 @@ splitter is a NO-OP if the assembled system doesn't end with the static body (ne
 Also this session (perf/cost): #1535 Gemini/Vertex per-call timeout + concurrent vision-describe (merged);
 the vision concurrency TEST was flaky on CI (asserted wall-clock overlap — non-deterministic) → replaced with
 a deterministic order+presence assertion (merged in #1536).
+
+## 2026-07-18 — Offline AI chat fix: a greeting is text-only (no wall of feature cards)
+
+Admin bug report: sending "hi" to the Offline AI chat replied with the greeting PLUS a wall of feature
+cards (Pro v5.0, Professionals, Download app, Support…). Root cause: the greeting/identity quick-answers
+attach `overviewFeatures().slice(0,4)` as `features` (useful in the OLD search UI's overview), and
+`buildChatReply` passed those through for EVERY deterministic `answer`, so the chat rendered them as full
+cards. Fix (root cause, chat layer): a deterministic answer (greeting / math / date / identity / recalled
+memory) is now TEXT ONLY — `features: []`, `deviceMatches: []`. Cards stay on the 'matches' path (where is
+X / how do I Y / phone help), which is unchanged. Regression test locks "hi"/"2+2"/etc. to zero cards while
+"how do i deploy" still returns feature cards and "wifi not working" a phone card. Gate: frontend tsc ✓,
+full vitest 7447 ✓.

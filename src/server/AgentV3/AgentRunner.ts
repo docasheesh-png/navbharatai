@@ -260,6 +260,11 @@ export class AgentRunner {
     const expectsArtifacts = this.opts.expectsArtifacts === true;
     const readinessGate = this.opts.readinessGate === true;
     const lintGate = this.opts.lintGate === true;
+    // P-PIPE — build-end dependency-health advisory (OSV/CVE + strong-copyleft). Default-OFF admin flag
+    // (AGENTV3_DEPHEALTH_GATE=on); read here directly (self-contained) rather than threaded via opts since it
+    // is advisory-only and never influences build control flow. When on, it appends an advisory block to a
+    // successful build's summary — it NEVER blocks or fails a build.
+    const depHealthGate = process.env.AGENTV3_DEPHEALTH_GATE === 'on';
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -609,6 +614,16 @@ export class AgentRunner {
             } catch { /* lint gate is best-effort — a scan error never fails a real build */ }
           }
 
+          // P-PIPE — build-end dependency-health advisory (CVE + strong-copyleft). Advisory-only: appends to
+          // the summary of a successful artifact build, NEVER blocks it (a transitive CVE / GPL dep must not
+          // break an otherwise-working app). Best-effort — a scan error is swallowed.
+          if (ok && depHealthGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const advisory = await dispatcher.assessDependencyHealthGate();
+              if (advisory) summary = `${summary}\n\n${advisory}`;
+            } catch { /* advisory gate is best-effort — never fails a build */ }
+          }
+
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed() };
@@ -809,6 +824,13 @@ export class AgentRunner {
               summary = `Step limit reached (${stepCap}) — and the lint gate found ${lint.errorCount} ESLint error${lint.errorCount === 1 ? '' : 's'}.${detail}`;
             }
           } catch { /* lint gate is best-effort — a scan error never flips the verdict */ }
+        }
+        // P-PIPE — build-end dependency-health advisory also applies at the step-cap exit (advisory-only).
+        if (ok && depHealthGate && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const advisory = await dispatcher.assessDependencyHealthGate();
+            if (advisory) summary = `${summary}\n\n${advisory}`;
+          } catch { /* advisory gate is best-effort — never fails a build */ }
         }
         // Slice 3 — AUTO-RESUME: a NOT-ready artifact build at the cap continues (bounded) instead of
         // dying; the model is steered at the remaining blockers so the extension is spent finishing,

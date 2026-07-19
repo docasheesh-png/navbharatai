@@ -265,6 +265,10 @@ export class AgentRunner {
     // is advisory-only and never influences build control flow. When on, it appends an advisory block to a
     // successful build's summary — it NEVER blocks or fails a build.
     const depHealthGate = process.env.AGENTV3_DEPHEALTH_GATE === 'on';
+    // Cap-4 injection — deterministically add a /health route to an Express entry that lacks one, at
+    // build-end. Default-OFF admin flag (AGENTV3_OBSERVABILITY_INJECT=on); read here directly (self-contained,
+    // advisory-adjacent). Purely additive + persisted via the durable write path; it NEVER blocks a build.
+    const observabilityInject = process.env.AGENTV3_OBSERVABILITY_INJECT === 'on';
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -624,6 +628,15 @@ export class AgentRunner {
             } catch { /* advisory gate is best-effort — never fails a build */ }
           }
 
+          // Cap-4 injection — add a /health route to an Express entry that lacks one (durable write).
+          // Purely additive; never blocks. Best-effort — a failure is swallowed.
+          if (ok && observabilityInject && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const note = await dispatcher.injectObservability();
+              if (note) summary = `${summary}\n\n${note}`;
+            } catch { /* injection is best-effort — never fails a build */ }
+          }
+
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
           return { ok, summary, steps, usage, billedUsd: billed() };
@@ -831,6 +844,13 @@ export class AgentRunner {
             const advisory = await dispatcher.assessDependencyHealthGate();
             if (advisory) summary = `${summary}\n\n${advisory}`;
           } catch { /* advisory gate is best-effort — never fails a build */ }
+        }
+        // Cap-4 injection — /health route injection also applies at the step-cap exit (additive, never blocks).
+        if (ok && observabilityInject && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const note = await dispatcher.injectObservability();
+            if (note) summary = `${summary}\n\n${note}`;
+          } catch { /* injection is best-effort — never fails a build */ }
         }
         // Slice 3 — AUTO-RESUME: a NOT-ready artifact build at the cap continues (bounded) instead of
         // dying; the model is steered at the remaining blockers so the extension is spent finishing,

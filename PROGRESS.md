@@ -19192,3 +19192,33 @@ Continued the conveyor (CI-in-background mode). Closes the "Backup"/in-app "Expo
 Extends PR #1604 (admin + dashboard + backup, CI in background). The `generate_crud` → migration → rbac →
 admin → dashboard → backup set now forms a coherent "data + admin" backend toolkit the builder can assemble.
 Next: T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.4 (safe slice) `analyze_requirements` — requirement-gap analyzer
+
+Cross-matched the requirement-understanding area first (safeguard #2): `DialogueStateManager` only carries
+PROMPT guidance ("confirm scope, don't over-ask") with NO real clarification loop, and no active collision
+was visible on those files. The FULL interactive "pause and ask the user" loop changes the core build flow +
+UX, so it's a deliberate follow-up (not rushed). Shipped the safe, real, wired detection half instead.
+
+**Shipped (pure analyzer, no build-flow change):**
+- `src/server/lib/RequirementGapAnalyzer.ts` — `analyzeRequirementGaps(prompt)` deterministically infers the
+  likely DOMAIN (healthcare / ecommerce / social / saas / booking), the features that domain usually needs
+  but the prompt left implicit (RBAC, audit log, EMR, payments, multi-tenant, offline, …) split into
+  MENTIONED vs LIKELY-MISSING, the non-functional signals (scale / offline / security / i18n), and a capped
+  list (≤6, "never over-ask") of clarifying questions. `renderRequirementGaps` formats it for the planner.
+  Directly embodies the admin's own example ("build a hospital system" → a strong AI asks about RBAC /
+  pharmacy / audit / offline instead of shipping a login page).
+- Wired as the `analyze_requirements` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case
+  that returns the analysis text — no file writes). The planner can call it to avoid shipping a shallow app
+  for a rich request.
+- Gate green: server `tsc` + `vitest` RequirementGapAnalyzer 5/5 + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Open root cause (rule 6): the interactive clarification LOOP (actually pausing the build to ask the user the
+questions this analyzer produces, then resuming) is the remaining T1.4 work — it needs a UX + resume-protocol
+design and admin sign-off; recorded here so it isn't silently dropped. Fresh branch off `38c7868`, own PR.
+
+**Tier-1 status: T1.1 (schema) ✅, T1.2 (crud) ✅, T1.3 (rbac/admin/dashboard/backup) ✅, T1.4 detection ✅
+(interactive loop = open follow-up).** Plus T-SPEED.1 streaming preview ✅. Next: Tier-2 (frontend UX pack,
+performance gate, SSO/ABAC, observability injection) — all safe additive work.

@@ -1054,6 +1054,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'analyze_requirements',
+      description:
+        'Analyze a build prompt for its likely DOMAIN (healthcare/ecommerce/social/saas/booking), the features ' +
+        'that domain usually needs but the prompt left implicit (RBAC, audit log, payments, multi-tenant, ' +
+        'offline, …), the non-functional signals (scale/offline/security/i18n), and a short list of clarifying ' +
+        'questions to confirm before building — so a rich request never gets a shallow app. Use during planning.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: "The user's build request to analyze." },
+        },
+        required: ['prompt'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1599,6 +1614,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_admin',
   'generate_dashboard',
   'generate_backup',
+  'analyze_requirements',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

@@ -123,6 +123,7 @@ import { generateRbac } from '../lib/RbacGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
+import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2942,6 +2943,15 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('backup');
         return `Wired a backup endpoint:\n${bkWritten.join('\n')}\n\n${bk.instructions}`;
+      }
+
+      case 'analyze_requirements': {
+        // T1.4 (safe slice) — surface the likely domain, commonly-missing features, non-functional signals
+        // and clarifying questions for a prompt. Pure analyzer in RequirementGapAnalyzer.ts; no file writes.
+        const arRec = (input as Record<string, unknown>) || {};
+        const arPrompt = typeof arRec.prompt === 'string' ? arRec.prompt : '';
+        if (!arPrompt.trim()) return 'analyze_requirements: pass the "prompt" to analyze.';
+        return renderRequirementGaps(analyzeRequirementGaps(arPrompt));
       }
 
       case 'generate_deploy_artifacts': {

@@ -1385,6 +1385,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_qr',
+      description:
+        'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
+        'data-URL + generateQrSvg(text) → SVG helper. Use for event/movie tickets, UPI & payment links, ' +
+        '"scan to open", table ordering and share links (e.g. generateQr("upi://pay?pa=merchant@bank&am=100")). ' +
+        'Server-side, generate on demand per order/ticket; adds the qrcode dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1720,6 +1729,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_logging',
   'generate_graceful_shutdown',
   'generate_security_headers',
+  'generate_qr',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

@@ -29,6 +29,7 @@ import { rotateAllSecrets, getLatestKeyVersion, encrypt, decrypt } from '../lib/
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp';
 import { deploymentStore, type DeploymentStatus } from '../AgentV3/DeploymentStore';
 import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 
 /**
  * Admin dashboard routes extracted from the server.ts monolith (Phase 1).
@@ -133,6 +134,21 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     const totpCode = String(req.body?.totp || '').trim();
     const validUser = adminUsername();
     const validPass = adminPassword();
+    const clientIp = String(req.ip || 'unknown');
+
+    // SEC (admin 2026-07-19) — escalating brute-force lockout ON TOP of the 5/min IP rate limiter.
+    // Once an IP crosses the failure threshold, each further attempt is refused for a window that
+    // grows with the failure count (1m → 2m → 4m … capped at 30m). A correct login clears it, and
+    // it is per-IP so an attacker can only lock their OWN IP, never the real admin's account.
+    if (adminLockoutEnabled()) {
+      const lock = checkAdminLock(clientIp);
+      if (lock.locked) {
+        const retryAfterSec = Math.ceil(lock.retryAfterMs / 1000);
+        audit('ADMIN_LOGIN_LOCKED', { ip: clientIp, retryAfterSec });
+        res.setHeader('Retry-After', String(retryAfterSec));
+        return res.status(429).json({ error: 'Too many failed attempts. Try again later.', retryAfterSec });
+      }
+    }
 
     if (!validPass) {
       audit('ADMIN_LOGIN_BLOCKED', { reason: 'ADMIN_PASSWORD not set', ip: req.ip });
@@ -157,9 +173,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (!verifyTotp(mfa.secret, totpCode)) {
           audit('ADMIN_LOGIN_MFA_FAILED', { username, ip: req.ip });
           serverStats.failedLogins++;
+          // A correct password with a wrong TOTP is still a failed attempt — count it toward the
+          // lockout so TOTP guessing (1M codes) also gets throttled, not just password guessing.
+          if (adminLockoutEnabled()) recordAdminFail(clientIp);
           return res.status(401).json({ error: 'Invalid authenticator code.', mfaRequired: true });
         }
       }
+      // Full success (password + MFA if enabled) — clear this IP's failure history immediately so a
+      // legitimate admin who mistyped earlier is never left waiting out a lock.
+      if (adminLockoutEnabled()) recordAdminSuccess(clientIp);
       // SEC Phase 5 (F8): a TIME-STAMPED token with a 30-day TTL (was a static, never-expiring HMAC).
       // The issued-at is signed in, so a leaked token now expires instead of granting permanent access.
       const token = mintAdminToken(validPass, username, Date.now());
@@ -171,6 +193,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     serverStats.failedLogins++;
     serverStats.failedLoginIPs.push({ ip: String(req.ip), time: Date.now(), username });
     if (serverStats.failedLoginIPs.length > 100) serverStats.failedLoginIPs.shift();
+    if (adminLockoutEnabled()) recordAdminFail(clientIp);
     return res.status(401).json({ error: 'Invalid credentials.' });
   });
 

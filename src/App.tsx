@@ -2411,6 +2411,7 @@ export default function App() {
           onEnterFocusMode={handleEnterFocusMode}
           onOpenProfile={() => setActiveView('my_profile')}
           onOpenSettings={() => setActiveView('settings')}
+          isAdmin={isAdmin}
         />
       )}
 

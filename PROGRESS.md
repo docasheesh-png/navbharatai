@@ -18431,3 +18431,29 @@ format` auto-fix (format-fixable class) and the client-not-generated self-heal a
 
 Tests: 11 new pure-helper cases (each error class + specific-wins-over-generic + non-Prisma null). Gate:
 server tsc 0, ToolDispatcher suite 144 pass. Remaining LearnLoop open root cause: #1 GLM 429/timeout storm.
+
+---
+
+## 2026-07-19 — LearnLoop OPEN root cause #1 FIXED: GLM 429/timeout storm (shared cooldown arms on first throttle)
+
+Closes the last LearnLoop open root cause. Evidence (agent map): the SHARED cross-instance rate-limit
+cooldown (`MultiProviderTurnRunner.ts`) — the exact machinery built (StudySync/TaskFlow autopsies) to stop
+these storms — armed only on the SECOND consecutive strike (`benchAfter=2`). But the fast lane fires up to
+8 CONCURRENT turns that all 429 before any single bench name reaches 2, so the cooldown never armed and the
+build hammered the throttled provider turn after turn (LearnLoop: 44 GLM provider failures) before finally
+falling to the Claude backstop.
+
+Fix (minimal, env-revertible, respects the documented per-instance design): the shared cooldown singleton
+now arms on the FIRST throttle (`rateLimitBenchAfter()`, env `AGENTV3_RATE_LIMIT_BENCH_AFTER`, default 1).
+After one GLM 429/timeout, every subsequent turn AND every sibling runner instance skips that name for the
+cooldown window, then retries it automatically when the window expires (soft bench — cheap capacity is
+never permanently sidelined; a successful turn clears the strike instantly). Happy path untouched: a
+healthy provider is never benched. Set `AGENTV3_RATE_LIMIT_BENCH_AFTER=2` to restore the old behavior.
+
+Why not the proactive pacer / a Retry-After sleep: the pacer would throttle EVERY build (latency on the
+happy path) and is a bigger, measurement-gated decision (left as the existing `AGENTV3_RATE_PACER` flag);
+a fall-through sleep just adds latency. Arming the shared cooldown on the first throttle is the smallest
+change that collapses the storm at its root while touching ONLY the failure path.
+
+Tests: 2 new (single-429 arms the cooldown cross-instance; env parsing default/override/garbage). Gate:
+server tsc 0, MultiProviderTurnRunner suite 44 pass. All three LearnLoop open root causes now closed.

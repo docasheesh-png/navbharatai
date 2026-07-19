@@ -300,8 +300,27 @@ function rateLimitCooldownMs(): number {
   return Number.isFinite(n) && n >= 0 ? n : 60_000;
 }
 
+/**
+ * Consecutive throttle strikes (429 / timeout / overload) on ONE bench name before the SHARED
+ * cross-instance cooldown benches it. Env-tunable (`AGENTV3_RATE_LIMIT_BENCH_AFTER`); DEFAULT 1.
+ *
+ * ROOT CAUSE (LearnLoop autopsy — the "GLM 429 storm", 44 provider failures in one build): this
+ * cooldown used to arm only on the SECOND strike, but the fast lane fires up to 8 CONCURRENT turns
+ * that ALL 429 before any single name reaches 2 — so the very machinery built to stop the storm never
+ * armed, and the build hammered the throttled provider turn after turn before finally falling to the
+ * backstop. Arming on the FIRST throttle collapses the storm: after one GLM 429/timeout, every
+ * subsequent turn (and every sibling runner instance) skips that name for the cooldown window, then
+ * retries it automatically when the window expires (soft bench — cheap capacity is never permanently
+ * sidelined). A HEALTHY provider is never benched — a successful turn clears its strikes instantly.
+ * Set to `2` to restore the old, slower-to-arm behavior.
+ */
+export function rateLimitBenchAfter(): number {
+  const n = Number((process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER ?? '').trim());
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
+
 /** The production singleton — one shared memory across every runner instance in the process. */
-export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs());
+export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs(), rateLimitBenchAfter());
 
 /**
  * Build a TurnRunner that tries each runner in `chain` order and returns the first that

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { makeMultiProviderTurnRunner, forceModelRunner, pacedRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, type NamedRunner } from './MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, pacedRunner, isFatalProviderError, fatalProviderHint, isServiceOverloadedError, createRateLimitCooldowns, sharedRateLimitCooldowns, rateLimitBenchAfter, type NamedRunner } from './MultiProviderTurnRunner';
 import { _resetSharedPacers } from '../RateLimitPacer';
 
 // The shared 429-cooldown singleton persists across runner instances BY DESIGN — reset it between
@@ -351,6 +351,41 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     const res = await r2.runTurn(PARAMS);
     expect(res.text).toBe('c');
     expect(glm2.runTurn).not.toHaveBeenCalled(); // skipped instantly — no re-hammering the saturated provider
+  });
+
+  it('BENCH-AFTER-1 (LearnLoop 429-storm fix) — a SINGLE 429 arms the shared cooldown so the storm can never form', async () => {
+    // The default production benchAfter is now 1: one throttle benches the name process-wide, instead of
+    // the old 2 that a concurrent-turn burst stampedes past. Cross-instance skip after just ONE 429.
+    const cooldowns = createRateLimitCooldowns(60_000, 1);
+    let t = 1_000_000;
+    const now = () => t;
+    const glm1 = runnerFail('429 Rate limit reached');
+    const r1 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm1 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    await r1.runTurn(PARAMS); // 429 #1 → cooldown armed IMMEDIATELY (was: needs a 2nd)
+    const glm2 = runnerFail('429 Rate limit reached');
+    const r2 = makeMultiProviderTurnRunner([{ name: 'GLM', runner: glm2 }, { name: 'CLAUDE', runner: runnerOk('c') }], { cooldowns, now });
+    const res = await r2.runTurn(PARAMS);
+    expect(res.text).toBe('c');
+    expect(glm2.runTurn).not.toHaveBeenCalled(); // benched after the FIRST 429 — no storm
+  });
+
+  it('rateLimitBenchAfter — env parsing: default 1, honors a valid override, floors garbage to 1', () => {
+    const saved = process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER;
+    try {
+      delete process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER;
+      expect(rateLimitBenchAfter()).toBe(1);           // default = arm on first throttle
+      process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER = '2';
+      expect(rateLimitBenchAfter()).toBe(2);           // admin can restore the old behavior
+      process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER = '3';
+      expect(rateLimitBenchAfter()).toBe(3);
+      process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER = 'abc';
+      expect(rateLimitBenchAfter()).toBe(1);           // garbage → safe default
+      process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER = '0';
+      expect(rateLimitBenchAfter()).toBe(1);           // < 1 is meaningless → default
+    } finally {
+      if (saved === undefined) delete process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER;
+      else process.env.AGENTV3_RATE_LIMIT_BENCH_AFTER = saved;
+    }
   });
 
   it('SHARED COOLDOWN — expires: the provider is tried again after the window (softer than the run-long bench)', async () => {

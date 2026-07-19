@@ -1372,6 +1372,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_sanitize_html',
+      description:
+        'Add real HTML sanitization / XSS prevention to the app (server/lib/sanitize.ts, sanitize-html): ' +
+        'sanitizeHtml(dirty) keeps a safe formatting subset (headings, lists, bold/italic, links forced to ' +
+        'safe protocols + rel="noopener") and strips <script>, event handlers, javascript: URLs and <iframe>; ' +
+        'sanitizeToText(dirty) strips all markup to plain text. Run it on any user-supplied HTML before you ' +
+        'store or render it (comments, rich-text posts, bios, ticket bodies) to close the stored-XSS hole — a ' +
+        'proper allowlist, not a bypassable regex. Adds the sanitize-html dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_logging',
       description:
         'Add real structured logging to the app (server/lib/logger.ts, pino): a configured JSON logger + an ' +
@@ -1765,6 +1776,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_env_validation',
   'generate_cors',
   'generate_validation',
+  'generate_sanitize_html',
   'generate_logging',
   'generate_graceful_shutdown',
   'generate_security_headers',

@@ -125,6 +125,30 @@ describe('runSimpleBuild — plan → per-file → assemble', () => {
     expect(written.map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']);
   });
 
+  // STREAMING FIRST-PAINT — the onFilesReady hook hands the healed files to the caller early so an
+  // in-browser preview can render before the slow verify+install+dev-boot tax.
+  it('streaming preview: calls onFilesReady once with the final files before returning', async () => {
+    let handed: OneShotFile[] | null = null;
+    let callCount = 0;
+    const r = await runSimpleBuild(baseDeps({ onFilesReady: (f) => { callCount += 1; handed = f; } }));
+    expect(r.ok).toBe(true);
+    expect(callCount).toBe(1); // fired exactly once
+    expect(handed).not.toBeNull();
+    expect((handed as unknown as OneShotFile[]).map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/TodoList.tsx', 'src/index.css']);
+  });
+
+  it('streaming preview: a throwing onFilesReady never fails or blocks the build', async () => {
+    const r = await runSimpleBuild(baseDeps({ onFilesReady: () => { throw new Error('hook boom'); } }));
+    expect(r.ok).toBe(true); // the hook is best-effort — its failure is swallowed
+    expect(r.filesWritten).toBe(3);
+  });
+
+  it('streaming preview: omitting onFilesReady leaves the build exactly as before', async () => {
+    const r = await runSimpleBuild(baseDeps()); // no hook wired
+    expect(r.ok).toBe(true);
+    expect(r.filesWritten).toBe(3);
+  });
+
   it('auto-adds a forgotten shared-symbol import before writing (jungle-game CANVAS_HEIGHT crash)', async () => {
     // Reproduce the real bug: constants.ts exports CANVAS_HEIGHT; Background.ts uses it but imports
     // only the type. Without the fix, the written file crashes the preview with a ReferenceError.

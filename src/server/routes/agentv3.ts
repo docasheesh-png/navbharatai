@@ -6574,7 +6574,20 @@ export function registerAgentV3Routes(app: Express): void {
         // 1) SIMPLE BUILDER (primary) — plan a file manifest, then generate EACH file in its own
         //    focused call. This beats the single-call OneShot's ~8k-token truncation that made
         //    multi-file apps produce "no files" and drop into the slow agentic loop.
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        // STREAMING FIRST-PAINT (gated, default OFF). The healed files are final long before the
+        // verify+repair loop and the dev-server install/boot (30–155 s) finish. When on, persist them
+        // to the durable store NOW (mergeWorkspaceFiles UNIONS paths — never a wipe) so the sandbox-
+        // free in-browser preview can render them, then emit file_changed events so the client's
+        // filesVersion bumps and the preview re-pulls immediately — the user sees the real app tens of
+        // seconds sooner. Best-effort; never blocks or fails the build. Kill: unset AGENTV3_STREAMING_PREVIEW.
+        const onFilesReady = process.env.AGENTV3_STREAMING_PREVIEW === 'on'
+          ? (files: { path: string; content: string }[]) => {
+              const rec = Object.fromEntries(files.map((f) => [f.path, f.content]));
+              mergeWorkspaceFiles(workspaceId, rec).catch(() => { /* durable save is best-effort */ });
+              for (const f of files) events.emit({ type: 'file_changed', agent: 'architect', change: { path: f.path, kind: 'create' as const }, ts: Date.now() });
+            }
+          : undefined;
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: fastWrite, startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // OBSERVABILITY (deep-test App #2, 2026-07-13): when the fast lane falls back after a verify
         // failure, record the ACTUAL compiler error text so the report can be mined for the true cause

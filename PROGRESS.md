@@ -18849,3 +18849,46 @@ branch → verification gate → PR → CI green → merge.
 (4/4) are already world-class; the real weakness is **output depth** — schema generation shallow, backend
 CRUD-quality thin, runtime performance unmeasured. The four Tier-1 items lift real-app quality fastest
 without touching the moat (multi-provider routing, billing honesty, white-label, India-first).
+
+---
+
+## 2026-07-19 — SPEED: streaming first-paint preview (T-SPEED.1, slice 1) + build-path latency audit
+
+Acted on the admin's "har app seconds me" ask HONESTLY (a literal "any app in seconds" is not real for
+complex apps; the winning, truthful goal is *fastest RELIABLE builder* — seconds for simple apps + an early
+preview for every app). First ran a real **latency audit** of the fast-lane build path (six-investigator +
+direct code trace), then shipped the first speed increment.
+
+**Latency audit — where the wall-clock goes (fast lane):** the fixed infra tax on a cold build is
+**~90–155 s** = sandbox cold boot (≤45 s, `E2BActuator SANDBOX_CREATE_TIMEOUT_MS`) + `npm install` (30–90 s,
+run every build) + dev-server port-wait (25 s + up to 40 s recovery). Variable = tiered per-file generation
+(3 serial waves, concurrency 8) + the heal/repair loop (up to 3 repair+reverify cycles — the biggest
+amplifier). Already-present speed infra (verified): sandbox resume/reuse (ON), Anthropic prompt-cache (ON),
+parallel tiered gen (ON), warm-node_modules primer (env-gated), dev-server fastpath, in-browser render cache,
+frontend preview pre-warm. **Confirmed ABSENT:** any progressive/streaming first-paint — the user watches
+text narration and sees the app only after the WHOLE build (install + dev-boot + verify + heal) finishes.
+
+**Key architectural find:** the in-browser preview (`/api/agentv3/inbrowser-preview`) is the DEFAULT surface,
+needs NO sandbox/install/dev-server (compiles saved files client-side in seconds), and the client already
+auto-refreshes it — `AgentV3Panel` bumps `filesVersion` on every `state.files` change
+(`useEffect(... [state.files, state.diffs])`), which drives `PreviewSurface`'s `reloadSignal`. So the whole
+CLIENT chain for progressive preview already exists; the only missing piece was the SERVER saving/emitting
+files EARLY (today it saves once at `agentv3.ts:6653`, after the fast lane fully succeeds).
+
+**Shipped (gated, default OFF — cannot change today's behavior):**
+- `SimpleBuilder.runSimpleBuild` gained an optional `onFilesReady(files)` hook, fired ONCE with the fully
+  self-healed files the instant they're final (after deterministic heal + write, BEFORE the verify+repair
+  loop). Fire-and-forget + best-effort — a hook throw or slowness can never affect or delay the build.
+- The fast-lane caller (`routes/agentv3.ts`) wires it behind **`AGENTV3_STREAMING_PREVIEW=on`**: it durably
+  `mergeWorkspaceFiles` (UNION — never a wipe) the ready files and emits `file_changed` events, so the client
+  `filesVersion` bumps and the sandbox-free in-browser preview renders the REAL app **~30–155 s sooner**
+  (before install/dev-boot/verify). Flag unset = byte-identical to today.
+- Regression tests: hook fires exactly once with the final files; a throwing hook never fails the build;
+  omitting it leaves the build unchanged. Gate green: server `tsc` + frontend `tsc` + `vitest` SimpleBuilder
+  63/63 (incl. the 3 new). No AppKnowledgeBase entry — a perf change with no new navigable surface.
+
+This is slice 1 of T-SPEED.1 (single early emit of the complete healed app). A later slice can go per-TIER
+(emit after tier 0/1) for an even earlier partial paint, and add a real warm SANDBOX POOL (the one missing
+infra piece — resume only helps the 2nd+ turn; the first build still pays the ≤45 s cold `Sandbox.create`).
+Next on the conveyor per the roadmap: Tier-1 depth items (deep schema generator, `generate_crud`, product
+scaffolds, smart clarification). Cross-match-with-live-code rule applies to each before starting.

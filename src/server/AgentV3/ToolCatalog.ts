@@ -1070,6 +1070,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_currency',
+      description:
+        'Add real currency conversion to the app (Bring-Your-Own key): a server getRate(from, to) + convert(' +
+        'amount, from, to) helper for "exchangerate" (any pair directly) or "fixer" (EUR-base cross-rate, ' +
+        'computed for you) — behind multi-currency pricing, international checkout and finance dashboards. ' +
+        'Server-side (the key never reaches the browser); no npm dependency (REST via fetch). The user pastes ' +
+        'their key into .env; NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['exchangerate', 'fixer'], description: 'The exchange-rate provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1385,6 +1401,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_moderation',
   'generate_cache',
   'generate_newsletter',
+  'generate_currency',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

@@ -120,6 +120,7 @@ import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimit
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
+import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3314,6 +3315,29 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ai integration');
         return `Wired ${aiProvider} AI text generation (on the user's own key):\n${aiWritten.join('\n')}\nAdd the dependency: ${aicfg.dependency.name}@${aicfg.dependency.version}\n\n${aicfg.instructions}`;
+      }
+
+      case 'generate_geocoding': {
+        // U-4 recipe — real BYO geocoding address<->coordinates (Google/Mapbox): a server geocode +
+        // reverseGeocode helper (REST via fetch, no dependency). Pure generator in GeocodingGenerator.ts.
+        const gcProvider = optStr(input, 'provider');
+        if (!isGeocodingProvider(gcProvider)) return 'generate_geocoding: pass provider = "google" | "mapbox".';
+        const gccfg = generateGeocodingIntegration(gcProvider);
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gccfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); gcWritten.push(`Kept existing ${path} (add: ${gccfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('geocoding integration');
+        const gcDepLine = gccfg.dependency ? `\nAdd the dependency: ${gccfg.dependency.name}@${gccfg.dependency.version}` : '\n(No npm dependency needed — the geocoding REST API is called with the built-in fetch.)';
+        return `Wired ${gcProvider} geocoding:\n${gcWritten.join('\n')}${gcDepLine}\n\n${gccfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

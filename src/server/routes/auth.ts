@@ -22,8 +22,10 @@ export function registerAuthRoutes(app: Express): void {
       const { phone } = req.body;
       const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown-ip').split(',')[0].trim();
 
-      if (!phone) {
-        return res.status(400).json({ success: false, message: "Phone number is required." });
+      // Validate TYPE, not just truthiness: a non-string phone (number/object/array) used to reach
+      // `phone.replace(...)` below and throw → a 500 on malformed input. Reject it cleanly as a 400.
+      if (!phone || typeof phone !== 'string' || phone.length > 20) {
+        return res.status(400).json({ success: false, message: "A valid phone number is required." });
       }
 
       // Normalize phone number structure (remove symbols, spaces, dashes)

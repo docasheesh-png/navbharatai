@@ -221,7 +221,11 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
   app.post('/api/payment/verify-payment', paymentLimiter, async (req: Request, res: Response) => {
     const { orderId } = req.body;
-    if (!orderId) return res.status(400).json({ error: 'Order ID is required' });
+    // Validate TYPE, not just truthiness — a non-string orderId must never reach the Firestore
+    // doc path / verify routine. Also bound the length to a sane order-id size.
+    if (!orderId || typeof orderId !== 'string' || orderId.length > 128) {
+      return res.status(400).json({ error: 'A valid Order ID is required' });
+    }
 
     const result = await verifyPaymentInternal(orderId);
     if (result.success) {

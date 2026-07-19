@@ -1010,6 +1010,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_ids',
+      description:
+        'Add real secure IDs/tokens to the app (server/lib/ids.ts): dependency-free newId() (UUID v4 primary ' +
+        'key / public record id), shortId() (compact URL-safe share/referral code, base62 with no modulo ' +
+        'bias), secureToken() (long unguessable token for password-reset / email-verification links & API ' +
+        'keys) and hashToken() for at-rest storage. All from the node:crypto CSPRNG — NEVER Math.random(), ' +
+        'which is predictable and would let an attacker guess a reset token. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_admin',
       description:
         'Generate a COMPLETE React admin page for one resource, bound to the generate_crud REST endpoints ' +
@@ -1815,6 +1825,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crud',
   'generate_pagination',
   'generate_rbac',
+  'generate_ids',
   'generate_admin',
   'generate_dashboard',
   'generate_backup',

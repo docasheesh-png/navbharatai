@@ -1393,6 +1393,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_file_upload',
+      description:
+        'Add real file-upload validation to the app (server/lib/upload.ts): a dependency-free ' +
+        'validateUpload(buffer, { allowed, maxBytes }) + detectFileType(buffer) that identify the TRUE file ' +
+        'type from its MAGIC BYTES (PNG/JPEG/GIF/WebP/PDF/MP4/ZIP), NOT the forgeable client filename/extension/' +
+        'Content-Type — so a renamed .php or a script cannot slip through as an image. Enforces a type ' +
+        'allowlist + size cap and returns an honest {ok, type, error}. Run it before saving any upload ' +
+        '(avatars, product photos, documents); pair with generate_image to resize after validating. No env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_graceful_shutdown',
       description:
         'Add real graceful shutdown to the app (server/lib/shutdown.ts): installGracefulShutdown(server) traps ' +
@@ -1778,6 +1789,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_validation',
   'generate_sanitize_html',
   'generate_logging',
+  'generate_file_upload',
   'generate_graceful_shutdown',
   'generate_security_headers',
   'generate_qr',

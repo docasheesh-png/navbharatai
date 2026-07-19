@@ -161,6 +161,7 @@ import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateSlugIntegration } from '../lib/SlugGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
+import { generateMarkdownIntegration } from '../lib/MarkdownGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateCsvIntegration } from '../lib/CsvGenerator';
@@ -4199,6 +4200,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('html sanitization');
         return `Wired HTML sanitization (XSS prevention):\n${szWritten.join('\n')}\nAdd the dependency: ${szcfg.dependency.name}@${szcfg.dependency.version}\n\n${szcfg.instructions}`;
+      }
+
+      case 'generate_markdown': {
+        // U-4 recipe — Markdown → SAFE HTML (marked + sanitize-html): renderMarkdown renders AND sanitizes in
+        // one call (safe by construction). Pure generator in MarkdownGenerator.ts. No env keys.
+        const mkcfg = generateMarkdownIntegration();
+        const mkWritten: string[] = [];
+        for (const [path, content] of Object.entries(mkcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('markdown rendering');
+        const mkDeps = mkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired Markdown rendering:\n${mkWritten.join('\n')}\nAdd the dependencies: ${mkDeps}\n\n${mkcfg.instructions}`;
       }
 
       case 'generate_qr': {

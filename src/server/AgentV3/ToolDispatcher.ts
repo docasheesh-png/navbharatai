@@ -144,6 +144,7 @@ import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGen
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateSlugIntegration } from '../lib/SlugGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
@@ -3838,6 +3839,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('cors config');
         return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
+      }
+
+      case 'generate_slug': {
+        // U-4 recipe — Unicode-aware URL slug generator (server/lib/slug.ts). Dependency-free; keeps Indic
+        // combining marks so Hindi slugs are correct. Pure generator in SlugGenerator.ts. No env keys.
+        const slcfg = generateSlugIntegration();
+        const slWritten: string[] = [];
+        for (const [path, content] of Object.entries(slcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          slWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('slug generation');
+        return `Wired URL slug generation:\n${slWritten.join('\n')}\n(No npm dependency needed — native Unicode normalize.)\n\n${slcfg.instructions}`;
       }
 
       case 'generate_validation': {

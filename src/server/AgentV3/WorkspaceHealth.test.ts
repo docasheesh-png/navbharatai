@@ -29,6 +29,24 @@ describe('analyzeWorkspaceHealth', () => {
     expect(r.totalIssues).toBeGreaterThanOrEqual(3);
   });
 
+  it('framework-gates the React-only checks — a Nuxt/Vue app is not falsely blocked (ShopSphere autopsy)', async () => {
+    // The SAME code that trips react-hooks/jsx/hook-resolution above must be treated as CLEAN for a
+    // non-React framework: a Nuxt `useX` composable is not a React hook, and an auto-imported composable
+    // is not "never imported". Import/export consistency stays framework-neutral.
+    const files = {
+      'package.json': JSON.stringify({ dependencies: {} }),
+      'app.vue': `<script setup>\nconst { data } = useFetch('/api/products');\nconst products = useProducts();\n</script>`,
+    };
+    const nuxt = await analyzeWorkspaceHealth(files, 'nuxt');
+    const byId = Object.fromEntries(nuxt.checks.map(c => [c.id, c]));
+    expect(byId['react-hooks'].ok).toBe(true);
+    expect(byId['react-hooks'].issues).toBe(0);
+    expect(byId['react-hooks'].summary).toMatch(/skipped/i);
+    expect(byId['jsx-resolution'].ok).toBe(true);
+    expect(byId['hook-resolution'].ok).toBe(true);
+    expect(byId['hook-resolution'].summary).toMatch(/skipped/i);
+  });
+
   it('always returns the six named checks in a stable shape', async () => {
     const r = await analyzeWorkspaceHealth({});
     expect(r.checks.map(c => c.id)).toEqual(['code-confidence', 'react-hooks', 'import-export', 'jsx-resolution', 'hook-resolution', 'dependency-constraints']);

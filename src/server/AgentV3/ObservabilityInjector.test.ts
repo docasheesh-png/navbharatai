@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { injectHealthEndpoint } from './ObservabilityInjector';
+import { injectHealthEndpoint, injectErrorHandler, injectObservabilityFixes } from './ObservabilityInjector';
 import { scanObservability } from './ObservabilityAnalysis';
 
 describe('injectHealthEndpoint — deterministic /health injection (Cap-4 injection half)', () => {
@@ -111,5 +111,82 @@ describe('injectHealthEndpoint — deterministic /health injection (Cap-4 inject
     const once = injectHealthEndpoint(files)!;
     const twice = injectHealthEndpoint({ 'server/index.ts': once.newContent });
     expect(twice).toBeNull();
+  });
+});
+
+describe('injectErrorHandler — deterministic error-middleware injection', () => {
+  it('injects a 4-arg error handler before app.listen on an Express entry that lacks one', () => {
+    const files = {
+      'server/index.ts': [
+        "import express from 'express';",
+        'const app = express();',
+        "app.get('/', (_req, res) => res.send('home'));",
+        'app.listen(3000);',
+      ].join('\n'),
+    };
+    const result = injectErrorHandler(files)!;
+    expect(result).not.toBeNull();
+    expect(result.newContent).toContain('app.use((err, _req, res, _next) =>');
+    // handler is AFTER the route and BEFORE listen (Express requires it last)
+    expect(result.newContent.indexOf("app.get('/'")).toBeLessThan(result.newContent.indexOf('app.use((err'));
+    expect(result.newContent.indexOf('app.use((err')).toBeLessThan(result.newContent.indexOf('app.listen'));
+  });
+
+  it('the injected file now PASSES the observability error-handler check (round-trip)', () => {
+    const files = {
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/x', (_r, s) => s.end());\napp.listen(3000);",
+    };
+    expect(scanObservability(files).some((i) => i.kind === 'missing-error-handler')).toBe(true);
+    const result = injectErrorHandler(files)!;
+    const after = scanObservability({ 'server/index.ts': result.newContent });
+    expect(after.some((i) => i.kind === 'missing-error-handler')).toBe(false);
+  });
+
+  it('returns null when an error handler already exists', () => {
+    const files = {
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.use((err, req, res, next) => res.status(500).end());\napp.listen(3000);",
+    };
+    expect(injectErrorHandler(files)).toBeNull();
+  });
+
+  it('returns null when there is no Express app', () => {
+    expect(injectErrorHandler({ 'src/App.tsx': 'export const A = () => null;' })).toBeNull();
+  });
+});
+
+describe('injectObservabilityFixes — apply both fixes in one pass', () => {
+  it('adds BOTH a /health route and an error handler, both before listen, health first', () => {
+    const files = {
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/', (_r, s) => s.end());\napp.listen(process.env.PORT);",
+    };
+    const result = injectObservabilityFixes(files)!;
+    expect(result.added).toEqual(['health', 'error-handler']);
+    expect(result.newContent).toContain("app.get('/health'");
+    expect(result.newContent).toContain('app.use((err, _req, res, _next) =>');
+    expect(result.newContent.indexOf("'/health'")).toBeLessThan(result.newContent.indexOf('app.use((err'));
+    expect(result.newContent.indexOf('app.use((err')).toBeLessThan(result.newContent.indexOf('app.listen'));
+    // the fully-injected file passes BOTH observability checks
+    const after = scanObservability({ 'server/index.ts': result.newContent });
+    expect(after.some((i) => i.kind === 'missing-health-endpoint')).toBe(false);
+    expect(after.some((i) => i.kind === 'missing-error-handler')).toBe(false);
+  });
+
+  it('adds ONLY the missing fix when the other is already present', () => {
+    const files = {
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/health', (_r, s) => s.json({ok:true}));\napp.listen(3000);",
+    };
+    const result = injectObservabilityFixes(files)!;
+    expect(result.added).toEqual(['error-handler']);
+  });
+
+  it('returns null when both are already present', () => {
+    const files = {
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/health', (_r, s) => s.end());\napp.use((err, req, res, next) => res.status(500).end());\napp.listen(3000);",
+    };
+    expect(injectObservabilityFixes(files)).toBeNull();
+  });
+
+  it('returns null when there is no unambiguous Express entry', () => {
+    expect(injectObservabilityFixes({ 'src/App.tsx': 'export const A = () => null;' })).toBeNull();
   });
 });

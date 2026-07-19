@@ -103,8 +103,8 @@ export { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis
 export type { AccessibilityIssue, AccessibilitySeverity } from './AccessibilityAnalysis';
 export { scanObservability, observabilitySummary } from './ObservabilityAnalysis';
 export type { ObservabilityIssue, ObservabilitySeverity } from './ObservabilityAnalysis';
-export { injectHealthEndpoint } from './ObservabilityInjector';
-export type { HealthInjectionResult } from './ObservabilityInjector';
+export { injectHealthEndpoint, injectErrorHandler, injectObservabilityFixes } from './ObservabilityInjector';
+export type { HealthInjectionResult, ObservabilityInjectionResult } from './ObservabilityInjector';
 export { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdownAnalysis';
 export type { ShutdownIssue, ShutdownSeverity } from './GracefulShutdownAnalysis';
 export { scanSecurityHeaders, securityHeadersSummary } from './SecurityHeadersAnalysis';

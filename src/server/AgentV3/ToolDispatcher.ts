@@ -120,6 +120,7 @@ import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/Analyt
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
+import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
@@ -3628,6 +3629,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('sms integration');
         return `Wired ${smProvider} transactional SMS:\n${smWritten.join('\n')}\nAdd the dependency: ${smcfg.dependency.name}@${smcfg.dependency.version}\n\n${smcfg.instructions}`;
+      }
+
+      case 'generate_password': {
+        // U-4 recipe — secure password hashing (bcryptjs): hashPassword + verifyPassword + needsRehash
+        // (server/lib/password.ts). Complements generate_auth (session AFTER verify). Pure generator in
+        // PasswordGenerator.ts. No env keys.
+        const pwcfg = generatePasswordIntegration();
+        const pwWritten: string[] = [];
+        for (const [path, content] of Object.entries(pwcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pwWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('password hashing');
+        return `Wired password hashing:\n${pwWritten.join('\n')}\nAdd the dependency: ${pwcfg.dependency.name}@${pwcfg.dependency.version}\n\n${pwcfg.instructions}`;
       }
 
       case 'generate_ratelimit': {

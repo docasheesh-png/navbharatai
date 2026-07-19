@@ -173,6 +173,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • FULL-TEXT SEARCH (Algolia / Meilisearch): v5.0 can add real search to a content-heavy app (catalog, docs, marketplace) — a server indexer (indexRecords, uses the admin/write key) + a client search() (uses a search-only key that is safe in the browser). The admin key stays server-side; NavBharatAI never stores your keys — you paste them into .env.
 • PHONE OTP / VERIFICATION (MSG91 / Twilio Verify): v5.0 can add real phone-number verification — a server sendOtp(phone) + verifyOtp(phone, code) pair (MSG91 India-first, or Twilio Verify) so signup/login can confirm a real number. You paste your keys into .env; NavBharatAI never stores them.
 • TRANSACTIONAL SMS (Twilio / Vonage): v5.0 can add a real server sendSms(to, message) helper for order updates, alerts and one-off notifications. You paste your keys + sender into .env (server-side only); NavBharatAI never stores them.
+• PASSWORD HASHING (generate_password): v5.0 can add real secure password hashing (server/lib/password.ts, bcryptjs) — hashPassword(plain) to store at signup (bcrypt cost 12, per-password salt; NEVER plaintext or a fast MD5/SHA hash), verifyPassword(plain, hash) to gate login (constant-time, fails safe), and needsRehash(hash) to transparently upgrade older hashes. Complements the auth/JWT generator (issue the session only AFTER verifyPassword). bcryptjs is pure JS (no native build). Adds the bcryptjs dependency; no keys.
 • PRODUCT ANALYTICS (PostHog / Mixpanel): v5.0 can add real event tracking — a client track(event, props) + identify(userId) so you can see what users actually do. You paste your project key into .env; NavBharatAI never stores it.
 • INTERACTIVE MAPS (Google Maps / Mapbox): v5.0 can add a real interactive map component (markers, pan/zoom) to your app. You paste your map key into .env; NavBharatAI never stores it.
 • GEOCODING (Google / Mapbox): v5.0 can add a server geocode(address) → { lat, lng } (and reverse) helper — turn an address into coordinates for maps, delivery and store-locators. Server-side (the key never reaches the browser); you paste it into .env; NavBharatAI never stores it.
@@ -298,6 +299,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'search', 'full text search', 'algolia', 'meilisearch',
       'otp', 'phone verification', 'verify phone', 'msg91', 'twilio verify', 'otp verification',
       'sms', 'send sms', 'text message', 'vonage', 'twilio',
+      'password', 'password hash', 'hash password', 'bcrypt', 'bcryptjs', 'store password', 'login password', 'signup password', 'salt', 'verify password', 'secure password',
       'analytics', 'product analytics', 'event tracking', 'posthog', 'mixpanel',
       'maps', 'map', 'google maps', 'mapbox', 'interactive map',
       'geocode', 'geocoding', 'address to coordinates', 'lat lng', 'reverse geocode',

@@ -208,11 +208,17 @@ export interface ActuatorPort {
     action: 'click' | 'type' | 'navigate' | 'scroll' | 'press' | 'wait' | 'hover' | 'double_click' | 'select_option',
     args: { selector?: string; text?: string; url?: string; direction?: 'up' | 'down' },
   ): Promise<{ screenshot: string; result: string; cursorX?: number; cursorY?: number }>;
-  /** Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`. */
+  /**
+   * Runtime browser errors (console.error / uncaught / failed requests) since `sinceMs`.
+   * `captured` reports whether a real browser session was actually read: `true` = the console was
+   * captured (an empty `errors` then genuinely means "ran clean"); `false` = no live session, so an empty
+   * `errors` means "could NOT check", NOT "clean"; omitted = unknown (treated as captured for back-compat).
+   * This lets the auto-fix loop tell an honest "runtime clean" from an honest "runtime unchecked".
+   */
   getConsoleErrors?(
     workspaceId: string,
     sinceMs: number,
-  ): Promise<{ errors: { t: number; kind: string; text: string }[] }>;
+  ): Promise<{ errors: { t: number; kind: string; text: string }[]; captured?: boolean }>;
   /** The built static site (dist/) as path→bytes, for a real persistent deploy. */
   downloadDistFiles?(workspaceId: string): Promise<Map<string, Buffer>>;
 }

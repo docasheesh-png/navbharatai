@@ -123,6 +123,12 @@ import { generateRbac } from '../lib/RbacGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
+import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { generateI18n } from '../lib/I18nGenerator';
+import { generateUiStates } from '../lib/UiStatesGenerator';
+import { generateImageOptimization } from '../lib/ImageOptGenerator';
+import { generateSsoIntegration } from '../lib/SsoGenerator';
+import { generateAbac } from '../lib/AbacGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2942,6 +2948,108 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('backup');
         return `Wired a backup endpoint:\n${bkWritten.join('\n')}\n\n${bk.instructions}`;
+      }
+
+      case 'analyze_requirements': {
+        // T1.4 (safe slice) — surface the likely domain, commonly-missing features, non-functional signals
+        // and clarifying questions for a prompt. Pure analyzer in RequirementGapAnalyzer.ts; no file writes.
+        const arRec = (input as Record<string, unknown>) || {};
+        const arPrompt = typeof arRec.prompt === 'string' ? arRec.prompt : '';
+        if (!arPrompt.trim()) return 'analyze_requirements: pass the "prompt" to analyze.';
+        return renderRequirementGaps(analyzeRequirementGaps(arPrompt));
+      }
+
+      case 'generate_i18n': {
+        // T2.5 recipe — real react-i18next infrastructure (init + per-language locale files + a language
+        // switch hook). Pure generator in I18nGenerator.ts. English is always kept as the fallback.
+        const i18nRec = (input as Record<string, unknown>) || {};
+        const i18nLangs = Array.isArray(i18nRec.languages) ? i18nRec.languages.filter((l): l is string => typeof l === 'string') : [];
+        const i18nCfg = generateI18n(i18nLangs);
+        const i18nWritten: string[] = [];
+        for (const [path, content] of Object.entries(i18nCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          i18nWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('i18n');
+        const i18nDeps = i18nCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired i18n:\n${i18nWritten.join('\n')}\nAdd the dependencies: ${i18nDeps}\n\n${i18nCfg.instructions}`;
+      }
+
+      case 'generate_ui_states': {
+        // T2.5 recipe — a dependency-free React UI-states pack (spinner/skeleton/empty/error-boundary +
+        // useAsync + useOptimisticList). Pure generator in UiStatesGenerator.ts.
+        const uiRec = (input as Record<string, unknown>) || {};
+        const uiInclude = Array.isArray(uiRec.include) ? uiRec.include.filter((s): s is string => typeof s === 'string') : undefined;
+        const ui = generateUiStates(uiInclude);
+        const uiWritten: string[] = [];
+        for (const [path, content] of Object.entries(ui.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          uiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ui-states');
+        return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_image_optimization': {
+        // T2.6 recipe — a sharp server helper + a CLS-safe lazy <img>. Pure generator in ImageOptGenerator.ts.
+        const io = generateImageOptimization();
+        const ioWritten: string[] = [];
+        for (const [path, content] of Object.entries(io.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ioWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('image-optimization');
+        const ioDeps = io.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired image optimization:\n${ioWritten.join('\n')}\nAdd the dependencies: ${ioDeps}\n\n${io.instructions}`;
+      }
+
+      case 'generate_sso': {
+        // T2.7 recipe — real OIDC SSO (any provider). Pure generator in SsoGenerator.ts. BYO credentials;
+        // never overwrites an existing .env.example.
+        const sso = generateSsoIntegration();
+        const ssoWritten: string[] = [];
+        for (const [path, content] of Object.entries(sso.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); ssoWritten.push(`Kept existing ${path} (add: ${sso.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ssoWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('sso');
+        const ssoDeps = sso.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired OIDC SSO:\n${ssoWritten.join('\n')}\nAdd the dependencies: ${ssoDeps}\n\n${sso.instructions}`;
+      }
+
+      case 'generate_abac': {
+        // T2.7 recipe — attribute-based access control (policy registry + authorize guard). Pure generator.
+        const abac = generateAbac();
+        const abacWritten: string[] = [];
+        for (const [path, content] of Object.entries(abac.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          abacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('abac');
+        return `Wired ABAC:\n${abacWritten.join('\n')}\n\n${abac.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

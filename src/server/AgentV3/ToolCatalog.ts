@@ -1054,6 +1054,86 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'analyze_requirements',
+      description:
+        'Analyze a build prompt for its likely DOMAIN (healthcare/ecommerce/social/saas/booking), the features ' +
+        'that domain usually needs but the prompt left implicit (RBAC, audit log, payments, multi-tenant, ' +
+        'offline, …), the non-functional signals (scale/offline/security/i18n), and a short list of clarifying ' +
+        'questions to confirm before building — so a rich request never gets a shallow app. Use during planning.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: "The user's build request to analyze." },
+        },
+        required: ['prompt'],
+      },
+    },
+    {
+      name: 'generate_i18n',
+      description:
+        'Add real internationalization (react-i18next) to the app: an i18n init module, a JSON locale file per ' +
+        'language, and a useLanguage() switch hook. English + Hindi ship with real starter translations; other ' +
+        'languages start from the English keys to translate. Pass the language codes (e.g. ["en","hi","ta"]) — ' +
+        'English is always kept as the fallback. Use it with useTranslation().t("key").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          languages: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Language codes (e.g. ["en","hi","ta"]). Defaults to ["en","hi"]; English is always the fallback.',
+          },
+        },
+        required: ['languages'],
+      },
+    },
+    {
+      name: 'generate_ui_states',
+      description:
+        'Add a dependency-free React UI-states pack: a Spinner + Skeleton (loading placeholders), EmptyState, an ' +
+        'ErrorBoundary (class boundary with fallback), a useAsync hook (loading/error/data for every fetch), and ' +
+        'useOptimisticList (optimistic add/remove that rolls back on failure). Optionally pass include to emit a ' +
+        'subset. Reuse them everywhere so the app has honest loading / empty / error states.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional subset by name (e.g. ["Spinner","useAsync"]); default = the full pack.',
+          },
+        },
+      },
+    },
+    {
+      name: 'generate_image_optimization',
+      description:
+        'Add real image optimization: a sharp-based server helper (optimizeImage — resize + WebP re-encode on ' +
+        'the upload path, so a 4 MB photo becomes ~100 KB) and a CLS-safe React <LazyImage> (native lazy-load ' +
+        '+ async decode + reserved width/height so the layout never jumps → faster LCP). Use for any app that ' +
+        'shows user-uploaded or content images. Adds the sharp dependency.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_sso',
+      description:
+        'Add real Single Sign-On (OpenID Connect) — works with any OIDC provider (Google/Okta/Auth0/Azure AD/' +
+        'Keycloak). Emits a discovery-based OIDC client + /auth/sso/login and /auth/sso/callback routes with ' +
+        'state+nonce (CSRF + replay protection); after login req.session.user has { id, email, name }. ' +
+        'Bring-Your-Own credentials (OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET/REDIRECT_URI) pasted into .env, never ' +
+        'stored. Needs a session (express-session). Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_abac',
+      description:
+        'Add attribute-based access control (ABAC) — fine-grained authorization that RBAC roles alone cannot ' +
+        'express (e.g. "only the OWNER or an admin may edit THIS record"). Emits a policy registry (deny by ' +
+        'default / fail closed) + a can() evaluator + an authorize(policy, buildContext) Express guard (401/403). ' +
+        'Complements generate_rbac (roles) and generate_auth (req.user). Dependency-free.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1599,6 +1679,12 @@ export const CATALOG_TOOL_NAMES = [
   'generate_admin',
   'generate_dashboard',
   'generate_backup',
+  'analyze_requirements',
+  'generate_i18n',
+  'generate_ui_states',
+  'generate_image_optimization',
+  'generate_sso',
+  'generate_abac',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

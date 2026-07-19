@@ -19192,3 +19192,131 @@ Continued the conveyor (CI-in-background mode). Closes the "Backup"/in-app "Expo
 Extends PR #1604 (admin + dashboard + backup, CI in background). The `generate_crud` → migration → rbac →
 admin → dashboard → backup set now forms a coherent "data + admin" backend toolkit the builder can assemble.
 Next: T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.4 (safe slice) `analyze_requirements` — requirement-gap analyzer
+
+Cross-matched the requirement-understanding area first (safeguard #2): `DialogueStateManager` only carries
+PROMPT guidance ("confirm scope, don't over-ask") with NO real clarification loop, and no active collision
+was visible on those files. The FULL interactive "pause and ask the user" loop changes the core build flow +
+UX, so it's a deliberate follow-up (not rushed). Shipped the safe, real, wired detection half instead.
+
+**Shipped (pure analyzer, no build-flow change):**
+- `src/server/lib/RequirementGapAnalyzer.ts` — `analyzeRequirementGaps(prompt)` deterministically infers the
+  likely DOMAIN (healthcare / ecommerce / social / saas / booking), the features that domain usually needs
+  but the prompt left implicit (RBAC, audit log, EMR, payments, multi-tenant, offline, …) split into
+  MENTIONED vs LIKELY-MISSING, the non-functional signals (scale / offline / security / i18n), and a capped
+  list (≤6, "never over-ask") of clarifying questions. `renderRequirementGaps` formats it for the planner.
+  Directly embodies the admin's own example ("build a hospital system" → a strong AI asks about RBAC /
+  pharmacy / audit / offline instead of shipping a login page).
+- Wired as the `analyze_requirements` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case
+  that returns the analysis text — no file writes). The planner can call it to avoid shipping a shallow app
+  for a rich request.
+- Gate green: server `tsc` + `vitest` RequirementGapAnalyzer 5/5 + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Open root cause (rule 6): the interactive clarification LOOP (actually pausing the build to ask the user the
+questions this analyzer produces, then resuming) is the remaining T1.4 work — it needs a UX + resume-protocol
+design and admin sign-off; recorded here so it isn't silently dropped. Fresh branch off `38c7868`, own PR.
+
+**Tier-1 status: T1.1 (schema) ✅, T1.2 (crud) ✅, T1.3 (rbac/admin/dashboard/backup) ✅, T1.4 detection ✅
+(interactive loop = open follow-up).** Plus T-SPEED.1 streaming preview ✅. Next: Tier-2 (frontend UX pack,
+performance gate, SSO/ABAC, observability injection) — all safe additive work.
+
+---
+
+## 2026-07-19 — T2.5 (Tier-2 start) `generate_i18n` — real react-i18next infrastructure
+
+Started Tier-2 (admin: "tier 2 start karo"). The audit flagged i18n 🟡 (a machine-translation tool existed,
+but no real i18n INFRASTRUCTURE). `generate_i18n` closes it — and it is on-brand for NavBharatAI's India-first
+identity (Hindi ships as a first-class language).
+
+**Shipped (pure, real react-i18next scaffold):**
+- `src/server/lib/I18nGenerator.ts` — `generateI18n(languages)` (default `["en","hi"]`; English always kept as
+  the fallback) emits: `src/i18n/index.ts` (i18next + initReactI18next init), one `src/i18n/locales/<lang>.json`
+  per language (English + **Hindi ship with real starter translations**; other languages start from the English
+  keys to translate), and `src/i18n/useLanguage.ts` (a switch hook). Language codes sanitized + de-duped.
+- Wired as the `generate_i18n` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). Deps:
+  i18next + react-i18next.
+- Gate green: server `tsc` + `vitest` I18nGenerator 5/5 + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+(Note: the generated locale JSON is the USER APP's content, so Hindi values there are correct — the
+English-only source rule governs NavBharatAI's own code, not generated multilingual app content.) Batched onto
+PR #1608 (T1.4 + i18n, CI in background). Next Tier-2: frontend UX states (loading/skeleton/optimistic),
+performance gate + image-opt, SSO/ABAC, observability injection.
+
+---
+
+## 2026-07-19 — T2.5 (cont.) `generate_ui_states` — React UI-states pack
+
+Continued Tier-2 (CI-in-background mode — no blocking on green). Closes the audit's Frontend ❌ cluster
+(loading states, skeleton, optimistic updates, error boundaries were all LLM-authored ad hoc).
+
+**Shipped (pure, dependency-free React helpers):**
+- `src/server/lib/UiStatesGenerator.ts` — `generateUiStates(include?)` emits: `Spinner` + `Skeleton` (CSS
+  keyframes shipped in `ui.css`), `EmptyState`, a class `ErrorBoundary` (getDerivedStateFromError — the
+  correct React pattern), `useAsync` (loading/error/data for every fetch), and `useOptimisticList`
+  (optimistic add/remove that ROLLS BACK on failure so the UI never lies). Optional `include` subset filter.
+- Wired as the `generate_ui_states` tool. Gate green: server `tsc` + `vitest` UiStatesGenerator 6/6 +
+  ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Batched onto PR #1608 (T1.4 + i18n + ui-states, CI in background). Next Tier-2: image-optimization,
+SSO/ABAC, observability logger injection.
+
+---
+
+## 2026-07-19 — T2.6 `generate_image_optimization` — sharp WebP + CLS-safe lazy image
+
+Continued Tier-2. Closes the audit's Performance ❌ "Image optimization" + lazy-loading.
+
+**Shipped (pure):**
+- `src/server/lib/ImageOptGenerator.ts` — `generateImageOptimization()` emits `server/lib/optimizeImage.ts`
+  (sharp: EXIF-rotate + resize `withoutEnlargement` + WebP re-encode on the upload path — a 4 MB photo →
+  ~100 KB) and `src/components/ui/LazyImage.tsx` (native `loading="lazy"` + `decoding="async"` + REQUIRED
+  width/height + `aspect-ratio` so the layout never shifts → faster LCP). Adds the `sharp` dependency.
+- Wired as the `generate_image_optimization` tool. Gate green: server `tsc` + `vitest` ImageOptGenerator 3/3
+  + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Batched onto PR #1608 (T1.4 + i18n + ui-states + image-opt, CI in background). Next: SSO/ABAC (enterprise),
+observability logger injection.
+
+---
+
+## 2026-07-19 — T2.7 `generate_sso` — real OpenID Connect SSO (enterprise)
+
+Continued Tier-2. Closes the audit's Enterprise ❌ "SSO".
+
+**Shipped (real OIDC, BYO credentials):**
+- `src/server/lib/SsoGenerator.ts` — `generateSsoIntegration()` emits `server/lib/sso.ts` (lazy provider
+  discovery from the issuer URL via `openid-client` + authorization-code client) and
+  `server/routes/sso.routes.ts` (`/auth/sso/login` with state+nonce, `/auth/sso/callback` doing the verified
+  code→token exchange → `req.session.user = { id, email, name }`, `/logout`). Works with any OIDC provider
+  (Google/Okta/Auth0/Azure AD/Keycloak). Blank `.env.example` (OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET/
+  REDIRECT_URI), never overwrites an existing one; credentials never stored. Deps: openid-client +
+  express-session.
+- Wired as the `generate_sso` tool. Gate green: server `tsc` + `vitest` SsoGenerator 4/4 + ToolCatalog 5/5 +
+  ToolDispatcher 145/145.
+
+Batched onto PR #1608 (CI in background). Next: `generate_abac` (attribute policy over RBAC) to complete the
+enterprise pair, then observability logger injection.
+
+---
+
+## 2026-07-19 — T2.7 (cont.) `generate_abac` — attribute-based access control (enterprise pair complete)
+
+Closes the audit's Security ❌ "ABAC". RBAC answers "what role?"; ABAC answers "given subject + resource +
+action + context, allowed?" — e.g. "only the OWNER or an admin may edit THIS record", which roles alone
+cannot express.
+
+**Shipped (pure, dependency-free):**
+- `src/server/lib/AbacGenerator.ts` — `generateAbac()` emits `server/lib/abac.ts` (a policy registry — each
+  policy a pure predicate returning true to ALLOW; **deny by default / fail closed** — plus a `can(policy,
+  ctx)` evaluator with example ownership policies) and `server/middleware/authorize.ts` (an Express guard
+  that builds the context from the request and enforces a named policy: 401 unauthenticated, 403 denied).
+  Complements `generate_rbac` (roles) + `generate_auth` (req.user).
+- Wired as the `generate_abac` tool. Gate green: server `tsc` + `vitest` AbacGenerator 3/3 + ToolCatalog 5/5
+  + ToolDispatcher 145/145.
+
+**Enterprise pair complete: SSO (OIDC) + ABAC.** PR #1608 now carries the full T1.4 + Tier-2 batch
+(analyze_requirements, i18n, ui-states, image-opt, sso, abac). Letting it settle to merge (6 real features).
+Remaining Tier-2: observability logger/metrics injection (fresh PR after #1608 lands).

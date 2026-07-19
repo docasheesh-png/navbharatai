@@ -848,6 +848,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_otp',
+      description:
+        'Add real phone-OTP verification/login to the app (Bring-Your-Own keys): a server route that SENDS an ' +
+        'OTP and VERIFIES it server-side (a client-reported success is never trusted) + a client sendOtp/' +
+        'verifyOtp helper, for "msg91" (India-first) or "twilio" (Verify API). The user pastes their provider ' +
+        'credentials into .env (they stay server-side); NavBharatAI never stores them. Never overwrites an ' +
+        'existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['msg91', 'twilio'], description: 'The OTP/SMS provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1149,6 +1165,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_storage',
   'generate_realtime',
   'generate_search',
+  'generate_otp',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

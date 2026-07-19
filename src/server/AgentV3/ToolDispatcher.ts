@@ -111,6 +111,7 @@ import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
+import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3081,6 +3082,30 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('search integration');
         const scDeps = sccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${scProvider} search:\n${scWritten.join('\n')}\nAdd the dependencies: ${scDeps}\n\n${sccfg.instructions}`;
+      }
+
+      case 'generate_otp': {
+        // U-4 recipe — real BYO phone-OTP verification (MSG91 India-first / Twilio Verify): a server route that
+        // sends + verifies the OTP server-side + a client sendOtp/verifyOtp helper. Pure generator in
+        // OtpGenerator.ts. MSG91 uses global fetch (no dependency); Twilio needs the `twilio` package.
+        const oProvider = optStr(input, 'provider');
+        if (!isOtpProvider(oProvider)) return 'generate_otp: pass provider = "msg91" | "twilio".';
+        const ocfg = generateOtpIntegration(oProvider);
+        const otpWritten: string[] = [];
+        for (const [path, content] of Object.entries(ocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); otpWritten.push(`Kept existing ${path} (add: ${ocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          otpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('otp integration');
+        const otpDepLine = ocfg.dependency ? `\nAdd the dependency: ${ocfg.dependency.name}@${ocfg.dependency.version}` : '\n(No npm dependency needed — MSG91 v5 is called with the built-in fetch.)';
+        return `Wired ${oProvider} phone-OTP:\n${otpWritten.join('\n')}${otpDepLine}\n\n${ocfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

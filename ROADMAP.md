@@ -433,8 +433,15 @@ safely edit, or truly verify it).
   immediately before `.listen(` (so the route registers first and the error handler is last, as Express
   requires). `injectObservabilityFixes` applies both in one pass; persisted through the durable write path;
   wired as a default-OFF build-end gate (`AGENTV3_OBSERVABILITY_INJECT=on`), never blocks. High precision —
-  only the unambiguous single-entry case. **Remaining ❌:** injecting the request **logger** (needs a new
-  dependency — morgan/pino — added to package.json + import) and cost-alerting thresholds.
+  only the unambiguous single-entry case.
+  **Request-logger injection SHIPPED (#1634, 2026-07-19):** `injectRequestLogger` completes the injection trio
+  — a DEPENDENCY-FREE inline middleware (logs method/url/status/duration on the response `finish` event via
+  console; never headers/body, so secrets never leak) placed immediately AFTER the app declaration and BEFORE
+  any route (Express middleware only runs for later routes). Chosen dependency-free over morgan/pino on purpose:
+  adding an npm dep to a generated app can break the install (the roadmap's morgan/pino assumption was corrected
+  per the external-suggestion rule). `injectObservabilityFixes` now applies logger → /health → error-handler in
+  one pass; `ObservabilityAnalysis`'s logger detector recognizes the finish-event idiom too, so an injected app
+  is never re-flagged (round-trip test-locked). **Remaining ❌:** cost-alerting thresholds.
 
 ### 2E · Pipeline verification stages (P-PIPE)
 - 🟢❌ Runtime smoke tests (hit routes/API, auth, DB reads) · hydration validation · post-deploy liveness check.

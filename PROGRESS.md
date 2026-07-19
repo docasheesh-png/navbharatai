@@ -19399,3 +19399,37 @@ green on every branch before push.
 **Process note (root-cause, rule 4):** an early treadmill where two branches sharing the same catalog/KB
 anchor forced repeated rebases was eliminated by giving every recipe a **distinct** wiring anchor (and a
 distinct AppKnowledgeBase keyword line); after that, all remaining PRs merged conflict-free.
+
+---
+
+## 2026-07-19 — Recipe batch (cont.) + a real red-main root-cause + Cap-4 logger injection
+
+Continuation of the U-4 recipe conveyor, plus a genuine defect caught and killed at the root, plus one
+verified-open roadmap item closed. All shipped branch → verify → PR → CI-green → self-merge, CI in background.
+
+**More recipes merged (each real, fully-wired, unit-tested, distinct wiring anchor):**
+- `generate_ids` (#1631) — crypto-secure IDs/tokens (node:crypto CSPRNG): UUID v4, URL-safe short id
+  (rejection-sampled, no modulo bias), reset/verify token + SHA-256 at-rest hash. Never Math.random().
+- `generate_retry` (#1632) — retry with exponential backoff + full jitter, shouldRetry predicate, AbortSignal,
+  rethrows last error (no fake success); instructions warn to only retry idempotent work.
+- `generate_indian_validators` (#1635) — India-first PAN/GSTIN/Aadhaar/IFSC/PIN/UPI/mobile validators with the
+  REAL government checksums (GSTIN mod-36, Aadhaar Verhoeff), runtime-verified against known-valid values.
+
+**Cap-4 observability injection trio COMPLETED (#1634):** `injectRequestLogger` adds a dependency-free
+request logger (finish-event, secret-safe) after the app decl / before routes; the analyzer's logger detector
+now recognizes the injected idiom (honesty round-trip). See ROADMAP Cap-4.
+
+**Root-cause fix — a real red main (#1633):** ID #1631's CI (the first run to include ALL the accumulated
+recipe keywords together) tripped the offline-guide guard: `buildChatReply('who is the prime minister')`
+surfaced a feature card. ROOT CAUSE — the offline AND online feature matchers scored SINGLE-WORD keywords with
+a substring check (`msg.includes(kw)`), so the 3-char `ist` (IST timezone) grazed "min-IST-er" and `pr` grazed
+"PRime", crossing the confident-score threshold. Because each recipe PR was cut from an earlier main, no single
+CI run tested the full accumulation, so main went red without any PR being red. FIX (both mirrored scorers,
+rule-3 siblings): single-word keywords now match on a WORD BOUNDARY (token), phrases keep their substring
+signal — mirroring the description matcher, which already tokenizes for exactly this reason. Bare `ist` keyword
+upgraded to `ist timezone`/`indian standard time`. Regression test encodes the exact failure.
+
+**Honest finding (rule 3):** ROADMAP.md is substantially STALE — several `❌`/`🟢❌` items are already built
+(DependencyReconciler, ProjectPlan task-dependency build order, e2e/smoke scaffold, the Prettier lint gate).
+Verified-open items were built (Cap-4 logger, Indian validators); evidence-gated Tier-0 items (AP-1 runtime
+gate, T0-1/2/4/5/6) were NOT guess-patched — they need a real build report for the rule-5 autopsy.

@@ -910,6 +910,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_sms',
+      description:
+        'Add real transactional SMS to the app (Bring-Your-Own keys): a server sendSms(to, body) helper for ' +
+        '"twilio" or "vonage" — for order confirmations, shipping/appointment alerts and notifications. Always ' +
+        'server-side (credentials never reach the browser). For login/verification OTP use generate_otp ' +
+        'instead. The user pastes their keys into .env; NavBharatAI never stores them. Never overwrites an ' +
+        'existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['twilio', 'vonage'], description: 'The SMS provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1215,6 +1231,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_analytics',
   'generate_map',
   'generate_jobs',
+  'generate_sms',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

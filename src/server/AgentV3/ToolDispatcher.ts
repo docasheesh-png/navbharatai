@@ -115,6 +115,7 @@ import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
 import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
+import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3196,6 +3197,28 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('jobs integration');
         const jbDeps = jbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${jbProvider} background jobs:\n${jbWritten.join('\n')}\nAdd the dependencies: ${jbDeps}\n\n${jbcfg.instructions}`;
+      }
+
+      case 'generate_sms': {
+        // U-4 recipe — real BYO transactional SMS (Twilio/Vonage): a server sendSms(to, body) helper. Distinct
+        // from generate_otp (login/verification). Pure generator in SmsGenerator.ts.
+        const smProvider = optStr(input, 'provider');
+        if (!isSmsProvider(smProvider)) return 'generate_sms: pass provider = "twilio" | "vonage".';
+        const smcfg = generateSmsIntegration(smProvider);
+        const smWritten: string[] = [];
+        for (const [path, content] of Object.entries(smcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); smWritten.push(`Kept existing ${path} (add: ${smcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          smWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('sms integration');
+        return `Wired ${smProvider} transactional SMS:\n${smWritten.join('\n')}\nAdd the dependency: ${smcfg.dependency.name}@${smcfg.dependency.version}\n\n${smcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -148,6 +148,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCaptchaIntegration } from '../lib/CaptchaGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
+import { generateIdempotencyIntegration } from '../lib/IdempotencyGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
@@ -3946,6 +3947,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('retry backoff');
         return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
+      }
+
+      case 'generate_idempotency': {
+        // U-4 recipe — idempotency-key middleware (server/lib/idempotency.ts): createMemoryStore + idempotency
+        // Express middleware that replays the cached response per Idempotency-Key (no double-charge on retry).
+        // Dependency-free. Pure generator in IdempotencyGenerator.ts. No env keys.
+        const idmcfg = generateIdempotencyIntegration();
+        const idmWritten: string[] = [];
+        for (const [path, content] of Object.entries(idmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          idmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('idempotency');
+        return `Wired idempotency middleware:\n${idmWritten.join('\n')}\n(No npm dependency needed — in-process store; swap for Redis to scale.)\n\n${idmcfg.instructions}`;
       }
 
       case 'generate_newsletter': {

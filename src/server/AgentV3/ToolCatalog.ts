@@ -1339,6 +1339,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_idempotency',
+      description:
+        'Add real idempotency to the app (server/lib/idempotency.ts): a dependency-free Express middleware + ' +
+        'createMemoryStore() that make a POST run ONCE per client "Idempotency-Key" header and replay the same ' +
+        'response for any repeat — so a double-tap or a retried/dropped request never double-charges or ' +
+        'double-creates. A 5xx is not cached (stays retryable); a still-in-flight repeat gets 409. Guard ' +
+        'payment/order mutations with it; pairs with generate_retry. In-memory (per-instance) — swap the store ' +
+        'for Redis to scale across instances. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_newsletter',
       description:
         'Add a real newsletter / mailing-list signup to the app (Bring-Your-Own key): a server subscribe(' +
@@ -1922,6 +1933,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_captcha',
   'generate_cache',
   'generate_retry',
+  'generate_idempotency',
   'generate_newsletter',
   'generate_currency',
   'generate_money_format',

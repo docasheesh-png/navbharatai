@@ -129,6 +129,7 @@ import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/News
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
+import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3510,6 +3511,26 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('notify integration');
         return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
+      }
+
+      case 'generate_env_validation': {
+        // U-4 recipe — real fail-fast env validator (server/lib/env.ts). Adds no env keys, no .env.example.
+        // Pure generator in EnvValidationGenerator.ts.
+        const rawKeys = input.keys;
+        const keys = Array.isArray(rawKeys) ? rawKeys.filter((k): k is string => typeof k === 'string') : [];
+        const evcfg = generateEnvValidation(keys);
+        const evWritten: string[] = [];
+        for (const [path, content] of Object.entries(evcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          evWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('env validation');
+        const evKeyLine = evcfg.validatedKeys.length ? `\nValidated keys: ${evcfg.validatedKeys.join(', ')}` : '';
+        return `Wired fail-fast env validation:\n${evWritten.join('\n')}${evKeyLine}\n(No npm dependency needed — plain process.env.)\n\n${evcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

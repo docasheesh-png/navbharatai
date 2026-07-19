@@ -54,6 +54,24 @@ export function stripPrismaSqliteEnums(path: string, content: string): string {
   return out;
 }
 
+/**
+ * A Prisma date field typed `String` but defaulted to `now()` / marked `@updatedAt` is INVALID — the
+ * `now()` function and `@updatedAt` produce a DateTime, so `prisma generate` fails with
+ * "The function `now()` cannot be used on fields of type `String`" (MediConnect autopsy 2026-07-19: 19
+ * such validation errors after the builder wrongly converted DateTime→String for SQLite). SQLite fully
+ * supports Prisma's `DateTime` scalar, so the correct, mechanical fix is to restore the type to
+ * `DateTime`. Fires on ANY schema.prisma (the bug is provider-independent). Only rewrites the type token
+ * of a field that ALSO carries `@default(now())` or `@updatedAt` on the SAME line — a plain
+ * `String @default("x")` is untouched. Pure.
+ */
+export function fixPrismaDateStringDefault(path: string, content: string): string {
+  if (!isPrismaSchema(path) || typeof content !== 'string') return content;
+  // `  createdAt   String   @default(now())`  /  `  updatedAt String @updatedAt`  (optional `?`).
+  // Use [ \t] (NOT \s, which crosses newlines) so the match stays strictly on ONE field line.
+  const fieldRe = /^([ \t]*\w+[ \t]+)String(\??)([ \t]+[^\n]*@(?:default\([ \t]*now\(\)[ \t]*\)|updatedAt)[^\n]*)$/gm;
+  return content.replace(fieldRe, (_all, head: string, opt: string, tail: string) => `${head}DateTime${opt}${tail}`);
+}
+
 /** CJS libraries whose USABLE api is the DEFAULT export — a namespace import breaks their methods. */
 const CJS_DEFAULT_LIBS = ['bcrypt', 'bcryptjs', 'jsonwebtoken'];
 const isCodeFile = (path: string): boolean => /\.(t|j)sx?$/.test(path) && !/\.d\.ts$/.test(path);
@@ -104,5 +122,5 @@ export function ensureViteTypeModule(path: string, content: string): string {
 /** Apply every full-stack write-time guard in order. Flag-gated; a disabled flag is a pure pass-through. */
 export function applyFullStackGuards(path: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!fullStackGuardsEnabled(env)) return content;
-  return ensureViteTypeModule(path, fixCjsDefaultImport(path, stripPrismaSqliteEnums(path, content)));
+  return ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content))));
 }

@@ -143,6 +143,7 @@ import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/Geocod
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
+import { generateRetryIntegration } from '../lib/RetryGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
@@ -3849,6 +3850,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('cache integration');
         return `Wired ${caProvider} caching:\n${caWritten.join('\n')}\nAdd the dependency: ${cacfg.dependency.name}@${cacfg.dependency.version}\n\n${cacfg.instructions}`;
+      }
+
+      case 'generate_retry': {
+        // U-4 recipe — retry with exponential backoff + full jitter (server/lib/retry.ts). Dependency-free;
+        // shouldRetry predicate + AbortSignal; rethrows last error. Pure generator in RetryGenerator.ts.
+        const rtcfg = generateRetryIntegration();
+        const rtWritten: string[] = [];
+        for (const [path, content] of Object.entries(rtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('retry backoff');
+        return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
       }
 
       case 'generate_newsletter': {

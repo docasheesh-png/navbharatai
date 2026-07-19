@@ -122,6 +122,7 @@ import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/Fe
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
+import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3362,6 +3363,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('translation integration');
         const trDepLine = trcfg.dependency ? `\nAdd the dependency: ${trcfg.dependency.name}@${trcfg.dependency.version}` : '\n(No npm dependency needed — the translation REST API is called with the built-in fetch.)';
         return `Wired ${trProvider} translation:\n${trWritten.join('\n')}${trDepLine}\n\n${trcfg.instructions}`;
+      }
+
+      case 'generate_moderation': {
+        // U-4 recipe — real BYO content moderation (OpenAI Moderation/Perspective): a server moderate(text)
+        // -> { flagged, score } helper (REST via fetch, no dependency). Pure generator in ModerationGenerator.ts.
+        const mdProvider = optStr(input, 'provider');
+        if (!isModerationProvider(mdProvider)) return 'generate_moderation: pass provider = "openai" | "perspective".';
+        const mdcfg = generateModerationIntegration(mdProvider);
+        const mdWritten: string[] = [];
+        for (const [path, content] of Object.entries(mdcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); mdWritten.push(`Kept existing ${path} (add: ${mdcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('moderation integration');
+        const mdDepLine = mdcfg.dependency ? `\nAdd the dependency: ${mdcfg.dependency.name}@${mdcfg.dependency.version}` : '\n(No npm dependency needed — the moderation REST API is called with the built-in fetch.)';
+        return `Wired ${mdProvider} content moderation:\n${mdWritten.join('\n')}${mdDepLine}\n\n${mdcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -1021,6 +1021,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_moderation',
+      description:
+        'Add real content moderation to the app (Bring-Your-Own key): a server moderate(text) → { flagged, ' +
+        'score } helper for "openai" (free Moderation endpoint) or "perspective" (TOXICITY, tunable ' +
+        'threshold) — catch toxic/unsafe user-generated content (comments, chat, reviews) before it is shown ' +
+        'or stored. Server-side (the key never reaches the browser); no npm dependency (REST via fetch); fails ' +
+        'open so a moderation outage never blocks the app. The user pastes their key into .env; NavBharatAI ' +
+        'never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['openai', 'perspective'], description: 'The moderation provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1333,6 +1350,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_ai',
   'generate_geocoding',
   'generate_translation',
+  'generate_moderation',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

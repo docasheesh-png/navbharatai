@@ -1038,6 +1038,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_cache',
+      description:
+        'Add real key/value caching to the app (Bring-Your-Own infra): a server cacheGet/cacheSet(key, value, ' +
+        'ttlSeconds)/cacheDel helper for "redis" (over TCP, any Redis) or "upstash" (over HTTP, for ' +
+        'serverless/edge). Cache expensive DB queries/API responses to make the app fast. Values are JSON-' +
+        'serialised. The user points REDIS_URL / Upstash REST creds at their own infra in .env; NavBharatAI ' +
+        'never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['redis', 'upstash'], description: 'The cache backend: Redis over TCP or Upstash over HTTP.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1351,6 +1367,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_geocoding',
   'generate_translation',
   'generate_moderation',
+  'generate_cache',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

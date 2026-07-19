@@ -123,6 +123,7 @@ import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
 import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/GeocodingGenerator';
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
+import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3386,6 +3387,28 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('moderation integration');
         const mdDepLine = mdcfg.dependency ? `\nAdd the dependency: ${mdcfg.dependency.name}@${mdcfg.dependency.version}` : '\n(No npm dependency needed — the moderation REST API is called with the built-in fetch.)';
         return `Wired ${mdProvider} content moderation:\n${mdWritten.join('\n')}${mdDepLine}\n\n${mdcfg.instructions}`;
+      }
+
+      case 'generate_cache': {
+        // U-4 recipe — real BYO key/value caching (Redis over TCP / Upstash over HTTP): a server
+        // cacheGet/cacheSet(TTL)/cacheDel helper. Pure generator in CacheGenerator.ts.
+        const caProvider = optStr(input, 'provider');
+        if (!isCacheProvider(caProvider)) return 'generate_cache: pass provider = "redis" | "upstash".';
+        const cacfg = generateCacheIntegration(caProvider);
+        const caWritten: string[] = [];
+        for (const [path, content] of Object.entries(cacfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); caWritten.push(`Kept existing ${path} (add: ${cacfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          caWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cache integration');
+        return `Wired ${caProvider} caching:\n${caWritten.join('\n')}\nAdd the dependency: ${cacfg.dependency.name}@${cacfg.dependency.version}\n\n${cacfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

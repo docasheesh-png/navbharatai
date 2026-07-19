@@ -19222,3 +19222,25 @@ design and admin sign-off; recorded here so it isn't silently dropped. Fresh bra
 **Tier-1 status: T1.1 (schema) ✅, T1.2 (crud) ✅, T1.3 (rbac/admin/dashboard/backup) ✅, T1.4 detection ✅
 (interactive loop = open follow-up).** Plus T-SPEED.1 streaming preview ✅. Next: Tier-2 (frontend UX pack,
 performance gate, SSO/ABAC, observability injection) — all safe additive work.
+
+---
+
+## 2026-07-19 — T2.5 (Tier-2 start) `generate_i18n` — real react-i18next infrastructure
+
+Started Tier-2 (admin: "tier 2 start karo"). The audit flagged i18n 🟡 (a machine-translation tool existed,
+but no real i18n INFRASTRUCTURE). `generate_i18n` closes it — and it is on-brand for NavBharatAI's India-first
+identity (Hindi ships as a first-class language).
+
+**Shipped (pure, real react-i18next scaffold):**
+- `src/server/lib/I18nGenerator.ts` — `generateI18n(languages)` (default `["en","hi"]`; English always kept as
+  the fallback) emits: `src/i18n/index.ts` (i18next + initReactI18next init), one `src/i18n/locales/<lang>.json`
+  per language (English + **Hindi ship with real starter translations**; other languages start from the English
+  keys to translate), and `src/i18n/useLanguage.ts` (a switch hook). Language codes sanitized + de-duped.
+- Wired as the `generate_i18n` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). Deps:
+  i18next + react-i18next.
+- Gate green: server `tsc` + `vitest` I18nGenerator 5/5 + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+(Note: the generated locale JSON is the USER APP's content, so Hindi values there are correct — the
+English-only source rule governs NavBharatAI's own code, not generated multilingual app content.) Batched onto
+PR #1608 (T1.4 + i18n, CI in background). Next Tier-2: frontend UX states (loading/skeleton/optimistic),
+performance gate + image-opt, SSO/ABAC, observability injection.

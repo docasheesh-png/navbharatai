@@ -1069,6 +1069,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_i18n',
+      description:
+        'Add real internationalization (react-i18next) to the app: an i18n init module, a JSON locale file per ' +
+        'language, and a useLanguage() switch hook. English + Hindi ship with real starter translations; other ' +
+        'languages start from the English keys to translate. Pass the language codes (e.g. ["en","hi","ta"]) — ' +
+        'English is always kept as the fallback. Use it with useTranslation().t("key").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          languages: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Language codes (e.g. ["en","hi","ta"]). Defaults to ["en","hi"]; English is always the fallback.',
+          },
+        },
+        required: ['languages'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1615,6 +1634,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_dashboard',
   'generate_backup',
   'analyze_requirements',
+  'generate_i18n',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

@@ -124,6 +124,7 @@ import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { generateI18n } from '../lib/I18nGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2952,6 +2953,26 @@ export class ToolDispatcher {
         const arPrompt = typeof arRec.prompt === 'string' ? arRec.prompt : '';
         if (!arPrompt.trim()) return 'analyze_requirements: pass the "prompt" to analyze.';
         return renderRequirementGaps(analyzeRequirementGaps(arPrompt));
+      }
+
+      case 'generate_i18n': {
+        // T2.5 recipe — real react-i18next infrastructure (init + per-language locale files + a language
+        // switch hook). Pure generator in I18nGenerator.ts. English is always kept as the fallback.
+        const i18nRec = (input as Record<string, unknown>) || {};
+        const i18nLangs = Array.isArray(i18nRec.languages) ? i18nRec.languages.filter((l): l is string => typeof l === 'string') : [];
+        const i18nCfg = generateI18n(i18nLangs);
+        const i18nWritten: string[] = [];
+        for (const [path, content] of Object.entries(i18nCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          i18nWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('i18n');
+        const i18nDeps = i18nCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired i18n:\n${i18nWritten.join('\n')}\nAdd the dependencies: ${i18nDeps}\n\n${i18nCfg.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

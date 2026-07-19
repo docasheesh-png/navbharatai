@@ -132,6 +132,7 @@ import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenera
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
+import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3570,6 +3571,26 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('request validation');
         return `Wired request validation:\n${vaWritten.join('\n')}\nAdd the dependency: ${vacfg.dependency.name}@${vacfg.dependency.version}\n\n${vacfg.instructions}`;
+      }
+
+      case 'generate_logging': {
+        // U-4 recipe — structured logging (pino): a configured logger + a secret-safe request-logger
+        // middleware (server/lib/logger.ts). Pure generator in LoggingGenerator.ts. Never overwrites .env.example.
+        const lgcfg = generateLoggingIntegration();
+        const lgWritten: string[] = [];
+        for (const [path, content] of Object.entries(lgcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); lgWritten.push(`Kept existing ${path} (add: ${lgcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('logging');
+        return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

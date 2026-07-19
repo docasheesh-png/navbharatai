@@ -101,6 +101,32 @@ describe('BuildDiagnostics', () => {
     expect(r.issues.some((i) => i.code === 'SANDBOX_UNAVAILABLE')).toBe(false); // a genuine failure is not excused
   });
 
+  it('classifies a migrate that exits 0 but could not reach the DB as DB_UNREACHABLE (MediConnect autopsy)', () => {
+    const d = fresh();
+    // The exact MediConnect shape: `prisma migrate dev` exits 0 while its output says the DB is unreachable.
+    d.recordCommand({
+      command: 'npx prisma migrate dev --name init',
+      exitCode: 0,
+      stdout: '[health-check] Error: P1001: Can\'t reach database server at `localhost:5432`\n[health-check] dev server did not come up on port 5432 after automatic recovery.',
+      durationMs: 71474,
+    });
+    const r = d.report();
+    const issue = r.issues.find((i) => i.code === 'DB_UNREACHABLE');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('error');
+    expect(issue?.autoResolved).toBe(false);
+    expect(issue?.message).toMatch(/database was NOT reachable/i);
+    // The misleading exit-0 must NOT be logged as a benign success line.
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD' && /migrate/.test(i.message))).toBe(false);
+  });
+
+  it('a genuinely healthy migrate (exit 0, DB in sync) is NOT flagged DB_UNREACHABLE', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npx prisma migrate dev --name init', exitCode: 0, stdout: 'Your database is now in sync with your schema.', durationMs: 5000 });
+    const r = d.report();
+    expect(r.issues.some((i) => i.code === 'DB_UNREACHABLE')).toBe(false);
+  });
+
   it('derives a TOOL_ERROR from a failed tool_result event', () => {
     const d = fresh();
     d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: false, summary: 'npm install failed: ERESOLVE', ts: 1 } as AgentEvent);

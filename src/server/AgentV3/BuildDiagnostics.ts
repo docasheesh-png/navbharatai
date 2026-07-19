@@ -12,7 +12,7 @@
 
 import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
-import { isDeadSandboxSignal } from './sandbox/EngineerAI/actuators/sandboxHealth';
+import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -417,6 +417,22 @@ export class BuildDiagnostics {
         severity: 'warning',
         code: 'SANDBOX_UNAVAILABLE',
         message: `$ ${cmdHead} → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.`,
+        autoResolved: false,
+        detail: capTail(rec.stderr || rec.stdout, 400) || undefined,
+      });
+      return;
+    }
+    // HONESTY (MediConnect autopsy 2026-07-19): a `prisma migrate`/`seed` can EXIT 0 while its output
+    // proves the DB was never reachable (`P1001: Can't reach database server`, `did not come up on port
+    // 5432`). The exit code lies — the migration did NOT apply. Recording it as a benign SANDBOX_CMD
+    // let the builder believe the DB was ready and improvise a broken SQLite downgrade. Surface it as a
+    // distinct DB_UNREACHABLE problem so the report tells the truth and the builder isn't fooled.
+    if (!failed && detectSilentDbFailure({ command: rec.command, exitCode: rec.exitCode, stdout: rec.stdout, stderr: rec.stderr })) {
+      this.record({
+        phase: 'build',
+        severity: 'error',
+        code: 'DB_UNREACHABLE',
+        message: `$ ${cmdHead} → reported exit 0 but the database was NOT reachable — the migration/query did not actually run.`,
         autoResolved: false,
         detail: capTail(rec.stderr || rec.stdout, 400) || undefined,
       });

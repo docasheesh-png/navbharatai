@@ -50,6 +50,48 @@ export function resolveThrownCommandExit(err: unknown): number {
   return -1; // truly could not run (no exit info) — the dead-sandbox path owns this
 }
 
+// ── Silent DB-unreachable failure (MediConnect autopsy 2026-07-19) ────────────────────────────────
+//
+// ROOT CAUSE (App #14, Remix + Prisma + Postgres): `npx prisma migrate dev` returned **exit 0** while
+// its own output said `P1001: Can't reach database server at localhost:5432` and
+// `dev server did not come up on port 5432`. The migration NEVER applied — no Postgres was running in
+// the sandbox — yet the exit-0 made recordCommand log it as a benign `SANDBOX_CMD` (info, autoResolved).
+// The builder, seeing "migrate succeeded", proceeded on a FALSE premise, then improvised a broken
+// Postgres→SQLite downgrade that cascaded into enum/DateTime errors. A DB-connectivity failure hidden
+// behind a 0 exit code is a lie the report must not repeat: exit 0 ≠ "the database was reachable".
+//
+// These patterns are Prisma/Postgres connectivity failures that are unambiguous even on a 0 exit — a
+// health-check wrapper can swallow the real exit while still printing the failure into stdout.
+const DB_UNREACHABLE_PATTERNS: RegExp[] = [
+  /\bP1001\b/i,                                   // Prisma: "Can't reach database server"
+  /can'?t\s+reach\s+database\s+server/i,
+  /did\s+not\s+come\s+up\s+on\s+port\s+5432/i,    // our health-check's Postgres-port giveup line
+  /database\s+server\s+.*(is\s+not\s+running|not\s+reachable|unreachable)/i,
+  /connection\s+refused.*:\s*5432|:\s*5432.*connection\s+refused/i,
+];
+
+/** True when a command is DB-provisioning/ORM-related (prisma / migrate / seed / psql / drizzle / pg). */
+function isDbRelatedCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  return /\b(prisma|migrate|drizzle|psql|pg_|createdb|sequelize)\b/i.test(command)
+    || /\bseed(\.[tj]s)?\b/i.test(command);
+}
+
+/**
+ * Detect a "silent" database-unreachable failure: a command that reported SUCCESS (exit 0, so the
+ * normal `failed` path never fires) but whose output proves the database was never reachable, so the
+ * migration/query did NOT actually happen. Requires BOTH a hard DB-unreachable output signal AND a
+ * DB-related command, so an app that merely PRINTS "P1001" in a log line it's echoing is never
+ * mis-flagged. Only meaningful when the command claims success (exitCode 0) — a real nonzero exit is
+ * already handled by the normal failure path. Pure + unit-testable.
+ */
+export function detectSilentDbFailure(sig: { command?: string; exitCode: number | null; stdout?: string; stderr?: string }): boolean {
+  if (sig.exitCode !== 0) return false;              // a real nonzero exit is handled elsewhere
+  if (!isDbRelatedCommand(sig.command)) return false;
+  const out = `${sig.stdout || ''}\n${sig.stderr || ''}`;
+  return DB_UNREACHABLE_PATTERNS.some((re) => re.test(out));
+}
+
 export interface CommandFailureSignal {
   /** Exit code. <0 means the SDK threw (the program never ran) rather than the program exiting nonzero. */
   exitCode: number;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
-import { fileDocId, loadWorkspaceFiles, capPathsToDocLimit } from './WorkspaceFileStore';
+import { fileDocId, loadWorkspaceFiles, capPathsToDocLimit, isEssentialManifest, essentialManifestsToCarry } from './WorkspaceFileStore';
 import type { ToolUse } from './ClaudeClient';
 
 const call = (name: string, input: Record<string, unknown>): ToolUse => ({ id: 't1', name, input });
@@ -106,5 +106,55 @@ describe('savePlanForFileSet — the shrink guard (the "49 files → 3, sab gaya
     const { savePlanForFileSet } = await import('./WorkspaceFileStore');
     expect(savePlanForFileSet(0, 1)).toBe('replace');
     expect(savePlanForFileSet(3, 1)).toBe('replace');
+  });
+});
+
+describe('essential-manifest carry-forward (the "No package.json found" preview bug can never recur)', () => {
+  it('isEssentialManifest recognises the preview-critical ROOT manifests across frameworks', () => {
+    for (const p of [
+      'package.json', 'index.html', 'tsconfig.json', 'tsconfig.app.json', 'jsconfig.json',
+      'vite.config.ts', 'vite.config.js', 'vite.config.mjs',
+      'svelte.config.js', 'next.config.js', 'next.config.mjs', 'nuxt.config.ts',
+      'astro.config.mjs', 'remix.config.js', 'angular.json',
+    ]) {
+      expect(isEssentialManifest(p)).toBe(true);
+    }
+    // Tolerates a leading ./ or / that some path forms carry.
+    expect(isEssentialManifest('./package.json')).toBe(true);
+    expect(isEssentialManifest('/package.json')).toBe(true);
+  });
+
+  it('is ROOT-only — a nested manifest is NOT treated as the preview-critical root manifest', () => {
+    expect(isEssentialManifest('src/package.json')).toBe(false);
+    expect(isEssentialManifest('packages/api/package.json')).toBe(false);
+    expect(isEssentialManifest('src/App.tsx')).toBe(false);
+    expect(isEssentialManifest('README.md')).toBe(false);
+    expect(isEssentialManifest('')).toBe(false);
+  });
+
+  it('the EXACT bug: an AI-written partial save (no package.json) carries the scaffold manifest forward', () => {
+    // The durable index has the scaffold (package.json + index.html) plus AI files; the next
+    // authoritative save passes ONLY the AI-written files — package.json must NOT be dropped.
+    const existing = ['package.json', 'index.html', 'src/App.tsx', 'src/main.tsx'];
+    const incoming = ['src/App.tsx', 'src/main.tsx', 'src/pages/Home.tsx']; // AI writes, no manifests
+    expect(essentialManifestsToCarry(existing, incoming).sort()).toEqual(['index.html', 'package.json']);
+  });
+
+  it('does NOT carry a manifest the incoming set DID rewrite (the new content must win)', () => {
+    const existing = ['package.json', 'src/App.tsx'];
+    const incoming = ['package.json', 'src/App.tsx']; // AI rewrote package.json (added deps)
+    expect(essentialManifestsToCarry(existing, incoming)).toEqual([]);
+  });
+
+  it('carries nothing for a comparable full save that already includes the manifests', () => {
+    const existing = ['package.json', 'index.html', 'src/App.tsx'];
+    const incoming = ['package.json', 'index.html', 'src/App.tsx', 'src/new.tsx'];
+    expect(essentialManifestsToCarry(existing, incoming)).toEqual([]);
+  });
+
+  it('never carries a non-manifest source file that was omitted (only essentials are protected here)', () => {
+    const existing = ['package.json', 'src/App.tsx', 'src/util.ts'];
+    const incoming = ['package.json']; // shrink guard handles this class; carry-forward only adds manifests
+    expect(essentialManifestsToCarry(existing, incoming)).toEqual([]);
   });
 });

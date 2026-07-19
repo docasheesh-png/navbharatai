@@ -18380,3 +18380,31 @@ splitter is a NO-OP if the assembled system doesn't end with the static body (ne
 Also this session (perf/cost): #1535 Gemini/Vertex per-call timeout + concurrent vision-describe (merged);
 the vision concurrency TEST was flaky on CI (asserted wall-clock overlap — non-deterministic) → replaced with
 a deterministic order+presence assertion (merged in #1536).
+
+---
+
+## 2026-07-19 — LearnLoop OPEN root cause #2 FIXED: preview "No package.json found" sync gap
+
+Autopsy (App #10 LearnLoop) left 3 open root causes. This entry closes #2. Root cause (evidence, three
+agents mapped it): the scaffold's root manifests (package.json, index.html, framework configs) are seeded
+straight into the E2B sandbox by `E2BActuator.ensureWorkspace` via `sandbox.files.writeFiles` — which
+BYPASSES the `onFileWrite` write-tracking hook. So they never enter `writtenFiles`; every intermediate
+durable flush saves only `writtenFiles`; the ONLY path package.json reached the durable store was the
+best-effort end-of-build sandbox scan (swallowed by catch). When that scan failed/timed out, a later
+cold-sandbox preview re-seeded from durable had NO package.json → `DevServerRecovery.missingPreviewReason`
+returned "No package.json found" even though `npm run dev` had exited 0.
+
+Two central, single-point DNA fixes (neither touches `writtenFiles`, so empty-build detection + the
+"working app or free" billing law are untouched):
+1. Seed-at-start: `E2BActuator` now remembers the seeded scaffold (`_rememberSeededScaffold` /
+   `takeSeededScaffold`, optional `IEngineerActuator` method); the build route drains it right after
+   `ensureWorkspace` and `mergeWorkspaceFiles`-es it to durable → package.json is durable from step 0,
+   independent of the flaky end scan.
+2. Carry-forward guard: `saveWorkspaceFiles`'s authoritative replace now carries forward any essential
+   ROOT manifest (`essentialManifestsToCarry` / `isEssentialManifest`) present in the existing index but
+   omitted by an AI-written partial set — so a later `saveWorkspaceFiles(writtenFiles)` can never wipe
+   package.json. If the AI DID rewrite the manifest it's in the incoming set → new content wins.
+
+Tests: 11 new pure-helper cases (root-only match, the exact partial-save bug, AI-rewrite wins, no false
+carry). Gate: server tsc 0, frontend tsc 0, full AgentV3 suite 3239 pass. Remaining LearnLoop open root
+causes: #1 GLM 429/timeout storm, #3 Prisma relation self-heal breadth (next).

@@ -1171,6 +1171,28 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_graceful_shutdown',
+      description:
+        'Add real graceful shutdown to the app (server/lib/shutdown.ts): installGracefulShutdown(server) traps ' +
+        'the SIGTERM every deploy/restart sends — stops accepting new connections, lets in-flight requests ' +
+        'finish, runs optional cleanup (close the DB pool), then exits, with a hard timeout so a stuck ' +
+        'connection can never hang the deploy. Prevents dropped requests and cut DB connections on restart ' +
+        '(the actionable counterpart to the graceful-shutdown advisory). Dependency-free; SHUTDOWN_TIMEOUT_MS ' +
+        'tunes the timeout. Writes no .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_security_headers',
+      description:
+        'Add real security headers to the app (server/lib/securityHeaders.ts): a dependency-free middleware ' +
+        'that sets the safe browser hardening headers (X-Content-Type-Options nosniff, X-Frame-Options ' +
+        'SAMEORIGIN, Referrer-Policy, HSTS, Permissions-Policy) — defending against clickjacking, MIME-' +
+        'sniffing and referrer leakage WITHOUT breaking a normal app. The actionable counterpart to the ' +
+        'security-headers advisory. A Content-Security-Policy is included as a commented, opt-in block (a ' +
+        'wrong CSP breaks the app, so it needs per-app tuning). No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1493,6 +1515,8 @@ export const CATALOG_TOOL_NAMES = [
   'generate_cors',
   'generate_validation',
   'generate_logging',
+  'generate_graceful_shutdown',
+  'generate_security_headers',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

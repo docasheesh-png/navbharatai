@@ -133,6 +133,8 @@ import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
+import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
+import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3591,6 +3593,40 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('logging');
         return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
+      }
+
+      case 'generate_graceful_shutdown': {
+        // U-4 recipe — graceful shutdown (SIGTERM drain, server/lib/shutdown.ts). Dependency-free. Pure
+        // generator in GracefulShutdownGenerator.ts. Writes no .env.example.
+        const gscfg = generateGracefulShutdownIntegration();
+        const gsWritten: string[] = [];
+        for (const [path, content] of Object.entries(gscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graceful shutdown');
+        return `Wired graceful shutdown:\n${gsWritten.join('\n')}\n(No npm dependency needed — Node signals + server.close().)\n\n${gscfg.instructions}`;
+      }
+
+      case 'generate_security_headers': {
+        // U-4 recipe — safe security headers middleware (server/lib/securityHeaders.ts). Dependency-free,
+        // CSP left commented (a wrong CSP breaks the app). Pure generator in SecurityHeadersGenerator.ts.
+        const shcfg = generateSecurityHeadersIntegration();
+        const shWritten: string[] = [];
+        for (const [path, content] of Object.entries(shcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          shWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('security headers');
+        return `Wired security headers:\n${shWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${shcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -147,6 +147,7 @@ import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
+import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
@@ -3888,6 +3889,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('pdf generation');
         return `Wired PDF generation:\n${pdfWritten.join('\n')}\nAdd the dependency: ${pdfcfg.dependency.name}@${pdfcfg.dependency.version}\n\n${pdfcfg.instructions}`;
+      }
+
+      case 'generate_image': {
+        // U-4 recipe — real image processing (sharp): resizeImage + makeThumbnail (server/lib/image.ts).
+        // Pure generator in ImageGenerator.ts. No env keys.
+        const imgcfg = generateImageIntegration();
+        const imgWritten: string[] = [];
+        for (const [path, content] of Object.entries(imgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          imgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('image processing');
+        return `Wired image processing:\n${imgWritten.join('\n')}\nAdd the dependency: ${imgcfg.dependency.name}@${imgcfg.dependency.version}\n\n${imgcfg.instructions}`;
       }
 
       case 'generate_logging': {

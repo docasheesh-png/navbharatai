@@ -95,6 +95,15 @@ function stylesheetKey(spec: string): string {
 }
 
 /**
+ * A build/framework config file (nuxt.config.ts, vite.config.ts, tailwind.config.js, app.config.ts, …).
+ * These wire stylesheets by DECLARATION, not by `import`: Nuxt's `css: ['~/assets/css/main.css']` array,
+ * a Vite `css` option, etc. A sheet named there is genuinely wired even though no module imports it, so
+ * the orphan check must treat a config reference as a real reference (ShopSphere/Nuxt autopsy 2026-07-19:
+ * `assets/css/main.css` wired in `nuxt.config.ts` was falsely reported "imported by nothing").
+ */
+const isConfigFile = (path: string): boolean => /(^|\/)[\w.-]*\.config\.[cm]?[jt]s$/i.test(path);
+
+/**
  * Find every component that grabs INITIAL focus at mount. A component is a focus owner when it either
  * renders a JSX element with a bare `autoFocus` attribute, or calls `.focus()` inside a mount effect
  * (`useEffect(() => { … }, [])` with EMPTY deps — a focus call in a keyed/handler effect is deliberate
@@ -166,14 +175,24 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
   const referencedKeys = new Set<string>();
   const importRe = /import\s+['"]([^'"]+\.css)['"]/g;
   const linkRe = /<link\b[^>]*href\s*=\s*['"]([^'"]+\.css)['"]/gi;
+  // In a config file a stylesheet is wired by DECLARATION (Nuxt `css: ['~/assets/css/main.css']`), not
+  // an `import` statement, so match every quoted `.css` string literal there — not only imports.
+  const anyCssRe = /['"]([^'"]+\.css)['"]/g;
   for (const [file, raw] of Object.entries(files)) {
     if (typeof raw !== 'string') continue;
-    if (isSourceFile(file)) {
+    if (isConfigFile(file)) {
       const src = stripComments(raw);
       let m: RegExpExecArray | null;
+      anyCssRe.lastIndex = 0;
+      while ((m = anyCssRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
+    } else if (isSourceFile(file)) {
+      const src = stripComments(raw);
+      let m: RegExpExecArray | null;
+      importRe.lastIndex = 0;
       while ((m = importRe.exec(src)) !== null) referencedKeys.add(stylesheetKey(m[1]));
     } else if (/\.html?$/i.test(file)) {
       let m: RegExpExecArray | null;
+      linkRe.lastIndex = 0;
       while ((m = linkRe.exec(raw)) !== null) referencedKeys.add(stylesheetKey(m[1]));
     }
   }

@@ -237,6 +237,7 @@ import {
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps } from '../AgentV3/DependencyAutoFix';
+import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
@@ -5654,6 +5655,10 @@ export function registerAgentV3Routes(app: Express): void {
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
       let architectSystem = architectSystemPrompt(framework);
+      // Capture the pure static body BEFORE any per-request context block is prepended below, so the
+      // cache-prefix optimization (AGENTV3_CACHE_PREFIX, applied before the runner is built) can split
+      // the volatile prefix back out and keep this large static body as a stable Anthropic cache prefix.
+      const staticArchitectSystem = architectSystem;
       // P-PE.2 — register the BASE architect prompt (pre per-turn injections) and capture its version
       // id for telemetry traceability. Best-effort — never affects the build.
       let architectPromptVersion = '';
@@ -5858,6 +5863,19 @@ export function registerAgentV3Routes(app: Express): void {
       // U-1 — LintGate follows the same top-level-only / not-on-import scoping as the readiness gate,
       // but is OFF unless the admin opts in (AGENTV3_LINT_GATE=on). Default OFF → builds are unchanged.
       const runLintGate = lintGateEnabled() && !isImportTurn;
+      // SYSTEM-PROMPT CACHE-PREFIX (perf/cost audit 2026-07-18, opt-in AGENTV3_CACHE_PREFIX=on, default OFF):
+      // the ~12 volatile context blocks above were prepended to the HEAD of the static architect prompt,
+      // so the daily/per-request-changing head busted the Anthropic cache for the whole ~46KB static body
+      // every build. When enabled, split that volatile prefix back OUT of the cached system block and move
+      // it into the per-turn USER message (applied at buildPrompt init below) — the model sees identical
+      // content, only relocated, so quality is unchanged, but the large static body becomes a stable cache
+      // prefix (cache reads ≈ 0.1× input rate). Ships DORMANT: flag off = byte-for-byte today's behaviour.
+      let cachePrefixPreamble = '';
+      if (process.env.AGENTV3_CACHE_PREFIX === 'on') {
+        const split = splitCachedSystem(architectSystem, staticArchitectSystem);
+        architectSystem = split.system;
+        cachePrefixPreamble = split.preamble;
+      }
       const baseRunnerOpts = {
         dispatcher,
         state,
@@ -5958,6 +5976,10 @@ export function registerAgentV3Routes(app: Express): void {
       } catch { /* checkpoint listener is best-effort — never blocks a build */ }
 
       let buildPrompt = prompt;
+      // Cache-prefix mode (see above): the volatile context blocks that were split out of the system
+      // prompt ride the user turn instead, so the model still receives every one — just not in the
+      // cached system prefix. '' (flag off) leaves buildPrompt exactly as today.
+      if (cachePrefixPreamble) buildPrompt = `${cachePrefixPreamble}\n\n---\n\n${buildPrompt}`;
 
       // MEMORY FIX 1 (Claude-level continuity): inject the current PROJECT CONTEXT — the real
       // file list + the project map + recent requests — so a follow-up like "continue" KNOWS what

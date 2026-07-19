@@ -124,6 +124,62 @@ export function pinKnownDepsInInstallCommand(command: string): string {
     .join('');
 }
 
+/**
+ * The subset of WELL_KNOWN_DEPS where a NEWER MAJOR silently breaks the scaffold, so the version
+ * declared IN package.json (not merely in an install command) must be held to the known-good major.
+ * Keep this tiny + documented — it FORCES a value onto whatever the LLM wrote, so it must only ever
+ * cover deps with a proven breaking major (never a matter of taste).
+ */
+export const PACKAGE_JSON_FORCE_PINS: Record<string, string> = {
+  // Prisma 7 moved the datasource `url` out of schema.prisma into a prisma.config.ts + adapter — the
+  // classic `url = env("DATABASE_URL")` the scaffold/guards generate is a hard validation error on 7.x.
+  prisma: '^6',
+  '@prisma/client': '^6',
+};
+
+/** First integer in a semver range ('^7.8.0' → 7, 'latest'/'*'/'' → null). Pure. */
+function firstMajor(range: string): number | null {
+  const m = /(\d+)/.exec(range || '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * Force known-BREAKING deps to their known-good major inside a package.json's CONTENT.
+ *
+ * ROOT CAUSE this closes (LearnLoop autopsy 2026-07-18): #1526 pins bare INSTALL COMMANDS, but the LLM
+ * can instead WRITE `package.json` with `"prisma": "^7"` / `"latest"` and then run a plain `npm install`
+ * (no package tokens → the command pin never fires) → npm pulls Prisma 7 → its breaking datasource config
+ * bricked DB setup and the build looped ~8 `prisma generate` failures + a hallucinated `@prisma/adapter-
+ * sqlite@6` 404 downgrade. Pinning the package.json content at write time is the sibling choke point.
+ *
+ * SAFE by construction: only the curated PACKAGE_JSON_FORCE_PINS deps are touched, and only when the
+ * declared MAJOR differs from the pin (or is unpinned like `latest`/`*`) — an already-good `^6.19.3` is
+ * left alone. Values-only mutation preserves key order. Any non-JSON / non-object input returns unchanged.
+ * Pure + deterministic + unit-testable.
+ */
+export function pinKnownDepsInPackageJson(content: string): { content: string; changed: string[] } {
+  let pkg: unknown;
+  try { pkg = JSON.parse(content); } catch { return { content, changed: [] }; }
+  if (!pkg || typeof pkg !== 'object') return { content, changed: [] };
+  const changed: string[] = [];
+  for (const section of ['dependencies', 'devDependencies'] as const) {
+    const deps = (pkg as Record<string, unknown>)[section];
+    if (!deps || typeof deps !== 'object') continue;
+    const depObj = deps as Record<string, unknown>;
+    for (const [name, pin] of Object.entries(PACKAGE_JSON_FORCE_PINS)) {
+      if (!Object.prototype.hasOwnProperty.call(depObj, name)) continue;
+      const cur = String(depObj[name] ?? '');
+      if (firstMajor(cur) !== firstMajor(pin)) {
+        depObj[name] = pin;
+        changed.push(`${name}: ${cur || '(unset)'} → ${pin}`);
+      }
+    }
+  }
+  if (changed.length === 0) return { content, changed: [] };
+  const trailingNl = content.endsWith('\n') ? '\n' : '';
+  return { content: JSON.stringify(pkg, null, 2) + trailingNl, changed };
+}
+
 export interface DependencyAutoFixPlan {
   /** Missing packages that are on the well-known allowlist — safe to suggest with an exact version. */
   autofixable: Array<{ package: string; version: string }>;

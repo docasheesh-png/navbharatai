@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown } from 'lucide-react';
+import { Menu, X, RotateCcw, LogOut, Maximize2, User, Settings, ChevronDown, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -41,6 +41,9 @@ export interface TopNavProps {
   /** Profile navigation */
   onOpenProfile?: () => void;
   onOpenSettings?: () => void;
+  /** True once an admin session is active (a successful /admin login). Gates the "Admin Panel" entry
+   *  below so it is visible ONLY to the admin — never advertised to normal users. */
+  isAdmin?: boolean;
 }
 
 export function TopNav({
@@ -48,7 +51,7 @@ export function TopNav({
   setIsMenuOpen, openTabs, activeView, setActiveView, toggleTab, closeTab,
   menuItems, hasGeneratedCode, canUndo, canRedo, undoCode, redoCode,
   user, setShowAuth, auth, onEnterFocusMode,
-  onOpenProfile, onOpenSettings,
+  onOpenProfile, onOpenSettings, isAdmin,
 }: TopNavProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -254,6 +257,17 @@ export function TopNav({
                       <Settings className="w-4 h-4 text-[#8b949e]" />
                       <span className="text-sm font-bold text-[#8b949e]">Settings</span>
                     </button>
+                    {/* Admin Panel — visible ONLY when an admin session is active (isAdmin). Opens the
+                        existing /admin dashboard view. Normal users never see this entry. */}
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setDropdownOpen(false); setActiveView('admin'); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-500/10 transition-colors text-left group"
+                      >
+                        <Shield className="w-4 h-4 text-amber-400" />
+                        <span className="text-sm font-bold text-amber-400">Admin Panel</span>
+                      </button>
+                    )}
                   </div>
                   <div className="border-t border-white/5 py-1">
                     <button

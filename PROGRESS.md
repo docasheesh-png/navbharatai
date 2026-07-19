@@ -18318,3 +18318,65 @@ SQL — hot-path reads are single-doc getDoc, already optimal); "cache rate card
 3. Wallet doc read 2-3× sequentially per build (uncached, money path) → read once + thread through the gates
    (correctness unchanged, fewer reads); + parallelize the independent pre-flight gates before first byte.
    Money path → confirm.
+
+### 2026-07-18 — LearnLoop (deep-test App #10, SvelteKit+Prisma LMS) FORENSIC AUTOPSY (5th rule)
+
+Admin built "LearnLoop" (SvelteKit 2 + Prisma + Lucia auth, a mini-Udemy). Result: **BUILD_FAILED after 183
+steps / 26m24s**, builtBy=GLM. counts: 485 total / 18 errors / 465 auto-resolved / **20 unresolved**.
+providerDelivery GLM 121, **providerFailures GLM 44**. framework=sveltekit (✅ #1509 detection worked again).
+
+**5-bucket ledger:**
+- ✅ **Self-healed (465):** most import/tsc issues; the Prisma relation errors eventually (hand-looped sed);
+  bcrypt `--legacy-peer-deps`; the `@sveltejs/vite-plugin-svelte` version dance (5.0→3.0.0); Prisma 7→6 downgrade.
+- 🔀 **Workarounds:** manual `prisma@6` downgrade after Prisma 7 broke; `--legacy-peer-deps` on every install;
+  svelte-plugin version trial-and-error (4 installs). Each is a DEFERRED root cause.
+- ⏭️ **Skipped:** —
+- ❌ **Still broken (20 unresolved):** BUILD_FAILED; the **in-browser preview shows "No package.json found"**
+  even though the build ran `npm run dev` to exit 0 in the sandbox → a durable-store/preview file-sync gap.
+- 🥵 **Struggle points (the real story):** (1) **GLM 429/timeout STORM — 44 failures** with repeatCounts up
+  to 11, ~5 min of pure provider thrash before real work; (2) **8× looped `npx prisma generate`** on Prisma-7
+  breaking config + LLM-written broken relations; (3) 4× looped seed; (4) 4× svelte-plugin version guess.
+
+**Systemic missing subsystems identified:**
+1. 🔴 **Provider rate-pacer / 429-backoff** — 44 GLM failures dominated the run. (Open root cause; the
+   rate-pacer #1520 is the path — provider-side, recorded not silently patched.)
+2. 🟢 **package.json dep-version sanitizer** — Prisma 7 got in via the LLM-authored package.json (a plain
+   `npm install` with no package tokens → the #1526 install-command pin can't fire) → Prisma 7.8.0's breaking
+   datasource config bricked DB setup → the 8× generate loop + a hallucinated `@prisma/adapter-sqlite@6` 404.
+3. 🟡 **In-browser preview file-sync** — package.json missing from the preview's view despite existing/running
+   in the sandbox. Open root cause (needs a separate slice).
+4. 🟡 **Prisma relation self-heal breadth** — the `prisma format` self-heal only covers the P1012 opposite-
+   field class; "one-to-one → add @relation / change to one-to-many" and "Type X is neither built-in nor a
+   model" still hand-looped. Open (broaden the heal).
+
+**FIXED THIS SESSION (root-cause, hunts the sibling #1526 missed):** `pinKnownDepsInPackageJson` +
+`PACKAGE_JSON_FORCE_PINS` (prisma / @prisma/client → ^6) in `DependencyAutoFix.ts`, wired into BOTH
+`ToolDispatcher.write_file` and `write_files_batch` via `pinPackageJsonContent` (path-gated, values-only
+mutation preserves key order, kill switch `AGENTV3_PKG_PIN_GUARD=off`). Now when the LLM writes a package.json
+with `prisma: ^7`/`latest`, it is forced to `^6` at write time — the Prisma-7 breaking-config cascade (the
+single biggest concrete failure driver here) can't happen even via a plain `npm install`. Only a NEWER major
+is corrected; an already-good `^6.19.3` is left byte-identical. 4 new tests. Full suite green.
+
+**Open root causes recorded (rule 6 — not cosmetically patched):** the GLM 429 storm (#1520 pacer), the
+in-browser-preview package.json sync gap, and the Prisma relation self-heal breadth. Next slices.
+
+### 2026-07-18 — Perf/cost: system-prompt cache-prefix optimization (flag-gated, DEFAULT OFF)
+
+The biggest COGS lever from the perf/cost audit. The ~46KB STATIC architect build-prompt is an ideal
+Anthropic prompt-cache target, but the route prepends ~12 per-request/per-day context blocks (today's date,
+user prefs, ADRs, grounding, …) to its HEAD. The cache breakpoint sits on the whole system block and cache
+matching is PREFIX-based, so a head that changes every request (the date alone changes daily) busts the cache
+for the entire 46KB static body on every build.
+
+Fix (opt-in `AGENTV3_CACHE_PREFIX=on`, default OFF): pure `splitCachedSystem` (systemPromptCache.ts, 6 tests)
+splits the accumulated volatile prefix back OUT of the cached system block and moves it into the per-turn
+USER message (applied at buildPrompt init). The model receives identical content — only relocated — so quality
+is unchanged, but the large static body becomes a stable cache prefix (cache reads ≈ 0.1× input rate).
+Implementation is byte-for-byte dormant when the flag is off: capture the static body before the prepends,
+and only when the flag is `on` run the split (`architectSystem`→static, preamble→buildPrompt). Ships DORMANT
+so the admin flips it, watches quality + the deliveredVia/cost telemetry, then makes it default. Safety: the
+splitter is a NO-OP if the assembled system doesn't end with the static body (never corrupts the prompt).
+
+Also this session (perf/cost): #1535 Gemini/Vertex per-call timeout + concurrent vision-describe (merged);
+the vision concurrency TEST was flaky on CI (asserted wall-clock overlap — non-deterministic) → replaced with
+a deterministic order+presence assertion (merged in #1536).

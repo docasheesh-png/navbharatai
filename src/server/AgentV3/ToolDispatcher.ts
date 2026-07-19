@@ -126,6 +126,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
+import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3457,6 +3458,28 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('currency integration');
         return `Wired ${cuProvider} currency conversion:\n${cuWritten.join('\n')}\n(No npm dependency needed — the exchange-rate REST API is called with the built-in fetch.)\n\n${cucfg.instructions}`;
+      }
+
+      case 'generate_weather': {
+        // U-4 recipe — real BYO current-weather lookup (OpenWeatherMap/WeatherAPI): a server getWeather(city)
+        // helper (REST via fetch, no dependency). Pure generator in WeatherGenerator.ts.
+        const weProvider = optStr(input, 'provider');
+        if (!isWeatherProvider(weProvider)) return 'generate_weather: pass provider = "openweathermap" | "weatherapi".';
+        const wecfg = generateWeatherIntegration(weProvider);
+        const weWritten: string[] = [];
+        for (const [path, content] of Object.entries(wecfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); weWritten.push(`Kept existing ${path} (add: ${wecfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          weWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('weather integration');
+        return `Wired ${weProvider} weather:\n${weWritten.join('\n')}\n(No npm dependency needed — the weather REST API is called with the built-in fetch.)\n\n${wecfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

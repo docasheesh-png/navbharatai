@@ -1086,6 +1086,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_weather',
+      description:
+        'Add real current-weather lookup to the app (Bring-Your-Own key): a server getWeather(city) → ' +
+        '{ tempC, description, humidity } helper for "openweathermap" or "weatherapi" — behind delivery ETAs, ' +
+        'travel, agri/logistics and dashboard features. Server-side (the key never reaches the browser); no ' +
+        'npm dependency (REST via fetch); returns null on failure so it never breaks. The user pastes their ' +
+        'key into .env; NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['openweathermap', 'weatherapi'], description: 'The weather provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1402,6 +1418,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_cache',
   'generate_newsletter',
   'generate_currency',
+  'generate_weather',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

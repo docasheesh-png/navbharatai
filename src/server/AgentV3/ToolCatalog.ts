@@ -894,6 +894,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_jobs',
+      description:
+        'Add real background-job processing / a task queue to the app (Bring-Your-Own infra): a server ' +
+        'enqueueJob(queue, data) + processJobs(queue, handler) helper, for "bullmq" (Redis-backed) or ' +
+        '"pgboss" (Postgres-backed). Moves slow work (email, image processing, webhooks, scheduled tasks) ' +
+        'off the request path. The user points REDIS_URL / DATABASE_URL at their own infra in .env; ' +
+        'NavBharatAI never stores it. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['bullmq', 'pgboss'], description: 'The job-queue backend to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1198,6 +1214,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_otp',
   'generate_analytics',
   'generate_map',
+  'generate_jobs',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

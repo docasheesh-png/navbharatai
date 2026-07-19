@@ -114,6 +114,17 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     startCommand: 'npm run dev',
   },
   {
+    id: 'alpine',
+    name: 'Alpine.js + Vite',
+    description: 'Tiny reactive behaviour sprinkled into HTML — no build-heavy SPA',
+    category: 'frontend',
+    language: 'TypeScript',
+    color: '#77C1D2',
+    iconChar: '🏔️',
+    devPort: 5173,
+    startCommand: 'npm run dev',
+  },
+  {
     id: 'sveltekit',
     name: 'SvelteKit',
     description: 'Full-stack Svelte framework with file-based routing',

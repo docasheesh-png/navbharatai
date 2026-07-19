@@ -149,6 +149,7 @@ import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
+import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -3926,6 +3927,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('pdf generation');
         return `Wired PDF generation:\n${pdfWritten.join('\n')}\nAdd the dependency: ${pdfcfg.dependency.name}@${pdfcfg.dependency.version}\n\n${pdfcfg.instructions}`;
+      }
+
+      case 'generate_csv': {
+        // U-4 recipe — real CSV import/export (papaparse): a server toCsv + parseCsv helper
+        // (server/lib/csv.ts) with RFC-4180-correct quoting. Pure generator in CsvGenerator.ts. No env keys.
+        const csvcfg = generateCsvIntegration();
+        const csvWritten: string[] = [];
+        for (const [path, content] of Object.entries(csvcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csvWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('csv import/export');
+        return `Wired CSV import/export:\n${csvWritten.join('\n')}\nAdd the dependency: ${csvcfg.dependency.name}@${csvcfg.dependency.version}\n\n${csvcfg.instructions}`;
       }
 
       case 'generate_image': {

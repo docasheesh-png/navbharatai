@@ -279,6 +279,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'preact', 'preactjs', // Preact + Vite frontend scaffold (tiny React alternative)
       'lit', 'litelement', 'lit-html', 'web component', 'web components', // Lit + Vite (Web Components)
       'alpine', 'alpinejs', 'alpine.js', // Alpine.js + Vite (lightweight HTML-driven reactivity)
+      'hono', // Hono + Node backend API framework
       'polyglot', 'fullstack', 'full stack', 'rest api', 'microservice', 'java app', 'go app', 'java banao', 'backend banao',
       // Bring-Your-Own integration recipes the builder can wire (users ask "can you add X to my app?")
       'add integration', 'integrate', 'byo', 'bring your own', 'add feature to app', 'connect service',

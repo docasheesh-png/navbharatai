@@ -184,6 +184,17 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     startCommand: 'npm run dev',
   },
   {
+    id: 'hono',
+    name: 'Hono',
+    description: 'Ultrafast modern web framework — Web-standard, runs on Node/edge',
+    category: 'backend',
+    language: 'TypeScript',
+    color: '#FF5B11',
+    iconChar: '🔥',
+    devPort: 3000,
+    startCommand: 'npm run dev',
+  },
+  {
     id: 'nestjs',
     name: 'NestJS',
     description: 'Enterprise Node.js framework with decorators & DI',

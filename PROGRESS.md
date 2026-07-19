@@ -19360,3 +19360,42 @@ Closes the last observability ❌ ("Tracing"). With logging (generate_observabil
 
 **Observability trio complete: logs + metrics + traces.** Batched onto PR #1616 (metrics + tracing). Session:
 16 real features + audit; Tier-1 complete, Tier-2 effectively complete.
+
+---
+
+## 2026-07-19 — Recipe breadth batch (U-4): 11 real generator recipes toward "world's best app builder"
+
+A continuous branch → verify → PR → CI-green → self-merge conveyor (CI always in background, never
+idle-waited) added eleven new, fully-wired `generate_*` recipes to AgentV3's ToolCatalog, so a built app
+can request real, production-grade capabilities. Every recipe is a pure generator (`*Generator.ts` → files +
+optional dependency + instructions), wired at all three points — `ToolDispatcher` (case), `ToolCatalog`
+(def + `CATALOG_TOOL_NAMES`), `AppKnowledgeBase` (capability bullet + keywords) — with a unit test and the
+`ToolWiring` structural guard green. No fakes, no stubs (rules 1–2). Distinct wiring anchors per recipe so
+they merge independently without conflict.
+
+**Shipped (each its own PR, squash-merged to main):**
+- `generate_qr` (#1617) — QR codes (qrcode): PNG data-URL + SVG (tickets, UPI links).
+- `generate_pdf` (#1618) — PDF generation (pdfkit): createInvoicePdf + generic createPdf → Buffer.
+- `generate_image` (#1621) — image processing (sharp): resizeImage + makeThumbnail (WebP, EXIF-aware).
+- `generate_sanitize_html` (#1623) — XSS prevention (sanitize-html): allowlist sanitizeHtml + sanitizeToText.
+- `generate_slug` (#1624) — URL slugs, **Unicode/Indic-aware** (`\p{L}\p{N}\p{M}`): fixed a real Devanagari
+  root cause (matras were being stripped → `नमस्ते` shattered to `नमस-त`); regression-locked.
+- `generate_csv` (#1620) — CSV import/export (papaparse): toCsv + parseCsv, RFC-4180-correct.
+- `generate_file_upload` (#1625) — upload validation by **magic bytes** (dependency-free): detects true type,
+  not the forgeable client mime/extension; rejects a renamed .php/script.
+- `generate_webhook` (#1622) — incoming-webhook HMAC verify (node:crypto): constant-time, RAW body, sha256=.
+- `generate_password` (#1626) — password hashing (bcryptjs, pure JS): hash/verify/needsRehash; complements
+  generate_auth.
+- `generate_money_format` (#1627) — **Indian** money/number formatting (Intl en-IN): lakh/crore grouping +
+  rupees-in-words; money as integer paise.
+- `generate_datetime` (#1628) — **IST** date/time formatting (Intl Asia/Kolkata): fixes the UTC-server
+  5.5h-off bug + relativeTime.
+
+Each India-first recipe (slug, money, datetime) was runtime-verified against real Hindi/₹/IST inputs before
+commit, not just structurally tested. All generators are pure and dependency-light; five are fully
+dependency-free (sanitize excepted). Verification gate (server `tsc` + `vitest` per-recipe + `ToolWiring`)
+green on every branch before push.
+
+**Process note (root-cause, rule 4):** an early treadmill where two branches sharing the same catalog/KB
+anchor forced repeated rebases was eliminated by giving every recipe a **distinct** wiring anchor (and a
+distinct AppKnowledgeBase keyword line); after that, all remaining PRs merged conflict-free.

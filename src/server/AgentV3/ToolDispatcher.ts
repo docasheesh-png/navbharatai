@@ -116,6 +116,7 @@ import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/Analyt
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
+import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3219,6 +3220,29 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('sms integration');
         return `Wired ${smProvider} transactional SMS:\n${smWritten.join('\n')}\nAdd the dependency: ${smcfg.dependency.name}@${smcfg.dependency.version}\n\n${smcfg.instructions}`;
+      }
+
+      case 'generate_ratelimit': {
+        // U-4 recipe — real API rate limiting (express-rate-limit) with a "memory" (single instance) or
+        // "redis" (distributed) store. Pure generator in RateLimitGenerator.ts.
+        const rlStore = optStr(input, 'store');
+        if (!isRateLimitStore(rlStore)) return 'generate_ratelimit: pass store = "memory" | "redis".';
+        const rlcfg = generateRateLimitIntegration(rlStore);
+        const rlWritten: string[] = [];
+        for (const [path, content] of Object.entries(rlcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); rlWritten.push(`Kept existing ${path} (add: ${rlcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('rate-limit integration');
+        const rlDeps = rlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${rlStore}-store API rate limiting:\n${rlWritten.join('\n')}\nAdd the dependencies: ${rlDeps}\n\n${rlcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -181,6 +181,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • INTERACTIVE MAPS (Google Maps / Mapbox): v5.0 can add a real interactive map component (markers, pan/zoom) to your app. You paste your map key into .env; NavBharatAI never stores it.
 • GEOCODING (Google / Mapbox): v5.0 can add a server geocode(address) → { lat, lng } (and reverse) helper — turn an address into coordinates for maps, delivery and store-locators. Server-side (the key never reaches the browser); you paste it into .env; NavBharatAI never stores it.
 • BACKGROUND JOBS / QUEUES (BullMQ / pg-boss): v5.0 can add a real job queue — an enqueue(name, data) producer + a worker that processes jobs off-request (emails, exports, image processing) so slow work doesn't block the response. Uses your Redis (BullMQ) or Postgres (pg-boss); you paste the connection into .env; NavBharatAI never stores it.
+• JOB SCHEDULER / CRON (generate_scheduler): v5.0 can add a real recurring-job scheduler (server/lib/scheduler.ts) — dependency-free scheduleEvery(ms, fn) for fixed-interval work (hourly sync, cleanup) and scheduleDailyUtc(hour, minute, fn) for "run once a day at HH:MM UTC" (nightly purge, daily digest). The daily job recomputes its next run each day so it never drifts, a thrown run never stops the loop, and each returns stop(). Distinct from background jobs (a queue). Honest scope: in-process only — for a run that survives a restart/scale-to-0, drive it from an external cron. No keys.
 • API RATE LIMITING (in-memory / Redis): v5.0 can add a real rate-limit middleware that caps requests per IP/user (protects login, APIs and expensive routes) — in-memory for a single instance or Redis-backed for multi-instance. You paste the Redis URL (if used) into .env; NavBharatAI never stores it.
 • ERROR TRACKING (Sentry / Rollbar): v5.0 can wire real production error monitoring — client + server capture so exceptions reach your dashboard with stack traces instead of vanishing. You paste your DSN/token into .env; NavBharatAI never stores it.
 • FEATURE FLAGS (LaunchDarkly / Unleash): v5.0 can add a real isEnabled(flag, user) helper so you can turn features on/off and roll out gradually without a redeploy. You paste your SDK key into .env; NavBharatAI never stores it.
@@ -313,6 +314,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'maps', 'map', 'google maps', 'mapbox', 'interactive map',
       'geocode', 'geocoding', 'address to coordinates', 'lat lng', 'reverse geocode',
       'background jobs', 'job queue', 'queue', 'bullmq', 'pg-boss', 'worker', 'cron job',
+      'scheduler', 'schedule job', 'cron', 'recurring', 'daily job', 'nightly', 'setinterval', 'scheduled task', 'run every', 'run daily',
       'rate limit', 'rate limiting', 'throttle', 'api limit',
       'error tracking', 'error monitoring', 'sentry', 'rollbar', 'crash reporting',
       'feature flags', 'feature flag', 'launchdarkly', 'unleash', 'toggle feature',

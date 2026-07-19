@@ -920,6 +920,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_scheduler',
+      description:
+        'Add a real recurring-job scheduler to the app (server/lib/scheduler.ts): dependency-free ' +
+        'scheduleEvery(ms, fn) for fixed-interval work (hourly sync, cleanup) and scheduleDailyUtc(hour, ' +
+        'minute, fn) for "run once a day at HH:MM UTC" (nightly purge, daily digest). The daily job recomputes ' +
+        'its next run each day so it never drifts, a thrown run never stops the loop, and each returns stop(). ' +
+        'Distinct from generate_jobs (a queue for off-request work). Honest scope: in-process (alive-only) — ' +
+        'for a guaranteed run across restarts/scale-to-0, drive it from an external cron. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_sms',
       description:
         'Add real transactional SMS to the app (Bring-Your-Own keys): a server sendSms(to, body) helper for ' +
@@ -1875,6 +1886,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_analytics',
   'generate_map',
   'generate_jobs',
+  'generate_scheduler',
   'generate_sms',
   'generate_password',
   'generate_ratelimit',

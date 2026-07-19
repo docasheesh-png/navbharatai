@@ -19320,3 +19320,43 @@ cannot express.
 **Enterprise pair complete: SSO (OIDC) + ABAC.** PR #1608 now carries the full T1.4 + Tier-2 batch
 (analyze_requirements, i18n, ui-states, image-opt, sso, abac). Letting it settle to merge (6 real features).
 Remaining Tier-2: observability logger/metrics injection (fresh PR after #1608 lands).
+
+---
+
+## 2026-07-19 — T2.8 `generate_metrics` — Prometheus metrics (observability)
+
+#1608 merged (37e74af — the 6-feature T1.4+Tier-2 batch). Continued Tier-2. Cross-matched: structured
+logging (pino) already exists via `generate_observability`/`LoggingGenerator`, but metrics + tracing were
+genuinely absent (audit DevOps ❌). `generate_metrics` closes the metrics half without duplicating logging.
+
+**Shipped (pure):**
+- `src/server/lib/MetricsGenerator.ts` — `generateMetrics()` emits `server/lib/metrics.ts` (a prom-client
+  registry with `collectDefaultMetrics` + `http_requests_total` counter + `http_request_duration_seconds`
+  histogram + a `metricsMiddleware` that records count/latency per request, labelled by the MATCHED route
+  pattern so cardinality stays bounded) and `server/routes/metrics.routes.ts` (`GET /metrics` in Prometheus
+  text format). Adds the prom-client dependency.
+- Wired as the `generate_metrics` tool. Gate green: server `tsc` + `vitest` MetricsGenerator 3/3 + ToolCatalog
+  5/5 + ToolDispatcher 145/145.
+
+Fresh branch off `37e74af`, own PR. Observability now: logging (existing) + metrics (this) — tracing
+(OpenTelemetry) remains a fast-follow. **Session so far: 15 real features + audit; Tier-1 complete, Tier-2
+largely done (i18n, ui-states, image-opt, sso, abac, metrics).**
+
+---
+
+## 2026-07-19 — T2.8 (cont.) `generate_tracing` — OpenTelemetry distributed tracing (observability trio complete)
+
+Closes the last observability ❌ ("Tracing"). With logging (generate_observability) + metrics
+(generate_metrics), this completes the trio.
+
+**Shipped (real OpenTelemetry, BYO collector):**
+- `src/server/lib/TracingGenerator.ts` — `generateTracing()` emits `server/tracing.ts` (a NodeSDK with
+  `getNodeAutoInstrumentations()` for HTTP/Express/DB + an OTLP HTTP exporter; `sdk.start()` + a SIGTERM
+  flush) and a blank `.env.example` (OTEL_SERVICE_NAME / OTEL_EXPORTER_OTLP_ENDPOINT; never overwrites an
+  existing one). With no endpoint set it is a no-op → never breaks the app. Deps: @opentelemetry/sdk-node +
+  auto-instrumentations-node + exporter-trace-otlp-http.
+- Wired as the `generate_tracing` tool. Gate green: server `tsc` + `vitest` TracingGenerator 3/3 + ToolCatalog
+  5/5 + ToolDispatcher 145/145.
+
+**Observability trio complete: logs + metrics + traces.** Batched onto PR #1616 (metrics + tracing). Session:
+16 real features + audit; Tier-1 complete, Tier-2 effectively complete.

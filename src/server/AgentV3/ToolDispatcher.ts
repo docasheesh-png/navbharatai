@@ -129,6 +129,8 @@ import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
 import { generateSsoIntegration } from '../lib/SsoGenerator';
 import { generateAbac } from '../lib/AbacGenerator';
+import { generateMetrics } from '../lib/MetricsGenerator';
+import { generateTracing } from '../lib/TracingGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -3052,6 +3054,44 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('abac');
         return `Wired ABAC:\n${abacWritten.join('\n')}\n\n${abac.instructions}`;
+      }
+
+      case 'generate_metrics': {
+        // T2.8 recipe — Prometheus metrics (registry + request middleware + /metrics route). Pure generator.
+        const met = generateMetrics();
+        const metWritten: string[] = [];
+        for (const [path, content] of Object.entries(met.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          metWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('metrics');
+        const metDeps = met.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired Prometheus metrics:\n${metWritten.join('\n')}\nAdd the dependencies: ${metDeps}\n\n${met.instructions}`;
+      }
+
+      case 'generate_tracing': {
+        // T2.8 recipe — OpenTelemetry distributed tracing (NodeSDK + auto-instrumentation + OTLP). Pure
+        // generator in TracingGenerator.ts. BYO collector endpoint; never overwrites an existing .env.example.
+        const trc = generateTracing();
+        const trcWritten: string[] = [];
+        for (const [path, content] of Object.entries(trc.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); trcWritten.push(`Kept existing ${path} (add: ${trc.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          trcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('tracing');
+        const trcDeps = trc.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired OpenTelemetry tracing:\n${trcWritten.join('\n')}\nAdd the dependencies: ${trcDeps}\n\n${trc.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

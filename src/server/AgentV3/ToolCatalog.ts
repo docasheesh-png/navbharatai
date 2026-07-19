@@ -1362,6 +1362,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_slug',
+      description:
+        'Add a real URL slug generator to the app (server/lib/slug.ts): a dependency-free slugify(title) that ' +
+        'turns any title into a clean, URL-safe slug for blog posts, product pages, docs and profiles, plus ' +
+        'uniqueSlug(title, existing) for collision-safe slugs. Unicode-aware — Hindi/Indic titles (e.g. ' +
+        '"नमस्ते दुनिया" → "नमस्ते-दुनिया") produce a real slug instead of an empty string, and Latin accents ' +
+        'are folded (café → cafe). No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_validation',
       description:
         'Add real request/input validation to the app (server/lib/validate.ts, zod): a typed validateBody() ' +
@@ -1775,6 +1785,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_notify',
   'generate_env_validation',
   'generate_cors',
+  'generate_slug',
   'generate_validation',
   'generate_sanitize_html',
   'generate_logging',

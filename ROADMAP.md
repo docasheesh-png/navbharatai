@@ -424,6 +424,10 @@ safely edit, or truly verify it).
   existing `.env.example`. (Smoke-testing the generated recipe end-to-end remains a future enhancement.)
 - **Cap-4** 🟢🟡 — Auto-inject observability (error handler + request logger + `/health`) into
   generated apps + cost-alerting thresholds.
+  **Advisory half SHIPPED (#1548, 2026-07-19):** `ObservabilityAnalysis.scanObservability` is an `evaluate`
+  dimension that flags a backend missing a `/health` route (high), an Express/Koa error handler (medium), or
+  a request logger (low) — project-level, conservative (SPA/Fastify/Nest not false-flagged). **Remaining ❌:**
+  the auto-INJECTION half (write the handler/logger/`/health` into the app) + cost-alerting thresholds.
 
 ### 2E · Pipeline verification stages (P-PIPE)
 - 🟢❌ Runtime smoke tests (hit routes/API, auth, DB reads) · hydration validation · post-deploy liveness check.
@@ -431,8 +435,11 @@ safely edit, or truly verify it).
 - 🟢🟡 Wire eslint + prettier + `npm audit`/CVE + license-validation gates into the AgentV3 pipeline.
   **License slice SHIPPED (#1444, 2026-07-16):** `SBOMGenerator.licenseAdvisorySummary` + the `check_licenses`
   tool flag strong-copyleft (GPL/AGPL) deps (on-demand parity with the CVE `scan_vulnerabilities` tool).
-  ESLint gate + OSV CVE already exist. **Remaining ❌:** auto-running prettier + CVE + license at BUILD-END
-  (vs on-demand) — a small AgentRunner-gate wiring slice.
+  ESLint gate + OSV CVE already exist. **CVE + license build-end auto-run SHIPPED (#1551, 2026-07-19):**
+  `DependencyHealthGate` + `ToolDispatcher.assessDependencyHealthGate` run the OSV/CVE scan + strong-copyleft
+  check at BUILD-END and append one advisory block to a successful build's summary — advisory-only (never
+  blocks), default-OFF behind `AGENTV3_DEPHEALTH_GATE=on`. **Remaining ❌:** auto-running **prettier** at
+  build-end (the CVE + license halves are now wired).
 - 🟢❌ Perf/bundle-size + Lighthouse gate (blocker for complex apps) · a11y as a blocker for complex apps.
 - 🟢❌ Task-dependency graph (`TodoItem.dependsOn`) for correct big-app build order.
 - 🟢❌ Real interactive clarification round (bounded `ask_user` tool for complex apps).

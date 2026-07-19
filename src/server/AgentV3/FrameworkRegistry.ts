@@ -103,6 +103,17 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     startCommand: 'npm run dev',
   },
   {
+    id: 'lit',
+    name: 'Lit + Vite',
+    description: 'Fast, standards-based Web Components — reactive props, no virtual DOM',
+    category: 'frontend',
+    language: 'TypeScript',
+    color: '#324FFF',
+    iconChar: '💡',
+    devPort: 5173,
+    startCommand: 'npm run dev',
+  },
+  {
     id: 'sveltekit',
     name: 'SvelteKit',
     description: 'Full-stack Svelte framework with file-based routing',

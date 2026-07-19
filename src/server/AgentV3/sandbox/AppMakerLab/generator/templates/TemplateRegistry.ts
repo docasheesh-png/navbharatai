@@ -6,6 +6,7 @@ import { SvelteProvider } from './SvelteProvider';
 import { SvelteKitProvider } from './SvelteKitProvider';
 import { SolidProvider } from './SolidProvider';
 import { PreactProvider } from './PreactProvider';
+import { LitProvider } from './LitProvider';
 import { NodeExpressProvider } from './NodeExpressProvider';
 import { NestJSProvider } from './NestJSProvider';
 import { FastifyProvider } from './FastifyProvider';
@@ -47,6 +48,7 @@ export class TemplateRegistry {
     // Other frontend
     'solid': new SolidProvider(),
     'preact': new PreactProvider(),
+    'lit': new LitProvider(),
     'astro': new AstroProvider(),
     'angular': new AngularProvider(),
     'vanilla': new VanillaProvider(),

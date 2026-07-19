@@ -19130,3 +19130,24 @@ settings recipe existed, and `AuthCodeGenerator` had no role logic — so "Roles
 
 Fresh branch off `e0420bb` (post-#1598 main), its own PR (option-1 small-verified-merges). Next Tier-1
 slices: `generate_admin` / `generate_dashboard` (build on this RBAC), then T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 2) `generate_admin` — React admin page recipe
+
+After #1603 (generate_rbac) merged, continued the product-scaffold conveyor. Cross-matched live: no admin
+recipe existed, but a frontend-emitting recipe precedent does (`RealtimeGenerator` emits client React code),
+and `generate_crud` exposes `/api/<resource>` endpoints — so an admin UI can bind straight to them.
+
+**Shipped (pure, dependency-free, real React code):**
+- `src/server/lib/AdminGenerator.ts` — `generateAdmin(entity)` emits one page `src/admin/<Model>Admin.tsx`:
+  a paginated table (columns = id + writable fields + createdAt) that reads `GET /api/<route>?page&limit`,
+  a per-row Delete calling `DELETE /api/<route>/:id` then refetching, and honest loading / error / empty
+  states. Plain React + fetch — no new deps.
+- Wired as the `generate_admin` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). It
+  pairs with `generate_crud` (the endpoints) and `generate_rbac` (guard the route with `requireRole('admin')`).
+- Closes the "Admin" Feature-Completeness gap. Gate green: server `tsc` + `vitest` AdminGenerator 4/4 +
+  ToolCatalog 5/5 + ToolDispatcher 145/145. No AppKnowledgeBase entry — consistent with sibling recipes.
+
+Fresh branch off `c252958` (post-#1603 main), own PR (option-1). Next: `generate_dashboard` (stats summary),
+then T1.4 smart clarification.

@@ -120,6 +120,7 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
+import { generateAdmin } from '../lib/AdminGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2870,6 +2871,35 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('rbac');
         return `Wired RBAC:\n${rbacWritten.join('\n')}\n\n${rbac.instructions}`;
+      }
+
+      case 'generate_admin': {
+        // T1.3 recipe — a React admin page (paginated table + delete) bound to generate_crud's endpoints.
+        // Pure generator in AdminGenerator.ts; guard the route with generate_rbac's requireRole('admin').
+        const adminRec = (input as Record<string, unknown>) || {};
+        const adminName = typeof adminRec.name === 'string' ? adminRec.name : '';
+        if (!adminName) return 'generate_admin: pass the resource "name" (e.g. "Post") and its "fields".';
+        const adminRawFields = Array.isArray(adminRec.fields) ? adminRec.fields : [];
+        const adminFields = adminRawFields
+          .map((f: unknown) => {
+            if (typeof f !== 'object' || f === null) return null;
+            const fo = f as Record<string, unknown>;
+            const fname = typeof fo.name === 'string' ? fo.name : '';
+            return fname ? { name: fname, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+          })
+          .filter((f): f is { name: string; type: string | undefined } => f !== null);
+        const admin = generateAdmin({ name: adminName, fields: adminFields });
+        const adminWritten: string[] = [];
+        for (const [path, content] of Object.entries(admin.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          adminWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`admin (${adminName})`);
+        return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

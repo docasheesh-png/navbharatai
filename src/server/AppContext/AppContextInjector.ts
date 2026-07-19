@@ -186,8 +186,18 @@ export class AppContextInjector {
 
   private static scoreFeature(f: AppFeature, msg: string, surface?: string): number {
     let score = 0;
+    // A MULTI-WORD keyword phrase is a strong, intentional signal → substring hit counts (+3). A SINGLE-WORD
+    // keyword must match on a WORD BOUNDARY (a query token), never as a substring — otherwise a short keyword
+    // like "ist" (IST timezone) falsely fires inside "min-IST-er", or "pr" inside "PRime", injecting a
+    // misleading feature for an unrelated question.
+    const msgTokens = new Set(msg.split(/[^a-z0-9]+/i).filter(Boolean));
     for (const kw of f.keywords) {
-      if (msg.includes(kw)) score += kw.includes(' ') ? 3 : 2;
+      if (!kw) continue;
+      if (kw.includes(' ')) {
+        if (msg.includes(kw)) score += 3;
+      } else if (msgTokens.has(kw)) {
+        score += 2;
+      }
     }
     // Exact feature-name token hit is a strong signal.
     if (msg.includes(f.name.toLowerCase())) score += 3;

@@ -18773,3 +18773,37 @@ Cap-4 observability injection (/health #1554 + error-handler #1555). Full suite 
 across the whole run; the only failing suites throughout remained the pre-existing `src/server/sonic/*`
 optional-dep load failures (unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-
 only or default-off-gated or purely additive — none can break a build.
+## 2026-07-19 — ShopSphere (App #12, Nuxt) autopsy — fix A: framework-aware simple-build prompt
+
+App #12 (ShopSphere, multi-vendor marketplace, Nuxt 3) — Nuxt was correctly DETECTED (#1509 works), but the
+build's per-file simple-build prompt injected a 100%-REACT export/import convention into a NUXT build
+(`fileSystemPrompt`/`repairSystemPrompt` appended `EXPORT_IMPORT_CONVENTION`, whose text says "A React
+COMPONENT file → export default … import React …"). So the model wrote React-style components, invented Nuxt
+modules that weren't requested (`useSupabaseClient`, `useI18n`, `#auth`, `<Icon>` — the app is Prisma/Postgres,
+not Supabase), and duplicate-imported the same type (`OrderStatus` twice) — cross-file drift by construction.
+
+Fix A: `exportImportConvention(framework)` (pure, exported) picks the convention by framework — Vue/Nuxt
+(SFC + `<script setup>` + auto-imports + Pinia; explicitly "do NOT invent `useSupabaseClient`/`#auth`/`<Icon>`";
+"import each type EXACTLY ONCE"), Svelte/SvelteKit (`.svelte` + `export let` + `$lib`), React family
+(unchanged), and a framework-neutral fallback (Angular/Solid/Astro/unknown). Wired into both
+`fileSystemPrompt` and `repairSystemPrompt`. This folds in ShopSphere findings D (hallucinated modules) and
+E (duplicate imports) as prompt-level guards. Tests: 5 new. Gate: server tsc 0, SimpleBuilder 65 pass.
+
+WHY the report was partial (admin observed live): the build HALTED on a client↔server "network error" at
+~145 steps (~1m12s into the full builder, after 35 files) — a stream disconnect, not an engine bug — so the
+diagnostics were incomplete and the full-builder + gates never got to fix the fast-lane's C/D/E issues.
+Open ShopSphere items still to address: B (.env DATABASE_URL sqlite vs schema postgresql mismatch),
+F (salvage→sandbox sync: architect read_file on a salvaged file said "does not exist"), G (GLM fast-lane
+429-storm + 200s latencies → fast-lane 240s timeout at 25/39; proactive pacer), H (intent misclassified as
+DEPLOY/SHIP). And the network-error-halts-a-long-build robustness (resume path) if it recurs.
+
+## 2026-07-19 — ShopSphere autopsy fix H: "production-<quality>" no longer misread as a deploy request
+
+Finding H: the full-builder got a "CONVERSATION PHASE — DEPLOY/SHIP: the user wants to publish" posture on a
+FRESH build. Root cause: `DialogueStateManager.DEPLOY_RE` matched the bare word `production`, and the
+ShopSphere prompt ended with "Production-clean, mobile-responsive" — a QUALITY bar, not a deploy request. So
+`inferPhase` returned `deployed` and the builder was told to publish instead of build. Fix: a negative
+lookahead on `production` that ignores the quality compounds (`production-clean/ready/grade/quality/level/
+worthy/ise/ize`) while still catching a real "deploy to production". New test file (9 cases: the exact
+ShopSphere ending → building; quality compounds → building; real deploy words → deployed; other phases
+intact). Gate: server tsc 0, DialogueStateManager 9 pass. Shipped with fix A in the same ShopSphere PR.

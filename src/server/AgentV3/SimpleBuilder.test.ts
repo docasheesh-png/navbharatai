@@ -1,6 +1,50 @@
 import { describe, it, expect } from 'vitest';
-import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles } from './SimpleBuilder';
+import { parseFileManifest, runSimpleBuild, manifestSystemPrompt, fileUserPrompt, fileSystemPrompt, repairSystemPrompt, contractBlock, contractSystemPrompt, repairUserPrompt, generationTier, dependencyContext, blueprintAdvisoryBlock, cssBraceImbalance, repairStrategyForAttempt, REPAIR_LADDER, offendingFiles, exportImportConvention } from './SimpleBuilder';
 import type { OneShotFile } from './OneShotBuilder';
+
+describe('exportImportConvention — framework-aware (ShopSphere/Nuxt autopsy: React rules were fed to Nuxt)', () => {
+  const join = (fw: string) => exportImportConvention(fw).join('\n');
+
+  it('Vue/Nuxt gets the Vue convention (SFC + auto-import), NOT React', () => {
+    for (const fw of ['nuxt', 'vue', 'Nuxt 3']) {
+      const t = join(fw);
+      expect(t).toContain('Vue 3 / Nuxt');
+      expect(t).toContain('Single-File Components');
+      expect(t).toContain('AUTO-IMPORTED');
+      expect(t).not.toContain('A React COMPONENT'); // the React-convention marker must be absent
+      // the exact ShopSphere mistakes are explicitly forbidden
+      expect(t).toContain('useSupabaseClient');
+      expect(t).toContain('EXACTLY ONCE'); // duplicate-import guard
+    }
+  });
+
+  it('Svelte/SvelteKit gets the Svelte convention', () => {
+    const t = join('sveltekit');
+    expect(t).toContain('Svelte');
+    expect(t).toContain('export let');
+    expect(t).toContain('$lib');
+    expect(t).not.toContain('A React COMPONENT');
+  });
+
+  it('React family (react / vite-react / next / remix) keeps the React convention', () => {
+    for (const fw of ['react', 'vite-react', 'nextjs', 'remix']) {
+      expect(join(fw)).toContain('A React COMPONENT file');
+    }
+  });
+
+  it('unknown / Angular falls back to the framework-neutral convention (no React specifics)', () => {
+    const t = join('angular');
+    expect(t).not.toContain('A React COMPONENT');
+    expect(t).not.toContain('Vue 3');
+    expect(t).toContain('IDIOMATIC');
+  });
+
+  it('fileSystemPrompt + repairSystemPrompt both carry the framework-correct convention for Nuxt', () => {
+    expect(fileSystemPrompt('nuxt')).toContain('Single-File Components');
+    expect(repairSystemPrompt('nuxt')).toContain('Single-File Components');
+    expect(fileSystemPrompt('nuxt')).not.toContain('A React COMPONENT');
+  });
+});
 
 describe('parseFileManifest', () => {
   it('parses "path :: purpose" lines, stripping bullets', () => {

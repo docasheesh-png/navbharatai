@@ -427,7 +427,7 @@ safely edit, or truly verify it).
   **Advisory half SHIPPED (#1548, 2026-07-19):** `ObservabilityAnalysis.scanObservability` is an `evaluate`
   dimension that flags a backend missing a `/health` route (high), an Express/Koa error handler (medium), or
   a request logger (low) — project-level, conservative (SPA/Fastify/Nest not false-flagged).
-  **Injection half — `/health` SHIPPED (#1553, 2026-07-19):** `ObservabilityInjector.injectHealthEndpoint`
+  **Injection half — `/health` SHIPPED (#1554, 2026-07-19):** `ObservabilityInjector.injectHealthEndpoint`
   deterministically adds a `/health` route to an Express entry that lacks one (dependency-free, purely
   additive), persisted through the durable write path; wired as a default-OFF build-end gate
   (`AGENTV3_OBSERVABILITY_INJECT=on`), never blocks. High precision — only the unambiguous single-entry case.

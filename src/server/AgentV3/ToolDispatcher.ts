@@ -76,7 +76,7 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
-import { nextBuildRepairHint } from './frameworkBuildHints';
+import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1226,7 +1226,25 @@ export class ToolDispatcher {
       }
 
       case 'write_file': {
-        const path = reqStr(input, 'path');
+        let path = reqStr(input, 'path');
+        // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY
+        // from the project root (`middleware.ts`) or `src/middleware.ts` — a `app/middleware.*` is
+        // SILENTLY ignored, so the route guards / auth it holds never run and every guarded route is
+        // unprotected while the app looks fine. Relocate the misplaced file to where Next actually reads
+        // it. Deterministic (Next semantics are unambiguous — app/middleware is ALWAYS wrong). Kill
+        // switch AGENTV3_NEXT_MW_FIX=off.
+        if (process.env.AGENTV3_NEXT_MW_FIX !== 'off' && (this.framework === 'nextjs' || this.framework === 'next')) {
+          const corrected = nextMiddlewareCorrectPath(path);
+          if (corrected && corrected !== path) {
+            this.events?.emit({
+              type: 'narration', agent,
+              text: `🔧 Moved \`${path}\` to \`${corrected}\` — Next.js only runs middleware from the project root, so the route guards were silently disabled where it was written.`,
+              ts: Date.now(),
+            });
+            try { getWorkspaceMemory(this.workspaceId).recordAudit(`[NEXT-MW] relocated misplaced middleware ${path} → ${corrected}`); } catch { /* audit best-effort */ }
+            path = corrected;
+          }
+        }
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)

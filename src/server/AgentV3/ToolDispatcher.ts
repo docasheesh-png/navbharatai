@@ -104,6 +104,7 @@ import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager 
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
+import { dependencyHealthVerdict } from './DependencyHealthGate';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
@@ -409,6 +410,55 @@ export class ToolDispatcher {
       })(), 45_000, 'assessLintGate');
     } catch {
       return permissive;
+    }
+  }
+
+  /**
+   * P-PIPE — run the project's dependency-health checks (OSV/CVE + strong-copyleft license) at BUILD-END and
+   * return one advisory block for the build summary. ADVISORY-ONLY: never blocks a build. Best-effort +
+   * timeout-bounded (parity with assessLintGate): on no package.json, an unreachable OSV API, an invalid
+   * lockfile, or a slow scan it returns '' (clean) so it can never fail a real build on its own trouble.
+   * AgentRunner only calls this when AGENTV3_DEPHEALTH_GATE is enabled.
+   */
+  async assessDependencyHealthGate(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        let vulnFindings = 0;
+        let vulnSummary = '';
+        let copyleftStrong = 0;
+        let licenseSummary = '';
+
+        // 1) CVE / OSV supply-chain scan (needs package.json; lockfile improves resolution).
+        let pkgJson: string | undefined;
+        try { pkgJson = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgJson = undefined; }
+        if (typeof pkgJson === 'string') {
+          let lockJson: string | undefined;
+          try { lockJson = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockJson = undefined; }
+          const deps = resolveDependencies(pkgJson, lockJson);
+          const result = await scanVulnerabilities(deps);
+          if (result.ok && result.findings.length > 0) {
+            vulnFindings = result.findings.length;
+            vulnSummary = vulnScanSummary(result);
+          }
+        }
+
+        // 2) Strong-copyleft license classification (needs package-lock.json; pure, no network).
+        let lockRaw: string | undefined;
+        try { lockRaw = await this.actuator.readFile(this.workspaceId, 'package-lock.json'); } catch { lockRaw = undefined; }
+        if (typeof lockRaw === 'string') {
+          try {
+            const analysis = analyzeAppDependencies(JSON.parse(lockRaw));
+            if (analysis.hasCopyleftRisk) {
+              copyleftStrong = analysis.copyleft.strong.length;
+              licenseSummary = licenseAdvisorySummary(analysis);
+            }
+          } catch { /* invalid lockfile — skip the license half, never throw */ }
+        }
+
+        return dependencyHealthVerdict({ vulnFindings, vulnSummary, copyleftStrong, licenseSummary }).summary;
+      })(), 45_000, 'assessDependencyHealthGate');
+    } catch {
+      return '';
     }
   }
 

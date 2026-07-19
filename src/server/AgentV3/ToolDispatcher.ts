@@ -125,6 +125,7 @@ import { generateTranslationIntegration, isTranslationProvider } from '../lib/Tr
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
+import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3434,6 +3435,28 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('newsletter integration');
         const nlDepLine = nlcfg.dependency ? `\nAdd the dependency: ${nlcfg.dependency.name}@${nlcfg.dependency.version}` : '\n(No npm dependency needed — the provider REST API is called with the built-in fetch.)';
         return `Wired ${nlProvider} newsletter signup:\n${nlWritten.join('\n')}${nlDepLine}\n\n${nlcfg.instructions}`;
+      }
+
+      case 'generate_currency': {
+        // U-4 recipe — real BYO currency conversion (ExchangeRate-API/Fixer): a server getRate + convert
+        // helper (REST via fetch, no dependency). Pure generator in CurrencyGenerator.ts.
+        const cuProvider = optStr(input, 'provider');
+        if (!isCurrencyProvider(cuProvider)) return 'generate_currency: pass provider = "exchangerate" | "fixer".';
+        const cucfg = generateCurrencyIntegration(cuProvider);
+        const cuWritten: string[] = [];
+        for (const [path, content] of Object.entries(cucfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); cuWritten.push(`Kept existing ${path} (add: ${cucfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cuWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('currency integration');
+        return `Wired ${cuProvider} currency conversion:\n${cuWritten.join('\n')}\n(No npm dependency needed — the exchange-rate REST API is called with the built-in fetch.)\n\n${cucfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

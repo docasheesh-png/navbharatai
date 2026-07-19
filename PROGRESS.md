@@ -18773,3 +18773,79 @@ Cap-4 observability injection (/health #1554 + error-handler #1555). Full suite 
 across the whole run; the only failing suites throughout remained the pre-existing `src/server/sonic/*`
 optional-dep load failures (unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-
 only or default-off-gated or purely additive — none can break a build.
+
+---
+
+## 2026-07-19 — Capability Audit: 30-category engineering framework matched to REAL code (gap ledger + roadmap)
+
+An admin-supplied external framework (30 categories, ~270 sub-points — the standard "professional
+software-architecture review" checklist) was **matched item-by-item against the actual AgentV3 codebase**
+by six parallel read-only investigators grepping `src/server/AgentV3`, `src/server`, generators, analyzers,
+recipes and tests. Every verdict is anchored to a real file. Tally: **~128 ✅ done (47%) · ~70 🟡 partial
+(26%) · ~72 ❌ missing (27%)**. Below is the line-listing of ONLY the 🟡 and ❌ items (the work backlog);
+✅ items are omitted here (they are already solid).
+
+### ⚠️ WORKING RULE (admin-mandated) — cross-match with realtime code before touching any item
+This ledger is a **snapshot**. Before picking up ANY 🟡/❌ item, first **cross-match it against the LIVE
+code** (grep the current repo) — another session may have shipped it since this audit (safeguard #1 + #6).
+Only treat an item as 🟡/❌ after confirming the current source; never rebuild something already ✅. Every
+fix ships root-cause (rule 4) + regression test + `AppKnowledgeBase.ts` entry if user-facing, via
+branch → verification gate → PR → CI green → merge.
+
+### The gap ledger (🟡 = adha-adhura, ❌ = nahi hai) — by category
+
+1. **Requirement Understanding** — 🟡 ambiguous prompts (keyword heuristic, not semantic) · follow-up/clarifying questions (prompt-only, no ask loop) · identify missing requirements (plan-gap, not prompt-gap) · non-functional reqs (detects scale/secure, no offline/NFR plan). ❌ infer business logic · detect prompt contradictions · auto-detect edge cases.
+2. **System Architecture** — 🟡 microservice-ready (no service-split gen) · coupling detection (no score) · code reuse (no extract-shared). ❌ named paradigms Clean/DDD/MVC/MVVM/Hexagonal.
+3. **Code Quality** — 🟡 readability (God-file flag only) · warnings (counted, never enforced) · code smell (God-file only). ❌ comment analysis · duplicate/clone detection · magic numbers · SOLID/DRY/KISS/YAGNI.
+4. **Scalability** — 🟡 caching (CDN/static only, no data-cache) · horizontal scaling (IaC, no autoscale tuning) · connection pooling (pg Pool default only). ❌ pagination · virtualization.
+5. **Database Design** — 🟡 foreign keys (validated, not generated). ❌ normalization · indexes · cascade delete · composite indexes · transactions · audit tables · soft delete.
+6. **Backend Quality** — 🟡 API design (detection+docs only) · REST quality (health GET only) · authorization (no RBAC gen) · error handling (React+Sentry, no backend middleware) · caching (static only) · retry (engine-internal, not a recipe). ❌ GraphQL · gRPC · validation · OAuth · refresh token · pagination · filtering · sorting.
+7. **Frontend Quality** — 🟡 reusable components (LLM-driven) · dark mode (template default, no toggle recipe) · i18n (machine-translation ≠ i18n scaffold). ❌ state management · animations · loading states · skeleton · optimistic updates.
+8. **UI/UX Quality** — 🟡 visual hierarchy · spacing · typography · user flow · forms · empty states · micro-interactions · modern design · professional appearance (all prompt/advisory, not generated/gated). ❌ navigation UX · transitions.
+9. **AI Coding Ability** — (all ✅ — no gaps).
+10. **Security** — 🟡 CSRF (cookie-flag only, no token gen) · password hashing (analyzer only, no hash gen). ❌ ABAC.
+11. **Performance** — ❌ Lighthouse · First Paint · LCP · CLS · INP · memory · CPU · frontend network requests · image optimization. (only bundle-size ✅ — weakest category.)
+12. **Reliability** — 🟡 offline support (platform only, not app) · sync (platform only, no app offline-sync) · data integrity (engine-side, no DB-level gen). ❌ none.
+13. **Testing** — 🟡 integration tests (no app generator) · mocking (skeletons carry TODO asserts). ❌ none.
+14. **DevOps** — 🟡 monitoring (liveness probes, no APM/dashboard) · logging (detected but injector advisory-only). ❌ tracing (OpenTelemetry) · metrics (/metrics endpoint).
+15. **Maintainability** — 🟡 feature-can-be-added (no extensibility score) · module-can-be-removed (advisory) · technical-debt tracking (no ledger/score). ❌ none.
+16. **Documentation** — 🟡 database docs (no human DB-doc gen) · deployment docs (IaC only, no guide). ❌ developer guide.
+17. **AI Productivity** — 🟡 iterations (no edit-loop count). ❌ prompt count · regenerate count.
+18. **Debugging Ability** — ❌ regression detection (runtime).
+19. **Feature Completeness** — 🟡 notifications (channels, no center) · filters (LLM-built) · import (into engine, no in-app data import) · export (deploy/GitHub, no in-app CSV export). ❌ admin · dashboard · roles · settings · backup.
+20. **Enterprise Readiness** — 🟡 multi-tenancy (workspace isolation, no tenant model) · SOC2 (support evidence, no control mapping) · localization (no i18n scaffold). ❌ SSO (SAML/OIDC) · HIPAA.
+21. **AI Reasoning** — 🟡 suggest alternatives (critique, not tradeoff analysis). ❌ estimate scaling · estimate server load · estimate DB growth.
+22. **Multi-file Capability** — 🟡 edit 200 files (50-file codemod cap) · repo-wide refactor (50-file bound). ❌ edit 1000 files · edit 5000 files.
+23. **Context Window** — 🟡 max-tokens handling (truncation, not budget accounting) · long-conversation quality (head/tail trim, not semantic summarization). ❌ none.
+24. **Speed (time-to-X)** — 🟡 time-to-plan · time-to-generate (no isolated metric). ❌ time-to-understand-prompt · time-to-fix-bugs · time-to-deploy.
+25. **Deployment** — ❌ AWS · Azure · Railway · Render (Firebase/Cloud Run/Vercel/Netlify/Cloudflare already ✅).
+26. **Cost Efficiency** — 🟡 retries (no retry-cost line item) · infrastructure cost (no hosting-spend accounting). ❌ regeneration cost.
+27. **Extensibility** — 🟡 CLI (internal bakeoff only, no user-facing bin). ❌ plugins · MCP support · custom SDK.
+28. **Error Recovery** — (all ✅ — no gaps).
+29. **Real-world Capability** — 🟡 Hospital ERP · CRM · ERP · EMR · multi-agent app-gen · Large SaaS (all feasible-but-thin: no domain recipe/RBAC, ~500-file editable cap). ❌ none.
+30. **Final Output Quality** — ❌ Prototype/Hackathon/Production/Enterprise maturity-tier grading (only binary ready + 0–100 score today).
+
+### The priority roadmap (impact-ranked; all additive/opt-in — cannot break a build)
+
+**Tier 1 — highest impact, build first (real-app quality jump):**
+- **T1.1 Deep schema generator** — upgrade `MigrationGenerator` to emit indexes + composite indexes, foreign keys with `onDelete`, timestamps, soft-delete (`deletedAt` + filtered reads), audit columns, transaction wrappers. Closes: indexes, FKs, cascade, composite, transactions, soft-delete, audit tables. (Analysis layer — N+1, query-optimizer, schemaGraph — already verifies the output.)
+- **T1.2 `generate_crud` REST-resource recipe** — one recipe: zod validation + paginated/filterable/sortable list endpoints + RBAC-guarded routes + backend error-handler middleware. Closes most of the 3/17 Backend gap at once (validation, pagination, filtering, sorting, authorization, error handling).
+- **T1.3 Product-scaffold recipes** — `generate_admin`, `generate_dashboard`, `generate_rbac` (roles UI + policy), settings scaffold, notification-center, CSV in-app import/export. Closes: admin, dashboard, roles, settings, notifications, import/export.
+- **T1.4 Smart bounded clarification pass** (admin's #1 category) — on an ambiguous/large prompt, ask 2–4 high-value scoping questions before building (multi-tenant? RBAC? offline? EMR?), bounded so it never over-asks or breaks the fast default path; add prompt-level contradiction + NFR extraction feeding the plan. Closes: follow-up questions, business logic, contradictions, edge cases, NFRs.
+
+**Tier 2 — strong differentiators (polish + enterprise wedge):**
+- **T2.5 Frontend UX recipe pack** — real generated artifacts for loading/skeleton states, optimistic updates, a state-management scaffold (Zustand/Context), transitions, and genuine `react-i18next` i18n.
+- **T2.6 Performance gate + image optimization** — Lighthouse + web-vitals against the live preview (LCP/CLS/INP in the build report) + sharp/webp + lazy-`<img>` recipe. Closes the weakest category with honest measured numbers.
+- **T2.7 Enterprise tier** — OIDC/SAML SSO recipe (passport), an ABAC policy layer over the existing RBAC, a tenant-scoping generator. Closes: SSO, ABAC, multi-tenancy.
+- **T2.8 Observability injection** — extend `ObservabilityInjector` from advisory to active: auto-inject a structured logger (pino) + OpenTelemetry `traceId` + `/metrics` (prom-client). Closes: tracing, metrics, auto-logging.
+
+**Tier 3 — scale & platform polish (ambition + long tail):**
+- **T3.9 Large-scale multi-file engine** — lift the 50-file codemod cap with a chunked repo-wide refactor path; replace transcript truncation with semantic summarization for long context. Closes: 200/1000/5000-file edits, repo-wide refactor, long-conversation quality — serves ERP/large-SaaS.
+- **T3.10 Extensibility surface** — MCP support, a plugin/recipe registry, a published engine SDK, a user-facing CLI. Closes: plugins, MCP, SDK, CLI.
+- **T3.11 Code-quality analyzers** — duplicate/clone detection, magic-number check, light SOLID/DRY smell rules.
+- **T3.12 Deploy targets + maturity grading + telemetry** — AWS/Azure/Railway/Render deploy providers; Prototype/Hackathon/Production/Enterprise output grading; prompt-count, regeneration-count, per-phase time-to-X instrumentation.
+
+**Strategic read:** the engine's brain (AI-coding 13/13), security (11/14), reliability and error-recovery
+(4/4) are already world-class; the real weakness is **output depth** — schema generation shallow, backend
+CRUD-quality thin, runtime performance unmeasured. The four Tier-1 items lift real-app quality fastest
+without touching the moat (multi-provider routing, billing honesty, white-label, India-first).

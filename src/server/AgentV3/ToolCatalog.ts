@@ -1054,6 +1054,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_newsletter',
+      description:
+        'Add a real newsletter / mailing-list signup to the app (Bring-Your-Own key): a server subscribe(' +
+        'email, name?) helper for "mailchimp" or "brevo" that adds a contact to a list — the "join our ' +
+        'newsletter / waitlist" capability. Distinct from generate_email (which SENDS one-off emails). ' +
+        'Server-side (the key never reaches the browser); no npm dependency (REST via fetch). The user pastes ' +
+        'their key + list id into .env; NavBharatAI never stores them. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['mailchimp', 'brevo'], description: 'The mailing-list provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1368,6 +1384,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_translation',
   'generate_moderation',
   'generate_cache',
+  'generate_newsletter',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

@@ -124,6 +124,7 @@ import { generateGeocodingIntegration, isGeocodingProvider } from '../lib/Geocod
 import { generateTranslationIntegration, isTranslationProvider } from '../lib/TranslationGenerator';
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
+import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3409,6 +3410,30 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('cache integration');
         return `Wired ${caProvider} caching:\n${caWritten.join('\n')}\nAdd the dependency: ${cacfg.dependency.name}@${cacfg.dependency.version}\n\n${cacfg.instructions}`;
+      }
+
+      case 'generate_newsletter': {
+        // U-4 recipe — real BYO newsletter/mailing-list signup (Mailchimp/Brevo): a server subscribe(email,
+        // name?) helper (REST via fetch, no dependency). Distinct from generate_email (transactional send).
+        // Pure generator in NewsletterGenerator.ts.
+        const nlProvider = optStr(input, 'provider');
+        if (!isNewsletterProvider(nlProvider)) return 'generate_newsletter: pass provider = "mailchimp" | "brevo".';
+        const nlcfg = generateNewsletterIntegration(nlProvider);
+        const nlWritten: string[] = [];
+        for (const [path, content] of Object.entries(nlcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); nlWritten.push(`Kept existing ${path} (add: ${nlcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          nlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('newsletter integration');
+        const nlDepLine = nlcfg.dependency ? `\nAdd the dependency: ${nlcfg.dependency.name}@${nlcfg.dependency.version}` : '\n(No npm dependency needed — the provider REST API is called with the built-in fetch.)';
+        return `Wired ${nlProvider} newsletter signup:\n${nlWritten.join('\n')}${nlDepLine}\n\n${nlcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

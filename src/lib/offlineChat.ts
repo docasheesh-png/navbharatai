@@ -43,13 +43,15 @@ export interface ChatReply {
 export function buildChatReply(query: string, now: Date = new Date(), memories: UserMemory[] = []): ChatReply {
   const a = answerOffline(query, now, memories);
 
-  // A deterministic on-device answer (math / date / greeting / identity / recalled memory).
+  // A deterministic on-device answer (math / date / greeting / identity / recalled memory). The reply IS
+  // the text — a bot must NOT dump feature/phone cards under a greeting or a calculation (that turned "hi"
+  // into a wall of cards). Cards belong to "where is X / how do I Y" queries (the 'matches' path below).
   if (a.kind === 'answer') {
     return {
       text: a.answerText || '',
       answerKind: a.answerKind,
-      features: a.matches,
-      deviceMatches: a.deviceMatches ?? [],
+      features: [],
+      deviceMatches: [],
       online: false,
     };
   }

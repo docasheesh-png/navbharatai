@@ -64,12 +64,26 @@ export function resolveLocalTarget(importer: string, spec: string, fileSet: Set<
     const cand = normalizePath(base + ext);
     if (fileSet.has(cand)) return cand;
   }
+  // NodeNext/ESM TypeScript: a `.js`/`.jsx`/`.mjs`/`.cjs` import resolves to the `.ts`/`.tsx`/`.mts`/`.cts`
+  // SOURCE (SvelteKit — CollabDesk autopsy). Swap the JS output extension for its TS source before giving
+  // up, so a correct `./types.js` → `types.ts` import is neither falsely flagged nor wrongly "reconciled".
+  const jsExt = /\.(js|jsx|mjs|cjs)$/i.exec(base);
+  if (jsExt) {
+    const stem = base.slice(0, -jsExt[0].length);
+    for (const ext of [...(TS_SOURCE_FOR_JS_EXT[jsExt[1].toLowerCase()] ?? []), ...EXTS]) {
+      const cand = normalizePath(stem + ext);
+      if (fileSet.has(cand)) return cand;
+    }
+  }
   for (const idx of INDEXES) {
     const cand = normalizePath(base + idx);
     if (fileSet.has(cand)) return cand;
   }
   return null;
 }
+
+/** TypeScript SOURCE extensions a JS OUTPUT extension resolves to under NodeNext/ESM (SvelteKit). */
+const TS_SOURCE_FOR_JS_EXT: Record<string, string[]> = { js: ['.ts', '.tsx'], jsx: ['.tsx'], mjs: ['.mts'], cjs: ['.cts'] };
 
 interface ExportInfo { names: Set<string>; hasDefault: boolean; hasWildcard: boolean; parseFailed: boolean; }
 

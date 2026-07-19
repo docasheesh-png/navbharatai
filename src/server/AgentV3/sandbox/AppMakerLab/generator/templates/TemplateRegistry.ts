@@ -9,6 +9,7 @@ import { PreactProvider } from './PreactProvider';
 import { LitProvider } from './LitProvider';
 import { AlpineProvider } from './AlpineProvider';
 import { NodeExpressProvider } from './NodeExpressProvider';
+import { HonoProvider } from './HonoProvider';
 import { NestJSProvider } from './NestJSProvider';
 import { FastifyProvider } from './FastifyProvider';
 import { SpringBootProvider } from './SpringBootProvider';
@@ -37,6 +38,7 @@ export class TemplateRegistry {
     'sveltekit': new SvelteKitProvider(),
     // Node.js backends
     'node-express': new NodeExpressProvider(),
+    'hono': new HonoProvider(),
     'nestjs': new NestJSProvider(),
     'fastify': new FastifyProvider(),
     // Python backends

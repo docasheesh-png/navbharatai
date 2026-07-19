@@ -144,6 +144,7 @@ import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
+import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
@@ -3830,6 +3831,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('qr generation');
         return `Wired QR code generation:\n${qrWritten.join('\n')}\nAdd the dependency: ${qrcfg.dependency.name}@${qrcfg.dependency.version}\n\n${qrcfg.instructions}`;
+      }
+
+      case 'generate_pdf': {
+        // U-4 recipe — real PDF generation (pdfkit): a server createPdf + createInvoicePdf helper
+        // (server/lib/pdf.ts). Pure generator in PdfGenerator.ts. No env keys.
+        const pdfcfg = generatePdfIntegration();
+        const pdfWritten: string[] = [];
+        for (const [path, content] of Object.entries(pdfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pdfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pdf generation');
+        return `Wired PDF generation:\n${pdfWritten.join('\n')}\nAdd the dependency: ${pdfcfg.dependency.name}@${pdfcfg.dependency.version}\n\n${pdfcfg.instructions}`;
       }
 
       case 'generate_logging': {

@@ -1385,6 +1385,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_pdf',
+      description:
+        'Add real PDF generation to the app (server/lib/pdf.ts, pdfkit): a server createInvoicePdf(...) ready ' +
+        'invoice + a generic createPdf((doc) => { ... }) builder that resolve a Buffer you can stream as the ' +
+        'HTTP response, save, or email. Core for GST/tax invoices, receipts, order confirmations, tickets and ' +
+        'reports. Server-side; adds the pdfkit dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_qr',
       description:
         'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
@@ -1730,6 +1739,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_graceful_shutdown',
   'generate_security_headers',
   'generate_qr',
+  'generate_pdf',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

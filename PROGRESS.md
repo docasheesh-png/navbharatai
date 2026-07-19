@@ -19299,3 +19299,24 @@ Continued Tier-2. Closes the audit's Enterprise ❌ "SSO".
 
 Batched onto PR #1608 (CI in background). Next: `generate_abac` (attribute policy over RBAC) to complete the
 enterprise pair, then observability logger injection.
+
+---
+
+## 2026-07-19 — T2.7 (cont.) `generate_abac` — attribute-based access control (enterprise pair complete)
+
+Closes the audit's Security ❌ "ABAC". RBAC answers "what role?"; ABAC answers "given subject + resource +
+action + context, allowed?" — e.g. "only the OWNER or an admin may edit THIS record", which roles alone
+cannot express.
+
+**Shipped (pure, dependency-free):**
+- `src/server/lib/AbacGenerator.ts` — `generateAbac()` emits `server/lib/abac.ts` (a policy registry — each
+  policy a pure predicate returning true to ALLOW; **deny by default / fail closed** — plus a `can(policy,
+  ctx)` evaluator with example ownership policies) and `server/middleware/authorize.ts` (an Express guard
+  that builds the context from the request and enforces a named policy: 401 unauthenticated, 403 denied).
+  Complements `generate_rbac` (roles) + `generate_auth` (req.user).
+- Wired as the `generate_abac` tool. Gate green: server `tsc` + `vitest` AbacGenerator 3/3 + ToolCatalog 5/5
+  + ToolDispatcher 145/145.
+
+**Enterprise pair complete: SSO (OIDC) + ABAC.** PR #1608 now carries the full T1.4 + Tier-2 batch
+(analyze_requirements, i18n, ui-states, image-opt, sso, abac). Letting it settle to merge (6 real features).
+Remaining Tier-2: observability logger/metrics injection (fresh PR after #1608 lands).

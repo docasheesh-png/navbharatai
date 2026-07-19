@@ -128,6 +128,7 @@ import { generateI18n } from '../lib/I18nGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
 import { generateSsoIntegration } from '../lib/SsoGenerator';
+import { generateAbac } from '../lib/AbacGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -3033,6 +3034,22 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('sso');
         const ssoDeps = sso.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired OIDC SSO:\n${ssoWritten.join('\n')}\nAdd the dependencies: ${ssoDeps}\n\n${sso.instructions}`;
+      }
+
+      case 'generate_abac': {
+        // T2.7 recipe — attribute-based access control (policy registry + authorize guard). Pure generator.
+        const abac = generateAbac();
+        const abacWritten: string[] = [];
+        for (const [path, content] of Object.entries(abac.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          abacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('abac');
+        return `Wired ABAC:\n${abacWritten.join('\n')}\n\n${abac.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

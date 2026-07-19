@@ -1125,6 +1125,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_abac',
+      description:
+        'Add attribute-based access control (ABAC) — fine-grained authorization that RBAC roles alone cannot ' +
+        'express (e.g. "only the OWNER or an admin may edit THIS record"). Emits a policy registry (deny by ' +
+        'default / fail closed) + a can() evaluator + an authorize(policy, buildContext) Express guard (401/403). ' +
+        'Complements generate_rbac (roles) and generate_auth (req.user). Dependency-free.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1675,6 +1684,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_ui_states',
   'generate_image_optimization',
   'generate_sso',
+  'generate_abac',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

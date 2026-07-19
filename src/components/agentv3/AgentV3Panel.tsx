@@ -4,7 +4,7 @@ import { AttachMenu } from '../AttachMenu';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
+  Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
   Star, Search,
@@ -2728,12 +2728,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {/* File inputs now live inside <AttachMenu/> (photo / gallery / file) below. */}
-            <div className="flex items-end gap-1.5 px-2 py-0.5">
-              {/* LEFT CONTROLS (admin 2026-07-18 — "Android me chat box ~50% chota karo"): the
-                  Build/Plan/Advise MODE SELECTOR + settings + attach now sit in ONE ROW beside the input
-                  (was stacked in two rows, which forced the whole composer ~60px tall). Same function as
-                  before: same setChatMode, same dropups (still open upward), running dot, thread counts. */}
-              <div className="flex items-end gap-1 shrink-0">
+            <div className="flex flex-col gap-1.5 px-2 py-0.5">
+              {/* OPTION A (admin 2026-07-19 — "input box gadbad, reposition + attractive"): the input now
+                  sits on its OWN full-width row (order-1) and the Build/Plan/Advise MODE SELECTOR + settings
+                  + attach sit in a slim toolbar row BELOW it (order-2, flex-wrap so more controls can be
+                  added later without squeezing the input). CSS `order` reorders VISUALLY without touching
+                  DOM order or any handler — same setChatMode, same dropups (still open upward, now over the
+                  input), running dot, thread counts. Input is full-width again (the phone squish is gone). */}
+              <div className="flex items-center gap-1 order-2 flex-wrap">
               <div className="relative">
                 {modeMenuOpen && (
                   <>
@@ -2858,7 +2860,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title="Build options"
                   className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
                 >
-                  <SlidersHorizontal className="w-4 h-4" />
+                  <Settings className="w-4 h-4" />
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>
@@ -2871,8 +2873,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 buttonClassName="h-7 w-9 flex items-center justify-center rounded border border-zinc-700 text-zinc-400 hover:text-white disabled:opacity-40"
               />
               </div>{/* /settings + attach row */}
-              </div>{/* /left column (mode selector + settings/attach) */}
-              <div className="relative flex-1" data-tour="chat">
+              </div>{/* /toolbar row (order-2): mode selector + settings + attach — below the input */}
+              <div className="relative w-full order-1" data-tour="chat">
                 <textarea
                   ref={composerRef}
                   className={`w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-3 pr-16 py-1 text-sm resize-none focus:outline-none focus:border-indigo-500 overflow-y-auto ${composerExpanded ? 'h-[50vh]' : ''}`}

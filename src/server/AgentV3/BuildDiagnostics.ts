@@ -682,8 +682,12 @@ export class BuildDiagnostics {
       }
     }
     this.pending.clear();
+    // When the build ULTIMATELY SUCCEEDED, any intermediate failure it recovered from is resolved by
+    // definition. TOOL_ERROR / nudge / empty-retry were already back-filled; SANDBOX_CMD_FAILED must be
+    // too (PaisaTrack autopsy 2026-07-19: 6 intermediate `tsc → exit -1` failures the agent then FIXED —
+    // the final tsc passed — still showed as "6 unresolved" on an ok:true build, a false verdict).
     for (const issue of this.issues) {
-      if ((issue.code === 'TOOL_ERROR' || issue.code === 'NO_BUILD_NUDGE' || issue.code === 'EMPTY_BUILD_RETRY') && ok) {
+      if ((issue.code === 'TOOL_ERROR' || issue.code === 'NO_BUILD_NUDGE' || issue.code === 'EMPTY_BUILD_RETRY' || issue.code === 'SANDBOX_CMD_FAILED') && ok) {
         issue.autoResolved = true;
       }
     }

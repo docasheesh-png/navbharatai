@@ -12,6 +12,15 @@ export interface IEngineerActuator {
    * sandbox if the resume target no longer exists.
    */
   ensureWorkspace(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void>;
+  /**
+   * Return (and CLEAR) the scaffold-template files the most recent `ensureWorkspace` seeded into a
+   * fresh sandbox, as workspace-relative path→content. These bypass the write-tracking hook, so the
+   * caller persists them to the durable store immediately — otherwise the scaffold's root manifests
+   * (package.json etc.) only reach durable via a flaky end-of-build scan, and a later cold-sandbox
+   * preview reports "No package.json found". Returns undefined when nothing was seeded (e.g. a resumed
+   * sandbox that already had the workspace). Optional — actuators without a scaffold need not implement.
+   */
+  takeSeededScaffold?(workspaceId: string): Record<string, string> | undefined;
   writeFile(workspaceId: string, filePath: string, content: string): Promise<void>;
   /**
    * Phase 12C/12D — write a binary file (e.g. an uploaded image/logo) from a

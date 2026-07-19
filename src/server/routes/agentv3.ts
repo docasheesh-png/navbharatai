@@ -5236,6 +5236,19 @@ export function registerAgentV3Routes(app: Express): void {
           ? (await sandboxStore.get(workspaceId).catch(() => null)) ?? undefined
           : undefined;
         await actuator.ensureWorkspace(workspaceId, framework, resumeSandboxId);
+        // PREVIEW SYNC FIX (LearnLoop autopsy): the scaffold's root manifests (package.json, index.html,
+        // framework configs) are seeded straight into the sandbox by ensureWorkspace and BYPASS the
+        // onFileWrite write-tracking — so they only reached the durable store via a flaky end-of-build
+        // scan. When that scan failed, a later cold-sandbox preview re-seeded from durable had no
+        // package.json → "No package.json found" despite `npm run dev` exit 0. Persist the seeded scaffold
+        // to durable NOW (merge = union, never wipes anything), so package.json is durable from step 0.
+        // Best-effort — never blocks a build; a resumed sandbox seeds nothing (returns undefined → no-op).
+        try {
+          const seededScaffold = actuator.takeSeededScaffold?.(workspaceId);
+          if (seededScaffold && Object.keys(seededScaffold).length > 0) {
+            await mergeWorkspaceFiles(workspaceId, seededScaffold).catch(() => {});
+          }
+        } catch { /* scaffold durability is best-effort — the end-of-build scan remains the fallback */ }
         // GIT-NATIVE HYDRATE: when storage is active, ensure the project repo exists and seed the
         // sandbox from it BEFORE the Firestore fallback. Best-effort — any failure here leaves the
         // build on the existing (Firestore) durability path, never blocking it.

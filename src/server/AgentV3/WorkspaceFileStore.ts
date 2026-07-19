@@ -84,6 +84,37 @@ export function savePlanForFileSet(existingCount: number, newCount: number): 're
 }
 
 /**
+ * A build's SCAFFOLD root manifests (package.json, index.html, framework configs) are seeded straight
+ * into the sandbox by `ensureWorkspace` and BYPASS the write-tracking that feeds the durable saves.
+ * They are preview-critical (package.json holds the deps + start command) and a build NEVER
+ * intentionally deletes them mid-build. This is the exact allowlist of "never silently drop me".
+ */
+const ESSENTIAL_MANIFEST_RE =
+  /^(?:package\.json|index\.html|tsconfig(?:\.[\w-]+)?\.json|jsconfig\.json|vite\.config\.[cm]?[jt]s|svelte\.config\.[cm]?js|next\.config\.[cm]?[jt]s|nuxt\.config\.[cm]?[jt]s|astro\.config\.[cm]?[jt]s|remix\.config\.[cm]?[jt]s|angular\.json)$/;
+
+/** True for a workspace-ROOT preview-critical manifest (package.json etc.). Root-only by design. PURE. */
+export function isEssentialManifest(path: string): boolean {
+  return ESSENTIAL_MANIFEST_RE.test((path || '').replace(/^\.?\//, ''));
+}
+
+/**
+ * ESSENTIAL-MANIFEST CARRY-FORWARD. `saveWorkspaceFiles` REPLACES the authoritative path list with
+ * exactly the set it is given, and many callers pass only the AI-written files (`writtenFiles`) —
+ * which never include the scaffold's root manifests. So an authoritative save would silently DROP
+ * package.json from the durable index even though the sandbox still has it, and a later cold-sandbox
+ * preview re-seeded from durable then reports "No package.json found" (the exact LearnLoop bug).
+ *
+ * A root manifest's absence from an incoming set is always an omission, never an intentional delete,
+ * so any essential manifest present in the existing index but absent from the incoming set is carried
+ * forward (its content doc already exists). If the AI DID rewrite the manifest it is in the incoming
+ * set → not carried → the new content wins. PURE + tested.
+ */
+export function essentialManifestsToCarry(existingPaths: string[], incomingPaths: string[]): string[] {
+  const incoming = new Set(incomingPaths);
+  return (existingPaths || []).filter((p) => !incoming.has(p) && isEssentialManifest(p));
+}
+
+/**
  * Persist the current set of workspace source files. The `paths` metadata list is authoritative:
  * a file removed from `files` won't be returned by loadWorkspaceFiles even if its content doc
  * lingers. GUARDED: a drastically-smaller partial set is MERGED, never a wipe (savePlanForFileSet).
@@ -115,7 +146,13 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     }
     const safe = capPathsToDocLimit(entries.map(([p]) => p));
     if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${entries.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
-    await root.set({ paths: safe.paths, count: safe.paths.length, savedAt: Date.now() }, { merge: false });
+    // ESSENTIAL-MANIFEST CARRY-FORWARD: an authoritative replace must never drop a scaffold root
+    // manifest (package.json etc.) the AI-written partial set happens to omit — else the preview later
+    // reports "No package.json found" despite the sandbox having it. The manifest's content doc already
+    // exists (it was merged in at build start), so carrying the path forward restores it losslessly.
+    const carried = essentialManifestsToCarry(existingPaths, safe.paths);
+    const finalPaths = carried.length > 0 ? Array.from(new Set([...safe.paths, ...carried])) : safe.paths;
+    await root.set({ paths: finalPaths, count: finalPaths.length, savedAt: Date.now() }, { merge: false });
   } catch (e) {
     // Best-effort — a save failure never blocks a build — but it is the exact "reload pe data gayab"
     // trigger (e.g. free-tier daily write quota exhausted), so make it visible instead of silent.

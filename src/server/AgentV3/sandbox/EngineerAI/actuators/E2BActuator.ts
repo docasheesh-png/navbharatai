@@ -254,6 +254,10 @@ export class E2BActuator implements IEngineerActuator {
   private _fileCache = new Map<string, Map<string, string>>();
   private static readonly FILE_CACHE_MAX_FILES = 500;
   private static readonly FILE_CACHE_MAX_BYTES = 256 * 1024; // per file
+  // Scaffold files the last ensureWorkspace() seeded into a fresh sandbox, per workspace. These bypass
+  // the write-tracking hook, so the route drains them (takeSeededScaffold) and persists them durably —
+  // otherwise package.json only reaches durable via a flaky end scan ("No package.json found" preview bug).
+  private _seededScaffold = new Map<string, Record<string, string>>();
 
   /**
    * Optional per-user E2B API key. When provided (e.g. a Pro user's own key for
@@ -452,6 +456,9 @@ export class E2BActuator implements IEngineerActuator {
       await withTimeout(sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
       ), 30_000, 'files.writeFiles(template)');
+      // Record the seeded scaffold (workspace-relative) so the route can persist it durably — these
+      // writes bypass the onFileWrite hook, so without this package.json never reliably reaches durable.
+      this._rememberSeededScaffold(workspaceId, files);
     } catch {
       // Last-resort fallback: seed a minimal vite-react project so the workspace is never empty.
       try {
@@ -459,12 +466,31 @@ export class E2BActuator implements IEngineerActuator {
         await withTimeout(sandbox.files.writeFiles(
           Object.entries(fallbackFiles).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
         ), 30_000, 'files.writeFiles(fallback)');
+        this._rememberSeededScaffold(workspaceId, fallbackFiles);
       } catch { /* if this also fails, agent will scaffold manually */ }
     }
 
     // Kick off playwright install in background immediately — by the time the agent
     // builds an app and starts a dev server, it'll be ready.
     this._kickoffPlaywright(sandbox, workspaceId);
+  }
+
+  /** Store the scaffold files seeded for a workspace (kept small — a template is a handful of files). */
+  private _rememberSeededScaffold(workspaceId: string, files: Record<string, string>): void {
+    try {
+      const rel: Record<string, string> = {};
+      for (const [p, content] of Object.entries(files || {})) {
+        if (typeof content === 'string') rel[safeRelPath(p)] = content;
+      }
+      if (Object.keys(rel).length > 0) this._seededScaffold.set(workspaceId, rel);
+    } catch { /* best-effort — scaffold durability must never break workspace setup */ }
+  }
+
+  /** IEngineerActuator — drain the scaffold seeded by the last ensureWorkspace (see interface doc). */
+  takeSeededScaffold(workspaceId: string): Record<string, string> | undefined {
+    const seeded = this._seededScaffold.get(workspaceId);
+    if (seeded) this._seededScaffold.delete(workspaceId);
+    return seeded;
   }
 
   /** Fire-and-forget: installs playwright + chromium in a dedicated tools dir. */

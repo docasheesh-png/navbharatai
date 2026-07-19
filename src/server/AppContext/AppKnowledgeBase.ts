@@ -171,6 +171,23 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
 • FILE UPLOADS / STORAGE (S3 / R2 / Supabase / Cloudinary): v5.0 can add real file uploads — a server route + a client uploadFile() helper that uploads directly to storage (presigned URL for S3-compatible providers, a signed upload for Cloudinary), so the file never proxies through your server and your secret never leaves it. You paste your keys into .env; NavBharatAI never stores them.
 • REALTIME (Pusher / Ably): v5.0 can add live pub/sub for chat, notifications, presence and collaborative updates — a server publish() helper + a client subscribe() that returns an unsubscribe cleanup. You paste your keys into .env (the secret stays server-side); NavBharatAI never stores them.
 • FULL-TEXT SEARCH (Algolia / Meilisearch): v5.0 can add real search to a content-heavy app (catalog, docs, marketplace) — a server indexer (indexRecords, uses the admin/write key) + a client search() (uses a search-only key that is safe in the browser). The admin key stays server-side; NavBharatAI never stores your keys — you paste them into .env.
+• PHONE OTP / VERIFICATION (MSG91 / Twilio Verify): v5.0 can add real phone-number verification — a server sendOtp(phone) + verifyOtp(phone, code) pair (MSG91 India-first, or Twilio Verify) so signup/login can confirm a real number. You paste your keys into .env; NavBharatAI never stores them.
+• TRANSACTIONAL SMS (Twilio / Vonage): v5.0 can add a real server sendSms(to, message) helper for order updates, alerts and one-off notifications. You paste your keys + sender into .env (server-side only); NavBharatAI never stores them.
+• PRODUCT ANALYTICS (PostHog / Mixpanel): v5.0 can add real event tracking — a client track(event, props) + identify(userId) so you can see what users actually do. You paste your project key into .env; NavBharatAI never stores it.
+• INTERACTIVE MAPS (Google Maps / Mapbox): v5.0 can add a real interactive map component (markers, pan/zoom) to your app. You paste your map key into .env; NavBharatAI never stores it.
+• GEOCODING (Google / Mapbox): v5.0 can add a server geocode(address) → { lat, lng } (and reverse) helper — turn an address into coordinates for maps, delivery and store-locators. Server-side (the key never reaches the browser); you paste it into .env; NavBharatAI never stores it.
+• BACKGROUND JOBS / QUEUES (BullMQ / pg-boss): v5.0 can add a real job queue — an enqueue(name, data) producer + a worker that processes jobs off-request (emails, exports, image processing) so slow work doesn't block the response. Uses your Redis (BullMQ) or Postgres (pg-boss); you paste the connection into .env; NavBharatAI never stores it.
+• API RATE LIMITING (in-memory / Redis): v5.0 can add a real rate-limit middleware that caps requests per IP/user (protects login, APIs and expensive routes) — in-memory for a single instance or Redis-backed for multi-instance. You paste the Redis URL (if used) into .env; NavBharatAI never stores it.
+• ERROR TRACKING (Sentry / Rollbar): v5.0 can wire real production error monitoring — client + server capture so exceptions reach your dashboard with stack traces instead of vanishing. You paste your DSN/token into .env; NavBharatAI never stores it.
+• FEATURE FLAGS (LaunchDarkly / Unleash): v5.0 can add a real isEnabled(flag, user) helper so you can turn features on/off and roll out gradually without a redeploy. You paste your SDK key into .env; NavBharatAI never stores it.
+• AI / LLM TEXT (OpenAI / Anthropic): v5.0 can add a real server generateText(prompt) helper so your app can do AI text generation, summaries and chat. Server-side (the key never reaches the browser); you paste it into .env; NavBharatAI never stores it.
+• TRANSLATION (Google Translate / DeepL): v5.0 can add a real server translate(text, targetLang) helper to localize content on the fly. Server-side; you paste your key into .env; NavBharatAI never stores it.
+• CONTENT MODERATION (OpenAI Moderation / Perspective): v5.0 can add a real server moderate(text) → { flagged, score } helper to catch toxic/unsafe user content before it is shown or stored — it fails OPEN so a moderation outage never blocks your app. You paste your key into .env; NavBharatAI never stores it.
+• CACHING (Redis / Upstash): v5.0 can add a real key/value cache — cacheGet / cacheSet(ttl) / cacheDel (JSON-serialised) so expensive DB queries and API responses are served instantly next time. Redis over TCP or Upstash over HTTP (serverless/edge); you paste the connection into .env; NavBharatAI never stores it.
+• NEWSLETTER / MAILING LIST (Mailchimp / Brevo): v5.0 can add a real server subscribe(email) helper for the "join our newsletter / waitlist" signup that adds a contact to your list (distinct from transactional email, which sends one-off mails). You paste your key + list id into .env; NavBharatAI never stores them.
+• CURRENCY CONVERSION (ExchangeRate-API / Fixer): v5.0 can add a real server getRate(from, to) + convert(amount, from, to) helper for multi-currency pricing and international checkout. Server-side; you paste your key into .env; NavBharatAI never stores it.
+• WEATHER (OpenWeatherMap / WeatherAPI): v5.0 can add a real server getWeather(city) → { tempC, description, humidity } helper for delivery ETAs, travel and dashboards — it returns null on failure so a weather outage never breaks the app. You paste your key into .env; NavBharatAI never stores it.
+• TEAM NOTIFICATIONS (Slack / Discord): v5.0 can add a real server notify(message) helper that posts to your Slack/Discord channel on the events that matter (a new order, signup, failed payment) — it never throws, so a notification failure can't break the request. You paste the webhook URL into .env; NavBharatAI never stores it.
 • MOBILE APP EXPORT (Android / iOS via Capacitor): v5.0 can turn your generated web app into a native mobile project — it emits a capacitor.config.ts wrapper + a MOBILE_EXPORT.md runbook and lists the Capacitor dependencies/scripts to add, so your app can ship to the Play Store / App Store. HONEST LIMIT: it generates the wrapper config, not the final signed .apk/.aab/.ipa binary — building that needs the Android SDK / Xcode plus your own signing keystore on a build machine (the runbook gives the exact steps). Ask for a "mobile / Android / app-store version" of your app to use it.
 • DESKTOP APP EXPORT (Windows .exe / macOS .dmg / Linux .AppImage via Electron): v5.0 can turn your generated web app into a desktop app — it emits electron/main.cjs + electron-builder.yml + a DESKTOP_EXPORT.md runbook and lists the Electron devDependencies/scripts + the package.json "main" entry to set. HONEST LIMIT: it generates the wrapper config, not the final signed installer — electron-builder must run on the matching OS (Windows for .exe, macOS for a signed .dmg); the runbook gives the steps (and the required relative-base-path fix so assets load under file://). Ask for a "desktop / .exe / installable version" of your app to use it.
 • BROWSER EXTENSION EXPORT (Chrome / Edge / Firefox, Manifest V3): v5.0 can turn your generated web app into a browser extension — it emits a manifest.json (Manifest V3) that serves your built app as the extension popup + an EXTENSION_EXPORT.md runbook (build → load unpacked → package). HONEST LIMIT: it generates the manifest + instructions, not a published extension — publishing needs a Chrome Web Store / Firefox AMO developer account + review; the runbook gives the steps (and the relative-base-path fix so the popup isn't blank). Ask for a "browser / Chrome extension version" of your app to use it.
@@ -253,6 +270,30 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'edit karo', 'badlo', 'change karo', 'thik karo', 'wapas se bana diya', 'pura dobara bana diya',
       'java', 'spring boot', 'springboot', 'go', 'golang', 'backend', 'jvm', 'maven', 'mongodb', 'mongo', 'redis',
       'polyglot', 'fullstack', 'full stack', 'rest api', 'microservice', 'java app', 'go app', 'java banao', 'backend banao',
+      // Bring-Your-Own integration recipes the builder can wire (users ask "can you add X to my app?")
+      'add integration', 'integrate', 'byo', 'bring your own', 'add feature to app', 'connect service',
+      'payments', 'razorpay', 'stripe', 'checkout', 'payment gateway', 'upi payment',
+      'email', 'send email', 'resend', 'sendgrid', 'transactional email',
+      'file upload', 'uploads', 'storage', 's3', 'r2', 'cloudinary',
+      'realtime', 'real-time', 'pusher', 'ably', 'live updates', 'websocket',
+      'search', 'full text search', 'algolia', 'meilisearch',
+      'otp', 'phone verification', 'verify phone', 'msg91', 'twilio verify', 'otp verification',
+      'sms', 'send sms', 'text message', 'vonage', 'twilio',
+      'analytics', 'product analytics', 'event tracking', 'posthog', 'mixpanel',
+      'maps', 'map', 'google maps', 'mapbox', 'interactive map',
+      'geocode', 'geocoding', 'address to coordinates', 'lat lng', 'reverse geocode',
+      'background jobs', 'job queue', 'queue', 'bullmq', 'pg-boss', 'worker', 'cron job',
+      'rate limit', 'rate limiting', 'throttle', 'api limit',
+      'error tracking', 'error monitoring', 'sentry', 'rollbar', 'crash reporting',
+      'feature flags', 'feature flag', 'launchdarkly', 'unleash', 'toggle feature',
+      'ai', 'llm', 'openai', 'anthropic', 'chatgpt', 'text generation', 'ai text',
+      'translation', 'translate', 'google translate', 'deepl', 'localize',
+      'moderation', 'content moderation', 'toxicity', 'perspective', 'filter content',
+      'cache', 'caching', 'upstash', 'redis cache',
+      'newsletter', 'mailing list', 'mailchimp', 'brevo', 'waitlist', 'subscribe',
+      'currency', 'exchange rate', 'convert currency', 'forex', 'multi currency',
+      'weather', 'weather api', 'openweathermap', 'weatherapi', 'forecast',
+      'notifications', 'slack', 'discord', 'team notification', 'slack alert', 'webhook notify',
     ],
   },
   {

@@ -120,6 +120,7 @@ import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGene
 import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
+import { generateSchedulerIntegration } from '../lib/SchedulerGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
@@ -3666,6 +3667,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('jobs integration');
         const jbDeps = jbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${jbProvider} background jobs:\n${jbWritten.join('\n')}\nAdd the dependencies: ${jbDeps}\n\n${jbcfg.instructions}`;
+      }
+
+      case 'generate_scheduler': {
+        // U-4 recipe — dependency-free in-process job scheduler (server/lib/scheduler.ts): scheduleEvery +
+        // scheduleDailyUtc (drift-free, error-isolated). Distinct from generate_jobs (queue). Pure generator
+        // in SchedulerGenerator.ts. No env keys.
+        const schcfg = generateSchedulerIntegration();
+        const schWritten: string[] = [];
+        for (const [path, content] of Object.entries(schcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          schWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('scheduler');
+        return `Wired job scheduler:\n${schWritten.join('\n')}\n(No npm dependency needed — native timers.)\n\n${schcfg.instructions}`;
       }
 
       case 'generate_sms': {

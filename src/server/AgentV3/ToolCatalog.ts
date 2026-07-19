@@ -973,6 +973,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_ai',
+      description:
+        'Add real AI text generation to the app on the USER\'S OWN provider key (Bring-Your-Own): a server ' +
+        'generateText(prompt) + chat(messages) helper for "openai" or "anthropic" — for chat, summarise, ' +
+        'draft, classify features. The model is env-driven (upgrade via .env, no code change). The API key is ' +
+        'a server secret (never the browser); NavBharatAI never stores it and its own AI account is never used. ' +
+        'Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string', enum: ['openai', 'anthropic'], description: 'The AI/LLM provider to wire up.' },
+        },
+        required: ['provider'],
+      },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1282,6 +1298,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_ratelimit',
   'generate_error_tracking',
   'generate_feature_flags',
+  'generate_ai',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

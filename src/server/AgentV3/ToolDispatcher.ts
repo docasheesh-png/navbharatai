@@ -118,6 +118,7 @@ import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
+import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2817,6 +2818,37 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`migration (${provider})`);
         return `${summary}\n${written.join('\n')}`;
+      }
+
+      case 'generate_crud': {
+        // T1.2 recipe — a COMPLETE CRUD REST resource on Prisma (zod validation + paginated/filtered/
+        // sorted list + validated create/update + SOFT delete). Pure generator in CrudGenerator.ts;
+        // pairs with generate_migration's schema (soft-delete deletedAt + timestamps).
+        const crudRec = (input as Record<string, unknown>) || {};
+        const crudName = typeof crudRec.name === 'string' ? crudRec.name : '';
+        if (!crudName) return 'generate_crud: pass the resource "name" (e.g. "Post") and its "fields".';
+        const crudRawFields = Array.isArray(crudRec.fields) ? crudRec.fields : [];
+        const crudFields = crudRawFields
+          .map((f: unknown) => {
+            if (typeof f !== 'object' || f === null) return null;
+            const fo = f as Record<string, unknown>;
+            const fname = typeof fo.name === 'string' ? fo.name : '';
+            return fname ? { name: fname, type: typeof fo.type === 'string' ? fo.type : undefined } : null;
+          })
+          .filter((f): f is { name: string; type: string | undefined } => f !== null);
+        const crud = generateCrudResource({ name: crudName, fields: crudFields }, { protected: crudRec.protected === true });
+        const crudWritten: string[] = [];
+        for (const [path, content] of Object.entries(crud.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crudWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`crud resource (${crudName})`);
+        const crudDeps = crud.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

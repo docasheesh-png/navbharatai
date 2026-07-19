@@ -942,6 +942,35 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_crud',
+      description:
+        'Generate a COMPLETE REST CRUD resource for one entity on Prisma: a zod validation schema, plus an ' +
+        'Express router with a paginated + filterable + sortable list (?page,?limit,?sort=field:asc|desc,' +
+        '?field=value), get-by-id, validated create/update, and SOFT delete (sets deletedAt). Also emits a ' +
+        "shared Prisma client and a central error handler. Pairs with generate_migration's schema. Set " +
+        'protected:true to require an authenticated req.user on every mutation. Use after defining the entity.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Resource/model name (e.g. "Post").' },
+          fields: {
+            type: 'array',
+            description: 'The resource fields (id + created_at/updated_at/deleted_at are managed automatically).',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Field name.' },
+                type: { type: 'string', description: 'Optional type hint: string|int|float|boolean|date.' },
+              },
+              required: ['name'],
+            },
+          },
+          protected: { type: 'boolean', description: 'Require an authenticated req.user on create/update/delete (default false).' },
+        },
+        required: ['name', 'fields'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1482,6 +1511,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_seed_data',
   'generate_auth',
   'generate_migration',
+  'generate_crud',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

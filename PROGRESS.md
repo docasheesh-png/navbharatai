@@ -18773,6 +18773,195 @@ Cap-4 observability injection (/health #1554 + error-handler #1555). Full suite 
 across the whole run; the only failing suites throughout remained the pre-existing `src/server/sonic/*`
 optional-dep load failures (unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-
 only or default-off-gated or purely additive — none can break a build.
+
+---
+
+## 2026-07-19 — Capability Audit: 30-category engineering framework matched to REAL code (gap ledger + roadmap)
+
+An admin-supplied external framework (30 categories, ~270 sub-points — the standard "professional
+software-architecture review" checklist) was **matched item-by-item against the actual AgentV3 codebase**
+by six parallel read-only investigators grepping `src/server/AgentV3`, `src/server`, generators, analyzers,
+recipes and tests. Every verdict is anchored to a real file. Tally: **~128 ✅ done (47%) · ~70 🟡 partial
+(26%) · ~72 ❌ missing (27%)**. Below is the line-listing of ONLY the 🟡 and ❌ items (the work backlog);
+✅ items are omitted here (they are already solid).
+
+### ⚠️ WORKING RULE (admin-mandated) — cross-match with realtime code before touching any item
+This ledger is a **snapshot**. Before picking up ANY 🟡/❌ item, first **cross-match it against the LIVE
+code** (grep the current repo) — another session may have shipped it since this audit (safeguard #1 + #6).
+Only treat an item as 🟡/❌ after confirming the current source; never rebuild something already ✅. Every
+fix ships root-cause (rule 4) + regression test + `AppKnowledgeBase.ts` entry if user-facing, via
+branch → verification gate → PR → CI green → merge.
+
+### The gap ledger (🟡 = adha-adhura, ❌ = nahi hai) — by category
+
+1. **Requirement Understanding** — 🟡 ambiguous prompts (keyword heuristic, not semantic) · follow-up/clarifying questions (prompt-only, no ask loop) · identify missing requirements (plan-gap, not prompt-gap) · non-functional reqs (detects scale/secure, no offline/NFR plan). ❌ infer business logic · detect prompt contradictions · auto-detect edge cases.
+2. **System Architecture** — 🟡 microservice-ready (no service-split gen) · coupling detection (no score) · code reuse (no extract-shared). ❌ named paradigms Clean/DDD/MVC/MVVM/Hexagonal.
+3. **Code Quality** — 🟡 readability (God-file flag only) · warnings (counted, never enforced) · code smell (God-file only). ❌ comment analysis · duplicate/clone detection · magic numbers · SOLID/DRY/KISS/YAGNI.
+4. **Scalability** — 🟡 caching (CDN/static only, no data-cache) · horizontal scaling (IaC, no autoscale tuning) · connection pooling (pg Pool default only). ❌ pagination · virtualization.
+5. **Database Design** — 🟡 foreign keys (validated, not generated). ❌ normalization · indexes · cascade delete · composite indexes · transactions · audit tables · soft delete.
+6. **Backend Quality** — 🟡 API design (detection+docs only) · REST quality (health GET only) · authorization (no RBAC gen) · error handling (React+Sentry, no backend middleware) · caching (static only) · retry (engine-internal, not a recipe). ❌ GraphQL · gRPC · validation · OAuth · refresh token · pagination · filtering · sorting.
+7. **Frontend Quality** — 🟡 reusable components (LLM-driven) · dark mode (template default, no toggle recipe) · i18n (machine-translation ≠ i18n scaffold). ❌ state management · animations · loading states · skeleton · optimistic updates.
+8. **UI/UX Quality** — 🟡 visual hierarchy · spacing · typography · user flow · forms · empty states · micro-interactions · modern design · professional appearance (all prompt/advisory, not generated/gated). ❌ navigation UX · transitions.
+9. **AI Coding Ability** — (all ✅ — no gaps).
+10. **Security** — 🟡 CSRF (cookie-flag only, no token gen) · password hashing (analyzer only, no hash gen). ❌ ABAC.
+11. **Performance** — ❌ Lighthouse · First Paint · LCP · CLS · INP · memory · CPU · frontend network requests · image optimization. (only bundle-size ✅ — weakest category.)
+12. **Reliability** — 🟡 offline support (platform only, not app) · sync (platform only, no app offline-sync) · data integrity (engine-side, no DB-level gen). ❌ none.
+13. **Testing** — 🟡 integration tests (no app generator) · mocking (skeletons carry TODO asserts). ❌ none.
+14. **DevOps** — 🟡 monitoring (liveness probes, no APM/dashboard) · logging (detected but injector advisory-only). ❌ tracing (OpenTelemetry) · metrics (/metrics endpoint).
+15. **Maintainability** — 🟡 feature-can-be-added (no extensibility score) · module-can-be-removed (advisory) · technical-debt tracking (no ledger/score). ❌ none.
+16. **Documentation** — 🟡 database docs (no human DB-doc gen) · deployment docs (IaC only, no guide). ❌ developer guide.
+17. **AI Productivity** — 🟡 iterations (no edit-loop count). ❌ prompt count · regenerate count.
+18. **Debugging Ability** — ❌ regression detection (runtime).
+19. **Feature Completeness** — 🟡 notifications (channels, no center) · filters (LLM-built) · import (into engine, no in-app data import) · export (deploy/GitHub, no in-app CSV export). ❌ admin · dashboard · roles · settings · backup.
+20. **Enterprise Readiness** — 🟡 multi-tenancy (workspace isolation, no tenant model) · SOC2 (support evidence, no control mapping) · localization (no i18n scaffold). ❌ SSO (SAML/OIDC) · HIPAA.
+21. **AI Reasoning** — 🟡 suggest alternatives (critique, not tradeoff analysis). ❌ estimate scaling · estimate server load · estimate DB growth.
+22. **Multi-file Capability** — 🟡 edit 200 files (50-file codemod cap) · repo-wide refactor (50-file bound). ❌ edit 1000 files · edit 5000 files.
+23. **Context Window** — 🟡 max-tokens handling (truncation, not budget accounting) · long-conversation quality (head/tail trim, not semantic summarization). ❌ none.
+24. **Speed (time-to-X)** — 🟡 time-to-plan · time-to-generate (no isolated metric). ❌ time-to-understand-prompt · time-to-fix-bugs · time-to-deploy.
+25. **Deployment** — ❌ AWS · Azure · Railway · Render (Firebase/Cloud Run/Vercel/Netlify/Cloudflare already ✅).
+26. **Cost Efficiency** — 🟡 retries (no retry-cost line item) · infrastructure cost (no hosting-spend accounting). ❌ regeneration cost.
+27. **Extensibility** — 🟡 CLI (internal bakeoff only, no user-facing bin). ❌ plugins · MCP support · custom SDK.
+28. **Error Recovery** — (all ✅ — no gaps).
+29. **Real-world Capability** — 🟡 Hospital ERP · CRM · ERP · EMR · multi-agent app-gen · Large SaaS (all feasible-but-thin: no domain recipe/RBAC, ~500-file editable cap). ❌ none.
+30. **Final Output Quality** — ❌ Prototype/Hackathon/Production/Enterprise maturity-tier grading (only binary ready + 0–100 score today).
+
+### The priority roadmap (impact-ranked; all additive/opt-in — cannot break a build)
+
+**Tier 1 — highest impact, build first (real-app quality jump):**
+- **T1.1 Deep schema generator** — upgrade `MigrationGenerator` to emit indexes + composite indexes, foreign keys with `onDelete`, timestamps, soft-delete (`deletedAt` + filtered reads), audit columns, transaction wrappers. Closes: indexes, FKs, cascade, composite, transactions, soft-delete, audit tables. (Analysis layer — N+1, query-optimizer, schemaGraph — already verifies the output.)
+- **T1.2 `generate_crud` REST-resource recipe** — one recipe: zod validation + paginated/filterable/sortable list endpoints + RBAC-guarded routes + backend error-handler middleware. Closes most of the 3/17 Backend gap at once (validation, pagination, filtering, sorting, authorization, error handling).
+- **T1.3 Product-scaffold recipes** — `generate_admin`, `generate_dashboard`, `generate_rbac` (roles UI + policy), settings scaffold, notification-center, CSV in-app import/export. Closes: admin, dashboard, roles, settings, notifications, import/export.
+- **T1.4 Smart bounded clarification pass** (admin's #1 category) — on an ambiguous/large prompt, ask 2–4 high-value scoping questions before building (multi-tenant? RBAC? offline? EMR?), bounded so it never over-asks or breaks the fast default path; add prompt-level contradiction + NFR extraction feeding the plan. Closes: follow-up questions, business logic, contradictions, edge cases, NFRs.
+
+**Tier 2 — strong differentiators (polish + enterprise wedge):**
+- **T2.5 Frontend UX recipe pack** — real generated artifacts for loading/skeleton states, optimistic updates, a state-management scaffold (Zustand/Context), transitions, and genuine `react-i18next` i18n.
+- **T2.6 Performance gate + image optimization** — Lighthouse + web-vitals against the live preview (LCP/CLS/INP in the build report) + sharp/webp + lazy-`<img>` recipe. Closes the weakest category with honest measured numbers.
+- **T2.7 Enterprise tier** — OIDC/SAML SSO recipe (passport), an ABAC policy layer over the existing RBAC, a tenant-scoping generator. Closes: SSO, ABAC, multi-tenancy.
+- **T2.8 Observability injection** — extend `ObservabilityInjector` from advisory to active: auto-inject a structured logger (pino) + OpenTelemetry `traceId` + `/metrics` (prom-client). Closes: tracing, metrics, auto-logging.
+
+**Tier 3 — scale & platform polish (ambition + long tail):**
+- **T3.9 Large-scale multi-file engine** — lift the 50-file codemod cap with a chunked repo-wide refactor path; replace transcript truncation with semantic summarization for long context. Closes: 200/1000/5000-file edits, repo-wide refactor, long-conversation quality — serves ERP/large-SaaS.
+- **T3.10 Extensibility surface** — MCP support, a plugin/recipe registry, a published engine SDK, a user-facing CLI. Closes: plugins, MCP, SDK, CLI.
+- **T3.11 Code-quality analyzers** — duplicate/clone detection, magic-number check, light SOLID/DRY smell rules.
+- **T3.12 Deploy targets + maturity grading + telemetry** — AWS/Azure/Railway/Render deploy providers; Prototype/Hackathon/Production/Enterprise output grading; prompt-count, regeneration-count, per-phase time-to-X instrumentation.
+
+**Strategic read:** the engine's brain (AI-coding 13/13), security (11/14), reliability and error-recovery
+(4/4) are already world-class; the real weakness is **output depth** — schema generation shallow, backend
+CRUD-quality thin, runtime performance unmeasured. The four Tier-1 items lift real-app quality fastest
+without touching the moat (multi-provider routing, billing honesty, white-label, India-first).
+
+---
+
+## 2026-07-19 — SPEED: streaming first-paint preview (T-SPEED.1, slice 1) + build-path latency audit
+
+Acted on the admin's "har app seconds me" ask HONESTLY (a literal "any app in seconds" is not real for
+complex apps; the winning, truthful goal is *fastest RELIABLE builder* — seconds for simple apps + an early
+preview for every app). First ran a real **latency audit** of the fast-lane build path (six-investigator +
+direct code trace), then shipped the first speed increment.
+
+**Latency audit — where the wall-clock goes (fast lane):** the fixed infra tax on a cold build is
+**~90–155 s** = sandbox cold boot (≤45 s, `E2BActuator SANDBOX_CREATE_TIMEOUT_MS`) + `npm install` (30–90 s,
+run every build) + dev-server port-wait (25 s + up to 40 s recovery). Variable = tiered per-file generation
+(3 serial waves, concurrency 8) + the heal/repair loop (up to 3 repair+reverify cycles — the biggest
+amplifier). Already-present speed infra (verified): sandbox resume/reuse (ON), Anthropic prompt-cache (ON),
+parallel tiered gen (ON), warm-node_modules primer (env-gated), dev-server fastpath, in-browser render cache,
+frontend preview pre-warm. **Confirmed ABSENT:** any progressive/streaming first-paint — the user watches
+text narration and sees the app only after the WHOLE build (install + dev-boot + verify + heal) finishes.
+
+**Key architectural find:** the in-browser preview (`/api/agentv3/inbrowser-preview`) is the DEFAULT surface,
+needs NO sandbox/install/dev-server (compiles saved files client-side in seconds), and the client already
+auto-refreshes it — `AgentV3Panel` bumps `filesVersion` on every `state.files` change
+(`useEffect(... [state.files, state.diffs])`), which drives `PreviewSurface`'s `reloadSignal`. So the whole
+CLIENT chain for progressive preview already exists; the only missing piece was the SERVER saving/emitting
+files EARLY (today it saves once at `agentv3.ts:6653`, after the fast lane fully succeeds).
+
+**Shipped (gated, default OFF — cannot change today's behavior):**
+- `SimpleBuilder.runSimpleBuild` gained an optional `onFilesReady(files)` hook, fired ONCE with the fully
+  self-healed files the instant they're final (after deterministic heal + write, BEFORE the verify+repair
+  loop). Fire-and-forget + best-effort — a hook throw or slowness can never affect or delay the build.
+- The fast-lane caller (`routes/agentv3.ts`) wires it behind **`AGENTV3_STREAMING_PREVIEW=on`**: it durably
+  `mergeWorkspaceFiles` (UNION — never a wipe) the ready files and emits `file_changed` events, so the client
+  `filesVersion` bumps and the sandbox-free in-browser preview renders the REAL app **~30–155 s sooner**
+  (before install/dev-boot/verify). Flag unset = byte-identical to today.
+- Regression tests: hook fires exactly once with the final files; a throwing hook never fails the build;
+  omitting it leaves the build unchanged. Gate green: server `tsc` + frontend `tsc` + `vitest` SimpleBuilder
+  63/63 (incl. the 3 new). No AppKnowledgeBase entry — a perf change with no new navigable surface.
+
+This is slice 1 of T-SPEED.1 (single early emit of the complete healed app). A later slice can go per-TIER
+(emit after tier 0/1) for an even earlier partial paint, and add a real warm SANDBOX POOL (the one missing
+infra piece — resume only helps the 2nd+ turn; the first build still pays the ≤45 s cold `Sandbox.create`).
+Next on the conveyor per the roadmap: Tier-1 depth items (deep schema generator, `generate_crud`, product
+scaffolds, smart clarification). Cross-match-with-live-code rule applies to each before starting.
+
+---
+
+## 2026-07-19 — T1.1 DEEP SCHEMA GENERATOR (roadmap Tier-1, item 1)
+
+Cross-matched the live `src/server/AppMakerLab/generator/MigrationGenerator.ts` (the `generate_migration`
+tool's generator, `ToolDispatcher.ts:2777`) against the audit: it emitted FLAT tables — only a PK, a UNIQUE
+email, and a `created_at` default. No FKs, indexes, cascade, composite indexes, transactions, soft-delete or
+audit columns (exactly the audit's Cat-5 ❌ cluster). Upgraded it to a real relational schema generator.
+
+**Shipped (pure, deterministic, backward-compatible):**
+- New `enrich` flag — **default ON via `generateMigration`** (the tool path), OFF on the low-level
+  `generatePrismaSchema`/`generateSqlDdl` so every prior direct-call and its exact-string tests stay
+  byte-identical (rule 1). Opt out with `{ enrich: false }`.
+- New exported `foreignKeysFor(entity, all)` — detects a `<base>_id` / `<base>Id` field whose singularized
+  base matches another entity; `id` alone and words merely ending in lowercase "id" (valid/uuid/grid) are
+  never FKs; a `_id` with no matching entity is not a FK.
+- Enriched **SQL**: real `FOREIGN KEY … REFERENCES … ON DELETE CASCADE`, a `CREATE INDEX` per FK column,
+  auto `created_at`/`updated_at` (`DEFAULT CURRENT_TIMESTAMP`) + a nullable `deleted_at` when absent, a
+  `UNIQUE(a_id, b_id)` on a two-FK join table, and the whole migration wrapped in `BEGIN … COMMIT`
+  (transactional — a partial apply rolls back instead of half-migrating).
+- Enriched **Prisma**: `@@index([fk])` per FK, `createdAt @default(now())` / `updatedAt @updatedAt` /
+  `deletedAt DateTime?` when absent, and `@@unique([a, b])` on a join table. (Prisma relation NAVIGATION —
+  forward+back `@relation` objects — is a deliberate fast-follow; index-only keeps every emitted schema
+  VALID by construction, never a half-declared relation that fails `prisma validate`.)
+- Closes audit Cat-5 gaps: indexes ✅, foreign keys ✅, cascade ✅, composite ✅, transactions ✅,
+  soft-delete ✅, audit timestamps ✅. (Normalization + full Prisma relation nav remain fast-follows.)
+- Tests: `foreignKeysFor` positive/negative cases; enriched SQL FK+index+cascade+timestamps+soft-delete+
+  join-unique+transaction; enriched Prisma @@index/timestamps/deletedAt/@@unique; enrich=false byte-identical
+  to legacy; `generateMigration` enriched by default + `enrich:false` opt-out. Gate green: server `tsc` +
+  `vitest` MigrationGenerator 17/17 + ToolDispatcher 144/144 (the tool's enriched output breaks nothing).
+  No AppKnowledgeBase entry — the `generate_migration` capability already exists; this deepens its output.
+
+Batched onto the same feature branch as T-SPEED.1 (single-branch session constraint) → PR #1598 now covers
+"speed + deep schema". Next on the conveyor: T1.2 (`generate_crud` — validation/pagination/filter/sort/RBAC).
+
+---
+
+## 2026-07-19 — T1.2 `generate_crud` — full CRUD REST resource recipe (roadmap Tier-1, item 2)
+
+Cross-matched the recipe pattern (`src/server/lib/*Generator.ts` → `{files, dependencies, instructions}`,
+wired via ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case). The audit's biggest ❌ cluster was
+Backend request-quality (3/17): no validation, pagination, filtering, sorting, or a real error contract — the
+LLM hand-wrote each endpoint. New `generate_crud` closes it with ONE recipe.
+
+**Shipped (real, complete code — no stubs; pairs with T1.1's Prisma schema):**
+- `src/server/lib/CrudGenerator.ts` — pure `generateCrudResource(entity, { protected? })` emitting, on Prisma:
+  - `server/validation/<r>.schema.ts` — a zod create schema (email→`.email()`, int→`.number().int()`, etc.;
+    auto-managed `id`/`created_at`/`updated_at`/`deleted_at` excluded) + a `.partial()` update schema.
+  - `server/routes/<r>.routes.ts` — an Express router: LIST with pagination (`?page,?limit`≤100), allow-listed
+    exact-match filtering (`?field=value`) and sorting (`?sort=field:asc|desc`), get-by-id, validated
+    create/update, and **SOFT delete** (sets `deletedAt`, excluded from reads) — all via `asyncHandler` so
+    errors reach the handler. 404s on missing/soft-deleted rows.
+  - `server/lib/prisma.ts` — one shared PrismaClient. `server/middleware/errorHandler.ts` — the central error
+    contract (zod→400 with issues, `.status`→that code, else 500 with a generic message).
+  - `protected: true` → also emits `server/middleware/requireAuth.ts` and guards every mutation with an
+    authenticated `req.user` (pairs with `generate_auth`); default is an open resource that works standalone.
+  - Field-kind inference REUSES `fieldKind` from MigrationGenerator (one source of truth, rule 3/4) — a `<x>_id`
+    stays a string, etc.
+- Wired as the `generate_crud` tool: ToolCatalog def (name/description/input_schema with `name`+`fields`+
+  `protected`) + `CATALOG_TOOL_NAMES` + a ToolDispatcher case that writes each file with the standard
+  create/modify → `recordFileChange` → `indexFile` → checkpoint flow and reports the deps to add.
+- Closes audit Cat-6 gaps: validation ✅, pagination ✅, filtering ✅, sorting ✅, backend error handling ✅,
+  authorization ✅ (opt-in). (GraphQL/gRPC/OAuth/refresh-token remain separate fast-follows.)
+- No AppKnowledgeBase entry — consistent with the sibling `generate_*` recipes (engine builder tool, not a
+  user-navigable screen). Gate green: server `tsc` + `vitest` CrudGenerator 6/6 + ToolDispatcher 144/144 +
+  ToolCatalog 5/5.
+
+Batched onto PR #1598 (now "speed + deep schema + CRUD recipe"). Next on the conveyor: T1.3 (product
+scaffolds — admin/dashboard/roles) or T1.4 (smart clarification), per the roadmap.
 ## 2026-07-19 — ShopSphere (App #12, Nuxt) autopsy — fix A: framework-aware simple-build prompt
 
 App #12 (ShopSphere, multi-vendor marketplace, Nuxt 3) — Nuxt was correctly DETECTED (#1509 works), but the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateSqlDdl, generatePrismaSchema, generateMigration, fieldKind } from './MigrationGenerator';
+import { generateSqlDdl, generatePrismaSchema, generateMigration, fieldKind, foreignKeysFor } from './MigrationGenerator';
 
 const entity = { name: 'Post', fields: [
   { name: 'id' },
@@ -63,5 +63,78 @@ describe('generateMigration', () => {
     expect(out.files.some((f) => /\.sql$/.test(f.path))).toBe(true);
     // @ts-expect-error — malformed input must not throw
     expect(() => generateMigration(null)).not.toThrow();
+  });
+});
+
+// T1.1 — DEEP SCHEMA. FKs, indexes, timestamps, soft-delete, composite join-key, transactional SQL.
+const relSchema = [
+  { name: 'User', fields: [{ name: 'id' }, { name: 'email' }] },
+  { name: 'Post', fields: [{ name: 'id' }, { name: 'title', type: 'string' }, { name: 'user_id' }] },
+  // classic many-to-many link row (two FKs) — user <-> post
+  { name: 'Like', fields: [{ name: 'id' }, { name: 'user_id' }, { name: 'post_id' }] },
+];
+
+describe('foreignKeysFor', () => {
+  it('detects _id / Id fields that reference another entity', () => {
+    expect(foreignKeysFor(relSchema[1], relSchema)).toEqual([{ field: 'user_id', targetModel: 'User', targetTable: 'users' }]);
+    expect(foreignKeysFor(relSchema[2], relSchema).map((f) => f.field)).toEqual(['user_id', 'post_id']);
+  });
+  it('ignores plain id, words merely ending in lowercase "id", and _id with no matching entity', () => {
+    expect(foreignKeysFor({ name: 'Thing', fields: [{ name: 'id' }, { name: 'valid' }, { name: 'uuid' }, { name: 'grid' }] }, relSchema)).toEqual([]);
+    expect(foreignKeysFor({ name: 'Order', fields: [{ name: 'coupon_id' }] }, relSchema)).toEqual([]);
+  });
+});
+
+describe('deep schema — enriched SQL', () => {
+  it('emits FK constraints with ON DELETE CASCADE + one index per FK, inside a transaction', () => {
+    const ddl = generateSqlDdl(relSchema, 'postgresql', true);
+    expect(ddl).toMatch(/^-- Auto-generated[\s\S]*BEGIN;/);
+    expect(ddl.trim().endsWith('COMMIT;')).toBe(true);
+    expect(ddl).toContain('FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE');
+    expect(ddl).toContain('CREATE INDEX "idx_posts_user_id" ON "posts" ("user_id");');
+  });
+  it('adds created_at/updated_at defaults + a nullable deleted_at when absent', () => {
+    const ddl = generateSqlDdl(relSchema, 'postgresql', true);
+    expect(ddl).toContain('"created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    expect(ddl).toContain('"updated_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    expect(ddl).toContain('"deleted_at" TIMESTAMP NULL');
+  });
+  it('makes a two-FK join table pair UNIQUE', () => {
+    expect(generateSqlDdl(relSchema, 'postgresql', true)).toContain('UNIQUE ("user_id", "post_id")');
+  });
+  it('enrich=false stays byte-identical to the legacy flat output', () => {
+    const flat = generateSqlDdl(relSchema, 'postgresql', false);
+    expect(flat).not.toContain('BEGIN;');
+    expect(flat).not.toContain('FOREIGN KEY');
+    expect(flat).not.toContain('deleted_at');
+  });
+});
+
+describe('deep schema — enriched Prisma', () => {
+  it('adds @@index per FK, audit timestamps, a nullable deletedAt, and a composite @@unique join key', () => {
+    const p = generatePrismaSchema(relSchema, 'postgresql', true);
+    expect(p).toContain('@@index([user_id])');
+    expect(p).toContain('@@index([post_id])');
+    expect(p).toContain('@@unique([user_id, post_id])');
+    expect(p).toMatch(/createdAt\s+DateTime @default\(now\(\)\)/);
+    expect(p).toMatch(/updatedAt\s+DateTime @updatedAt/);
+    expect(p).toMatch(/deletedAt\s+DateTime\?/);
+  });
+  it('enrich=false reproduces the legacy schema', () => {
+    const p = generatePrismaSchema(relSchema, 'postgresql', false);
+    expect(p).not.toContain('@@index');
+    expect(p).not.toContain('deletedAt');
+  });
+});
+
+describe('deep schema — generateMigration defaults to enriched', () => {
+  it('the tool path emits the deep schema by default', () => {
+    const sql = generateMigration(relSchema).files.find((f) => /\.sql$/.test(f.path))!.content;
+    expect(sql).toContain('ON DELETE CASCADE');
+    expect(sql).toContain('BEGIN;');
+  });
+  it('enrich:false opts back into the flat schema', () => {
+    const sql = generateMigration(relSchema, { enrich: false }).files.find((f) => /\.sql$/.test(f.path))!.content;
+    expect(sql).not.toContain('ON DELETE CASCADE');
   });
 });

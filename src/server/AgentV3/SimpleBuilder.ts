@@ -546,6 +546,14 @@ export interface SimpleBuildDeps {
   overallTimeoutMs?: number;
   /** Hard cap (ms) on the best-effort preview (default 90 s). */
   previewTimeoutMs?: number;
+  /**
+   * STREAMING FIRST-PAINT (gated by the caller). Called ONCE with the fully-healed generated files
+   * the instant they are final — after deterministic self-heal + write, but BEFORE the verify+repair
+   * loop and the caller's install/dev-server boot (tens of seconds). The caller uses it to publish an
+   * early in-browser preview so the user sees the real app much sooner. Fire-and-forget + best-effort:
+   * a hook failure or slowness never affects or delays the build. Omit it (default) = today's behavior.
+   */
+  onFilesReady?: (files: OneShotFile[]) => void | Promise<void>;
 }
 
 export interface SimpleBuildResult {
@@ -766,6 +774,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // catastrophe). Refuse; the catch below has salvaged what was finished.
       if (lapsed) throw new Error('simple-build-cancelled');
       await deps.writeFiles(written);
+      // STREAMING FIRST-PAINT (gated by the caller via onFilesReady). The files are final and in the
+      // workspace, but the verify+repair loop and the caller's install/dev-server boot (tens of
+      // seconds) still lie ahead. Hand the ready files to the caller NOW so it can publish an early
+      // in-browser preview — the user sees their real app while the slow infra tax runs. Fire-and-
+      // forget + best-effort: a hook throw or slowness can never affect or delay the build.
+      if (deps.onFilesReady) {
+        try { void Promise.resolve(deps.onFilesReady(written)).catch(() => {}); } catch { /* a hook failure never touches the build */ }
+      }
       return written;
     })(), deps.overallTimeoutMs ?? 240_000, 'simple-build');
   } catch (e) {

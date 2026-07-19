@@ -131,6 +131,7 @@ import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGen
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3552,6 +3553,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('cors config');
         return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
+      }
+
+      case 'generate_validation': {
+        // U-4 recipe — real request validation (zod): validateBody + validate() middleware (server/lib/
+        // validate.ts). Pure generator in ValidationGenerator.ts. No env keys, no .env.example.
+        const vacfg = generateValidationIntegration();
+        const vaWritten: string[] = [];
+        for (const [path, content] of Object.entries(vacfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          vaWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('request validation');
+        return `Wired request validation:\n${vaWritten.join('\n')}\nAdd the dependency: ${vacfg.dependency.name}@${vacfg.dependency.version}\n\n${vacfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

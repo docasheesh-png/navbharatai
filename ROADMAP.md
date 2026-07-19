@@ -427,12 +427,14 @@ safely edit, or truly verify it).
   **Advisory half SHIPPED (#1548, 2026-07-19):** `ObservabilityAnalysis.scanObservability` is an `evaluate`
   dimension that flags a backend missing a `/health` route (high), an Express/Koa error handler (medium), or
   a request logger (low) — project-level, conservative (SPA/Fastify/Nest not false-flagged).
-  **Injection half — `/health` SHIPPED (#1554, 2026-07-19):** `ObservabilityInjector.injectHealthEndpoint`
-  deterministically adds a `/health` route to an Express entry that lacks one (dependency-free, purely
-  additive), persisted through the durable write path; wired as a default-OFF build-end gate
-  (`AGENTV3_OBSERVABILITY_INJECT=on`), never blocks. High precision — only the unambiguous single-entry case.
-  **Remaining ❌:** injecting the error handler + request logger (placement/dependency-sensitive) and
-  cost-alerting thresholds.
+  **Injection half — `/health` + error handler SHIPPED (#1554 + #1555, 2026-07-19):**
+  `ObservabilityInjector` deterministically adds a `/health` route (#1554) AND a 4-arg error-handling
+  middleware (#1555) to an Express entry that lacks them — both dependency-free and purely additive, placed
+  immediately before `.listen(` (so the route registers first and the error handler is last, as Express
+  requires). `injectObservabilityFixes` applies both in one pass; persisted through the durable write path;
+  wired as a default-OFF build-end gate (`AGENTV3_OBSERVABILITY_INJECT=on`), never blocks. High precision —
+  only the unambiguous single-entry case. **Remaining ❌:** injecting the request **logger** (needs a new
+  dependency — morgan/pino — added to package.json + import) and cost-alerting thresholds.
 
 ### 2E · Pipeline verification stages (P-PIPE)
 - 🟢❌ Runtime smoke tests (hit routes/API, auth, DB reads) · hydration validation · post-deploy liveness check.

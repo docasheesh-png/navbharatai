@@ -106,7 +106,7 @@ import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, typ
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { dependencyHealthVerdict } from './DependencyHealthGate';
-import { injectHealthEndpoint } from './ObservabilityInjector';
+import { injectObservabilityFixes } from './ObservabilityInjector';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
@@ -476,13 +476,18 @@ export class ToolDispatcher {
     try {
       return await withTimeout((async () => {
         const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
-        const result = injectHealthEndpoint(files);
+        const result = injectObservabilityFixes(files);
         if (!result) return '';
         await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
         try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
-        try { getWorkspaceMemory(this.workspaceId).recordAudit(`observability: injected /health route (on ${result.appVar}) into ${result.path}.`); } catch { /* audit best-effort */ }
-        return `🩺 Observability: added a /health route to ${result.path} so deploy/uptime probes have an endpoint to check.`;
+        const labels: Record<'health' | 'error-handler', string> = {
+          health: 'a /health route',
+          'error-handler': 'an error handler',
+        };
+        const what = result.added.map((a) => labels[a]).join(' and ');
+        try { getWorkspaceMemory(this.workspaceId).recordAudit(`observability: injected ${result.added.join(' + ')} (on ${result.appVar}) into ${result.path}.`); } catch { /* audit best-effort */ }
+        return `🩺 Observability: added ${what} to ${result.path} so deploy/uptime probes and thrown errors are handled cleanly.`;
       })(), 20_000, 'injectObservability');
     } catch {
       return '';

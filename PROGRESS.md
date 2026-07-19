@@ -18807,3 +18807,40 @@ lookahead on `production` that ignores the quality compounds (`production-clean/
 worthy/ise/ize`) while still catching a real "deploy to production". New test file (9 cases: the exact
 ShopSphere ending → building; quality compounds → building; real deploy words → deployed; other phases
 intact). Gate: server tsc 0, DialogueStateManager 9 pass. Shipped with fix A in the same ShopSphere PR.
+
+---
+
+## 2026-07-19 — U-4 verified-recipe track: 6 more BYO integrations (autonomous cycle, cont.)
+
+Continued the recipe conveyor after the AI/LLM + geocoding + translation recipes, adding six more real,
+fully-wired, unit-tested Bring-Your-Own integrations. Same discipline throughout (pure builder unit-tested
+for the generated output; `generate_*` agent tool = ToolDispatcher case + ToolCatalog def +
+CATALOG_TOOL_NAMES; keys/webhooks pasted into `.env` and NEVER stored; `.env.example` blank + never
+overwritten; real complete code, no stubs; branch → gate → PR → CI green → squash-merge). Built as stacked
+chains and unwound with `git rebase --onto` so every PR diff stayed clean (only its own files).
+
+- **#1573 — content moderation (`generate_moderation`):** OpenAI Moderation (free endpoint) + Perspective
+  (TOXICITY, tunable threshold). Server moderate(text) → { flagged, score }; fails OPEN so a moderation
+  outage never blocks the app. Catch toxic UGC before it is shown/stored.
+- **#1575 — object cache (`generate_cache`):** Redis over TCP (ioredis) + Upstash over HTTP (@upstash/redis,
+  serverless/edge). cacheGet/cacheSet(TTL)/cacheDel, JSON-serialised.
+- **#1576 — newsletter/mailing-list (`generate_newsletter`):** Mailchimp (data-center derived from the key)
+  + Brevo. Server subscribe(email, name?); distinct from generate_email (transactional send).
+- **#1577 — currency conversion (`generate_currency`):** ExchangeRate-API (/pair, any pair) + Fixer
+  (EUR-base cross-rate computed for you). getRate/convert.
+- **#1578 — weather (`generate_weather`):** OpenWeatherMap (metric) + WeatherAPI. getWeather(city) →
+  { tempC, description, humidity }; null on failure.
+- **#1579 — team notifications (`generate_notify`):** Slack + Discord incoming webhooks. notify(message);
+  never throws, so a notification failure can't break the request that triggered it.
+
+**Full session recap — the builder's BYO-integration library gained 17 recipes:** phone-OTP, product
+analytics, interactive maps, background jobs, transactional SMS, API rate limiting, error tracking, feature
+flags, AI/LLM, geocoding, translation, content moderation, object caching, newsletter signup, currency
+conversion, weather and team notifications — on top of the earlier payments/email/storage/realtime/search/
+auth/database recipes. Also this session: 4 backend-hardening advisory dimensions (observability #1548,
+graceful-shutdown #1549, security-headers #1550, CVE+license build-end gate #1551) and Cap-4 observability
+injection (/health #1554 + error-handler #1555). Full suite grew 7470 → 7639 passing across the entire run;
+the only failing suites throughout remained the pre-existing `src/server/sonic/*` optional-dep load failures
+(unrelated, identical on clean `main`). No new `tsc` errors. Every change advisory-only / default-off-gated /
+purely additive — none can break a build. All server-side recipes keep the secret server-side; a browser
+never sees a provider key.

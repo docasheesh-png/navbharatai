@@ -35,6 +35,7 @@ import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
 import { scanObservability, observabilitySummary } from './ObservabilityAnalysis';
+import { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdownAnalysis';
 import {
   scanCompliance, complianceSummary,
   detectsPiiCollection, detectsTracker, detectsConsentUI, looksLikePrivacyPolicy,
@@ -697,6 +698,24 @@ export class ToolDispatcher {
         if (typeof content === 'string') record[path] = content;
       }
       return scanObservability(record);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Best-effort graceful-shutdown scan over the project's BACKEND files. Detects a long-lived HTTP server
+   * that binds a port but never handles SIGTERM/SIGINT to drain in-flight requests before exit — the defect
+   * that drops requests on every Cloud Run / k8s redeploy. Serverless and framework-managed runtimes are not
+   * flagged. Wrapped so any read error degrades to an empty list — never breaks evaluate.
+   */
+  private collectGracefulShutdownIssues(sources: EvalSourceFile[]): ReturnType<typeof scanGracefulShutdown> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanGracefulShutdown(record);
     } catch {
       return [];
     }
@@ -1571,6 +1590,8 @@ export class ToolDispatcher {
         const a11yIssues = this.collectAccessibilityIssues(snap.sources);
         // Best-effort observability pass (Cap-4 advisory) — backend health/error-handler/logging gaps. Never throws.
         const obsIssues = this.collectObservabilityIssues(snap.sources);
+        // Best-effort graceful-shutdown pass — long-lived server with no SIGTERM drain. Never throws.
+        const shutdownIssues = this.collectGracefulShutdownIssues(snap.sources);
         // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never throws.
         const complianceIssues = this.collectComplianceIssues(snap.sources);
         // Calibrated build confidence (Layer 74 "Sahyog") — an honest synthesis of
@@ -1934,7 +1955,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
       }
 
       case 'update_todo': {

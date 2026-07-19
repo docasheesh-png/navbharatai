@@ -103,6 +103,8 @@ export { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis
 export type { AccessibilityIssue, AccessibilitySeverity } from './AccessibilityAnalysis';
 export { scanObservability, observabilitySummary } from './ObservabilityAnalysis';
 export type { ObservabilityIssue, ObservabilitySeverity } from './ObservabilityAnalysis';
+export { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdownAnalysis';
+export type { ShutdownIssue, ShutdownSeverity } from './GracefulShutdownAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
 export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';

@@ -4,6 +4,7 @@ import { NextjsProvider } from './NextjsProvider';
 import { VueProvider } from './VueProvider';
 import { SvelteProvider } from './SvelteProvider';
 import { SvelteKitProvider } from './SvelteKitProvider';
+import { SolidProvider } from './SolidProvider';
 import { NodeExpressProvider } from './NodeExpressProvider';
 import { NestJSProvider } from './NestJSProvider';
 import { FastifyProvider } from './FastifyProvider';
@@ -43,6 +44,7 @@ export class TemplateRegistry {
     'spring-boot': new SpringBootProvider(),
     'go': new GoProvider(),
     // Other frontend
+    'solid': new SolidProvider(),
     'astro': new AstroProvider(),
     'angular': new AngularProvider(),
     'vanilla': new VanillaProvider(),

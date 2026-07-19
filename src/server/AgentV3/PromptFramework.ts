@@ -32,6 +32,9 @@ const RULES: FrameworkRule[] = [
   { id: 'remix', re: /\bremix(\.run|\srun)?\b/i },
   { id: 'angular', re: /\bangular(js|\s?\d+)?\b/i },
   { id: 'astro', re: /\bastro\b/i },
+  // SolidJS — REQUIRE the "js"/".js" (bare "solid" is a common English word, e.g. "a solid app",
+  // and would false-positive onto the Solid scaffold).
+  { id: 'solid', re: /\bsolid\.?js\b|\bsolidjs\b|\bsolid\sjs\b/i },
   // Vue — the base library, checked after Nuxt. Pinia / Vue Router are strong Vue-only signals.
   { id: 'vue', re: /\bvue(\.js|js|\s?[23])?\b|\bpinia\b|\bvue-?router\b/i },
 ];

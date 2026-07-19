@@ -81,6 +81,17 @@ export const FRAMEWORKS: FrameworkMeta[] = [
     startCommand: 'npm run dev',
   },
   {
+    id: 'solid',
+    name: 'Solid + Vite',
+    description: 'Fine-grained reactive UI — JSX with signals, no virtual DOM',
+    category: 'frontend',
+    language: 'TypeScript',
+    color: '#2C4F7C',
+    iconChar: '🧱',
+    devPort: 5173,
+    startCommand: 'npm run dev',
+  },
+  {
     id: 'sveltekit',
     name: 'SvelteKit',
     description: 'Full-stack Svelte framework with file-based routing',

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   stripPrismaSqliteEnums,
   fixCjsDefaultImport,
+  fixPrismaDateStringDefault,
   ensureViteTypeModule,
   applyFullStackGuards,
   fullStackGuardsEnabled,
@@ -75,6 +76,42 @@ describe('fixCjsDefaultImport', () => {
   it('NEVER touches a legitimate namespace import (React, fs, a local module)', () => {
     const keep = `import * as React from 'react';\nimport * as fs from 'fs';\nimport * as utils from './utils';`;
     expect(fixCjsDefaultImport('a.tsx', keep)).toBe(keep);
+  });
+});
+
+describe('fixPrismaDateStringDefault — a date field defaulted to now() must be DateTime (MediConnect autopsy)', () => {
+  // The exact MediConnect failure: `createdAt String @default(now())` → prisma generate fails with
+  // "The function `now()` cannot be used on fields of type `String`" (19 such errors).
+  const BROKEN = `model Message {
+  id        String   @id @default(cuid())
+  notes     String?
+  createdAt String   @default(now())
+  updatedAt String   @updatedAt
+  isTyping  Boolean  @default(false)
+}`;
+
+  it('rewrites String→DateTime for @default(now()) and @updatedAt fields, keeping optionality', () => {
+    const out = fixPrismaDateStringDefault('prisma/schema.prisma', BROKEN);
+    expect(out).toContain('createdAt DateTime   @default(now())');
+    expect(out).toContain('updatedAt DateTime   @updatedAt');
+  });
+
+  it('leaves ordinary String fields and non-date defaults untouched', () => {
+    const out = fixPrismaDateStringDefault('prisma/schema.prisma', BROKEN);
+    expect(out).toContain('notes     String?');            // a plain optional String — unchanged
+    expect(out).toContain('isTyping  Boolean  @default(false)'); // not a String field
+    expect(out).toContain('id        String   @id @default(cuid())'); // @default(cuid()) is a valid String default
+  });
+
+  it('is a no-op for a non-schema path or content without the bug', () => {
+    expect(fixPrismaDateStringDefault('src/App.tsx', BROKEN)).toBe(BROKEN);
+    const ok = `model X {\n  createdAt DateTime @default(now())\n}`;
+    expect(fixPrismaDateStringDefault('prisma/schema.prisma', ok)).toBe(ok);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    expect(applyFullStackGuards('prisma/schema.prisma', BROKEN)).toContain('createdAt DateTime');
+    expect(applyFullStackGuards('prisma/schema.prisma', BROKEN, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(BROKEN);
   });
 });
 

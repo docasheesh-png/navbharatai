@@ -498,6 +498,42 @@ describe('circuit breaker — a sustained 429 rate benches the provider for a LO
     expect(cd.until('GLM')).toBe(1_000_000 + 60_000); // only the short cooldown, never a long breaker
   });
 
+  // ESCALATING BENCH (MediConnect autopsy): each repeat trip benches GLM 2× longer, capped — so a
+  // persistently-throttled provider stops being re-probed instead of re-storming 67 times over 31 min.
+  it('escalates the bench on repeat trips (300s → 600s → 1200s), capped at breakerMaxMs', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, {
+      breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000,
+      breakerMaxMs: 1_000_000, breakerEscalationWindowMs: 1_800_000,
+    });
+    // Trip #1 at t0 → base bench 300s.
+    let t = 1_000_000;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 300_000);
+    // After the bench expires the provider is probed again and re-storms → Trip #2 → 600s.
+    t = t + 300_000 + 1;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 600_000);
+    // Trip #3 → 1200s, but the cap (1_000_000ms) applies.
+    t = t + 600_000 + 1;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);
+    expect(cd.until('GLM')).toBe(t + 1_000_000); // 1200s wanted, capped at 1000s
+  });
+
+  it('a lone trip does NOT escalate (no breakerMaxMs → fixed bench, existing behaviour preserved)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    let t = 1_000_000;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);      // trip #1 → 300s
+    t = t + 300_001;
+    cd.strike('GLM', t); cd.strike('GLM', t); cd.strike('GLM', t);      // trip #2 → still 300s (no escalation)
+    expect(cd.until('GLM')).toBe(t + 300_000);
+  });
+
+  it('circuitBreakerConfig — escalation defaults ON (cap 30min); tunable via env', async () => {
+    const { circuitBreakerConfig } = await import('./MultiProviderTurnRunner');
+    expect(circuitBreakerConfig({} as NodeJS.ProcessEnv).breakerMaxMs).toBe(1_800_000);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER_MAX_MS: '600000' } as unknown as NodeJS.ProcessEnv).breakerMaxMs).toBe(600_000);
+  });
+
   it('circuitBreakerConfig — default ON (trip 8); AGENTV3_CIRCUIT_BREAKER=off disables', async () => {
     const { circuitBreakerConfig } = await import('./MultiProviderTurnRunner');
     expect(circuitBreakerConfig({} as NodeJS.ProcessEnv).breakerTripAfter).toBe(8);

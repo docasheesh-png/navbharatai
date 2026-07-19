@@ -76,6 +76,9 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines } from './postgresProvision';
+import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
+import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
@@ -214,6 +217,13 @@ export interface ActuatorPort {
     workspaceId: string,
     command: string,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  /**
+   * Provision backend services (a local PostgreSQL, auth/storage scaffolds) inside the sandbox and
+   * return the resulting env (e.g. DATABASE_URL). Real sandboxes only (E2BActuator installs + starts
+   * Postgres); LocalActuator throws. Optional — a sandbox without it degrades honestly. Used lazily by
+   * the bash path to give a `provider="postgresql"` build a real DB before `prisma migrate`/seed.
+   */
+  provisionBackend?(workspaceId: string, features: ('db' | 'auth' | 'storage')[]): Promise<BackendProvisionResult>;
   /** Public HTTPS URL for a port in the sandbox (real sandboxes only). Optional. */
   getPortUrl?(workspaceId: string, port: number): Promise<string>;
   /** Capture a PNG screenshot of a URL from inside the sandbox (real sandboxes only). */
@@ -355,6 +365,8 @@ export class ToolDispatcher {
    */
   private userSecretsEnv: Record<string, string> = {};
   private secretsEnvWritten = false;
+  /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
+  private postgresProvisioned = false;
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
@@ -396,6 +408,53 @@ export class ToolDispatcher {
       } catch { /* gitignore hardening is best-effort */ }
       this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
     } catch { /* best-effort — never block the build; the app just runs without injected keys */ }
+  }
+
+  /**
+   * LAZY POSTGRES PROVISIONING (MediConnect autopsy 2026-07-19). The first time the builder is about to
+   * run a command that needs a LIVE database (`prisma migrate` / `db push` / seed), AND the app's Prisma
+   * schema targets `provider="postgresql"`, provision a real local Postgres in the sandbox and write its
+   * DATABASE_URL into `.env` (Prisma auto-loads `.env`). This is the from-scratch counterpart of the
+   * imported-app provisioning — the exact gap that left MediConnect with nothing at localhost:5432, so
+   * `prisma migrate dev` failed with P1001 and the builder improvised a broken SQLite downgrade.
+   *
+   * Fires at most ONCE per build, only for postgres schemas, and never throws — a provisioning failure
+   * degrades honestly (the migrate then reports its real DB-unreachable error via Slice 1's DB_UNREACHABLE).
+   * Kill switch: AGENTV3_SANDBOX_POSTGRES=off. A sandbox without provisionBackend (LocalActuator) is a no-op.
+   */
+  private async ensureSandboxPostgres(command: string): Promise<void> {
+    if (this.postgresProvisioned) return;
+    if (!sandboxPostgresEnabled()) return;
+    if (!commandNeedsLiveDatabase(command)) return;
+    if (typeof this.actuator.provisionBackend !== 'function') return; // e.g. LocalActuator — honest no-op
+    // Only for a Postgres-targeting schema — a sqlite/mysql app must not trigger a Postgres install.
+    let schema = '';
+    try { schema = await withTimeout(this.actuator.readFile(this.workspaceId, 'prisma/schema.prisma'), 5_000, 'schema-read'); } catch { schema = ''; }
+    if (!schemaTargetsPostgres(schema)) return;
+    this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
+    try {
+      this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
+      const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-provision');
+      const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
+      if (Object.keys(lines).length > 0) {
+        let existing = '';
+        try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+        const merged = mergeDotEnv(existing, lines);
+        await this.actuator.writeFile(this.workspaceId, '.env', merged);
+        try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
+        // Keep .env out of git.
+        try {
+          let gi = '';
+          try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
+          const nextGi = gitignoreWithEnv(gi);
+          if (nextGi !== gi) { await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi); try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ } }
+        } catch { /* gitignore hardening is best-effort */ }
+        this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Local database ready — running your migrations against it now.', ts: Date.now() });
+      }
+    } catch {
+      // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real
+      // DB-unreachable output is surfaced honestly (Slice 1 DB_UNREACHABLE). Never block the build.
+    }
   }
 
   /**
@@ -1623,6 +1682,10 @@ export class ToolDispatcher {
         // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);
+        // Provision a real local Postgres BEFORE a migrate/seed if the app targets postgres (MediConnect
+        // autopsy): without this the from-scratch build hit P1001 at localhost:5432 and downgraded to a
+        // broken SQLite schema. Best-effort + once-per-build; a failure degrades to an honest DB error.
+        await this.ensureSandboxPostgres(effectiveCommand);
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
@@ -1684,6 +1747,40 @@ export class ToolDispatcher {
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
+        // PRISMA STRIPPED-ENUM CONSUMER SELF-HEAL (MediConnect autopsy 2026-07-19): a SQLite schema has
+        // no enums, so FullStackGuards strips them to String — but a seed/route that still does
+        // `import { AppointmentStatus } from '@prisma/client'` then crashes at load with
+        // "does not provide an export named 'AppointmentStatus'" and the seed (exit 1) never runs.
+        // Deterministic close: find the files importing the missing enum, make them coherent with a
+        // String enum (drop the import name, `Enum.MEMBER` → 'MEMBER', `: Enum` → `: string`), and retry
+        // the command ONCE. Mirrors the relation/generate self-heals above; best-effort, never blocks.
+        if (exitCode !== 0) {
+          const missingEnums = extractMissingPrismaExports(`${stdout}\n${stderr}`);
+          if (missingEnums.length > 0) {
+            try {
+              const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+              let fixedAny = false;
+              for (const [p, original] of Object.entries(files)) {
+                if (!isEnumConsumerFile(p)) continue;
+                let next = original;
+                for (const enumName of missingEnums) next = fixDanglingEnumConsumer(p, next, enumName);
+                if (next !== original) {
+                  await this.actuator.writeFile(this.workspaceId, p, next);
+                  try { this.onFileWrite?.(p, next); } catch { /* durable sync best-effort */ }
+                  this.state?.recordFileChange({ path: p, kind: 'modify' }, 'architect');
+                  fixedAny = true;
+                }
+              }
+              if (fixedAny) {
+                const retry = await this.actuator.runCommand(this.workspaceId, command);
+                if (retry.exitCode === 0) {
+                  ({ exitCode, stdout, stderr } = retry);
+                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 A database enum wasn't available on SQLite — rewired the code that used it (${missingEnums.join(', ')}) to plain string values and re-ran the step successfully.`, ts: Date.now() });
+                }
+              }
+            } catch { /* self-heal is best-effort — the original failure is still reported */ }
+          }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {

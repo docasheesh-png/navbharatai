@@ -280,14 +280,26 @@ export interface RateLimitCooldowns {
  * leads with the next provider (Kimi) instead of poking the throttled one turn after turn. Time-based
  * recovery only (after `breakerMs` it is tried again); a single success does NOT un-trip a proven-
  * saturated provider. Disabled when `breakerTripAfter` or `breakerMs` is 0 (existing 2-arg callers).
+ *
+ * ESCALATING BENCH (MediConnect autopsy 2026-07-19). The single fixed `breakerMs` still RE-PROBES a
+ * genuinely-throttled provider each cycle: a 31-min build tripped GLM ~6 times (bench 300s → probe →
+ * re-storm 8×429 → bench 300s → …), producing 67 GLM failures for 27 deliveries (71% fail rate). The
+ * fix: each REPEAT trip within `breakerEscalationWindowMs` benches the name for `breakerMs × 2^(trips-1)`,
+ * capped at `breakerMaxMs`. So a persistently-saturated provider's 2nd trip benches it long past the end
+ * of a typical build (it stops being re-probed), while a provider that behaves for the window ages its
+ * trips out and returns to the base bench — process-safe self-healing, never a permanent kill.
  */
 export interface CircuitBreakerOptions {
   /** Strikes within the window that trip the long breaker. 0 = breaker disabled. */
   breakerTripAfter?: number;
   /** Rolling window (ms) over which strikes are counted toward the trip threshold. */
   breakerWindowMs?: number;
-  /** How long (ms) a tripped name stays benched — long enough to stop the per-minute re-probe storm. */
+  /** How long (ms) a tripped name stays benched on the FIRST trip — the base of the escalation. */
   breakerMs?: number;
+  /** Cap (ms) on the escalated bench. Escalation is active only when this exceeds `breakerMs`. */
+  breakerMaxMs?: number;
+  /** Rolling window (ms) over which repeat trips are counted toward the escalation multiplier. */
+  breakerEscalationWindowMs?: number;
 }
 
 export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, breaker: CircuitBreakerOptions = {}): RateLimitCooldowns {
@@ -296,9 +308,13 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
   // Circuit breaker: rolling strike timestamps + the long "breaker open" expiry per name.
   const strikeTimes = new Map<string, number[]>();
   const breakerUntil = new Map<string, number>();
+  // Escalating bench: timestamps of past TRIPS per name (rolling), so a repeat trip benches longer.
+  const tripTimes = new Map<string, number[]>();
   const tripAfter = Math.max(0, Math.floor(breaker.breakerTripAfter ?? 0));
   const windowMs = Math.max(0, breaker.breakerWindowMs ?? 120_000);
   const openMs = Math.max(0, breaker.breakerMs ?? 0);
+  const maxMs = Math.max(openMs, breaker.breakerMaxMs ?? 0);
+  const escWindowMs = Math.max(windowMs, breaker.breakerEscalationWindowMs ?? 1_800_000);
   const breakerOn = tripAfter > 0 && openMs > 0;
   return {
     // The effective bench is the LATER of the short cooldown and the long breaker window.
@@ -312,7 +328,21 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
         const recent = (strikeTimes.get(name) ?? []).filter((t) => t >= nowMs - windowMs);
         recent.push(nowMs);
         strikeTimes.set(name, recent);
-        if (recent.length >= tripAfter) breakerUntil.set(name, nowMs + openMs);
+        if (recent.length >= tripAfter) {
+          // A trip fires. Escalate the bench by how many times this name has tripped within the rolling
+          // escalation window: bench = openMs × 2^(trips-1), capped at maxMs. A repeat offender is
+          // benched long past the build; a one-off returns to the base bench once its trips age out.
+          const trips = (tripTimes.get(name) ?? []).filter((t) => t >= nowMs - escWindowMs);
+          trips.push(nowMs);
+          tripTimes.set(name, trips);
+          const escalated = maxMs > openMs
+            ? Math.min(openMs * Math.pow(2, trips.length - 1), maxMs)
+            : openMs;
+          breakerUntil.set(name, nowMs + escalated);
+          // The rolling strike list is consumed by the trip — start the next window fresh so the NEXT
+          // trip reflects a genuinely new storm (not the same strikes counted twice).
+          strikeTimes.set(name, []);
+        }
       }
     },
     clear(name) {
@@ -346,6 +376,11 @@ export function circuitBreakerConfig(env: NodeJS.ProcessEnv = process.env): Circ
     breakerTripAfter: num('AGENTV3_CIRCUIT_BREAKER_TRIP', 8),
     breakerWindowMs: num('AGENTV3_CIRCUIT_BREAKER_WINDOW_MS', 120_000),
     breakerMs: num('AGENTV3_CIRCUIT_BREAKER_MS', 300_000),
+    // ESCALATING BENCH (MediConnect autopsy): repeat trips within the window bench the provider for
+    // openMs × 2^(trips-1), capped here — so a persistently-throttled GLM's 2nd/3rd trip benches it past
+    // the end of a typical build instead of re-storming every 5 min (67 GLM failures → ~2-3 trips' worth).
+    breakerMaxMs: num('AGENTV3_CIRCUIT_BREAKER_MAX_MS', 1_800_000),
+    breakerEscalationWindowMs: num('AGENTV3_CIRCUIT_BREAKER_ESC_WINDOW_MS', 1_800_000),
   };
 }
 

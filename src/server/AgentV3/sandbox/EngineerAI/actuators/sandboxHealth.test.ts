@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit } from './sandboxHealth';
+import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit, detectSilentDbFailure } from './sandboxHealth';
 
 describe('resolveThrownCommandExit — a rejected command keeps its REAL exit code (PaisaTrack autopsy)', () => {
   it("uses the error's own exitCode (E2B CommandExitError) — a tsc exit 2 stays 2, not -1", () => {
@@ -76,5 +76,59 @@ describe('isDeadSandboxSignal', () => {
 
   it('a normal successful-but-nonzero program exit is never a dead signal', () => {
     expect(isDeadSandboxSignal({ exitCode: 1, durationMs: 0, stdout: '', stderr: '' })).toBe(false);
+  });
+});
+
+describe('detectSilentDbFailure — exit 0 that hides a DB-unreachable failure (MediConnect autopsy)', () => {
+  // THE reported shape (App #14, Remix + Prisma + Postgres): `npx prisma migrate dev --name init`
+  // returned exit 0, but its own stdout said the DB was never reachable. The migration did NOT apply.
+  const MEDICONNECT_MIGRATE_STDOUT = [
+    '[health-check] installing dependencies (package.json changed)… done.',
+    '[health-check] attempt 1 — The dev server crashed on startup — restarting. Error: P1001: Can\'t reach database server at `localhost:5432`',
+    '[health-check] dev server did not come up on port 5432 after automatic recovery.',
+  ].join('\n');
+
+  it('flags the real MediConnect migrate: exit 0 + P1001 in output = silent DB failure', () => {
+    expect(detectSilentDbFailure({
+      command: 'npx prisma migrate dev --name init',
+      exitCode: 0,
+      stdout: MEDICONNECT_MIGRATE_STDOUT,
+    })).toBe(true);
+  });
+
+  it('flags a prisma seed that "succeeded" but could not reach the database', () => {
+    expect(detectSilentDbFailure({
+      command: 'npx tsx prisma/seed.ts',
+      exitCode: 0,
+      stderr: 'PrismaClientInitializationError: Can\'t reach database server at `localhost:5432`',
+    })).toBe(true);
+  });
+
+  it('does NOT flag when the exit code already reports failure (handled by the normal path)', () => {
+    expect(detectSilentDbFailure({
+      command: 'npx prisma migrate dev',
+      exitCode: 1,
+      stderr: 'P1001: Can\'t reach database server',
+    })).toBe(false);
+  });
+
+  it('does NOT flag a non-DB command that merely echoes the string P1001', () => {
+    expect(detectSilentDbFailure({
+      command: 'echo "the error code was P1001"',
+      exitCode: 0,
+      stdout: 'the error code was P1001',
+    })).toBe(false);
+  });
+
+  it('does NOT flag a healthy migrate (exit 0, no unreachable signal)', () => {
+    expect(detectSilentDbFailure({
+      command: 'npx prisma migrate dev --name init',
+      exitCode: 0,
+      stdout: '✔ Generated Prisma Client\nYour database is now in sync with your schema.',
+    })).toBe(false);
+  });
+
+  it('does NOT flag a null exit code (still-running / not settled)', () => {
+    expect(detectSilentDbFailure({ command: 'npx prisma migrate dev', exitCode: null, stdout: 'P1001' })).toBe(false);
   });
 });

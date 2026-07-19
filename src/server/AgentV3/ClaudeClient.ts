@@ -66,6 +66,15 @@ export interface TurnResult {
   toolUses: ToolUse[];
   /** Anthropic stop reason: 'end_turn' | 'tool_use' | 'max_tokens' | … */
   stopReason: string | null;
+  /**
+   * TRUE when the provider stopped because it hit the output-token limit (Anthropic 'max_tokens',
+   * OpenAI/GLM/Kimi finish_reason 'length', Gemini 'MAX_TOKENS') — REGARDLESS of whether the turn also
+   * emitted tool calls. `stopReason` alone is insufficient: the OpenAI/Gemini adapters force `'tool_use'`
+   * whenever a tool call is present, which MASKS a truncation that happened mid-`write_file` (the exact
+   * CargoPilot kimi/vertex case) — leaving the truncation guard blind and a partial file on disk. This
+   * flag surfaces the real finish reason so the loop can recover. Optional (undefined = not truncated).
+   */
+  truncated?: boolean;
   usage: TurnUsage;
   /** Raw assistant content blocks, to append verbatim to the transcript (RC-2). */
   rawContent: unknown[];
@@ -487,6 +496,7 @@ export function parseMessage(resp: AnthropicMessageLike): TurnResult {
     text,
     toolUses,
     stopReason: resp.stop_reason ?? null,
+    ...(resp.stop_reason === 'max_tokens' ? { truncated: true } : {}),
     usage: {
       inputTokens: u.input_tokens ?? 0,
       outputTokens: u.output_tokens ?? 0,

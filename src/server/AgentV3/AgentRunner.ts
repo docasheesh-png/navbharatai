@@ -701,13 +701,29 @@ export class AgentRunner {
         // file it wrote (esbuild, in-process, free) and hand the exact parse failures back with the
         // tool results — the very next turn rewrites the broken file instead of discovering it later.
         let truncationSteer: string | null = null;
-        if (turn.stopReason === 'max_tokens') {
+        // Trigger on the explicit `truncated` flag (set by EVERY provider adapter from the real finish
+        // reason) — NOT just stopReason === 'max_tokens'. CargoPilot autopsy (NEW-F): the OpenAI/Gemini
+        // adapters MASK a mid-write_file truncation to stopReason 'tool_use', so keying on 'max_tokens'
+        // alone left GLM/Kimi/Gemini truncations (the common cheap-floor case) completely unguarded and a
+        // partial file on disk. `truncated` unmasks them.
+        if (turn.truncated || turn.stopReason === 'max_tokens') {
           try {
             const written: Record<string, string> = {};
             for (const tu of turn.toolUses) {
-              if (tu.name !== 'write_file') continue;
-              const inp = tu.input as { path?: unknown; content?: unknown };
-              if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+              // Cover write_file AND write_files_batch — a batch write is just as truncatable, and the
+              // old guard only looked at write_file (so a batch's cut-off tail slipped through).
+              if (tu.name === 'write_file') {
+                const inp = tu.input as { path?: unknown; content?: unknown };
+                if (typeof inp?.path === 'string' && typeof inp?.content === 'string') written[inp.path] = inp.content;
+              } else if (tu.name === 'write_files_batch') {
+                const b = tu.input as { files?: unknown };
+                if (Array.isArray(b?.files)) {
+                  for (const f of b.files) {
+                    const ff = f as { path?: unknown; content?: unknown };
+                    if (typeof ff?.path === 'string' && typeof ff?.content === 'string') written[ff.path] = ff.content;
+                  }
+                }
+              }
             }
             const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
             if (broken.length > 0) {

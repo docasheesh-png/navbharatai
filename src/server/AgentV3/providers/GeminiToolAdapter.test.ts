@@ -104,6 +104,22 @@ describe('parseGeminiResponse', () => {
     expect(r.rawContent).toEqual([{ type: 'text', text: 'Done!' }]);
   });
 
+  it('UNMASKS a MAX_TOKENS truncation during a functionCall (the CargoPilot vertex case)', () => {
+    const r = parseGeminiResponse({
+      candidates: [{ content: { parts: [{ functionCall: { name: 'write_file', args: { path: 'big.tsx', content: 'export const A = () =>' } } }] }, finishReason: 'MAX_TOKENS' }],
+    });
+    expect(r.stopReason).toBe('tool_use'); // masked (the loop still runs the tool)
+    expect(r.truncated).toBe(true);        // …but the truncation is now visible to the guard
+  });
+
+  it('a text-only MAX_TOKENS stop is truncated; a normal STOP is not', () => {
+    const t = parseGeminiResponse({ candidates: [{ content: { parts: [{ text: 'half…' }] }, finishReason: 'MAX_TOKENS' }] });
+    expect(t.stopReason).toBe('max_tokens');
+    expect(t.truncated).toBe(true);
+    const ok = parseGeminiResponse({ candidates: [{ content: { parts: [{ text: 'done' }] }, finishReason: 'STOP' }] });
+    expect(ok.truncated).toBeUndefined();
+  });
+
   it('parses functionCall parts into synthesized-id toolUses + Anthropic rawContent + tool_use', () => {
     const r = parseGeminiResponse({
       candidates: [{ content: { parts: [

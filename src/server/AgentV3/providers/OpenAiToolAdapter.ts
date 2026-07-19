@@ -223,6 +223,9 @@ export function parseOpenAiCompletion(completion: OpenAiCompletionLike): TurnRes
 
   // If the model returned tool calls, the agent loop must run them: force tool_use.
   const stopReason = toolUses.length ? 'tool_use' : mapFinishReason(choice?.finish_reason);
+  // Surface the REAL finish reason even when it was masked to 'tool_use' above — a `length` stop that
+  // cut off a write_file mid-arguments must be visible to the truncation guard (CargoPilot kimi case).
+  const truncated = choice?.finish_reason === 'length';
 
-  return { text, toolUses, stopReason, usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
+  return { text, toolUses, stopReason, ...(truncated ? { truncated } : {}), usage, rawContent, ...(typeof completion?.model === 'string' && completion.model ? { model: completion.model } : {}) };
 }

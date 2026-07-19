@@ -125,6 +125,7 @@ import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimit
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
+import { generateIdIntegration } from '../lib/IdGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
@@ -3008,6 +3009,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('rbac');
         return `Wired RBAC:\n${rbacWritten.join('\n')}\n\n${rbac.instructions}`;
+      }
+
+      case 'generate_ids': {
+        // U-4 recipe — secure IDs/tokens (server/lib/ids.ts): newId (UUID v4) + shortId + secureToken +
+        // hashToken via node:crypto CSPRNG. Dependency-free. Pure generator in IdGenerator.ts. No env keys.
+        const idcfg = generateIdIntegration();
+        const idWritten: string[] = [];
+        for (const [path, content] of Object.entries(idcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          idWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('secure ids');
+        return `Wired secure IDs/tokens:\n${idWritten.join('\n')}\n(No npm dependency needed — node:crypto CSPRNG.)\n\n${idcfg.instructions}`;
       }
 
       case 'generate_admin': {

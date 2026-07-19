@@ -18457,3 +18457,70 @@ change that collapses the storm at its root while touching ONLY the failure path
 
 Tests: 2 new (single-429 arms the cooldown cross-instance; env parsing default/override/garbage). Gate:
 server tsc 0, MultiProviderTurnRunner suite 44 pass. All three LearnLoop open root causes now closed.
+
+## 2026-07-19 — ROADMAP: NavBharatAI Pro v5.0 "Velocity" master plan (PLAN ONLY — no code changed)
+
+Admin directive: make v5.0 the world's FASTEST AI app builder while quality goes UP, not down. This entry
+records the plan/roadmap only — NO code was changed in this update. ⚠️ LIVING DOCUMENT: this roadmap MUST
+be continuously re-checked and ENHANCED against the CURRENT code as the engine evolves (current-code ke
+anusar aur enhance karte rehna) — treat it as a direction, not a frozen spec; re-run the recon before
+implementing each item.
+
+### Recon finding (live map of the AgentV3 build pipeline) — the 2 biggest wins are ALREADY CODED, just OFF
+1. **Prompt-cache prefix (PR #1538, default OFF):** `cache_control` is already stamped in
+   `ClaudeClient.runTurn` (system + tool defs + growing transcript, default ON). The separate cache-PREFIX
+   relocation (`systemPromptCache.ts` `splitCachedSystem`, gated by `AGENTV3_CACHE_PREFIX=on`) moves the ~12
+   volatile head blocks (date/prefs/ADRs) out of the ~46KB static architect prompt so the static body stays
+   a stable cache prefix (cache read ≈ 0.1× input). Flipping the flag = highest-ROI TTFT win, low risk,
+   already unit-tested + no-op-safe.
+2. **Pre-baked E2B template (default OFF):** `E2BActuator` already has a warm `node_modules` primer + custom
+   template support (`resolveE2bTemplate`), inert until a custom image is published and `E2B_TEMPLATE_ID` /
+   `FULLSTACK_E2B_TEMPLATE_ID` are set. That turns a 30–90s cold `npm install` on the critical path into a
+   ~1–3s copy on every build. Low risk (infra/env; code already written).
+   Other findings: build has two lanes (fast `SimpleBuilder` fan-out @ concurrency 8, agentic `AgentRunner`
+   serial loop, maxSteps 50); per-file routing is single-policy-per-build (cheapest-first chain, error-only
+   fallback), NOT per-file adaptive; blueprint runs serial before the loop; no warm sandbox pool yet.
+
+### The phased roadmap (kya / kaise / kab / kaunsa) — every item ships flag-gated + quality-gated
+- **PHASE 1 (days, now — free wins):** (a) `AGENTV3_CACHE_PREFIX=on` + A/B-watch cacheReadInputTokens;
+  (b) build & publish the custom E2B template, set `E2B_TEMPLATE_ID`; (c) add a "time-to-first-screen"
+  metric so later phases are measured, not guessed.
+- **PHASE 2 (1–2 wks — routing & streaming):** (a) adaptive per-file routing (leaf/config/CSS → cheap floor,
+  shell + shared-contract → flagship; judge still guards quality); (b) stream file writes + progressive
+  first-screen preview; (c) run the best-effort blueprint CONCURRENT with sandbox warm-up.
+- **PHASE 3 (3–6 wks — big bets):** (a) Template DNA / recipe library (clone proven, tested app skeletons →
+  faster AND higher quality); (b) instant in-browser first-paint preview (Bolt/WebContainer-style) while the
+  cloud build continues; (c) diff-based edits + fast-apply model; warm/paused sandbox pool for paid users.
+- **PHASE 4 (ongoing — compounding polish):** context diet / RAG (send only relevant files); confidence-gated
+  review (deep heal only when needed); cross-project memory feeding routing + templates.
+
+### Competitor steal-sheet (what to take from each)
+- **Bolt.new** → WebContainers (in-browser runtime = near-instant preview). **Cursor** → fast-apply model
+  (instant diff apply) + diff edits. **v0** → template/component-driven generation (shadcn blocks).
+  **Lovable** → tight iterative diff-edit loop + 1-click backend. **Replit Agent** → always-warm cloud env +
+  checkpoints.
+
+### Operating principle (how the intelligence is spent — speed without quality loss)
+Cheap model does the bulk (flagship only on hard shell/logic, judge catches slips) · cache the stable (big
+prompts/tool-defs/context → ~0.1× cache reads) · parallelize the independent (files in a tier, blueprint vs
+warm-up, verify vs next step) · reuse what's proven (Template DNA + cross-project memory — the fastest code
+is the code you don't regenerate).
+
+### Pre-warm sandbox — honest cost analysis (admin's question: kitna extra paisa?)
+E2B bills per-second while a sandbox RUNS; a PAUSED sandbox bills only cheap storage (compute not billed,
+resume in ~seconds). Illustrative at ~$0.09/running-hr for a small (2 vCPU / 2–4GB) VM — VERIFY current E2B
+rates:
+- Naive always-on pool of 5 VMs 24/7 ≈ ~$330/mo (₹28k); 10 VMs ≈ ~$660/mo. WASTEFUL.
+- Paused-pool (1–2 hot + many paused snapshots) ≈ ~$65–130/mo (₹5–11k). OK.
+- ⭐ On-demand pre-warm (warm the moment a user OPENS the builder, ~30–60s before Send) ≈ ~$0–30/mo — you
+  pay for seconds you'd spend anyway, shifted a minute earlier. BEST.
+- Pre-baked template (Phase 1) shortens EVERY build → fewer sandbox-seconds → partially/fully OFFSETS the
+  warm cost.
+RECOMMENDATION: on-demand pre-warm + a tiny hot pool at peak, gated to PAID users only (cost tracks revenue).
+Realistic net extra ≈ $0–120/mo (₹0–~10k), tunable, start at $0 (on-demand only), grow only if data shows a
+wait. (A styled artifact of this whole plan was shared with the admin on 2026-07-19.)
+
+### Immediate next step (when the admin says go — NOT done in this entry)
+Phase 1: prepare the E2B custom-template definition + a verification build + the time-to-first-screen metric
+(code), and hand the admin the exact env flips (`AGENTV3_CACHE_PREFIX=on`, `E2B_TEMPLATE_ID`). No code was
+changed as part of recording this plan.

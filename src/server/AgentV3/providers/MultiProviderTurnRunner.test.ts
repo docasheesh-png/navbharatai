@@ -463,6 +463,49 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
   });
 });
 
+// === CIRCUIT BREAKER (CollabDesk/PaisaTrack GLM-storm autopsy 2026-07-19) =============================
+// The short 60s cooldown RE-PROBES a saturated provider every minute → 79 GLM 429s in one build. The
+// breaker tracks the rolling 429 rate and, once tripped, benches the provider for a LONG window (no
+// per-minute re-probe) so the whole build leads with the next provider.
+describe('circuit breaker — a sustained 429 rate benches the provider for a LONG window (not re-probed)', () => {
+  it('trips after breakerTripAfter strikes in the window and stays benched past the short cooldown', () => {
+    let t = 1_000_000;
+    // trip after 3 strikes in 120s; short cooldown 60s; breaker 300s.
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    cd.strike('GLM', t); // #1 → short cooldown t+60s
+    cd.strike('GLM', t); // #2
+    cd.strike('GLM', t); // #3 → breaker trips → t+300s
+    // At t+61s the SHORT cooldown has expired, but the breaker keeps GLM benched.
+    expect(cd.until('GLM')).toBe(t + 300_000);
+    // A single success clears the short cooldown but NOT the breaker (proven-saturated stays benched).
+    cd.clear('GLM');
+    expect(cd.until('GLM')).toBe(t + 300_000);
+  });
+
+  it('does NOT trip when strikes are spread OUTSIDE the rolling window (a healthy provider with rare 429s)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 3, breakerWindowMs: 120_000, breakerMs: 300_000 });
+    cd.strike('GLM', 1_000_000);          // 1 strike
+    cd.strike('GLM', 1_000_000 + 200_000); // +200s (window is 120s → the first aged out)
+    cd.strike('GLM', 1_000_000 + 400_000); // +400s
+    // Only ever 1 strike inside any 120s window → breaker never trips (only the short cooldown, which
+    // a later success would clear). The last strike's short cooldown is the only bench.
+    expect(cd.until('GLM')).toBe(1_000_000 + 400_000 + 60_000);
+  });
+
+  it('is disabled when breakerTripAfter is 0 (existing 2-arg behaviour is byte-for-byte unchanged)', () => {
+    const cd = createRateLimitCooldowns(60_000, 1, { breakerTripAfter: 0 });
+    for (let i = 0; i < 20; i++) cd.strike('GLM', 1_000_000);
+    expect(cd.until('GLM')).toBe(1_000_000 + 60_000); // only the short cooldown, never a long breaker
+  });
+
+  it('circuitBreakerConfig — default ON (trip 8); AGENTV3_CIRCUIT_BREAKER=off disables', async () => {
+    const { circuitBreakerConfig } = await import('./MultiProviderTurnRunner');
+    expect(circuitBreakerConfig({} as NodeJS.ProcessEnv).breakerTripAfter).toBe(8);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER: 'off' } as unknown as NodeJS.ProcessEnv).breakerTripAfter).toBe(0);
+    expect(circuitBreakerConfig({ AGENTV3_CIRCUIT_BREAKER_TRIP: '5' } as unknown as NodeJS.ProcessEnv).breakerTripAfter).toBe(5);
+  });
+});
+
 describe('hopelessly-oversized prompts abort the ladder (the 2.2M-token reviewer case, 2026-07-07)', () => {
   it('classifies the real errors: >1M tokens = hopeless; a merely-large prompt still falls through', async () => {
     const { isHopelesslyOversizedError } = await import('./MultiProviderTurnRunner');

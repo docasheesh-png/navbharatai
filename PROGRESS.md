@@ -18653,3 +18653,31 @@ this is NOT a too-small-cap bug — it's the model attempting more than 32k outp
 fix is a CONTINUATION mechanism (detect finish=max_tokens on a tool-call turn → resume/continue the
 generation, or split the file), a proper subsystem — deferred rather than faked. Recorded as an open root
 cause for a dedicated slice.
+
+---
+
+## 2026-07-19 — CargoPilot NEW-F FIXED: unmask LLM truncation so the guard actually engages
+
+Closes the LAST CargoPilot open root cause. Root cause (agent-mapped): a provider stopping at the output
+limit is a SUCCESSFUL return (never a throw), so the multi-provider error-fallback never sees it, and the
+only recovery — the AgentRunner TRUNCATION GUARD — keys on `stopReason === 'max_tokens'`. But the
+OpenAI/GLM/Kimi and Gemini adapters FORCE `stopReason = 'tool_use'` whenever the turn emits a tool call,
+which MASKS a truncation that happened mid-`write_file` (the exact CargoPilot kimi/vertex case). So the
+guard was BLIND to every cheap-provider truncation and a partial file could ship.
+
+Fix (DNA-level — make the real finish reason visible):
+- New `truncated?: boolean` on `TurnResult`, set by EVERY adapter from the RAW finish reason regardless of
+  tool calls: `OpenAiToolAdapter` (`finish_reason === 'length'`), `GeminiToolAdapter`
+  (`finishReason === 'MAX_TOKENS'`), `ClaudeClient.parseMessage` (`stop_reason === 'max_tokens'`).
+  `stopReason` stays as-is (the loop still runs the tool) — `truncated` is the honest side-channel.
+- AgentRunner truncation guard now triggers on `turn.truncated || turn.stopReason === 'max_tokens'` and
+  ALSO collects `write_files_batch` writes (was write_file only) → it syntax-checks every file a truncated
+  turn wrote (any provider, any write tool) and hands the exact parse failures back so the next turn
+  rewrites them. (Dropped a considered "verify parse-clean file" steer: a truncated write_file whose
+  content arg was cut off yields invalid JSON → empty input → no file written, so a parse-CLEAN written
+  file is genuinely complete; steering on it would be noise.)
+
+Tests: 5 new adapter cases (text-only length stop truncated; masked mid-tool-call truncation unmasked;
+normal tool call not truncated — for both OpenAI and Gemini) + existing guard tests still green. Gate:
+server tsc 0, AgentRunner + both adapters + ClaudeClient + BuildDiagnostics = 210 pass. ALL CargoPilot
+root causes (NEW-A..G) now closed.

@@ -146,6 +146,7 @@ import { generateTranslationIntegration, isTranslationProvider } from '../lib/Tr
 import { generateModerationIntegration, isModerationProvider } from '../lib/ModerationGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
+import { generateHttpClientIntegration } from '../lib/HttpClientGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
@@ -3904,6 +3905,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('retry backoff');
         return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
+      }
+
+      case 'generate_http_client': {
+        // U-4 recipe — resilient HTTP client (server/lib/http.ts): fetchJson with an AbortController timeout,
+        // non-2xx→HttpError, JSON parse. Dependency-free. Pure generator in HttpClientGenerator.ts. No env keys.
+        const hccfg = generateHttpClientIntegration();
+        const hcWritten: string[] = [];
+        for (const [path, content] of Object.entries(hccfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          hcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('http client');
+        return `Wired resilient HTTP client:\n${hcWritten.join('\n')}\n(No npm dependency needed — native fetch + AbortController timeout.)\n\n${hccfg.instructions}`;
       }
 
       case 'generate_newsletter': {

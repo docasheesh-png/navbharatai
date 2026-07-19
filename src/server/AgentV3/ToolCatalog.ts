@@ -1316,6 +1316,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_http_client',
+      description:
+        'Add a real resilient HTTP client to the app (server/lib/http.ts): a dependency-free fetchJson(url, { ' +
+        'timeoutMs, headers, method, body }) that adds a REAL timeout via AbortController (bare fetch has none, ' +
+        'so a dead upstream hangs the request forever), throws HttpError on any non-2xx status (native fetch ' +
+        'resolves on 4xx/5xx — a classic silent bug) and returns parsed JSON. Use for every third-party API ' +
+        'call; wrap with generate_retry for automatic backoff. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_newsletter',
       description:
         'Add a real newsletter / mailing-list signup to the app (Bring-Your-Own key): a server subscribe(' +
@@ -1886,6 +1896,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_moderation',
   'generate_cache',
   'generate_retry',
+  'generate_http_client',
   'generate_newsletter',
   'generate_currency',
   'generate_money_format',

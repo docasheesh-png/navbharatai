@@ -130,6 +130,7 @@ import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/Currency
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
+import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3531,6 +3532,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('env validation');
         const evKeyLine = evcfg.validatedKeys.length ? `\nValidated keys: ${evcfg.validatedKeys.join(', ')}` : '';
         return `Wired fail-fast env validation:\n${evWritten.join('\n')}${evKeyLine}\n(No npm dependency needed — plain process.env.)\n\n${evcfg.instructions}`;
+      }
+
+      case 'generate_cors': {
+        // U-4 recipe — safe allowlist CORS middleware (server/lib/cors.ts). Dependency-free. Pure generator
+        // in CorsGenerator.ts. Never overwrites an existing .env.example.
+        const cocfg = generateCorsIntegration();
+        const coWritten: string[] = [];
+        for (const [path, content] of Object.entries(cocfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); coWritten.push(`Kept existing ${path} (add: ${cocfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          coWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cors config');
+        return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

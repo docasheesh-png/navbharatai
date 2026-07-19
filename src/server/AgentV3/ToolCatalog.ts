@@ -1140,6 +1140,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_cors',
+      description:
+        'Add a safe CORS configuration to the app (server/lib/cors.ts): a dependency-free corsMiddleware that ' +
+        'allows credentialed cross-origin requests ONLY from an allowlist (ALLOWED_ORIGINS, comma-separated) ' +
+        'and echoes back the exact matching origin — NEVER a wildcard "*", the dangerous anti-pattern the ' +
+        'threat-model flags. Fixes the common fullstack blocker where the browser refuses the frontend→backend ' +
+        'call. Handles the OPTIONS preflight. The user sets ALLOWED_ORIGINS in .env; NavBharatAI never stores ' +
+        'it. Never overwrites an existing .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1459,6 +1470,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_weather',
   'generate_notify',
   'generate_env_validation',
+  'generate_cors',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

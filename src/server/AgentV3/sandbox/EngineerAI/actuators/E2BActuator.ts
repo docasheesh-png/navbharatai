@@ -8,7 +8,7 @@ import type { DevFramework } from './devServerHost';
 import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, devServerRunnerMissing, type DevServerDiagnosis } from './DevServerRecovery';
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
-import { isDeadSandboxSignal, isDeadSandboxError } from './sandboxHealth';
+import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
 import { resolveTemplateId } from './fullstackRouting';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
@@ -868,13 +868,16 @@ export class E2BActuator implements IEngineerActuator {
         const result = await sb.commands.run(command, { cwd: WORKSPACE_ROOT, timeoutMs: cmdTimeoutMs });
         return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       } catch (err: any) {
-        const dead = isDeadSandboxSignal({ exitCode: -1, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
+        // A non-zero exit REJECTS here (E2B CommandExitError) — recover the REAL exit code so a genuine
+        // command failure (tsc exit 2) is reported honestly, not flattened to the -1 dead-sandbox sentinel.
+        const realExit = resolveThrownCommandExit(err);
+        const dead = isDeadSandboxSignal({ exitCode: realExit, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
         if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
           this.sandboxes.delete(workspaceId); // drop the reaped sandbox reference
           try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
-        return { exitCode: -1, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
+        return { exitCode: realExit, stdout: err.stdout || '', stderr: err.stderr || err.message || String(err) };
       }
     }
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };

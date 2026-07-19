@@ -130,6 +130,25 @@ describe('BuildDiagnostics', () => {
     expect(r.counts.unresolved).toBe(0);
   });
 
+  it('finish(ok=true) back-fills recovered SANDBOX_CMD_FAILED as auto-resolved (PaisaTrack: no phantom unresolved)', () => {
+    const d = fresh();
+    // Two intermediate `tsc → exit 2` failures the agent then fixed; the build ultimately SUCCEEDED.
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.recordCommand({ command: 'npx tsc --noEmit', exitCode: 2, stdout: '', stderr: 'error TS2532', durationMs: 1000 });
+    d.finish(true, 'Build complete.');
+    const r = d.report();
+    expect(r.ok).toBe(true);
+    expect(r.counts.unresolved).toBe(0); // recovered → not a phantom "unresolved" on a passing build
+    expect(r.issues.filter((i) => i.code === 'SANDBOX_CMD_FAILED').every((i) => i.autoResolved)).toBe(true);
+  });
+
+  it('finish(ok=false) keeps SANDBOX_CMD_FAILED unresolved (a genuinely failed build still names it)', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'build failed', durationMs: 3000 });
+    d.finish(false, 'failed');
+    expect(d.report().counts.unresolved).toBeGreaterThanOrEqual(1);
+  });
+
   it('finish(ok=false) keeps tool errors/nudges UNRESOLVED', () => {
     const d = fresh();
     d.record({ phase: 'build', severity: 'warning', code: 'NO_BUILD_NUDGE', message: 'no files', autoResolved: false });

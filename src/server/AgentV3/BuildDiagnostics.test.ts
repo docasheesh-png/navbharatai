@@ -360,6 +360,25 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     expect(deriveRootCause({ issues, ok: false })).toContain('npm run build');
   });
 
+  it('a fast-lane handoff (SIMPLE_BUILD_OUTCOME) is NOT a terminal outcome — no false "BUILD_FAILED" (CollabDesk autopsy)', () => {
+    // The fast lane timed out and handed off to the full builder; the report was captured MID-full-builder.
+    // The handoff must NOT read as the build's rootCause — a cut/partial snapshot should say "still running",
+    // never "BUILD_FAILED" for a build that was progressing fine.
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_FALLBACK', message: 'Simple build timed out after generating 8 file(s) — the full builder continues from them.', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues })).toBeUndefined(); // ok not yet set → honest "still running", not a failure
+  });
+
+  it('the FULL builder\'s real OUTCOME_ still wins once it settles', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'info' as const, code: 'SIMPLE_BUILD_OUTCOME', message: 'Fast-lane outcome (handed off to the full builder): BUILD_FAILED', autoResolved: true },
+      { ts: 2, phase: 'build' as const, severity: 'info' as const, code: 'OUTCOME_BUILD_SUCCESS', message: 'Build outcome: BUILD_SUCCESS', autoResolved: true },
+    ];
+    expect(deriveRootCause({ issues, ok: true })).toBe('Build outcome: BUILD_SUCCESS');
+  });
+
   it('reports an honest "no problems" once the build settled clean', () => {
     expect(deriveRootCause({ issues: [], ok: true })).toBe('Build completed successfully with no problems recorded.');
   });

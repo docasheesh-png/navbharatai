@@ -6586,7 +6586,19 @@ export function registerAgentV3Routes(app: Express): void {
         }
         // Deterministic end-state classification (BUILD_SUCCESS / TYPECHECK_FAILED / BUILD_PARTIAL / …)
         // recorded into the build report so dashboards/retry policy can branch on the exact outcome.
-        if (sb.outcome) buildDiag.record({ phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true });
+        // A fast-lane FALLBACK (`!sb.ok` — timed out / verify-failed) is a HANDOFF to the full builder,
+        // NOT a terminal build outcome. Recording it as `OUTCOME_BUILD_FAILED` made a mid-build snapshot
+        // or a cut/partial report show a FALSE "BUILD_FAILED" rootCause while the full builder was still
+        // successfully finishing the app (CollabDesk/SvelteKit autopsy 2026-07-19: a 48-file build that
+        // progressed fine for 10+ more min after the fast-lane timeout carried a stale "BUILD_FAILED"
+        // rootCause because the report was captured before the full builder emitted its own outcome).
+        // Only a SUCCESSFUL fast lane is terminal (the app is done); a fallback's outcome is informational
+        // (SIMPLE_BUILD_FALLBACK already frames the handoff) and must NOT feed deriveRootCause.
+        if (sb.outcome) {
+          buildDiag.record(sb.ok
+            ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+        }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
         // to complete — not alien clutter to re-plan around or delete. Without this framing the full

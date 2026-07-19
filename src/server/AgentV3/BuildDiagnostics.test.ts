@@ -81,6 +81,26 @@ describe('BuildDiagnostics', () => {
     expect(r.counts.autoResolved).toBe(1);
   });
 
+  it('classifies a dead-sandbox "exit -1 (0s, empty)" as SANDBOX_UNAVAILABLE, not an app-build error (ShopSphere autopsy)', () => {
+    const d = fresh();
+    // The exact shape of the 81 dead-sandbox commands: the SDK threw, program never ran → exit -1, 0ms, empty.
+    d.recordCommand({ command: 'npx --no-install tsc --noEmit 2>&1', exitCode: -1, stdout: '', stderr: '', durationMs: 0 });
+    const r = d.report();
+    const issue = r.issues.find((i) => i.code === 'SANDBOX_UNAVAILABLE');
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.message).toMatch(/sandbox was unavailable/i);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(false); // NOT blamed on the app
+  });
+
+  it('a REAL command failure (nonzero exit WITH output) still records as SANDBOX_CMD_FAILED', () => {
+    const d = fresh();
+    d.recordCommand({ command: 'npm run build', exitCode: 1, stdout: '', stderr: 'error TS2304: Cannot find name X', durationMs: 4200 });
+    const r = d.report();
+    expect(r.issues.some((i) => i.code === 'SANDBOX_CMD_FAILED')).toBe(true);
+    expect(r.issues.some((i) => i.code === 'SANDBOX_UNAVAILABLE')).toBe(false); // a genuine failure is not excused
+  });
+
   it('derives a TOOL_ERROR from a failed tool_result event', () => {
     const d = fresh();
     d.ingestEvent({ type: 'tool_result', agent: 'architect', callId: 'c1', ok: false, summary: 'npm install failed: ERESOLVE', ts: 1 } as AgentEvent);
@@ -301,6 +321,24 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
       { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: 'npm install failed', autoResolved: false },
     ];
     expect(deriveRootCause({ issues })).toBe('npm install failed');
+  });
+
+  it('names INFRA honestly when the only failure is a dead sandbox — never blames the app (ShopSphere autopsy)', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: '$ npx --no-install tsc --noEmit → could not run — the build sandbox was unavailable (reaped/expired/unreachable). Infrastructure condition, not an app error.', autoResolved: false },
+    ];
+    const rc = deriveRootCause({ issues, ok: false });
+    expect(rc).toMatch(/sandbox became unavailable/i);
+    expect(rc).toMatch(/infrastructure condition/i);
+    expect(rc).not.toMatch(/tsc/); // must NOT surface the raw "tsc → exit -1" as if the app failed to compile
+  });
+
+  it('a REAL app error still wins over a co-occurring sandbox-unavailable event', () => {
+    const issues = [
+      { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ npm run build → exit 1 (TS2304)', autoResolved: false },
+      { ts: 2, phase: 'build' as const, severity: 'warning' as const, code: 'SANDBOX_UNAVAILABLE', message: 'sandbox went away', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: false })).toContain('npm run build');
   });
 
   it('reports an honest "no problems" once the build settled clean', () => {

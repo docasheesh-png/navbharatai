@@ -4,7 +4,7 @@ import { AttachMenu } from '../AttachMenu';
 import {
   Bot, Send, Square, Loader2, Terminal, FileDiff, FolderOpen,
   History, CheckCircle2, AlertCircle, Rocket, Globe, ExternalLink, RotateCcw, Play,
-  SlidersHorizontal, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
+  Settings, Check, X, Paperclip, FileText, Github, Circle, GitBranch,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
   Star, Search,
@@ -2860,7 +2860,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   title="Build options"
                   className={`relative h-7 w-9 flex items-center justify-center rounded border ${settingsOpen ? 'border-indigo-500 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:text-white'}`}
                 >
-                  <SlidersHorizontal className="w-4 h-4" />
+                  <Settings className="w-4 h-4" />
                   {anyToggleOn && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />}
                 </button>
               </div>

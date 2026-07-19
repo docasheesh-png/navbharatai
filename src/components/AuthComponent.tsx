@@ -773,11 +773,15 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         onClick={onClose}
         className="absolute inset-0 bg-black/80 backdrop-blur-md"
       />
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="relative w-full max-w-md bg-[#161b22] border border-white/10 rounded-[2.5rem] shadow-3xl overflow-hidden p-8"
+        // max-h + overflow-y-auto so a tall form (email + all 4 social buttons) never runs off the top/
+        // bottom of the screen — it scrolls INSIDE the card instead. 100dvh tracks the real visible height
+        // on mobile Safari (accounts for the address bar), and the safe-area insets keep it clear of the notch.
+        className="relative w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-[#161b22] border border-white/10 rounded-[2.5rem] shadow-3xl p-8"
+        style={{ maxHeight: 'calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1.5rem)' }}
       >
         <button 
           onClick={onClose}
@@ -1064,7 +1068,10 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               type="button"
               onClick={handleAppleSignIn}
               disabled={loading}
-              className="w-full py-4 bg-black hover:bg-[#1a1a1a] disabled:opacity-50 text-white border border-white/15 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+              // Force white text + icon inline so the label is readable no matter what theme/global CSS is
+              // applied around the modal (the button rendered with dark, unreadable text otherwise).
+              style={{ color: '#ffffff' }}
+              className="w-full py-4 bg-black hover:bg-[#1a1a1a] disabled:opacity-50 text-white border border-white/25 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.05 12.53c-.02-2.02 1.65-2.99 1.72-3.04-.94-1.37-2.4-1.56-2.92-1.58-1.24-.13-2.42.73-3.05.73-.63 0-1.6-.71-2.63-.69-1.35.02-2.6.79-3.3 2-1.4 2.44-.36 6.04 1.01 8.02.67.97 1.47 2.05 2.51 2.01 1.01-.04 1.39-.65 2.61-.65 1.22 0 1.56.65 2.63.63 1.09-.02 1.78-.98 2.44-1.96.77-1.12 1.09-2.21 1.11-2.27-.02-.01-2.13-.82-2.15-3.23zM15.04 6.36c.56-.68.94-1.62.83-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.83-.46 2.4-1.14z"/></svg>
               Sign in with Apple
@@ -1073,7 +1080,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
               type="button"
               onClick={handleGithubSignIn}
               disabled={loading}
-              className="w-full py-4 bg-[#24292e] hover:bg-[#2f363d] disabled:opacity-50 text-white border border-white/10 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
+              // Lighter GitHub grey + forced white text/icon so the label reads clearly (was too dark).
+              style={{ color: '#ffffff' }}
+              className="w-full py-4 bg-[#30363d] hover:bg-[#3a4048] disabled:opacity-50 text-white border border-white/25 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95"
             >
               <Github className="w-4 h-4" />
               Continue with GitHub

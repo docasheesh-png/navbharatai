@@ -981,6 +981,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_pagination',
+      description:
+        'Add real, DoS-safe list pagination to the app (server/lib/pagination.ts): dependency-free ' +
+        'parsePagination(req.query) → a clamped { limit, offset, page } (caps limit so ?limit=999999 cannot ' +
+        'OOM the DB, floors a bad/missing page at 1) and pageMeta(total, params) → { total, page, pages, ' +
+        'hasNext, hasPrev } for the response envelope. Use on any list endpoint (products, orders, posts, ' +
+        'search). Feed limit/offset into SQL LIMIT/OFFSET or .skip()/.take(). No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_rbac',
       description:
         'Add real role-based access control (RBAC): an ordered Role hierarchy + a hasRole() check + a ' +
@@ -1803,6 +1813,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_crud',
+  'generate_pagination',
   'generate_rbac',
   'generate_admin',
   'generate_dashboard',

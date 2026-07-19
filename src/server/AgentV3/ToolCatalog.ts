@@ -1017,6 +1017,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_dashboard',
+      description:
+        'Generate a stats dashboard: a server endpoint (GET /api/dashboard/stats) that aggregates per-resource ' +
+        'counts (total + created-in-the-last-7-days, soft-deleted excluded) on Prisma, and a React page ' +
+        '(src/pages/Dashboard.tsx) of stat tiles. Pass the resource/model names to summarize. Reuses ' +
+        "generate_crud's Prisma client + error handler. Guard the route with generate_rbac's requireRole('admin').",
+      input_schema: {
+        type: 'object',
+        properties: {
+          models: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Resource/model names to summarize (e.g. ["Post","User"]).',
+          },
+        },
+        required: ['models'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1560,6 +1579,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crud',
   'generate_rbac',
   'generate_admin',
+  'generate_dashboard',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

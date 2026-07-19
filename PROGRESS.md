@@ -19151,3 +19151,26 @@ and `generate_crud` exposes `/api/<resource>` endpoints — so an admin UI can b
 
 Fresh branch off `c252958` (post-#1603 main), own PR (option-1). Next: `generate_dashboard` (stats summary),
 then T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 3) `generate_dashboard` + CI-background working mode (admin-clarified)
+
+Admin clarified the working mode: **CI ALWAYS runs in the background — do NOT wait for green; complete the
+next step immediately** (the CLAUDE.md "CI runs in the background, always advance" rule). So from here the
+conveyor keeps building while each push's CI bakes in the background; a background timer merges each PR the
+moment it's green. Given the single-branch session constraint, later slices extend the open PR (#1604) rather
+than blocking on its CI.
+
+**Shipped `generate_dashboard` (pure, dependency-free, real code):**
+- `src/server/lib/DashboardGenerator.ts` — `generateDashboard(models)` emits:
+  - `server/routes/dashboard.routes.ts` — `GET /api/dashboard/stats`, aggregating per-resource `total` +
+    `recent` (created in the last 7 days), soft-deleted rows excluded, on Prisma; reuses generate_crud's
+    shared Prisma client + asyncHandler/error handler. De-dupes models.
+  - `src/pages/Dashboard.tsx` — a React page of stat tiles (total + "+N this week"), with loading/error states.
+- Wired as the `generate_dashboard` tool (ToolCatalog def + `CATALOG_TOOL_NAMES` + a ToolDispatcher case).
+- Closes the "Dashboard" Feature-Completeness gap. Gate green: server `tsc` + `vitest` DashboardGenerator 4/4
+  + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+**Product-scaffold cluster (T1.3) now complete: roles (rbac) + admin + dashboard**, all pairing with
+generate_crud/generate_migration. Extends PR #1604 (CI in background). Next: T1.4 smart clarification.

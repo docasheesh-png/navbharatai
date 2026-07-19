@@ -121,6 +121,7 @@ import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimit
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
+import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2900,6 +2901,26 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`admin (${adminName})`);
         return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
+      }
+
+      case 'generate_dashboard': {
+        // T1.3 recipe — a stats dashboard (GET /api/dashboard/stats aggregation + React tiles page).
+        // Pure generator in DashboardGenerator.ts; reuses generate_crud's prisma client + error handler.
+        const dashRec = (input as Record<string, unknown>) || {};
+        const dashModels = Array.isArray(dashRec.models) ? dashRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (dashModels.length === 0) return 'generate_dashboard: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const dash = generateDashboard(dashModels);
+        const dashWritten: string[] = [];
+        for (const [path, content] of Object.entries(dash.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dashWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('dashboard');
+        return `Wired a dashboard:\n${dashWritten.join('\n')}\n\n${dash.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

@@ -26,6 +26,21 @@ describe('resolveLocalImport', () => {
     expect(resolveLocalImport('src/App.tsx', '~/utils', files)).toBe('src/utils/index.ts');
     expect(resolveLocalImport('src/App.tsx', '@/Missing', files)).toBeNull(); // alias to a missing file → still null
   });
+
+  it('resolves a NodeNext/ESM `.js`-extension import to its `.ts` source (SvelteKit — CollabDesk autopsy)', () => {
+    // `import { Card } from './types.js'` in a `"type":"module"` TS project resolves to `./types.ts`.
+    const ts = new Set(['src/lib/types.ts', 'src/lib/permissions.ts', 'src/lib/cards.ts', 'src/lib/Comp.tsx']);
+    expect(resolveLocalImport('src/lib/cards.ts', './types.js', ts)).toBe('src/lib/types.ts');
+    expect(resolveLocalImport('src/lib/cards.ts', './permissions.js', ts)).toBe('src/lib/permissions.ts');
+    expect(resolveLocalImport('src/lib/cards.ts', './Comp.jsx', ts)).toBe('src/lib/Comp.tsx');
+    // A genuinely missing `.js` target still returns null (no over-reach).
+    expect(resolveLocalImport('src/lib/cards.ts', './nope.js', ts)).toBeNull();
+  });
+
+  it('still prefers an actual `.js` file when one exists (does not hijack a real JS import)', () => {
+    const mixed = new Set(['src/lib/legacy.js', 'src/lib/app.ts']);
+    expect(resolveLocalImport('src/lib/app.ts', './legacy.js', mixed)).toBe('src/lib/legacy.js');
+  });
 });
 
 describe('analyzeArchitecture', () => {

@@ -16,6 +16,11 @@ describe('resolveLocalTarget', () => {
   it('returns null when nothing matches', () => {
     expect(resolveLocalTarget('src/App.tsx', './missing', set)).toBeNull();
   });
+  it('resolves a NodeNext/ESM `.js`-extension import to its `.ts` source (SvelteKit — CollabDesk autopsy)', () => {
+    const ts = new Set(['src/lib/types.ts', 'src/lib/cards.ts']);
+    expect(resolveLocalTarget('src/lib/cards.ts', './types.js', ts)).toBe('src/lib/types.ts');
+    expect(resolveLocalTarget('src/lib/cards.ts', './missing.js', ts)).toBeNull();
+  });
 });
 
 describe('analyzeImportExports — clean (no false positives)', () => {

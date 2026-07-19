@@ -18632,3 +18632,24 @@ fire on that force-push). Consolidating slices 1+2+3 onto branch and re-pushing 
 #1553 becomes the single cohesive "CargoPilot autopsy fixes" PR. Remaining CargoPilot open: NEW-F
 (kimi/vertex max_tokens truncation) and NEW-G (app/middleware.ts must be at project root — silent
 route-guard failure, needs a different detector).
+
+---
+
+## 2026-07-19 — CargoPilot autopsy slice 4: Next.js middleware-location fix (NEW-G) + NEW-F recorded open
+
+Closes CargoPilot NEW-G. Evidence: CargoPilot wrote `app/middleware.ts`, but Next.js runs middleware ONLY
+from the project root (`middleware.ts`) or `src/middleware.ts` — an `app/middleware.*` is SILENTLY ignored,
+so the RBAC/route guards it held never ran and every "guarded" route was actually unprotected while the app
+looked fine (a silent security break, no build error). Fix: `nextMiddlewareCorrectPath` (pure) + a write-time
+relocation in ToolDispatcher's write_file — for a Next.js project, a middleware written under `app/` is moved
+to the location Next actually reads (`app/middleware.ts` → `middleware.ts`; `src/app/middleware.ts` →
+`src/middleware.ts`), with narration. Deterministic (Next semantics are unambiguous — app/middleware is
+always wrong). Kill switch `AGENTV3_NEXT_MW_FIX=off`. 9 tests total in frameworkBuildHints (5 hint + 4
+relocation). Gate: server tsc 0, frameworkBuildHints 9 + ToolDispatcher 144 pass.
+
+NEW-F recorded OPEN (rule 6 — not cosmetically patched): kimi/vertex `LLM_TRUNCATED` (finish=max_tokens) on
+large files. The agentic builder already uses `buildMaxTokensPerTurn()` = 32000 (not the 8000 fallback), so
+this is NOT a too-small-cap bug — it's the model attempting more than 32k output in a single turn. The real
+fix is a CONTINUATION mechanism (detect finish=max_tokens on a tool-call turn → resume/continue the
+generation, or split the file), a proper subsystem — deferred rather than faked. Recorded as an open root
+cause for a dedicated slice.

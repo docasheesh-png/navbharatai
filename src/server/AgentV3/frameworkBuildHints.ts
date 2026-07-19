@@ -53,3 +53,18 @@ export function nextBuildRepairHint(output: string): string | null {
   }
   return null;
 }
+
+/**
+ * Next.js runs middleware ONLY from `middleware.ts`/`.js` at the PROJECT ROOT (or `src/middleware.ts`
+ * when the project uses a `src/` dir). A `app/middleware.*` (or `src/app/middleware.*`) is SILENTLY
+ * ignored — the route guards / auth checks it holds never run, so the app looks fine but every guarded
+ * route is unprotected (CargoPilot autopsy 2026-07-19: an `app/middleware.ts` meant RBAC never enforced).
+ *
+ * Given a written file path, return the location Next.js actually reads, or null when the path is not a
+ * misplaced middleware (already at root/src, or not a middleware file at all). PURE.
+ */
+export function nextMiddlewareCorrectPath(path: string): string | null {
+  const p = (path || '').replace(/^\.?\//, '');
+  const m = /^(src\/)?app\/(middleware\.(?:ts|js|mts|mjs))$/.exec(p);
+  return m ? `${m[1] ?? ''}${m[2]}` : null;
+}

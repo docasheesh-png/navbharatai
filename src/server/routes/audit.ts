@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { callGemini } from '../lib/aiCalls';
 import { getSecurityContext } from '../lib/prompts';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * Security-scan + website-audit routes extracted from the server.ts monolith
@@ -28,7 +29,7 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
       res.json({ reply });
     } catch (error: any) {
       console.error('Security scan failure:', error.message);
-      res.status(500).json({ error: error.message });
+      sendSafeError(res, 500, 'Security scan failed. Please try again.', error, 'security scan');
     }
   });
 
@@ -41,7 +42,7 @@ Analyze the target for any vulnerabilities, configuration issues, or exposed sec
       const report = { status: 'audit_not_available' }; // Placeholder
       res.json(report);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      sendSafeError(res, 500, 'Website audit failed. Please try again.', error, 'website audit');
     }
   });
 }

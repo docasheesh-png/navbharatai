@@ -5,6 +5,7 @@ import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
 import { aiRouter } from '../lib/aiRouter';
 import { AppContextInjector } from '../AppContext/AppContextInjector';
 import { buildDocumentContext } from '../lib/attachmentText';
+import { toSafeClientMessage } from '../lib/httpError';
 import { runVisionChain } from '../lib/visionChain';
 import { CREATOR_IDENTITY, recencyDirective } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
@@ -379,7 +380,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     } catch(e: any) {
       console.error(`Error for tier ${tier}:`, e.message);
       if (!res.headersSent) {
-        res.status(500).json({ reply: 'Backend AI inference failed', error: e.message });
+        // Never leak the raw inference error (may name a provider/model) to the client.
+        res.status(500).json({ reply: 'Backend AI inference failed', error: toSafeClientMessage(e, 'Backend AI inference failed') });
       }
     }
   };

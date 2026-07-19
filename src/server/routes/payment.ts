@@ -7,6 +7,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 // unauthenticated CLIENT SDK was rejected with PERMISSION_DENIED. Same modular API, admin-backed.
 import { doc, getDoc, setDoc, updateDoc, runTransaction, getServerDb as getDb } from '../lib/serverDb';
 import { getSecretValue } from '../lib/secrets';
+import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal } from '../lib/payments';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 
@@ -298,7 +299,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       }
     } catch (error: any) {
       console.error('[CASHFREE WEBHOOK] Error handling webhook exception:', error);
-      return res.status(500).json({ error: error.message });
+      return sendSafeError(res, 500, 'Payment webhook processing failed.', error, 'cashfree webhook');
     }
   });
 
@@ -392,7 +393,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       return res.json({ success: true, balanceAdded: value, currentBalance: newBalance });
     } catch (err: any) {
       console.error('[COUPON] Redemption failed:', err.message);
-      return res.status(500).json({ error: err.message });
+      return sendSafeError(res, 500, 'Coupon redemption failed. Please try again.', err, 'coupon redeem');
     }
   });
 }

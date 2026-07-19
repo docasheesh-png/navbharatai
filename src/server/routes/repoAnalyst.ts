@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, enforceNotBanned } from '../lib/authMiddleware';
 import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
 import { runRepoImprovementGen } from '../repoAnalyst/generate';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * GitHub Repo Analyst & Improver route.
@@ -28,7 +29,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
       const reply = await runRepoAnalystChat(message.trim(), turns, token);
       res.json({ reply, professionalId: 'repo_analyst' });
     } catch (err: any) {
-      res.status(503).json({ error: err?.message || 'The analyst is busy. Please try again.' });
+      sendSafeError(res, 503, 'The analyst is busy. Please try again.', err, 'repo analyst chat');
     }
   });
 
@@ -45,7 +46,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
       const result = await runRepoImprovementGen(typeof message === 'string' ? message.trim() : '', turns, token);
       res.json({ ...result, professionalId: 'repo_analyst' });
     } catch (err: any) {
-      res.status(503).json({ error: err?.message || 'The analyst is busy. Please try again.' });
+      sendSafeError(res, 503, 'The analyst is busy. Please try again.', err, 'repo analyst generate');
     }
   });
 }

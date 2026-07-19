@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
+import { sendSafeError } from '../lib/httpError';
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -35,7 +36,7 @@ export function registerTelemetryRoutes(app: Express): void {
         tbt: audits['total-blocking-time']?.displayValue,
       });
     } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Failed to analyze' });
+      return sendSafeError(res, 500, 'Failed to analyze. Please try again.', err, 'telemetry analyze');
     }
   });
 

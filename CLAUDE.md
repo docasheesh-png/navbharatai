@@ -451,6 +451,13 @@ completes the NEXT task, with one eye on CI in the background.** Push → start 
 a background timer/notification brings you back to merge each PR the moment its check is green. You are
 never idle-waiting on a progress bar — your attention is on the next unit of work, CI just pings you when
 it's ready.
+**THE FULL LOOP (admin verbatim, 2026-07-19): CI background me chalti hai — green ka wait NAHI karna hai.
+CI run hote hi turant naya (next) kaam shuru karo, cycle me. Aur jab CI GREEN ho jaaye, tab ek checkpoint
+par ruk kar us PR ko merge karo, phir wapas apne purane checkpoint (jahaan next-kaam paused tha) se kaam
+continue karo.** In plain terms: the green-notification is a brief, cheap interrupt — you pause the task
+in flight ONLY long enough to land that one merge at its checkpoint, then immediately resume the paused
+task from exactly where you left it. You never stop the conveyor to watch a run go green, and you never
+abandon the in-flight task after merging — merge, then straight back to the paused checkpoint.
 When the work is large or spans many PRs, MANY CI runs will queue up — that is expected and fine.
 Do NOT sit and watch any single CI run. The rule, every time you push:
 - **Push → then IMMEDIATELY move to the next unit of work** (investigate, design, or start the next

@@ -18892,3 +18892,38 @@ This is slice 1 of T-SPEED.1 (single early emit of the complete healed app). A l
 infra piece — resume only helps the 2nd+ turn; the first build still pays the ≤45 s cold `Sandbox.create`).
 Next on the conveyor per the roadmap: Tier-1 depth items (deep schema generator, `generate_crud`, product
 scaffolds, smart clarification). Cross-match-with-live-code rule applies to each before starting.
+
+---
+
+## 2026-07-19 — T1.1 DEEP SCHEMA GENERATOR (roadmap Tier-1, item 1)
+
+Cross-matched the live `src/server/AppMakerLab/generator/MigrationGenerator.ts` (the `generate_migration`
+tool's generator, `ToolDispatcher.ts:2777`) against the audit: it emitted FLAT tables — only a PK, a UNIQUE
+email, and a `created_at` default. No FKs, indexes, cascade, composite indexes, transactions, soft-delete or
+audit columns (exactly the audit's Cat-5 ❌ cluster). Upgraded it to a real relational schema generator.
+
+**Shipped (pure, deterministic, backward-compatible):**
+- New `enrich` flag — **default ON via `generateMigration`** (the tool path), OFF on the low-level
+  `generatePrismaSchema`/`generateSqlDdl` so every prior direct-call and its exact-string tests stay
+  byte-identical (rule 1). Opt out with `{ enrich: false }`.
+- New exported `foreignKeysFor(entity, all)` — detects a `<base>_id` / `<base>Id` field whose singularized
+  base matches another entity; `id` alone and words merely ending in lowercase "id" (valid/uuid/grid) are
+  never FKs; a `_id` with no matching entity is not a FK.
+- Enriched **SQL**: real `FOREIGN KEY … REFERENCES … ON DELETE CASCADE`, a `CREATE INDEX` per FK column,
+  auto `created_at`/`updated_at` (`DEFAULT CURRENT_TIMESTAMP`) + a nullable `deleted_at` when absent, a
+  `UNIQUE(a_id, b_id)` on a two-FK join table, and the whole migration wrapped in `BEGIN … COMMIT`
+  (transactional — a partial apply rolls back instead of half-migrating).
+- Enriched **Prisma**: `@@index([fk])` per FK, `createdAt @default(now())` / `updatedAt @updatedAt` /
+  `deletedAt DateTime?` when absent, and `@@unique([a, b])` on a join table. (Prisma relation NAVIGATION —
+  forward+back `@relation` objects — is a deliberate fast-follow; index-only keeps every emitted schema
+  VALID by construction, never a half-declared relation that fails `prisma validate`.)
+- Closes audit Cat-5 gaps: indexes ✅, foreign keys ✅, cascade ✅, composite ✅, transactions ✅,
+  soft-delete ✅, audit timestamps ✅. (Normalization + full Prisma relation nav remain fast-follows.)
+- Tests: `foreignKeysFor` positive/negative cases; enriched SQL FK+index+cascade+timestamps+soft-delete+
+  join-unique+transaction; enriched Prisma @@index/timestamps/deletedAt/@@unique; enrich=false byte-identical
+  to legacy; `generateMigration` enriched by default + `enrich:false` opt-out. Gate green: server `tsc` +
+  `vitest` MigrationGenerator 17/17 + ToolDispatcher 144/144 (the tool's enriched output breaks nothing).
+  No AppKnowledgeBase entry — the `generate_migration` capability already exists; this deepens its output.
+
+Batched onto the same feature branch as T-SPEED.1 (single-branch session constraint) → PR #1598 now covers
+"speed + deep schema". Next on the conveyor: T1.2 (`generate_crud` — validation/pagination/filter/sort/RBAC).

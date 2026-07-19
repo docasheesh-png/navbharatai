@@ -113,6 +113,7 @@ import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
 import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
+import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -3148,6 +3149,29 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('analytics integration');
         const anDeps = ancfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${anProvider} analytics:\n${anWritten.join('\n')}\nAdd the dependencies: ${anDeps}\n\n${ancfg.instructions}`;
+      }
+
+      case 'generate_map': {
+        // U-4 recipe — real BYO interactive maps (Google Maps/Mapbox): a client createMap/addMarker helper
+        // using the PUBLIC browser map key. Pure generator in MapGenerator.ts.
+        const mpProvider = optStr(input, 'provider');
+        if (!isMapProvider(mpProvider)) return 'generate_map: pass provider = "googlemaps" | "mapbox".';
+        const mpcfg = generateMapIntegration(mpProvider);
+        const mpWritten: string[] = [];
+        for (const [path, content] of Object.entries(mpcfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); mpWritten.push(`Kept existing ${path} (add: ${mpcfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('map integration');
+        const mpDeps = mpcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired ${mpProvider} maps:\n${mpWritten.join('\n')}\nAdd the dependencies: ${mpDeps}\n\n${mpcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

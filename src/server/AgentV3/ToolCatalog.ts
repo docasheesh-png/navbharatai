@@ -1332,6 +1332,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_email_template',
+      description:
+        'Add a real HTML email template builder to the app (server/lib/emailTemplate.ts): dependency-free ' +
+        'renderEmail({ title, heading, body, button, footer, preheader }) → { html, text }. The HTML is ' +
+        'responsive, TABLE-based with INLINE styles (renders correctly in Outlook/Gmail, unlike a div/flex ' +
+        'email) with a bulletproof button, and every value is escaped so a name/amount can never break the ' +
+        'markup; it also returns the matching PLAIN-TEXT body (send both parts so it stays out of spam). Use ' +
+        'for welcome / verify / reset / receipt emails; pass .html + .text into the email-send recipe. No env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_currency',
       description:
         'Add real currency conversion to the app (Bring-Your-Own key): a server getRate(from, to) + convert(' +
@@ -1887,6 +1898,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_cache',
   'generate_retry',
   'generate_newsletter',
+  'generate_email_template',
   'generate_currency',
   'generate_money_format',
   'generate_weather',

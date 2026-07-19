@@ -147,6 +147,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
+import { generateEmailTemplateIntegration } from '../lib/EmailTemplateGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
 import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
@@ -3928,6 +3929,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('newsletter integration');
         const nlDepLine = nlcfg.dependency ? `\nAdd the dependency: ${nlcfg.dependency.name}@${nlcfg.dependency.version}` : '\n(No npm dependency needed — the provider REST API is called with the built-in fetch.)';
         return `Wired ${nlProvider} newsletter signup:\n${nlWritten.join('\n')}${nlDepLine}\n\n${nlcfg.instructions}`;
+      }
+
+      case 'generate_email_template': {
+        // U-4 recipe — responsive HTML email template builder (server/lib/emailTemplate.ts): renderEmail →
+        // { html, text }, table-based + inline styles + escaped. Dependency-free. Pure generator in
+        // EmailTemplateGenerator.ts. No env keys.
+        const etcfg = generateEmailTemplateIntegration();
+        const etWritten: string[] = [];
+        for (const [path, content] of Object.entries(etcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          etWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('email template');
+        return `Wired HTML email template:\n${etWritten.join('\n')}\n(No npm dependency needed — table-based, escaped, html + text.)\n\n${etcfg.instructions}`;
       }
 
       case 'generate_currency': {

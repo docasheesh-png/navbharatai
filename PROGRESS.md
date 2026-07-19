@@ -19174,3 +19174,21 @@ than blocking on its CI.
 
 **Product-scaffold cluster (T1.3) now complete: roles (rbac) + admin + dashboard**, all pairing with
 generate_crud/generate_migration. Extends PR #1604 (CI in background). Next: T1.4 smart clarification.
+
+---
+
+## 2026-07-19 — T1.3 (slice 4) `generate_backup` — data-export endpoint
+
+Continued the conveyor (CI-in-background mode). Closes the "Backup"/in-app "Export" Feature-Completeness ❌.
+
+**Shipped (pure, dependency-free):**
+- `src/server/lib/BackupGenerator.ts` — `generateBackup(models)` emits `server/routes/backup.routes.ts`:
+  `GET /api/admin/backup` streams a downloadable JSON snapshot (`{ exportedAt, data }`, `Content-Disposition:
+  attachment`) of every row of each model on Prisma; reuses generate_crud's shared client + error handler;
+  de-dupes models. Guard behind `requireRole('admin')` — it exposes ALL data.
+- Wired as the `generate_backup` tool. Gate green: server `tsc` + `vitest` BackupGenerator 3/3 + ToolCatalog
+  5/5 + ToolDispatcher 145/145.
+
+Extends PR #1604 (admin + dashboard + backup, CI in background). The `generate_crud` → migration → rbac →
+admin → dashboard → backup set now forms a coherent "data + admin" backend toolkit the builder can assemble.
+Next: T1.4 smart clarification.

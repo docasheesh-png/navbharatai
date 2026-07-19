@@ -122,6 +122,7 @@ import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
+import { generateBackup } from '../lib/BackupGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2921,6 +2922,26 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('dashboard');
         return `Wired a dashboard:\n${dashWritten.join('\n')}\n\n${dash.instructions}`;
+      }
+
+      case 'generate_backup': {
+        // T1.3 recipe — a JSON data-export ("backup") endpoint. Pure generator in BackupGenerator.ts;
+        // reuses generate_crud's prisma client + error handler. Guard with generate_rbac's requireRole('admin').
+        const bkRec = (input as Record<string, unknown>) || {};
+        const bkModels = Array.isArray(bkRec.models) ? bkRec.models.filter((m): m is string => typeof m === 'string') : [];
+        if (bkModels.length === 0) return 'generate_backup: pass models as a non-empty array (e.g. ["Post","User"]).';
+        const bk = generateBackup(bkModels);
+        const bkWritten: string[] = [];
+        for (const [path, content] of Object.entries(bk.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          bkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('backup');
+        return `Wired a backup endpoint:\n${bkWritten.join('\n')}\n\n${bk.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

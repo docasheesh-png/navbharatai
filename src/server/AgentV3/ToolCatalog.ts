@@ -1036,6 +1036,24 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_backup',
+      description:
+        'Generate a data-export ("backup") endpoint: GET /api/admin/backup downloads a JSON snapshot of every ' +
+        'row of the given resources, on Prisma. Pass the resource/model names to export. Reuses generate_crud\'s ' +
+        "Prisma client + error handler. Guard it with generate_rbac's requireRole('admin') — it exposes ALL data.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          models: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Resource/model names to export (e.g. ["Post","User"]).',
+          },
+        },
+        required: ['models'],
+      },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1580,6 +1598,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_rbac',
   'generate_admin',
   'generate_dashboard',
+  'generate_backup',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

@@ -1106,6 +1106,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_image_optimization',
+      description:
+        'Add real image optimization: a sharp-based server helper (optimizeImage — resize + WebP re-encode on ' +
+        'the upload path, so a 4 MB photo becomes ~100 KB) and a CLS-safe React <LazyImage> (native lazy-load ' +
+        '+ async decode + reserved width/height so the layout never jumps → faster LCP). Use for any app that ' +
+        'shows user-uploaded or content images. Adds the sharp dependency.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1654,6 +1663,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'generate_ui_states',
+  'generate_image_optimization',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

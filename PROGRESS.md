@@ -19262,3 +19262,20 @@ Continued Tier-2 (CI-in-background mode — no blocking on green). Closes the au
 
 Batched onto PR #1608 (T1.4 + i18n + ui-states, CI in background). Next Tier-2: image-optimization,
 SSO/ABAC, observability logger injection.
+
+---
+
+## 2026-07-19 — T2.6 `generate_image_optimization` — sharp WebP + CLS-safe lazy image
+
+Continued Tier-2. Closes the audit's Performance ❌ "Image optimization" + lazy-loading.
+
+**Shipped (pure):**
+- `src/server/lib/ImageOptGenerator.ts` — `generateImageOptimization()` emits `server/lib/optimizeImage.ts`
+  (sharp: EXIF-rotate + resize `withoutEnlargement` + WebP re-encode on the upload path — a 4 MB photo →
+  ~100 KB) and `src/components/ui/LazyImage.tsx` (native `loading="lazy"` + `decoding="async"` + REQUIRED
+  width/height + `aspect-ratio` so the layout never shifts → faster LCP). Adds the `sharp` dependency.
+- Wired as the `generate_image_optimization` tool. Gate green: server `tsc` + `vitest` ImageOptGenerator 3/3
+  + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Batched onto PR #1608 (T1.4 + i18n + ui-states + image-opt, CI in background). Next: SSO/ABAC (enterprise),
+observability logger injection.

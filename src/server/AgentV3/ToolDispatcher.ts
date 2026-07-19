@@ -126,6 +126,7 @@ import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
+import { generateImageOptimization } from '../lib/ImageOptGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2993,6 +2994,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ui-states');
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_image_optimization': {
+        // T2.6 recipe — a sharp server helper + a CLS-safe lazy <img>. Pure generator in ImageOptGenerator.ts.
+        const io = generateImageOptimization();
+        const ioWritten: string[] = [];
+        for (const [path, content] of Object.entries(io.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ioWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('image-optimization');
+        const ioDeps = io.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired image optimization:\n${ioWritten.join('\n')}\nAdd the dependencies: ${ioDeps}\n\n${io.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

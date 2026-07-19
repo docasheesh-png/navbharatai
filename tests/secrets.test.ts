@@ -5,19 +5,24 @@ import { encrypt, decrypt, getLatestKeyVersion } from '../src/server/lib/secrets
  * P-SEC.5 — Encryption key rotation (versioned ciphertext, backward-compatible).
  */
 describe('secrets — versioned encryption (P-SEC.5)', () => {
-  it('round-trips a versioned secret', () => {
+  it('round-trips a versioned secret (authenticated GCM: g<N>:iv:tag:ct)', () => {
     const plain = 'sk-test-ABC123!@#';
     const enc = encrypt(plain);
-    expect(enc.startsWith('v')).toBe(true);           // versioned format v<N>:iv:ct
-    expect(enc.split(':').length).toBe(3);
+    expect(enc.startsWith('g')).toBe(true);           // authenticated GCM format g<N>:iv:tag:ct
+    expect(enc.split(':').length).toBe(4);
     expect(decrypt(enc)).toBe(plain);
   });
 
-  it('still decrypts LEGACY two-part ciphertext (<iv>:<ct>) — backward compatible', () => {
+  it('still decrypts LEGACY CBC ciphertext (v<N>:iv:ct AND <iv>:<ct>) — backward compatible', () => {
     const plain = 'legacy-secret-value';
-    // Simulate pre-versioning data: strip the version prefix from a fresh ciphertext
-    // (same key, so the 2-part legacy path must decrypt it identically).
-    const legacy = encrypt(plain).replace(/^v\d+:/, '');
+    // Produce old-format CBC via the rollback switch; decrypt() must read both legacy shapes.
+    process.env.SECRET_CIPHER = 'cbc';
+    const versioned = encrypt(plain);
+    delete process.env.SECRET_CIPHER;
+    expect(versioned.split(':').length).toBe(3);
+    expect(decrypt(versioned)).toBe(plain);
+    // Pre-versioning 2-part form (strip the v<N>: prefix).
+    const legacy = versioned.replace(/^v\d+:/, '');
     expect(legacy.split(':').length).toBe(2);
     expect(decrypt(legacy)).toBe(plain);
   });

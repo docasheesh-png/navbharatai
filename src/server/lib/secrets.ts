@@ -121,6 +121,40 @@ export async function rotateAllSecrets(): Promise<{ rotated: number; skipped: nu
   return { rotated, skipped, failed, toVersion };
 }
 
+/**
+ * Load ALL of a user's own stored vault secrets (decrypted) as a { NAME: value } map, for injecting
+ * into the environment of the app THEY build (admin 2026-07-17: NavBharatAI Pro v5 guides the user to
+ * store an app's required keys here — never in chat — and the build reads them from the vault).
+ *
+ * SECURITY — CRITICAL: unlike getSecretValue(), this NEVER falls back to process.env. process.env holds
+ * NavBharatAI's OWN platform keys (GEMINI_API_KEY, ANTHROPIC_API_KEY, E2B_API_KEY, …); a name collision
+ * (a user naming a secret `GEMINI_API_KEY`) must NOT leak the platform's key into the user's app. Only
+ * the user's real `user_secrets` documents are returned. Invalid env-var names and undecryptable/empty
+ * values are dropped. Best-effort: any failure returns {} (the build just runs without injected secrets).
+ */
+export async function loadUserVaultSecrets(userId: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!userId) return out;
+  const db = getDb() as any;
+  if (!db) return out;
+  try {
+    const snap = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
+    for (const d of snap.docs) {
+      const data = d.data() as { secret_name?: string; encrypted_secret_value?: string; deleted?: boolean };
+      if (data?.deleted || !data?.secret_name || !data?.encrypted_secret_value) continue;
+      const name = String(data.secret_name).trim();
+      // A valid POSIX env-var name only — never let a stored name inject extra .env lines.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+      const value = decrypt(data.encrypted_secret_value);
+      if (value === '') continue; // undecryptable or empty — skip
+      out[name] = value; // last write wins if duplicate names exist
+    }
+  } catch (err) {
+    console.error('[loadUserVaultSecrets] failed:', err);
+  }
+  return out;
+}
+
 export async function getSecretValue(userId: string, secretName: string): Promise<string | null> {
   // First check process.env:
   if (process.env[secretName]) {

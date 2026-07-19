@@ -17,6 +17,7 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const [value, setValue] = useState('');
   const [showValue, setShowValue] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [addError, setAddError] = useState('');
 
   // Cashfree Webhook Specific State variables
   const [cfSecretValue, setCfSecretValue] = useState('');
@@ -46,12 +47,15 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
   const addSecret = async () => {
     if (!name || !value) return;
     setIsLoading(true);
+    setAddError('');
     try {
       await axios.post(`/api/secrets/${userId}`, { secret_name: name.trim(), secret_value: value.trim() });
       setName('');
       setValue('');
-    } catch (err) {
+    } catch (err: any) {
+      // Honest, visible failure — a silent console.error left the user thinking the key saved when it didn't.
       console.error('Failed to add secret:', err);
+      setAddError(err?.response?.data?.error || 'Could not save the key. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -226,6 +230,9 @@ export const SecretManager: React.FC<{ userId: string }> = ({ userId }) => {
         >
           {isLoading ? 'Saving...' : <><Save size={16} /> Save Secret</>}
         </button>
+        {addError && (
+          <p className="text-[11px] text-red-400 font-semibold text-center">{addError}</p>
+        )}
       </div>
 
       <div className="space-y-2">

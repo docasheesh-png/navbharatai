@@ -27,6 +27,7 @@ import { analyzeArchitecture, architectureSummary, generateArchitectureDoc } fro
 import { securitySummary } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
+import { mergeDotEnv, gitignoreWithEnv } from '../secrets/appSecretsEnv';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
@@ -287,6 +288,57 @@ export class ToolDispatcher {
       }
       return; // signed the first HTML entry we found
     }
+  }
+
+  /**
+   * The user's OWN vault secrets (Settings → Secrets & Keys), decrypted, to inject into the environment
+   * of the app they build (admin 2026-07-17). The composition root loads them (loadUserVaultSecrets) and
+   * sets them here before the build runs. Empty = nothing to inject (no-op). These are the USER's keys —
+   * never NavBharatAI's platform keys (the loader deliberately never reads process.env).
+   */
+  private userSecretsEnv: Record<string, string> = {};
+  private secretsEnvWritten = false;
+
+  /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
+  setUserSecrets(env: Record<string, string>): void {
+    this.userSecretsEnv = env && typeof env === 'object' ? env : {};
+  }
+
+  /**
+   * Write the user's vault secrets into the app's `.env` the FIRST time the app is about to install /
+   * build / run — so the running preview AND any later deploy use real credentials, and the user never
+   * had to paste a key into chat. Done once per build, best-effort, and only for real app commands.
+   *
+   * SECURITY: `.env` is force-added to `.gitignore` so the user's real keys can NEVER reach their git
+   * repo; command output that prints a secret is already masked by redactSecrets on the way back. The
+   * vault OVERRIDES any generated placeholder (mergeDotEnv), and existing .env lines are preserved.
+   * Never throws — a failure just means the app runs without the injected keys (honest degradation).
+   */
+  private async ensureUserSecretsEnvFile(command: string): Promise<void> {
+    if (this.secretsEnvWritten) return;
+    const names = Object.keys(this.userSecretsEnv);
+    if (names.length === 0) return;
+    // Only right before the app actually installs/builds/runs — that is when a .env must be on disk.
+    if (!/\b(?:npm|pnpm|yarn|bun|vite|next|node|nodemon|tsx|ts-node|deno|python|pip|uvicorn|gunicorn|flask)\b/i.test(command)) return;
+    this.secretsEnvWritten = true; // attempt once regardless of outcome — never rewrite on every command
+    try {
+      let existing = '';
+      try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+      const merged = mergeDotEnv(existing, this.userSecretsEnv);
+      await this.actuator.writeFile(this.workspaceId, '.env', merged);
+      try { this.onFileWrite?.('.env', merged); } catch { /* durable-store record is best-effort */ }
+      // Keep .env out of git — always, even if the app already had one.
+      try {
+        let gi = '';
+        try { gi = await withTimeout(this.actuator.readFile(this.workspaceId, '.gitignore'), 5_000, 'gi-read'); } catch { gi = ''; }
+        const nextGi = gitignoreWithEnv(gi);
+        if (nextGi !== gi) {
+          await this.actuator.writeFile(this.workspaceId, '.gitignore', nextGi);
+          try { this.onFileWrite?.('.gitignore', nextGi); } catch { /* best-effort */ }
+        }
+      } catch { /* gitignore hardening is best-effort */ }
+      this.events?.emit({ type: 'narration', agent: 'architect', text: `🔐 Loaded ${names.length} of your saved key${names.length === 1 ? '' : 's'} (Settings → Secrets & Keys) into the app — no keys ever pasted in chat.`, ts: Date.now() });
+    } catch { /* best-effort — never block the build; the app just runs without injected keys */ }
   }
 
   /**
@@ -1305,6 +1357,9 @@ export class ToolDispatcher {
         // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
         // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
         const effectiveCommand = pinKnownDepsInInstallCommand(command);
+        // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
+        // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
+        await this.ensureUserSecretsEnvFile(effectiveCommand);
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma

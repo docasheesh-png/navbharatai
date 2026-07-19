@@ -16,15 +16,20 @@ import { requireUserMatch, trackDevice } from '../lib/authMiddleware';
 export function registerSecretsRoutes(app: Express): void {
   app.get('/api/secrets/:userId', requireUserMatch('userId'), trackDevice('userId'), async (req: Request, res: Response) => {
     const db = getDb() as any;
-    console.log('[DEBUG] GET /api/secrets/:userId called for:', req.params.userId);
     try {
       const { userId } = req.params;
       const secretsSnapshot = await getDocs(query(collection(db, 'user_secrets'), where('user_id', '==', userId)));
-      const secrets = secretsSnapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() })) as { deleted?: boolean }[];
-      console.log('[DEBUG] Secrets found:', secrets);
-      res.json(secrets.filter(s => !s.deleted));
+      // Return ONLY the metadata the UI needs (name + timestamp) — never the encrypted value. The
+      // ciphertext has no reason to leave the server, and the client only ever renders the name.
+      const secrets = secretsSnapshot.docs
+        .map((doc: any) => {
+          const d = doc.data() as { secret_name?: string; created_at?: unknown; deleted?: boolean };
+          return { id: doc.id, secret_name: d.secret_name, created_at: d.created_at, deleted: d.deleted };
+        })
+        .filter((s) => !s.deleted);
+      res.json(secrets);
     } catch (err) {
-      console.error('[DEBUG] Error fetching secrets:', err);
+      console.error('Error fetching secrets:', err);
       res.status(500).json({ error: 'Failed to fetch secrets' });
     }
   });

@@ -158,6 +158,7 @@ import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
+import { generateWebhookIntegration } from '../lib/WebhookGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -4129,6 +4130,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('security headers');
         return `Wired security headers:\n${shWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${shcfg.instructions}`;
+      }
+
+      case 'generate_webhook': {
+        // U-4 recipe — incoming-webhook HMAC signature verification (server/lib/webhook.ts). Dependency-free
+        // (node:crypto), constant-time compare over the RAW body. Pure generator in WebhookGenerator.ts.
+        const whcfg = generateWebhookIntegration();
+        const whWritten: string[] = [];
+        for (const [path, content] of Object.entries(whcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          whWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('webhook verification');
+        return `Wired webhook signature verification:\n${whWritten.join('\n')}\n(No npm dependency needed — node:crypto.)\n\n${whcfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

@@ -50,6 +50,14 @@ const RULES: readonly HintRule[] = [
       'did not, add the field by hand.)',
   },
   {
+    id: 'one-to-one-needs-unique',
+    match: /one-to-one relation must use unique fields|add an? [`'"]?@unique[`'"]? attribute/i,
+    hint:
+      'A one-to-one Prisma relation needs the foreign-key scalar to be `@unique`. Either add `@unique` to the FK ' +
+      'field (e.g. `vehicleId String? @unique`), OR make it one-to-many by changing the other side to a list ' +
+      '(e.g. `Vehicle` → `vehicles Vehicle[]`).',
+  },
+  {
     id: 'referenced-not-unique',
     match: /references[^\n]*must (point|refer) to[^\n]*unique|referenced field[^\n]*is not unique|must be unique to be used in an? (@relation|relation)/i,
     hint:

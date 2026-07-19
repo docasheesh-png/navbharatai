@@ -89,6 +89,13 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   pinia: '^2',
   '@vueuse/core': '^11',
   'vue-i18n': '^10',
+  // Map ecosystem (CargoPilot autopsy 2026-07-19): a Next.js 14 app (react@18) ran
+  // `npm install react-leaflet` → npm pulled the LATEST (5.x), whose peer REQUIRES react@^19 →
+  // ERESOLVE, and the --legacy-peer-deps recovery corrupted node_modules until the `next` binary
+  // itself was pruned → dev server dead. react-leaflet@4 is the react-18-compatible major; leaflet
+  // is stable at 1.x. Pinning the bare install here resolves the tree cleanly on the react-18 scaffolds.
+  'react-leaflet': '^4',
+  leaflet: '^1',
 };
 
 // Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare

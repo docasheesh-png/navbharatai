@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson } from './DependencyAutoFix';
+import { planDependencyAutoFix, applyWellKnownMissingDeps, WELL_KNOWN_DEPS, pinKnownDepsInPackageJson, pinKnownDepsInInstallCommand } from './DependencyAutoFix';
 
 const pkg = (deps: Record<string, string> = {}, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ name: 'app', version: '0.1.0', dependencies: deps, ...extra }, null, 2);
@@ -12,6 +12,23 @@ describe('planDependencyAutoFix — partition missing deps into allowlisted vs n
     ]);
     expect(plan.autofixable).toEqual([{ package: 'axios', version: WELL_KNOWN_DEPS.axios }]);
     expect(plan.needsReview).toEqual(['components/Button']);
+  });
+});
+
+describe('pinKnownDepsInInstallCommand — react-leaflet peer-conflict pin (CargoPilot autopsy)', () => {
+  it('pins the EXACT CargoPilot install so react-leaflet@5 (needs react@19) can never brick a react-18 app', () => {
+    // The real failing command: bare `react-leaflet`/`leaflet` → npm pulled 5.x → ERESOLVE (peer react@^19).
+    const cmd =
+      'npm install @prisma/client prisma stripe bcryptjs socket.io socket.io-client lucide-react leaflet react-leaflet leaflet-defaulticon-compatibility tailwindcss-animate clsx class-variance-authority @radix-ui/react-slot 2>&1 | tail -30';
+    const out = pinKnownDepsInInstallCommand(cmd);
+    expect(out).toContain('react-leaflet@^4'); // pinned to the react-18-compatible major
+    expect(out).toContain('leaflet@^1');
+    expect(out).toContain('prisma@^6'); // existing pins still applied
+    expect(out).toContain('socket.io@^4');
+  });
+
+  it('leaves an explicitly-versioned react-leaflet untouched', () => {
+    expect(pinKnownDepsInInstallCommand('npm install react-leaflet@5')).toBe('npm install react-leaflet@5');
   });
 });
 

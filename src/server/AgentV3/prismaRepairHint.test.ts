@@ -32,6 +32,15 @@ describe('prismaRepairHint — targeted fix guidance for Prisma schema errors fo
     expect(out).toContain('posts Post[]');
   });
 
+  it('one-to-one relation missing @unique (the EXACT CargoPilot error) → @unique / one-to-many guidance', () => {
+    const out = prismaRepairHint(
+      'Error: Prisma schema validation - (get-dmmf wasm)\nError code: P1012\nerror: Error parsing attribute "@relation": A one-to-one relation must use unique fields on the defining side. Either add an `@unique` attribute to the field `vehicleId`, or change the relation to one-to-many.\nprisma/schema.prisma:55',
+    );
+    expect(out).toContain('@unique');
+    expect(out).toContain('one-to-many');
+    expect(out).not.toContain('schema validation failed'); // the SPECIFIC hint, not the generic fallback
+  });
+
   it('referenced field not unique → add @unique guidance', () => {
     const out = prismaRepairHint(
       'The argument `references` must refer to a unique criteria in the related model `User`. schema.prisma P1012',

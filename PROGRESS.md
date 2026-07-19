@@ -18559,3 +18559,28 @@ onto `main` as each parent merged, so every PR diff stayed clean (only its own f
 Verification across the increment: full suite grew 7470 → 7502 passing (the only failing suites throughout
 were the pre-existing `src/server/sonic/*` load failures from the missing optional `@aws-sdk/
 client-bedrock-runtime` dep — identical on clean `main`, unrelated to these changes). No new `tsc` errors.
+---
+
+## 2026-07-19 — CargoPilot (App #11) autopsy — DNA fixes slice 1: react-leaflet pin + Prisma one-to-one hint
+
+App #11 (CargoPilot, Next.js 14 + Prisma + Postgres) BUILD_FAILED after 26 min. Full forensic autopsy in
+chat. The build's FATAL chain: LLM ran `npm install ... react-leaflet ...` → npm pulled react-leaflet@5
+(peer REQUIRES react@^19) → ERESOLVE on the react@18 Next app → the `--legacy-peer-deps` recovery churned
+node_modules until the `next` binary itself was pruned (`sh: 1: next: not found`, `ls node_modules/.bin/next`
+→ absent) → `next build`/dev dead → preview failed ("No package.json found"/"preview did not start").
+
+Slice 1 (2 clean, evidenced DNA fixes shipped now; both correct regardless of deploy state):
+- **react-leaflet peer-conflict pin** (same class as the Prisma-7 pin): added `react-leaflet: ^4` +
+  `leaflet: ^1` to `WELL_KNOWN_DEPS` so `pinKnownDepsInInstallCommand` rewrites the bare install to the
+  react-18-compatible major before it can ERESOLVE. Test uses the EXACT CargoPilot command.
+- **Prisma one-to-one hint gap**: #1543's rules missed the very common P1012 "A one-to-one relation must
+  use unique fields on the defining side / add an `@unique` attribute" phrasing (CargoPilot hit it at
+  schema.prisma:55) — it fell through to the generic hint. Added a specific `one-to-one-needs-unique` rule.
+
+Open (next slices, recorded honestly): NEW-A the node_modules/`next`-binary-vanished dev-server-death
+class (the fatal one — needs a post-install framework-binary guard); NEW-B `2>&1 | tail` masks npm's real
+exit code so an ERESOLVE reports exit 0; NEW-E Next.js App-Router `export const config` deprecation in the
+stripe webhook route; NEW-F kimi/vertex LLM_TRUNCATED (max_tokens) on large files. ALSO: the build showed
+the same GLM-429-storm + no-package.json symptoms as pre-fix — the 3 prior fixes (#1541/#1543/#1544) may
+not have propagated to the serving Cloud Run revision when the build started (merges finished 11:07 IST,
+build started 11:22 IST; 3 back-to-back deploys can queue) — a clean re-run is needed to validate them.

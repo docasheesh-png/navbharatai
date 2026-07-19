@@ -105,6 +105,8 @@ export { scanObservability, observabilitySummary } from './ObservabilityAnalysis
 export type { ObservabilityIssue, ObservabilitySeverity } from './ObservabilityAnalysis';
 export { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdownAnalysis';
 export type { ShutdownIssue, ShutdownSeverity } from './GracefulShutdownAnalysis';
+export { scanSecurityHeaders, securityHeadersSummary } from './SecurityHeadersAnalysis';
+export type { SecurityHeaderIssue, SecurityHeaderSeverity } from './SecurityHeadersAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
 export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';

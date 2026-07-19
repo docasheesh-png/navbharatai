@@ -151,6 +151,7 @@ import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
+import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
@@ -3962,6 +3963,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('logging');
         return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
+      }
+
+      case 'generate_file_upload': {
+        // U-4 recipe — file-upload validation by MAGIC BYTES (server/lib/upload.ts). Dependency-free; detects
+        // the TRUE type from content, not the forgeable client mime/ext. Pure generator in FileUploadGenerator.ts.
+        const upcfg = generateFileUploadIntegration();
+        const upWritten: string[] = [];
+        for (const [path, content] of Object.entries(upcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          upWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('file-upload validation');
+        return `Wired file-upload validation:\n${upWritten.join('\n')}\n(No npm dependency needed — magic-byte content sniffing.)\n\n${upcfg.instructions}`;
       }
 
       case 'generate_graceful_shutdown': {

@@ -595,7 +595,8 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, result.path, result.newContent);
         try { this.onFileWrite?.(result.path, result.newContent); } catch { /* durable mirror is best-effort */ }
         try { this.state?.recordFileChange({ path: result.path, kind: 'modify' }, 'architect'); } catch { /* UI count is best-effort */ }
-        const labels: Record<'health' | 'error-handler', string> = {
+        const labels: Record<'request-logger' | 'health' | 'error-handler', string> = {
+          'request-logger': 'a request logger',
           health: 'a /health route',
           'error-handler': 'an error handler',
         };

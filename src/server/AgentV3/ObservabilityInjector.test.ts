@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { injectHealthEndpoint, injectErrorHandler, injectObservabilityFixes } from './ObservabilityInjector';
+import { injectHealthEndpoint, injectErrorHandler, injectRequestLogger, injectObservabilityFixes } from './ObservabilityInjector';
 import { scanObservability } from './ObservabilityAnalysis';
 
 describe('injectHealthEndpoint — deterministic /health injection (Cap-4 injection half)', () => {
@@ -154,34 +154,90 @@ describe('injectErrorHandler — deterministic error-middleware injection', () =
   });
 });
 
-describe('injectObservabilityFixes — apply both fixes in one pass', () => {
-  it('adds BOTH a /health route and an error handler, both before listen, health first', () => {
+describe('injectRequestLogger — deterministic dependency-free request logger', () => {
+  it('injects a logging middleware right after the app declaration, before any route', () => {
+    const files = {
+      'server/index.ts': [
+        "import express from 'express';",
+        'const app = express();',
+        "app.get('/', (_req, res) => res.send('home'));",
+        'app.listen(3000);',
+      ].join('\n'),
+    };
+    const result = injectRequestLogger(files)!;
+    expect(result).not.toBeNull();
+    expect(result.appVar).toBe('app');
+    expect(result.newContent).toContain("res.on('finish'");
+    // logger registered AFTER the app decl but BEFORE the first route (else it misses that route)
+    expect(result.newContent.indexOf('const app = express();')).toBeLessThan(result.newContent.indexOf("res.on('finish'"));
+    expect(result.newContent.indexOf("res.on('finish'")).toBeLessThan(result.newContent.indexOf("app.get('/', "));
+    // dependency-free — no morgan/pino import added
+    expect(result.newContent).not.toContain('morgan');
+    expect(result.newContent).not.toContain('pino');
+  });
+
+  it('never logs headers or body (secret-safe — only method/url/status/duration)', () => {
+    const files = { 'server/index.ts': "import express from 'express';\nconst app = express();\napp.listen(3000);" };
+    const logged = injectRequestLogger(files)!.newContent;
+    expect(logged).toContain('req.method');
+    expect(logged).toContain('res.statusCode');
+    expect(logged).not.toMatch(/req\.headers|req\.body/);
+  });
+
+  it('does NOT inject when a logger is already present (morgan, or a hand-rolled finish logger)', () => {
+    expect(injectRequestLogger({
+      'server/index.ts': "import express from 'express';\nimport morgan from 'morgan';\nconst app = express();\napp.use(morgan('tiny'));\napp.listen(3000);",
+    })).toBeNull();
+    expect(injectRequestLogger({
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.use((req, res, next) => { res.on('finish', () => {}); next(); });\napp.listen(3000);",
+    })).toBeNull();
+  });
+
+  it('returns null when there is no unambiguous Express entry', () => {
+    expect(injectRequestLogger({ 'src/App.tsx': 'export const A = () => null;' })).toBeNull();
+  });
+
+  it('the injected logger PASSES the observability logger check (round-trip with the analyzer)', () => {
+    const files = { 'server/index.ts': "import express from 'express';\nconst app = express();\napp.listen(process.env.PORT);" };
+    // before: logger gap present
+    expect(scanObservability(files).some((i) => i.kind === 'missing-request-logging')).toBe(true);
+    const result = injectRequestLogger(files)!;
+    // after: the analyzer recognizes the injected finish-event logger → no missing-request-logging finding
+    const after = scanObservability({ 'server/index.ts': result.newContent });
+    expect(after.some((i) => i.kind === 'missing-request-logging')).toBe(false);
+  });
+});
+
+describe('injectObservabilityFixes — apply all three fixes in one pass', () => {
+  it('adds a request logger, a /health route and an error handler in the right order', () => {
     const files = {
       'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/', (_r, s) => s.end());\napp.listen(process.env.PORT);",
     };
     const result = injectObservabilityFixes(files)!;
-    expect(result.added).toEqual(['health', 'error-handler']);
+    expect(result.added).toEqual(['request-logger', 'health', 'error-handler']);
+    expect(result.newContent).toContain("res.on('finish'");
     expect(result.newContent).toContain("app.get('/health'");
     expect(result.newContent).toContain('app.use((err, _req, res, _next) =>');
+    // logger before the route; health before the error handler; error handler before listen
+    expect(result.newContent.indexOf("res.on('finish'")).toBeLessThan(result.newContent.indexOf("app.get('/', "));
     expect(result.newContent.indexOf("'/health'")).toBeLessThan(result.newContent.indexOf('app.use((err'));
     expect(result.newContent.indexOf('app.use((err')).toBeLessThan(result.newContent.indexOf('app.listen'));
-    // the fully-injected file passes BOTH observability checks
     const after = scanObservability({ 'server/index.ts': result.newContent });
     expect(after.some((i) => i.kind === 'missing-health-endpoint')).toBe(false);
     expect(after.some((i) => i.kind === 'missing-error-handler')).toBe(false);
   });
 
-  it('adds ONLY the missing fix when the other is already present', () => {
+  it('adds ONLY the missing fixes when others are already present', () => {
     const files = {
       'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/health', (_r, s) => s.json({ok:true}));\napp.listen(3000);",
     };
     const result = injectObservabilityFixes(files)!;
-    expect(result.added).toEqual(['error-handler']);
+    expect(result.added).toEqual(['request-logger', 'error-handler']);
   });
 
-  it('returns null when both are already present', () => {
+  it('returns null when all three are already present', () => {
     const files = {
-      'server/index.ts': "import express from 'express';\nconst app = express();\napp.get('/health', (_r, s) => s.end());\napp.use((err, req, res, next) => res.status(500).end());\napp.listen(3000);",
+      'server/index.ts': "import express from 'express';\nconst app = express();\napp.use((req, res, next) => { res.on('finish', () => {}); next(); });\napp.get('/health', (_r, s) => s.end());\napp.use((err, req, res, next) => res.status(500).end());\napp.listen(3000);",
     };
     expect(injectObservabilityFixes(files)).toBeNull();
   });

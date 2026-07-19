@@ -53,9 +53,11 @@ const NEST_HEALTH = /@nestjs\/terminus|HealthCheck\s*\(|@Get\s*\(\s*['"`]health/
 /** An Express-style error-handling middleware: a 4-arg (err, req, res, next) callback, or app.use(errorHandler). */
 const ERROR_HANDLER =
   /\(\s*err(?:or)?\s*(?::[^,)]+)?\s*,\s*\w+\s*(?::[^,)]+)?\s*,\s*\w+\s*(?::[^,)]+)?\s*,\s*\w+\s*(?::[^,)]+)?\s*\)\s*=>|\.use\s*\(\s*\w*[eE]rror\w*\s*\)|setErrorHandler\s*\(/;
-/** Any request logger — a library, or a hand-rolled logging middleware. */
+/** Any request logger — a library, a hand-rolled `.use(...log...)` middleware, or a middleware that logs on
+ *  the response's `finish` event (the dependency-free idiom the observability injector auto-adds; the two
+ *  detectors must agree on what counts as a logger, so an injected app is never re-flagged as missing one). */
 const REQUEST_LOGGER =
-  /\bmorgan\s*\(|\bpino(?:-http|Http)?\s*\(|require\(['"`]morgan|from\s+['"`]morgan|\bwinston\b|express-winston|\brequestLogger\b|\.use\s*\(\s*[^)]*\blog/i;
+  /\bmorgan\s*\(|\bpino(?:-http|Http)?\s*\(|require\(['"`]morgan|from\s+['"`]morgan|\bwinston\b|express-winston|\brequestLogger\b|\.use\s*\(\s*[^)]*\blog|res\.on\s*\(\s*['"`]finish['"`]/i;
 /** Frameworks whose error-handler / logging idioms differ enough that we only flag the health gap. */
 const EXPRESS_LIKE = /\bexpress\s*\(|\bKoa\s*\(|\bnew\s+Koa\s*\(/;
 

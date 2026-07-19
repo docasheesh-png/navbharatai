@@ -17,6 +17,12 @@ import type { InitProgressReport, MLCEngineInterface } from '@mlc-ai/web-llm';
  *  shader-f16 requirement). Overridable so we can tune the exact id after on-device testing. */
 export const STAGE1_MODEL = 'Qwen2.5-0.5B-Instruct-q4f32_1-MLC';
 
+/** Load ladder: try the primary (~0.5B), then fall back to a lighter ~360M model if the primary fails to
+ *  initialize on a weaker device (out-of-memory / adapter limits). Both ids are verified present in
+ *  web-llm's prebuilt config; all q4f32 for the widest WebGPU compatibility. A single explicit `modelId`
+ *  (from opts) overrides the ladder. */
+export const STAGE1_MODELS: string[] = [STAGE1_MODEL, 'SmolLM2-360M-Instruct-q4f32_1-MLC'];
+
 export interface LlmProgress {
   /** 0..1 download/load progress. */
   progress: number;
@@ -52,30 +58,43 @@ let cached: Promise<OfflineLlm> | null = null;
  * Load (or reuse) the on-device LLM. First call downloads + initializes the model (progress streamed to
  * `onProgress`); later calls reuse the same engine. Throws on any failure — never returns a fake engine.
  */
+function wrapEngine(engine: MLCEngineInterface): OfflineLlm {
+  return {
+    async generate(messages: ChatTurn[]): Promise<string> {
+      const reply = await engine.chat.completions.create({
+        messages,
+        temperature: 0.7,
+        max_tokens: 512,
+      });
+      return reply.choices?.[0]?.message?.content ?? '';
+    },
+    async unload(): Promise<void> {
+      try { await engine.unload?.(); } catch { /* best-effort */ }
+      cached = null;
+    },
+  };
+}
+
 export function loadOfflineLlm(opts: { modelId?: string; onProgress?: ProgressCb; factory?: EngineFactory } = {}): Promise<OfflineLlm> {
   if (cached) return cached;
-  const modelId = opts.modelId ?? STAGE1_MODEL;
+  // An explicit modelId is used alone; otherwise walk the fallback ladder (primary → lighter model).
+  const candidates = opts.modelId ? [opts.modelId] : STAGE1_MODELS;
   const factory = opts.factory ?? defaultFactory;
 
   cached = (async (): Promise<OfflineLlm> => {
-    const engine = await factory(modelId, (r) => opts.onProgress?.({ progress: r.progress ?? 0, text: r.text ?? '' }));
-    return {
-      async generate(messages: ChatTurn[]): Promise<string> {
-        const reply = await engine.chat.completions.create({
-          messages,
-          temperature: 0.7,
-          max_tokens: 512,
-        });
-        return reply.choices?.[0]?.message?.content ?? '';
-      },
-      async unload(): Promise<void> {
-        try { await engine.unload?.(); } catch { /* best-effort */ }
-        cached = null;
-      },
-    };
+    let lastErr: unknown;
+    for (const id of candidates) {
+      try {
+        const engine = await factory(id, (r) => opts.onProgress?.({ progress: r.progress ?? 0, text: r.text ?? '' }));
+        return wrapEngine(engine);
+      } catch (err) {
+        lastErr = err; // this model couldn't init on this device — try the next lighter one
+      }
+    }
+    throw lastErr ?? new Error('No on-device model could be loaded');
   })();
 
-  // If init fails, clear the cache so the user can retry.
+  // If every candidate fails, clear the cache so the user can retry.
   cached.catch(() => { cached = null; });
   return cached;
 }

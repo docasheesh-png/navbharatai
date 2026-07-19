@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadOfflineLlm, resetOfflineLlm, STAGE1_MODEL, type EngineFactory } from './offlineLlmEngine';
+import { loadOfflineLlm, resetOfflineLlm, STAGE1_MODEL, STAGE1_MODELS, type EngineFactory } from './offlineLlmEngine';
 
 // A fake web-llm engine so the wrapper's control flow is testable without WebGPU/GPU.
 function fakeFactory(reply = 'hello from device'): { factory: EngineFactory; calls: string[]; progressSeen: number[] } {
@@ -57,9 +57,28 @@ describe('offlineLlmEngine — wrapper control flow (real WebGPU run verified on
       if (attempt === 1) throw new Error('WebGPU init failed');
       return { chat: { completions: { create: async () => ({ choices: [{ message: { content: 'ok' } }] }) } } } as any;
     };
-    await expect(loadOfflineLlm({ factory: flaky })).rejects.toThrow(/init failed/i);
+    // Pin a single modelId so the fallback ladder can't mask the failure.
+    await expect(loadOfflineLlm({ modelId: 'M', factory: flaky })).rejects.toThrow(/init failed/i);
     // retry succeeds because the failed promise was not cached
-    const llm = await loadOfflineLlm({ factory: flaky });
+    const llm = await loadOfflineLlm({ modelId: 'M', factory: flaky });
     expect(await llm.generate([{ role: 'user', content: 'x' }])).toBe('ok');
+  });
+
+  it('falls back to the lighter model when the primary fails to load on a weak device', async () => {
+    const tried: string[] = [];
+    const factory: EngineFactory = async (id) => {
+      tried.push(id);
+      if (id === STAGE1_MODEL) throw new Error('OOM on primary'); // weak device: primary won't init
+      return { chat: { completions: { create: async () => ({ choices: [{ message: { content: 'from fallback' } }] }) } } } as any;
+    };
+    const llm = await loadOfflineLlm({ factory });
+    expect(tried).toEqual(STAGE1_MODELS);       // tried primary, then fell back to the lighter one
+    expect(await llm.generate([{ role: 'user', content: 'x' }])).toBe('from fallback');
+  });
+
+  it('the ladder is real ids (primary first) — used when no explicit model is given', () => {
+    expect(STAGE1_MODELS[0]).toBe(STAGE1_MODEL);
+    expect(STAGE1_MODELS.length).toBeGreaterThanOrEqual(2);
+    expect(STAGE1_MODELS.every((m) => m.endsWith('-MLC'))).toBe(true);
   });
 });

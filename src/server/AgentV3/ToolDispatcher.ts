@@ -72,6 +72,7 @@ import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson } from './DependencyAutoFix';
+import { prismaRepairHint } from './prismaRepairHint';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
@@ -1466,6 +1467,19 @@ export class ToolDispatcher {
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
         let out =
           `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+        // PRISMA SCHEMA REPAIR HINT (widen the relation self-heal beyond the `prisma format` class):
+        // when a prisma command STILL fails with a schema-validation error that `prisma format` cannot
+        // mechanically fix (ambiguous relation, missing @id/@unique, missing fields/references, SQLite
+        // enum, unset DATABASE_URL), append a deterministic, targeted fix instruction to the tool result
+        // so the builder converges in ONE directed turn instead of re-discovering the fix by trial and
+        // error (the LearnLoop/ShopKhata Prisma struggle). Guidance ONLY — it never edits the schema, so
+        // it can never break a build. Kill switch: AGENTV3_PRISMA_HINT=off.
+        if (exitCode !== 0 && process.env.AGENTV3_PRISMA_HINT !== 'off') {
+          try {
+            const hint = prismaRepairHint(`${stdout}\n${stderr}`);
+            if (hint) out = `${out}\n\n[schema-repair hint] ${hint}`;
+          } catch { /* hint is best-effort — the raw error is still reported */ }
+        }
         if (risk.level !== 'none') {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[${risk.level}] ran: ${command.slice(0, 200)} — ${risk.reasons.join('; ')}`,

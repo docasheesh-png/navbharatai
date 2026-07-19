@@ -18715,3 +18715,33 @@ remained the pre-existing `src/server/sonic/*` load failures from the missing op
 client-bedrock-runtime` dep — unrelated, identical on clean `main`). No new `tsc` errors. One rebase mishap
 (a `git rebase | tail` swallowed a conflict exit code) was caught and recovered cleanly with `rebase --onto`
 before any bad state merged.
+
+---
+
+## 2026-07-19 — U-4 verified-recipe track: 4 more BYO integrations (autonomous cycle, cont.)
+
+Continued the recipe conveyor after OTP/analytics/maps (#1557/#1559/#1560), adding four more real,
+fully-wired, unit-tested Bring-Your-Own-keys integrations the builder can wire into any generated app. Each:
+a pure builder unit-tested for the generated output, wired as a `generate_*` agent tool (ToolDispatcher +
+ToolCatalog def + CATALOG_TOOL_NAMES); credentials pasted into `.env` and NEVER stored; `.env.example`
+created blank and an existing one never overwritten; real complete code, no TODO stubs. All via
+branch → gate (`tsc -p tsconfig.server.json` + full `vitest run`) → PR → CI green → squash-merge, stacked
+chains unwound with `git rebase --onto` so every PR diff stayed clean.
+
+- **#1562 — background jobs (`generate_jobs`):** BullMQ (Redis; ioredis with the required
+  `maxRetriesPerRequest: null`) + pg-boss (Postgres; pinned `^9`, lazy single-start). Server enqueueJob +
+  processJobs — moves slow work off the request path.
+- **#1563 — transactional SMS (`generate_sms`):** Twilio Messages + Vonage SMS. Server-only sendSms(to, body)
+  (credentials never reach the browser). Distinct from the OTP recipe (`generate_otp`).
+- **#1564 — API rate limiting (`generate_ratelimit`):** express-rate-limit with a "memory" (single instance)
+  or "redis" (distributed, shared counter across instances) store. Front-line abuse/brute-force defence.
+- **#1565 — error tracking (`generate_error_tracking`):** Sentry (@sentry/node + @sentry/react) + Rollbar.
+  Wires BOTH server and client capture; the client no-ops when unconfigured; server DSN secret, client DSN
+  public. Turns a user's crash into an alerted stack trace.
+
+The builder's BYO-integration library now spans (this session): phone-OTP, product analytics, interactive
+maps, background jobs, transactional SMS, API rate-limiting and error tracking — on top of the earlier
+payments/email/storage/realtime/search/auth/database recipes. Full suite grew 7564 → 7587 passing across
+these four (the only failing suites throughout remained the pre-existing `src/server/sonic/*` optional-dep
+load failures — unrelated, identical on clean `main`). No new `tsc` errors. No AppKnowledgeBase entries —
+consistent with the sibling recipes; the "named tech" capability already recognizes SMS/analytics/maps/etc.

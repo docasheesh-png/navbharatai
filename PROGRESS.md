@@ -18681,3 +18681,37 @@ Tests: 5 new adapter cases (text-only length stop truncated; masked mid-tool-cal
 normal tool call not truncated — for both OpenAI and Gemini) + existing guard tests still green. Gate:
 server tsc 0, AgentRunner + both adapters + ClaudeClient + BuildDiagnostics = 210 pass. ALL CargoPilot
 root causes (NEW-A..G) now closed.
+
+---
+
+## 2026-07-19 — Cap-4 observability injection + 3 BYO-integration recipes (autonomous cycle, cont.)
+
+Continued the autonomous conveyor after the four advisory-hardening dimensions (#1548–#1551). Two coherent
+batches, seven more PRs, all branch → full gate (`tsc -p tsconfig.server.json` + `vitest run`) → PR → CI
+green → squash-merge; stacked chains unwound via `git rebase --onto` so each PR diff stayed clean.
+
+**Cap-4 observability INJECTION (completes the advisory half's counterpart):**
+- **#1554** — `ObservabilityInjector.injectHealthEndpoint`: deterministically adds a `/health` route to the
+  one unambiguous Express entry that lacks one, placed before `.listen(`, on the real app variable.
+- **#1555** — `injectErrorHandler` + `injectObservabilityFixes` (apply both in one pass): adds a 4-arg error
+  handler after all routes. Refactored the shared entry+listen detection into `findExpressEntry` (rule 4).
+- Both dependency-free + purely additive, persisted via the durable write path (sandbox + mirror + graph),
+  wired as a default-OFF build-end gate `AGENTV3_OBSERVABILITY_INJECT=on`, never blocking a build. High
+  precision — declines any ambiguous project. Request-logger injection stays ❌ (needs a dependency+install).
+
+**U-4 verified-recipe track — three new BYO-keys integrations (real, complete, no stubs; keys never stored):**
+- **#1557** — phone-OTP (`generate_otp`): MSG91 (India-first, v5 REST via fetch, no dep) + Twilio (Verify API).
+  Server send+verify (server-side verification only — a client "verified" is never trusted) + client helper.
+- **#1559** — product analytics (`generate_analytics`): PostHog + Mixpanel. Server capture (private key) +
+  client init/track/identify (public key; no-ops safely when unconfigured).
+- **#1560** — interactive maps (`generate_map`): Google Maps (@googlemaps/js-api-loader) + Mapbox GL (imports
+  the required CSS, uses [lng,lat] order). Public browser key, restricted by referrer.
+- Each: a pure builder unit-tested for the generated output, wired as a `generate_*` agent tool
+  (ToolDispatcher + ToolCatalog + CATALOG_TOOL_NAMES). No AppKnowledgeBase entry — consistent with the
+  sibling recipes; the "named tech" capability already recognizes SMS/analytics/maps.
+
+Verification across the increment: full suite grew 7502 → 7564 passing (the only failing suites throughout
+remained the pre-existing `src/server/sonic/*` load failures from the missing optional `@aws-sdk/
+client-bedrock-runtime` dep — unrelated, identical on clean `main`). No new `tsc` errors. One rebase mishap
+(a `git rebase | tail` swallowed a conflict exit code) was caught and recovered cleanly with `rebase --onto`
+before any bad state merged.

@@ -141,17 +141,23 @@ export async function describeVisionAttachments(
     claude: describeWithClaude,
   };
   const chain = visionProviderChain(opts);
-  const blocks: string[] = [];
-  for (const att of vision) {
-    let desc = '';
-    for (const provider of chain) {
-      desc = await describers[provider](att);
-      if (desc) break;
-    }
-    const label = att.type === 'application/pdf' ? 'PDF' : 'Image';
-    blocks.push(desc
-      ? `[${label}: ${att.name}]\n${clamp(desc)}`
-      : `[${label}: ${att.name} — could not be read by any available vision model.]`);
-  }
+  // Each attachment is described INDEPENDENTLY, so fan them out concurrently instead of N sequential
+  // round-trips (perf audit 2026-07-18: multi-image/PDF prompts paid N× latency). The inner provider
+  // FALLBACK stays sequential PER attachment (try gemini → grok → …, stop at the first that succeeds),
+  // and Promise.all preserves input order, so the joined output is byte-identical to the old loop —
+  // only the wall-clock changes. describeWith* never throw (they catch → return ''), so no rejection.
+  const blocks = await Promise.all(
+    vision.map(async (att) => {
+      let desc = '';
+      for (const provider of chain) {
+        desc = await describers[provider](att);
+        if (desc) break;
+      }
+      const label = att.type === 'application/pdf' ? 'PDF' : 'Image';
+      return desc
+        ? `[${label}: ${att.name}]\n${clamp(desc)}`
+        : `[${label}: ${att.name} — could not be read by any available vision model.]`;
+    }),
+  );
   return blocks.join('\n\n');
 }

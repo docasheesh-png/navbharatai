@@ -31,6 +31,27 @@ export interface GeminiToolRunnerOptions {
   /** Gemini model id, e.g. 'gemini-2.5-flash' (cheap) or 'gemini-2.5-pro'. */
   model?: string;
   defaultMaxTokens?: number;
+  /**
+   * Per-call wall-clock timeout in ms. A stalled Vertex/Gemini call otherwise blocks the whole
+   * build (the Google GenAI SDK is constructed without an http timeout), so this bounds it and
+   * REJECTS on overrun — the orchestrator then falls through to the next provider (Claude backstop)
+   * exactly like every other provider's timeout. Default 120000 (matches the Claude LLM timeout).
+   * Set to 0 to disable. (Perf/resilience audit 2026-07-18 — the only provider family missing a timeout.)
+   */
+  timeoutMs?: number;
+}
+
+/** Reject a promise if it does not settle within `ms`. Portable (no SDK/AbortController dependency),
+ *  so it bounds ANY injected client. `ms <= 0` disables the bound. Pure + module-local. */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  if (!(ms > 0)) return p;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 /**
@@ -54,11 +75,15 @@ export class GeminiToolRunner implements TurnRunner {
     if (systemInstruction) config.systemInstruction = systemInstruction;
     if (tools) config.tools = tools;
 
-    const response = await this.client.models.generateContent({
-      model: this.opts.model || params.model,
-      contents,
-      config,
-    });
+    const response = await withTimeout(
+      this.client.models.generateContent({
+        model: this.opts.model || params.model,
+        contents,
+        config,
+      }),
+      this.opts.timeoutMs ?? 120_000,
+      `Gemini/Vertex call exceeded ${this.opts.timeoutMs ?? 120_000}ms`,
+    );
 
     const result = parseGeminiResponse(response);
     if (params.onText && result.text) params.onText(result.text);

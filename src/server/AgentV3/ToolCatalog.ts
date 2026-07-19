@@ -1307,6 +1307,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_money_format',
+      description:
+        'Add real Indian money/number formatting to the app (server/lib/money.ts): dependency-free ' +
+        'formatInr(paise) → a correctly lakh/crore-grouped ₹ string (12345678 → "₹1,23,456.78"), ' +
+        'formatIndianNumber(n) → Indian-grouped counts, and rupeesInWords(rupees) → the amount in words ' +
+        '(lakh/crore) for invoices/cheques. Built on native Intl en-IN, so grouping is correct (NOT Western ' +
+        'thousands). Store money as integer paise. Distinct from generate_currency (conversion). No env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_weather',
       description:
         'Add real current-weather lookup to the app (Bring-Your-Own key): a server getWeather(city) → ' +
@@ -1823,6 +1833,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_cache',
   'generate_newsletter',
   'generate_currency',
+  'generate_money_format',
   'generate_weather',
   'generate_notify',
   'generate_env_validation',

@@ -144,6 +144,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateCurrencyIntegration, isCurrencyProvider } from '../lib/CurrencyGenerator';
+import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
@@ -3875,6 +3876,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('currency integration');
         return `Wired ${cuProvider} currency conversion:\n${cuWritten.join('\n')}\n(No npm dependency needed — the exchange-rate REST API is called with the built-in fetch.)\n\n${cucfg.instructions}`;
+      }
+
+      case 'generate_money_format': {
+        // U-4 recipe — Indian money/number formatting (server/lib/money.ts). Dependency-free (Intl en-IN);
+        // lakh/crore grouping + amount-in-words. Pure generator in MoneyFormatGenerator.ts. No env keys.
+        const mfcfg = generateMoneyFormatIntegration();
+        const mfWritten: string[] = [];
+        for (const [path, content] of Object.entries(mfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('money formatting');
+        return `Wired Indian money/number formatting:\n${mfWritten.join('\n')}\n(No npm dependency needed — native Intl en-IN.)\n\n${mfcfg.instructions}`;
       }
 
       case 'generate_weather': {

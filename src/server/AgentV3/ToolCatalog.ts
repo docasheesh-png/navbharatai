@@ -864,6 +864,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_indian_validators',
+      description:
+        'Add real Indian identity/format validators to the app (server/lib/indianValidators.ts): dependency-' +
+        'free isValidPAN, isValidGSTIN, isValidAadhaar, isValidIFSC, isValidPincode, isValidUPI, ' +
+        'isValidIndianMobile. GSTIN and Aadhaar verify the REAL government CHECKSUM (GSTIN mod-36, Aadhaar ' +
+        'Verhoeff), so a single mistyped character is caught at the form instead of failing later in a payout ' +
+        'or a tax filing — a bare regex would let it through. Use at signup/KYC/invoice/payout forms. No env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_analytics',
       description:
         'Add real product analytics to the app (Bring-Your-Own keys): a server capture helper (private key) + ' +
@@ -1839,6 +1849,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_realtime',
   'generate_search',
   'generate_otp',
+  'generate_indian_validators',
   'generate_analytics',
   'generate_map',
   'generate_jobs',

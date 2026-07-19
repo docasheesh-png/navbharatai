@@ -116,6 +116,7 @@ import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } f
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
+import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGenerator';
 import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
 import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
@@ -3558,6 +3559,23 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('otp integration');
         const otpDepLine = ocfg.dependency ? `\nAdd the dependency: ${ocfg.dependency.name}@${ocfg.dependency.version}` : '\n(No npm dependency needed — MSG91 v5 is called with the built-in fetch.)';
         return `Wired ${oProvider} phone-OTP:\n${otpWritten.join('\n')}${otpDepLine}\n\n${ocfg.instructions}`;
+      }
+
+      case 'generate_indian_validators': {
+        // U-4 recipe — Indian identity/format validators (server/lib/indianValidators.ts): PAN/GSTIN/Aadhaar/
+        // IFSC/PIN/UPI/mobile, with the REAL GSTIN mod-36 + Aadhaar Verhoeff checksums. Dependency-free.
+        const ivcfg = generateIndianValidatorsIntegration();
+        const ivWritten: string[] = [];
+        for (const [path, content] of Object.entries(ivcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ivWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('indian validators');
+        return `Wired Indian validators:\n${ivWritten.join('\n')}\n(No npm dependency needed — real GSTIN/Aadhaar checksums.)\n\n${ivcfg.instructions}`;
       }
 
       case 'generate_analytics': {

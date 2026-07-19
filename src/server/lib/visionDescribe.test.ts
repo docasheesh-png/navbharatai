@@ -89,10 +89,19 @@ describe('describeVisionAttachments — weak-module no-Claude guard', () => {
   it('describes multiple attachments CONCURRENTLY and preserves input order (perf audit 2026-07-18)', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
+    // BARRIER (not a fixed sleep) so concurrency is observed DETERMINISTICALLY — the old 15ms window
+    // was a race: on a loaded CI runner the first mock could resolve before the others were dispatched,
+    // giving maxInFlight=1 and a flaky failure. Now each call blocks until at least 2 are simultaneously
+    // in flight (proving real overlap) or a 2s cap elapses. If the fan-out is genuinely concurrent this
+    // releases immediately; if it were sequential (a real regression) no 2nd call ever arrives, the cap
+    // trips, and maxInFlight stays 1 → the test still fails, correctly.
     messagesCreate.mockImplementation(async () => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 15));
+      const start = Date.now();
+      while (inFlight < 2 && Date.now() - start < 2000) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
       inFlight--;
       return { content: [{ type: 'text', text: 'desc' }] };
     });

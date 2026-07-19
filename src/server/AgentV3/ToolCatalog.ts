@@ -1404,6 +1404,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_image',
+      description:
+        'Add real image processing to the app (server/lib/image.ts, sharp): resizeImage(buffer, { width }) to ' +
+        'bound + re-encode a heavy upload into a fast web asset (WebP by default, honours EXIF orientation) + ' +
+        'makeThumbnail(buffer, 200) for a square avatar/tile. Pair with file-upload/storage: resize BEFORE ' +
+        'storing. Server-side; adds the sharp dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pdf',
       description:
         'Add real PDF generation to the app (server/lib/pdf.ts, pdfkit): a server createInvoicePdf(...) ready ' +
@@ -1761,6 +1770,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_security_headers',
   'generate_qr',
   'generate_pdf',
+  'generate_image',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

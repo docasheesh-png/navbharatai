@@ -18524,3 +18524,38 @@ wait. (A styled artifact of this whole plan was shared with the admin on 2026-07
 Phase 1: prepare the E2B custom-template definition + a verification build + the time-to-first-screen metric
 (code), and hand the admin the exact env flips (`AGENTV3_CACHE_PREFIX=on`, `E2B_TEMPLATE_ID`). No code was
 changed as part of recording this plan.
+
+---
+
+## 2026-07-19 — Backend/pipeline hardening: 4 advisory dimensions shipped (autonomous cycle)
+
+Continued the autonomous roadmap-completion cycle (CLAUDE.md: complete → PR → CI-in-background → merge →
+next). Shipped four real, fully-wired, unit-tested additive dimensions of the AgentV3 `evaluate` tool + the
+build-end pipeline, each advisory-only (never blocks or false-fails a working build — the one absolute rule)
+and conservative (high precision: static SPAs and non-Express frameworks are not false-flagged). Each went
+branch → gate (`tsc -p tsconfig.server.json` + full `vitest run`, read the real pass line) → PR → CI green →
+squash-merge. The four were built as a STACKED chain (each branch off the previous) and unwound via rebase
+onto `main` as each parent merged, so every PR diff stayed clean (only its own files).
+
+- **#1548 — Cap-4 observability advisory (`ObservabilityAnalysis`).** Flags a backend missing a `/health`
+  route (high), an Express/Koa error handler (medium), or a request logger (low). Project-level aggregation;
+  Fastify/Nest/Hono only checked for the framework-agnostic health gap. 11 tests. (Cap-4 advisory half done;
+  the auto-INJECTION half remains ❌.)
+- **#1549 — graceful-shutdown advisory (`GracefulShutdownAnalysis`).** Flags a long-lived Node HTTP server
+  that binds a port but never handles SIGTERM/SIGINT to drain in-flight requests — the defect that drops
+  requests on every Cloud Run / k8s redeploy. Serverless + framework-managed runtimes (Next.js/Nest) and
+  shutdown libraries (http-terminator/stoppable/…) are recognized and not flagged. 14 tests.
+- **#1550 — security-headers advisory (`SecurityHeadersAnalysis`).** Flags an Express/Koa server that sets
+  no core HTTP security headers (neither `helmet()` nor manual CSP/X-Frame-Options/HSTS/nosniff) — the gap
+  `SecurityConfigAnalysis` (CORS/TLS/secret-logging) does not cover. Cross-file helmet middleware counts;
+  type-only express imports and Fastify are not flagged. 12 tests.
+- **#1551 — build-end dependency-health gate (P-PIPE, `DependencyHealthGate`).** Auto-runs the existing
+  OSV/CVE scan + strong-copyleft license check at BUILD-END and appends one advisory block to a successful
+  build's summary. Advisory-only, never blocks; default-OFF behind `AGENTV3_DEPHEALTH_GATE=on` (same
+  conservative rollout as `AGENTV3_LINT_GATE`). Pure verdict unit-tested (6 tests); network/file glue is
+  best-effort + 45s-timeout-bounded, degrading to a clean advisory on any trouble. Closes the P-PIPE
+  "auto-run CVE + license at build-end" ❌ (prettier-at-build-end remains).
+
+Verification across the increment: full suite grew 7470 → 7502 passing (the only failing suites throughout
+were the pre-existing `src/server/sonic/*` load failures from the missing optional `@aws-sdk/
+client-bedrock-runtime` dep — identical on clean `main`, unrelated to these changes). No new `tsc` errors.

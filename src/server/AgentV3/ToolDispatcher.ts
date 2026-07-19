@@ -119,6 +119,7 @@ import { generateJobsIntegration, isJobsProvider } from '../lib/JobsGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
+import { generateRbac } from '../lib/RbacGenerator';
 import { generateErrorTrackingIntegration, isErrorTrackingProvider } from '../lib/ErrorTrackingGenerator';
 import { generateFeatureFlagIntegration, isFeatureFlagProvider } from '../lib/FeatureFlagGenerator';
 import { generateAiIntegration, isAiProvider } from '../lib/AiGenerator';
@@ -2849,6 +2850,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint(`crud resource (${crudName})`);
         const crudDeps = crud.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
+      }
+
+      case 'generate_rbac': {
+        // T1.3 recipe — a dependency-free RBAC layer (Role hierarchy + hasRole + requireRole guard).
+        // Pure generator in RbacGenerator.ts; pairs with generate_auth (sets req.user.role) + generate_crud.
+        const rbacRec = (input as Record<string, unknown>) || {};
+        const rbacRoles = Array.isArray(rbacRec.roles) ? rbacRec.roles.filter((r): r is string => typeof r === 'string') : [];
+        if (rbacRoles.length === 0) return 'generate_rbac: pass roles as a non-empty array, highest → lowest (e.g. ["admin","editor","viewer"]).';
+        const rbac = generateRbac(rbacRoles);
+        const rbacWritten: string[] = [];
+        for (const [path, content] of Object.entries(rbac.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rbacWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('rbac');
+        return `Wired RBAC:\n${rbacWritten.join('\n')}\n\n${rbac.instructions}`;
       }
 
       case 'generate_deploy_artifacts': {

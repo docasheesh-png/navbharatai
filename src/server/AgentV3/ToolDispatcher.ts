@@ -77,6 +77,7 @@ import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines } from './postgresProvision';
+import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
 import { analyzePwa, pwaSummary } from './PwaAnalysis';
@@ -1738,6 +1739,40 @@ export class ToolDispatcher {
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
+        // PRISMA STRIPPED-ENUM CONSUMER SELF-HEAL (MediConnect autopsy 2026-07-19): a SQLite schema has
+        // no enums, so FullStackGuards strips them to String — but a seed/route that still does
+        // `import { AppointmentStatus } from '@prisma/client'` then crashes at load with
+        // "does not provide an export named 'AppointmentStatus'" and the seed (exit 1) never runs.
+        // Deterministic close: find the files importing the missing enum, make them coherent with a
+        // String enum (drop the import name, `Enum.MEMBER` → 'MEMBER', `: Enum` → `: string`), and retry
+        // the command ONCE. Mirrors the relation/generate self-heals above; best-effort, never blocks.
+        if (exitCode !== 0) {
+          const missingEnums = extractMissingPrismaExports(`${stdout}\n${stderr}`);
+          if (missingEnums.length > 0) {
+            try {
+              const { files } = await collectWorkspaceFiles(this.actuator, this.workspaceId);
+              let fixedAny = false;
+              for (const [p, original] of Object.entries(files)) {
+                if (!isEnumConsumerFile(p)) continue;
+                let next = original;
+                for (const enumName of missingEnums) next = fixDanglingEnumConsumer(p, next, enumName);
+                if (next !== original) {
+                  await this.actuator.writeFile(this.workspaceId, p, next);
+                  try { this.onFileWrite?.(p, next); } catch { /* durable sync best-effort */ }
+                  this.state?.recordFileChange({ path: p, kind: 'modify' }, 'architect');
+                  fixedAny = true;
+                }
+              }
+              if (fixedAny) {
+                const retry = await this.actuator.runCommand(this.workspaceId, command);
+                if (retry.exitCode === 0) {
+                  ({ exitCode, stdout, stderr } = retry);
+                  this.events?.emit({ type: 'narration', agent: 'architect', text: `🔧 A database enum wasn't available on SQLite — rewired the code that used it (${missingEnums.join(', ')}) to plain string values and re-ran the step successfully.`, ts: Date.now() });
+                }
+              }
+            } catch { /* self-heal is best-effort — the original failure is still reported */ }
+          }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {

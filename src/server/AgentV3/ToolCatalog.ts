@@ -1295,6 +1295,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_retry',
+      description:
+        'Add a real retry-with-backoff helper to the app (server/lib/retry.ts): dependency-free ' +
+        'retry(fn, { attempts, baseMs, shouldRetry, signal }) that wraps a flaky external call (payment ' +
+        'gateway, third-party API, DB mid-failover) with exponential backoff + FULL JITTER (avoids a retry ' +
+        'storm), a shouldRetry predicate, an attempt/delay cap and AbortSignal cancellation, and rethrows the ' +
+        'last error on give-up (never a fake success). Only retry IDEMPOTENT work (GET/PUT or an ' +
+        'idempotency-keyed payment) — retrying a bare create can duplicate it. No dependency; no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_newsletter',
       description:
         'Add a real newsletter / mailing-list signup to the app (Bring-Your-Own key): a server subscribe(' +
@@ -1863,6 +1874,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_translation',
   'generate_moderation',
   'generate_cache',
+  'generate_retry',
   'generate_newsletter',
   'generate_currency',
   'generate_money_format',

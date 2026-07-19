@@ -1151,6 +1151,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_validation',
+      description:
+        'Add real request/input validation to the app (server/lib/validate.ts, zod): a typed validateBody() ' +
+        'helper + an Express validate(schema) middleware that reject a malformed body with a clear 400 listing ' +
+        'exactly which fields are wrong, BEFORE the handler runs — so bad input never crashes a route or ' +
+        'reaches the database. Use whenever a route accepts a body (signup, forms, APIs). Adds the zod ' +
+        'dependency; introduces no env keys and never writes .env.example.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1471,6 +1481,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_notify',
   'generate_env_validation',
   'generate_cors',
+  'generate_validation',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',

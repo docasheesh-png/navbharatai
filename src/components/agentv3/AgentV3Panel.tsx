@@ -31,6 +31,7 @@ import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
+import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
@@ -269,6 +270,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [frameworkExplicit, setFrameworkExplicit] = useState(false);
   // The user picked a framework in the picker → mark it explicit so the server honours it over chat text.
   const pickFramework = useCallback((id: string) => { setFramework(id); setFrameworkExplicit(true); }, []);
+  // A pending framework conflict (admin 2026-07-20): the user PICKED framework A but their message NAMES a
+  // different framework B — confirm which one BEFORE building, never silently build the wrong stack.
+  // `launch(fw)` re-runs the held build with the chosen framework (resolved, so it won't re-prompt).
+  const [fwConflict, setFwConflict] = useState<{ picked: string; detected: string; launch: (fw: string) => void } | null>(null);
+  const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -934,13 +940,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-    start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, frameworkExplicit, appSignature: appSignaturePref(),
+    // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
+    // nor the server re-prompts on the same conflict.
+    const launch = (fw: string, resolved: boolean) => start(msgText, {
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments,
+      framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
       chatRole: chatMode === 'build' ? undefined : chatMode,
     });
+    // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
+    // one framework but the message NAMES a different one — pause and ask which to use instead of building
+    // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
+    const sel = chatMode === 'build'
+      ? resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt: msgText })
+      : { status: 'ok' as const, framework };
+    if (sel.status === 'conflict') {
+      setFwConflict({ picked: sel.picked, detected: sel.detected, launch: (fw: string) => launch(fw, true) });
+      return;
+    }
+    launch(sel.framework, false);
   };
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
@@ -2659,6 +2679,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <div className="flex gap-2">
                   <button onClick={() => respond(state.pendingPermission!.callId, true)} className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white">Approve &amp; build</button>
                   <button onClick={() => respond(state.pendingPermission!.callId, false)} className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100">Reject</button>
+                </div>
+              </div>
+            )}
+            {fwConflict && (
+              <div className="px-3 py-2.5 bg-indigo-950/50 border border-indigo-800 rounded">
+                <div className="flex items-center gap-2 text-xs text-indigo-200 mb-1">
+                  <AlertCircle className="w-4 h-4" /> Which framework should I use?
+                </div>
+                <div className="text-[11px] text-zinc-400 mb-2">
+                  You selected <b className="text-zinc-200">{fwName(fwConflict.picked)}</b>, but your message mentions <b className="text-zinc-200">{fwName(fwConflict.detected)}</b>. Pick one — I&apos;ll build with it.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setFramework(fwConflict.detected); setFrameworkExplicit(true); fwConflict.launch(fwConflict.detected); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white"
+                  >Use {fwName(fwConflict.detected)} (from your message)</button>
+                  <button
+                    onClick={() => { setFramework(fwConflict.picked); setFrameworkExplicit(true); fwConflict.launch(fwConflict.picked); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+                  >Keep {fwName(fwConflict.picked)} (your selection)</button>
+                  <button
+                    onClick={() => setFwConflict(null)}
+                    className="px-3 py-1 text-xs rounded bg-transparent hover:bg-white/5 text-zinc-500"
+                  >Cancel</button>
                 </div>
               </div>
             )}

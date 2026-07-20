@@ -129,7 +129,7 @@ import { enterNoClaudeZone } from '../AgentV3/noClaudeZone';
 import { findSyntaxErrors, syntaxRepairInstruction } from '../AgentV3/SyntaxCheck';
 import { analyzeImportExports, exportRegenTargets, exportRegenInstruction, findCircularDependencies, findUnusedDependencies, type ExportRegenTarget } from '../AgentV3/ImportExportAnalysis';
 import { detectBackendPresence } from '../AgentV3/BackendPresence';
-import { detectFrameworkFromPrompt } from '../AgentV3/PromptFramework';
+import { resolveFrameworkSelection } from '../AgentV3/PromptFramework';
 import { computePromptHash, reportMatchesActiveBuild, hasActiveBuildExpectation, type ActiveBuildExpectation } from '../AgentV3/buildIdentity';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, parseFileBlocks } from '../AgentV3/OneShotBuilder';
@@ -4488,11 +4488,14 @@ export function registerAgentV3Routes(app: Express): void {
     // prompt was scaffolded as React → unresolved imports, readiness 0/100. A project import overrides again
     // below (L~4409). Backward-compatible: an old client sends no `frameworkExplicit`, so detection still
     // runs whenever the value is the bare default — exactly today's behaviour.
+    //   • CONFLICT — if the user picked framework A but the text names a DIFFERENT framework B, the CLIENT
+    //     confirms first and re-sends with `frameworkResolved` set (never silently build the wrong stack).
+    //     The server uses the SAME shared resolver; on a residual conflict (e.g. a non-interactive caller
+    //     that can't confirm) it honours the explicit PICK, so a build is never blocked here.
     const frameworkExplicit = req.body?.frameworkExplicit === true;
-    if (!frameworkExplicit && framework === 'vite-react') {
-      const fromPrompt = detectFrameworkFromPrompt(prompt);
-      if (fromPrompt) framework = fromPrompt;
-    }
+    const frameworkResolved = req.body?.frameworkResolved === true;
+    const fwSel = resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt, resolved: frameworkResolved });
+    framework = fwSel.status === 'ok' ? fwSel.framework : fwSel.picked;
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
     // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────

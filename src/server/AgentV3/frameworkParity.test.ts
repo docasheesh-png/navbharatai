@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
-import { detectFrameworkFromPrompt, detectBackendOnlyFramework, DETECTABLE_FRAMEWORK_IDS } from './PromptFramework';
+import { detectFrameworkFromPrompt, detectBackendOnlyFramework, resolveFrameworkSelection, DETECTABLE_FRAMEWORK_IDS } from './PromptFramework';
 import { FRAMEWORK_OPTION_IDS } from '../../components/agentv3/frameworkOptions';
 
 // The admin sync law (2026-07-20): the three sources of truth for "which framework" — the client picker,
@@ -69,5 +69,34 @@ describe('bidirectional selection — chat naming a framework picks it (both pat
   it('a plain app request with no framework named stays null (React default)', () => {
     expect(detectFrameworkFromPrompt('build a todo list app')).toBeNull();
     expect(detectFrameworkFromPrompt('')).toBeNull();
+  });
+});
+
+describe('resolveFrameworkSelection — settings pick vs chat text, CONFLICT confirms first (admin 2026-07-20)', () => {
+  it('picked A + text names a DIFFERENT B → conflict (do NOT silently build)', () => {
+    const r = resolveFrameworkSelection({ picked: 'vite-react', explicit: true, prompt: 'build a Next.js dashboard' });
+    expect(r).toEqual({ status: 'conflict', picked: 'vite-react', detected: 'nextjs' });
+  });
+
+  it('once the user has confirmed (resolved), the pick is honoured — no re-prompt', () => {
+    const r = resolveFrameworkSelection({ picked: 'nextjs', explicit: true, prompt: 'build a Next.js dashboard', resolved: true });
+    expect(r).toEqual({ status: 'ok', framework: 'nextjs' });
+  });
+
+  it('an explicit pick that MATCHES the text is no conflict', () => {
+    expect(resolveFrameworkSelection({ picked: 'nextjs', explicit: true, prompt: 'a Next.js app' })).toEqual({ status: 'ok', framework: 'nextjs' });
+  });
+
+  it('an explicit pick with no framework in the text just uses the pick', () => {
+    expect(resolveFrameworkSelection({ picked: 'vue', explicit: true, prompt: 'a todo app' })).toEqual({ status: 'ok', framework: 'vue' });
+  });
+
+  it('NOT explicit (bare default) → chat text auto-selects the framework', () => {
+    expect(resolveFrameworkSelection({ picked: 'vite-react', explicit: false, prompt: 'a Django REST API' })).toEqual({ status: 'ok', framework: 'django' });
+    expect(resolveFrameworkSelection({ picked: 'vite-react', explicit: false, prompt: 'a plain app' })).toEqual({ status: 'ok', framework: 'vite-react' });
+  });
+
+  it('defaults picked to vite-react when absent', () => {
+    expect(resolveFrameworkSelection({ picked: undefined, explicit: false, prompt: 'a Nuxt storefront' })).toEqual({ status: 'ok', framework: 'nuxt' });
   });
 });

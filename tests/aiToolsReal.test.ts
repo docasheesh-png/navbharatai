@@ -37,3 +37,28 @@ describe('Voice to App — real v5 handoff', () => {
     expect(src).not.toMatch(/VoiceToApp onAppGenerated/);
   });
 });
+
+describe('AI Debugger — real analysis, no fake fallback', () => {
+  it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
+    const entry = kb('ai_debugger');
+    expect(entry).toBeTruthy();
+    expect(entry!.path).toContain('AI Tools → AI Debugger');
+    expect(entry!.description).toMatch(/REAL AI analysis/i);
+    expect(entry!.description).toMatch(/never shows a canned fake/i);
+    expect(navFor(entry!)).toEqual({ view: 'debugger' });
+  });
+
+  it('the canned mock generator is gone from the client (fake analysis can never return)', () => {
+    const src = readFileSync(join(__dirname, '../src/components/ide/AIDebugger.tsx'), 'utf8');
+    expect(src).not.toMatch(/function generateMockResponse\(/);
+    // Failures now surface honestly.
+    expect(src).toContain('analyzeError');
+  });
+
+  it('the /api/debug route is registered on the server (the endpoint the client calls exists)', () => {
+    const route = readFileSync(join(__dirname, '../src/server/routes/debug.ts'), 'utf8');
+    expect(route).toContain("app.post('/api/debug'");
+    const server = readFileSync(join(__dirname, '../server.ts'), 'utf8');
+    expect(server).toContain('registerDebugRoutes(app)');
+  });
+});

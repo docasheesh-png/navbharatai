@@ -62,3 +62,27 @@ describe('AI Debugger — real analysis, no fake fallback', () => {
     expect(server).toContain('registerDebugRoutes(app)');
   });
 });
+
+describe('AI Image Gen — our own engine, no third-party hotlink', () => {
+  it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
+    const entry = kb('ai_image_gen');
+    expect(entry).toBeTruthy();
+    expect(entry!.path).toContain('AI Tools → AI Image Gen');
+    expect(entry!.description).toMatch(/REAL images/i);
+    expect(entry!.description).toMatch(/never shows a placeholder/i);
+    expect(navFor(entry!)).toEqual({ view: 'imagegen' });
+  });
+
+  it('the client calls our server route — the third-party hotlink is gone for good', () => {
+    const src = readFileSync(join(__dirname, '../src/components/ide/AIImageGenerator.tsx'), 'utf8');
+    expect(src).toContain("'/api/image/generate'");
+    expect(src).not.toContain('pollinations');
+  });
+
+  it('the /api/image/generate route is registered on the server', () => {
+    const route = readFileSync(join(__dirname, '../src/server/routes/imageGen.ts'), 'utf8');
+    expect(route).toContain("app.post('/api/image/generate'");
+    const server = readFileSync(join(__dirname, '../server.ts'), 'utf8');
+    expect(server).toContain('registerImageGenRoutes(app)');
+  });
+});

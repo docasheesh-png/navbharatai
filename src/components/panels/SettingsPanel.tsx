@@ -15,6 +15,7 @@ import {
   getStoredFontScale, applyFontScale, FONT_SCALE_MIN, FONT_SCALE_MAX, FONT_SCALE_STEP, FONT_SCALE_DEFAULT,
 } from '../../lib/a11y';
 import { SettingsScreen, ViewType, ApiKeys, PROVIDER_CONFIG } from '../../types';
+import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
 import { THEME_MODES } from '../../lib/theme';
 import type { ThemeMode } from '../../lib/theme';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -25,6 +26,10 @@ const _lz = <T extends object>(fn: () => Promise<T>, k: keyof T) =>
 
 const SecretManager    = _lz(() => import('../SecretManager'),             'SecretManager');
 const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'DatabaseSettings');
+// The REAL sandbox terminal (same component Code Studio mounts) — runs actual commands in the
+// user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
+// users can run a quick command without opening the full Code Studio.
+const RealTerminal     = _lz(() => import('../ide/RealTerminal'),          'RealTerminal');
 
 // Inlined theme-classes shape (matches getThemeClasses return type)
 type ThemeClasses = {
@@ -847,6 +852,40 @@ export function SettingsPanel({
                   <Suspense fallback={null}><DatabaseSettings userId={user.uid} /></Suspense>
                 ) : (
                   <div className="p-6 text-white text-center">Please log in to configure your database</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* REAL sandbox terminal (admin 2026-07-20): the same RealTerminal Code Studio mounts,
+                pointed at the SAME v5.0 workspace (shared agentv3_session_{uid} key) — so commands run
+                in the exact sandbox where NavBharatAI Pro v5.0 builds the user's app, without opening
+                the full Code Studio. Honest by construction: when the sandbox is cold it says so and
+                explains how to warm it — it never fakes output. */}
+            {settingsScreen === 'shell' && (
+              <motion.div
+                key="shell"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="px-1 pt-4">
+                  <h2 className="text-2xl font-black text-white tracking-tight">Terminal</h2>
+                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Run real commands in your app&apos;s sandbox</p>
+                </div>
+                {user ? (
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                    <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
+                      <RealTerminal
+                        workspaceId={getAgentV3WorkspaceId(user.uid)}
+                        userId={user.uid}
+                        email={user.email || ''}
+                        onClose={() => setSettingsScreen('root')}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to use the terminal</div>
                 )}
               </motion.div>
             )}

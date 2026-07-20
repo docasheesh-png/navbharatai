@@ -82,7 +82,7 @@ export type AgentV3WireEvent =
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
-  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
+  | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
 
 /** One live agent card in the "AI Team" tracker (D9 — driven by REAL events only). */
 export interface AgentCard {
@@ -189,6 +189,9 @@ export interface AgentV3ClientState {
   /** SPM-3 (project mode): modules not yet done after this turn — drives the progress-monotone
    *  auto-continue guard (continue only while this number strictly decreases). */
   planRemaining?: number;
+  /** FleetOps: total files written by this build so far, reported on a wall-clock PAUSE — the
+   *  progress signal for the classic auto-continue (keep going while it strictly increases). */
+  filesWritten?: number;
   /** P-UX.7 — total tokens (in + out) the finished build used, for the usage badge. */
   tokens?: number;
   /** Billing Phase 1 — tokens actually deducted from the user's wallet for this build. */

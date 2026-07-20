@@ -19508,3 +19508,93 @@ showed the right, un-capped, graph-scoped pattern.
 Closes the audit's "200/1000/5000-file edits" ❌ for rename/add-prop. Phase 2 (chunked/bounded for very large
 shortlists) and Phase 3 (semantic long-context) remain as separate, smaller follow-ups per the design doc.
 Fresh branch off `d7ee19d`, own PR.
+## 2026-07-20 — Recipe/fix batch: 5 new U-4 recipes + 1 root-cause fix (6 PRs merged)
+
+Continued the BYO-recipe breadth conveyor. Shipped six PRs, each branch → verify gate → PR → CI green →
+self-merge (CI ran in the background through a multi-hour GitHub REST 503 outage; drained the queue the
+moment the API recovered). Combined `main` re-verified locally after the batch: ToolWiring guard pass,
+22 generator tests pass, server + frontend `tsc` clean.
+
+**New recipes (each = pure `XGenerator.ts` + emitted-runnable test + 3-point wiring at a DISTINCT anchor
++ generator test + the `ToolWiring` structural guard; all dependency-free unless noted):**
+- **#1649 `generate_http_client`** — resilient `fetchJson(url,{timeoutMs})` + `HttpError`. Fixes the three
+  classic bare-`fetch` bugs (no timeout → hang; 4xx/5xx read as success; forgot to parse). Native
+  fetch + AbortController. Pairs with `generate_retry`. (Supersedes the outage-stranded, force-rebased
+  #1643, which GitHub refused to reopen → fresh PR.)
+- **#1647 `generate_upi`** — India-first UPI payment deep-link (`upi://pay?...`) that opens
+  GPay/PhonePe/Paytm/BHIM for a real payment to the merchant's own VPA — keyless, no gateway. `buildUpiLink`
+  (URL-encoded, amount→2dp, INR) + `isValidVpa`. Pairs with `generate_qr` for scan-to-pay.
+- **#1648 `generate_audit`** — tamper-evident hash-chained audit log. `appendAudit(store,{actor,action,…})`
+  chains SHA-256 prevHash→hash; `verifyAuditChain` returns the first tampered seq (detects edits AND
+  deletions). Storage-agnostic (caller supplies `{last(),save()}`).
+- **#1650 `generate_webhook_sender`** — outgoing signed webhook `sendWebhook(url,payload,secret,{event})`;
+  HMAC-SHA256 `sha256=<hex>` signature interoperates with the incoming `generate_webhook` verifier
+  (runtime-verified: right secret accepts, wrong rejects); AbortController timeout; never throws.
+- **#1644** — added the ~22 new recipes to the builder's systemPrompt "reach for the real generator"
+  needs→tool map so the whole session's recipes are actually reachable by AgentV3 (leverage fix).
+
+**Root-cause fix (rule 2/3/4):**
+- **#1646 `rupeesInWords`** — while scoping an "amount in words" recipe I found `money_format` ALREADY had
+  that capability, so instead of shipping a drifting duplicate I fixed the existing (buggy) one IN PLACE:
+  (1) `twoDigits(crore)` emitted "undefined" for ≥100 crore → now the crore group RECURSES; (2) paise were
+  dropped (`Math.floor`) → now rounded + "… and NN Paise"; (3) added the legal "Rupees … Only" suffix.
+  Locked with an EMITTED regression test (`money.test.ts`) encoding the exact failure
+  (`1250000000 → "One Hundred Twenty Five Crore Rupees Only"`, asserts no "undefined").
+
+**Process notes:** distinct-anchor discipline held — all 6 branches merged with zero cross-conflict. The
+"amount in words" episode is the redundant-work rule (safeguard #6) working as intended: audit-before-build
+turned a would-be duplicate into a real bug fix. No `.aab` rebuilt — this batch is backend generator
+capability only (invisible to the Capacitor web-app shell), so a store build would be over-building per the
+Play-release judgement rule.
+
+---
+
+## 2026-07-20 — Roadmap reconciliation → ROADMAP_REMAINING.md (all sources compiled, code-verified) + engine-quality ships
+
+**Deliverable: one code-verified "what's actually left" file — `ROADMAP_REMAINING.md`.** The four roadmap
+sources (ROADMAP.md Tier 0-5 + this file's 30-category gap ledger) were cross-matched against the LIVE code by
+four parallel investigators (Tier 1 / Tier 2 / Tier 3+ledger / Tier 4-5+non-goals). **Done items and
+non-goals/downgrades were REMOVED** — it is the upgrade-only worklist, in one place (admin: "sab ek jagah lao,
+jo ho chuka / downgrade karega woh hata do"). Buckets:
+- **🟢 BUILD NOW** (code-tractable, no infra): bounded `ask_user` clarification tool (admin's #1 category),
+  GLM/Kimi prompt-cache stable prefixes (AP-5), Cap-4 cost-alert thresholds, daily-spend quota gauge,
+  network-request capture for the auto-fix loop (B5 remainder), runtime route/API/auth/DB smoke-hitter, +
+  breadth recipes (more languages Rust/Rails/Laravel/C, deploy targets AWS/Azure/Railway/Render, GraphQL,
+  state-management, settings+notification-center, design-to-code, Ansible IaC, CI `--ignore-scripts`,
+  pure-code polish).
+- **🔵 LARGER** (multi-PR, still code): full-builder frontend/backend parallelism + merged heal pass (AP-4,
+  20→5-7 min), cross-restart build resume (AP-3/T1-session-rehydrate), 1000-file codemod, template gallery
+  (AP-10), P-INTEG/MCP/SDK.
+- **🔒 BLOCKED** (infra/keys/decision — code half where present is DONE): signed native binaries,
+  Lighthouse/Web-Vitals+axe over live preview, GA-2 out-of-process workers, GA-4 sandbox skip+cache, GA-16
+  runtime profiler, embeddings, WebContainers, KMS/Armor/Redis/monitoring, DB auto-create, escalation/
+  power-effort/cost-ladder DEFAULT-ON flips (code shipped; needs measurement + billing sign-off), GLM key-pool
+  keys (parseKeyPool done; buy+set env).
+- **🚫 EXCLUDED** (non-goal / downgrade): **AP-9 requirement-matcher tightening** (the roadmap itself flags it a
+  trust DOWNGRADE — false negatives hide skipped features → breaks the honesty moat; DO NOT build), BYOK,
+  local execution / VS Code-JetBrains ext / local `nbai` CLI, PowerShell/CMD/ZSH, legacy AppMakerLab, Kafka/
+  K8s/gRPC/HSM/SAML-at-infra/GPU/multi-region-DB, "Bucket C" earned-over-time, all Tier-5 north-star vision.
+
+**Stale-roadmap correction (code-anchored):** ~90% of the old ROADMAP.md ❌/🟡 marks are actually DONE.
+Verified-DONE (do NOT rebuild): T1-autofix-loop, T1-auth-scaffold, T1-budget-ux, T1-costladder-on, B5 classifier
+(#1656 RuntimeErrorClassify.ts), B6 Go typecheck (#1655), C7/C8 codemods, GA-5/6/7/8/10/13/14/15/16, D11/D12,
+dependency reconciler, task-dependency DAG, CSRF/ABAC/SSO/i18n/metrics/tracing/admin/dashboard/rbac/backup/
+pagination/cache/image-opt/crud/migration-schema-depth/maturity-tier grading/find_code_smells, UT-1/2/3 wrappers.
+
+**Engine-quality ships this session (all merged, CI-green):**
+- **B6 (#1655)** — Go added to the live cross-language typecheck (`crossLangTypecheck.ts`: `go build ./...`);
+  deleted the drifted dead `crossLangCheck.ts` duplicate (root-cause: two impls, only python+java wired).
+- **B5 (#1656)** — `RuntimeErrorClassify.ts`: buckets captured runtime errors (react-render/hooks, null-deref,
+  CORS, network, hydration, env, …) with targeted repair hints (CORS→generate_cors) into `buildRepairPrompt`.
+- **Prettier build-end advisory (#1657)** — `PrettierGate.ts`, default-OFF `AGENTV3_PRETTIER_GATE`, non-blocking.
+- **White-Label fix (#1658)** — `redactProviderError` now actually strips AI vendor/model names (GLM/Kimi/
+  Claude/Sonnet/Opus/Gemini/Grok + model ids → "NavBharatAI"/"the model"); it was only stripping E2B/secrets
+  before, so a real LLM error routed to the user's chat would have leaked the vendor. + §4 invariant test.
+- **Test-hardening (#1660)** — locked two untested pure backstops: `extractJson` (LLM-JSON extractor — the
+  silent-failure/lastIndexOf trap) + `httpError` (`toSafeClientMessage` secret + vendor redaction).
+- **Recipe/fix batch (#1646-1650, #1644)** — http-client, UPI, audit-log, webhook-sender, rupeesInWords
+  root-cause fix, systemPrompt recipe-map (recorded above).
+
+**Note:** the FleetOps (App-complex) build-report autopsy is owned by a SEPARATE session/agent — not touched
+here (no duplication, no engine-file collision). This session stayed on roadmap-reconciliation + isolated
+engine-quality/test work. `ROADMAP_REMAINING.md` is the live "what's next"; ROADMAP.md stays the historical ledger.

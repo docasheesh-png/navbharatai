@@ -15,8 +15,12 @@
 // so module 30 gets the same pause tolerance module 1 had. An absolute session cap backstops
 // everything. This module is pure + fully unit-testable; AgentV3Panel just wires the refs.
 
-/** Classic budget: deadline-pause continues allowed per module (or per user message outside plan mode). */
+/** Classic budget: consecutive NO-PROGRESS deadline-pause continues before we stop (a stuck build). */
 export const PAUSE_CONTINUE_MAX = 2;
+/** Absolute backstop for progress-driven wall-clock continues in one user message — a big full-stack
+ *  app legitimately needs several 30-min windows, but this bounds a pathological case. Each window that
+ *  adds NEW files counts against it; a build adding files every window finishes unattended within it. */
+export const PAUSE_PROGRESS_MAX = 8;
 /** Absolute backstop for plan-driven continues in one unattended chain (server MAX_MODULES is 60;
  *  failed-module retries can add a few more turns — this cap should never bind on a real plan). */
 export const PLAN_CONTINUE_MAX = 100;
@@ -37,10 +41,16 @@ export function decideAutoContinue(input: {
   planRemaining: number | null | undefined;
   /** `planRemaining` from the PREVIOUS plan-mode result in this chain (null when none yet). */
   lastPlanRemaining: number | null;
-  /** Deadline-pause continues used since the last real progress (or the user's message). */
+  /** Deadline-pause continues used since the last user message (both progress + no-progress). */
   pauseContinues: number;
   /** Plan-driven continues used in this unattended chain. */
   planContinues: number;
+  /** Total files written SO FAR at THIS wall-clock pause (undefined outside a deadline pause / when unknown). */
+  filesWritten?: number | null;
+  /** Files written at the PREVIOUS pause in this chain (null when this is the first pause). */
+  lastFilesWritten?: number | null;
+  /** Consecutive NO-PROGRESS pauses so far (files did not grow) — reset to 0 on any progress. */
+  noProgressPauses?: number;
 }): AutoContinueDecision {
   const { planRemaining, lastPlanRemaining, pauseContinues, planContinues } = input;
 
@@ -62,8 +72,30 @@ export function decideAutoContinue(input: {
     return { proceed: true, resetPauseBudget: true, isPlanContinue: true };
   }
 
-  // Classic: a wall-clock pause (or any other resumable result without a plan signal).
-  if (pauseContinues >= PAUSE_CONTINUE_MAX) {
+  // Classic: a wall-clock pause (no plan signal). PROGRESS-DRIVEN (FleetOps/deep-test 2026-07-20):
+  // a big full-stack app legitimately needs several 30-min windows. Continue for as long as the build
+  // is still ADDING FILES each window (real progress), bounded by an absolute backstop; only fall back
+  // to the tight 2-continue budget when a window makes NO progress (a genuinely stuck build). This is
+  // what makes a 30+min app finish unattended instead of pausing midway asking the user to type continue.
+  const { filesWritten, lastFilesWritten, noProgressPauses } = input;
+  const haveProgressSignal = typeof filesWritten === 'number';
+  const madeProgress = haveProgressSignal && (lastFilesWritten == null || (filesWritten as number) > lastFilesWritten);
+
+  // Absolute backstop — even a steadily-progressing build can't auto-continue forever.
+  if (pauseContinues >= PAUSE_PROGRESS_MAX) {
+    return {
+      proceed: false, resetPauseBudget: false, isPlanContinue: false,
+      stopMessage: `This build has already auto-continued ${pauseContinues} times and is still going — pausing for a checkpoint. Type **"continue"** to keep finishing it.`,
+    };
+  }
+  // Still making progress each window → keep going. resetPauseBudget stays FALSE: the caller keeps the
+  // ABSOLUTE pauseContinues counter climbing toward PAUSE_PROGRESS_MAX (it must never reset, or a
+  // steadily-progressing build would auto-continue forever); the caller resets only its no-progress streak.
+  if (madeProgress) {
+    return { proceed: true, resetPauseBudget: false, isPlanContinue: false };
+  }
+  // No new files this window (or no progress signal at all) → the classic tight budget guards a stuck build.
+  if ((noProgressPauses ?? pauseContinues) >= PAUSE_CONTINUE_MAX) {
     return {
       proceed: false, resetPauseBudget: false, isPlanContinue: false,
       stopMessage: 'This build is taking longer than the time limit allows even after auto-continuing. Type **"continue"** and I will keep finishing it.',

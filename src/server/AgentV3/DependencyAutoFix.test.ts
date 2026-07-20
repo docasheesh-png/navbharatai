@@ -30,6 +30,15 @@ describe('pinKnownDepsInInstallCommand — react-leaflet peer-conflict pin (Carg
   it('leaves an explicitly-versioned react-leaflet untouched', () => {
     expect(pinKnownDepsInInstallCommand('npm install react-leaflet@5')).toBe('npm install react-leaflet@5');
   });
+
+  it('pins bare tailwindcss to v3 so the v3 CLI/directives work (LedgerLoop autopsy)', () => {
+    // The real LedgerLoop install: bare `tailwindcss` → npm pulled v4 → `tailwindcss init -p` gone.
+    const out = pinKnownDepsInInstallCommand('npm install lucia prisma zod @prisma/client tailwindcss postcss autoprefixer');
+    expect(out).toContain('tailwindcss@^3');
+    expect(out).toContain('prisma@^6'); // existing pins still applied
+    // an explicit tailwind version is respected
+    expect(pinKnownDepsInInstallCommand('npm install -D tailwindcss@4')).toBe('npm install -D tailwindcss@4');
+  });
 });
 
 describe('ensureFrameworkCoreDeps — the framework binary can never vanish (CargoPilot dev-server-death)', () => {

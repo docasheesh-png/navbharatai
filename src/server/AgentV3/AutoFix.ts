@@ -8,6 +8,7 @@
 // the impure orchestration (capture → repair runner → re-capture) lives in the build route.
 
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
+import { renderRepairGuidance } from './RuntimeErrorClassify';
 
 export interface RuntimeError {
   t: number;
@@ -128,11 +129,16 @@ export function formatRuntimeErrors(errors: RuntimeError[], max = 20): string {
  * exactly what is broken at runtime and to fix → reload → re-verify, without rebuilding from scratch.
  */
 export function buildRepairPrompt(errors: RuntimeError[]): string {
+  // B5 — hand the repair pass root-cause GROUPED guidance (crash-class first, each with a targeted hint
+  // and the recipe to reach for) so it fixes the class, not just the symptom, and converges faster.
+  const guidance = renderRepairGuidance(errors.map((e) => e.text));
   return [
     'The app you just built has RUNTIME errors captured in the browser while it was running',
     '(these do not show up in a successful build/compile). Fix them now without rebuilding from',
-    'scratch — make the smallest targeted edits that resolve each one:',
+    'scratch — make the smallest targeted edits that resolve each one.',
     '',
+    ...(guidance ? ['Grouped by likely root cause — fix the crash-class groups first:', '', guidance, ''] : []),
+    'All captured errors (with a file:line hint where extractable):',
     formatRuntimeErrors(errors),
     '',
     'Steps: locate the cause with grep/read_file, apply a surgical edit_file fix, then RELOAD the',

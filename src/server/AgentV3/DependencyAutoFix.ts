@@ -31,6 +31,12 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
   clsx: '^2',
   classnames: '^2',
   'tailwind-merge': '^2',
+  // Tailwind pinned to v3 (LedgerLoop autopsy 2026-07-20). A bare `npm install tailwindcss` pulls v4,
+  // which REMOVED the `tailwindcss init -p` CLI and the `node_modules/.bin/tailwindcss` binary, and
+  // switched to CSS-first config (`@import "tailwindcss"`) — so the v3 conventions every LLM emits
+  // (`tailwindcss init -p`, `tailwind.config.js`, `@tailwind base/components/utilities`) all fail. The
+  // builder burned 5 failed commands on this. v3 is the stable major the scaffold + generated code use.
+  tailwindcss: '^3',
   'class-variance-authority': '^0.7.0',
   dayjs: '^1',
   'date-fns': '^3',

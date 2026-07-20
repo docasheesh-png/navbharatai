@@ -86,8 +86,57 @@ export function isValidUPI(vpa: string): boolean {
 
 // Indian mobile — 10 digits starting 6-9, tolerating a leading +91 / 0.
 export function isValidIndianMobile(num: string): boolean {
-  return /^[6-9][0-9]{9}$/.test(clean(num).replace(/^(?:\\+91|91|0)/, ''));
+  return /^[6-9][0-9]{9}$/.test(bareMobile(num));
 }
+
+// Strip spaces, hyphens, brackets and a leading +91 / 91 / 0 down to the bare 10 digits.
+function bareMobile(num: string): string {
+  return clean(num).replace(/[\\s\\-()]/g, '').replace(/^(?:\\+91|91|0)/, '');
+}
+
+// Normalize any Indian mobile to ONE canonical E.164 form (+91XXXXXXXXXX) for storing, de-duping users, and
+// passing to SMS/WhatsApp APIs. Accepts '98765 43210', '098765-43210', '+91 98765 43210', '919876543210', …
+// Returns null if it is not a valid Indian mobile (so a caller must handle the bad case, never store junk).
+export function normalizeIndianMobile(num: string): string | null {
+  const bare = bareMobile(num);
+  return /^[6-9][0-9]{9}$/.test(bare) ? '+91' + bare : null;
+}
+`;
+
+const VALIDATORS_TEST = `import { describe, it, expect } from 'vitest';
+import {
+  isValidPAN, isValidGSTIN, isValidAadhaar, isValidIFSC, isValidPincode, isValidUPI,
+  isValidIndianMobile, normalizeIndianMobile,
+} from './indianValidators';
+
+describe('indianValidators', () => {
+  it('accepts well-formed values and rejects a single-char typo (real checksums)', () => {
+    expect(isValidPAN('ABCDE1234F')).toBe(true);
+    expect(isValidGSTIN('27AAPFU0939F1ZV')).toBe(true);      // valid mod-36 check digit
+    expect(isValidGSTIN('27AAPFU0939F1ZX')).toBe(false);     // last char tampered
+    expect(isValidAadhaar('999941057058')).toBe(true);        // valid Verhoeff
+    expect(isValidAadhaar('999941057059')).toBe(false);       // last digit tampered
+    expect(isValidIFSC('SBIN0005943')).toBe(true);
+    expect(isValidPincode('560001')).toBe(true);
+    expect(isValidUPI('name@okhdfcbank')).toBe(true);
+  });
+
+  it('validates Indian mobiles tolerating +91 / 0 / spacing', () => {
+    expect(isValidIndianMobile('9876543210')).toBe(true);
+    expect(isValidIndianMobile('+91 98765 43210')).toBe(true);
+    expect(isValidIndianMobile('098765-43210')).toBe(true);
+    expect(isValidIndianMobile('1234567890')).toBe(false);    // must start 6-9
+  });
+
+  it('normalizes any Indian mobile to one canonical +91XXXXXXXXXX form (or null)', () => {
+    expect(normalizeIndianMobile('9876543210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('+91 98765 43210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('098765-43210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('919876543210')).toBe('+919876543210');
+    expect(normalizeIndianMobile('12345')).toBeNull();
+    expect(normalizeIndianMobile('1234567890')).toBeNull();
+  });
+});
 `;
 
 const INSTRUCTIONS =
@@ -95,12 +144,17 @@ const INSTRUCTIONS =
   'isValidAadhaar, isValidIFSC, isValidPincode, isValidUPI, isValidIndianMobile and validate the field at the ' +
   'form/API BEFORE you store or act on it. GSTIN and Aadhaar verify the REAL government checksum (GSTIN mod-36, ' +
   'Aadhaar Verhoeff), so a single mistyped character is caught up front instead of failing later in a payout or ' +
-  'a tax filing — a bare regex would let it through. These prove a value is well-FORMED; the authoritative ' +
-  'check is still the government/bank API. No API key needed.';
+  'a tax filing — a bare regex would let it through. Use normalizeIndianMobile(num) to canonicalize any mobile ' +
+  '(+91/0/spacing tolerated) to ONE +91XXXXXXXXXX form for de-duping users and passing to SMS/WhatsApp APIs ' +
+  '(returns null if invalid). These prove a value is well-FORMED; the authoritative check is still the ' +
+  'government/bank API. No API key needed.';
 
 export function generateIndianValidatorsIntegration(): IndianValidatorsConfig {
   return {
-    files: { 'server/lib/indianValidators.ts': VALIDATORS_SERVER },
+    files: {
+      'server/lib/indianValidators.ts': VALIDATORS_SERVER,
+      'server/lib/indianValidators.test.ts': VALIDATORS_TEST,
+    },
     instructions: INSTRUCTIONS,
   };
 }

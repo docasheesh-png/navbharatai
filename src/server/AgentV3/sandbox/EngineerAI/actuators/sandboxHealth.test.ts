@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit, detectSilentDbFailure } from './sandboxHealth';
+import { isDeadSandboxError, isDeadSandboxSignal, resolveThrownCommandExit, detectSilentDbFailure, looksLikeDbUnreachable } from './sandboxHealth';
 
 describe('resolveThrownCommandExit — a rejected command keeps its REAL exit code (PaisaTrack autopsy)', () => {
   it("uses the error's own exitCode (E2B CommandExitError) — a tsc exit 2 stays 2, not -1", () => {
@@ -130,5 +130,38 @@ describe('detectSilentDbFailure — exit 0 that hides a DB-unreachable failure (
 
   it('does NOT flag a null exit code (still-running / not settled)', () => {
     expect(detectSilentDbFailure({ command: 'npx prisma migrate dev', exitCode: null, stdout: 'P1001' })).toBe(false);
+  });
+
+  // LedgerLoop autopsy 2026-07-20: a Prisma SCHEMA-validation error makes the health-check print
+  // "did not come up on port 5432", which the first cut mislabeled as DB_UNREACHABLE. The DB is fine —
+  // the schema is wrong. Must NOT be flagged (the schema-repair path owns it).
+  it('does NOT flag a Prisma schema-validation error even though the health-check mentions port 5432', () => {
+    const schemaErr = [
+      'Error: Prisma schema validation - (validate wasm)',
+      'auditLogs    AuditLog[]',
+      'Validation Error Count: 3',
+      '[Context: validate]',
+      '[health-check] dev server did not come up on port 5432 after automatic recovery. Root cause: Prisma schema validation',
+    ].join('\n');
+    expect(detectSilentDbFailure({ command: 'npx prisma migrate dev --name init', exitCode: 0, stdout: schemaErr })).toBe(false);
+  });
+
+  it('STILL flags a genuine P1001 even if a schema marker also appears (connectivity wins)', () => {
+    const both = 'Validation Error Count: 1\nError: P1001: Can\'t reach database server at `localhost:5432`';
+    expect(detectSilentDbFailure({ command: 'npx prisma migrate dev', exitCode: 0, stdout: both })).toBe(true);
+  });
+});
+
+describe('looksLikeDbUnreachable — triggers a mid-build Postgres re-provision (FleetOps autopsy)', () => {
+  it('detects P1001 / can\'t reach server / connection refused :5432, regardless of exit code', () => {
+    expect(looksLikeDbUnreachable('Error: P1001: Can\'t reach database server at `localhost:5432`')).toBe(true);
+    expect(looksLikeDbUnreachable("can't reach database server")).toBe(true);
+    expect(looksLikeDbUnreachable('connection refused ... :5432')).toBe(true);
+  });
+  it('does NOT fire on a schema-validation error or unrelated output', () => {
+    expect(looksLikeDbUnreachable('Validation Error Count: 3\n[Context: validate]')).toBe(false);
+    expect(looksLikeDbUnreachable('Your database is now in sync')).toBe(false);
+    expect(looksLikeDbUnreachable('')).toBe(false);
+    expect(looksLikeDbUnreachable(null)).toBe(false);
   });
 });

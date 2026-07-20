@@ -1844,12 +1844,26 @@ export function planRunnerChainNames(noClaude: boolean): string[] {
  * can echo a token-embedded URL (a real secret leak). These pure helpers give the user a clean, honest
  * message; the RAW error still goes to the build report / logs (admin-only) for debugging.
  */
+// The White-Label Law (CLAUDE.md §2): a user must NEVER see which third-party AI/infra vendor did the work
+// — to them it is always NavBharatAI. This is the single anonymizer for any provider text that could reach a
+// user-facing surface (chat narration, error toasts, degraded notices), so the branding is applied by
+// construction. Model IDs are stripped first (so `glm-5.2` doesn't leave a stray `-5.2`), then vendor names,
+// then the infra vendor, secrets and URLs. Admin-only surfaces (build diagnostics, logs, telemetry) keep the
+// real names — this function is ONLY for text that a normal end user can see.
+const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|gpt|deepseek|mistral|llama|qwen|nova|titan)[-/][\w.:-]+/gi;
+const AI_VENDOR_RE = /\b(?:anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|bedrock|cohere|mistral|perplexity)\b/gi;
+const MODEL_TIER_RE = /\b(?:sonnet|opus|haiku)\b/gi; // Claude tier words that identify the vendor
+
 export function redactProviderError(raw: string): string {
   return String(raw ?? '')
     .replace(/https?:\/\/[^\s)]+/gi, '[link]')                       // URLs, incl. token-embedded clone URLs
     .replace(/x-access-token:[^@\s]+/gi, '[token]')                  // git credential in a remote URL
     .replace(/\b(bearer|token|key|secret|password)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]')
-    .replace(/\bE2B\b/gi, 'the build engine')                        // don't name the infra vendor
+    .replace(MODEL_ID_RE, 'the model')                              // glm-5.2 / claude-opus-4-8 / gemini-… → no model id leaks
+    .replace(AI_VENDOR_RE, 'NavBharatAI')                           // GLM/Kimi/Claude/Gemini/Grok/… → always our brand
+    .replace(MODEL_TIER_RE, 'the model')                            // "Sonnet"/"Opus"/"Haiku" identify Anthropic
+    .replace(/\bE2B\b/gi, 'the build engine')                       // don't name the infra vendor
+    .replace(/\bNavBharatAI(?:\s+NavBharatAI)+\b/g, 'NavBharatAI')  // collapse repeats from adjacent vendor tokens
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 200);
@@ -4874,14 +4888,20 @@ export function registerAgentV3Routes(app: Express): void {
           : null;
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
       } else {
-        // RC-4 (admin 2026-07-06): HONEST pause wording. The old line claimed "It was likely almost
-        // done" — an unverified guess that is false for a big build that timed out early. Report only the
-        // real progress fact we have: how many files were written so far (writtenFiles.size).
+        // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
+        // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
+        // "time limit reached" chat bubble. We deliberately do NOT emit a pause narration here. The
+        // client's decideAutoContinue speaks only when it genuinely STOPS (budget/backstop/no-progress),
+        // showing an honest message THEN; while it keeps auto-continuing it stays silent, so a multi-
+        // window build reads as one continuous build. The `summary` is kept on the result for the record
+        // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
+        // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = deadlinePauseMessage(writtenFiles.size);
-        emit({ type: 'narration', agent: 'architect', text: pauseMsg.narration, ts: Date.now() });
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
-        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
+        // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
+        // pause while this strictly increases across windows, so a big full-stack app finishes unattended.
+        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
       }
       // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has

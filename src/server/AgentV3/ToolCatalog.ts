@@ -495,7 +495,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'Find WHERE the app fails to compile — and type-check every language. It parses every frontend ' +
         'JS/TS/JSX/TSX file and reports the EXACT `file:line:column` of any SYNTAX error (an unbalanced ' +
         'or mismatched tag, a missing `)`/`}`, a duplicate declaration), then compiles the other ' +
-        'languages present (Python, Java). ALWAYS call this to locate a compile/syntax error — it gives ' +
+        'languages present (Python, Java, Go). ALWAYS call this to locate a compile/syntax error — it gives ' +
         'you the precise location in one step. NEVER hand-count `<div>` tags or braces with grep/awk/' +
         'python; that wastes steps and misses the real spot. Takes no arguments. Run it before declaring ' +
         'a build verified and fix each reported location.',
@@ -1348,6 +1348,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_http_client',
+      description:
+        'Add a resilient HTTP client to the app (server/lib/http.ts): dependency-free ' +
+        'fetchJson(url, { timeoutMs, headers, method, body }) that fixes the three classic bare-fetch bugs — ' +
+        'it adds a REAL timeout (default 10s, AbortController) so a dead upstream fails fast instead of hanging ' +
+        'the request forever, throws HttpError on any non-2xx status (native fetch resolves on 4xx/5xx, a ' +
+        'silent bug), and returns parsed JSON. Use it for every server-side call to a third-party API; wrap ' +
+        'with generate_retry for automatic backoff. Native fetch + AbortController, no dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_idempotency',
       description:
         'Add real idempotency to the app (server/lib/idempotency.ts): a dependency-free Express middleware + ' +
@@ -1487,6 +1498,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_csrf',
+      description:
+        'Add CSRF protection (double-submit cookie) to the app (server/lib/csrf.ts): dependency-free ' +
+        'issueCsrfToken(res) + a csrfProtection Express middleware. Use when the app authenticates with a ' +
+        'COOKIE session — it guards state-changing routes (POST/PUT/PATCH/DELETE) by requiring the ' +
+        "'x-csrf-token' header to match the csrf_token cookie (constant-time compare); a cross-origin " +
+        'attacker cannot read the cookie, so cannot forge the header → 403. Safe methods pass through. Not ' +
+        'needed for pure Bearer/JWT-header APIs (no cookie). node:crypto, no dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_slug',
       description:
         'Add a real URL slug generator to the app (server/lib/slug.ts): a dependency-free slugify(title) that ' +
@@ -1603,6 +1625,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_webhook_sender',
+      description:
+        'Add a real OUTGOING webhook sender to the app (server/lib/webhookSender.ts): a dependency-free ' +
+        'sendWebhook(url, payload, secret, { event }) for when YOUR app lets customers subscribe to events. It ' +
+        'HMAC-SHA256 signs the JSON body as "X-Webhook-Signature: sha256=<hex>" (the exact format ' +
+        'generate_webhook verifies, so subscribers can confirm it is really you), enforces a timeout so a slow ' +
+        'subscriber cannot hang your server, and returns { ok, status } without throwing (retry on !ok). The ' +
+        'send/verify pair to generate_webhook. No dependency (node:crypto + fetch); no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pdf',
       description:
         'Add real PDF generation to the app (server/lib/pdf.ts, pdfkit): a server createInvoicePdf(...) ready ' +
@@ -1621,12 +1654,36 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_audit',
+      description:
+        'Add a real tamper-evident audit log to the app (server/lib/audit.ts) — dependency-free (node:crypto), ' +
+        'NO API key, storage-agnostic. appendAudit(store, { actor, action, target?, meta? }) records who did ' +
+        'what when; each entry stores the SHA-256 hash of the previous entry (a hash chain), so editing or ' +
+        'deleting any past row breaks the chain. verifyAuditChain(entries) returns the seq of the first ' +
+        'tampered entry (or -1 if intact). You supply a tiny { last(), save() } store backed by your DB. Use ' +
+        'for admin actions, money movements, role changes and sensitive data edits — anything that needs a ' +
+        'trustworthy trail.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_qr',
       description:
         'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
         'data-URL + generateQrSvg(text) → SVG helper. Use for event/movie tickets, UPI & payment links, ' +
         '"scan to open", table ordering and share links (e.g. generateQr("upi://pay?pa=merchant@bank&am=100")). ' +
         'Server-side, generate on demand per order/ticket; adds the qrcode dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_upi',
+      description:
+        'Add a real UPI payment deep-link to the app (src/lib/upi.ts) — India-first, dependency-free, NO API ' +
+        'key and NO payment gateway. buildUpiLink({ payeeVpa, payeeName, amount?, note? }) returns a ' +
+        '`upi://pay?...` intent link that opens GPay/PhonePe/Paytm/BHIM directly for a real payment to the ' +
+        "merchant's OWN VPA; isValidVpa(vpa) validates the address; omit amount for an open collect link. " +
+        'Params are URL-encoded and the amount is fixed to 2 decimals (UPI spec), so the link works on the ' +
+        'first tap. Pair with generate_qr (generateQr(link)) for scan-to-pay. Use this for direct merchant ' +
+        'collection; for a gateway with webhooks/refunds use generate_payment instead.',
       input_schema: { type: 'object', properties: {} },
     },
     {
@@ -1965,6 +2022,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_captcha',
   'generate_cache',
   'generate_retry',
+  'generate_http_client',
   'generate_idempotency',
   'generate_newsletter',
   'generate_email_template',
@@ -1975,6 +2033,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_notify',
   'generate_env_validation',
   'generate_cors',
+  'generate_csrf',
   'generate_slug',
   'generate_validation',
   'generate_sanitize_html',
@@ -1985,9 +2044,12 @@ export const CATALOG_TOOL_NAMES = [
   'generate_security_headers',
   'generate_seo',
   'generate_webhook',
+  'generate_webhook_sender',
   'generate_qr',
+  'generate_upi',
   'generate_pdf',
   'generate_csv',
+  'generate_audit',
   'generate_image',
   'generate_mobile_export',
   'generate_desktop_export',

@@ -77,7 +77,8 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
-import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines } from './postgresProvision';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
+import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
@@ -111,6 +112,7 @@ import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, typ
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { dependencyHealthVerdict } from './DependencyHealthGate';
+import { prettierGateResult, prettierAdvisory } from './PrettierGate';
 import { injectObservabilityFixes } from './ObservabilityInjector';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
@@ -149,6 +151,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCaptchaIntegration } from '../lib/CaptchaGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
+import { generateHttpClientIntegration } from '../lib/HttpClientGenerator';
 import { generateIdempotencyIntegration } from '../lib/IdempotencyGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateEmailTemplateIntegration } from '../lib/EmailTemplateGenerator';
@@ -159,13 +162,16 @@ import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateCsrfIntegration } from '../lib/CsrfGenerator';
 import { generateSlugIntegration } from '../lib/SlugGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
 import { generateMarkdownIntegration } from '../lib/MarkdownGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
+import { generateUpiIntegration } from '../lib/UpiGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateCsvIntegration } from '../lib/CsvGenerator';
+import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -173,6 +179,7 @@ import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGene
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateSeoIntegration } from '../lib/SeoGenerator';
 import { generateWebhookIntegration } from '../lib/WebhookGenerator';
+import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -383,6 +390,12 @@ export class ToolDispatcher {
   private secretsEnvWritten = false;
   /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
   private postgresProvisioned = false;
+  /** Set once this app is known to target PostgreSQL — locks the datasource against a silent SQLite downgrade. */
+  private postgresIntended = false;
+  /** We attempted ONE mid-build Postgres re-provision after it died (bounded — never loop). */
+  private postgresReprovisionAttempted = false;
+  /** Postgres died mid-build and could NOT be brought back — the lock RELEASES so the app can fall to SQLite. */
+  private postgresConfirmedDead = false;
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
@@ -447,6 +460,7 @@ export class ToolDispatcher {
     let schema = '';
     try { schema = await withTimeout(this.actuator.readFile(this.workspaceId, 'prisma/schema.prisma'), 5_000, 'schema-read'); } catch { schema = ''; }
     if (!schemaTargetsPostgres(schema)) return;
+    this.postgresIntended = true;    // lock the datasource against a later silent SQLite downgrade
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
     try {
       this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
@@ -471,6 +485,35 @@ export class ToolDispatcher {
       // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real
       // DB-unreachable output is surfaced honestly (Slice 1 DB_UNREACHABLE). Never block the build.
     }
+  }
+
+  /**
+   * POSTGRES-PROVIDER LOCK (LedgerLoop autopsy 2026-07-20). Applied to a `prisma/schema.prisma` write
+   * BEFORE the config guards run. Two jobs:
+   *   • learn intent: the FIRST time a schema targets postgresql, remember it (postgresIntended),
+   *   • enforce it: once the app is known to target Postgres, a write that flips the datasource to sqlite
+   *     is reverted to postgresql — killing the silent SQLite downgrade the builder does when it misreads
+   *     a schema/connection error as "no database". The builder is nudged to fix the schema instead.
+   * Runs BEFORE guardConfigContent so the reverted (postgres) content never triggers the sqlite enum-strip.
+   * Only touches schema.prisma; a genuine sqlite app (never postgres) is untouched. Kill switch reuses
+   * AGENTV3_SANDBOX_POSTGRES=off (the same DB-provisioning regime).
+   */
+  private applyPostgresProviderLock(path: string, content: string): string {
+    if (!/(^|\/)schema\.prisma$/.test(path) || typeof content !== 'string') return content;
+    if (!sandboxPostgresEnabled()) return content;
+    // If Postgres died in the sandbox and could not be restarted, the lock RELEASES — forcing a dead DB
+    // is an unwinnable loop (FleetOps autopsy). Let the SQLite fallback through so the app can still run.
+    if (this.postgresConfirmedDead) return content;
+    if (schemaTargetsPostgres(content)) { this.postgresIntended = true; return content; }
+    if (this.postgresIntended && schemaTargetsSqlite(content)) {
+      const { content: fixed, reverted } = revertSqliteToPostgres(content);
+      if (reverted) {
+        getWorkspaceMemory(this.workspaceId).recordAudit('postgres-lock: reverted a schema downgrade to sqlite back to postgresql');
+        this.events?.emit({ type: 'narration', agent: 'architect', text: '🔒 Kept your database on PostgreSQL — it\'s provisioned and ready. A failing migration means the schema needs fixing (a relation or field), not a switch to SQLite. Fixing the schema instead.', ts: Date.now() });
+        return fixed;
+      }
+    }
+    return content;
   }
 
   /**
@@ -584,6 +627,29 @@ export class ToolDispatcher {
 
         return dependencyHealthVerdict({ vulnFindings, vulnSummary, copyleftStrong, licenseSummary }).summary;
       })(), 45_000, 'assessDependencyHealthGate');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * P-PIPE — build-end PRETTIER advisory (default-OFF, AGENTV3_PRETTIER_GATE=on). Runs the project's own
+   * `prettier --check` (only when prettier is configured) and returns a non-blocking advisory listing the
+   * unformatted files, or '' when clean / not-configured / could-not-run. Timeout-bounded and fully guarded
+   * (parity with assessLintGate / assessDependencyHealthGate): any trouble returns '' so it can never fail a
+   * real build on its own account. AgentRunner only calls this when the gate is enabled.
+   */
+  async assessPrettierGate(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plan = detectLinters(files, pkgRaw).find((p) => p.tool === 'prettier');
+        if (!plan) return ''; // prettier not configured → nothing to advise
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+        return prettierAdvisory(prettierGateResult(exitCode, stdout, stderr));
+      })(), 45_000, 'assessPrettierGate');
     } catch {
       return '';
     }
@@ -1374,7 +1440,7 @@ export class ToolDispatcher {
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        let content = guardConfigContent(path, reqStr(input, 'content'));
+        let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
@@ -1471,7 +1537,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: guardConfigContent(p, reqStr(obj, 'content')) };
+          return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -1586,7 +1652,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = guardConfigContent(path, edited);
+        const updated = guardConfigContent(path, this.applyPostgresProviderLock(path, edited));
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -1797,6 +1863,48 @@ export class ToolDispatcher {
                 }
               }
             } catch { /* self-heal is best-effort — the original failure is still reported */ }
+          }
+        }
+        // POSTGRES DIED MID-BUILD → RE-PROVISION ONCE, then RELEASE the lock (FleetOps autopsy 2026-07-20).
+        // The sandbox Postgres we provisioned was reaped ~2.5 min into the build (P1001). The builder could
+        // not restart it (`pg_ctl`/`pg_ctlcluster` are exit 127 in its shell), and the provider-LOCK then
+        // forced ~4 min of futile postgres retries until the builder escaped via `sed`. The correct
+        // behaviour: (1) the ENGINE re-provisions Postgres via the actuator (the mechanism that actually
+        // works), retry once; (2) if it STILL can't come back, mark it confirmed-dead so the lock releases
+        // and the app degrades to SQLite gracefully instead of an unwinnable loop. Bounded to ONE re-provision.
+        if (
+          this.postgresProvisioned && !this.postgresConfirmedDead &&
+          looksLikeDbUnreachable(`${stdout}\n${stderr}`)
+        ) {
+          if (!this.postgresReprovisionAttempted && typeof this.actuator.provisionBackend === 'function') {
+            this.postgresReprovisionAttempted = true;
+            try {
+              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
+              const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
+              const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
+              if (Object.keys(lines).length > 0) {
+                let existing = '';
+                try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+                await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existing, lines)).catch(() => {});
+              }
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
+              } else {
+                this.postgresConfirmedDead = true;
+              }
+            } catch {
+              this.postgresConfirmedDead = true;
+            }
+          } else {
+            // Already re-provisioned once (or no provisioner) and it's STILL unreachable → give up on
+            // Postgres for this preview and let the app fall to SQLite (the lock now releases).
+            this.postgresConfirmedDead = true;
+          }
+          if (this.postgresConfirmedDead) {
+            getWorkspaceMemory(this.workspaceId).recordAudit('postgres confirmed dead in sandbox — releasing the provider lock so the app can use SQLite for the preview');
+            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ NavBharatAI couldn\'t keep PostgreSQL running in the preview sandbox, so the live preview will use SQLite. Your PostgreSQL setup still applies when you deploy to your own database.', ts: Date.now() });
           }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
@@ -2584,10 +2692,10 @@ export class ToolDispatcher {
       }
 
       case 'typecheck': {
-        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) so a
-        // polyglot app's non-TS code is type/compile-checked too. Detection + parsing are pure
-        // (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a missing toolchain
-        // reports "could not run", never a fake pass.
+        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) +
+        // `go build ./...` (Go) so a polyglot app's non-TS code is type/compile-checked too. Detection +
+        // parsing are pure (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a
+        // missing toolchain reports "could not run", never a fake pass.
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
         // FRONTEND SYNTAX LOCATOR (deep-test 2026-07-18). A model verifying "does it compile?" runs
         // `tsc` by hand — but `tsc | head` masks the exit code and tsc never crisply pinpoints a JSX PARSE
@@ -2624,8 +2732,8 @@ export class ToolDispatcher {
           if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
           crossLang = typecheckSummary(outcomes);
         }
-        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java sources to check.');
-        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python or Java sources detected — nothing beyond the tsc gate.';
+        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java/Go sources to check.');
+        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python, Java, or Go sources detected — nothing beyond the tsc gate.';
       }
 
       case 'code_graph': {
@@ -3971,6 +4079,23 @@ export class ToolDispatcher {
         return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
       }
 
+      case 'generate_http_client': {
+        // U-4 recipe — resilient HTTP client (server/lib/http.ts): fetchJson with a real timeout + HttpError on
+        // non-2xx. Dependency-free (native fetch + AbortController). Pure generator in HttpClientGenerator.ts.
+        const httpcfg = generateHttpClientIntegration();
+        const httpWritten: string[] = [];
+        for (const [path, content] of Object.entries(httpcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          httpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('http client');
+        return `Wired resilient HTTP client:\n${httpWritten.join('\n')}\n(No npm dependency — native fetch + AbortController; pairs with generate_retry.)\n\n${httpcfg.instructions}`;
+      }
+
       case 'generate_idempotency': {
         // U-4 recipe — idempotency-key middleware (server/lib/idempotency.ts): createMemoryStore + idempotency
         // Express middleware that replays the cached response per Idempotency-Key (no double-charge on retry).
@@ -4171,6 +4296,23 @@ export class ToolDispatcher {
         return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
       }
 
+      case 'generate_csrf': {
+        // U-4 recipe — CSRF protection (double-submit cookie) at server/lib/csrf.ts. Dependency-free
+        // (node:crypto), constant-time compare. Pure generator in CsrfGenerator.ts. No env keys.
+        const csrfcfg = generateCsrfIntegration();
+        const csrfWritten: string[] = [];
+        for (const [path, content] of Object.entries(csrfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csrfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('csrf protection');
+        return `Wired CSRF protection (double-submit cookie):\n${csrfWritten.join('\n')}\n(No npm dependency — node:crypto, constant-time compare; guard cookie-session mutating routes.)\n\n${csrfcfg.instructions}`;
+      }
+
       case 'generate_slug': {
         // U-4 recipe — Unicode-aware URL slug generator (server/lib/slug.ts). Dependency-free; keeps Indic
         // combining marks so Hindi slugs are correct. Pure generator in SlugGenerator.ts. No env keys.
@@ -4257,6 +4399,24 @@ export class ToolDispatcher {
         return `Wired QR code generation:\n${qrWritten.join('\n')}\nAdd the dependency: ${qrcfg.dependency.name}@${qrcfg.dependency.version}\n\n${qrcfg.instructions}`;
       }
 
+      case 'generate_upi': {
+        // U-4 recipe — UPI payment deep-link + VPA validation (src/lib/upi.ts). Dependency-free, keyless,
+        // India-first: a `upi://pay?...` intent link that opens GPay/PhonePe/Paytm/BHIM with no gateway.
+        // Pure generator in UpiGenerator.ts. No env keys.
+        const upicfg = generateUpiIntegration();
+        const upiWritten: string[] = [];
+        for (const [path, content] of Object.entries(upicfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          upiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('upi link');
+        return `Wired UPI payment deep-link:\n${upiWritten.join('\n')}\n(No npm dependency, no API key — pairs with generate_qr for scan-to-pay.)\n\n${upicfg.instructions}`;
+      }
+
       case 'generate_pdf': {
         // U-4 recipe — real PDF generation (pdfkit): a server createPdf + createInvoicePdf helper
         // (server/lib/pdf.ts). Pure generator in PdfGenerator.ts. No env keys.
@@ -4289,6 +4449,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('csv import/export');
         return `Wired CSV import/export:\n${csvWritten.join('\n')}\nAdd the dependency: ${csvcfg.dependency.name}@${csvcfg.dependency.version}\n\n${csvcfg.instructions}`;
+      }
+
+      case 'generate_audit': {
+        // U-4 recipe — tamper-evident hash-chained audit log (server/lib/audit.ts). Dependency-free
+        // (node:crypto), storage-agnostic. Pure generator in AuditLogGenerator.ts. No env keys.
+        const auditcfg = generateAuditLogIntegration();
+        const auditWritten: string[] = [];
+        for (const [path, content] of Object.entries(auditcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          auditWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('audit log');
+        return `Wired tamper-evident audit log:\n${auditWritten.join('\n')}\n(No npm dependency — node:crypto hash chain; you back it with your own DB store.)\n\n${auditcfg.instructions}`;
       }
 
       case 'generate_image': {
@@ -4411,6 +4588,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('webhook verification');
         return `Wired webhook signature verification:\n${whWritten.join('\n')}\n(No npm dependency needed — node:crypto.)\n\n${whcfg.instructions}`;
+      }
+
+      case 'generate_webhook_sender': {
+        // U-4 recipe — outgoing signed webhook sender (server/lib/webhookSender.ts): sendWebhook HMAC-signs the
+        // body in the same sha256=<hex> format generate_webhook verifies, with a timeout. Dependency-free.
+        const wscfg = generateWebhookSenderIntegration();
+        const wsWritten: string[] = [];
+        for (const [path, content] of Object.entries(wscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('webhook sender');
+        return `Wired outgoing webhook sender:\n${wsWritten.join('\n')}\n(No npm dependency needed — node:crypto + fetch.)\n\n${wscfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

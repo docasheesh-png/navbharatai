@@ -119,8 +119,52 @@ export function ensureViteTypeModule(path: string, content: string): string {
   }
 }
 
+/**
+ * Run a Prisma SEED script with `tsx`, not `ts-node` (LedgerLoop autopsy 2026-07-20). LedgerLoop's seed
+ * crashed twice: first `ts-node` failed on the ESM project (`require.extensions.<computed> [as .ts]`),
+ * then it could not resolve the `@/lib/auth` path alias. `tsx` fixes BOTH — it loads TS under ESM and
+ * honours tsconfig `paths`. This guard rewrites a `package.json` "seed" script (and a Prisma `prisma.seed`
+ * command) that invokes `ts-node` to use `tsx`, and guarantees `tsx` is in devDependencies so
+ * `npm run seed` resolves the binary. Only touches a package.json whose seed actually uses ts-node; a
+ * seed already on tsx, or none, is untouched. Pure.
+ */
+export function fixPrismaSeedRunner(path: string, content: string): string {
+  if (!/(^|\/)package\.json$/.test(path) || typeof content !== 'string') return content;
+  try {
+    const pkg = JSON.parse(content) as Record<string, unknown>;
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return content;
+    const swapTsNode = (cmd: unknown): { cmd: string; changed: boolean } => {
+      if (typeof cmd !== 'string' || !/\bts-node\b/.test(cmd)) return { cmd: String(cmd ?? ''), changed: false };
+      // `ts-node`, `ts-node-esm`, `ts-node --esm`, `node --loader ts-node/esm` → `tsx`.
+      const next = cmd
+        .replace(/\bnode\s+--loader\s+ts-node\/esm\b/g, 'tsx')
+        .replace(/\bts-node(?:-esm)?\b(?:\s+--esm\b)?/g, 'tsx');
+      return { cmd: next, changed: next !== cmd };
+    };
+    let changed = false;
+    const scripts = { ...(pkg.scripts as Record<string, unknown> | undefined) };
+    if (scripts && typeof scripts.seed === 'string') {
+      const r = swapTsNode(scripts.seed);
+      if (r.changed) { scripts.seed = r.cmd; changed = true; }
+    }
+    const prisma = { ...(pkg.prisma as Record<string, unknown> | undefined) };
+    if (prisma && typeof prisma.seed === 'string') {
+      const r = swapTsNode(prisma.seed);
+      if (r.changed) { prisma.seed = r.cmd; changed = true; }
+    }
+    if (!changed) return content;
+    const devDeps = { ...(pkg.devDependencies as Record<string, unknown> | undefined) };
+    if (devDeps.tsx === undefined) devDeps.tsx = '^4';
+    const out = { ...pkg, scripts, devDependencies: devDeps };
+    if (pkg.prisma !== undefined) (out as Record<string, unknown>).prisma = prisma;
+    return JSON.stringify(out, null, 2);
+  } catch {
+    return content; // not valid JSON — never mangle a file we can't parse
+  }
+}
+
 /** Apply every full-stack write-time guard in order. Flag-gated; a disabled flag is a pure pass-through. */
 export function applyFullStackGuards(path: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!fullStackGuardsEnabled(env)) return content;
-  return ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content))));
+  return fixPrismaSeedRunner(path, ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content)))));
 }

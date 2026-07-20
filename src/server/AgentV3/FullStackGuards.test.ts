@@ -3,6 +3,7 @@ import {
   stripPrismaSqliteEnums,
   fixCjsDefaultImport,
   fixPrismaDateStringDefault,
+  fixPrismaSeedRunner,
   ensureViteTypeModule,
   applyFullStackGuards,
   fullStackGuardsEnabled,
@@ -136,6 +137,35 @@ describe('applyFullStackGuards — orchestration + kill switch', () => {
 // "vite-tsconfig-paths resolved to an ESM file. ESM file cannot be loaded by `require`" because the
 // workspace package.json had no "type": "module". The guard re-inserts the invariant on every vite
 // package.json write, so a builder rewrite can never kill config loading again.
+describe('fixPrismaSeedRunner — seed runs on tsx, not ts-node (LedgerLoop autopsy)', () => {
+  it('rewrites a ts-node seed script to tsx and adds tsx to devDependencies', () => {
+    const pkg = JSON.stringify({ name: 'app', scripts: { seed: 'ts-node prisma/seed.ts' }, devDependencies: { 'ts-node': '^10' } });
+    const out = JSON.parse(fixPrismaSeedRunner('package.json', pkg));
+    expect(out.scripts.seed).toBe('tsx prisma/seed.ts');
+    expect(out.devDependencies.tsx).toBe('^4');
+  });
+
+  it('rewrites the prisma.seed command form too (node --loader ts-node/esm)', () => {
+    const pkg = JSON.stringify({ name: 'app', prisma: { seed: 'node --loader ts-node/esm prisma/seed.ts' } });
+    const out = JSON.parse(fixPrismaSeedRunner('package.json', pkg));
+    expect(out.prisma.seed).toBe('tsx prisma/seed.ts');
+    expect(out.devDependencies.tsx).toBe('^4');
+  });
+
+  it('leaves a seed already on tsx (or absent) untouched', () => {
+    const onTsx = JSON.stringify({ name: 'app', scripts: { seed: 'tsx prisma/seed.ts' } });
+    expect(fixPrismaSeedRunner('package.json', onTsx)).toBe(onTsx);
+    const none = JSON.stringify({ name: 'app', scripts: { dev: 'next dev' } });
+    expect(fixPrismaSeedRunner('package.json', none)).toBe(none);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    const pkg = JSON.stringify({ name: 'app', scripts: { seed: 'ts-node prisma/seed.ts' } });
+    expect(JSON.parse(applyFullStackGuards('package.json', pkg)).scripts.seed).toBe('tsx prisma/seed.ts');
+    expect(applyFullStackGuards('package.json', pkg, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(pkg);
+  });
+});
+
 describe('ensureViteTypeModule — a vite package.json always carries type:module', () => {
   it('adds type:module to a vite app package.json that lacks it (the ShopKhata wall)', () => {
     const pkg = JSON.stringify({ name: 'project', version: '0.1.0', scripts: { dev: 'vite' }, devDependencies: { vite: '^5.4.1', 'vite-tsconfig-paths': '5.1.4' } });

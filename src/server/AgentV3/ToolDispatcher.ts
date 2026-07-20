@@ -77,7 +77,7 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
-import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines } from './postgresProvision';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
@@ -387,6 +387,8 @@ export class ToolDispatcher {
   private secretsEnvWritten = false;
   /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
   private postgresProvisioned = false;
+  /** Set once this app is known to target PostgreSQL — locks the datasource against a silent SQLite downgrade. */
+  private postgresIntended = false;
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
@@ -451,6 +453,7 @@ export class ToolDispatcher {
     let schema = '';
     try { schema = await withTimeout(this.actuator.readFile(this.workspaceId, 'prisma/schema.prisma'), 5_000, 'schema-read'); } catch { schema = ''; }
     if (!schemaTargetsPostgres(schema)) return;
+    this.postgresIntended = true;    // lock the datasource against a later silent SQLite downgrade
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
     try {
       this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
@@ -475,6 +478,32 @@ export class ToolDispatcher {
       // Provisioning genuinely failed — do NOT fake it. The migrate command runs next and its real
       // DB-unreachable output is surfaced honestly (Slice 1 DB_UNREACHABLE). Never block the build.
     }
+  }
+
+  /**
+   * POSTGRES-PROVIDER LOCK (LedgerLoop autopsy 2026-07-20). Applied to a `prisma/schema.prisma` write
+   * BEFORE the config guards run. Two jobs:
+   *   • learn intent: the FIRST time a schema targets postgresql, remember it (postgresIntended),
+   *   • enforce it: once the app is known to target Postgres, a write that flips the datasource to sqlite
+   *     is reverted to postgresql — killing the silent SQLite downgrade the builder does when it misreads
+   *     a schema/connection error as "no database". The builder is nudged to fix the schema instead.
+   * Runs BEFORE guardConfigContent so the reverted (postgres) content never triggers the sqlite enum-strip.
+   * Only touches schema.prisma; a genuine sqlite app (never postgres) is untouched. Kill switch reuses
+   * AGENTV3_SANDBOX_POSTGRES=off (the same DB-provisioning regime).
+   */
+  private applyPostgresProviderLock(path: string, content: string): string {
+    if (!/(^|\/)schema\.prisma$/.test(path) || typeof content !== 'string') return content;
+    if (!sandboxPostgresEnabled()) return content;
+    if (schemaTargetsPostgres(content)) { this.postgresIntended = true; return content; }
+    if (this.postgresIntended && schemaTargetsSqlite(content)) {
+      const { content: fixed, reverted } = revertSqliteToPostgres(content);
+      if (reverted) {
+        getWorkspaceMemory(this.workspaceId).recordAudit('postgres-lock: reverted a schema downgrade to sqlite back to postgresql');
+        this.events?.emit({ type: 'narration', agent: 'architect', text: '🔒 Kept your database on PostgreSQL — it\'s provisioned and ready. A failing migration means the schema needs fixing (a relation or field), not a switch to SQLite. Fixing the schema instead.', ts: Date.now() });
+        return fixed;
+      }
+    }
+    return content;
   }
 
   /**
@@ -1378,7 +1407,7 @@ export class ToolDispatcher {
         // Deterministic backstop: a Vite config must always allow the E2B preview host, or the
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
-        let content = guardConfigContent(path, reqStr(input, 'content'));
+        let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // PACKAGE.JSON DEP PIN (LearnLoop autopsy 2026-07-18): force known-breaking deps (Prisma → ^6)
         // to their known-good major IN the written package.json, so a later plain `npm install` (which
         // carries no package tokens, so pinKnownDepsInInstallCommand can't fire) never pulls a breaking
@@ -1475,7 +1504,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           // Same Vite-preview-host backstop as write_file, applied per batched file.
-          return { path: p, content: guardConfigContent(p, reqStr(obj, 'content')) };
+          return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
         // Collapse duplicate paths within one batch to their LAST entry (last write wins — the same
         // final state the old serial loop produced), so the parallel writers below never race two
@@ -1590,7 +1619,7 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = guardConfigContent(path, edited);
+        const updated = guardConfigContent(path, this.applyPostgresProviderLock(path, edited));
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {

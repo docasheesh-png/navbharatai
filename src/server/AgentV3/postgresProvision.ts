@@ -55,3 +55,36 @@ export function postgresEnvLines(databaseUrl: string | null | undefined): Record
   if (typeof databaseUrl !== 'string' || !databaseUrl.trim()) return {};
   return { DATABASE_URL: databaseUrl.trim() };
 }
+
+// ── Postgres-provider LOCK (LedgerLoop autopsy 2026-07-20) ─────────────────────────────────────────
+//
+// ROOT CAUSE the lock closes: on BOTH MediConnect (#14) and LedgerLoop (#15) the builder, when its
+// Postgres migrate failed (a genuinely-unreachable DB the first time, a BROKEN SCHEMA the second), wrote
+// the schema's datasource back to `provider = "sqlite"` — silently downgrading a PostgreSQL app the user
+// explicitly asked for, and triggering the enum/DateTime SQLite cascade. Provisioning Postgres (Slice 2)
+// removes the DB excuse, but nothing STOPS the LLM from flipping the provider when it misreads a schema
+// error as "no database". The lock is the guarantee: once an app is known to target Postgres, a schema
+// write that flips the datasource to sqlite is reverted to postgresql (url restored to env("DATABASE_URL")).
+// The builder is nudged to FIX THE SCHEMA instead of downgrading. Pure — the dispatcher owns the state.
+
+/** True if a Prisma schema's datasource targets SQLite (the downgrade we must revert when locked). Pure. */
+export function schemaTargetsSqlite(content: string | null | undefined): boolean {
+  if (typeof content !== 'string' || !content) return false;
+  return /datasource\s+\w+\s*\{[^}]*provider\s*=\s*["']sqlite["'][^}]*\}/is.test(content);
+}
+
+/**
+ * Revert a SQLite datasource back to PostgreSQL: `provider = "sqlite"` → `provider = "postgresql"` and a
+ * `url = "file:…"` → `url = env("DATABASE_URL")`, ONLY inside the `datasource` block. No-op if the schema
+ * doesn't target sqlite. Returns { content, reverted } so the caller can nudge only when it actually
+ * changed something. Pure + unit-testable.
+ */
+export function revertSqliteToPostgres(content: string): { content: string; reverted: boolean } {
+  if (typeof content !== 'string' || !schemaTargetsSqlite(content)) return { content, reverted: false };
+  const out = content.replace(/datasource\s+\w+\s*\{[^}]*\}/is, (block) =>
+    block
+      .replace(/provider\s*=\s*["']sqlite["']/i, 'provider = "postgresql"')
+      .replace(/url\s*=\s*["']file:[^"']*["']/i, 'url = env("DATABASE_URL")'),
+  );
+  return { content: out, reverted: out !== content };
+}

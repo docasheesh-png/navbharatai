@@ -4,6 +4,8 @@ import {
   commandNeedsLiveDatabase,
   schemaTargetsPostgres,
   postgresEnvLines,
+  schemaTargetsSqlite,
+  revertSqliteToPostgres,
 } from './postgresProvision';
 
 describe('sandboxPostgresEnabled — default ON, off only via explicit flag', () => {
@@ -60,6 +62,32 @@ describe('schemaTargetsPostgres — only a postgres datasource', () => {
     expect(schemaTargetsPostgres('')).toBe(false);
     expect(schemaTargetsPostgres(null)).toBe(false);
     expect(schemaTargetsPostgres(undefined)).toBe(false);
+  });
+});
+
+describe('schemaTargetsSqlite / revertSqliteToPostgres — the provider LOCK (LedgerLoop autopsy)', () => {
+  const sqlite = `datasource db {\n  provider = "sqlite"\n  url      = "file:./dev.db"\n}\n\nmodel Org { id String @id }\n`;
+  const pg = `datasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n}\n`;
+
+  it('detects a sqlite datasource', () => {
+    expect(schemaTargetsSqlite(sqlite)).toBe(true);
+    expect(schemaTargetsSqlite(pg)).toBe(false);
+    expect(schemaTargetsSqlite('')).toBe(false);
+  });
+
+  it('reverts a sqlite downgrade back to postgresql + env DATABASE_URL', () => {
+    const { content, reverted } = revertSqliteToPostgres(sqlite);
+    expect(reverted).toBe(true);
+    expect(content).toContain('provider = "postgresql"');
+    expect(content).toContain('url = env("DATABASE_URL")');
+    expect(content).not.toMatch(/sqlite|file:/);
+    expect(content).toContain('model Org { id String @id }'); // the rest of the schema is untouched
+  });
+
+  it('is a no-op for a schema that is already postgres (nothing to revert)', () => {
+    const { content, reverted } = revertSqliteToPostgres(pg);
+    expect(reverted).toBe(false);
+    expect(content).toBe(pg);
   });
 });
 

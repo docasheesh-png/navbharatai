@@ -161,6 +161,7 @@ import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
+import { generateNotificationCenterIntegration } from '../lib/NotificationCenterGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateCsrfIntegration } from '../lib/CsrfGenerator';
@@ -4273,6 +4274,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('notify integration');
         return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
+      }
+
+      case 'generate_notification_center': {
+        // Roadmap BUILD-NOW #10 — in-app notification CENTER (dependency-free React: provider + bell + badge).
+        // Distinct from generate_notify (OUTBOUND channel). Pure generator in NotificationCenterGenerator.ts.
+        const ncfg = generateNotificationCenterIntegration();
+        const ncWritten: string[] = [];
+        for (const [path, content] of Object.entries(ncfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ncWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notification center');
+        return `Wired an in-app notification center:\n${ncWritten.join('\n')}\n(No npm dependency — React Context + localStorage.)\n\n${ncfg.instructions}`;
       }
 
       case 'generate_env_validation': {

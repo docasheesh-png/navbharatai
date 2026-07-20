@@ -1476,6 +1476,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_notification_center',
+      description:
+        'Add a real IN-APP notification center to the frontend (src/notifications/, dependency-free React): a ' +
+        'NotificationsProvider (add / mark-read / mark-all-read / unread count, persisted to localStorage) + a ' +
+        'useNotifications hook + a NotificationBell component (unread badge + accessible dropdown + honest ' +
+        'empty state). Wrap the app in <NotificationsProvider>, drop <NotificationBell/> in the header, and ' +
+        "call add({ title, body }) anywhere. This is the IN-APP center; for OUTBOUND email/SMS/push use " +
+        'generate_notify. No dependency, no env key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_env_validation',
       description:
         'Add a real fail-fast environment-variable validator to the app (server/lib/env.ts): validateEnv + ' +
@@ -2042,6 +2053,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_weather',
   'generate_datetime',
   'generate_notify',
+  'generate_notification_center',
   'generate_env_validation',
   'generate_cors',
   'generate_csrf',

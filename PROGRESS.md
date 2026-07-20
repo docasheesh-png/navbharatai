@@ -19655,3 +19655,37 @@ The domain verticals (booking + inventory + tickets) compose with the existing p
 recipes into real order/service flows — a step up in value from single-file middlewares. The 'real guarantee'
 in each (no double-booking / no overselling / valid state-machine) is exactly the bug a stub would hide, so
 each is verified by running the emitted service against those cases. Engine still untouched (autopsy agent).
+
+---
+
+## 2026-07-20 — Deep-test autopsy conveyor (apps #15→#18) + the Postgres-lifecycle CLASS closed (engine work)
+
+The 5th-rule autopsy loop continued on live admin builds; each report got the full 5-bucket ledger +
+DNA fixes, shipped via the normal cycle (branch → gate → PR → CI-green → squash-merge):
+
+- **PR #1654 (LedgerLoop #15)** — Postgres-provider LOCK (block the silent SQLite downgrade) +
+  detectSilentDbFailure schema-error false-positive fix.
+- **PR #1659 (FleetOps #16)** — dead-Postgres mid-build revival + lock release when confirmed dead;
+  progress-driven wall-clock auto-continue (builds finish across ~2 windows automatically, transitions
+  invisible); 60-min deep windows (DEEP_TIME_FACTOR 2.0).
+- **PR #1670 (BazaarX #17)** — prisma-CLI-missing self-heal (the 13-failed-generates / 59→43-file gap);
+  duplicate-import collapse (the pasted "Duplicate declaration ErrorBoundary" preview crash).
+- **PR #1687 (EstateNest #18)** — preview-boot Postgres revival: new `db_unreachable`/`reprovision_db`
+  dev-server recovery cause (P1001 was mis-classified as a generic crash → futile blind restarts);
+  provisionBackend now polls pg_isready (no masked-ready); deriveRootCause severity ordering (an
+  unresolved ERROR outranks an earlier benign WARNING — the report names the real killer). Also
+  carried forward the vertex-peer chain (AGENTV3_VERTEX_PEER, GLM→Kimi→Vertex/Gemini→Claude→Haiku,
+  admin "GLM fail → Kimi AUR Vertex dono") + the weak-module Sonnet-lock regression test, both of
+  which #1670's squash had dropped.
+- **PR #1691 (admin-requested cross-report gap analysis)** — read builds #14→#18 together: ONE class
+  (sandbox Postgres dies between touchpoints; every fix was reactive + once-only). Structural close:
+  in-sandbox **keepalive watchdog** armed at the provisionBackend choke point (pgrep-guarded,
+  nohup/setsid, restarts the cluster ≤20s after a reap — self-heals BEFORE P1001); **preflight
+  pg_isready probe** before live-DB commands (revive first, run once — no failed-command cycle);
+  revival budget **POSTGRES_MAX_REVIVALS=2** replaces once-only (multi-reap long builds no longer
+  forced into SQLite); sibling EngineerAI provisionBackend got the same readiness poll.
+
+Weak-module guarantee re-verified after the chain reorder (admin: "weak me only Haiku, Sonnet never"):
+enforceNoClaude strips mid-chain CLAUDE from the vertex-peer shape too — locked by a regression test.
+All merged CI-green; full suite 8198 tests / 804 files at the end of the batch. Engine-side work only —
+no collision with the parallel recipes/capabilities session.

@@ -1122,6 +1122,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_crm',
+      description:
+        'Add a real CRM / lead-pipeline backend to the app (server/crm/) — a packaged domain vertical for any ' +
+        'SMB with a sales motion. The real guarantee is a sales-stage STATE-MACHINE: a lead moves ' +
+        'new → contacted → qualified → won/lost along allowed transitions only (won/lost terminal except a ' +
+        'reopen to new), and an invalid jump is rejected. Emits a dependency-free CrmService (contacts, leads, ' +
+        'moveStage, assign, notes, filtered list, openPipelineValue) + an Express router (GET/POST /contacts + ' +
+        '/leads, PATCH /leads/:id/stage → 409 on invalid transition, PATCH /leads/:id/assign, POST ' +
+        '/leads/:id/notes, GET /pipeline/value) + a README. In-memory by default — swap the store for your DB. ' +
+        'Pairs with the auth/notification/audit recipes.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2179,6 +2192,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crud',
   'generate_booking',
   'generate_inventory',
+  'generate_crm',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

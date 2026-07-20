@@ -135,6 +135,7 @@ import { generateApiVersionIntegration } from '../lib/ApiVersionGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
+import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3315,6 +3316,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('inventory starter');
         const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an inventory/stock backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
+      }
+
+      case 'generate_crm': {
+        // Breadth recipe (domain vertical) — CRM/lead-pipeline (server/crm/): a real CrmService with a
+        // sales-stage STATE-MACHINE + open-pipeline value + an Express router. Pure gen in CrmGenerator.ts.
+        const crmcfg = generateCrmIntegration();
+        const crmWritten: string[] = [];
+        for (const [path, content] of Object.entries(crmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('crm starter');
+        const crmDeps = crmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a CRM / lead-pipeline backend:\n${crmWritten.join('\n')}\nAdd the dependencies: ${crmDeps}\n\n${crmcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

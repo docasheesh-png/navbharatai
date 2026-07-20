@@ -77,7 +77,7 @@ const V3_EXT_COLOR: Record<string, string> = {
 // stale (never-cleared) `resume` prop re-apply an old chat on each reopen. See the resume effect below.
 let lastAppliedResumeNonce = 0;
 
-export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
+export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
   const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
@@ -1837,17 +1837,20 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // One-click deploy: drive the REAL build+deploy pipeline (the agent runs `npm run build` then the
   // deploy tool, publishing to the CHOSEN provider's permanent public URL). Routed through the normal
   // stream so the user watches real progress; the live URL is then refreshed from the server.
-  const deployLive = () => {
+  const deployLive = (providerOverride?: string) => {
     if (running || !state.workspaceId) return;
+    // When triggered from the Git panel a specific provider is passed; otherwise use the picker.
+    const prov = providerOverride || deployProvider;
+    if (providerOverride) setDeployProvider(providerOverride);
     if (state.narration.length > 0) {
       setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    const providerName = configuredProviders.find((p) => p.id === deployProvider)?.name || 'a live URL';
+    const providerName = configuredProviders.find((p) => p.id === prov)?.name || 'a live URL';
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider, appSignature: appSignaturePref() },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider: prov, appSignature: appSignaturePref() },
     );
   };
 
@@ -2024,6 +2027,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setShowWorkspace(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFix?.nonce]);
+
+  // Deploy requested from the Git panel (sidebar) for a specific real provider — run v5's REAL
+  // build+deploy pipeline for that provider (the actual, tested deploy engine). Fires on each new
+  // pendingDeploy (nonce change). If there is no app in the workspace yet, deployLive no-ops safely.
+  useEffect(() => {
+    if (!pendingDeploy?.provider) return;
+    setShowWorkspace(false);
+    deployLive(pendingDeploy.provider);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDeploy?.nonce]);
 
   // Load the file contents when the Files tab is opened (and not already loaded), so each file
   // row can show its line count — without the user having to click into a file first.

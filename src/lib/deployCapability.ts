@@ -30,6 +30,19 @@ export function sanitizeZipName(name: string | undefined | null): string {
   return base.endsWith('.zip') ? base : `${base}.zip`;
 }
 
+// Platforms that NavBharatAI Pro v5.0's REAL build+deploy engine can publish to right now (each has a
+// genuine server-side DeployProvider: Firebase/Vercel/Netlify/Cloudflare). Selecting one of these in
+// the Git panel hands off to v5's real pipeline (build in the sandbox → deploy → live URL), instead of
+// showing 'unavailable'. Token-gated per provider: without the provider's API token the real engine
+// returns an honest 'set <TOKEN>' message — never a fake success. Kept in sync with the server registry
+// (DeployProviders.ts + the provider modules registered in routes/agentv3.ts).
+export const V5_DEPLOY_PROVIDERS = ['firebase', 'vercel', 'netlify', 'cloudflare'] as const;
+
+/** True when a Git-panel platform id maps to a real v5 deploy provider (so the panel can really deploy it). */
+export function isV5DeployProvider(platformId: string): boolean {
+  return (V5_DEPLOY_PROVIDERS as readonly string[]).includes(platformId);
+}
+
 /** The honest, user-facing console lines shown when a platform isn't directly deployable yet. Pure. */
 export function unavailableDeployMessage(platformName: string): string[] {
   return [

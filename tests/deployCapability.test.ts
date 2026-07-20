@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deployCapability, sanitizeZipName, unavailableDeployMessage } from '../src/lib/deployCapability';
+import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider, V5_DEPLOY_PROVIDERS } from '../src/lib/deployCapability';
 
 /** DevOps panel honesty: only github-push and static-zip are real; everything else is unavailable. */
 
@@ -11,6 +11,20 @@ describe('deployCapability', () => {
   it('treats every other (un-wired) platform as unavailable — never a faked deploy', () => {
     for (const id of ['firebase', 'vercel', 'netlify', 'cloudflare', 'gcloud', 'docker', 'render', 'railway', 'aws', 'supabase', 'surge', 'digitalocean', 'heroku', 'remote', '']) {
       expect(deployCapability(id)).toBe('unavailable');
+    }
+  });
+});
+
+describe('isV5DeployProvider', () => {
+  it('is true for the 4 providers v5 can really build+deploy', () => {
+    for (const id of ['firebase', 'vercel', 'netlify', 'cloudflare']) {
+      expect(isV5DeployProvider(id)).toBe(true);
+    }
+    expect([...V5_DEPLOY_PROVIDERS].sort()).toEqual(['cloudflare', 'firebase', 'netlify', 'vercel']);
+  });
+  it('is false for platforms with no real provider yet (they stay honestly unavailable)', () => {
+    for (const id of ['gcloud', 'docker', 'render', 'railway', 'aws', 'supabase', 'surge', 'digitalocean', 'heroku', 'remote', 'github', 'static', '']) {
+      expect(isV5DeployProvider(id)).toBe(false);
     }
   });
 });

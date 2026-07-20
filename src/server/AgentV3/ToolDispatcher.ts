@@ -146,6 +146,7 @@ import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
 import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
 import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateMessagingIntegration } from '../lib/MessagingGenerator';
+import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3515,6 +3516,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('messaging starter');
         const msgDeps = msgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a direct-messaging backend:\n${msgWritten.join('\n')}\nAdd the dependencies: ${msgDeps}\n\n${msgcfg.instructions}`;
+      }
+
+      case 'generate_listings': {
+        // Breadth recipe (domain vertical) — marketplace listings (server/listings/): a real ListingService with
+        // SALE INTEGRITY (lifecycle draft→active→sold/removed, sell-once, no self-purchase) + an Express router.
+        // Pure gen in ListingsGenerator.ts.
+        const lstcfg = generateListingsIntegration();
+        const lstWritten: string[] = [];
+        for (const [path, content] of Object.entries(lstcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lstWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('listings starter');
+        const lstDeps = lstcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a marketplace-listings backend:\n${lstWritten.join('\n')}\nAdd the dependencies: ${lstDeps}\n\n${lstcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

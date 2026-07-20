@@ -121,6 +121,10 @@ export interface ViewPanelsProps {
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
+  /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
+   *  view, where Send starts a genuine live build. Used by tools like Voice to App whose old
+   *  "generate" path called a non-existent endpoint (display-only, admin autopsy 2026-07-20). */
+  onBuildViaV5Prompt?: (prompt: string) => void;
   /** Real compile-error problems from the live preview bundle, surfaced in Code Studio's Problems panel. */
   problems?: PreviewProblem[];
 }
@@ -137,7 +141,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, onV3FixError, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, onV3FixError, onBuildViaV5Prompt, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -314,13 +318,12 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 4 — Voice to App */}
+      {/* Voice to App — REAL path (admin 2026-07-20): the spoken prompt is handed to the Pro v5.0
+          engine (composer prefill + view switch); Send there starts a genuine live build. The old
+          onAppGenerated flow rendered nothing real (its /api/generate endpoint never existed). */}
       {activeView === 'voice' && (
         <div className="flex-1 h-full overflow-hidden">
-          <VoiceToApp onAppGenerated={(code: string, _prompt: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <VoiceToApp onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
         </div>
       )}
 

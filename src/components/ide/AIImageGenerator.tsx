@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface GeneratedImage {
   id: string;
@@ -270,7 +271,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors mt-2"
           >
             {isLoading ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+              <><TirangaLoader className="w-4 h-4" /> Generating...</>
             ) : (
               <><Wand2 className="w-4 h-4" /> Generate Image</>
             )}
@@ -285,7 +286,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
             <div className="relative bg-[#161b22] border border-white/5 rounded-xl overflow-hidden" style={{ minHeight: '240px' }}>
               {isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                  <div className="w-12 h-12 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                  <TirangaLoader className="w-12 h-12" />
                   <p className="text-xs text-white/40">AI image generate ho raha hai...</p>
                   <p className="text-[10px] text-white/20">Size: {selectedSize.w}×{selectedSize.h}</p>
                 </div>

@@ -19737,3 +19737,25 @@ on for everyone. Kill switch: unset / set to anything but 'on'.
 **Still OPEN (engine, higher-risk — needs care):** prompt-cache stable prefixes for GLM/Kimi (AP-5) — touches
 the provider hot path of every LLM call; the code already has a cachePrefixPreamble hook, so it's partially
 scaffolded. Left for a deliberate, well-tested slice.
+
+## 2026-07-20 — App-wide loading indicator: TirangaLoader replaces the frozen CSS spinners (root-cause fix)
+
+Admin report: "puri app me circle ⭕ spinner ghumta hi nahi." Root-caused (rule 4): the old spinners used the
+CSS `animate-spin` utility + `@keyframes spin`, a fragile path in this app — the global `nb-reduce-motion`
+reset (`src/index.css`) `!important`-zeroes every CSS animation, and a static `transform: translateZ(0)` is
+applied to `.animate-spin`; the JS/SVG-driven tiranga build-flag animated fine while CSS spinners froze. Fix =
+class elimination, not a per-site patch: a new shared `src/components/ui/TirangaLoader.tsx` drives the animation
+in JS (a canvas repainted from ONE shared requestAnimationFrame loop → N loaders cost one frame callback), so
+nothing global can freeze it. Visual: three rotating tiranga arcs (saffron/white/green) around a navy Ashoka
+Chakra; size-adaptive (drops the 24 spokes below ~22px so tiny in-button spinners stay legible). Drop-in for
+both `<Loader2 className="w-4 h-4 animate-spin"/>` and `<Loader2 size={14}/>` forms.
+
+Swept every genuine loading spinner across ~40 files (App boot overlay, Auth, chat surfaces, agentv3 surfaces,
+panels, and ~27 IDE tool panels) — Loader2/RefreshCw-as-loader/inline-border-div spinners → `<TirangaLoader>`.
+Intentionally LEFT: the WavingTiranga build-flag and the PreviewSurface Ashoka-Chakra loader (admin: keep the
+tiranga as-is); conditional refresh-buttons (a RefreshCw that spins only while loading — those are refresh
+affordances, not spinners); and decorative slow-spin icons (Sparkles 4s, Globe 6s, Disc branding, a pending
+Clock). Regression test (`TirangaLoader.test.tsx`) locks render branches + the size-adaptive draw logic; the one
+stale test that asserted `animate-spin` (ActivityTimelineRow) was updated to assert the loader's canvas. Gate
+green: frontend `tsc --noEmit` clean, `npm run build` OK, bundle within budget. Note: coverage only measures
+`src/server/**`, so the frontend component doesn't affect the coverage gate.

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Bot, Send, Loader2 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 export const VertexTestChat: React.FC = () => {
     const [messages, setMessages] = useState<{ id: string; text: string; sender: 'user' | 'ai' }[]>([]);
@@ -35,7 +36,7 @@ export const VertexTestChat: React.FC = () => {
                         </div>
                     </div>
                 ))}
-                {isLoading && <Loader2 className="animate-spin text-purple-400" />}
+                {isLoading && <TirangaLoader size={20} className="text-purple-400" />}
             </div>
             <div className="p-4 border-t border-white/10 flex gap-2">
                 <input 

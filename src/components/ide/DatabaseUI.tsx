@@ -3,6 +3,7 @@ import {
   Database, RefreshCcw, Plus, Trash2, Edit2, Search,
   ChevronRight, Save, X, AlertCircle, Eye, Loader2, Check
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import {
   collection, getDocs, doc, setDoc, deleteDoc, addDoc,
   query, orderBy, limit, onSnapshot, startAfter,
@@ -386,7 +387,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
         {/* Loading state (initial) */}
         {loading && docs.length === 0 && (
           <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+            <TirangaLoader className="w-8 h-8" />
           </div>
         )}
 
@@ -489,7 +490,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
                   disabled={loading}
                   className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#8b949e] hover:text-white transition-colors disabled:opacity-40"
                 >
-                  {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                   Load More
                 </button>
               </div>
@@ -540,7 +541,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
               )}
             >
               {saving ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <TirangaLoader className="w-3.5 h-3.5" />
               ) : saveSuccess ? (
                 <Check className="w-3.5 h-3.5" />
               ) : (
@@ -597,7 +598,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
                   disabled={adding}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-indigo-600 hover:bg-indigo-700 transition-colors disabled:opacity-50"
                 >
-                  {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  {adding ? <TirangaLoader className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                   {adding ? 'Adding...' : 'Add Document'}
                 </button>
               </div>
@@ -635,7 +636,7 @@ export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
                   disabled={deleting}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
                 >
-                  {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  {deleting ? <TirangaLoader className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
                   {deleting ? 'Deleting...' : 'Delete'}
                 </button>
               </div>

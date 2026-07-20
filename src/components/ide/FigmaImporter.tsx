@@ -19,6 +19,7 @@ import {
   Check,
   Clock,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface FigmaImporterProps {
   onCodeGenerated?: (code: string) => void;
@@ -357,7 +358,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
   const statusBadge = () => {
     const cfg: Record<ConnectionStatus, { label: string; icon: React.ReactNode; color: string }> = {
       disconnected: { label: 'Disconnected', icon: <X size={12} />, color: 'text-gray-400 bg-gray-800' },
-      connecting: { label: 'Connecting...', icon: <Loader2 size={12} className="animate-spin" />, color: 'text-yellow-400 bg-yellow-900/30' },
+      connecting: { label: 'Connecting...', icon: <TirangaLoader size={12} />, color: 'text-yellow-400 bg-yellow-900/30' },
       connected: { label: 'Connected ✓', icon: <CheckCircle2 size={12} />, color: 'text-green-400 bg-green-900/30' },
       error: { label: 'Error', icon: <X size={12} />, color: 'text-red-400 bg-red-900/30' },
     };
@@ -474,7 +475,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
               disabled={!figmaUrl || !token || connectionStatus === 'connecting'}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-[#a259ff] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
             >
-              {connectionStatus === 'connecting' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {connectionStatus === 'connecting' ? <TirangaLoader size={14} /> : <RefreshCw size={14} />}
               Connect &amp; Fetch
             </button>
             {history.length > 0 && (
@@ -596,7 +597,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                   disabled={!selectedFrame || isImporting}
                   className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium py-2 rounded-lg transition-colors"
                 >
-                  {isImporting ? <Loader2 size={13} className="animate-spin" /> : <FileCode size={13} />}
+                  {isImporting ? <TirangaLoader size={13} /> : <FileCode size={13} />}
                   Import Selected Frame
                 </button>
               </div>
@@ -724,7 +725,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
                       disabled={isRefining || !aiPrompt.trim()}
                       className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs px-4 py-2 rounded-lg transition-colors"
                     >
-                      {isRefining ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                      {isRefining ? <TirangaLoader size={13} /> : <Sparkles size={13} />}
                       Refine
                     </button>
                     <button

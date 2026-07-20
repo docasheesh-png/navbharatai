@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertTriangle, X, Lightbulb, Clock,
   BarChart2
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -566,9 +567,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           >
             {isAnalyzing ? (
               <>
-                <span
-                  className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"
-                />
+                <TirangaLoader className="w-3 h-3" />
                 Analyzing...
               </>
             ) : (
@@ -607,7 +606,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
           {/* Analyzing spinner */}
           {isAnalyzing && (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
-              <span className="inline-block w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <TirangaLoader className="w-8 h-8" />
               <span className="text-sm text-[#8b949e]">Analyzing code...</span>
             </div>
           )}

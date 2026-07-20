@@ -7,6 +7,7 @@ import {
   Baby, Zap, Shield, Heart, Navigation, ChevronDown, ChevronUp, Volume2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import ReactMarkdown from 'react-markdown';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -1001,7 +1002,7 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
               disabled={(!input.trim() && !attachedFile) || loading}
               className="w-10 h-10 flex items-center justify-center bg-emerald-700 hover:bg-emerald-600 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-all shrink-0 shadow-lg shadow-emerald-900/40"
             >
-              {loading ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
+              {loading ? <TirangaLoader className="w-4 h-4 text-white" /> : <Send className="w-4 h-4 text-white" />}
             </button>
           </div>
 

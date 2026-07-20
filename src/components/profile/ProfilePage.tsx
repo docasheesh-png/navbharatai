@@ -13,6 +13,7 @@ import {
   User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight,
   Edit3, Save, X, RefreshCw, CalendarDays, Zap, Activity, LogOut, AlertTriangle,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { ApiKeysCard } from './ApiKeysCard';
 
@@ -355,7 +356,7 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
                   disabled={saving}
                   className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all disabled:opacity-50"
                 >
-                  {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                   Save Changes
                 </button>
                 <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/8 text-[#8b949e] rounded-xl text-xs font-bold transition-all">
@@ -395,7 +396,7 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
 
           {loading ? (
             <div className="flex items-center gap-2 text-[#484f58] text-xs">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading…
+              <TirangaLoader className="w-3.5 h-3.5" /> Loading…
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -524,7 +525,7 @@ export function ProfilePage({ user, onNavigateToBilling, onNavigateToSettings, o
           {/* History table */}
           {historyLoading ? (
             <div className="flex items-center gap-2 text-[#484f58] text-xs py-4">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading history…
+              <TirangaLoader className="w-3.5 h-3.5" /> Loading history…
             </div>
           ) : historyRecords.length === 0 ? (
             <div className="text-center py-8 text-[#484f58] text-sm">

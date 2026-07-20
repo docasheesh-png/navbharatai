@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShareForReview } from './ShareForReview';
 import { CloudUpload, ServerCog, CloudCheck, CloudCog, Globe, Rocket, Check, X, Loader2, ChevronRight, RefreshCw, ExternalLink, Terminal, Shield, Zap, Clock, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 type Platform = 'vercel' | 'netlify' | 'firebase' | 'cloudrun' | 'railway' | 'render' | 'navbharat';
 type DeployStatus = 'idle' | 'building' | 'deploying' | 'success' | 'failed';
@@ -332,7 +333,7 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
                 ))}
                 {(deployStatus === 'building' || deployStatus === 'deploying') && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
-                    <Loader2 size={10} className="animate-spin" /> processing...
+                    <TirangaLoader size={10} /> processing...
                   </div>
                 )}
               </div>

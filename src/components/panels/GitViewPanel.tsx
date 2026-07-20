@@ -7,6 +7,7 @@
  */
 import React from 'react';
 import { Rocket, List, Github, RefreshCw, Search } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { GitPanel } from '../ide/GitPanel';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ export function GitViewPanel({
                 className="px-3 py-1 bg-white/5 border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:bg-white/10 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
               >
                 {isGHSyncing
-                  ? <RefreshCw className="w-3 h-3 animate-spin text-white" />
+                  ? <TirangaLoader className="w-3 h-3 text-white" />
                   : <Search className="w-3 h-3 text-white" />}
                 Review Files
               </button>

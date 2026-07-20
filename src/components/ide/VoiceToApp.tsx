@@ -12,6 +12,7 @@ import {
   Languages,
   Info,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface VoiceToAppProps {
   onAppGenerated?: (code: string, prompt: string) => void;
@@ -328,7 +329,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
               >
                 {status === 'generating' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <TirangaLoader className="w-4 h-4" />
                     Generating…
                   </>
                 ) : (

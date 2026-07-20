@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -277,7 +278,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           disabled={saving}
           className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-bold rounded-2xl transition-colors"
         >
-          {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Database className="w-5 h-5" />}
+          {saving ? <TirangaLoader className="w-5 h-5" /> : <Database className="w-5 h-5" />}
           {saving ? 'Saving…' : 'Save & Sync to Secrets'}
         </button>
 

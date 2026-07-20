@@ -10,6 +10,7 @@
  */
 import React, { useRef, useState, useEffect } from 'react';
 import { FolderOpen, Upload, Download, FileCode, ChevronRight, History, GitCommit, RotateCcw, Loader2, Plus, Trash2, Pencil, Check, X, Copy } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { listBuildHistory, fetchBuildVersion } from '../../services/buildService';
 import type { VersionMeta } from '../../services/buildService';
 import { SkeletonList } from '../ui/Skeleton';
@@ -441,7 +442,7 @@ export function FilesPanel({
                       title={`Restore to version ${versions.length - i}`}
                     >
                       {restoringId === v.id ? (
-                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <TirangaLoader className="w-2.5 h-2.5" />
                       ) : (
                         <RotateCcw className="w-2.5 h-2.5" />
                       )}

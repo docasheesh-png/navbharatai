@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Terminal as TerminalIcon, X, Maximize2, Minimize2, Loader2 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../App';
 
 /**
@@ -121,7 +122,7 @@ export const RealTerminal: React.FC<RealTerminalProps> = ({ workspaceId, userId,
         {lines.map((l, i) => (
           <div key={i} className={`${colorFor(l.kind)} whitespace-pre-wrap break-words`}>{l.text}</div>
         ))}
-        {running && <div className="flex items-center gap-1.5 text-amber-400 text-[10px] py-0.5"><Loader2 className="w-3 h-3 animate-spin" /> running…</div>}
+        {running && <div className="flex items-center gap-1.5 text-amber-400 text-[10px] py-0.5"><TirangaLoader className="w-3 h-3" /> running…</div>}
         <div ref={endRef} />
       </div>
 

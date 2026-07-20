@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GitBranch, Loader2, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 /**
  * Dedicated "GitHub Repo Analyst & Improver" tool UI.
@@ -159,7 +160,7 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
           />
         </div>
         <button onClick={analyse} disabled={!repoUrl.trim() || loading} className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-semibold flex items-center gap-2 shrink-0">
-          {loading && !hasReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitBranch className="w-4 h-4" />}
+          {loading && !hasReport ? <TirangaLoader className="w-4 h-4" /> : <GitBranch className="w-4 h-4" />}
           Analyse
         </button>
       </div>
@@ -189,7 +190,7 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
           ))}
           {loading && (
             <div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-3 flex items-center gap-2 text-sm text-[#8b949e]">
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" /> Fetching &amp; analysing the repository…
+              <TirangaLoader className="w-4 h-4 text-indigo-400" /> Fetching &amp; analysing the repository…
             </div>
           )}
 
@@ -200,7 +201,7 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
                 disabled={genLoading || loading}
                 className="text-[13px] px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 disabled:opacity-40 text-white font-semibold flex items-center gap-2"
               >
-                {genLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {genLoading ? <TirangaLoader className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
                 Generate improvement files
               </button>
               <p className="text-[11px] text-[#586069] mt-1">Original, ready-to-use files for YOUR fork (tests, README, CI, fixes…). Type a specific ask in the box below first if you want (e.g. “a CI workflow + a test”). License-respecting — apply them in your own copy.</p>
@@ -240,7 +241,7 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
             className="flex-1 resize-none bg-[#161b22] border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder:text-[#586069] focus:outline-none focus:border-indigo-500/40 max-h-32"
           />
           <button onClick={() => ask()} disabled={!followUp.trim() || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
       )}

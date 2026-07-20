@@ -38,7 +38,7 @@ describe('ActionGroupRow — Claude-style collapsed action row (real render)', (
     if (b.kind !== 'actions') throw new Error('expected actions');
     const html = renderToStaticMarkup(<ActionGroupRow block={b} />);
     expect(html).toContain('12/33 files');
-    expect(html).toContain('animate-spin');
+    expect(html).toContain('<canvas'); // the live spinner is now the freeze-proof TirangaLoader (a canvas)
   });
 
   it('a failed group renders with the failure accent', () => {

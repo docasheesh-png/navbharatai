@@ -142,6 +142,7 @@ import { generatePollsIntegration } from '../lib/PollsGenerator';
 import { generateBlogIntegration } from '../lib/BlogGenerator';
 import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
 import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
+import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3452,6 +3453,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('loyalty starter');
         const loyDeps = loycfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a loyalty/points-wallet backend:\n${loyWritten.join('\n')}\nAdd the dependencies: ${loyDeps}\n\n${loycfg.instructions}`;
+      }
+
+      case 'generate_referrals': {
+        // Breadth recipe (growth vertical) — referral/invite (server/referrals/): a real ReferralService with
+        // ATTRIBUTION INTEGRITY (unique code, refer-once, no self-referral, credit-once) + an Express router.
+        // Pure gen in ReferralsGenerator.ts.
+        const refcfg = generateReferralsIntegration();
+        const refWritten: string[] = [];
+        for (const [path, content] of Object.entries(refcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          refWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('referrals starter');
+        const refDeps = refcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a referral/invite backend:\n${refWritten.join('\n')}\nAdd the dependencies: ${refDeps}\n\n${refcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

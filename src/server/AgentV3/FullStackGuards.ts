@@ -163,8 +163,59 @@ export function fixPrismaSeedRunner(path: string, content: string): string {
   }
 }
 
+/**
+ * Collapse a DUPLICATE same-name import of the SAME module (Bazaar-era autopsy 2026-07-20). The builder
+ * wrote BOTH `import ErrorBoundary from './ErrorBoundary'` AND `import { ErrorBoundary } from './ErrorBoundary'`
+ * — two bindings of the same name in one scope → babel/Vite hard-fails with "Duplicate declaration
+ * 'ErrorBoundary'" and the whole preview won't compile. Deterministic + SAFE because both point at the
+ * SAME module: keep the FIRST import statement that binds the name, and drop the name from any LATER
+ * import of that same module (removing the whole statement if it becomes empty). Only the same-module
+ * case is touched — a genuine cross-module name clash (a real conflict) is left for the reconciler. Pure.
+ */
+export function dedupeSameModuleImports(path: string, content: string): string {
+  if (!isCodeFile(path) || typeof content !== 'string' || !content.includes('import')) return content;
+  const seen = new Set<string>(); // `${module}::${localName}` already bound by an earlier import
+  const localsOf = (clause: string): string[] => {
+    const names: string[] = [];
+    const def = /^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(clause); // leading default binding
+    if (def && !clause.trimStart().startsWith('{') && !clause.trimStart().startsWith('*')) names.push(def[1]);
+    const ns = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause);
+    if (ns) names.push(ns[1]);
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (braces) for (const part of braces[1].split(',')) {
+      const m = /(?:\btype\s+)?[A-Za-z_$][\w$]*\s+as\s+([A-Za-z_$][\w$]*)|(?:\btype\s+)?([A-Za-z_$][\w$]*)/.exec(part.trim());
+      if (m) names.push(m[1] || m[2]);
+    }
+    return names.filter(Boolean);
+  };
+  const lines = content.split('\n');
+  const out: string[] = [];
+  const importRe = /^(\s*import\s+)(.+?)(\s+from\s+)(["'])([^"']+)\4(\s*;?\s*)$/;
+  for (const line of lines) {
+    const m = importRe.exec(line);
+    if (!m) { out.push(line); continue; }
+    const mod = m[5];
+    const locals = localsOf(m[2]);
+    const dupes = locals.filter((n) => seen.has(`${mod}::${n}`));
+    locals.forEach((n) => seen.add(`${mod}::${n}`));
+    if (dupes.length === 0) { out.push(line); continue; }
+    if (dupes.length === locals.length) continue; // every binding is a same-module dupe → drop the whole line
+    // Some bindings survive: strip only the duplicate NAMED specifiers, keep the rest.
+    const kept = m[2].replace(/\{([^}]*)\}/, (_all, inner: string) => {
+      const parts = inner.split(',').map((s) => s.trim()).filter(Boolean).filter((p) => {
+        const nm = /\bas\s+([A-Za-z_$][\w$]*)$|^(?:type\s+)?([A-Za-z_$][\w$]*)$/.exec(p);
+        const local = nm ? (nm[1] || nm[2]) : p;
+        return !dupes.includes(local);
+      });
+      return parts.length ? `{ ${parts.join(', ')} }` : '';
+    }).replace(/,\s*$/, '').replace(/^\s*,/, '').trim();
+    out.push(`${m[1]}${kept}${m[3]}${m[4]}${mod}${m[4]}${m[6]}`);
+  }
+  return out.join('\n');
+}
+
 /** Apply every full-stack write-time guard in order. Flag-gated; a disabled flag is a pure pass-through. */
 export function applyFullStackGuards(path: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!fullStackGuardsEnabled(env)) return content;
-  return fixPrismaSeedRunner(path, ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content)))));
+  return dedupeSameModuleImports(path, fixPrismaSeedRunner(path, ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content))))));
 }

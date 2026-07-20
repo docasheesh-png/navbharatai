@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, ExternalLink, Loader2, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { auth } from '../../App';
 import { newReloadTracker, shouldReloadOnSignal } from './previewAutoReload';
 import { shouldAutoRebootPreview } from './previewAutoReboot';
@@ -565,7 +566,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
                       title="Check the real state of the dev server inside your sandbox — installs, starts, and reports the exact cause if it still doesn't come up"
                     >
-                      {diagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Stethoscope className="w-3.5 h-3.5" />}
+                      {diagnosing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Stethoscope className="w-3.5 h-3.5" />}
                       {diagnosing ? 'Starting the live server…' : 'Diagnose'}
                     </button>
                   </div>
@@ -608,7 +609,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
         {switcher}
         {viewportSwitcher}
         <span className="flex-1 truncate">{kind ? `In-browser preview (${kind})` : 'In-browser preview'}</span>
-        {savingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />}
+        {savingEdit && <TirangaLoader className="w-3.5 h-3.5 text-indigo-400" />}
         {!!html && !err && (
           <button
             onClick={() => { const next = !editMode; setEditMode(next); setIframeEditMode(next); }}
@@ -621,7 +622,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           </button>
         )}
         <button onClick={() => void loadInBrowser()} disabled={loading || !workspaceId} className="flex items-center gap-1 hover:text-zinc-200 disabled:opacity-40" title="Rebuild the in-browser preview from the current files">
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+          {loading ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
         </button>
       </div>
       {editError && (
@@ -671,7 +672,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
               className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold"
               title="First deep-refreshes the preview (it may just start working); only if it still fails does it send the error to the AI"
             >
-              {deepRefreshing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+              {deepRefreshing ? <TirangaLoader className="w-3.5 h-3.5" /> : <Wand2 className="w-3.5 h-3.5" />}
               {deepRefreshing ? 'Deep-refreshing preview…' : 'Fix with AI'}
             </button>
           )}

@@ -14,6 +14,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, sanitizeFirestoreData } from '../../App';
 import { escapeHtml } from '../../lib/escapeHtml';
 import { newSdaCaseId } from '../../lib/sdaCaseId';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -762,6 +763,11 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId }) => {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+          {(() => {
+            // In SDA the USER is the 'doctor' sender; 'sda' is the assistant.
+            const lastUser = [...messages].reverse().find(m => m.sender === 'doctor');
+            return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+          })()}
           {messages.map(msg => (
             <div key={msg.id} className={cn("flex", msg.sender === 'doctor' ? "justify-end" : "justify-start")}>
               {msg.sender === 'sda' && (

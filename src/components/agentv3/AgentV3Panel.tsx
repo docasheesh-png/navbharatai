@@ -10,6 +10,7 @@ import {
   Star, Search,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
@@ -2504,6 +2505,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           {/* Conversation */}
           {/* Admin 2026-07-06: tighter padding (p-3 → px-2 py-2) + smaller gaps so more chat is visible. */}
           <div ref={scrollRef} className="flex-1 overflow-auto px-2 py-2 space-y-2.5 min-h-0">
+            {(() => {
+              const lastUser = [...convo].reverse().find((m) => m.role === 'user');
+              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+            })()}
             {convo.length === 0 && (
               <div className="text-sm text-zinc-500 mt-6 text-center">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-indigo-400/60" />

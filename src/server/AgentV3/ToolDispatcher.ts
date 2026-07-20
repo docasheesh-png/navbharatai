@@ -182,6 +182,7 @@ import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
+import { generateRequestIdIntegration } from '../lib/RequestIdGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
 import { generateMaintenanceIntegration } from '../lib/MaintenanceModeGenerator';
@@ -4740,6 +4741,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('logging');
         return `Wired structured logging:\n${lgWritten.join('\n')}\nAdd the dependency: ${lgcfg.dependency.name}@${lgcfg.dependency.version}\n\n${lgcfg.instructions}`;
+      }
+
+      case 'generate_request_id': {
+        // Breadth recipe — correlation-id middleware (server/lib/requestId.ts): reuses a safe inbound
+        // X-Request-Id or mints a UUID, sets req.id + echoes the response header. Dependency-free (node:crypto).
+        // Pairs with generate_logging/generate_tracing. Pure generator in RequestIdGenerator.ts. No env keys.
+        const ricfg = generateRequestIdIntegration();
+        const riWritten: string[] = [];
+        for (const [path, content] of Object.entries(ricfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          riWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('request id');
+        return `Wired correlation IDs:\n${riWritten.join('\n')}\n(No npm dependency needed — node:crypto randomUUID.)\n\n${ricfg.instructions}`;
       }
 
       case 'generate_file_upload': {

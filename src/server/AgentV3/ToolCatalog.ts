@@ -399,6 +399,34 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_integration_tests',
+      description:
+        'Generate a REAL integration-test suite for a REST resource — a full create → read → update → ' +
+        'delete → 404 lifecycle test (supertest) with real assertions on real response bodies (NOT the ' +
+        'TODO skeletons generate_tests emits), PLUS a working in-memory reference app it runs against, so ' +
+        'the suite is green out of the box. Swap the app import to test your real Express backend. Use this ' +
+        'to verify a CRUD API end-to-end. Needs supertest + express (dev). No API key.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          resource: { type: 'string', description: 'Singular resource name, e.g. "product" (default "item").' },
+          base_path: { type: 'string', description: 'Base route, e.g. "/products" (default: "/" + resource + "s").' },
+          fields: {
+            type: 'array',
+            description: 'Resource fields; the first is the required field validated on create.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Field name.' },
+                type: { type: 'string', enum: ['string', 'number', 'boolean'], description: 'Field type (default string).' },
+              },
+              required: ['name'],
+            },
+          },
+        },
+      },
+    },
+    {
       name: 'generate_e2e',
       description:
         'Scaffold an end-to-end (Playwright) test setup for the running app: a playwright.config.ts that ' +
@@ -2021,6 +2049,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_openapi',
   'generate_api_docs',
   'generate_tests',
+  'generate_integration_tests',
   'generate_e2e',
   'run_tests',
   'typecheck',

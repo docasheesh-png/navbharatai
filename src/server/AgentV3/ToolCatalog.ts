@@ -1393,6 +1393,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_tags',
+      description:
+        'Add a real tags / taxonomy backend to the app (server/tags/) — a cross-cutting domain vertical used by ' +
+        'blogs, ecommerce, CRMs, task boards and anything that labels content. The real guarantee is TAG ' +
+        'INTEGRITY: tags are canonicalized (trimmed, lower-cased slug) so "React" and " react " are one tag; ' +
+        'tag()/untag() are idempotent (a (tag, entity) attachment exists at most once); rename() CASCADES to ' +
+        'every attachment and MERGES into an existing tag if the target slug already exists; all()/count() ' +
+        'report exact usage. Emits a dependency-free TagService (tag, untag, tagsOf, entitiesWith, rename, all, ' +
+        'count) + an Express router (POST /tags → 201 new / 200 existing, DELETE /tags?entity=&tag=, GET /tags, ' +
+        'GET /tags/:tag/entities, GET /entities/:entity/tags, POST /tags/rename {from,to} → 404 on unknown tag). ' +
+        'entity is any id you tag (post/product/contact). Pairs with generate_blog / generate_listings / ' +
+        'generate_crm. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2469,6 +2484,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_timesheet',
   'generate_leaderboard',
   'generate_waitlist',
+  'generate_tags',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

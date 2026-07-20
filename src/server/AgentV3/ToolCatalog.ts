@@ -755,16 +755,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       description:
         'Generate Infrastructure-as-Code to deploy the app to a cluster or cloud: Kubernetes manifests ' +
         '(k8s/manifests.yaml — a non-root Deployment with health probes + resource limits, a Service, an ' +
-        'HPA, and an Ingress when a host is given), a Helm chart (values-parameterized), and Terraform for ' +
-        'Google Cloud Run (terraform/*.tf). By default all three are written; pass "include" to pick a ' +
-        'subset. Deterministic; the operator runs `kubectl apply` / `helm install` / `terraform apply`.',
+        'HPA, and an Ingress when a host is given), a Helm chart (values-parameterized), Terraform for ' +
+        'Google Cloud Run (terraform/*.tf), and an Ansible playbook (ansible/ — deploys the container to ' +
+        'your own SSH hosts via community.docker). By default all four are written; pass "include" to pick a ' +
+        'subset. Deterministic; the operator runs `kubectl apply` / `helm install` / `terraform apply` / `ansible-playbook`.',
       input_schema: {
         type: 'object',
         properties: {
           include: {
             type: 'array',
-            description: "Which IaC to write. Any of 'k8s', 'helm', 'terraform'. Defaults to all three.",
-            items: { type: 'string', enum: ['k8s', 'helm', 'terraform'] },
+            description: "Which IaC to write. Any of 'k8s', 'helm', 'terraform', 'ansible'. Defaults to all four.",
+            items: { type: 'string', enum: ['k8s', 'helm', 'terraform', 'ansible'] },
           },
           appName: { type: 'string', description: 'Service name (sanitised to a DNS-1123 label; default "app").' },
           image: { type: 'string', description: 'Container image reference, e.g. ghcr.io/acme/app:1.2.3 (default app:latest).' },

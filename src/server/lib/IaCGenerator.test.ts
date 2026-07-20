@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toK8sName, generateK8sManifests, generateHelmChart, generateTerraformCloudRun, generateIaC } from './IaCGenerator';
+import { toK8sName, generateK8sManifests, generateHelmChart, generateTerraformCloudRun, generateAnsiblePlaybook, generateIaC } from './IaCGenerator';
 
 describe('toK8sName (DNS-1123 label)', () => {
   it('lowercases, replaces invalid chars, trims dashes, caps length', () => {
@@ -112,12 +112,50 @@ describe('generateTerraformCloudRun', () => {
   });
 });
 
+describe('generateAnsiblePlaybook', () => {
+  const files = generateAnsiblePlaybook({ appName: 'API Server', image: 'ghcr.io/acme/api:2.1', port: 3000, env: ['LOG_LEVEL=info', 'SECRET'], healthPath: '/healthz' });
+
+  it('emits a playbook, inventory and README', () => {
+    expect(files['ansible/playbook.yml']).toBeDefined();
+    expect(files['ansible/inventory.ini']).toBeDefined();
+    expect(files['ansible/README.md']).toBeDefined();
+  });
+
+  it('uses the community.docker container module with real port/image/health', () => {
+    const pb = files['ansible/playbook.yml'];
+    expect(pb).toContain('community.docker.docker_container');
+    expect(pb).toContain('image: "ghcr.io/acme/api:2.1"');
+    expect(pb).toContain('host_port: 3000');
+    expect(pb).toContain('"{{ host_port }}:{{ container_port }}"');
+    expect(pb).toContain('http://localhost:3000/healthz');
+    // the app name is sanitised to a DNS-1123 label
+    expect(pb).toContain('container_name: "api-server"');
+  });
+
+  it('renders env vars as a YAML mapping (value quoted, blank when unset)', () => {
+    const pb = files['ansible/playbook.yml'];
+    expect(pb).toContain('env:');
+    expect(pb).toContain('LOG_LEVEL: "info"');
+    expect(pb).toContain('SECRET: ""');
+  });
+
+  it('omits the env block entirely when no env vars are given', () => {
+    const pb = generateAnsiblePlaybook({ appName: 'x' })['ansible/playbook.yml'];
+    expect(pb).not.toContain('env:');
+  });
+
+  it('never throws on empty input', () => {
+    expect(() => generateAnsiblePlaybook()).not.toThrow();
+  });
+});
+
 describe('generateIaC (combined)', () => {
-  it('returns k8s manifests + the full Helm chart + terraform in one map', () => {
+  it('returns k8s manifests + the full Helm chart + terraform + ansible in one map', () => {
     const files = generateIaC({ appName: 'web', port: 5000 });
     expect(files['k8s/manifests.yaml']).toContain('kind: Deployment');
     expect(files['web/Chart.yaml']).toBeDefined();
     expect(files['terraform/main.tf']).toContain('google_cloud_run_v2_service');
+    expect(files['ansible/playbook.yml']).toContain('community.docker.docker_container');
   });
 
   it('never throws on empty/default input', () => {

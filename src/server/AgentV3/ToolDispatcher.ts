@@ -111,7 +111,7 @@ import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCo
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
 import { generateDeployConfig, isDeployTarget } from '../lib/DeployConfigGenerator';
-import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
+import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, generateAnsiblePlaybook, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { dependencyHealthVerdict } from './DependencyHealthGate';
@@ -3623,7 +3623,7 @@ export class ToolDispatcher {
         // generated deterministically from the app's image/port/env. Pure builders in IaCGenerator.ts.
         const rec = (input as Record<string, unknown>) || {};
         const includeRaw = Array.isArray(rec.include) ? rec.include.filter((x): x is string => typeof x === 'string') : [];
-        const include = new Set(includeRaw.length ? includeRaw : ['k8s', 'helm', 'terraform']);
+        const include = new Set(includeRaw.length ? includeRaw : ['k8s', 'helm', 'terraform', 'ansible']);
         const port = typeof rec.port === 'number' && rec.port > 0 ? rec.port : undefined;
         const replicas = typeof rec.replicas === 'number' && rec.replicas > 0 ? rec.replicas : undefined;
         const env = Array.isArray(rec.env) ? rec.env.filter((x): x is string => typeof x === 'string') : undefined;
@@ -3638,8 +3638,9 @@ export class ToolDispatcher {
         if (include.has('k8s')) all['k8s/manifests.yaml'] = generateK8sManifests(iacOpts);
         if (include.has('helm')) Object.assign(all, generateHelmChart(iacOpts));
         if (include.has('terraform')) Object.assign(all, generateTerraformCloudRun(iacOpts));
+        if (include.has('ansible')) Object.assign(all, generateAnsiblePlaybook(iacOpts));
         const iacPaths = Object.keys(all);
-        if (iacPaths.length === 0) return 'generate_iac: nothing to write — pass include: ["k8s","helm","terraform"].';
+        if (iacPaths.length === 0) return 'generate_iac: nothing to write — pass include: ["k8s","helm","terraform","ansible"].';
         const iacWritten: string[] = [];
         for (const p of iacPaths) {
           let kind: 'create' | 'modify' = 'create';

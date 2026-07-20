@@ -273,6 +273,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [ghReposError, setGhReposError] = useState<string>('');
   const [repoSearch, setRepoSearch] = useState('');
   const [importSending, setImportSending] = useState(false);
+  // ── Push mode (admin 2026-07-20): the SAME repo picker can PUSH the current app to a repo, so
+  // connect + import + push all live in one place. 'import' clones a repo in; 'push' publishes out.
+  const [modalMode, setModalMode] = useState<'import' | 'push'>('import');
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushResult, setPushResult] = useState<{ ok: boolean; text: string; url?: string } | null>(null);
+  const [pushCommitMsg, setPushCommitMsg] = useState('');
 
   const loadGhRepos = useCallback(async () => {
     const token = (() => { try { return localStorage.getItem('gh_token'); } catch { return null; } })();
@@ -305,7 +311,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, []);
   // Load the list the moment the modal opens (state 3: already connected → zero extra clicks).
   useEffect(() => {
-    if (showImportModal) { setRepoSearch(''); void loadGhRepos(); }
+    if (showImportModal) { setRepoSearch(''); setPushResult(null); setPushCommitMsg(''); void loadGhRepos(); }
   }, [showImportModal, loadGhRepos]);
 
   // Full-page OAuth redirect — the SAME proven flow the app-level GitHub connect uses (the
@@ -357,6 +363,50 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       text: 'Import this app from my GitHub repository and give me a short survey of what it is and how it is structured. Do not change any files yet.',
       importUrl: repoUrl,
     }).finally(() => setImportSending(false));
+  };
+
+  // REAL push: publish the CURRENT app's files to the chosen GitHub repo via the safe (non-force)
+  // push route. Reuses the repo picker — the user just clicks the repo to push to. Deliberately a
+  // plain function (closes over the current render's workspaceFiles/loader/token), like importRepo.
+  const pushToRepo = async (fullName: string) => {
+    if (pushBusy || running || importSending) return;
+    const token = ghToken();
+    if (!token) { setPushResult({ ok: false, text: 'Connect GitHub first, then push.' }); setGhReposError('auth'); return; }
+    const slash = fullName.indexOf('/');
+    if (slash <= 0) { setPushResult({ ok: false, text: 'Pick a repository in the form owner/name.' }); return; }
+    const owner = fullName.slice(0, slash).trim();
+    const repo = fullName.slice(slash + 1).trim();
+
+    setPushBusy(true);
+    setPushResult({ ok: true, text: `Pushing to ${fullName}…` });
+    try {
+      // Use the loaded workspace file CONTENTS; fetch them if the panel hasn't cached them yet.
+      let files = workspaceFiles;
+      if (!files || Object.keys(files).length === 0) files = await loadWorkspaceFiles();
+      if (!files || Object.keys(files).length === 0) {
+        setPushResult({ ok: false, text: 'No app files to push yet — build or open an app first.' });
+        return;
+      }
+      const res = await fetch('/api/github/push-enhanced', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          owner, repo, files,
+          visibility: 'private',
+          branch: 'main',
+          message: pushCommitMsg.trim() || 'Update from NavBharatAI Pro v5.0',
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (res.status === 401 || res.status === 403) { setPushResult({ ok: false, text: 'GitHub authorization expired — reconnect and try again.' }); setGhReposError('auth'); return; }
+      if (res.status === 409 || data?.nonFastForward) { setPushResult({ ok: false, text: 'This repo has newer commits than your app. Import it first, then push — this protects your work.' }); return; }
+      if (!res.ok || !data?.success) { setPushResult({ ok: false, text: typeof data?.error === 'string' ? data.error : 'Push failed — please try again.' }); return; }
+      setPushResult({ ok: true, text: `Pushed to ${fullName} ✓`, url: typeof data.repoUrl === 'string' ? data.repoUrl : `https://github.com/${owner}/${repo}` });
+    } catch {
+      setPushResult({ ok: false, text: 'Push failed — check your connection and try again.' });
+    } finally {
+      setPushBusy(false);
+    }
   };
   const [userMsgs, setUserMsgs] = useState<ChatMsg[]>([]);
   // Finalized agent replies from PREVIOUS turns. The live build state
@@ -3378,12 +3428,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
           <div className="relative z-10 w-full max-w-sm bg-[#0d1117] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-widest">Import Project</h3>
-                <p className="text-[10px] text-[#8b949e] mt-0.5">Clone a GitHub repo into your v5.0 workspace</p>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">{modalMode === 'push' ? 'Push to GitHub' : 'Import Project'}</h3>
+                <p className="text-[10px] text-[#8b949e] mt-0.5">{modalMode === 'push' ? 'Publish your current app to one of your GitHub repos' : 'Clone a GitHub repo into your v5.0 workspace'}</p>
               </div>
               <button onClick={() => setShowImportModal(false)} className="text-zinc-500 hover:text-white">
                 <X className="w-4 h-4" />
               </button>
+            </div>
+            {/* Import / Push toggle — one connection, both directions. */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-black/40 rounded-xl border border-white/10">
+              {(['import', 'push'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setModalMode(m); setPushResult(null); }}
+                  className={`py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all ${modalMode === m ? 'bg-indigo-600 text-white' : 'text-[#8b949e] hover:text-white'}`}
+                >
+                  {m === 'import' ? 'Import' : 'Push'}
+                </button>
+              ))}
             </div>
             {/* PRIMARY: the 1-click repo picker (states: connect → loading → list/empty → error) */}
             {ghReposError === 'auth' ? (
@@ -3426,9 +3489,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       <button
                         key={r.fullName}
                         type="button"
-                        onClick={() => importRepo(r.url)}
-                        disabled={running || importSending}
-                        title={running ? 'A build is running — wait for it to finish before importing' : `Import ${r.fullName} into this workspace`}
+                        onClick={() => (modalMode === 'push' ? void pushToRepo(r.fullName) : importRepo(r.url))}
+                        disabled={running || importSending || pushBusy}
+                        title={running ? 'A build is running — wait for it to finish' : modalMode === 'push' ? `Push your current app to ${r.fullName}` : `Import ${r.fullName} into this workspace`}
                         className="w-full text-left px-3 py-2.5 hover:bg-white/5 active:bg-white/10 disabled:opacity-40 touch-manipulation"
                       >
                         <span className="flex items-center gap-2">
@@ -3442,33 +3505,63 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     ))}
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[10px] text-[#484f58]">Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.</p>
+                  <p className="text-[10px] text-[#484f58]">{modalMode === 'push' ? 'Click a repo to push your current app to it. New repos are created automatically.' : 'Click a repo — it imports, opens in Files/IDE, boots the preview, and the AI surveys it. One click.'}</p>
                   <button type="button" onClick={disconnectGh} className="shrink-0 text-[10px] text-[#8b949e] hover:text-white underline underline-offset-2 touch-manipulation">Wrong account?</button>
                 </div>
               </div>
             ) : null}
 
-            {/* SECONDARY: paste any repo URL (e.g. someone else's public repo) */}
-            <div className="pt-1 border-t border-white/10 space-y-2">
-              <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
-              <div className="flex gap-2">
+            {/* PUSH mode: an optional commit message; the click on a repo above does the real push. */}
+            {modalMode === 'push' && ghReposError !== 'auth' && (
+              <div className="pt-1 border-t border-white/10 space-y-2">
+                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Commit message (optional)</label>
                 <input
-                  type="url"
-                  value={importUrl}
-                  onChange={e => setImportUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo"
-                  className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  type="text"
+                  value={pushCommitMsg}
+                  onChange={e => setPushCommitMsg(e.target.value)}
+                  placeholder="Update from NavBharatAI Pro v5.0"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
                 />
-                <button
-                  type="button"
-                  onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
-                  disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
-                  className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
-                >
-                  Import
-                </button>
+                <p className="text-[10px] text-[#484f58]">Secrets (.env, keys, service-account files) are never pushed. If a repo already has newer commits, we ask you to import first instead of overwriting.</p>
               </div>
-            </div>
+            )}
+
+            {/* SECONDARY (import only): paste any repo URL (e.g. someone else's public repo) */}
+            {modalMode === 'import' && (
+              <div className="pt-1 border-t border-white/10 space-y-2">
+                <label className="text-[10px] font-bold text-[#8b949e] uppercase tracking-widest">Or paste a repository URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={importUrl}
+                    onChange={e => setImportUrl(e.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-[#484f58] focus:outline-none focus:border-indigo-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { const u = importUrl.trim(); if (u) { setImportUrl(''); importRepo(u); } }}
+                    disabled={running || importSending || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/.test(importUrl.trim())}
+                    className="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold rounded-xl touch-manipulation"
+                  >
+                    Import
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason). */}
+            {(pushBusy || pushResult) && (
+              <div className={`flex items-start gap-2 p-3 rounded-xl border text-[11px] ${pushResult && !pushResult.ok ? 'bg-amber-500/10 border-amber-500/20 text-amber-200' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-100'}`}>
+                {pushBusy ? <Loader2 className="w-4 h-4 animate-spin shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
+                <div className="min-w-0">
+                  <p>{pushResult?.text || 'Pushing…'}</p>
+                  {pushResult?.ok && pushResult.url && (
+                    <a href={pushResult.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all hover:text-white">{pushResult.url}</a>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

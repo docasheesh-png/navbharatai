@@ -1382,6 +1382,21 @@ export function geminiLastResortEnabled(flag: string | undefined): boolean {
   return v !== '0' && v !== 'off';
 }
 
+/**
+ * Whether Vertex/Gemini act as a PEER of the cheap floor (tried right after GLM/Kimi, BEFORE Claude)
+ * on a floor-led build — admin request 2026-07-20 ("GLM fail ho to Kimi AUR Vertex dono se kaam
+ * karwao"). Default ON. This is exactly the order the FREE tier already uses (floor → Vertex/Gemini →
+ * Haiku); this extends it to the paid/normal floor-led path. Vertex/Gemini can under-produce in the
+ * agentic tool-loop, but the readiness + tsc gates + empty-build retry-on-stronger-model catch a
+ * 0-file turn — it can never SHIP a broken build; it just adds a fallback rung before Claude.
+ * `AGENTV3_VERTEX_PEER=0`/`off` reverts to Vertex/Gemini as the absolute last resort (after Claude).
+ * Pure + exported for testing.
+ */
+export function vertexPeerBuildEnabled(flag: string | undefined): boolean {
+  const v = (flag || '').trim().toLowerCase();
+  return v !== '0' && v !== 'off';
+}
+
 export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
   // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
@@ -1786,9 +1801,17 @@ function buildTurnRunner(opts?: { geminiModel?: string; claudeFirst?: boolean; a
   // the forced-Haiku backstop — model-pinned by forceModelRunner, so it can never run Sonnet/Opus — and
   // enforceNoClaude + the ClaudeClient zone chokepoint below independently guarantee the "never never".
   // Non-free cheap-only gets floor → Haiku (no Vertex/Gemini — unchanged policy for that path).
+  // VERTEX/GEMINI AS A CHEAP-FLOOR PEER (admin 2026-07-20 "GLM fail ho to Kimi AUR Vertex dono"): on a
+  // floor-led paid build, try Vertex/Gemini right after GLM/Kimi and BEFORE Claude — the same order the
+  // free tier already uses. Only when a floor is active, claudeFirst, the fallback (Vertex/Gemini) exists,
+  // and the peer flag is on; otherwise today's chain (Vertex/Gemini as the absolute last resort) stands.
+  const vertexPeer = vertexPeerBuildEnabled(process.env.AGENTV3_VERTEX_PEER)
+    && floorRunners.length > 0 && fallback.length > 0 && claudeFirst && !cheapOnly;
   const chain = cheapOnly
     ? (opts?.free ? [...floorRunners, ...cheap, ...withBackstop] : [...floorRunners, ...withBackstop])
-    : [...floorRunners, ...baseChain];
+    : vertexPeer
+      ? [...floorRunners, ...fallback, claude, ...withBackstop] // GLM → Kimi → Vertex/Gemini → Claude → Haiku
+      : [...floorRunners, ...baseChain];
   // UNBREAKABLE WEAK-MODULE GUARD (admin absolute rule 2026-07-13, HAIKU AMENDMENT same day): a
   // weak/noClaude build can NEVER touch Sonnet/Opus. enforceNoClaude strips 'CLAUDE' from the FINAL
   // chain no matter how it was assembled — so even a heal gate that forgot to set cheapOnly cannot leak

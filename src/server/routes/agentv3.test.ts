@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1367,6 +1367,18 @@ describe('geminiLastResortEnabled — Vertex/Gemini as the true last resort, DEF
   });
 });
 
+describe('vertexPeerBuildEnabled — Vertex/Gemini as a cheap-floor PEER (admin 2026-07-20 "GLM fail → Kimi AUR Vertex")', () => {
+  it('is ON by default → floor-led build tries GLM → Kimi → Vertex/Gemini → Claude', () => {
+    expect(vertexPeerBuildEnabled(undefined)).toBe(true);
+    expect(vertexPeerBuildEnabled('')).toBe(true);
+    expect(vertexPeerBuildEnabled('1')).toBe(true);
+  });
+  it("reverts to Vertex/Gemini as the absolute last resort with '0'/'off'", () => {
+    expect(vertexPeerBuildEnabled('0')).toBe(false);
+    expect(vertexPeerBuildEnabled('off')).toBe(false);
+  });
+});
+
 describe('shutdownGraceMs (VAJRA V4-1c) — bounded grace for the SIGTERM build drain', () => {
   it('gives no grace when nothing is building (exit immediately)', () => {
     expect(shutdownGraceMs(0)).toBe(0);
@@ -1537,6 +1549,23 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     const weird = [{ name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' }, { name: 'GLM' }, { name: 'CLAUDE' }];
     const out = enforceNoClaude(weird, true).map((r) => r.name);
     expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
+  });
+
+  // REGRESSION (admin 2026-07-20, verbatim: "weak module me claude ka only haiku use hona chahiye. sonnet
+  // never!!"): the vertex-peer reorder (AGENTV3_VERTEX_PEER) assembles the chain as
+  // [...floorRunners, ...fallback, claude, ...withBackstop] = GLM → KIMI → VERTEX → GEMINI → CLAUDE → CLAUDE_HAIKU,
+  // with the Sonnet/Opus 'CLAUDE' runner MID-chain (not at the tail as the old baseChain had it). Even so — and
+  // even on the leak path where a heal gate set noClaude WITHOUT cheapOnly, so the build took this !cheapOnly
+  // vertex-peer branch — enforceNoClaude must still strip that mid-chain CLAUDE and keep ONLY the pinned Haiku last.
+  it('the vertex-peer chain shape (CLAUDE mid-chain) still yields NO Sonnet/Opus for a weak build', () => {
+    const vertexPeerChain = [
+      { name: 'GLM' }, { name: 'KIMI' }, { name: 'VERTEX' }, { name: 'GEMINI' },
+      { name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' },
+    ];
+    const out = enforceNoClaude(vertexPeerChain, true).map((r) => r.name);
+    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
+    expect(out).not.toContain('CLAUDE'); // Sonnet/Opus never — the admin's "sonnet never!!"
+    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // only Haiku, and last
   });
 });
 

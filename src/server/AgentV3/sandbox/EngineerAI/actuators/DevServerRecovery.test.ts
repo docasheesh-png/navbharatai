@@ -140,6 +140,30 @@ describe('classifyDevServerFailure — deterministic root cause + recovery from 
     expect(classifyDevServerFailure('Error: listen EADDRINUSE :::3000').cause).toBe('port_in_use');
   });
 
+  it('Prisma P1001 (DB reaped) → db_unreachable → reprovision_db (EstateNest autopsy)', () => {
+    // The EXACT EstateNest health-check log: the from-scratch Prisma+Postgres app previewed ~13 min after
+    // the build began; the provisioned Postgres was reaped, so `npm run dev` crashed on boot with P1001.
+    const d = classifyDevServerFailure(
+      "attempt 1 — The dev server crashed on startup — restarting. Error: P1001: Can't reach database server at `localhost:5432`",
+    );
+    expect(d.cause).toBe('db_unreachable');
+    expect(d.recovery).toBe('reprovision_db');
+  });
+
+  it('P1001 wins over the generic "Error:" crash branch (most-specific-first — the real bug)', () => {
+    // P1001's own line contains "Error:", which the generic crash branch also matches. Before the fix that
+    // mis-classified it as `crash`/`plain_retry`, so both attempts were wasted on futile restarts that can
+    // never revive a dead DB, ending in DB_UNREACHABLE. It MUST be db_unreachable, not crash.
+    const d = classifyDevServerFailure("Error: P1001: Can't reach database server at `localhost:5432`");
+    expect(d.cause).toBe('db_unreachable');
+    expect(d.cause).not.toBe('crash');
+  });
+
+  it('raw connection-refused on the Postgres port → db_unreachable', () => {
+    expect(classifyDevServerFailure('Error: connect ECONNREFUSED 127.0.0.1:5432').cause).toBe('db_unreachable');
+    expect(classifyDevServerFailure('could not connect to server: Connection refused\n\tIs the server running on host "localhost" and accepting TCP/IP connections on port 5432?').cause).toBe('db_unreachable');
+  });
+
   it('unrecognised / empty log → unknown → plain_retry', () => {
     expect(classifyDevServerFailure('').cause).toBe('unknown');
     expect(classifyDevServerFailure('some unrelated noise with no error').recovery).toBe('plain_retry');
@@ -154,6 +178,11 @@ describe('planDevServerRecovery — bounded, escalating, code-error short-circui
 
   it('a recoverable cause retries while attempts remain', () => {
     expect(planDevServerRecovery("Cannot find module 'x'", 1, 3).recovery).toBe('reinstall');
+  });
+
+  it('a db_unreachable cause attempts reprovision_db (not short-circuited like code_error)', () => {
+    const p = planDevServerRecovery("Error: P1001: Can't reach database server at `localhost:5432`", 1, 3);
+    expect(p.recovery).toBe('reprovision_db');
   });
 
   it('escalates to give_up once attempts are exhausted', () => {

@@ -968,7 +968,15 @@ export function deriveRootCause(input: {
   // Sandbox-unavailability is INFRA, never the app's fault — exclude it from the app-problem pick so a
   // dead sandbox can't masquerade as "tsc failed" (ShopSphere autopsy). It is surfaced honestly below.
   const isInfra = (i: BuildIssue): boolean => i.code === 'SANDBOX_UNAVAILABLE';
-  const problem = issues.find((i) => i.severity !== 'info' && !i.autoResolved && !isInfra(i))
+  // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
+  // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two
+  // benign architect `read_file`-not-found WARNINGS — reading a file before it was written, build
+  // continued fine — appeared before the real DB_UNREACHABLE ERROR that actually killed the build, and the
+  // old first-match order blamed "useAuth.ts does not exist" instead of the database. Severity now leads
+  // the pick so the report names the real killer.)
+  const problem =
+    issues.find((i) => i.severity === 'error' && !i.autoResolved && !isInfra(i))
+    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !isInfra(i))
     ?? issues.find((i) => i.severity === 'error' && !isInfra(i))
     ?? issues.find((i) => i.severity !== 'info' && !isInfra(i));
   if (problem) return problem.message;

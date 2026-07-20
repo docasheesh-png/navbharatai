@@ -21,14 +21,21 @@ describe('detectTypecheckPlan', () => {
     expect(detectTypecheckPlan(['Main.java'])[0].command).toContain('javac');
   });
 
-  it('plans BOTH for a polyglot app, and NOTHING for a TS-only app (tsc owns TS)', () => {
-    const both = detectTypecheckPlan(['a.py', 'B.java', 'pom.xml']);
-    expect(both.map((p) => p.lang).sort()).toEqual(['java', 'python']);
+  it('plans `go build ./...` when Go sources are present', () => {
+    const plans = detectTypecheckPlan(['cmd/main.go', 'internal/svc.go']);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].lang).toBe('go');
+    expect(plans[0].command).toBe('go build ./...');
+  });
+
+  it('plans ALL THREE for a polyglot app, and NOTHING for a TS-only app (tsc owns TS)', () => {
+    const all = detectTypecheckPlan(['a.py', 'B.java', 'pom.xml', 'cmd/main.go']);
+    expect(all.map((p) => p.lang).sort()).toEqual(['go', 'java', 'python']);
     expect(detectTypecheckPlan(['src/App.tsx', 'src/index.ts'])).toEqual([]);
   });
 
-  it('ignores vendored dirs (node_modules/venv/target)', () => {
-    expect(detectTypecheckPlan(['venv/lib/x.py', 'target/Gen.java'])).toEqual([]);
+  it('ignores vendored dirs (node_modules/venv/target/vendor)', () => {
+    expect(detectTypecheckPlan(['venv/lib/x.py', 'target/Gen.java', 'vendor/github.com/x/y.go'])).toEqual([]);
   });
 });
 
@@ -52,10 +59,20 @@ describe('parseTypecheckOutcome', () => {
     expect(parseTypecheckOutcome('java', 1, 'build failed', '').errorCount).toBe(1);
   });
 
+  it('go: counts "file.go:line:col:" error lines; clean exit 0 is ok', () => {
+    const o = parseTypecheckOutcome('go', 1, '# myapp/internal\ninternal/svc.go:12:6: declared and not used: x\ninternal/svc.go:20:2: undefined: Foo', '');
+    expect(o.ok).toBe(false);
+    expect(o.ran).toBe(true);
+    expect(o.errorCount).toBe(2);
+    expect(o.firstErrors[0]).toContain('.go:12:6:');
+    expect(parseTypecheckOutcome('go', 0, '', '')).toMatchObject({ ok: true, ran: true, errorCount: 0 });
+  });
+
   it('a missing tool → ran:false (honest "could not run", never a fake pass)', () => {
     expect(parseTypecheckOutcome('python', null, '', '').ran).toBe(false);
     expect(parseTypecheckOutcome('python', 127, 'python: command not found', '').ran).toBe(false);
     expect(parseTypecheckOutcome('python', 1, "ModuleNotFoundError: No module named 'mypy'", '').ran).toBe(false);
+    expect(parseTypecheckOutcome('go', 127, 'go: command not found', '').ran).toBe(false);
   });
 });
 

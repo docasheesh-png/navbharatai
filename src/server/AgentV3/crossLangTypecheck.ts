@@ -1,15 +1,15 @@
 // B6 (roadmap Tier 2A) — cross-language TYPE-CHECK. `tsc` (TscGate) already type-checks TS/JS; this
-// closes the gap for a polyglot app by planning + interpreting a Python (mypy) and Java (javac via
-// Maven/Gradle) type/compile check alongside it, so "it compiles" is judged for EVERY language the app
-// ships, not just TypeScript. Mirrors testRunner.ts (B4): PURE detection + parsing here; the actual run
-// rides the sandbox actuator (the `typecheck` tool). Advisory — reports honest error counts, never a
-// fake "clean".
+// closes the gap for a polyglot app by planning + interpreting a Python (mypy), Java (javac via
+// Maven/Gradle) and Go (`go build ./...`) type/compile check alongside it, so "it compiles" is judged for
+// EVERY language the app ships, not just TypeScript. Mirrors testRunner.ts (B4): PURE detection + parsing
+// here; the actual run rides the sandbox actuator (the `typecheck` tool). Advisory — reports honest error
+// counts, never a fake "clean".
 //
 // HONEST SCOPE: execution needs the toolchain present in the sandbox — Java IS (JDK 17 + Maven, AB-1/AB-2),
-// Python's `mypy` may need an install; a missing tool surfaces as an honest "could not run", never a fake
-// pass. Detection + command planning + output parsing are pure + fully unit-tested.
+// Python's `mypy` and Go's toolchain may need an install; a missing tool surfaces as an honest "could not
+// run", never a fake pass. Detection + command planning + output parsing are pure + fully unit-tested.
 
-export type TypecheckLang = 'python' | 'java';
+export type TypecheckLang = 'python' | 'java' | 'go';
 
 export interface TypecheckPlan {
   lang: TypecheckLang;
@@ -31,7 +31,7 @@ export interface TypecheckOutcome {
 }
 
 function hasExt(files: string[], re: RegExp): boolean {
-  return files.some((f) => typeof f === 'string' && re.test(f) && !/(^|\/)(node_modules|\.git|dist|build|target|__pycache__|venv|\.venv)\//.test(f));
+  return files.some((f) => typeof f === 'string' && re.test(f) && !/(^|\/)(node_modules|\.git|dist|build|target|__pycache__|venv|\.venv|vendor)\//.test(f));
 }
 
 /**
@@ -64,12 +64,20 @@ export function detectTypecheckPlan(files: string[], configs: Record<string, str
     else out.push({ lang: 'java', command: 'javac -d /tmp/nbi-javac $(git ls-files "*.java")', reason: 'Java sources present (plain javac)' });
   }
 
+  // Go — `go build ./...` type-checks AND compiles every package (Go has no separate type-checker; the
+  // compiler is the type check). Fails on an unused import/variable or a type mismatch, exactly like tsc.
+  if (hasExt(files, /\.go$/)) {
+    out.push({ lang: 'go', command: 'go build ./...', reason: 'Go sources present (go build type-checks + compiles every package)' });
+  }
+
   return out;
 }
 
 const MYPY_COUNT = /Found (\d+) errors?/i;
 const MYPY_ERROR_LINE = /^[^\s].*: error:/;
 const JAVAC_ERROR_LINE = /error:|\berror\b.*\.java|\[ERROR\]/i;
+// `go build` prints "path/file.go:LINE:COL: message" per error, plus a bare "# package" header line.
+const GO_ERROR_LINE = /\.go:\d+(?::\d+)?:/;
 
 /**
  * Interpret a type/compile check's raw output into an honest outcome. Pure. `exitCode` null/undefined =
@@ -83,10 +91,10 @@ export function parseTypecheckOutcome(
 ): TypecheckOutcome {
   const text = `${stdout || ''}\n${stderr || ''}`;
   // A tool-not-found / could-not-execute signal → ran:false (honest "unknown", not a pass).
-  if (exitCode === null || exitCode === undefined || /command not found|No such file|is not recognized|ModuleNotFoundError: No module named ['"]?mypy/i.test(text)) {
+  if (exitCode === null || exitCode === undefined || /command not found|No such file|is not recognized|ModuleNotFoundError: No module named ['"]?mypy|go: command not found/i.test(text)) {
     return { lang, ok: false, ran: false, errorCount: 0, firstErrors: [] };
   }
-  const lineRe = lang === 'python' ? MYPY_ERROR_LINE : JAVAC_ERROR_LINE;
+  const lineRe = lang === 'python' ? MYPY_ERROR_LINE : lang === 'go' ? GO_ERROR_LINE : JAVAC_ERROR_LINE;
   const errLines = text.split(/\r?\n/).filter((l) => lineRe.test(l.trim()));
   let errorCount = errLines.length;
   const m = text.match(MYPY_COUNT);

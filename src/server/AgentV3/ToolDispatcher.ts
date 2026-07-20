@@ -163,6 +163,7 @@ import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateCartIntegration } from '../lib/CartGenerator';
+import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3838,6 +3839,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('cart starter');
         const crtDeps = crtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a shopping-cart backend:\n${crtWritten.join('\n')}\nAdd the dependencies: ${crtDeps}\n\n${crtcfg.instructions}`;
+      }
+
+      case 'generate_reactions': {
+        // Breadth recipe (domain vertical) — emoji reactions (server/reactions/): a real ReactionService whose
+        // core guarantee is REACTION INTEGRITY (an idempotent per-user toggle, at most one emoji per target, so
+        // per-emoji counts stay exact) + an Express router. Pure gen in ReactionsGenerator.ts.
+        const rxcfg = generateReactionsIntegration();
+        const rxWritten: string[] = [];
+        for (const [path, content] of Object.entries(rxcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          rxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('reactions starter');
+        const rxDeps = rxcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an emoji-reactions backend:\n${rxWritten.join('\n')}\nAdd the dependencies: ${rxDeps}\n\n${rxcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

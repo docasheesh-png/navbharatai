@@ -1701,6 +1701,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_maintenance',
+      description:
+        'Add real maintenance mode to the app (server/lib/maintenance.ts): a dependency-free Express middleware ' +
+        'that, when on, returns 503 + Retry-After to every request EXCEPT health checks (/health,/healthz,/readyz ' +
+        'so the orchestrator does not kill the instance), with an optional operator bypass header+token and a ' +
+        'runtime setMaintenance(true/false) toggle seeded from the MAINTENANCE_MODE env. Mount it first. Use to ' +
+        'take the app down cleanly for a deploy/migration. No dependency, no third-party key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_security_headers',
       description:
         'Add real security headers to the app (server/lib/securityHeaders.ts): a dependency-free middleware ' +
@@ -2167,6 +2177,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_logging',
   'generate_file_upload',
   'generate_graceful_shutdown',
+  'generate_maintenance',
   'generate_security_headers',
   'generate_seo',
   'generate_webhook',

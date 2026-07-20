@@ -184,6 +184,7 @@ import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
 import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGenerator';
+import { generateMaintenanceIntegration } from '../lib/MaintenanceModeGenerator';
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateSeoIntegration } from '../lib/SeoGenerator';
 import { generateWebhookIntegration } from '../lib/WebhookGenerator';
@@ -4773,6 +4774,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('graceful shutdown');
         return `Wired graceful shutdown:\n${gsWritten.join('\n')}\n(No npm dependency needed — Node signals + server.close().)\n\n${gscfg.instructions}`;
+      }
+
+      case 'generate_maintenance': {
+        // Breadth recipe — maintenance mode (server/lib/maintenance.ts): dependency-free Express middleware
+        // that returns 503 + Retry-After when on, allow-lists health checks, supports a bypass token, and a
+        // runtime setMaintenance() toggle. Pure generator in MaintenanceModeGenerator.ts. Env: MAINTENANCE_MODE.
+        const mmcfg = generateMaintenanceIntegration();
+        const mmWritten: string[] = [];
+        for (const [path, content] of Object.entries(mmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          mmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('maintenance mode');
+        return `Wired maintenance mode:\n${mmWritten.join('\n')}\n(No npm dependency needed — plain Express middleware. Env: MAINTENANCE_MODE.)\n\n${mmcfg.instructions}`;
       }
 
       case 'generate_security_headers': {

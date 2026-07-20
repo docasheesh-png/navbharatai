@@ -210,7 +210,7 @@ import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
-import { userDatabaseContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
+import { userDatabaseContext, noDatabaseConnectedContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
@@ -5795,7 +5795,14 @@ export function registerAgentV3Routes(app: Express): void {
       // '' when no DB is connected, so plain builds and prompt-regression tests are unaffected.
       try {
         const dbContext = userDatabaseContext(vaultSecrets);
-        if (dbContext) architectSystem = `${dbContext}\n\n---\n\n${architectSystem}`;
+        if (dbContext) {
+          architectSystem = `${dbContext}\n\n---\n\n${architectSystem}`;
+        } else if (!isEditMode) {
+          // No database connected: on a fresh build, tell the builder to guide the user (in THEIR
+          // language) to connect their own DB at Settings → Database IF the app needs persistence.
+          // Skipped in edit mode (an established app already made its data decision).
+          architectSystem = `${noDatabaseConnectedContext()}\n\n---\n\n${architectSystem}`;
+        }
       } catch { /* connected-DB context is best-effort — a failure leaves the prompt unchanged */ }
       // P-AI.3 — Dialogue phase: give the agent a posture for this turn's lifecycle stage (debugging /
       // requirements / planning / deploy). hasExistingFiles ≈ isEditMode (an established project).

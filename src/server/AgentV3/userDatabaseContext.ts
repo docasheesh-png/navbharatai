@@ -93,3 +93,34 @@ export function userDatabaseContext(vaultSecrets: Record<string, string> | null 
       : '',
   ].filter(Boolean).join('\n');
 }
+
+/**
+ * The guidance injected when NO database is connected: if the app being built actually needs to
+ * persist data, the builder must proactively tell the user — IN THEIR OWN LANGUAGE — to connect
+ * their own database in Settings → Database (never silently use an in-memory store as the final
+ * answer, and never NavBharatAI's own database — the user owns their data). If the app does not
+ * need persistence, this is ignored. Pure + unit-tested; self-contained on the language rule so it
+ * localises correctly for any of India's 20+ languages via the model's language mirroring.
+ */
+export function noDatabaseConnectedContext(): string {
+  return [
+    '## DATABASE — NONE CONNECTED YET (guide the user if the app needs one)',
+    'The user has NOT connected their own database. IF (and ONLY IF) this app needs to PERSIST data',
+    '— accounts/login, saved records, user-generated content, orders, bookings, anything that must',
+    'survive a page refresh — then, as part of your reply, you MUST:',
+    '- Tell the user CLEARLY that this app needs a database and that they should connect their own at',
+    '  **Settings → App Settings → Database** (supported: Supabase, Firebase, MongoDB, Neon, Appwrite,',
+    '  or a custom connection string). Say in one short line WHY (so their data is saved and stays',
+    '  private to them), and that once they connect it you will wire it in automatically on the next build.',
+    '- Write this message IN THE USER\'S OWN LANGUAGE — mirror the exact language they wrote their request',
+    '  in (Hindi, Hinglish, Tamil, Telugu, Bengali, Marathi, Gujarati, Kannada, Malayalam, Punjabi,',
+    '  Odia, English, or any other) — never default to English or Hindi just because of the product.',
+    'You MUST NOT:',
+    '- Use any NavBharatAI database for the user\'s app — the user owns their data on THEIR OWN database.',
+    '- Silently ship an in-memory/local-only store AS IF it were real persistence. You MAY use a clearly',
+    '  TEMPORARY local store so the app previews now, but you must state honestly that data will NOT',
+    '  persist until they connect their own database.',
+    'If the app does NOT need persistence (a static site, a calculator, a stateless tool), IGNORE this',
+    'entirely — do not nag the user about a database they do not need.',
+  ].join('\n');
+}

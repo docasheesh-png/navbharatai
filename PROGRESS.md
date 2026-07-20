@@ -19598,3 +19598,41 @@ pagination/cache/image-opt/crud/migration-schema-depth/maturity-tier grading/fin
 **Note:** the FleetOps (App-complex) build-report autopsy is owned by a SEPARATE session/agent — not touched
 here (no duplication, no engine-file collision). This session stayed on roadmap-reconciliation + isolated
 engine-quality/test work. `ROADMAP_REMAINING.md` is the live "what's next"; ROADMAP.md stays the historical ledger.
+
+---
+
+## 2026-07-20 — Recipe breadth batch + KB-anchor conflict lesson (all merged, CI-green)
+
+Seven isolated, additive recipes shipped one-at-a-time (each: pure XGenerator.ts → 3-point wiring in
+ToolDispatcher/ToolCatalog/AppKnowledgeBase → generator test + ToolWiring guard → CI-green → merge). Engine
+untouched all session (FleetOps autopsy owned by a separate agent — no collision, per admin instruction).
+
+- **generate_graphql (#1662)** — real runnable GraphQL API (graphql + graphql-yoga): schema + mountable yoga.
+- **generate_state (#1665)** — Zustand global store + selector hooks with a correct optimistic+rollback action.
+- **generate_notification_center (#1666)** — dependency-free in-app notification center (provider + bell).
+- **generate_settings (#1667)** — settings scaffold that actually applies the theme to <html data-theme>.
+- **generate_deploy_config (#1668)** — Railway/Render/Fly platform config (render.yaml/railway.json/fly.toml).
+- **generate_integration_tests (#1671)** — real CRUD-lifecycle supertest suite + a working in-memory
+  reference app; proven green by materializing+running the emitted files against express+supertest.
+- **generate_dev_guide (#1674)** — DEVELOPER_GUIDE.md from the app's real package.json + framework-aware
+  add-a-page/route/component recipes (distinct from README/architecture docs).
+- **Ansible IaC target (#1675)** — added ansible/ (community.docker deploy) to generate_iac's include set.
+- **generate_totp (#1677)** — RFC 6238 authenticator-app 2FA, dependency-free (node:crypto); correctness
+  proven by executing the emitted totp.ts against the official RFC 6238 test vectors.
+- **generate_maintenance (#1679)** — maintenance-mode middleware (503+Retry-After, health allow-list, bypass).
+- **generate_request_id (#1681)** — correlation-id middleware (safe inbound reuse or fresh UUID).
+- **generate_soft_delete (#1683)** — trash & restore (deletedAt stamping + activeOnly/trashedOnly + SQL clauses).
+
+**Root-cause lesson (recorded so it never repeats):** running several KB-touching branches in parallel that all
+inserted their AppKnowledgeBase bullet/keyword at the SAME anchor (after 'REQUEST VALIDATION') caused a merge-
+conflict cascade — each merge re-conflicted the others (#1665/#1668/#1671 each re-resolved 2-3x). Fix, now
+standing discipline: (1) give every recipe a DISTINCT KB anchor near a thematically-related existing bullet,
+and (2) ship ONE branch at a time (CI-green → merge → next), never a parallel fan of KB-touching PRs. After
+adopting both, #1674/#1675/#1677/#1679/#1681/#1683 all merged first-try with zero conflicts.
+
+**Honest scoping calls:** 'more languages' (Rust/Rails/Laravel) left as infra-gated (E2B sandbox lacks those
+toolchains → a non-buildable framework would be a fake feature). CI '--ignore-scripts on the audit job'
+(roadmap #18) skipped as non-applicable — ci.yml has a single npm ci serving both build+audit, so adding it
+would break legitimate build postinstalls (a downgrade). Breadth recipes are now essentially exhausted; the
+remaining high-leverage roadmap work is engine-level (bounded ask_user, prompt-cache prefixes, cost-alert),
+deferred this session to avoid colliding with the autopsy agent's engine work.

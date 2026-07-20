@@ -1954,6 +1954,9 @@ export default function App() {
   // v5.0 chat input with the error and switches to it. Nonce so the SAME text re-triggers the effect
   // even if the previous fix request is still sitting in the input unsent.
   const [v3PendingFix, setV3PendingFix] = useState<{ text: string; nonce: number } | null>(null);
+  // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
+  // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
+  const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);
 
   const resumeSession = (session: ChatSession) => {
     // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
@@ -2593,6 +2596,7 @@ export default function App() {
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               pendingFix={v3PendingFix}
+              pendingDeploy={v3DeployRequest}
               /* Same FilesPanel bundle the sidebar "Files" menu uses (see ViewPanels), so the v5.0
                  "Files" tab and the sidebar "Files" are ONE feature with two gates — same component,
                  same data (uploads + v5.0 builds), same actions. */
@@ -3237,6 +3241,7 @@ export default function App() {
                 onToggleView={toggleTab}
                 onActivatePreview={handleTriggerPreviewBuild}
                 onActivateWorkspace={handleActivateWorkspace}
+                onDeployViaV5={(provider) => { setV3DeployRequest({ provider, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
               />
             )}
 

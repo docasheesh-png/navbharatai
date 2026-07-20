@@ -37,6 +37,7 @@ export interface GitViewPanelProps {
   onToggleView: (view: string) => void;
   onActivatePreview: () => void;
   onActivateWorkspace: (agent: string) => void;
+  onDeployViaV5: (provider: string) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ export function GitViewPanel({
   onToggleView,
   onActivatePreview,
   onActivateWorkspace,
+  onDeployViaV5,
 }: GitViewPanelProps) {
   const resolvedRepoContext = githubRepoContext
     ?? (selectedRepo ? { owner: selectedRepo.owner.login, repo: selectedRepo.name, branch: currentBranch } : null);
@@ -148,6 +150,7 @@ export function GitViewPanel({
             onToggleView={onToggleView}
             onActivatePreview={onActivatePreview}
             onActivateWorkspace={onActivateWorkspace}
+            onDeployViaV5={onDeployViaV5}
           />
         </div>
       </div>

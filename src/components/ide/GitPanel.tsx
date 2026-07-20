@@ -12,7 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
-import { deployCapability, sanitizeZipName, unavailableDeployMessage } from '../../lib/deployCapability';
+import { deployCapability, sanitizeZipName, unavailableDeployMessage, isV5DeployProvider } from '../../lib/deployCapability';
 
 interface GitPanelProps {
   token: string | null;
@@ -37,6 +37,8 @@ interface GitPanelProps {
   onToggleView?: (view: any) => void;
   onActivatePreview?: () => void;
   onActivateWorkspace?: (agent: string) => void;
+  /** Hand a real deploy off to NavBharatAI Pro v5.0's build+deploy pipeline for the given provider. */
+  onDeployViaV5?: (provider: string) => void;
 }
 
 interface PlatformOption {
@@ -89,7 +91,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   onAgentChange,
   onToggleView,
   onActivatePreview,
-  onActivateWorkspace
+  onActivateWorkspace,
+  onDeployViaV5
 }) => {
   const [activeTab, setActiveTab2] = useState<'sync' | 'deploy'>('deploy');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -705,6 +708,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({
         void exportStaticZip();
         return;
       default:
+        // Real one-click deploy for the providers v5.0's engine actually supports (Firebase, Vercel,
+        // Netlify, Cloudflare): hand off to v5's real build+deploy pipeline. Everything else stays
+        // honestly "not available yet" until its real provider ships.
+        if (isV5DeployProvider(selectedPlatform) && onDeployViaV5) {
+          const name = DEPLOY_PLATFORMS.find(p => p.id === selectedPlatform)?.name || selectedPlatform;
+          setDeployStatus('idle');
+          setDeployLogs([`[${new Date().toLocaleTimeString()}] 🚀 Handing off to NavBharatAI Pro v5.0 to build and deploy to ${name} — watch the live progress there.`]);
+          onDeployViaV5(selectedPlatform);
+          return;
+        }
         showDeployUnavailable();
         return;
     }

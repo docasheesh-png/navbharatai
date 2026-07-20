@@ -164,6 +164,7 @@ import { generateConsentIntegration } from '../lib/ConsentGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
+import { generateOrdersIntegration } from '../lib/OrdersGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3858,6 +3859,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('reactions starter');
         const rxDeps = rxcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an emoji-reactions backend:\n${rxWritten.join('\n')}\nAdd the dependencies: ${rxDeps}\n\n${rxcfg.instructions}`;
+      }
+
+      case 'generate_orders': {
+        // Breadth recipe (domain vertical) — ecommerce order lifecycle (server/orders/): a real OrderService
+        // whose core guarantee is ORDER IMMUTABILITY (a placed order snapshots its items + total; later price
+        // changes can't alter it) + a status STATE-MACHINE (placed→paid→shipped→delivered; cancel until ship) +
+        // an Express router. Pure gen in OrdersGenerator.ts.
+        const orcfg = generateOrdersIntegration();
+        const orWritten: string[] = [];
+        for (const [path, content] of Object.entries(orcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          orWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('orders starter');
+        const orDeps = orcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an ecommerce orders backend:\n${orWritten.join('\n')}\nAdd the dependencies: ${orDeps}\n\n${orcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

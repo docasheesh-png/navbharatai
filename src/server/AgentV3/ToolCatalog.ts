@@ -1511,6 +1511,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_orders',
+      description:
+        'Add a real ecommerce order-lifecycle backend to the app (server/orders/) — a packaged domain vertical ' +
+        'for checkout → fulfillment. The real guarantee is ORDER IMMUTABILITY + a status STATE-MACHINE: placing ' +
+        'an order captures an IMMUTABLE SNAPSHOT of its line items and total (a later catalog price change can ' +
+        'never alter a placed order; the total is the exact sum of frozen subtotals in integer minor units), ' +
+        'and it moves placed → paid → shipped → delivered along allowed transitions only (illegal jump 409), ' +
+        'with cancel allowed until it ships. Emits a dependency-free OrderService (place, get, transition, ' +
+        'cancel, listForUser) + an Express router (POST /api/orders, GET /api/orders?userId=, GET ' +
+        '/api/orders/:id, PATCH /api/orders/:id/status, POST /api/orders/:id/cancel). Distinct from generate_cart ' +
+        '(pre-checkout, mutable) and generate_payment (the charge). In-memory by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2595,6 +2609,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_activity_feed',
   'generate_cart',
   'generate_reactions',
+  'generate_orders',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -100,6 +100,7 @@ import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
+import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
@@ -2485,6 +2486,62 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — the real module dependency map + structural notes (${content.length} bytes).`;
+      }
+
+      case 'generate_dev_guide': {
+        // Roadmap BUILD-NOW #15 — a human DEVELOPER_GUIDE.md (how to run, where code lives, how to add a
+        // page/route/component/endpoint, test, deploy, troubleshoot). Distinct from generate_readme (what the
+        // app IS) and generate_architecture_docs (structure). Derived from the app's REAL package.json +
+        // env refs. Pure gen in DeveloperGuideGenerator.ts. No env keys.
+        const dgPath = optStr(input, 'path') || 'DEVELOPER_GUIDE.md';
+        // Best-effort: read the real package.json for name / scripts / framework detection.
+        let dgName = optStr(input, 'name') || '';
+        let dgScripts: DevGuideScript[] = [];
+        let dgFramework = optStr(input, 'framework') || '';
+        try {
+          const pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json');
+          const pkg = JSON.parse(pkgRaw) as { name?: string; scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+          if (!dgName && typeof pkg.name === 'string') dgName = pkg.name;
+          if (pkg.scripts && typeof pkg.scripts === 'object') {
+            dgScripts = Object.entries(pkg.scripts)
+              .filter(([n, c]) => typeof n === 'string' && typeof c === 'string')
+              .map(([n, c]) => ({ name: n, cmd: c }));
+          }
+          if (!dgFramework) {
+            const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+            if (deps.next) dgFramework = 'next';
+            else if (deps['@sveltejs/kit'] || deps.svelte) dgFramework = 'svelte';
+            else if (deps['solid-js']) dgFramework = 'solid';
+            else if (deps.vue) dgFramework = 'vue';
+            else if (deps.react) dgFramework = 'react';
+            else if (deps.express) dgFramework = 'express';
+            else dgFramework = 'node';
+          }
+        } catch {
+          // no package.json (e.g. a Python app) — fall back to inputs / generic guidance
+        }
+        // Real env keys referenced by the code (same source generate_env_example uses).
+        let dgEnvKeys: string[] = [];
+        try {
+          dgEnvKeys = this.collectEnvRefs((await this.readEvalSnapshot()).sources);
+        } catch {
+          dgEnvKeys = [];
+        }
+        const dg = generateDevGuide({
+          name: dgName || undefined,
+          framework: dgFramework || undefined,
+          packageManager: optStr(input, 'package_manager') || undefined,
+          scripts: dgScripts,
+          envKeys: dgEnvKeys,
+        });
+        const dgContent = dg.files['DEVELOPER_GUIDE.md'];
+        let dgKind: 'create' | 'modify' = 'create';
+        try { await this.actuator.readFile(this.workspaceId, dgPath); dgKind = 'modify'; } catch { dgKind = 'create'; }
+        await this.actuator.writeFile(this.workspaceId, dgPath, dgContent);
+        this.state?.recordFileChange({ path: dgPath, kind: dgKind }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(dgPath, dgContent);
+        this.scheduleCheckpoint(`${dgKind} ${dgPath}`);
+        return `${dgKind === 'create' ? 'Created' : 'Updated'} ${dgPath} — a developer onboarding guide (setup, project layout, how to add features, testing, deploy, troubleshooting).\n\n${dg.instructions}`;
       }
 
       case 'generate_env_example': {

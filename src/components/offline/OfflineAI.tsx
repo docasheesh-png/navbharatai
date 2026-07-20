@@ -14,6 +14,7 @@ import {
   parseTeaching, addMemory, removeMemory, loadMemories, saveMemories, type UserMemory,
 } from '../../lib/offlineMemory';
 import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/offlineChatStore';
+import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 
 // Lookup maps to rehydrate a reloaded bot turn's cards from their stored ids (kept out of the component
 // body so they're built once).
@@ -187,6 +188,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
   const [memories, setMemories] = useState<UserMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-28 = 112px),
+  // snaps back to 1 line when send() clears the input.
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
   const [isTouch, setIsTouch] = useState(false);
 
   useEffect(() => { setMemories(loadMemories()); }, []);
@@ -377,8 +382,9 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
             <div className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-r from-indigo-500/0 to-violet-500/0 group-focus-within:from-indigo-500/40 group-focus-within:to-violet-500/40 transition-all duration-300 blur-[2px]" />
             <div className="relative flex items-end gap-2">
               <textarea
+                ref={composerRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 112); }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
                 rows={1}
                 placeholder="Message… (ask, calculate, phone help, or teach me “remember …”)"

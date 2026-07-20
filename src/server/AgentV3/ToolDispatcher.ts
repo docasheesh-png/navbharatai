@@ -172,6 +172,7 @@ import { generateGracefulShutdownIntegration } from '../lib/GracefulShutdownGene
 import { generateSecurityHeadersIntegration } from '../lib/SecurityHeadersGenerator';
 import { generateSeoIntegration } from '../lib/SeoGenerator';
 import { generateWebhookIntegration } from '../lib/WebhookGenerator';
+import { generateWebhookSenderIntegration } from '../lib/WebhookSenderGenerator';
 import { generateEmailIntegration, isEmailProvider } from '../lib/EmailGenerator';
 import { generateStorageIntegration, isStorageProvider } from '../lib/StorageGenerator';
 import { generateRealtimeIntegration, isRealtimeProvider } from '../lib/RealtimeGenerator';
@@ -4391,6 +4392,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('webhook verification');
         return `Wired webhook signature verification:\n${whWritten.join('\n')}\n(No npm dependency needed — node:crypto.)\n\n${whcfg.instructions}`;
+      }
+
+      case 'generate_webhook_sender': {
+        // U-4 recipe — outgoing signed webhook sender (server/lib/webhookSender.ts): sendWebhook HMAC-signs the
+        // body in the same sha256=<hex> format generate_webhook verifies, with a timeout. Dependency-free.
+        const wscfg = generateWebhookSenderIntegration();
+        const wsWritten: string[] = [];
+        for (const [path, content] of Object.entries(wscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('webhook sender');
+        return `Wired outgoing webhook sender:\n${wsWritten.join('\n')}\n(No npm dependency needed — node:crypto + fetch.)\n\n${wscfg.instructions}`;
       }
 
       case 'generate_mobile_export': {

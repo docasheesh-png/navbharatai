@@ -19855,6 +19855,91 @@ suite tests/aiToolsReal.test.ts locks every dead endpoint staying dead, every mo
 and every nav mapping; pure cores have their own test files (debugAnalysis, imageGen, botFlowPrompt).
 Gate green at every phase (suite grew 8336 → 8405 tests).
 
+## 2026-07-20 — PLAN: "Speed 2.0 + 100% Preview Guarantee" (code-anchored analysis → next speed/reliability roadmap)
+
+Admin ask: analyze PROGRESS.md + the live code and lay out the plan that makes NavBharatAI **faster** and
+**100%-preview-guaranteed**, including what the competitor builders do. Everything below was cross-matched
+against the LIVE code TODAY (safeguard #1/#6); competitor techniques are raw material adapted to this
+codebase per the external-suggestion rule — never transcribed blindly.
+
+### A. Where we stand (verified today, not assumed)
+
+- **Cold-build infra tax ~90–155 s** (2026-07-19 audit, still true): E2B cold boot ≤45 s + `npm install`
+  30–90 s every build + dev-server port-wait 25 s (+40 s recovery). Biggest amplifier: the repair loop
+  (up to 3 repair+reverify cycles). Warm SANDBOX POOL is still ABSENT (resume only helps turn 2+).
+- **The sandbox-free in-browser preview is already our ace**: `/api/agentv3/inbrowser-preview`
+  (`routes/agentv3.ts:3448`) compiles React/Vue/static client-side in seconds — npm deps resolve via an
+  **esm.sh import map** (`src/server/runtime/ReactPreview.ts:58`), `@/…` aliases resolve locally, renders
+  are content-hash cached, and a backend-presence detector shows an honest "needs a Live server" banner.
+  This is the same architectural family as Bolt's in-browser execution — we already own the key piece.
+- **Streaming first-paint exists but is gated OFF**: `SimpleBuilder.onFilesReady` → merge+`file_changed`
+  behind `AGENTV3_STREAMING_PREVIEW=on` (T-SPEED.1 slice 1). Client auto-refresh chain already works.
+- **Honesty floor already law**: "Preview is EARNED" verify gates (`SimpleBuilder.ts:818`,
+  `RunnabilityAnalysis.ts`), empty/unrendered/failed builds are never billed, runtime autofix
+  (`AGENTV3_AUTOFIX=on`) repairs captured console errors.
+- **Open roadmap items that serve this goal** (ROADMAP_REMAINING.md): AP-4 sub-agent parallelism +
+  merged heal pass (20 → 5–7 min class win), AP-5 GLM/Kimi prompt-cache stable prefixes, template
+  gallery, GA-4 incremental build skip (E2B-volume blocked), Lighthouse-over-live-preview (infra-blocked).
+
+### B. What the competitors do (analysis → adapt or reject)
+
+| Technique | Who | Verdict for NavBharatAI |
+|---|---|---|
+| Run Node fully in-browser (WebContainers) | Bolt/StackBlitz | License-blocked (V4-6) — but our esm.sh in-browser preview is the sovereign equivalent for FRONTEND; double down on it as the guaranteed first rung. |
+| Pre-verified component/block registry the LLM composes by reference | v0 | ADAPT — we already have ~40 tested server-side recipe generators; formalize them as a composable "verified blocks" layer (fewer tokens, fewer bugs, preview-safe by construction). |
+| Template-first + persistent per-project sandbox | Lovable | ADAPT — TemplateRegistry (25+ scaffolds) exists; make template-delta generation the default fast path; sandbox resume already ON. |
+| Always-on VM + env caching + checkpoints | Replit | Partially blocked (infra $$); the cheap version = warm pool + dependency pre-bake in the E2B template. |
+| Stream code → progressive HMR paint | all of them | ADAPT — slice 1 shipped; make it default + per-tier. |
+| Error overlay auto-fed to the AI | Lovable/Bolt | ALREADY OURS (`console_errors` + AGENTV3_AUTOFIX + "Fix with AI"). |
+
+### C. The plan (4 pillars, each slice env-gated default-off, shipped via the normal cycle)
+
+**Pillar 1 — Time-to-first-paint < 10 s (perceived speed):**
+1.1 Canary `AGENTV3_STREAMING_PREVIEW=on` (code is shipped + tested; needs the admin to set the env) →
+    watch a few real builds → default-ON in code once clean.
+1.2 T-SPEED.1 slice 2: per-TIER file emission (paint after tier 0/1, not only after the full heal).
+1.3 **Instant blueprint paint (out-of-the-box)**: the moment the PLAN exists, render a wireframe skeleton
+    (pages/nav/sections derived from the plan JSON) into the in-browser preview with an honest
+    "blueprint — building the real app…" label. User sees THEIR app's shape in ~5 s. Pure client render,
+    zero extra LLM cost, honest by construction.
+
+**Pillar 2 — Kill the ~90–155 s infra tax (real speed):**
+2.1 **Speculative sandbox warmup**: fire `Sandbox.create` + template-dep install AT PLAN TIME, in parallel
+    with LLM generation (today the sandbox work starts after files exist). Overlap ≈ the whole cold-boot +
+    much of the install disappears from perceived wall-clock. Bounded: reuse-or-kill on build abort.
+2.2 **Warm sandbox pool** (the one missing piece named in the 07-19 audit): N pre-created template-baked
+    sandboxes, env-capped (`AGENTV3_WARM_POOL=0` default), claimed on first build → cold boot ~0 s.
+2.3 **Dependency pre-bake**: bake the standard scaffold's `node_modules` into the E2B template image so
+    `npm install` is delta-only (`--prefer-offline`); measure before/after in the build report.
+
+**Pillar 3 — Generate less, generate parallel (model-side speed):**
+3.1 AP-5 prompt-cache stable prefixes for GLM/Kimi (cache-hit speed+cost win on the cheap floor).
+3.2 AP-4 frontend/backend sub-agent parallelism + ONE merged heal pass instead of 4 serial gate rounds.
+3.3 **Verified-blocks composition (v0-adapted)**: teach the builder to pull our tested recipe outputs
+    (auth/CRUD/dashboard/RBAC/i18n/…) by reference and generate only the domain delta.
+3.4 Template-delta default: pick the TemplateRegistry scaffold first; LLM writes only what differs.
+
+**Pillar 4 — 100% preview guarantee (formal, measured, never faked):**
+4.1 **The preview ladder, formalized**: rung 1 in-browser (seconds, sandbox-free, ALWAYS attempted) →
+    rung 2 sandbox live server (full fidelity) → rung 3 deployed URL. "100%" means: rung 1 must render
+    on every successful build, and every rung failure degrades to the rung below with an honest banner —
+    never a blank hole. (The honest-state law: a guarantee we can't meet is SHOWN, not hidden.)
+4.2 **Per-module fallback rendering (out-of-the-box)**: if ONE generated file fails to compile in-browser,
+    render the rest of the app with an error boundary naming the failing file (today one bad file can
+    blank the whole preview). Compile-per-file infrastructure already exists in ReactPreview.
+4.3 **Preview SLO telemetry**: record `preview_first_paint_ms` + `preview_ok` per build into the (admin)
+    build report — the guarantee becomes a measured number, not a claim.
+4.4 **Preview resurrect**: an expired sandbox preview (dead E2B URL on an old build) auto-falls back to
+    the in-browser render of the stored files + one-click "wake the live server" → old builds never look dead.
+
+### D. Sequencing (conveyor order — quick wins first)
+
+1) 1.1 canary (env-only) + 4.3 telemetry + 2.1 speculative warmup → 2) 3.1 AP-5 + 4.2 fallback render →
+3) 1.2 per-tier streaming + 4.4 resurrect → 4) 3.3/3.4 blocks+template-delta → 5) 3.2 AP-4 parallelism
+(biggest, riskiest — design-first per safeguard #3) → 6) 2.2/2.3 pool + pre-bake (needs E2B cost sign-off).
+Every slice: cross-match live code first, env-gated default-off, regression-tested, honest states, and the
+moat (routing/billing honesty/white-label/coherence) untouched.
+
 ---
 
 ## 2026-07-20 — Domain-vertical conveyor + bundle-budget root cause (session claude/upgrade-md-review-vxbdy0)

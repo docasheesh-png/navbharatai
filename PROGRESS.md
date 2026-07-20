@@ -19478,3 +19478,33 @@ Continued Tier-3 with the other safe slice. Closes the audit's Code-Quality ❌ 
 Batched onto PR #1645 (maturity-tier + code-smells, CI in background). **Tier-3 safe slices done** (grading +
 code-smells); the remaining Tier-3 (large-scale multi-file, MCP/plugins/SDK/CLI, Railway/Render deploy) are
 the heavy/risky items flagged for a focused, discussed effort — not tail-end rushes.
+
+---
+
+## 2026-07-19 — T3 large-scale multi-file, PHASE 1 (design-first, admin-approved) — scoped codemods
+
+The heavy Tier-3 item was taken design-first (safeguard #3): a design doc laid out the root cause + approach
++ risk + test plan for admin review; on the go-ahead, Phase 1 shipped.
+
+**Root cause (grounded):** `codemod_rename` (`ToolDispatcher.ts:4870`) and `codemod_add_prop` (`:4902`) read a
+BLIND `.slice(0, 50)` of files, so on a 200/1000/5000-file app the refactor was INCOMPLETE — files 51…N kept
+the OLD name → a broken build, reported as a fake success (rule-2 violation). `codemod_move_file` already
+showed the right, un-capped, graph-scoped pattern.
+
+**Phase 1 shipped (the right bound is RELEVANCE, not a count):**
+- `src/server/AgentV3/codemodScope.ts` — pure `containsSymbol(content, symbol)` (whole-identifier-token match,
+  so renaming `User` isn't triggered by `UserProfile`; regex-safe; falls back to substring rather than ever
+  wrongly EXCLUDING) + `scopeFilesForSymbol(files, symbol)` (a superset gate — never drops a real usage).
+- Both codemod cases now stream-read code files and KEEP only those referencing the symbol, then run the
+  precise AST codemod on that shortlist (usually far under 50), with a 2000 safety cap that reports an
+  HONEST truncation ("N more exceeded the cap — re-run") instead of a silent drop, and a 6000-file I/O bound.
+  **Kill switch `AGENTV3_CODEMOD_SCOPED=off` restores the exact legacy 50-file behaviour, no deploy** — so
+  worst case is instantly revertible to today.
+- Regression suite: the headline test builds a 65-file workspace where 56 reference the symbol → scope
+  returns all 56 (past the old 50 cap) and `renameSymbol` renames every one, leaving zero old-name refs;
+  plus whole-token vs substring, superset-gate, regex-safety, and never-throws cases. Gate green: server
+  `tsc` + `vitest` codemodScope 5/5 + ToolDispatcher 145/145.
+
+Closes the audit's "200/1000/5000-file edits" ❌ for rename/add-prop. Phase 2 (chunked/bounded for very large
+shortlists) and Phase 3 (semantic long-context) remain as separate, smaller follow-ups per the design doc.
+Fresh branch off `d7ee19d`, own PR.

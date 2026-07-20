@@ -973,6 +973,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_graphql',
+      description:
+        'Add a real runnable GraphQL API to the app (server/graphql/schema.ts + yoga.ts, graphql + ' +
+        'graphql-yoga). Emits a schema-first setup with a WORKING example (a Query health/items/item, a typed ' +
+        'Item, and an addItem Mutation with input validation) plus a one-line-mountable yoga handler (Express: ' +
+        'app.use(yoga.graphqlEndpoint, yoga)). GraphiQL explorer is on in dev. Use when the user wants a ' +
+        'GraphQL (not REST) backend; extend the SDL + resolvers and swap the demo store for your DB. No env key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_crud',
       description:
         'Generate a COMPLETE REST CRUD resource for one entity on Prisma: a zod validation schema, plus an ' +
@@ -1475,6 +1485,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         },
         required: ['provider'],
       },
+    },
+    {
+      name: 'generate_notification_center',
+      description:
+        'Add a real IN-APP notification center to the frontend (src/notifications/, dependency-free React): a ' +
+        'NotificationsProvider (add / mark-read / mark-all-read / unread count, persisted to localStorage) + a ' +
+        'useNotifications hook + a NotificationBell component (unread badge + accessible dropdown + honest ' +
+        'empty state). Wrap the app in <NotificationsProvider>, drop <NotificationBell/> in the header, and ' +
+        "call add({ title, body }) anywhere. This is the IN-APP center; for OUTBOUND email/SMS/push use " +
+        'generate_notify. No dependency, no env key.',
+      input_schema: { type: 'object', properties: {} },
     },
     {
       name: 'generate_env_validation',
@@ -1988,6 +2009,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_crud',
+  'generate_graphql',
   'generate_pagination',
   'generate_rbac',
   'generate_ids',
@@ -2043,6 +2065,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_weather',
   'generate_datetime',
   'generate_notify',
+  'generate_notification_center',
   'generate_env_validation',
   'generate_cors',
   'generate_csrf',

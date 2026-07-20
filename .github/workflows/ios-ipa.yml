@@ -60,9 +60,14 @@ on:
         type: boolean
         default: false
       apple_signin:
-        description: 'Enable native "Sign in with Apple" (needs the Firebase Apple provider enabled first; this run will enable the App-ID capability via the API key)'
+        # DEFAULT TRUE (root-cause fix, admin 2026-07-20): "Sign in with Apple" is a SHIPPED user-facing
+        # capability. When this defaulted to false, a routine rebuild triggered without inputs silently
+        # dropped the applesignin entitlement and broke Apple login for every updated user (real
+        # incident: the 2026-07-20 rebuild). A shipped capability must be opt-OUT, never opt-in.
+        # Prerequisites (App-ID capability + Firebase Apple provider) are one-time and already done.
+        description: 'Include native "Sign in with Apple" (default ON — it is a shipped capability; untick only to intentionally build without it)'
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build-ios:

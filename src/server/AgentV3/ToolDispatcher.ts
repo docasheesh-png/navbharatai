@@ -180,6 +180,7 @@ import { generateUpiIntegration } from '../lib/UpiGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
+import { generateSoftDeleteIntegration } from '../lib/SoftDeleteGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -4703,6 +4704,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('audit log');
         return `Wired tamper-evident audit log:\n${auditWritten.join('\n')}\n(No npm dependency — node:crypto hash chain; you back it with your own DB store.)\n\n${auditcfg.instructions}`;
+      }
+
+      case 'generate_soft_delete': {
+        // Breadth recipe — soft delete / trash & restore (server/lib/softDelete.ts): dependency-free,
+        // storage-agnostic softDelete/restore/isDeleted + activeOnly/trashedOnly filters + SQL WHERE clauses.
+        // Pure generator in SoftDeleteGenerator.ts. No env keys.
+        const sdcfg = generateSoftDeleteIntegration();
+        const sdWritten: string[] = [];
+        for (const [path, content] of Object.entries(sdcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          sdWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('soft delete');
+        return `Wired soft delete (trash & restore):\n${sdWritten.join('\n')}\n(No npm dependency — plain deletedAt stamping + SQL clause helpers.)\n\n${sdcfg.instructions}`;
       }
 
       case 'generate_image': {

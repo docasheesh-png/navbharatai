@@ -1614,6 +1614,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_webhook_sender',
+      description:
+        'Add a real OUTGOING webhook sender to the app (server/lib/webhookSender.ts): a dependency-free ' +
+        'sendWebhook(url, payload, secret, { event }) for when YOUR app lets customers subscribe to events. It ' +
+        'HMAC-SHA256 signs the JSON body as "X-Webhook-Signature: sha256=<hex>" (the exact format ' +
+        'generate_webhook verifies, so subscribers can confirm it is really you), enforces a timeout so a slow ' +
+        'subscriber cannot hang your server, and returns { ok, status } without throwing (retry on !ok). The ' +
+        'send/verify pair to generate_webhook. No dependency (node:crypto + fetch); no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pdf',
       description:
         'Add real PDF generation to the app (server/lib/pdf.ts, pdfkit): a server createInvoicePdf(...) ready ' +
@@ -2021,6 +2032,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_security_headers',
   'generate_seo',
   'generate_webhook',
+  'generate_webhook_sender',
   'generate_qr',
   'generate_upi',
   'generate_pdf',

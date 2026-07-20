@@ -660,6 +660,23 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_deploy_config',
+      description:
+        'Add a platform deploy config for a git-push PaaS: target "render" (render.yaml Blueprint), ' +
+        '"railway" (railway.json, Nixpacks + health check + restart policy), or "fly" (fly.toml, http_service ' +
+        '+ health check). Emits the ONE config file that target needs (references /health + PORT). HONEST: it ' +
+        'generates config — the user deploys from their OWN account (BYO), it does not auto-deploy. Use when ' +
+        'the user wants to deploy to Railway/Render/Fly. (One-click deploy exists for Firebase/Vercel/Netlify/' +
+        'Cloudflare; AWS/Azure need full IaC — use generate_iac.) Pairs with generate_deploy_artifacts (Dockerfile).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', enum: ['railway', 'render', 'fly'], description: 'The PaaS target to emit config for.' },
+        },
+        required: ['target'],
+      },
+    },
+    {
       name: 'generate_deploy_artifacts',
       description:
         'Generate deployment artifacts for the app and write them to the workspace: a production ' +
@@ -2039,6 +2056,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tracing',
   'find_code_smells',
   'generate_deploy_artifacts',
+  'generate_deploy_config',
   'generate_iac',
   'scan_vulnerabilities',
   'check_licenses',

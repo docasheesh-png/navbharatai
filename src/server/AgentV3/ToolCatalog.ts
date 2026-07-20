@@ -1087,6 +1087,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_booking',
+      description:
+        'Add a real booking/appointment backend to the app (server/booking/) — a packaged domain vertical for ' +
+        'clinics, salons, tutors, consultants. The real guarantee is correct DOUBLE-BOOKING PREVENTION: a slot ' +
+        'holds at most one confirmed booking and cancelling frees it. Emits a dependency-free BookingService ' +
+        '(book / cancel / isSlotAvailable / list) + an Express router (POST /bookings → 409 if the slot is ' +
+        'taken, GET /bookings filterable, GET /slots/:id/available, DELETE /bookings/:id) + a README. In-memory ' +
+        'by default — swap the store for your DB (same contracts). Slots are defined by your app; pairs with ' +
+        'the OTP/payment/notification recipes for a full flow.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pagination',
       description:
         'Add real, DoS-safe list pagination to the app (server/lib/pagination.ts): dependency-free ' +
@@ -2129,6 +2141,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_crud',
+  'generate_booking',
   'generate_graphql',
   'generate_pagination',
   'generate_rbac',

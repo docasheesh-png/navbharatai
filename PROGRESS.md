@@ -19478,3 +19478,44 @@ Continued Tier-3 with the other safe slice. Closes the audit's Code-Quality ❌ 
 Batched onto PR #1645 (maturity-tier + code-smells, CI in background). **Tier-3 safe slices done** (grading +
 code-smells); the remaining Tier-3 (large-scale multi-file, MCP/plugins/SDK/CLI, Railway/Render deploy) are
 the heavy/risky items flagged for a focused, discussed effort — not tail-end rushes.
+
+---
+
+## 2026-07-20 — Recipe/fix batch: 5 new U-4 recipes + 1 root-cause fix (6 PRs merged)
+
+Continued the BYO-recipe breadth conveyor. Shipped six PRs, each branch → verify gate → PR → CI green →
+self-merge (CI ran in the background through a multi-hour GitHub REST 503 outage; drained the queue the
+moment the API recovered). Combined `main` re-verified locally after the batch: ToolWiring guard pass,
+22 generator tests pass, server + frontend `tsc` clean.
+
+**New recipes (each = pure `XGenerator.ts` + emitted-runnable test + 3-point wiring at a DISTINCT anchor
++ generator test + the `ToolWiring` structural guard; all dependency-free unless noted):**
+- **#1649 `generate_http_client`** — resilient `fetchJson(url,{timeoutMs})` + `HttpError`. Fixes the three
+  classic bare-`fetch` bugs (no timeout → hang; 4xx/5xx read as success; forgot to parse). Native
+  fetch + AbortController. Pairs with `generate_retry`. (Supersedes the outage-stranded, force-rebased
+  #1643, which GitHub refused to reopen → fresh PR.)
+- **#1647 `generate_upi`** — India-first UPI payment deep-link (`upi://pay?...`) that opens
+  GPay/PhonePe/Paytm/BHIM for a real payment to the merchant's own VPA — keyless, no gateway. `buildUpiLink`
+  (URL-encoded, amount→2dp, INR) + `isValidVpa`. Pairs with `generate_qr` for scan-to-pay.
+- **#1648 `generate_audit`** — tamper-evident hash-chained audit log. `appendAudit(store,{actor,action,…})`
+  chains SHA-256 prevHash→hash; `verifyAuditChain` returns the first tampered seq (detects edits AND
+  deletions). Storage-agnostic (caller supplies `{last(),save()}`).
+- **#1650 `generate_webhook_sender`** — outgoing signed webhook `sendWebhook(url,payload,secret,{event})`;
+  HMAC-SHA256 `sha256=<hex>` signature interoperates with the incoming `generate_webhook` verifier
+  (runtime-verified: right secret accepts, wrong rejects); AbortController timeout; never throws.
+- **#1644** — added the ~22 new recipes to the builder's systemPrompt "reach for the real generator"
+  needs→tool map so the whole session's recipes are actually reachable by AgentV3 (leverage fix).
+
+**Root-cause fix (rule 2/3/4):**
+- **#1646 `rupeesInWords`** — while scoping an "amount in words" recipe I found `money_format` ALREADY had
+  that capability, so instead of shipping a drifting duplicate I fixed the existing (buggy) one IN PLACE:
+  (1) `twoDigits(crore)` emitted "undefined" for ≥100 crore → now the crore group RECURSES; (2) paise were
+  dropped (`Math.floor`) → now rounded + "… and NN Paise"; (3) added the legal "Rupees … Only" suffix.
+  Locked with an EMITTED regression test (`money.test.ts`) encoding the exact failure
+  (`1250000000 → "One Hundred Twenty Five Crore Rupees Only"`, asserts no "undefined").
+
+**Process notes:** distinct-anchor discipline held — all 6 branches merged with zero cross-conflict. The
+"amount in words" episode is the redundant-work rule (safeguard #6) working as intended: audit-before-build
+turned a would-be duplicate into a real bug fix. No `.aab` rebuilt — this batch is backend generator
+capability only (invisible to the Capacitor web-app shell), so a store build would be over-building per the
+Play-release judgement rule.

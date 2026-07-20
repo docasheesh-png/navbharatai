@@ -1424,6 +1424,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_short_links',
+      description:
+        'Add a real URL shortener backend to the app (server/shortlinks/) — a packaged domain vertical for ' +
+        'marketing links, sharing and QR targets. The real guarantee is LINK INTEGRITY: shorten() makes a ' +
+        'UNIQUE code (auto-generated codes retry on the rare collision; a custom alias is rejected if taken or ' +
+        'malformed; only http(s) URLs accepted); resolve() returns the target and increments an EXACT click ' +
+        'count but returns null for an unknown/disabled/EXPIRED code (so the route 404s instead of redirecting); ' +
+        'peek() previews without counting. Emits a dependency-free ShortLinkService (shorten, resolve, peek, ' +
+        'setActive, remove, list; node:crypto only) + an Express router (POST /api/links → 409 on a taken alias, ' +
+        'GET /api/links/:code stats, PATCH/DELETE /api/links/:code, and the public GET /:code → 302 redirect + ' +
+        'click, 404 if not live). Mount at the ROOT so links look like https://yourdomain/:code. Pairs with ' +
+        'generate_qr. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2502,6 +2517,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_waitlist',
   'generate_tags',
   'generate_experiments',
+  'generate_short_links',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -1378,6 +1378,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_waitlist',
+      description:
+        'Add a real launch waitlist backend to the app (server/waitlist/) — a packaged domain vertical for ' +
+        'product launches, beta access, drops and any "get in line" flow. The real guarantee is QUEUE ' +
+        'INTEGRITY: join() dedups by email (case-insensitive) so a repeat join returns the SAME stable entry ' +
+        '(never a duplicate); position() is a contiguous 1..n over the people still WAITING in join order; ' +
+        'invite(n) moves the front n waiting entries (in order) to invited, after which the remaining queue ' +
+        're-numbers correctly. Emits a dependency-free Waitlist (join, get, position, invite, remove, list) + an ' +
+        'Express router (POST /waitlist → idempotent join with position, GET /waitlist/:email, POST ' +
+        '/waitlist/invite {n}, GET /waitlist?status=, DELETE /waitlist/:email). Captures referredBy for ' +
+        'referral-boosted launches (pairs with generate_referrals). In-memory by default — swap the store for ' +
+        'your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2453,6 +2468,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_kanban',
   'generate_timesheet',
   'generate_leaderboard',
+  'generate_waitlist',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

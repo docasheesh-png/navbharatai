@@ -1217,6 +1217,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_referrals',
+      description:
+        'Add a real referral / invite backend to the app (server/referrals/) — a packaged growth vertical for ' +
+        'any app that wants viral invites. The real guarantee is ATTRIBUTION INTEGRITY: every user gets ONE ' +
+        'stable unique referral code, a new user can be attributed to AT MOST ONE referrer (self-referral, an ' +
+        'unknown code, and double-attribution are rejected), and the referrer is credited EXACTLY ONCE when the ' +
+        'referred user completes the qualifying event (a retried completion never double-credits). Emits a ' +
+        'dependency-free ReferralService (codeFor, attribute, complete, statsFor, listFor) + an Express router ' +
+        '(GET /referrals/:user/code, POST /referrals/attribute → 409 on self/unknown/already-referred, POST ' +
+        '/referrals/:referred/complete, GET /referrals/:referrer/stats). Pay rewards off statsFor().completed. ' +
+        'Take the user id from the authenticated session in production. In-memory by default — swap the store ' +
+        'for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2281,6 +2296,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_blog',
   'generate_reviews',
   'generate_loyalty',
+  'generate_referrals',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

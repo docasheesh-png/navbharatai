@@ -1641,6 +1641,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_upi',
+      description:
+        'Add a real UPI payment deep-link to the app (src/lib/upi.ts) — India-first, dependency-free, NO API ' +
+        'key and NO payment gateway. buildUpiLink({ payeeVpa, payeeName, amount?, note? }) returns a ' +
+        '`upi://pay?...` intent link that opens GPay/PhonePe/Paytm/BHIM directly for a real payment to the ' +
+        "merchant's OWN VPA; isValidVpa(vpa) validates the address; omit amount for an open collect link. " +
+        'Params are URL-encoded and the amount is fixed to 2 decimals (UPI spec), so the link works on the ' +
+        'first tap. Pair with generate_qr (generateQr(link)) for scan-to-pay. Use this for direct merchant ' +
+        'collection; for a gateway with webhooks/refunds use generate_payment instead.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_mobile_export',
       description:
         'Wrap the generated web app as a native mobile (Android/iOS) project using Capacitor: emits a ' +
@@ -1998,6 +2010,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_seo',
   'generate_webhook',
   'generate_qr',
+  'generate_upi',
   'generate_pdf',
   'generate_csv',
   'generate_image',

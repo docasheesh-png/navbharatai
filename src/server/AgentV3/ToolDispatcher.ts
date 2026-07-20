@@ -131,6 +131,7 @@ import { generateSchedulerIntegration } from '../lib/SchedulerGenerator';
 import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
+import { generateApiVersionIntegration } from '../lib/ApiVersionGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4102,6 +4103,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('rate-limit integration');
         const rlDeps = rlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired ${rlStore}-store API rate limiting:\n${rlWritten.join('\n')}\nAdd the dependencies: ${rlDeps}\n\n${rlcfg.instructions}`;
+      }
+
+      case 'generate_api_versioning': {
+        // Breadth recipe — API versioning middleware (server/lib/apiVersion.ts): resolves the requested
+        // version from X-API-Version/Accept-Version, validates against the supported list (406 when unknown),
+        // defaults + echoes it. Dependency-free. Pure generator in ApiVersionGenerator.ts. No env keys.
+        const avcfg = generateApiVersionIntegration();
+        const avWritten: string[] = [];
+        for (const [path, content] of Object.entries(avcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          avWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('api versioning');
+        return `Wired API versioning:\n${avWritten.join('\n')}\n(No npm dependency needed — plain Express middleware.)\n\n${avcfg.instructions}`;
       }
 
       case 'generate_error_tracking': {

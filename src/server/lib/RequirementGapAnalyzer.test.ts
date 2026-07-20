@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeRequirementGaps, renderRequirementGaps } from './RequirementGapAnalyzer';
+import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps } from './RequirementGapAnalyzer';
 
 describe('analyzeRequirementGaps', () => {
   it('detects healthcare and flags likely-missing RBAC/audit/EMR for a bare prompt', () => {
@@ -37,5 +37,12 @@ describe('analyzeRequirementGaps', () => {
     const out = renderRequirementGaps(analyzeRequirementGaps('Build an online store'));
     expect(out).toContain('Likely domain: ecommerce');
     expect(out).toMatch(/Questions to confirm|covers the usual/);
+  });
+
+  it('shouldSurfaceRequirementGaps is true for a real domain with gaps, false for a generic prompt', () => {
+    // A bare healthcare prompt leaves most features implicit → worth surfacing in the build report.
+    expect(shouldSurfaceRequirementGaps(analyzeRequirementGaps('build a hospital system'))).toBe(true);
+    // No domain detected → general → nothing domain-specific to surface (keeps the report high-signal).
+    expect(shouldSurfaceRequirementGaps(analyzeRequirementGaps('make me a thing'))).toBe(false);
   });
 });

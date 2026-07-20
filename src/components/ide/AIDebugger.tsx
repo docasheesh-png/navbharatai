@@ -4,6 +4,7 @@ import {
   Loader2, Clock, X, History, Shield,
   Lightbulb, Search, Code2, CheckCircle2
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
@@ -516,10 +517,7 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files }) => {
           {isLoading && (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <div className="flex items-center gap-2">
-                <Loader2
-                  className="w-5 h-5 animate-spin"
-                  style={{ color: '#818cf8' }}
-                />
+                <TirangaLoader className="w-5 h-5" />
                 <span className="text-sm font-medium" style={{ color: '#818cf8' }}>
                   Analyzing error...
                 </span>

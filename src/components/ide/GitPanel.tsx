@@ -9,6 +9,7 @@ import {
   Play, Server, Trash2, Cpu, FileText, Download, 
   Copy, AlertTriangle, ChevronDown, Sparkles, Clock, Lock, Unlock, ArrowUpRight
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { TEMPLATE_PROJECTS } from './SyncedTemplates';
@@ -1499,7 +1500,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
               >
                 {deployStatus === 'validating' || deployStatus === 'building' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <TirangaLoader className="w-4 h-4 text-white" />
                     Executing Push Pipeline...
                   </>
                 ) : (
@@ -1849,7 +1850,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
             <div className="flex-1 flex flex-col min-h-0 border border-white/5 rounded-xl p-2.5 space-y-2 bg-black/10 select-none overflow-hidden">
               <div className="flex items-center justify-between shrink-0">
                 <span className="text-[8.5px] font-black text-[#8b949e] uppercase tracking-wider px-1">Available Apps / Projects</span>
-                {isFetchingProjects && <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />}
+                {isFetchingProjects && <TirangaLoader className="w-3 h-3 text-indigo-400" />}
               </div>
 
               {/* Project Search Bar */}

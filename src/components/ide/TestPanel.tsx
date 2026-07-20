@@ -3,6 +3,7 @@ import {
   CheckCircle2, Clock, Play, Plus, AlertCircle,
   RefreshCcw, Loader2, ChevronDown, ChevronRight, Trash2, X
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { recordRun, isFlaky, loadHistory, serializeHistory, type TestRunHistory, FLAKY_STORAGE_KEY } from '../../lib/flakyTests';
 
@@ -108,7 +109,7 @@ function buildIframeSrc(appHtml: string, tests: TestCase[]): string {
 const StatusIcon: React.FC<{ status: TestCase['status'] }> = ({ status }) => {
   if (status === 'pass') return <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />;
   if (status === 'fail') return <X className="w-4 h-4 text-red-400 shrink-0" />;
-  if (status === 'running') return <Loader2 className="w-4 h-4 text-yellow-400 shrink-0 animate-spin" />;
+  if (status === 'running') return <TirangaLoader className="w-4 h-4 shrink-0" />;
   if (status === 'skip') return <AlertCircle className="w-4 h-4 text-gray-500 shrink-0" />;
   return <Clock className="w-4 h-4 text-gray-500 shrink-0" />;
 };
@@ -248,7 +249,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
           )}
         >
           {running
-            ? <Loader2 className="w-3 h-3 animate-spin" />
+            ? <TirangaLoader className="w-3 h-3" />
             : <Play className="w-3 h-3" />
           }
           {running ? 'Running…' : 'Run All'}
@@ -389,7 +390,7 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
         {failCount > 0 && <span className="text-red-500">{failCount} failed</span>}
         {running && (
           <span className="flex items-center gap-1 text-yellow-400 ml-auto">
-            <Loader2 className="w-3 h-3 animate-spin" /> Running tests…
+            <TirangaLoader className="w-3 h-3" /> Running tests…
           </span>
         )}
       </div>

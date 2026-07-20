@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, RefreshCw, Copy, Star, Info, X, Check, Download, Play, Lightbulb } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 type Severity = 'critical' | 'warning' | 'info' | 'suggestion';
 type Category = 'bugs' | 'performance' | 'security' | 'bestpractice' | 'accessibility';
@@ -405,7 +406,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
             disabled={reviewing || !generatedCode.trim()}
             className="flex items-center gap-1.5 text-sm px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-medium transition-all"
           >
-            {reviewing ? <><RefreshCw className="w-4 h-4 animate-spin" /> Analyzing...</> : <><Play className="w-4 h-4" /> Review Code</>}
+            {reviewing ? <><TirangaLoader className="w-4 h-4" /> Analyzing...</> : <><Play className="w-4 h-4" /> Review Code</>}
           </button>
         </div>
       </div>
@@ -442,7 +443,7 @@ export function AICodeReview({ generatedCode, onCodeUpdate }: Props) {
           {reviewing && (
             <div className="flex flex-col items-center gap-3 py-4 text-center">
               <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center border border-red-500/20 animate-pulse">
-                <RefreshCw className="w-7 h-7 text-red-400 animate-spin" />
+                <TirangaLoader className="w-7 h-7" />
               </div>
               <p className="text-xs text-white/40">Analyzing code...</p>
             </div>

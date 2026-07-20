@@ -22,6 +22,7 @@ import {
   Loader2,
   QrCode,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -482,7 +483,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                     disabled={inviting}
                     className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg px-3 py-2 flex items-center justify-center gap-1.5 transition-colors"
                   >
-                    {inviting ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                    {inviting ? <TirangaLoader size={14} /> : <Mail size={14} />}
                     {inviting ? 'Sending...' : 'Invite'}
                   </button>
                 </div>
@@ -691,7 +692,7 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
                     disabled={regenerating}
                     className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border transition-colors ${confirmRegenerate ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300 hover:bg-yellow-500/20' : 'border-white/10 text-gray-400 hover:bg-white/5'}`}
                   >
-                    {regenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    {regenerating ? <TirangaLoader size={12} /> : <RefreshCw size={12} />}
                     {confirmRegenerate ? 'Confirm Regenerate' : 'Regenerate Link'}
                   </button>
                   {confirmRegenerate && (

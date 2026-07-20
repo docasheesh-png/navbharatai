@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Kanban, CalendarDays, Milestone, Target, Flag, Trophy, Plus, Trash2, Edit2, Check, X, Sparkles, ChevronRight, Clock, User, AlertCircle, CheckCircle2, BarChart2, Loader2 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 type Status = 'todo' | 'inprogress' | 'review' | 'done';
@@ -239,7 +240,7 @@ export function AIProjectManager() {
                 </div>
               </div>
               <button onClick={generateAIPlan} disabled={aiLoading || !aiPrompt.trim()} style={{ width: '100%', padding: '10px', borderRadius: 6, border: 'none', cursor: aiLoading ? 'not-allowed' : 'pointer', background: '#6366f1', color: '#fff', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                {aiLoading ? <><Loader2 size={14} className="animate-spin" /> Generating Plan...</> : <><Sparkles size={14} /> Generate Project Plan</>}
+                {aiLoading ? <><TirangaLoader size={14} /> Generating Plan...</> : <><Sparkles size={14} /> Generate Project Plan</>}
               </button>
             </div>
           </div>

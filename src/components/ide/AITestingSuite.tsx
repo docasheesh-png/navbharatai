@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TestTube, Play, Check, X, AlertCircle, CheckCircle2, Code, RefreshCw, Download, Copy, Zap, FileCode, ChevronRight } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { sampleInputValue } from '../../server/QualityEvaluationEngine/TestDataManager';
 
 type TestStatus = 'pending' | 'pass' | 'fail' | 'skip';
@@ -303,7 +304,7 @@ export function AITestingSuite({ generatedCode, onCodeUpdate }: Props) {
             className="w-full py-2.5 bg-[#161b22] hover:bg-white/5 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-sm flex items-center justify-center gap-2 transition-all"
           >
             {running ? (
-              <><RefreshCw className="w-4 h-4 animate-spin" /> Running...</>
+              <><TirangaLoader className="w-4 h-4" /> Running...</>
             ) : (
               <><Play className="w-4 h-4 text-emerald-400" /> Run All Tests</>
             )}

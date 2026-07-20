@@ -12,6 +12,7 @@ import {
   Clock,
   Wifi,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { safeLocalJson } from '../../lib/safeLocalJson';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -530,7 +531,7 @@ export const CustomDomain: React.FC = () => {
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
                   >
                     {propagationStatus === 'checking' ? (
-                      <RefreshCw size={14} className="animate-spin" />
+                      <TirangaLoader size={14} />
                     ) : (
                       <Wifi size={14} />
                     )}
@@ -546,7 +547,7 @@ export const CustomDomain: React.FC = () => {
                     'border-red-500/30 bg-red-500/10'
                   }`}>
                     {propagationStatus === 'propagated' && <CheckCircle2 size={16} className="text-green-400 mt-0.5 shrink-0" />}
-                    {propagationStatus === 'checking' && <RefreshCw size={16} className="text-indigo-400 animate-spin mt-0.5 shrink-0" />}
+                    {propagationStatus === 'checking' && <TirangaLoader size={16} className="mt-0.5 shrink-0" />}
                     {propagationStatus === 'propagating' && <Clock size={16} className="text-yellow-400 mt-0.5 shrink-0" />}
                     {propagationStatus === 'not_found' && <AlertCircle size={16} className="text-red-400 mt-0.5 shrink-0" />}
                     <div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Languages, Globe, Plus, Trash2, Check, X, Copy, Download, Search, Edit2, ChevronRight, RefreshCw, Upload, FileCode } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface TranslationKey {
   key: string;
@@ -261,7 +262,7 @@ export function LocalizationManager() {
               disabled={autoTranslating}
               className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all"
             >
-              {autoTranslating ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Translating...</> : <><Languages className="w-3.5 h-3.5" /> Auto Translate</>}
+              {autoTranslating ? <><TirangaLoader className="w-3.5 h-3.5" /> Translating...</> : <><Languages className="w-3.5 h-3.5" /> Auto Translate</>}
             </button>
           </div>
 

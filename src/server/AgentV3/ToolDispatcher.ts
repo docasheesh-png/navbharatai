@@ -101,6 +101,7 @@ import { generateGitignore } from './GitignoreGenerator';
 import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
@@ -2609,6 +2610,40 @@ export class ToolDispatcher {
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
         return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+      }
+
+      case 'generate_integration_tests': {
+        // Roadmap BUILD-NOW #14 — REAL integration tests (not TODO skeletons). Emits a full CRUD lifecycle
+        // supertest suite with real body assertions PLUS a working in-memory reference app, so the suite is
+        // green out of the box; swap the app import to test the real backend. Pure gen in IntegrationTestGenerator.ts.
+        const itRec = (input as Record<string, unknown>) || {};
+        const itResource = optStr(input, 'resource') || undefined;
+        const itBasePath = optStr(input, 'base_path') || undefined;
+        const itFields = Array.isArray(itRec.fields)
+          ? itRec.fields
+              .filter((f): f is Record<string, unknown> => typeof f === 'object' && f !== null)
+              .map((f) => ({
+                name: typeof f.name === 'string' ? f.name : '',
+                type:
+                  f.type === 'number' || f.type === 'boolean' || f.type === 'string'
+                    ? (f.type as 'number' | 'boolean' | 'string')
+                    : undefined,
+              }))
+              .filter((f) => f.name)
+          : undefined;
+        const itCfg = generateIntegrationTests({ resource: itResource, basePath: itBasePath, fields: itFields });
+        const itWritten: string[] = [];
+        for (const [path, content] of Object.entries(itCfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          itWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('integration tests');
+        const itDeps = itCfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a real integration-test suite:\n${itWritten.join('\n')}\nAdd the dev dependencies: ${itDeps}\n\n${itCfg.instructions}`;
       }
 
       case 'generate_e2e': {

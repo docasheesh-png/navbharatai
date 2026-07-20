@@ -1148,6 +1148,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_subscriptions',
+      description:
+        'Add a real subscriptions / recurring-billing backend to the app (server/subscriptions/) — a packaged ' +
+        'domain vertical for SaaS and memberships. The real guarantees are a lifecycle STATE-MACHINE (active ↔ ' +
+        'paused, → past_due → cancelled, reactivate) enforced on every status change, and deterministic ' +
+        'renewal-date math (renewalAt = start/renew + the plan interval). Emits a dependency-free ' +
+        'SubscriptionService (definePlan, subscribe, setStatus, renew, isDue, list) + an Express router (POST ' +
+        '/plans, POST/GET /subscriptions(/:id), PATCH /subscriptions/:id/status → 409 on invalid transition, ' +
+        'POST /subscriptions/:id/renew). Charging is your gateway job — call renew() on a successful charge; ' +
+        'use isDue() in a scheduled job (pairs with generate_jobs). In-memory by default — swap the store for ' +
+        'your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2207,6 +2221,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_inventory',
   'generate_crm',
   'generate_events',
+  'generate_subscriptions',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

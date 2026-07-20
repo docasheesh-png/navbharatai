@@ -137,6 +137,7 @@ import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
+import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3353,6 +3354,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('events starter');
         const evDeps = evcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an events/RSVP backend:\n${evWritten.join('\n')}\nAdd the dependencies: ${evDeps}\n\n${evcfg.instructions}`;
+      }
+
+      case 'generate_subscriptions': {
+        // Breadth recipe (domain vertical) — subscriptions/recurring billing (server/subscriptions/): a real
+        // SubscriptionService with a lifecycle STATE-MACHINE + renewal-date math + an Express router. Pure gen
+        // in SubscriptionGenerator.ts.
+        const subcfg = generateSubscriptionIntegration();
+        const subWritten: string[] = [];
+        for (const [path, content] of Object.entries(subcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          subWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('subscriptions starter');
+        const subDeps = subcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a subscriptions / recurring-billing backend:\n${subWritten.join('\n')}\nAdd the dependencies: ${subDeps}\n\n${subcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

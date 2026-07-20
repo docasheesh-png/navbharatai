@@ -86,6 +86,44 @@ const DOMAINS: DomainDef[] = [
       { label: 'cancellation policy', re: /cancel|refund|policy/i },
     ],
   },
+  // Appended (2026-07-20) AFTER the domains above so existing classifications never change (first match
+  // wins): these only catch prompts the domains above did not. High-demand verticals for the SMB market.
+  {
+    key: 'education',
+    re: /\bschool\b|college|student|teacher|\bcourse\b|\blms\b|e-?learning|classroom|\bexam\b|\btutor|coaching|edtech|syllabus|curriculum/i,
+    features: [
+      { label: 'roles (student / teacher / admin)', re: /role|rbac|permission|teacher|admin|staff/i },
+      { label: 'courses & lessons / content', re: /course|lesson|module|content|curriculum|syllabus/i },
+      { label: 'enrolment & attendance', re: /enrol|enroll|attendance|register|roster/i },
+      { label: 'assignments & grading', re: /assignment|homework|grade|grading|marks|quiz|\bexam\b/i },
+      { label: 'progress tracking', re: /progress|report card|analytics|dashboard/i },
+      { label: 'fees / payments', re: /fee|payment|pay|invoice/i },
+    ],
+  },
+  {
+    key: 'logistics',
+    re: /logistic|delivery|courier|shipment|\bfleet\b|\bdriver\b|dispatch|last.?mile|parcel|consignment|freight|warehouse/i,
+    features: [
+      { label: 'shipment / order tracking', re: /track|status|trace|realtime|live/i },
+      { label: 'driver / agent app & assignment', re: /driver|agent|assign|dispatch|rider/i },
+      { label: 'route / delivery management', re: /route|zone|delivery|pickup|drop/i },
+      { label: 'proof of delivery (POD)', re: /proof|pod|signature|otp|photo/i },
+      { label: 'notifications (customer + driver)', re: /notif|alert|sms|whatsapp|email/i },
+      { label: 'admin dashboard & reports', re: /admin|dashboard|report|analytics/i },
+    ],
+  },
+  {
+    key: 'restaurant',
+    re: /restaurant|\bcafe\b|\bmenu\b|\bdine\b|kitchen|\bkot\b|food.?order|eatery|canteen|\bpos\b|billing/i,
+    features: [
+      { label: 'menu management', re: /menu|dish|item|category|price/i },
+      { label: 'table / order management (dine-in + takeaway)', re: /table|order|takeaway|dine|counter/i },
+      { label: 'kitchen order tickets (KOT)', re: /kot|kitchen|prepare|cook/i },
+      { label: 'billing & GST invoice', re: /bill|invoice|gst|tax|payment/i },
+      { label: 'delivery / online ordering', re: /delivery|online|swiggy|zomato|pickup/i },
+      { label: 'staff roles & shifts', re: /staff|role|waiter|cashier|shift/i },
+    ],
+  },
 ];
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [

@@ -578,6 +578,7 @@ const CURATED_NAV: Record<string, NavTarget> = {
   voice_to_app: { view: 'voice' },
   ai_debugger: { view: 'debugger' },
   ai_image_gen: { view: 'imagegen' },
+  bot_builder: { view: 'botbuilder' },
 };
 
 /** The direct-navigation target for a feature: its own KB `nav` first, else the curated fallback, else

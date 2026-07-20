@@ -4,6 +4,7 @@ import {
   MessageSquare, GitBranch, Globe, Zap, StopCircle, RotateCcw,
   Send, Bot, User, Copy, Check
 } from 'lucide-react';
+import { botFlowToBuildPrompt } from '../../lib/botFlowPrompt';
 
 type NodeType = 'start' | 'message' | 'menu' | 'condition' | 'api' | 'end';
 
@@ -108,7 +109,17 @@ function getNextNodes(edges: BotEdge[], fromId: string, nodes: BotNode[]) {
     .filter(x => x.node) as { node: BotNode; label?: string }[];
 }
 
-export const BotBuilder: React.FC = () => {
+interface BotBuilderProps {
+  /**
+   * Hands the designed flow to the REAL build engine (admin autopsy 2026-07-20): converts the
+   * nodes/edges into a full NavBharatAI Pro v5.0 build prompt (composer prefill + view switch) so
+   * "Build Bot App" produces a genuinely working chatbot app — the designer previously ended at a
+   * JSON download and never built anything.
+   */
+  onBuildViaV5?: (prompt: string) => void;
+}
+
+export const BotBuilder: React.FC<BotBuilderProps> = ({ onBuildViaV5 }) => {
   const [nodes, setNodes] = useState<BotNode[]>(defaultNodes);
   const [edges, setEdges] = useState<BotEdge[]>(defaultEdges);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -324,6 +335,16 @@ Content-Type: application/json
         {/* Node count */}
         <span className="text-xs text-gray-400 border border-white/10 rounded px-2 py-1">{nodes.length} nodes</span>
 
+        {onBuildViaV5 && (
+          <button
+            onClick={() => onBuildViaV5(botFlowToBuildPrompt(nodes, edges, platform))}
+            disabled={nodes.length === 0}
+            title="Hand this flow to NavBharatAI Pro v5.0 — press Send there to build the real chatbot app"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+          >
+            <Bot size={13} /> Build Bot App
+          </button>
+        )}
         <button
           onClick={startSim}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors"

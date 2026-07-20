@@ -1204,6 +1204,15 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'find_code_smells',
+      description:
+        'Scan the workspace for two code smells the other analyzers missed: magic numbers (numeric literals ' +
+        'outside a generous allow-list of indices/HTTP codes/time constants — they usually want a named ' +
+        'constant) and duplicate blocks (6+ identical non-trivial lines in two or more places — they usually ' +
+        'want a shared function). Advisory only; never blocks a build. Returns a file:line findings list.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_error_tracking',
       description:
         'Add real error/exception tracking to the app (Bring-Your-Own key): a server + client init + ' +
@@ -1925,6 +1934,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_abac',
   'generate_metrics',
   'generate_tracing',
+  'find_code_smells',
   'generate_deploy_artifacts',
   'generate_iac',
   'scan_vulnerabilities',

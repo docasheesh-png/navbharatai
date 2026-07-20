@@ -19457,3 +19457,24 @@ only a binary READY/NOT-READY + a 0–100 score; there was no maturity grade.
 Fresh branch off `8a699c3`, own PR. **Tier-1 + Tier-2 complete; Tier-3 started with the safe grading slice.**
 Remaining Tier-3 (large-scale multi-file, MCP/plugins/SDK/CLI, code-smell analyzers, extra deploy targets)
 are heavier/riskier and flagged for a focused effort.
+
+---
+
+## 2026-07-19 — T3 (safe slice) `find_code_smells` — magic-number + duplicate-block analyzer
+
+Continued Tier-3 with the other safe slice. Closes the audit's Code-Quality ❌ ("magic numbers" +
+"duplicate code" — no analyzer detected either).
+
+**Shipped (pure, advisory-only — never blocks a build):**
+- `src/server/AgentV3/CodeSmellAnalyzer.ts` — `analyzeCodeSmells(files)` detects magic numbers (numeric
+  literals outside a generous allow-list of indices/HTTP status codes/time constants; ignores comments +
+  identifiers/versions via a lookbehind regex; skips |value| ≤ 2) and duplicate blocks (a run of ≥6 identical
+  non-trivial normalized lines, ≥120 chars, appearing in 2+ places → "extract a shared function"). Findings
+  capped at 40. `renderCodeSmells` formats file:line output.
+- Wired as the `find_code_smells` tool (mirrors the `api_graph` whole-workspace pattern: listFiles → readFile
+  → pure analyzer → findings; skips node_modules/dist/tests). Gate green: server `tsc` + `vitest`
+  CodeSmellAnalyzer 6/6 + ToolCatalog 5/5 + ToolDispatcher 145/145.
+
+Batched onto PR #1645 (maturity-tier + code-smells, CI in background). **Tier-3 safe slices done** (grading +
+code-smells); the remaining Tier-3 (large-scale multi-file, MCP/plugins/SDK/CLI, Railway/Render deploy) are
+the heavy/risky items flagged for a focused, discussed effort — not tail-end rushes.

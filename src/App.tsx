@@ -75,6 +75,7 @@ import { firebaseConfig } from './config/firebase';
 import { auth, db, signOutEverywhere } from './lib/firebase';
 export { auth, db };
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
+import { authGateDecision, isAuthGatedView } from './lib/authGate';
 
 /**
  * Build request headers carrying the signed-in user's Firebase ID token. SECURITY: the wallet/sync
@@ -1116,6 +1117,16 @@ export default function App() {
     if (user) setShowAuth(false);
   }, [user]);
 
+  // STABLE LOGIN, part 2 (admin 2026-07-20): the gates above open protected views OPTIMISTICALLY while
+  // the saved session is still restoring (so a returning user never sees a login flash). This is the
+  // honest other half: the moment the restore SETTLES genuinely logged-out while a protected view is
+  // open (tapped during the window, or a reload that restored straight into Pro v5.0), ask for sign-in
+  // NOW. A signed-in restore hits the `if (user) setShowAuth(false)` effect above instead — zero friction.
+  useEffect(() => {
+    if (loadingUser || user) return;
+    if (isAuthGatedView(activeView)) setShowAuth(true);
+  }, [loadingUser, user, activeView]);
+
   // Admin login = full app access. When the admin is signed in (separate server
   // password auth), treat them as a logged-in user so the app never forces the
   // Firebase login modal. A real Firebase sign-in always takes precedence; the
@@ -1171,22 +1182,21 @@ export default function App() {
       }
     }
 
-    if (view === 'security' && !user) {
+    // STABLE LOGIN (admin 2026-07-20: "har baar login karna pad raha hai"): these gates used to check
+    // only `!user` — but on every app open Firebase restores the saved session ASYNCHRONOUSLY, so for
+    // the first ~0.3–2s `user` is null even for a signed-in returning user, and tapping a protected tab
+    // flashed the LOGIN screen (users then logged in again — every single open). authGateDecision opens
+    // optimistically while the restore is still running (never flash login at a returning user); a
+    // genuinely signed-out user is prompted the moment the restore SETTLES (the effect below toggleTab).
+    if (authGateDecision(view, !!user, loadingUser) === 'login') {
+      if (view === 'history') pendingViewAfterLoginRef.current = view;
       setShowAuth(true);
-      addLog('Security Audit requires an active session. Please login.', 'warn');
-      return;
-    }
-
-    if (view === 'history' && !user) {
-      pendingViewAfterLoginRef.current = view;
-      setShowAuth(true);
-      addLog('Chat history requires an active session. Please login.', 'warn');
-      return;
-    }
-
-    if ((view === 'nbi_pro_chat' || view === 'sda_chat' || view === 'engineer_ai') && !user) {
-      setShowAuth(true);
-      addLog(`${view === 'nbi_pro_chat' ? 'NavBharatAI Pro v5.0' : view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`, 'warn');
+      addLog(
+        view === 'security' ? 'Security Audit requires an active session. Please login.'
+          : view === 'history' ? 'Chat history requires an active session. Please login.'
+          : `${view === 'sda_chat' ? 'Doctor AI' : 'NavBharatAI Pro v5.0'} is available for logged-in users only. Please sign in.`,
+        'warn',
+      );
       return;
     }
 

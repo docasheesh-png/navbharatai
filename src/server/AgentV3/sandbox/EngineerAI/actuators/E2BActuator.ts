@@ -9,6 +9,7 @@ import { planDevServerRecovery, classifyDevServerFailure, devServerHealthLine, d
 import { ensureViteAllowedHosts } from '../../../ViteConfigGuard';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
 import { isDeadSandboxSignal, isDeadSandboxError, resolveThrownCommandExit } from './sandboxHealth';
+import { postgresWatchdogCommand } from '../../../postgresProvision';
 import { resolveTemplateId } from './fullstackRouting';
 
 // Phase 12E — auto-pause a sandbox after this much inactivity to stop compute
@@ -1243,6 +1244,15 @@ fi`,
       // local Postgres — the downstream P1001 detector (dev-server reprovision + mid-build lock-release)
       // then handles a genuinely-dead DB honestly rather than this masking a failure as ready.
       dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
+      // KEEPALIVE WATCHDOG (last-5-reports class fix, 2026-07-20): the sandbox reaps the Postgres daemon
+      // minutes after provision — the root class behind builds #14→#18. Arm ONE in-sandbox loop (pgrep-
+      // guarded against duplicates) that restarts the cluster within ~20s of it dying, so a reap
+      // self-heals BEFORE any migrate/seed/preview can hit P1001. Armed here — the single provisioning
+      // choke point — so first provision, mid-build revival, and preview-boot revival all re-arm it.
+      // Best-effort: if nohup/setsid can't detach in this sandbox, the reactive nets still stand.
+      if (match) {
+        await sandbox.commands.run(postgresWatchdogCommand(), { timeoutMs: 15_000 }).catch(() => null);
+      }
     }
 
     const jwtSecret = `jwt_${Math.random().toString(36).slice(2)}_${Date.now()}`;

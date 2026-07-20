@@ -56,6 +56,76 @@ export function postgresEnvLines(databaseUrl: string | null | undefined): Record
   return { DATABASE_URL: databaseUrl.trim() };
 }
 
+// ── Postgres LIVENESS: keepalive watchdog + preflight probe (last-5-reports gap analysis 2026-07-20) ──
+//
+// THE CLASS behind five consecutive build reports (#14 MediConnect → #18 EstateNest): the sandbox
+// Postgres DIES between touchpoints (E2B reaps the daemon minutes after provision), and every fix so far
+// was REACTIVE — a command had to FAIL with P1001 before a revival ran, costing a failed command plus the
+// LLM turns spent reading the error. Two structural closures:
+//   • WATCHDOG — a tiny in-sandbox loop, started at provision time, that restarts the cluster within
+//     ~20s of it dying. The reap self-heals BEFORE any command can hit it; the reactive nets (mid-build
+//     revival, preview-boot reprovision) become rare last resorts instead of the primary path.
+//   • PREFLIGHT — before any live-DB command, a millisecond-cheap `pg_isready` probe; if the DB is down,
+//     revive FIRST and run the command ONCE, instead of fail → diagnose → revive → retry.
+// Both are pure command builders here; the actuator/dispatcher own the I/O. Same kill switch
+// (AGENTV3_SANDBOX_POSTGRES=off) governs the whole regime.
+
+/** Marker embedded as the watchdog shell's $0 so `pgrep -f` can find (and not duplicate) it. */
+export const POSTGRES_WATCHDOG_MARKER = 'nb_pg_watchdog';
+
+/**
+ * The keepalive watchdog launch command: starts ONE background loop (guarded by pgrep on the $0 marker,
+ * so repeated provisions never stack watchdogs) that restarts the Postgres cluster whenever pg_isready
+ * fails. Detached via nohup + setsid so it outlives the provisioning command. Pure.
+ */
+export function postgresWatchdogCommand(): string {
+  return `if ! pgrep -f ${POSTGRES_WATCHDOG_MARKER} >/dev/null 2>&1; then
+  nohup setsid sh -c 'while true; do
+  if ! pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+    PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
+    pg_ctlcluster "$PG_VER" main start >/dev/null 2>&1 || true
+  fi
+  sleep 20
+done' ${POSTGRES_WATCHDOG_MARKER} >/tmp/${POSTGRES_WATCHDOG_MARKER}.log 2>&1 &
+fi
+echo WATCHDOG_ARMED`;
+}
+
+/** The millisecond-cheap liveness probe run BEFORE a live-DB command. Prints PG_UP / PG_DOWN. Pure. */
+export function postgresPreflightProbeCommand(): string {
+  return 'pg_isready -h localhost -p 5432 -q 2>/dev/null && echo PG_UP || echo PG_DOWN';
+}
+
+/**
+ * Should the dispatcher run the preflight probe before this command? Only when a Postgres was actually
+ * provisioned this build, it is not confirmed dead, the command needs a live DB, and provisioning didn't
+ * JUST happen (a probe right after a fresh provision is pure waste — it was verified ready then).
+ * Pure + unit-testable; the dispatcher supplies its own state.
+ */
+export function shouldPreflightPostgres(state: {
+  provisioned: boolean;
+  confirmedDead: boolean;
+  needsLiveDb: boolean;
+  provisionedAtMs: number;
+  nowMs: number;
+}): boolean {
+  const { provisioned, confirmedDead, needsLiveDb, provisionedAtMs, nowMs } = state;
+  if (!provisioned || confirmedDead || !needsLiveDb) return false;
+  return nowMs - provisionedAtMs > 15_000;
+}
+
+/**
+ * May the engine attempt (another) Postgres revival? Bounded, but NOT once-only — a 60-minute two-window
+ * build can see the sandbox reap Postgres more than once, and FleetOps/EstateNest proved a restart
+ * genuinely works. Once-only (the old flag) forced a SQLite downgrade on the second death even though a
+ * cheap restart would have saved the app. Cap at 2 revivals per build; past that, confirmed-dead +
+ * lock-release remains the honest degrade. Pure.
+ */
+export const POSTGRES_MAX_REVIVALS = 2;
+export function canAttemptPostgresRevival(attempts: number, max: number = POSTGRES_MAX_REVIVALS): boolean {
+  return Number.isFinite(attempts) && attempts >= 0 && attempts < Math.max(1, max);
+}
+
 // ── Postgres-provider LOCK (LedgerLoop autopsy 2026-07-20) ─────────────────────────────────────────
 //
 // ROOT CAUSE the lock closes: on BOTH MediConnect (#14) and LedgerLoop (#15) the builder, when its

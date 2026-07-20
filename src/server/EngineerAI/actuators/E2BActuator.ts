@@ -791,18 +791,28 @@ const {chromium}=require('playwright');
     if (features.includes('db')) {
       // Install PostgreSQL if missing, then start it and create the app database.
       // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      // SIBLING of the AgentV3 provisioner (last-5-reports gap analysis 2026-07-20): poll pg_isready
+      // instead of a flat `sleep 2`, so a slow start is waited for and the DB_URL marker is emitted only
+      // when the server genuinely accepts connections — a failed start is not masked as ready.
       const pgResult = await sandbox.commands.run(
-        `set -e
-if ! which psql > /dev/null 2>&1; then
+        `if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
   apt-get install -y -qq postgresql 2>&1 | tail -5
 fi
 PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
-sleep 2
-su postgres -c "createdb myapp 2>/dev/null || true"
-echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
+for i in $(seq 1 20); do
+  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
+  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
+  sleep 1
+done
+if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  su postgres -c "createdb myapp 2>/dev/null || true"
+  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
+else
+  echo "DB_NOT_READY"
+fi`,
         { timeoutMs: 120_000 },
       ).catch(() => null);
 

@@ -76,6 +76,7 @@ import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
@@ -1794,7 +1795,9 @@ export class ToolDispatcher {
         // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
         // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
         // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
-        const effectiveCommand = pinKnownDepsInInstallCommand(command);
+        // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
+        // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
+        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command));
         // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);

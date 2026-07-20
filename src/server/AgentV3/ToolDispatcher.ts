@@ -163,6 +163,7 @@ import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
 import { generateMarkdownIntegration } from '../lib/MarkdownGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
+import { generateUpiIntegration } from '../lib/UpiGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
@@ -4235,6 +4236,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('qr generation');
         return `Wired QR code generation:\n${qrWritten.join('\n')}\nAdd the dependency: ${qrcfg.dependency.name}@${qrcfg.dependency.version}\n\n${qrcfg.instructions}`;
+      }
+
+      case 'generate_upi': {
+        // U-4 recipe — UPI payment deep-link + VPA validation (src/lib/upi.ts). Dependency-free, keyless,
+        // India-first: a `upi://pay?...` intent link that opens GPay/PhonePe/Paytm/BHIM with no gateway.
+        // Pure generator in UpiGenerator.ts. No env keys.
+        const upicfg = generateUpiIntegration();
+        const upiWritten: string[] = [];
+        for (const [path, content] of Object.entries(upicfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          upiWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('upi link');
+        return `Wired UPI payment deep-link:\n${upiWritten.join('\n')}\n(No npm dependency, no API key — pairs with generate_qr for scan-to-pay.)\n\n${upicfg.instructions}`;
       }
 
       case 'generate_pdf': {

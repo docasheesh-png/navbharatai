@@ -1525,6 +1525,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_faq',
+      description:
+        'Add a real FAQ / knowledge-base backend to the app (server/faq/) — a packaged domain vertical for a ' +
+        'help center or product FAQ. The real guarantee is the PUBLISH GATE + HELPFULNESS: a DRAFT entry is ' +
+        'never returned by the public list or search (only published entries are), entries are grouped by ' +
+        'category and manually ordered, keyword search matches the question OR answer (published only, ' +
+        'case-insensitive), and each entry keeps EXACT helpful / not-helpful vote counts. Emits a ' +
+        'dependency-free FaqService (add, update, setPublished, vote, publicList, adminList, search) + an ' +
+        'Express router (GET /api/faq ?category= ?q=, GET /api/faq/admin, GET/PATCH/DELETE /api/faq/:id, POST ' +
+        '/api/faq, PATCH /api/faq/:id/publish, POST /api/faq/:id/vote). Distinct from generate_support_tickets ' +
+        '(a per-user ticket state machine) and generate_blog (articles). In-memory by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2610,6 +2624,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_cart',
   'generate_reactions',
   'generate_orders',
+  'generate_faq',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

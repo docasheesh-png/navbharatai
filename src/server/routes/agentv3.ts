@@ -1844,12 +1844,26 @@ export function planRunnerChainNames(noClaude: boolean): string[] {
  * can echo a token-embedded URL (a real secret leak). These pure helpers give the user a clean, honest
  * message; the RAW error still goes to the build report / logs (admin-only) for debugging.
  */
+// The White-Label Law (CLAUDE.md §2): a user must NEVER see which third-party AI/infra vendor did the work
+// — to them it is always NavBharatAI. This is the single anonymizer for any provider text that could reach a
+// user-facing surface (chat narration, error toasts, degraded notices), so the branding is applied by
+// construction. Model IDs are stripped first (so `glm-5.2` doesn't leave a stray `-5.2`), then vendor names,
+// then the infra vendor, secrets and URLs. Admin-only surfaces (build diagnostics, logs, telemetry) keep the
+// real names — this function is ONLY for text that a normal end user can see.
+const MODEL_ID_RE = /\b(?:glm|kimi|claude|gemini|grok|gpt|deepseek|mistral|llama|qwen|nova|titan)[-/][\w.:-]+/gi;
+const AI_VENDOR_RE = /\b(?:anthropic|claude|openai|chatgpt|gpt-?\d[\w.-]*|google\s+gemini|gemini|vertex(?:\s*ai)?|xai|grok|moonshot|kimi|z\.?ai|chatglm|glm|deepseek|bedrock|cohere|mistral|perplexity)\b/gi;
+const MODEL_TIER_RE = /\b(?:sonnet|opus|haiku)\b/gi; // Claude tier words that identify the vendor
+
 export function redactProviderError(raw: string): string {
   return String(raw ?? '')
     .replace(/https?:\/\/[^\s)]+/gi, '[link]')                       // URLs, incl. token-embedded clone URLs
     .replace(/x-access-token:[^@\s]+/gi, '[token]')                  // git credential in a remote URL
     .replace(/\b(bearer|token|key|secret|password)[\s:=]+[A-Za-z0-9._\-]{6,}/gi, '$1 [redacted]')
-    .replace(/\bE2B\b/gi, 'the build engine')                        // don't name the infra vendor
+    .replace(MODEL_ID_RE, 'the model')                              // glm-5.2 / claude-opus-4-8 / gemini-… → no model id leaks
+    .replace(AI_VENDOR_RE, 'NavBharatAI')                           // GLM/Kimi/Claude/Gemini/Grok/… → always our brand
+    .replace(MODEL_TIER_RE, 'the model')                            // "Sonnet"/"Opus"/"Haiku" identify Anthropic
+    .replace(/\bE2B\b/gi, 'the build engine')                       // don't name the infra vendor
+    .replace(/\bNavBharatAI(?:\s+NavBharatAI)+\b/g, 'NavBharatAI')  // collapse repeats from adjacent vendor tokens
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 200);

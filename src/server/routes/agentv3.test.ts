@@ -1577,6 +1577,30 @@ describe('redactProviderError / sandboxUnavailableNotice — no raw infra error 
     expect(redactProviderError('')).toBe('');
     expect(redactProviderError(undefined as unknown as string)).toBe('');
   });
+
+  it('White-Label Law: strips every AI vendor + model id so no provider name can reach the user', () => {
+    const forbidden = [
+      'Provider GLM failed: 429 from Z.ai — falling back',
+      'claude-opus-4-8 rate limited; switching to Sonnet',
+      'Kimi (Moonshot) timed out, retrying on gemini-2.5-pro',
+      'xAI Grok returned an error; Anthropic backstop engaged',
+      'OpenAI gpt-4o quota exceeded',
+      'glm-5.2 and kimi-k2.7-code both unavailable, Vertex fallback',
+    ];
+    const banned = /\b(GLM|Z\.?ai|Kimi|Moonshot|Claude|Anthropic|Sonnet|Opus|Haiku|Gemini|Vertex|Grok|xAI|OpenAI|GPT|DeepSeek|glm-|kimi-|claude-|gemini-|grok-|gpt-)\b/i;
+    for (const raw of forbidden) {
+      const out = redactProviderError(raw);
+      expect(out, `leaked a provider name from: ${raw}`).not.toMatch(banned);
+    }
+    // A vendor NAME degrades to our brand; a bare model id degrades to a neutral "the model".
+    expect(redactProviderError('Provider GLM failed')).toContain('NavBharatAI');
+    expect(redactProviderError('claude-opus-4-8 rate limited')).toContain('the model');
+  });
+
+  it('does not mangle ordinary error words that merely resemble nothing forbidden', () => {
+    // A benign message with no provider token passes through (only cap/whitespace applied).
+    expect(redactProviderError('the import errored (repository not found)')).toBe('the import errored (repository not found)');
+  });
 });
 
 describe('Full Team mid-build steering gates (Fix 60)', () => {

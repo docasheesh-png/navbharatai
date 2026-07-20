@@ -24,16 +24,19 @@ describe('generateMoneyFormatIntegration', () => {
     expect(server).toContain('paise: number');
   });
 
-  it('words helper uses the Indian Crore/Lakh system', () => {
+  it('words helper uses the Indian Crore/Lakh system, handles paise, and recurses for >=100 crore', () => {
     expect(server).toContain("' Crore'");
     expect(server).toContain("' Lakh'");
     expect(server).toContain('10000000'); // crore divisor
     expect(server).toContain('100000'); // lakh divisor
+    expect(server).toContain("' Paise'");
+    expect(server).toContain("' Only'");
+    expect(server).toContain('toWords(crore)'); // recursion, not twoDigits(crore) — fixes the >=100 crore bug
   });
 
-  it('never writes .env.example and only the server file', () => {
+  it('ships an emitted regression test and never writes .env.example', () => {
     expect(c.files['.env.example']).toBeUndefined();
-    expect(Object.keys(c.files)).toEqual(['server/lib/money.ts']);
+    expect(Object.keys(c.files).sort()).toEqual(['server/lib/money.test.ts', 'server/lib/money.ts']);
     expect(c.instructions.toLowerCase()).toContain('paise');
   });
 });

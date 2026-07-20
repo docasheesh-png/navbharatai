@@ -1292,6 +1292,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_wishlist',
+      description:
+        'Add a real wishlist / favorites / likes backend to the app (server/favorites/) — a near-universal ' +
+        'domain vertical (ecommerce wishlists, content bookmarks, social likes). The real guarantee is ' +
+        'IDEMPOTENT MEMBERSHIP: a (user, item) favorite exists AT MOST ONCE — add is idempotent (favoriting ' +
+        'twice is a no-op, not a double entry), remove is idempotent, toggle flips the state, and the per-item ' +
+        'favorite COUNT is always exact. One service covers wishlists/likes/bookmarks via a collection ' +
+        'namespace. Emits a dependency-free FavoritesService (add, remove, toggle, has, listByUser, ' +
+        'countForItem, usersForItem) + an Express router (POST /favorites → 201 new / 200 existing, POST ' +
+        '/favorites/toggle, DELETE /favorites, GET /favorites/:user, GET /items/:item/favorites). Take user ' +
+        'from the auth session in production. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2361,6 +2375,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_messaging',
   'generate_listings',
   'generate_job_board',
+  'generate_wishlist',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

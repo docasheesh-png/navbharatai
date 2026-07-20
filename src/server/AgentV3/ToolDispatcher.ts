@@ -111,6 +111,7 @@ import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, typ
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
 import { dependencyHealthVerdict } from './DependencyHealthGate';
+import { prettierGateResult, prettierAdvisory } from './PrettierGate';
 import { injectObservabilityFixes } from './ObservabilityInjector';
 import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
@@ -617,6 +618,29 @@ export class ToolDispatcher {
 
         return dependencyHealthVerdict({ vulnFindings, vulnSummary, copyleftStrong, licenseSummary }).summary;
       })(), 45_000, 'assessDependencyHealthGate');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * P-PIPE — build-end PRETTIER advisory (default-OFF, AGENTV3_PRETTIER_GATE=on). Runs the project's own
+   * `prettier --check` (only when prettier is configured) and returns a non-blocking advisory listing the
+   * unformatted files, or '' when clean / not-configured / could-not-run. Timeout-bounded and fully guarded
+   * (parity with assessLintGate / assessDependencyHealthGate): any trouble returns '' so it can never fail a
+   * real build on its own account. AgentRunner only calls this when the gate is enabled.
+   */
+  async assessPrettierGate(): Promise<string> {
+    try {
+      return await withTimeout((async () => {
+        const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+        let pkgRaw: string | undefined;
+        try { pkgRaw = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { pkgRaw = undefined; }
+        const plan = detectLinters(files, pkgRaw).find((p) => p.tool === 'prettier');
+        if (!plan) return ''; // prettier not configured → nothing to advise
+        const { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, plan.command);
+        return prettierAdvisory(prettierGateResult(exitCode, stdout, stderr));
+      })(), 45_000, 'assessPrettierGate');
     } catch {
       return '';
     }

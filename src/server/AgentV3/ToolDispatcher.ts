@@ -76,7 +76,7 @@ import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
-import { prismaRepairHint } from './prismaRepairHint';
+import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
@@ -1798,6 +1798,36 @@ export class ToolDispatcher {
                   this.onFileWrite?.(schemaPath, fixedSchema);
                   this.state?.recordFileChange({ path: schemaPath, kind: 'modify' }, 'architect');
                 } catch { /* durable sync is best-effort */ }
+              }
+            }
+          } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
+        // PRISMA-CLI-NOT-INSTALLED SELF-HEAL (Bazaar-era autopsy 2026-07-20): a `prisma generate` (or any
+        // prisma command) fails because the `prisma` CLI is NOT in node_modules — either package.json never
+        // declared it, or a sandbox recycle wiped node_modules. `npx prisma generate` then tries to
+        // auto-FETCH the latest (`prisma@7.8.0`) and, being non-interactive, aborts with
+        // "npx canceled due to missing packages and no YES option". The model brute-forced this ~13 times
+        // over ~10 MINUTES before it finally ran `npm install -D prisma` — burning the build's whole
+        // window so the app shipped incomplete (59 files planned, ~43 built). Deterministic close: on that
+        // exact "prisma package missing" signal, install prisma + @prisma/client (pinned to ^6 by
+        // pinKnownDepsInInstallCommand — never v7) and retry the original command ONCE. Mirrors the other
+        // prisma self-heals; best-effort, never blocks. Kill switch reuses AGENTV3_PRISMA_HINT=off.
+        if (
+          exitCode !== 0 &&
+          process.env.AGENTV3_PRISMA_HINT !== 'off' &&
+          /\bprisma\b/.test(command) &&
+          isPrismaCliMissingError(`${stdout}\n${stderr}`)
+        ) {
+          try {
+            const dirMatch = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command);
+            const cd = dirMatch ? `cd ${dirMatch[1]} && ` : '';
+            const installCmd = pinKnownDepsInInstallCommand(`${cd}npm install -D prisma @prisma/client`);
+            const inst = await this.actuator.runCommand(this.workspaceId, installCmd);
+            if (inst.exitCode === 0) {
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (retry.exitCode === 0) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database toolkit wasn\'t installed yet — installed it and re-ran the step successfully.', ts: Date.now() });
               }
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }

@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { prismaRepairHint } from './prismaRepairHint';
+import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
+
+describe('isPrismaCliMissingError — prisma CLI not installed (Bazaar-era autopsy: 13 failed generates)', () => {
+  it('detects the exact non-interactive npx cancel', () => {
+    expect(isPrismaCliMissingError('npm error npx canceled due to missing packages and no YES option: ["prisma@7.8.0"]')).toBe(true);
+  });
+  it('detects the other "prisma binary missing" shapes', () => {
+    expect(isPrismaCliMissingError('npm error could not determine executable to run')).toBe(true);
+    expect(isPrismaCliMissingError('/bin/sh: prisma: not found')).toBe(true);
+    expect(isPrismaCliMissingError("Cannot find module 'prisma'")).toBe(true);
+  });
+  it('does NOT fire on a real schema-validation error or unrelated output', () => {
+    expect(isPrismaCliMissingError('Error validating model "User": missing an opposite relation field')).toBe(false);
+    expect(isPrismaCliMissingError('P1001: Can\'t reach database server')).toBe(false);
+    expect(isPrismaCliMissingError('')).toBe(false);
+    expect(isPrismaCliMissingError(null)).toBe(false);
+  });
+});
 
 describe('prismaRepairHint — targeted fix guidance for Prisma schema errors format cannot fix', () => {
   it('returns null for non-Prisma output (a generic phrase never triggers a hint)', () => {

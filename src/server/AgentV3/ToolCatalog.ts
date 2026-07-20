@@ -1468,6 +1468,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_activity_feed',
+      description:
+        'Add a real activity feed / timeline backend to the app (server/activity/) — a packaged domain vertical ' +
+        'for a social feed, an activity stream, a per-project event log or a notification timeline. The real ' +
+        'guarantee is STABLE CURSOR PAGINATION: every event gets a monotonic sequence id and the feed is paged ' +
+        'newest-first by "id < cursor", so paging a live feed NEVER duplicates or skips an item even when new ' +
+        'events are appended between page fetches (the classic offset-pagination bug this prevents). Emits a ' +
+        'dependency-free ActivityFeedService (record, feed, actorFeed, markSeen, unseenCount) + an Express ' +
+        'router (POST /api/activity, GET /api/activity ?cursor&limit, GET /api/activity/actor/:actor, GET ' +
+        '/api/activity/unseen ?viewer, POST /api/activity/seen). Distinct from generate_audit (tamper-evident ' +
+        'log) and generate_notification_center. In-memory by default — swap the array for your DB (an ' +
+        'auto-increment id column plays the sequence-id role).',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2549,6 +2564,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_short_links',
   'generate_feedback',
   'generate_consent',
+  'generate_activity_feed',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

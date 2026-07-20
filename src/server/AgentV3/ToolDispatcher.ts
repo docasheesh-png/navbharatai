@@ -161,6 +161,7 @@ import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
+import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3796,6 +3797,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('consent starter');
         const csDeps = cscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
+      }
+
+      case 'generate_activity_feed': {
+        // Breadth recipe (domain vertical) — activity feed / timeline (server/activity/): a real
+        // ActivityFeedService whose core guarantee is STABLE CURSOR PAGINATION (monotonic event ids paged by
+        // id < cursor never duplicate or skip as new events append) + an Express router. Pure gen in
+        // ActivityFeedGenerator.ts.
+        const afcfg = generateActivityFeedIntegration();
+        const afWritten: string[] = [];
+        for (const [path, content] of Object.entries(afcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          afWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('activity feed starter');
+        const afDeps = afcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an activity-feed backend:\n${afWritten.join('\n')}\nAdd the dependencies: ${afDeps}\n\n${afcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

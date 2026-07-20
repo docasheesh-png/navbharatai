@@ -317,7 +317,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   runtime errors are actually detected — a clean build costs nothing extra. Model follows the routing
   policy: free/weak = GLM/Kimi cheap coders, **no Sonnet/Opus**; paid = Claude-first (Sonnet); Opus tiers
   = Opus. Paid builds bill the extra pass to the user. Never blocks a build; records an honest
-  RUNTIME_VERIFIED / RUNTIME_UNCHECKED / RUNTIME_ERRORS_REMAIN verdict (#1596). Set `off`/unset to disable.)
+  RUNTIME_VERIFIED / RUNTIME_UNCHECKED / RUNTIME_ERRORS_REMAIN verdict (#1596). Set `off`/unset to disable.),
+  `AGENTV3_REQUIREMENT_AWARE` (set `on` by the admin 2026-07-20 — turns on **requirement-aware building**:
+  on a FRESH build of an ambiguous DOMAIN prompt, the engine proactively INCLUDES the features that domain
+  almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital, menu/KOT/GST for a
+  restaurant, …), so a rich request never yields a shallow app. FRICTION-FREE — NO clarifying round-trip
+  (honours the "text reply > build app" rule). Only fires for a new build (never an edit) of a detected
+  domain with genuine gaps; the analyzer covers healthcare/ecommerce/social/saas/booking/education/logistics/
+  restaurant. The same analysis is also recorded in the admin build report (code `REQUIREMENT_GAPS`, #1692).
+  Flag off ⇒ build prompt byte-identical to today. Pure decision in `RequirementGapAnalyzer.ts`; PRs #1692/
+  #1695/#1697. Set `off`/unset to disable.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is

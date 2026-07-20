@@ -133,6 +133,7 @@ import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateIdIntegration } from '../lib/IdGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
+import { generateSettingsScaffoldIntegration } from '../lib/SettingsScaffoldGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
@@ -3211,6 +3212,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`admin (${adminName})`);
         return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
+      }
+
+      case 'generate_settings': {
+        // Roadmap BUILD-NOW #10 (other half) — a settings scaffold (dependency-free React): a persisted
+        // SettingsProvider that APPLIES the theme + a SettingsPage. Pure generator in SettingsScaffoldGenerator.ts.
+        const st = generateSettingsScaffoldIntegration();
+        const stWritten: string[] = [];
+        for (const [path, content] of Object.entries(st.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          stWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('settings scaffold');
+        return `Wired a settings scaffold:\n${stWritten.join('\n')}\n(No npm dependency — React Context + localStorage; applies the theme.)\n\n${st.instructions}`;
       }
 
       case 'generate_dashboard': {

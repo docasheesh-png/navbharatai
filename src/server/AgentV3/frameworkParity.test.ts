@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { detectFrameworkFromPrompt, detectBackendOnlyFramework, resolveFrameworkSelection, DETECTABLE_FRAMEWORK_IDS } from './PromptFramework';
+import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
 import { FRAMEWORK_OPTION_IDS } from '../../components/agentv3/frameworkOptions';
 
 // The admin sync law (2026-07-20): the three sources of truth for "which framework" — the client picker,
@@ -98,5 +99,24 @@ describe('resolveFrameworkSelection — settings pick vs chat text, CONFLICT con
 
   it('defaults picked to vite-react when absent', () => {
     expect(resolveFrameworkSelection({ picked: undefined, explicit: false, prompt: 'a Nuxt storefront' })).toEqual({ status: 'ok', framework: 'nuxt' });
+  });
+});
+
+describe('frameworkRunsInBrowser — in-browser preview is framework-aware (CrewHub screenshots 2026-07-20)', () => {
+  it('SSR / meta frameworks and backends do NOT run in-browser (they need the Live server)', () => {
+    for (const id of ['nextjs', 'nuxt', 'sveltekit', 'remix', 'angular', 'astro', 'node-express', 'hono', 'nestjs', 'fastify', 'python-fastapi', 'django', 'flask', 'spring-boot', 'go']) {
+      expect(frameworkRunsInBrowser(id)).toBe(false);
+    }
+  });
+  it('client SPA frameworks DO run in-browser', () => {
+    for (const id of ['vite-react', 'vue', 'svelte', 'solid', 'preact', 'lit', 'alpine', 'vanilla', 'static']) {
+      expect(frameworkRunsInBrowser(id)).toBe(true);
+    }
+    expect(frameworkRunsInBrowser(undefined)).toBe(true); // unknown → the SPA default
+  });
+  it('serverFrameworkLabel gives a friendly name for the honest panel', () => {
+    expect(serverFrameworkLabel('nextjs')).toBe('Next.js');
+    expect(serverFrameworkLabel('spring-boot')).toBe('Spring Boot');
+    expect(serverFrameworkLabel('vite-react')).toBe('This'); // not a server framework → generic
   });
 });

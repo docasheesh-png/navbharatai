@@ -97,6 +97,29 @@ export const DETECTABLE_FRAMEWORK_IDS: readonly string[] = Array.from(
   new Set([...RULES, ...BACKEND_RULES].map((r) => r.id)),
 );
 
+// ── In-browser-preview capability (CrewHub screenshots 2026-07-20) ──────────────────────────────────
+// The lightweight IN-BROWSER preview is a client-side bundler that expects a browser SPA entry
+// (index.html → src/main). SSR / meta frameworks (Next.js, Nuxt, …) and pure BACKENDS have no such entry
+// and MUST run on a real Node server — so the in-browser lane greeted a Next.js app with a scary
+// "No React entry module found" error + a "Fix with AI" button, as if the (perfectly fine) app were
+// broken. These frameworks render honestly with a "runs on the Live server" panel instead.
+const SERVER_FRAMEWORK_LABELS: Record<string, string> = {
+  nextjs: 'Next.js', nuxt: 'Nuxt', sveltekit: 'SvelteKit', remix: 'Remix', angular: 'Angular', astro: 'Astro',
+  'node-express': 'Express', hono: 'Hono', nestjs: 'NestJS', fastify: 'Fastify',
+  'python-fastapi': 'FastAPI', django: 'Django', flask: 'Flask', 'spring-boot': 'Spring Boot', go: 'Go',
+};
+
+/** Can this framework render in the lightweight IN-BROWSER preview (a client SPA), or does it NEED the
+ *  Live server (SSR / meta framework / backend)? Pure. Unknown/empty → true (the SPA default). */
+export function frameworkRunsInBrowser(framework?: string): boolean {
+  return !(framework && Object.prototype.hasOwnProperty.call(SERVER_FRAMEWORK_LABELS, framework.toLowerCase()));
+}
+
+/** A friendly display name for a Live-server-only framework (for the honest preview panel). Pure. */
+export function serverFrameworkLabel(framework?: string): string {
+  return (framework && SERVER_FRAMEWORK_LABELS[framework.toLowerCase()]) || 'This';
+}
+
 /** The outcome of reconciling the two selection paths (settings pick + chat text). */
 export type FrameworkResolution =
   | { status: 'ok'; framework: string }

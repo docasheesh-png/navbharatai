@@ -15,6 +15,7 @@ import { fixWithAiAfterDeepRefresh } from './previewDeepRefresh';
 import { configuredPreviewSandboxUrl, PREVIEW_HTML_MESSAGE } from '../../lib/previewOrigin';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { type PreviewViewport, DEVICE_DIMS, computeDeviceScale } from './previewViewport';
+import { frameworkRunsInBrowser, serverFrameworkLabel } from '../../lib/frameworkDetect';
 
 async function authJsonHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -294,6 +295,10 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // uses this to decide whether the app recovered (skip the AI) or still needs a fix. `fresh:true`
   // asks the server to BYPASS its render cache so a stale cached render can't mask a recovery.
   const loadInBrowser = useCallback(async (opts?: { fresh?: boolean }): Promise<boolean> => {
+    // SSR / meta framework (Next.js, Nuxt, …) or a backend has no browser SPA entry, so the in-browser
+    // bundler would fail with a misleading "No React entry module found" (CrewHub 2026-07-20). Don't
+    // attempt it — the framework-aware panel below tells the user honestly to use the Live server.
+    if (!frameworkRunsInBrowser(framework)) { setErr(''); setLoading(false); return false; }
     if (!workspaceId) { setErr('Build something first — there are no files to preview yet.'); return false; }
     if (inFlight.current) return false;
     inFlight.current = true;
@@ -323,7 +328,7 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
       setLoading(false);
       inFlight.current = false;
     }
-  }, [workspaceId, userId, email]);
+  }, [workspaceId, userId, email, framework]);
 
   // "Fix with AI" on a broken preview — try a FREE deep refresh BEFORE spending an AI turn. A blank/
   // failed preview is frequently just a stale cached render or a transient cold-start miss (admin
@@ -376,11 +381,12 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
   // it can never loop forever).
   const emptyRetries = useRef(0);
   useEffect(() => {
-    if (mode !== 'inbrowser' || !workspaceId || html || loading || err) { emptyRetries.current = 0; return; }
+    // An SSR/backend framework never renders in-browser — the honest panel handles it, so don't retry.
+    if (mode !== 'inbrowser' || !workspaceId || html || loading || err || !frameworkRunsInBrowser(framework)) { emptyRetries.current = 0; return; }
     if (emptyRetries.current >= 3) return;
     const t = setTimeout(() => { emptyRetries.current += 1; void loadInBrowser(); }, 1_200);
     return () => clearTimeout(t);
-  }, [mode, workspaceId, html, loading, err, loadInBrowser]);
+  }, [mode, workspaceId, html, loading, err, loadInBrowser, framework]);
 
   // U1 — AUTO-REFRESH the preview as the build writes files. The parent bumps `reloadSignal` on every
   // file_changed/diff event; we DEBOUNCE so a burst of writes (a 20-file batch) triggers ONE reload
@@ -648,7 +654,23 @@ export function PreviewSurface({ url, workspaceId, userId, email, framework, aut
           <button onClick={() => setMode('live')} className="shrink-0 px-2 py-0.5 rounded bg-sky-800 hover:bg-sky-700 text-sky-100 font-semibold">Live server</button>
         </div>
       )}
-      {loading ? (
+      {mode === 'inbrowser' && !frameworkRunsInBrowser(framework) ? (
+        // SSR / meta framework (Next.js, Nuxt, …) or a backend — no browser SPA entry, so the in-browser
+        // bundler can't run it (it used to show a misleading "No React entry module found" as if the app
+        // were broken). Say so honestly and send the user to the Live server, which boots the real app.
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <div className="w-12 h-12" dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />
+          <p className="text-zinc-200 font-medium">{serverFrameworkLabel(framework)} runs on the Live server</p>
+          <p className="text-[12px] text-zinc-500 max-w-sm">
+            This is a {serverFrameworkLabel(framework)} app — it renders on a real Node/SSR server (pages,
+            API routes, server components), so the lightweight in-browser preview can&apos;t run it. Your app
+            isn&apos;t broken — switch to the Live server to see it fully.
+          </p>
+          <button onClick={() => setMode('live')} className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+            {effectiveUrl ? '● ' : ''}Open Live server
+          </button>
+        </div>
+      ) : loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-zinc-500 text-sm">
           {/* Ashok Chakra loader (admin 2026-07-07) — same spinner the in-iframe boot overlay uses. */}
           <div className="w-12 h-12 animate-spin" style={{ animationDuration: '1.6s' }} dangerouslySetInnerHTML={{ __html: ashokChakraSvg(48, '#4f6ef7') }} />

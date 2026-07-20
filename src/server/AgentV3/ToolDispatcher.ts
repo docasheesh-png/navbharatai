@@ -139,6 +139,7 @@ import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
+import { generateBlogIntegration } from '../lib/BlogGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3392,6 +3393,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('polls starter');
         const plDeps = plcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a polls/surveys backend:\n${plWritten.join('\n')}\nAdd the dependencies: ${plDeps}\n\n${plcfg.instructions}`;
+      }
+
+      case 'generate_blog': {
+        // Breadth recipe (domain vertical) — blog/CMS (server/blog/): a real BlogService with a publish
+        // STATE-MACHINE (draft↔published↔archived) + UNIQUE-slug generation + an Express router. Pure gen
+        // in BlogGenerator.ts.
+        const blogcfg = generateBlogIntegration();
+        const blogWritten: string[] = [];
+        for (const [path, content] of Object.entries(blogcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          blogWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('blog starter');
+        const blogDeps = blogcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a blog/CMS backend:\n${blogWritten.join('\n')}\nAdd the dependencies: ${blogDeps}\n\n${blogcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

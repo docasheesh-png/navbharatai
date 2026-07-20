@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useToast, ToastContainer } from './components/Toast';
-import { ProductTour } from './components/ProductTour';
 import { resolveGithubConnectionForUser } from './lib/githubConnection';
 import { sanitizeFileMap } from './lib/fileMapSanitize';
 import { computeTabClose } from './lib/tabClose';
@@ -3431,12 +3430,6 @@ export default function App() {
         previewBuildError={previewBuildError}
         setPreviewBuildError={setPreviewBuildError}
       />
-
-      {/* P-UX.4 — Product Tour overlay (dependency-free; renders its own launcher). Navigates via the
-          app's guarded toggleTab and gracefully skips any target not present on the current view.
-          currentView gates the floating launcher to the home view only, so it never overlaps the
-          controls on other surfaces (e.g. the v5.0 chat composer). */}
-      <ProductTour onNavigate={(view) => toggleTab(view as typeof activeView)} currentView={activeView} />
 
       {/* 8.1 — Mobile bottom navigation bar (hidden on desktop, and hidden in Focus Mode too).
           DYNAMIC PER-VIEW FOOTER (admin 2026-07-07): the bar is ONE component (same design, same

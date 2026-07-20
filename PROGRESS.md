@@ -19826,3 +19826,31 @@ either → blank screen on click. Fixed by making them real, not by hiding the t
   Offline AI nav + KB entry + regression tests extended (5 tests).
 
 Gate green on every phase: tsc frontend + server clean, full vitest suite (8321 → 8326 tests) passing.
+
+## 2026-07-20 — AI Tools real-ification: 4 display-only tools made REAL, Doctor AI tile removed (PRs #1727, #1729, #1731 + imagegen/botbuilder)
+
+Admin autopsy request: Settings → AI Tools ke sab tiles "bas dekhne ke the". Forensic findings + fixes:
+- **Doctor AI tile** — redundant Professionals shortcut in the wrong group → REMOVED (#1727, merged).
+- **Voice to App** (#1729, merged) — mic capture was real, but "Apna App Banao" POSTed to /api/generate
+  which NEVER EXISTED server-side → always errored. Now hands the prompt to Pro v5.0 via the pendingFix
+  composer-prefill signal (new onBuildViaV5Prompt prop App→ViewPanels); dead fetch + fake success banner
+  + legacy onAppGenerated path removed.
+- **AI Debugger** (#1731) — POSTed to non-existent /api/debug AND masked every failure with
+  generateMockResponse()'s canned fake "analysis" (rule-2 violation). Now REAL: pure
+  src/server/lib/debugAnalysis.ts (white-label prompts, honest parsing) + POST /api/debug on the FREE
+  AI namespace (never Claude); client mock deleted (~170 lines), honest error banner instead.
+- **AI Image Gen** (claude/ai-imagegen-real) — had NO server side; client hot-linked a third-party
+  free image site. Now REAL: pure src/server/lib/imageGen.ts + POST /api/image/generate on our own
+  @google/genai key chain (IMAGE_GEN_MODEL env-tunable ladder, default gemini-2.5-flash-image →
+  gemini-2.0-flash-preview-image-generation); honest 503 when keyless; history now session-only
+  (data URLs would overflow localStorage). NOTE for admin: needs GEMINI_API_KEY in Cloud Run (already
+  configured per the env registry) — no new env needed.
+- **Bot Builder** (claude/bot-builder-real) — real designer/simulator whose promise ended at a JSON
+  export; nothing was built. Now "Build Bot App" converts the flow (pure src/lib/botFlowPrompt.ts)
+  into a full build brief and hands it to Pro v5.0 for a genuinely working chatbot app.
+
+All AIs made aware (KB sync rule): new voice_to_app / ai_debugger / ai_image_gen / bot_builder
+AppKnowledgeBase entries + Offline AI CURATED_NAV working "Open" buttons for all four. Regression
+suite tests/aiToolsReal.test.ts locks every dead endpoint staying dead, every mock staying deleted,
+and every nav mapping; pure cores have their own test files (debugAnalysis, imageGen, botFlowPrompt).
+Gate green at every phase (suite grew 8336 → 8405 tests).

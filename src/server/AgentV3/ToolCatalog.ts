@@ -1632,6 +1632,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_audit',
+      description:
+        'Add a real tamper-evident audit log to the app (server/lib/audit.ts) — dependency-free (node:crypto), ' +
+        'NO API key, storage-agnostic. appendAudit(store, { actor, action, target?, meta? }) records who did ' +
+        'what when; each entry stores the SHA-256 hash of the previous entry (a hash chain), so editing or ' +
+        'deleting any past row breaks the chain. verifyAuditChain(entries) returns the seq of the first ' +
+        'tampered entry (or -1 if intact). You supply a tiny { last(), save() } store backed by your DB. Use ' +
+        'for admin actions, money movements, role changes and sensitive data edits — anything that needs a ' +
+        'trustworthy trail.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_qr',
       description:
         'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
@@ -2013,6 +2025,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_upi',
   'generate_pdf',
   'generate_csv',
+  'generate_audit',
   'generate_image',
   'generate_mobile_export',
   'generate_desktop_export',

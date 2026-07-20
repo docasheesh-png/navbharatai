@@ -1,11 +1,31 @@
 import { describe, it, expect } from 'vitest';
-import { assessReadiness, readinessVerdict } from './Readiness';
+import { assessReadiness, readinessVerdict, maturityTier, maturityTierLabel } from './Readiness';
 import type { ArchitectureReport } from './ArchitectureAnalysis';
 import type { SecurityFinding } from './SecurityAnalysis';
 
 const cleanArch: ArchitectureReport = {
   fileCount: 5, edgeCount: 6, cycles: [], unresolvedImports: [], layeringViolations: [], nodeBuiltinsInFrontend: [], orphanComponents: [],
 };
+
+describe('maturityTier', () => {
+  it('a not-ready build (a blocker or a sub-floor score) is at most a prototype', () => {
+    expect(maturityTier({ ready: false, score: 95, blockers: ['x'] })).toBe('prototype');
+    expect(maturityTier({ ready: true, score: 40, blockers: [] })).toBe('prototype'); // below MIN_READY_SCORE
+  });
+  it('climbs hackathon → production → enterprise as the score rises', () => {
+    expect(maturityTier({ ready: true, score: 60, blockers: [] })).toBe('hackathon');
+    expect(maturityTier({ ready: true, score: 80, blockers: [] })).toBe('production');
+    expect(maturityTier({ ready: true, score: 100, blockers: [] })).toBe('enterprise');
+  });
+  it('every tier has an honest, non-empty label', () => {
+    for (const t of ['prototype', 'hackathon', 'production', 'enterprise'] as const) {
+      expect(maturityTierLabel(t).length).toBeGreaterThan(0);
+    }
+  });
+  it('assessReadiness attaches the tier (a clean project is enterprise-grade)', () => {
+    expect(assessReadiness(cleanArch, []).tier).toBe('enterprise');
+  });
+});
 
 describe('assessReadiness', () => {
   it('scores a clean project 100 and READY', () => {

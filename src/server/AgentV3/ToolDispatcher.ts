@@ -5,6 +5,7 @@ import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome } from './testRunner';
 import { detectTypecheckPlan, parseTypecheckOutcome, typecheckSummary, type TypecheckOutcome } from './crossLangTypecheck';
 import { whoImports, dependenciesOf, impactOf, definitionsOf, referencesOf, resolveGraphFile } from './codeGraph';
@@ -486,7 +487,7 @@ export class ToolDispatcher {
    * never wrongly fails a real build on an internal error.
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [] };
+    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled
@@ -2686,6 +2687,24 @@ export class ToolDispatcher {
         const summary = unwiredFilesSummary(files);
         this.state?.appendTerminal(summary);
         return summary;
+      }
+
+      case 'find_code_smells': {
+        // T3 — advisory scan for magic numbers + duplicate blocks. Pure analyzer in CodeSmellAnalyzer.ts.
+        let csFiles: string[];
+        try { csFiles = await this.actuator.listFiles(this.workspaceId); }
+        catch { return 'find_code_smells: failed to list workspace files.'; }
+        const CS_CODE = /\.(t|j)sx?$/;
+        const CS_SKIP = /(node_modules|dist|build|coverage|\.next|\.git|\.test\.|\.spec\.)/;
+        const csCode = csFiles.filter((f) => CS_CODE.test(f) && !CS_SKIP.test(f)).slice(0, 300);
+        const csContents: { path: string; content: string }[] = [];
+        for (const f of csCode) {
+          try { csContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); }
+          catch { /* skip unreadable */ }
+        }
+        const csOut = renderCodeSmells(analyzeCodeSmells(csContents));
+        this.state?.appendTerminal(csOut);
+        return csOut;
       }
 
       case 'api_graph': {

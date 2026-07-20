@@ -1497,6 +1497,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_reactions',
+      description:
+        'Add a real emoji-reactions backend to the app (server/reactions/) — a packaged domain vertical for ' +
+        'reacting (👍 ❤️ 😂 …) to any post, comment, message or media. The real guarantee is REACTION ' +
+        'INTEGRITY: a user reaction to a given (target, emoji) is an idempotent TOGGLE (re-reacting with the ' +
+        'same emoji removes it — never a double count), and a user holds AT MOST ONE emoji per target (a new ' +
+        'emoji replaces the old), so per-emoji counts are always exact. Emits a dependency-free ReactionService ' +
+        '(react, unreact, hasReacted, countFor, summary) + an Express router (POST /api/reactions/:targetId ' +
+        '{userId, emoji} → toggle, DELETE /api/reactions/:targetId, GET /api/reactions/:targetId ?viewer=). ' +
+        'Emoji are validated against an allow-list. Distinct from generate_feedback (a single-upvote board) and ' +
+        'generate_polls (fixed-option voting). In-memory by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2580,6 +2594,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_consent',
   'generate_activity_feed',
   'generate_cart',
+  'generate_reactions',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

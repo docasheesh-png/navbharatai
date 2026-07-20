@@ -135,6 +135,7 @@ import { generateApiVersionIntegration } from '../lib/ApiVersionGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
+import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
@@ -3278,6 +3279,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('inventory starter');
         const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an inventory/stock backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
+      }
+
+      case 'generate_support_tickets': {
+        // Breadth recipe (domain vertical) — support tickets/helpdesk (server/tickets/): a real TicketService
+        // with a status STATE-MACHINE + an Express router. Pure generator in SupportTicketGenerator.ts.
+        const tkcfg = generateSupportTicketIntegration();
+        const tkWritten: string[] = [];
+        for (const [path, content] of Object.entries(tkcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tkWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('support tickets');
+        const tkDeps = tkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a support-ticket backend:\n${tkWritten.join('\n')}\nAdd the dependencies: ${tkDeps}\n\n${tkcfg.instructions}`;
       }
 
       case 'generate_graphql': {

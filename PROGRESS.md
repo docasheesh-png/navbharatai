@@ -19636,3 +19636,22 @@ toolchains → a non-buildable framework would be a fake feature). CI '--ignore-
 would break legitimate build postinstalls (a downgrade). Breadth recipes are now essentially exhausted; the
 remaining high-leverage roadmap work is engine-level (bounded ask_user, prompt-cache prefixes, cost-alert),
 deferred this session to avoid colliding with the autopsy agent's engine work.
+
+---
+
+## 2026-07-20 (cont.) — 5 more capabilities: request-id, api-versioning + domain verticals (all merged, CI-green)
+
+Continuing the isolated/additive conveyor (one branch at a time, distinct KB anchors, each proven by
+materializing + EXECUTING the emitted code, not just structural asserts):
+
+- **generate_request_id (#1681)** — correlation-id middleware (reuse a safe inbound X-Request-Id or mint a UUID).
+- **generate_api_versioning (#1685)** — resolve/validate the client API version (X-API-Version/Accept-Version, 406 on unknown).
+- **generate_booking (#1686)** — FIRST domain vertical: booking/appointments with real DOUBLE-BOOKING prevention.
+- **generate_inventory (#1689)** — stock backend with a real NO-OVERSELLING guarantee (reserve rejects when short).
+- **generate_support_tickets** — helpdesk with a real status STATE-MACHINE (open→in_progress→resolved→closed;
+  invalid jumps rejected 409; a closed ticket can only be reopened).
+
+The domain verticals (booking + inventory + tickets) compose with the existing payment/OTP/notification/audit
+recipes into real order/service flows — a step up in value from single-file middlewares. The 'real guarantee'
+in each (no double-booking / no overselling / valid state-machine) is exactly the bug a stub would hide, so
+each is verified by running the emitted service against those cases. Engine still untouched (autopsy agent).

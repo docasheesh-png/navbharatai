@@ -1122,6 +1122,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_support_tickets',
+      description:
+        'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
+        'for any SaaS/service business. The real guarantee is a status STATE-MACHINE: a ticket moves ' +
+        'open → in_progress → resolved → closed along allowed transitions only (a closed ticket can only be ' +
+        'reopened), and an invalid jump is rejected. Emits a dependency-free TicketService (create / transition ' +
+        '/ assign / comment / list) + an Express router (POST /tickets, GET /tickets(/:id), PATCH ' +
+        '/tickets/:id/status → 409 on invalid transition, PATCH /tickets/:id/assign, POST /tickets/:id/comments) ' +
+        '+ a README. In-memory by default — swap the store for your DB (same contracts). Pairs with the auth/' +
+        'notification/audit recipes.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pagination',
       description:
         'Add real, DoS-safe list pagination to the app (server/lib/pagination.ts): dependency-free ' +
@@ -2166,6 +2179,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crud',
   'generate_booking',
   'generate_inventory',
+  'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',
   'generate_rbac',

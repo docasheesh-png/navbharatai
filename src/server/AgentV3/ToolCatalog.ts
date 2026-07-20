@@ -1454,6 +1454,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_consent',
+      description:
+        'Add a real GDPR/privacy consent-log backend to the app (server/consent/) — a packaged domain vertical ' +
+        'for cookie/marketing/terms consent, DPA compliance and audit. The real guarantee is an APPEND-ONLY ' +
+        'event log: every grant/withdraw is recorded with a purpose, policy version and source, and NOTHING is ' +
+        'ever mutated or deleted — hasConsent(user, purpose) is derived from the MOST-RECENT event (latest ' +
+        'wins), so the current state is always provable and the full history is auditable. Emits a ' +
+        'dependency-free ConsentService (record, hasConsent, stateOf, history, grantedUsers) + an Express ' +
+        'router (POST /consent {grant|withdraw}, GET /consent/:user, GET /consent/:user/:purpose, GET ' +
+        '/consent/:user/history). Distinct from generate_audit (general tamper-evident log). In-memory by ' +
+        'default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2534,6 +2548,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_experiments',
   'generate_short_links',
   'generate_feedback',
+  'generate_consent',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -19710,3 +19710,30 @@ questions before building an ambiguous prompt). It changes the build-entry contr
 build-friction: 'text reply > build app') + needs frontend + a UX choice (pre-build clarify message vs a
 structured question card vs report-only). Deliberately NOT wired blind per safeguard #3 — awaiting the admin's
 UX call + a default-off/canary flag. Slice 1 (#1692) de-risks it by surfacing the analyzer output on real builds.
+
+---
+
+## 2026-07-20 (cont.) — Engine: requirement-aware build (#1695, admin chose friction-free option A)
+
+Admin picked the FRICTION-FREE path over an interactive clarify gate (honest recommendation: the interactive
+gate adds the exact build-friction the admin's own 'text reply > build app' rule kills, plus a multi-turn
+context-handoff problem). Delivered:
+
+- **#1695** — requirement-aware build, behind AGENTV3_REQUIREMENT_AWARE (default OFF, canary). On a FRESH build
+  of an ambiguous DOMAIN prompt, a bounded guidance block (new pure/tested buildRequirementGuidance, capped at
+  6 features) is prepended to buildPrompt telling the builder to proactively INCLUDE the features that domain
+  usually needs but the prompt left implicit (RBAC/audit/EMR for a hospital, ...) — real+wired, skip silently
+  if out of scope, NEVER ask. Reuses the existing buildPrompt guarded-prepend idiom; only fires for a new build
+  (never an edit) of a detected domain with genuine gaps. Flag OFF ⇒ buildPrompt byte-identical to today
+  (canary-safe, cannot touch the live app). Verified: server tsc + agentv3 route suite (247) + analyzer = 257.
+
+Together with #1692 (the same analysis surfaced in the admin build report), the #1 roadmap item (Requirement
+Understanding) now has a real, shippable engine path with ZERO build-friction.
+
+**ROLLOUT (admin action — Cloud Run):** set AGENTV3_REQUIREMENT_AWARE=on to start the canary; watch a few real
+domain builds in the build report (the REQUIREMENT_GAPS line from #1692 shows what it detected), then it stays
+on for everyone. Kill switch: unset / set to anything but 'on'.
+
+**Still OPEN (engine, higher-risk — needs care):** prompt-cache stable prefixes for GLM/Kimi (AP-5) — touches
+the provider hot path of every LLM call; the code already has a cachePrefixPreamble hook, so it's partially
+scaffolded. Left for a deliberate, well-tested slice.

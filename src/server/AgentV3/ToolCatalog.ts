@@ -1262,6 +1262,36 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_listings',
+      description:
+        'Add a real marketplace-listings backend to the app (server/listings/) — a packaged domain vertical for ' +
+        'classifieds, peer-to-peer marketplaces, second-hand stores and any buyer↔seller app. The real ' +
+        'guarantee is SALE INTEGRITY: a listing follows the lifecycle draft→active→sold/removed (invalid jumps ' +
+        'rejected), it can be SOLD AT MOST ONCE (a purchase on a sold/draft/removed listing is rejected and a ' +
+        'seller cannot buy their own), and only ACTIVE listings are publicly searchable. A sold listing is ' +
+        'immutable. Emits a dependency-free ListingService (create, publish, setStatus, buy, update, search, ' +
+        'listBySeller, purchasesBy) + an Express router (POST /listings, GET /listings?q= + /listings/:id, PATCH ' +
+        '/listings/:id/status → 409 on invalid transition, POST /listings/:id/buy → 409 on already-sold / ' +
+        'unavailable / self-purchase). Take seller/buyer from the auth session in production. In-memory by ' +
+        'default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_job_board',
+      description:
+        'Add a real job board / applicant-tracking backend to the app (server/jobboard/) — a packaged domain ' +
+        'vertical for career sites, hiring platforms and any recruiting flow. The real guarantee is APPLICATION ' +
+        'INTEGRITY: a candidate can apply to a given job AT MOST ONCE (a duplicate is rejected), only OPEN jobs ' +
+        'accept applications, and an application follows the hiring STATE-MACHINE applied→screening→interview→' +
+        'offer→hired/rejected (invalid jumps rejected; hired/rejected terminal). Emits a dependency-free ' +
+        'JobBoardService (postJob, listOpenJobs, apply, advance, applicationsForJob, applicationsByCandidate) + ' +
+        'an Express router (POST /jobs, GET /jobs, PATCH /jobs/:id/status, POST /jobs/:id/apply → 409 on ' +
+        'closed/duplicate, GET /jobs/:id/applications, PATCH /applications/:id/status → 409 on invalid ' +
+        'transition). Distinct from generate_jobs (background job queue). Take candidate from the auth session ' +
+        'in production. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2329,6 +2359,8 @@ export const CATALOG_TOOL_NAMES = [
   'generate_referrals',
   'generate_comments',
   'generate_messaging',
+  'generate_listings',
+  'generate_job_board',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

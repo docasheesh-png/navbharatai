@@ -1439,6 +1439,35 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_feedback',
+      description:
+        'Add a real feedback / feature-request board backend to the app (server/feedback/) — a packaged domain ' +
+        'vertical for a public product roadmap (Canny / Featurebase style). The real guarantee is VOTE + STATUS ' +
+        'INTEGRITY: a user can upvote a given post AT MOST ONCE (upvote/unvote are idempotent, so vote counts are ' +
+        'always exact), and a post moves along the status lifecycle open→planned→in_progress→done/declined ' +
+        '(allowed transitions only; done/declined reopen to open). submit() counts the author own vote. Emits a ' +
+        'dependency-free FeedbackService (submit, upvote, unvote, hasVoted, setStatus, list) + an Express router ' +
+        '(POST /feedback, GET /feedback?status= sorted by votes, GET /feedback/:id?user=, POST/DELETE ' +
+        '/feedback/:id/upvote, PATCH /feedback/:id/status → 409 on invalid transition). Distinct from ' +
+        'generate_polls (fixed-option voting) and generate_kanban (private task board). In-memory by default — ' +
+        'swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_consent',
+      description:
+        'Add a real GDPR/privacy consent-log backend to the app (server/consent/) — a packaged domain vertical ' +
+        'for cookie/marketing/terms consent, DPA compliance and audit. The real guarantee is an APPEND-ONLY ' +
+        'event log: every grant/withdraw is recorded with a purpose, policy version and source, and NOTHING is ' +
+        'ever mutated or deleted — hasConsent(user, purpose) is derived from the MOST-RECENT event (latest ' +
+        'wins), so the current state is always provable and the full history is auditable. Emits a ' +
+        'dependency-free ConsentService (record, hasConsent, stateOf, history, grantedUsers) + an Express ' +
+        'router (POST /consent {grant|withdraw}, GET /consent/:user, GET /consent/:user/:purpose, GET ' +
+        '/consent/:user/history). Distinct from generate_audit (general tamper-evident log). In-memory by ' +
+        'default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2518,6 +2547,8 @@ export const CATALOG_TOOL_NAMES = [
   'generate_tags',
   'generate_experiments',
   'generate_short_links',
+  'generate_feedback',
+  'generate_consent',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

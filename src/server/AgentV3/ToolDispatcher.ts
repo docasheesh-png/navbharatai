@@ -159,6 +159,8 @@ import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
 import { generateTagsIntegration } from '../lib/TagsGenerator';
 import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
+import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
+import { generateConsentIntegration } from '../lib/ConsentGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3756,6 +3758,44 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('short links starter');
         const slDeps = slcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a URL-shortener backend:\n${slWritten.join('\n')}\nAdd the dependencies: ${slDeps}\n\n${slcfg.instructions}`;
+      }
+
+      case 'generate_feedback': {
+        // Breadth recipe (domain vertical) — feedback / feature-request board (server/feedback/): a real
+        // FeedbackService with VOTE + STATUS INTEGRITY (upvote-once + exact counts + status lifecycle) + an
+        // Express router. Pure gen in FeedbackGenerator.ts.
+        const fbcfg = generateFeedbackIntegration();
+        const fbWritten: string[] = [];
+        for (const [path, content] of Object.entries(fbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('feedback starter');
+        const fbDeps = fbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a feedback board backend:\n${fbWritten.join('\n')}\nAdd the dependencies: ${fbDeps}\n\n${fbcfg.instructions}`;
+      }
+
+      case 'generate_consent': {
+        // Breadth recipe (domain vertical) — GDPR consent log (server/consent/): a real ConsentService with an
+        // APPEND-ONLY event log where hasConsent() is the most-recent grant/withdraw (latest wins) + an Express
+        // router. Pure generator in ConsentGenerator.ts.
+        const cscfg = generateConsentIntegration();
+        const csWritten: string[] = [];
+        for (const [path, content] of Object.entries(cscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('consent starter');
+        const csDeps = cscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a GDPR consent-log backend:\n${csWritten.join('\n')}\nAdd the dependencies: ${csDeps}\n\n${cscfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

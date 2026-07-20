@@ -1162,6 +1162,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_polls',
+      description:
+        'Add a real polls / surveys backend to the app (server/polls/) — a packaged domain vertical for ' +
+        'communities, events and product feedback. The real guarantee is VOTE INTEGRITY: each voter can vote ' +
+        'at most once per poll (a repeat vote is rejected, or moved with allowChange), a closed poll accepts no ' +
+        'more votes, and the tally is always exact. Emits a dependency-free PollService (createPoll, vote, ' +
+        'closePoll, results, hasVoted) + an Express router (POST /polls, GET /polls/:id(/results), POST ' +
+        '/polls/:id/vote → 409 on a duplicate vote or closed poll, POST /polls/:id/close). Identify the voter ' +
+        'by auth user id (or a device/session id for anonymous polls). In-memory by default — swap the store ' +
+        'for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2222,6 +2235,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_crm',
   'generate_events',
   'generate_subscriptions',
+  'generate_polls',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -138,6 +138,7 @@ import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
 import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
+import { generatePollsIntegration } from '../lib/PollsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3373,6 +3374,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('subscriptions starter');
         const subDeps = subcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a subscriptions / recurring-billing backend:\n${subWritten.join('\n')}\nAdd the dependencies: ${subDeps}\n\n${subcfg.instructions}`;
+      }
+
+      case 'generate_polls': {
+        // Breadth recipe (domain vertical) — polls/surveys (server/polls/): a real PollService with VOTE
+        // INTEGRITY (one vote per voter) + tally + an Express router. Pure gen in PollsGenerator.ts.
+        const plcfg = generatePollsIntegration();
+        const plWritten: string[] = [];
+        for (const [path, content] of Object.entries(plcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          plWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('polls starter');
+        const plDeps = plcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a polls/surveys backend:\n${plWritten.join('\n')}\nAdd the dependencies: ${plDeps}\n\n${plcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

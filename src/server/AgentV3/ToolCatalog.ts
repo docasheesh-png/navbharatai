@@ -1320,6 +1320,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_coupons',
+      description:
+        'Add a real coupons / discount-codes backend to the app (server/coupons/) — a packaged domain vertical ' +
+        'for ecommerce, SaaS and any checkout. The real guarantee is REDEMPTION INTEGRITY: a code enforces an ' +
+        'optional TOTAL-redemption cap AND an optional PER-USER limit (both counted exactly), rejects an ' +
+        'expired/inactive code or an order below its minimum, and computes the discount correctly — percentage ' +
+        '(capped at the order total) or fixed (never below zero). validate() checks without counting; redeem() ' +
+        'records the redemption toward both caps. Emits a dependency-free CouponService (create, validate, ' +
+        'redeem, stats) + an Express router (POST /coupons, POST /coupons/validate → 422 with a reason if not ' +
+        'usable, POST /coupons/redeem → 422 on failure, GET /coupons/:code/stats). Amounts are in the smallest ' +
+        'currency unit. Pairs with generate_payment / generate_loyalty. In-memory by default — swap the store ' +
+        'for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2391,6 +2406,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_job_board',
   'generate_wishlist',
   'generate_addresses',
+  'generate_coupons',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

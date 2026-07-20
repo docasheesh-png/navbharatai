@@ -154,6 +154,7 @@ import { generateCouponsIntegration } from '../lib/CouponsGenerator';
 import { generateKanbanIntegration } from '../lib/KanbanGenerator';
 import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
 import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
+import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3675,6 +3676,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('leaderboard starter');
         const lbDeps = lbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a leaderboard backend:\n${lbWritten.join('\n')}\nAdd the dependencies: ${lbDeps}\n\n${lbcfg.instructions}`;
+      }
+
+      case 'generate_waitlist': {
+        // Breadth recipe (domain vertical) — launch waitlist (server/waitlist/): a real Waitlist with QUEUE
+        // INTEGRITY (email dedup + FIFO position + invite-front-N-in-order) + an Express router. Pure gen in
+        // WaitlistGenerator.ts.
+        const wtcfg = generateWaitlistIntegration();
+        const wtWritten: string[] = [];
+        for (const [path, content] of Object.entries(wtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('waitlist starter');
+        const wtDeps = wtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a launch-waitlist backend:\n${wtWritten.join('\n')}\nAdd the dependencies: ${wtDeps}\n\n${wtcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

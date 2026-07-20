@@ -3,6 +3,7 @@ import {
   Send, Clock, Copy, Check, Trash2, Plus, ChevronDown,
   ArrowRight, Save, RefreshCcw, Globe
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -363,7 +364,7 @@ const APITester: React.FC<APITesterProps> = () => {
             disabled={loading || !url.trim()}
             className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-xs font-semibold transition-colors"
           >
-            {loading ? <RefreshCcw size={14} className="animate-spin" /> : <Send size={14} />}
+            {loading ? <TirangaLoader size={14} /> : <Send size={14} />}
             Send
           </button>
 
@@ -500,7 +501,7 @@ const APITester: React.FC<APITesterProps> = () => {
           <div className="flex-1 overflow-y-auto p-3 bg-[#0d1117]">
             {loading && (
               <div className="flex items-center gap-2 text-indigo-400 text-xs">
-                <RefreshCcw size={14} className="animate-spin" /> Sending request...
+                <TirangaLoader size={14} /> Sending request...
               </div>
             )}
             {error && (

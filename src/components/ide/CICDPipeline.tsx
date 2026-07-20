@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { GitBranch, Play, Check, X, Plus, Trash2, Download, RefreshCw, ChevronRight, Zap, Server, Shield, Rocket, Settings, Copy, AlertCircle } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 type StepType = 'checkout' | 'install' | 'test' | 'build' | 'deploy' | 'notify' | 'custom';
 type StepStatus = 'idle' | 'running' | 'pass' | 'fail' | 'skip';
@@ -263,7 +264,7 @@ export function CICDPipeline() {
                   }`}>
                     {step.status === 'pass' && <Check className="w-2 h-2 text-white" />}
                     {step.status === 'fail' && <X className="w-2 h-2 text-white" />}
-                    {step.status === 'running' && <RefreshCw className="w-2 h-2 text-white animate-spin" />}
+                    {step.status === 'running' && <TirangaLoader className="w-2 h-2 text-white" />}
                     {(step.status === 'idle' || step.status === 'skip') && <span className="text-[7px] text-white/40">{idx + 1}</span>}
                   </div>
                   <button

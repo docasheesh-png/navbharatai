@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, Sparkles, X, FileText, Crown, LogIn } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
@@ -179,7 +180,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           </div>
         ))}
         {loading && (
-          <div className="flex justify-start"><div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5"><Loader2 className="w-4 h-4 animate-spin text-indigo-400" /></div></div>
+          <div className="flex justify-start"><div className="bg-[#161b22] border border-white/10 rounded-2xl px-4 py-2.5"><TirangaLoader className="w-4 h-4 text-indigo-400" /></div></div>
         )}
         {showQuick && (
           <div className="flex flex-wrap gap-2 pt-2">
@@ -233,7 +234,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
             .map((m) => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, content: m.content }))}
         />
         <button onClick={() => send()} disabled={(!input.trim() && files.length === 0) || loading} className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white flex items-center justify-center shrink-0">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          {loading ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
         </button>
       </div>
 
@@ -260,7 +261,7 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
                   disabled={buying}
                   className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-60 text-black font-bold flex items-center justify-center gap-2"
                 >
-                  {buying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />}
+                  {buying ? <TirangaLoader className="w-4 h-4" /> : <Crown className="w-4 h-4" />}
                   {buying ? 'Opening checkout…' : `Get Pass — ₹${pass?.priceInr ?? 99}/month`}
                 </button>
                 <p className="text-[11px] text-[#586069] mt-2">Cancel anytime · secure payment</p>

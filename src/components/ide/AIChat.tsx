@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Bot, User, Send, Sparkles, Loader2, Heart, Zap, ShieldCheck, Languages, ShieldAlert, Link as LinkIcon, CheckCircle2, Github, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, Zap as ZapIcon, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Search } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -216,7 +217,7 @@ export const SecretQuickFill: React.FC<SecretQuickFillProps> = ({ providerId, us
         >
           {status === 'saving' ? (
             <>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <TirangaLoader className="w-3.5 h-3.5" />
               Saving to secure panel...
             </>
           ) : (
@@ -1369,7 +1370,7 @@ export const AIChat: React.FC<AIChatProps> = ({
               disabled={isPushing}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              {isPushing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {isPushing ? <TirangaLoader className="w-3 h-3" /> : <Send className="w-3 h-3" />}
               {isPushing ? 'Pushing...' : 'Confirm & Push to GitHub'}
             </button>
           </motion.div>
@@ -1505,7 +1506,7 @@ export const AIChat: React.FC<AIChatProps> = ({
                 {/* Stage */}
                 {buildProgress.stage && (
                   <div className="flex items-center gap-2 px-4 py-2 border-b border-white/5">
-                    <div className="w-3 h-3 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
+                    <TirangaLoader className="w-3 h-3 flex-shrink-0" />
                     <span className="text-[11px] text-amber-300 font-medium">{buildProgress.stage}</span>
                   </div>
                 )}

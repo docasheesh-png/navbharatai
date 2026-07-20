@@ -13,6 +13,7 @@ import {
   Image as ImageIcon,
   Clipboard,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface ScreenshotToCodeProps {
   onCodeGenerated?: (code: string) => void;
@@ -499,7 +500,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
 
             {status === 'generating' && (
               <div className="h-full flex flex-col items-center justify-center gap-3">
-                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+                <TirangaLoader className="w-8 h-8" />
                 <p className="text-sm text-gray-400">AI analyze kar raha hai...</p>
               </div>
             )}
@@ -530,7 +531,7 @@ export const ScreenshotToCode: React.FC<ScreenshotToCodeProps> = ({ onCodeGenera
         >
           {status === 'generating' ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <TirangaLoader className="w-4 h-4" />
               Generating...
             </>
           ) : (

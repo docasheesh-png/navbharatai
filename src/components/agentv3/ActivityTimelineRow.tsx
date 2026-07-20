@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { ChevronRight, Loader2, X, Check, FileCode, Terminal as TerminalIcon, Search, BookOpen, Bot, Globe, ClipboardList } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ActivityEntry } from './agentV3Types';
 import type { ChatBlock, TimelineMsgLike } from './activityTimeline';
 import { detailEntries, actionGroupOpen } from './activityTimeline';
@@ -46,7 +47,7 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Ex
           }`}
         >
           {block.active
-            ? <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
+            ? <TirangaLoader className="w-3 h-3 text-indigo-400 shrink-0" />
             : block.failed
               ? <X className="w-3 h-3 text-red-400 shrink-0" />
               : <Check className="w-3 h-3 text-emerald-500/80 shrink-0" />}
@@ -69,7 +70,7 @@ export function ActionGroupRow<M extends TimelineMsgLike>({ block }: { block: Ex
                   {(e.text || '').replace(/^running: /, '$ ')}
                 </span>
                 {e.active
-                  ? <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
+                  ? <TirangaLoader className="w-3 h-3 text-indigo-400 shrink-0" />
                   : e.ok === false
                     ? <X className="w-3 h-3 text-red-400 shrink-0" />
                     : <Check className="w-3 h-3 text-emerald-600/70 shrink-0" />}

@@ -50,6 +50,7 @@ import {
   Kanban, CloudUpload, LayoutTemplate, HeartPulse,
   Briefcase, FileText
 } from 'lucide-react';
+import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 import { AdminDashboard } from './components/AdminDashboard';
 // SDAChat kept eager — used immediately on tab open
@@ -2452,7 +2453,7 @@ export default function App() {
         <Suspense fallback={
           <div className="flex-1 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-indigo-500/40 border-t-indigo-500 rounded-full animate-spin" />
+              <TirangaLoader className="w-8 h-8" />
               <span className="text-xs text-[#8b949e] font-mono uppercase tracking-widest">Loading module…</span>
             </div>
           </div>
@@ -3470,7 +3471,7 @@ export default function App() {
               >
                 <span className="relative inline-flex">
                   {busy
-                    ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+                    ? <TirangaLoader className="w-5 h-5 shrink-0" />
                     : <Icon className={`w-5 h-5 shrink-0 ${active ? 'drop-shadow-[0_0_6px_rgba(99,102,241,0.8)]' : ''}`} />}
                   {/* Admin 2026-07-07: green dot = the app is genuinely viewable (real state, never a timer). */}
                   {dot && <span className="absolute -top-0.5 -right-1 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_5px_rgba(52,211,153,0.9)]" aria-label="Preview ready" />}

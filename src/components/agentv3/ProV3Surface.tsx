@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import { AgentV3Panel } from './AgentV3Panel';
 import type { FilesPanelProps } from '../panels/FilesPanel';
 import type { V3FooterApi } from './v3FooterApi';
@@ -34,7 +35,7 @@ export function ProV3Surface({ userId, email, resume, freshOpenNonce, onFilesSyn
   if (state === 'loading') {
     return (
       <div className="h-full flex items-center justify-center text-zinc-500">
-        <Loader2 className="w-5 h-5 animate-spin" />
+        <TirangaLoader className="w-5 h-5" />
       </div>
     );
   }

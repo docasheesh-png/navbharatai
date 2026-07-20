@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database } from 'lucide-react';
+import { TirangaLoader } from './ui/TirangaLoader';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -431,7 +432,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
       {loading && !analytics ? (
         <div className="py-24 text-center">
-          <RefreshCw className="w-10 h-10 text-indigo-500 animate-spin mx-auto mb-4" />
+          <TirangaLoader className="w-10 h-10 mx-auto mb-4" />
           <p className="text-xs text-[#8b949e] font-black uppercase tracking-widest">Loading dashboard data...</p>
         </div>
       ) : (
@@ -675,7 +676,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {usersLoading && (
-                        <tr><td colSpan={7} className="py-10 text-center"><RefreshCw className="w-5 h-5 animate-spin text-indigo-400 mx-auto" /></td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center"><TirangaLoader className="w-5 h-5 mx-auto" /></td></tr>
                       )}
                       {!usersLoading && users.length === 0 && usersError && (
                         <tr><td colSpan={7} className="py-10 text-center text-red-400 text-[10px] font-bold normal-case px-4">{usersError} <button onClick={fetchUsers} className="underline ml-1">Retry</button></td></tr>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Loader2, Bot } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import ReactMarkdown from 'react-markdown';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { getAgentV3SessionId, getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
@@ -130,7 +131,7 @@ export function AgentV3MiniChat({ userId, email }: { userId?: string; email?: st
         ))}
         {running && (
           <div className="flex items-center gap-2 text-xs text-zinc-500 px-1">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Working…
+            <TirangaLoader className="w-3.5 h-3.5" /> Working…
           </div>
         )}
       </div>

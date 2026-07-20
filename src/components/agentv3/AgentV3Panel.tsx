@@ -9,6 +9,7 @@ import {
   FileCode, Maximize2, Minimize2, ThumbsUp, ThumbsDown, Menu, Plus, Clock, Sparkles, Wallet, Copy,
   Star, Search,
 } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
@@ -2137,7 +2138,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             aria-label={c.pinned ? 'Unpin this session' : 'Pin this session'}
             className={`p-1 rounded touch-manipulation disabled:opacity-40 focus:opacity-100 ${c.pinned ? 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 opacity-100' : 'text-zinc-500 hover:text-indigo-400 hover:bg-indigo-500/10 opacity-60 sm:opacity-0 sm:group-hover:opacity-100'}`}
           >
-            {isPinning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
+            {isPinning ? <TirangaLoader className="w-3.5 h-3.5" /> : <Star className={`w-3.5 h-3.5 ${c.pinned ? 'fill-current' : ''}`} />}
           </button>
           <button
             type="button"
@@ -2147,7 +2148,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             aria-label="Delete this session"
             className="p-1 rounded touch-manipulation text-zinc-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
           >
-            {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+            {isDeleting ? <TirangaLoader className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -2193,7 +2194,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         </div>
       )}
       {historyLoading ? (
-        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading sessions…</div>
+        <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading sessions…</div>
       ) : historyError ? (
         <div className="px-3 py-4 text-xs text-center">
           <div className="flex items-center justify-center gap-1.5 text-amber-400">
@@ -2350,7 +2351,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             title="Download the diagnostics report from your last build (JSON) — every issue v5.0 hit (provider fallbacks, tool errors, readiness blockers, sandbox problems). Send it to support to get the build engine improved."
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {downloadingDiag ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            {downloadingDiag ? <TirangaLoader className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
             {downloadingDiag ? 'Preparing…' : 'Build report'}
           </button>
           {/* Copy build report (admin 2026-07-12 — re-added, right next to Download): copies the SAME
@@ -2387,7 +2388,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   )}
                   <div className="my-1 border-t border-zinc-800" />
                   {historyReportLoading ? (
-                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                    <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading…</div>
                   ) : historyReportItems.length === 0 ? (
                     <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
                   ) : (
@@ -2730,7 +2731,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 {queueItems.map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-[11px]">
                     <span className={`shrink-0 mt-0.5 ${item.status === 'running' ? 'text-indigo-400' : item.status === 'done' ? 'text-green-500' : item.status === 'failed' ? 'text-red-400' : item.status === 'cancelled' ? 'text-zinc-600' : 'text-zinc-400'}`}>
-                      {item.status === 'running' ? <Loader2 className="w-3 h-3 animate-spin" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
+                      {item.status === 'running' ? <TirangaLoader className="w-3 h-3" /> : item.status === 'done' ? <Check className="w-3 h-3" /> : item.status === 'failed' ? <X className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
                     </span>
                     <span className={`flex-1 break-words ${item.status === 'cancelled' ? 'text-zinc-600 line-through' : item.status === 'done' ? 'text-zinc-500' : 'text-zinc-300'}`}>
                       {item.prompt}
@@ -3032,7 +3033,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
                   <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
-                    {roleBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
@@ -3168,7 +3169,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         disabled={restoring}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
                       >
-                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                     )}
@@ -3199,7 +3200,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                         title="Bring your whole project back into the workspace"
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-indigo-700/60 text-indigo-300 hover:text-white hover:border-indigo-500 disabled:opacity-40"
                       >
-                        {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        {restoring ? <TirangaLoader className="w-3.5 h-3.5" /> : <RotateCcw className="w-3.5 h-3.5" />}
                         {restoring ? 'Restoring…' : 'Restore all files'}
                       </button>
                       {restoreMsg && <span className="text-[11px] text-zinc-400">{restoreMsg}</span>}
@@ -3311,7 +3312,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       </button>
                     )}
                     {historyReportLoading ? (
-                      <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                      <div className="px-3 py-3 text-xs text-zinc-500 flex items-center gap-2"><TirangaLoader className="w-3.5 h-3.5" /> Loading…</div>
                     ) : historyReportItems.length === 0 ? (
                       <div className="px-3 py-3 text-xs text-zinc-500">No past build reports saved yet.</div>
                     ) : (
@@ -3476,7 +3477,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             ) : ghReposLoading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-[#8b949e] text-xs">
-                <Loader2 className="w-4 h-4 animate-spin" /> Loading your repositories…
+                <TirangaLoader className="w-4 h-4" /> Loading your repositories…
               </div>
             ) : ghReposError ? (
               <div className="space-y-2 text-center py-2">
@@ -3566,7 +3567,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {/* Push status / result (honest: shows pushing, success with a real repo link, or the reason). */}
             {(pushBusy || pushResult) && (
               <div className={`flex items-start gap-2 p-3 rounded-xl border text-[11px] ${pushResult && !pushResult.ok ? 'bg-amber-500/10 border-amber-500/20 text-amber-200' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-100'}`}>
-                {pushBusy ? <Loader2 className="w-4 h-4 animate-spin shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
+                {pushBusy ? <TirangaLoader className="w-4 h-4 shrink-0 mt-0.5" /> : pushResult?.ok ? <Github className="w-4 h-4 shrink-0 mt-0.5" /> : <X className="w-4 h-4 shrink-0 mt-0.5" />}
                 <div className="min-w-0">
                   <p>{pushResult?.text || 'Pushing…'}</p>
                   {pushResult?.ok && pushResult.url && (
@@ -3814,7 +3815,7 @@ function Bubble({ msg }: { msg: ChatMsg }) {
 function todoStatusIcon(status: TodoStatus) {
   switch (status) {
     case 'done': return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />;
-    case 'in_progress': return <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />;
+    case 'in_progress': return <TirangaLoader className="w-3.5 h-3.5 text-indigo-400 shrink-0" />;
     case 'blocked': return <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
     default: return <Circle className="w-3.5 h-3.5 text-zinc-600 shrink-0" />; // pending
   }

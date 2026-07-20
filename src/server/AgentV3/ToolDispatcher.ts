@@ -139,6 +139,7 @@ import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
+import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
 import { generateSsoIntegration } from '../lib/SsoGenerator';
 import { generateAbac } from '../lib/AbacGenerator';
@@ -3347,6 +3348,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ui-states');
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_state': {
+        // Roadmap BUILD-NOW #9 — GLOBAL state management (Zustand store + selector hooks). Distinct from
+        // generate_ui_states' LOCAL useOptimisticList. Pure generator in FrontendStateGenerator.ts. No env keys.
+        const fs = generateFrontendStateIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fs.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('global state store');
+        const fsDeps = fs.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired global state management:\n${fsWritten.join('\n')}\nAdd the dependency: ${fsDeps}\n\n${fs.instructions}`;
       }
 
       case 'generate_image_optimization': {

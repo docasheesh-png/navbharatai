@@ -1178,6 +1178,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_state',
+      description:
+        'Add real GLOBAL state management to the frontend (src/store/, zustand): a typed cross-component store ' +
+        '+ selector hooks (useItems/useItemsActions) so shared app state (cart, session, a live list) is not ' +
+        'prop-drilled. Ships a working example with an OPTIMISTIC async action that applies instantly, confirms ' +
+        'with the server, and ROLLS BACK on failure. Use when the app needs shared state across components. ' +
+        "(For a LOCAL optimistic list inside one component, use generate_ui_states' useOptimisticList instead.) " +
+        'Adds the zustand dependency, no env key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_image_optimization',
       description:
         'Add real image optimization: a sharp-based server helper (optimizeImage — resize + WebP re-encode on ' +
@@ -2020,6 +2031,7 @@ export const CATALOG_TOOL_NAMES = [
   'analyze_requirements',
   'generate_i18n',
   'generate_ui_states',
+  'generate_state',
   'generate_image_optimization',
   'generate_sso',
   'generate_abac',

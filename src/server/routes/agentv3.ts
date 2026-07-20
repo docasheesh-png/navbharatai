@@ -99,7 +99,7 @@ import {
   type ConversationStore,
 } from '../AgentV3/ConversationStore';
 import { createTimelineRecorder, sessionRecallContextLine } from '../AgentV3/SessionTimeline';
-import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously } from '../AgentV3/ProjectImport';
+import { isZipAttachment, extractZipProject, validateImportedProject, droppedDetailNote, envTemplateNote, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace } from '../AgentV3/ProjectImport';
 import { generateMissingCssModules } from '../AgentV3/CssModuleGenerator';
 import { generateMissingBarrels } from '../AgentV3/BarrelGenerator';
 import { detectNeedsDatabase, envVarNames, buildDevEnvContent, externalServiceNote, conjurableSecrets } from '../AgentV3/ImportPreview';
@@ -5594,6 +5594,23 @@ export function registerAgentV3Routes(app: Express): void {
           if (process.env.AGENTV3_DEP_RECONCILE !== 'off') {
             try {
               const union = { ...saved, ...existing.files, ...plan.restore };
+              // FRAMEWORK-DRIFT CORRECTION (PulseBoard autopsy 2026-07-20): the `framework` label is set
+              // ONCE (client picker / first-turn prompt) and never re-derived from what the app ACTUALLY
+              // became. A Next.js app carried a stale `vite-react` label for the WHOLE session — so the
+              // builder spent ~15 min reconciling package.json vs Next.js code, the preview booted with
+              // Vite assumptions, and the report mislabelled it. Now: when the restored workspace clearly
+              // IS a meta-framework (a real next/nuxt/… dep, its config file, or the App-Router shape) that
+              // differs from the current label, adopt it — the SAME adoption a zip import already does,
+              // extended to a continue/restore turn. Only ever UPGRADES a bare `vite-react` label to a
+              // confidently-detected meta-framework (detectFrameworkFromWorkspace returns null otherwise),
+              // so it can never mis-flip a genuine Vite app. Kill switch: AGENTV3_FRAMEWORK_DRIFT=off.
+              if (process.env.AGENTV3_FRAMEWORK_DRIFT !== 'off' && framework === 'vite-react') {
+                const detected = detectFrameworkFromWorkspace(union);
+                if (detected && detected !== framework) {
+                  framework = detected;
+                  events.emit({ type: 'narration', agent: 'architect', text: `🧭 Detected this is a ${detected} app (not the default) — switching to the ${detected} toolchain so the preview and checks match your code.`, ts: Date.now() });
+                }
+              }
               if (typeof union['package.json'] === 'string') {
                 const depRes = applyWellKnownMissingDeps(union);
                 if (depRes.added.length) {

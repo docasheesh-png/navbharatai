@@ -420,7 +420,9 @@ export function SettingsPanel({
                     color: 'text-violet-400',
                     icon: Bot,
                     items: [
-                      { id: 'sda_chat', label: 'Doctor AI', icon: Activity, tab: true },
+                      // 'Doctor AI' tile removed (admin 2026-07-20): Doctor AI is a Professionals-hub
+                      // AI (Sidebar → Professionals), not an app-building tool — the tile here was a
+                      // redundant shortcut in the wrong group.
                       { id: 'voice', label: 'Voice to App', icon: Mic, tab: true },
                       { id: 'botbuilder', label: 'Bot Builder', icon: MessageSquare, tab: true },
                       { id: 'imagegen', label: 'AI Image Gen', icon: Wand2, tab: true },

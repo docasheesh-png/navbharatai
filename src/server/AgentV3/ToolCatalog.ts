@@ -1408,6 +1408,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_experiments',
+      description:
+        'Add a real A/B testing / experiment-assignment backend to the app (server/experiments/) — a packaged ' +
+        'domain vertical for any product running experiments or staged rollouts. The real guarantee is ' +
+        'DETERMINISTIC STICKY ASSIGNMENT: assign() is a PURE hash of (experiment salt + user) → a stable [0,1) ' +
+        'bucket → the weighted variant, so the SAME user ALWAYS gets the SAME variant with no stored state; ' +
+        'variant WEIGHTS are respected across the population; expose() logs each user once for exact counts(). ' +
+        'An inactive/unknown experiment returns the first-declared variant (control) and never throws. Emits a ' +
+        'dependency-free ExperimentService (define, assign, expose, counts, list; node:crypto only) + an Express ' +
+        'router (POST /experiments, GET /experiments/:key/assign/:user, POST /experiments/:key/expose, GET ' +
+        '/experiments/:key/counts, GET /experiments). Assignment is pure so client and server agree with no ' +
+        'round-trip. Distinct from generate_feature_flags (LaunchDarkly/Unleash provider). In-memory by default ' +
+        '— swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2485,6 +2501,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_leaderboard',
   'generate_waitlist',
   'generate_tags',
+  'generate_experiments',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

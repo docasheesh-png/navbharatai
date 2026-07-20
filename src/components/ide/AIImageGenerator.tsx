@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Wand2, Sparkles, Download, Palette, RefreshCw, Copy, Trash2, Clock, Layers, Star, Check, Image as ImageIcon } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 
@@ -67,53 +67,50 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState('');
   const [imageError, setImageError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('navbharat_image_history');
-      if (saved) setHistory(JSON.parse(saved));
-    } catch {}
-  }, []);
-
-  const saveHistory = (items: GeneratedImage[]) => {
-    setHistory(items);
-    try { localStorage.setItem('navbharat_image_history', JSON.stringify(items)); } catch {}
-  };
-
-  const handleGenerate = () => {
-    if (!prompt.trim()) return;
-    const selectedSize = SIZES.find(s => s.id === size) || SIZES[0];
-    const enhancer = STYLE_ENHANCERS[style] || '';
-    const fullPrompt = enhancer + prompt.trim();
-    const seed = Math.floor(Math.random() * 999999);
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=${selectedSize.w}&height=${selectedSize.h}&nologo=true&seed=${seed}`;
+  // REAL generation (admin autopsy 2026-07-20): images come from NavBharatAI's own server route
+  // (/api/image/generate) on our configured image engine — the old code hot-linked a third-party
+  // free image site from the browser (no server side at all; unreliable and outside our control).
+  // History is session-only: generated images are multi-MB data URLs that would overflow
+  // localStorage, so nothing is persisted — the current session keeps up to 6 recents in memory.
+  const handleGenerate = async () => {
+    if (!prompt.trim() || isLoading) return;
     setGeneratedUrl('');
     setImageError(false);
+    setErrorMsg('');
     setIsLoading(true);
-
-    const img = new window.Image();
-    img.onload = () => {
-      setIsLoading(false);
-      setGeneratedUrl(url);
+    try {
+      const res = await fetch('/api/image/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt.trim(), style, size }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || typeof data.image !== 'string') {
+        throw new Error((data && typeof data.error === 'string' && data.error)
+          || 'Image generation failed — please try again.');
+      }
+      setGeneratedUrl(data.image);
       const newItem: GeneratedImage = {
         id: Date.now().toString(),
-        url,
+        url: data.image,
         prompt: prompt.trim(),
         style,
         size,
         timestamp: Date.now(),
       };
-      const updated = [newItem, ...history].slice(0, 6);
-      saveHistory(updated);
-      if (onImageGenerated) onImageGenerated(url, prompt.trim());
-    };
-    img.onerror = () => {
-      setIsLoading(false);
+      setHistory((h) => [newItem, ...h].slice(0, 6));
+      if (onImageGenerated) onImageGenerated(data.image, prompt.trim());
+    } catch (e) {
+      // Honest failure — the real reason from the server, never a placeholder image.
       setImageError(true);
-    };
-    img.src = url;
+      setErrorMsg(e instanceof Error ? e.message : 'Image generation failed — please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleEnhance = () => {
@@ -132,7 +129,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
   };
 
   const handleClearHistory = () => {
-    saveHistory([]);
+    setHistory([]);
     setGeneratedUrl('');
   };
 
@@ -292,9 +289,9 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                 </div>
               )}
               {!isLoading && imageError && (
-                <div className="flex flex-col items-center justify-center h-60 gap-2">
+                <div className="flex flex-col items-center justify-center h-60 gap-2 px-4 text-center">
                   <ImageIcon className="w-10 h-10 text-white/10" />
-                  <p className="text-xs text-red-400">Image load nahi hui. Retry karo ya prompt change karo.</p>
+                  <p className="text-xs text-red-400">{errorMsg || 'Image generate nahi hui. Retry karo ya prompt change karo.'}</p>
                   <button onClick={handleGenerate} className="text-xs text-violet-400 hover:underline">Retry</button>
                 </div>
               )}
@@ -322,7 +319,7 @@ export function AIImageGenerator({ onImageGenerated }: Props) {
                     </button>
                     <a
                       href={generatedUrl}
-                      download="navbharat-ai-image.jpg"
+                      download="navbharat-ai-image.png"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded-lg transition-colors"

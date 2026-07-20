@@ -353,7 +353,7 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
       'send webhook', 'outgoing webhook', 'webhook sender', 'notify subscribers', 'fire webhook', 'dispatch webhook', 'webhook delivery', 'sign webhook',
       'validation', 'validate', 'input validation', 'request validation', 'zod', 'schema validation', 'validate body', 'form validation', 'sanitize input', 'bad request', '400',
       'xss', 'sanitize html', 'sanitize-html', 'html sanitization', 'cross site scripting', 'stored xss', 'clean html', 'strip html', 'user generated content', 'rich text', 'safe html',
-      'state management', 'global state', 'zustand', 'redux', 'store', 'shared state', 'app state', 'optimistic update', 'prop drilling', 'context', 'state store',
+      'state management', 'global state', 'zustand', 'redux', 'store', 'shared state', 'app state', 'optimistic update', 'context', 'state store',
       'markdown', 'render markdown', 'marked', 'md to html', 'markdown to html', 'commonmark', 'blog markdown', 'docs markdown',
       'qr', 'qr code', 'qrcode', 'scan', 'upi qr', 'ticket qr', 'generate qr',
       'upi', 'upi link', 'upi payment', 'upi id', 'vpa', 'collect payment', 'pay link', 'gpay', 'phonepe', 'bhim', 'scan to pay', 'upi intent', 'accept payment',

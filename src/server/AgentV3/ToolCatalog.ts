@@ -1498,6 +1498,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_csrf',
+      description:
+        'Add CSRF protection (double-submit cookie) to the app (server/lib/csrf.ts): dependency-free ' +
+        'issueCsrfToken(res) + a csrfProtection Express middleware. Use when the app authenticates with a ' +
+        'COOKIE session — it guards state-changing routes (POST/PUT/PATCH/DELETE) by requiring the ' +
+        "'x-csrf-token' header to match the csrf_token cookie (constant-time compare); a cross-origin " +
+        'attacker cannot read the cookie, so cannot forge the header → 403. Safe methods pass through. Not ' +
+        'needed for pure Bearer/JWT-header APIs (no cookie). node:crypto, no dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_slug',
       description:
         'Add a real URL slug generator to the app (server/lib/slug.ts): a dependency-free slugify(title) that ' +
@@ -2022,6 +2033,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_notify',
   'generate_env_validation',
   'generate_cors',
+  'generate_csrf',
   'generate_slug',
   'generate_validation',
   'generate_sanitize_html',

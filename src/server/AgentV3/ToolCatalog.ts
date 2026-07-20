@@ -1189,6 +1189,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_reviews',
+      description:
+        'Add a real reviews / ratings backend to the app (server/reviews/) — a packaged domain vertical for ' +
+        'marketplaces, ecommerce, app stores, courses and any product-feedback surface. The real guarantee is ' +
+        'RATING INTEGRITY: a rating is an integer 1..5 (out-of-range rejected), each user may review a given ' +
+        'item at most once (a repeat submission UPDATES the existing review instead of double-counting), and ' +
+        'the aggregate (average + count + per-star distribution) is computed EXACTLY from the live reviews. ' +
+        'Emits a dependency-free ReviewService (submit, getByUser, remove, listForItem, aggregate) + an Express ' +
+        'router (POST /reviews → create-or-update, 400 on a bad rating; GET /items/:itemId/reviews; GET ' +
+        '/items/:itemId/rating; GET/DELETE /reviews/:id). Take userId from the authenticated session in ' +
+        'production. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2251,6 +2265,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_subscriptions',
   'generate_polls',
   'generate_blog',
+  'generate_reviews',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

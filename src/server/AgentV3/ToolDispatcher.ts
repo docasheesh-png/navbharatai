@@ -140,6 +140,7 @@ import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
 import { generateBlogIntegration } from '../lib/BlogGenerator';
+import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3412,6 +3413,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('blog starter');
         const blogDeps = blogcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a blog/CMS backend:\n${blogWritten.join('\n')}\nAdd the dependencies: ${blogDeps}\n\n${blogcfg.instructions}`;
+      }
+
+      case 'generate_reviews': {
+        // Breadth recipe (domain vertical) — reviews/ratings (server/reviews/): a real ReviewService with
+        // RATING INTEGRITY (1..5 bounds, one review per (item,user), exact aggregate) + an Express router.
+        // Pure gen in ReviewsGenerator.ts.
+        const revcfg = generateReviewsIntegration();
+        const revWritten: string[] = [];
+        for (const [path, content] of Object.entries(revcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          revWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('reviews starter');
+        const revDeps = revcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a reviews/ratings backend:\n${revWritten.join('\n')}\nAdd the dependencies: ${revDeps}\n\n${revcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

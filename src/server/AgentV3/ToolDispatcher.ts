@@ -109,6 +109,7 @@ import { generateSeedData, type EntitySpec } from '../AppMakerLab/generator/Mock
 import { generateAuthCode, type AuthType } from '../AppMakerLab/generator/AuthCodeGenerator';
 import { generateMigration, type MigrationEntity, type MigrationDialect, type SqlProvider } from '../AppMakerLab/generator/MigrationGenerator';
 import { generateDeployArtifacts, type DeployArtifactInput, type PackageManager } from '../lib/DeployArtifactGenerator';
+import { generateDeployConfig, isDeployTarget } from '../lib/DeployConfigGenerator';
 import { generateK8sManifests, generateHelmChart, generateTerraformCloudRun, type IaCOptions } from '../lib/IaCGenerator';
 import { resolveDependencies, scanVulnerabilities, vulnScanSummary } from '../lib/VulnScanner';
 import { analyzeAppDependencies, licenseAdvisorySummary } from '../AppMakerLab/SBOMGenerator';
@@ -3539,6 +3540,25 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('deploy artifacts');
         return `Generated ${written.length} deployment artifact(s):\n${written.join('\n')}`;
+      }
+
+      case 'generate_deploy_config': {
+        // Roadmap BUILD-NOW #7 — platform deploy config for a git-push PaaS (Railway/Render/Fly). Pure
+        // generator in DeployConfigGenerator.ts; emits the one config file the target needs. No env keys.
+        const dcTarget = optStr(input, 'target');
+        if (!isDeployTarget(dcTarget)) return 'generate_deploy_config: pass target = "railway" | "render" | "fly".';
+        const dc = generateDeployConfig(dcTarget);
+        const dcWritten: string[] = [];
+        for (const [path, content] of Object.entries(dc.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          dcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint(`deploy config (${dcTarget})`);
+        return `Wired ${dcTarget} deploy config:\n${dcWritten.join('\n')}\n\n${dc.instructions}`;
       }
 
       case 'generate_iac': {

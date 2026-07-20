@@ -47,9 +47,53 @@ const RULES: FrameworkRule[] = [
   { id: 'vue', re: /\bvue(\.js|js|\s?[23])?\b|\bpinia\b|\bvue-?router\b/i },
 ];
 
+// ── BACKEND-ONLY detection (bidirectional-selection upgrade, admin 2026-07-20) ──────────────────────
+//
+// The admin's requirement: "chahe user settings se framework select kare ya user chat me bol de … dono se
+// apne aap select ho jaye". The frontend RULES above already make chat-selection work for front-end/meta
+// frameworks. This second phase extends it to BACK-END frameworks so "build a Django REST API" typed in
+// chat scaffolds Django — WITHOUT regressing the front-end-first design: a full-stack "React app with an
+// Express backend" must KEEP its React scaffold (the builder adds the server), so backend detection fires
+// ONLY when the prompt requests a pure backend/API with NO browser-UI signal at all.
+
+/** Any signal that a browser UI is wanted → the app is front-end-first; keep the React/meta default and
+ *  let the builder add the backend. Deliberately broad so a backend id is chosen only for a clearly
+ *  UI-less request. (`react` is here because it is the DEFAULT, not a front-end RULE above.) */
+const WEB_UI_SIGNAL =
+  /\breact\b|\bfront[\s-]?end\b|\bu\.?i\.?\b|\buser interface\b|\bdashboard\b|\bweb\s?site\b|\bweb\s?app\b|\bweb\s?page\b|\blanding\s?page\b|\bspa\b|\bsingle[\s-]?page\b|\bcomponent\b|\btailwind\b|\bresponsive\b|\bhtml\b|\bcss\b|\bpage\b|\bscreen\b/i;
+
+/** Back-end framework name → TemplateRegistry id. `go` requires an unambiguous signal (the bare word "go"
+ *  is far too common in English) — `golang`, or `go` next to a server/api/backend/net-http token. */
+const BACKEND_RULES: FrameworkRule[] = [
+  { id: 'django', re: /\bdjango\b/i },
+  { id: 'flask', re: /\bflask\b/i },
+  { id: 'python-fastapi', re: /\bfast\s?api\b/i },
+  { id: 'nestjs', re: /\bnest\.?js\b|\bnestjs\b/i },
+  { id: 'fastify', re: /\bfastify\b/i },
+  { id: 'hono', re: /\bhono\b/i },
+  { id: 'spring-boot', re: /\bspring\s?boot\b/i },
+  { id: 'node-express', re: /\bexpress(\.js|js)?\b/i },
+  { id: 'go', re: /\bgolang\b|\bgo\b[\s-]*(?:lang|back-?end|server|api|micro-?service|net\/http|fiber|gin)\b|\b(?:back-?end|server|api|micro-?service)\b[\s-]*(?:in|with|using)?\s*\bgo\b/i },
+];
+
 /**
- * Detect an explicitly-requested front-end framework from a build prompt and return its
- * TemplateRegistry id, or null when the prompt names none (React stays the default). Pure.
+ * Detect a pure BACK-END framework request (no browser-UI signal). Returns the TemplateRegistry id, or
+ * null when the prompt wants a UI (front-end-first) or names no backend framework. Pure.
+ */
+export function detectBackendOnlyFramework(prompt: string): string | null {
+  const p = typeof prompt === 'string' ? prompt : '';
+  if (!p.trim() || WEB_UI_SIGNAL.test(p)) return null;
+  for (const { id, re } of BACKEND_RULES) {
+    if (re.test(p)) return id;
+  }
+  return null;
+}
+
+/**
+ * Detect an explicitly-requested framework from a build prompt and return its TemplateRegistry id, or
+ * null when the prompt names none (React stays the default). Two phases: (1) any front-end / meta
+ * framework wins first; (2) otherwise a pure back-end/API request (no UI signal) picks its backend id.
+ * Pure.
  */
 export function detectFrameworkFromPrompt(prompt: string): string | null {
   const p = typeof prompt === 'string' ? prompt : '';
@@ -57,5 +101,14 @@ export function detectFrameworkFromPrompt(prompt: string): string | null {
   for (const { id, re } of RULES) {
     if (re.test(p)) return id;
   }
-  return null;
+  return detectBackendOnlyFramework(p);
 }
+
+/**
+ * Every TemplateRegistry id the detector can EVER return (front-end RULES + BACKEND_RULES). Exported so a
+ * parity test can assert the detector never returns an id the engine can't scaffold, and that the client
+ * FrameworkPicker offers a superset of what chat can select. Keeps the three sources of truth in sync.
+ */
+export const DETECTABLE_FRAMEWORK_IDS: readonly string[] = Array.from(
+  new Set([...RULES, ...BACKEND_RULES].map((r) => r.id)),
+);

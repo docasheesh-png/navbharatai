@@ -2395,15 +2395,15 @@ Hints are cleared after a successful build so they don't carry over to unrelated
     id: 'v3-framework-selector',
     name: 'Multi-Framework Builder (v5.0)',
     path: 'NavBharatAI Pro v5.0 → header → framework badge (or ⚙ → Framework)',
-    description: `NavBharatAI Pro v5.0 can build apps in 17 different frameworks and tech stacks:
-Frontend: React + Vite, Next.js, Remix, Vue 3, Nuxt 3, Svelte, SvelteKit, Angular, Astro, Vanilla TypeScript.
-Backend / API: Express.js, NestJS, Fastify, FastAPI (Python), Django (Python), Flask (Python).
+    description: `NavBharatAI Pro v5.0 can build apps in 24 different frameworks and tech stacks, and you can pick a framework TWO ways — they stay in sync:
+Frontend: React + Vite, Next.js, Remix, Preact, Vue 3, Nuxt 3, Svelte, SvelteKit, SolidJS, Angular, Astro, Lit (Web Components), Alpine.js, Vanilla TypeScript.
+Backend / API: Express.js, Hono, NestJS, Fastify, FastAPI (Python), Django (Python), Flask (Python), Spring Boot (Java), Go.
 Static: plain HTML/CSS/JS.
-Each framework gets a full starter scaffold (package.json, config, entry files) pre-seeded in the workspace so the agent can start building immediately. The agent's instructions are also tailored per framework — it knows the routing conventions, dev server port, and common pitfalls for each.`,
-    howToUse: 'In Pro v5.0 chat: click the framework badge in the header (shows e.g. "⚛ React + Vite") or open ⚙ → Framework. A picker appears with All / Frontend / Full-Stack / Backend / Static filters. Select your framework and click Confirm. Then describe your app — the agent will build using that framework.',
+BIDIRECTIONAL SELECTION: (1) pick a framework in the picker (⚙ → Framework or the header badge) — a deliberate pick always wins; OR (2) just NAME it in your build request ("build a Next.js dashboard", "a Django REST API", "a Hono edge API") and v5.0 auto-selects the matching scaffold. A pure backend/API request picks a backend framework; a web-app request that mentions a backend (e.g. "a React dashboard with an Express backend") stays front-end-first and the backend is wired in. Every framework gets a full starter scaffold (package.json, config, entry files) pre-seeded so the agent starts immediately, with per-framework instructions (routing conventions, dev-server port, common pitfalls).`,
+    howToUse: 'Two ways, both live: (A) SETTINGS — in Pro v5.0 chat click the framework badge in the header (e.g. "⚛ React + Vite") or ⚙ → Framework; the picker has All / Frontend / Full-Stack / Backend / Static filters — select and Confirm. (B) CHAT — just name the framework in your build request and v5.0 selects it automatically. If you both pick one AND name a different one, your explicit pick wins.',
     relatedFeatures: ['pro_chat', 'v3-github-import', 'iterative-agent-build'],
     aiSurface: 'pro_chat',
-    keywords: ['framework', 'nextjs', 'vue', 'svelte', 'angular', 'astro', 'django', 'flask', 'fastapi', 'nestjs', 'express', 'fastify', 'nuxt', 'remix', 'vanilla', 'python', 'stack', 'technology', 'kaunsa framework', 'react', 'typescript', 'javascript', 'tech stack', 'choose framework', 'framework select'],
+    keywords: ['framework', 'nextjs', 'vue', 'svelte', 'sveltekit', 'solid', 'solidjs', 'preact', 'lit', 'web components', 'alpine', 'hono', 'spring boot', 'go', 'golang', 'angular', 'astro', 'django', 'flask', 'fastapi', 'nestjs', 'express', 'fastify', 'nuxt', 'remix', 'vanilla', 'python', 'java', 'stack', 'technology', 'kaunsa framework', 'react', 'typescript', 'javascript', 'tech stack', 'choose framework', 'framework select', 'framework badalna', 'change framework'],
   },
   {
     id: 'v3-github-import',

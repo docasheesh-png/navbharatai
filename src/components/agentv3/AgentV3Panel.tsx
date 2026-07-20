@@ -263,6 +263,12 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [prompt, composerExpanded]);
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
+  // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
+  // choice then always wins over chat-text detection on the server (admin bidirectional-selection law
+  // 2026-07-20). Stays false for a brand-new default session, so chat can still auto-select the framework.
+  const [frameworkExplicit, setFrameworkExplicit] = useState(false);
+  // The user picked a framework in the picker → mark it explicit so the server honours it over chat text.
+  const pickFramework = useCallback((id: string) => { setFramework(id); setFrameworkExplicit(true); }, []);
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -726,7 +732,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // Apply only if the user hasn't already switched away meanwhile.
       if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
       // Adopt the durable framework so a reopened non-Vite session's follow-up build stays correct.
-      if (restored.framework) setFramework(restored.framework);
+      if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
       // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
       // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
       if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
@@ -929,7 +935,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
     start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, appSignature: appSignaturePref(),
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, frameworkExplicit, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
@@ -1078,7 +1084,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
@@ -1112,7 +1118,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
       void refreshQueue();
     } finally {
       queueClaimInFlightRef.current = false;
@@ -1407,7 +1413,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
         // Adopt the session's durable framework so a follow-up build/edit/deploy on a reopened
         // non-Vite session doesn't silently reset to vite-react (the framework-reset defect).
-        if (restored.framework) setFramework(restored.framework);
+        if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
         // REATTACH-ON-REOPEN (test #5): if THIS session's build is still running server-side (the
         // user closed the tab/browser mid-build — the build keeps going by design), detect it now
         // so the auto-resume effect re-attaches its live stream immediately — instead of the user
@@ -1851,7 +1857,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider: prov, appSignature: appSignaturePref() },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
     );
   };
 
@@ -3424,7 +3430,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <FrameworkPicker value={framework} onChange={setFramework} />
+            <FrameworkPicker value={framework} onChange={pickFramework} />
             <button
               onClick={() => setShowFrameworkPicker(false)}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"

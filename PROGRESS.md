@@ -19759,3 +19759,33 @@ Clock). Regression test (`TirangaLoader.test.tsx`) locks render branches + the s
 stale test that asserted `animate-spin` (ActivityTimelineRow) was updated to assert the loader's canvas. Gate
 green: frontend `tsc --noEmit` clean, `npm run build` OK, bundle within budget. Note: coverage only measures
 `src/server/**`, so the frontend component doesn't affect the coverage gate.
+
+## 2026-07-20 — Settings App-Settings row made REAL: tiles decluttered, Terminal + Logs zinda (3 PRs: #1717, #1719, #1721)
+
+Admin request (screenshot of Settings → App Settings): (1) remove the Connections tile ("bahut jagah hai"),
+(2) remove the Git tile (Git lives in the sidebar; verified the sidebar Git IS the one real GitViewPanel/
+GitPanel — real GitHub pushes via /api/github/push-enhanced + real v5 deploys, so the settings tile was a
+redundant doorway), (3) make Terminal real ("Replit ke shell jaisa"), (4) make Logs real — both synced with
+Pro v5 / Code Studio / Files / Preview and known to Pro + Offline AI.
+
+FORENSIC FINDING (rule 2 violation, now killed): the Terminal and Logs tiles were DEAD STUBS — 'shell' and
+'logs' are valid SettingsScreen values and the tiles navigated to them, but NO render block existed for
+either → blank screen on click. Fixed by making them real, not by hiding the tiles:
+
+- **#1717 (merged)** — Connections + Git tiles removed from the App Settings grid; the orphaned
+  settingsScreen==='git' sub-screen deleted as dead code (repo-grep proved nothing else navigated there);
+  the 'connections' SUB-SCREEN stays (Git panel's Connect GitHub flow + offline deep links still use it).
+  AppKnowledgeBase synced: settings_root group list corrected; settings_git repointed to Sidebar → Git.
+- **#1719 (merged)** — Settings → Terminal now mounts the SAME RealTerminal component Code Studio uses,
+  pointed at the SAME v5.0 workspace (shared agentv3_session_{uid} key via getAgentV3WorkspaceId): real
+  commands in the user's warm sandbox via POST /api/agentv3/exec (verified-owner gated, 30s bound, capped
+  output), honest dormant-state messaging, zero server changes. Offline AI CURATED_NAV gains
+  settings_terminal → shell; KB entry rewritten to describe reality; new tests/settingsShellNav.test.ts.
+- **#1721 (open at this writing)** — Settings → Logs mounts a new WorkspaceLogs component with two REAL
+  sections: BUILD LOG (replays + live-polls the durable v5.0 live channel GET /api/agentv3/live — narration
+  / file changes / build-finished, 2.5s poll while running, 10s idle) and RUNTIME ERRORS (the app's own
+  preview-console errors from the diagnostics store's previewErrors). WHITE-LABEL by construction: only the
+  app's own console records are rendered — issues/llmCalls/provider telemetry never surface on this screen.
+  Offline AI nav + KB entry + regression tests extended (5 tests).
+
+Gate green on every phase: tsc frontend + server clean, full vitest suite (8321 → 8326 tests) passing.

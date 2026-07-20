@@ -30,6 +30,8 @@ const DatabaseSettings = _lz(() => import('../settings/DatabaseSettings'), 'Data
 // user's warm v5.0 sandbox via POST /api/agentv3/exec. Rendered by the 'shell' settings screen so
 // users can run a quick command without opening the full Code Studio.
 const RealTerminal     = _lz(() => import('../ide/RealTerminal'),          'RealTerminal');
+// REAL workspace logs — live v5.0 build events + the app's own captured runtime errors.
+const WorkspaceLogs    = _lz(() => import('../ide/WorkspaceLogs'),         'WorkspaceLogs');
 
 // Inlined theme-classes shape (matches getThemeClasses return type)
 type ThemeClasses = {
@@ -886,6 +888,38 @@ export function SettingsPanel({
                   </div>
                 ) : (
                   <div className="p-6 text-white text-center">Please log in to use the terminal</div>
+                )}
+              </motion.div>
+            )}
+
+            {/* REAL workspace logs (admin 2026-07-20): live build events from the durable v5.0 live
+                channel + runtime errors captured from the app's own preview console. Same shared
+                workspaceId as Pro v5.0 / Code Studio / Files / Preview, so this screen always shows
+                the app the user is actually building. Honest empty states — nothing simulated. */}
+            {settingsScreen === 'logs' && (
+              <motion.div
+                key="logs"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="px-1 pt-4">
+                  <h2 className="text-2xl font-black text-white tracking-tight">Logs</h2>
+                  <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Live build log &amp; runtime errors of your app</p>
+                </div>
+                {user ? (
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                    <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading logs…</div>}>
+                      <WorkspaceLogs
+                        workspaceId={getAgentV3WorkspaceId(user.uid)}
+                        userId={user.uid}
+                        email={user.email || ''}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <div className="p-6 text-white text-center">Please log in to see your app&apos;s logs</div>
                 )}
               </motion.div>
             )}

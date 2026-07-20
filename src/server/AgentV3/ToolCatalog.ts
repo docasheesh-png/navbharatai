@@ -191,6 +191,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_dev_guide',
+      description:
+        'Generate a human DEVELOPER_GUIDE.md — onboarding for developers working ON the app: how to run ' +
+        'it locally, where code lives, framework-aware "how to add a page/route/component/endpoint" ' +
+        'recipes, testing, build & deploy, conventions and a troubleshooting table. Derived from the ' +
+        'app\'s real package.json (name, scripts, framework) and the env vars the code references. ' +
+        'Distinct from generate_readme (what the app IS) and generate_architecture_docs (structure). ' +
+        'Writes to DEVELOPER_GUIDE.md. No API key.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Optional output path (defaults to DEVELOPER_GUIDE.md).' },
+          name: { type: 'string', description: 'App name (defaults to package.json name).' },
+          framework: { type: 'string', description: 'Override framework detection (react/next/vue/svelte/solid/express/node/python).' },
+          package_manager: { type: 'string', description: 'npm/pnpm/yarn/bun (defaults to npm).' },
+        },
+      },
+    },
+    {
       name: 'generate_env_example',
       description:
         'Generate or update .env.example listing every environment variable the code ' +
@@ -2043,6 +2062,7 @@ export const CATALOG_TOOL_NAMES = [
   'codemod_move_file',
   'generate_readme',
   'generate_architecture_docs',
+  'generate_dev_guide',
   'generate_env_example',
   'generate_gitignore',
   'generate_app_defaults',

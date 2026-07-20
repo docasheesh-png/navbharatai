@@ -327,10 +327,11 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 4 — Bot Builder */}
+      {/* Bot Builder — the designed flow can now be BUILT for real via the Pro v5.0 handoff
+          (admin 2026-07-20); previously the designer ended at a JSON export and built nothing. */}
       {activeView === 'botbuilder' && (
         <div className="flex-1 h-full overflow-hidden">
-          <BotBuilder />
+          <BotBuilder onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
         </div>
       )}
 

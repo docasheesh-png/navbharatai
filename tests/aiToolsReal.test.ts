@@ -86,3 +86,22 @@ describe('AI Image Gen — our own engine, no third-party hotlink', () => {
     expect(server).toContain('registerImageGenRoutes(app)');
   });
 });
+
+describe('Bot Builder — real build handoff', () => {
+  it('KB entry exists, is honest, and Offline AI can navigate to it', () => {
+    const entry = kb('bot_builder');
+    expect(entry).toBeTruthy();
+    expect(entry!.path).toContain('AI Tools → Bot Builder');
+    expect(entry!.description).toMatch(/BUILD it for real/i);
+    expect(entry!.description).toMatch(/Pro v5\.0/);
+    expect(navFor(entry!)).toEqual({ view: 'botbuilder' });
+  });
+
+  it('the component wires "Build Bot App" through the v5 prefill signal', () => {
+    const src = readFileSync(join(__dirname, '../src/components/ide/BotBuilder.tsx'), 'utf8');
+    expect(src).toContain('botFlowToBuildPrompt');
+    expect(src).toContain('onBuildViaV5');
+    const vp = readFileSync(join(__dirname, '../src/components/panels/ViewPanels.tsx'), 'utf8');
+    expect(vp).toMatch(/BotBuilder onBuildViaV5/);
+  });
+});

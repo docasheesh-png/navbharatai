@@ -278,6 +278,20 @@ html, body {
 .animate-bounce,
 [class*="transition-"] {
   will-change: transform;
+}
+/* `.animate-spin` gets the GPU hint (will-change) but MUST NOT get a static
+   `transform: translateZ(0)`. Tailwind's `@keyframes spin` defines only the `to`
+   (100%) frame, so the `from` (0%) is synthesized from the element's underlying
+   transform. A static `translateZ(0)` makes that synthesized `from` an identity
+   matrix, and `to` is `rotate(360deg)` — also the identity matrix — so the
+   interpolation is identity→identity and the spinner never visibly rotates
+   (root cause of the app-wide "spinner doesn't spin" bug; verified in Chromium).
+   Excluding `.animate-spin` here lets its `from` synthesise from `none`
+   (= rotate(0deg)) so it spins. pulse/bounce/transition define transforms at
+   both keyframe ends, so the static promotion is safe for them. */
+.animate-pulse,
+.animate-bounce,
+[class*="transition-"] {
   transform: translateZ(0);
 }
 /* After animation completes, reset will-change to avoid persistent memory cost */

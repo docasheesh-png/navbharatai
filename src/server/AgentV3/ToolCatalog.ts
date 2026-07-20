@@ -1306,6 +1306,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_addresses',
+      description:
+        'Add a real address book / shipping-addresses backend to the app (server/addresses/) — a universal ' +
+        'domain vertical for ecommerce, delivery and billing. The real invariant is AT-MOST-ONE-DEFAULT: a user ' +
+        'can save many addresses but at most one is the default — the first address added becomes the default ' +
+        'automatically, setDefault atomically unsets the previous default, and deleting the default promotes ' +
+        'the most-recently-added remaining address. Emits a dependency-free AddressBook (add, setDefault, ' +
+        'getDefault, update, remove, list) + an Express router (POST /addresses, GET /addresses/:user + ' +
+        '/default, POST /addresses/:id/default, PATCH /addresses/:id, DELETE /addresses/:id → returns the ' +
+        'promoted newDefaultId). Take user from the auth session in production. In-memory by default — swap the ' +
+        'store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2376,6 +2390,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_listings',
   'generate_job_board',
   'generate_wishlist',
+  'generate_addresses',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

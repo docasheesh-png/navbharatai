@@ -149,6 +149,7 @@ import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
 import { generateWishlistIntegration } from '../lib/WishlistGenerator';
+import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3575,6 +3576,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('wishlist starter');
         const wlDeps = wlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a wishlist/favorites backend:\n${wlWritten.join('\n')}\nAdd the dependencies: ${wlDeps}\n\n${wlcfg.instructions}`;
+      }
+
+      case 'generate_addresses': {
+        // Breadth recipe (domain vertical) — address book (server/addresses/): a real AddressBook with the
+        // AT-MOST-ONE-DEFAULT invariant (first=default, setDefault unsets previous, delete-default promotes) +
+        // an Express router. Pure gen in AddressesGenerator.ts.
+        const adcfg = generateAddressesIntegration();
+        const adWritten: string[] = [];
+        for (const [path, content] of Object.entries(adcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          adWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('addresses starter');
+        const adDeps = adcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an address-book backend:\n${adWritten.join('\n')}\nAdd the dependencies: ${adDeps}\n\n${adcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

@@ -1068,6 +1068,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_settings',
+      description:
+        'Add a real settings scaffold to the frontend (src/settings/, dependency-free React): a SettingsProvider ' +
+        'that persists preferences to localStorage AND applies the theme to <html data-theme> (so dark mode ' +
+        'actually works), a useSettings hook, and a SettingsPage with grouped sections + working controls ' +
+        '(theme select, compact-mode + email-notification toggles, reset). Wrap the app in <SettingsProvider>, ' +
+        'render <SettingsPage/> on a /settings route, and read a pref anywhere via useSettings(). Extend with ' +
+        'your own sections. No dependency, no env key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_admin',
       description:
         'Generate a COMPLETE React admin page for one resource, bound to the generate_crud REST endpoints ' +
@@ -1182,6 +1193,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           },
         },
       },
+    },
+    {
+      name: 'generate_state',
+      description:
+        'Add real GLOBAL state management to the frontend (src/store/, zustand): a typed cross-component store ' +
+        '+ selector hooks (useItems/useItemsActions) so shared app state (cart, session, a live list) is not ' +
+        'prop-drilled. Ships a working example with an OPTIMISTIC async action that applies instantly, confirms ' +
+        'with the server, and ROLLS BACK on failure. Use when the app needs shared state across components. ' +
+        "(For a LOCAL optimistic list inside one component, use generate_ui_states' useOptimisticList instead.) " +
+        'Adds the zustand dependency, no env key.',
+      input_schema: { type: 'object', properties: {} },
     },
     {
       name: 'generate_image_optimization',
@@ -2020,11 +2042,13 @@ export const CATALOG_TOOL_NAMES = [
   'generate_rbac',
   'generate_ids',
   'generate_admin',
+  'generate_settings',
   'generate_dashboard',
   'generate_backup',
   'analyze_requirements',
   'generate_i18n',
   'generate_ui_states',
+  'generate_state',
   'generate_image_optimization',
   'generate_sso',
   'generate_abac',

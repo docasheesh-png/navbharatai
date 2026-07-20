@@ -4,10 +4,44 @@ import {
   fixCjsDefaultImport,
   fixPrismaDateStringDefault,
   fixPrismaSeedRunner,
+  dedupeSameModuleImports,
   ensureViteTypeModule,
   applyFullStackGuards,
   fullStackGuardsEnabled,
 } from './FullStackGuards';
+
+describe('dedupeSameModuleImports — kill "Duplicate declaration" (Bazaar-era autopsy)', () => {
+  it('removes a duplicate same-name import of the same module (the exact ErrorBoundary crash)', () => {
+    const src = `import App from './App';\nimport ErrorBoundary from './ErrorBoundary';\nimport { ErrorBoundary } from "./ErrorBoundary";\n`;
+    const out = dedupeSameModuleImports('src/main.tsx', src);
+    expect(out).toContain("import ErrorBoundary from './ErrorBoundary';");
+    expect(out).not.toMatch(/\{\s*ErrorBoundary\s*\}/); // the duplicate named import is gone
+    expect(out.split('\n').filter((l) => /ErrorBoundary/.test(l) && /^\s*import\b/.test(l)).length).toBe(1); // one import line binds it
+  });
+
+  it('keeps the surviving named specifiers when only one is a duplicate', () => {
+    const out = dedupeSameModuleImports('a.tsx', `import ErrorBoundary from './EB';\nimport { ErrorBoundary, Foo } from './EB';`);
+    expect(out).toContain("import ErrorBoundary from './EB';");
+    expect(out).toContain("import { Foo } from './EB';");
+  });
+
+  it('NEVER touches a same-name import from a DIFFERENT module (a real conflict — reconciler owns it)', () => {
+    const src = `import X from './a';\nimport { X } from './b';`;
+    expect(dedupeSameModuleImports('a.tsx', src)).toBe(src);
+  });
+
+  it('leaves side-effect and non-code files alone', () => {
+    const src = `import './styles.css';\nimport App from './App';`;
+    expect(dedupeSameModuleImports('a.tsx', src)).toBe(src);
+    expect(dedupeSameModuleImports('readme.md', src)).toBe(src);
+  });
+
+  it('runs through applyFullStackGuards (wired, flag-gated)', () => {
+    const src = `import EB from './EB';\nimport { EB } from './EB';`;
+    expect((applyFullStackGuards('src/main.tsx', src).match(/EB/g) || []).length).toBe(2); // one import line, module+name once each
+    expect(applyFullStackGuards('src/main.tsx', src, { AGENTV3_FULLSTACK_GUARDS: 'off' } as unknown as NodeJS.ProcessEnv)).toBe(src);
+  });
+});
 
 // The exact TaskFlow failures (build report 2026-07-17): Prisma-on-SQLite rejected `enum TaskStatus`
 // ("the current connector does not support enums") and the seed crashed with

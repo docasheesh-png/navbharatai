@@ -36,7 +36,7 @@ export interface UseAgentV3Build {
   state: AgentV3ClientState;
   running: boolean;
   error: string | null;
-  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
+  start: (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => Promise<void>;
   /** Approve or reject a pending plan/permission gate (P4). */
   respond: (requestId: string, approved: boolean) => Promise<void>;
   /** Restore the workspace to a checkpoint commit (History → restore). */
@@ -925,7 +925,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   }, []);
 
   const start = useCallback(
-    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => {
+    async (prompt: string, opts?: { userId?: string; email?: string; onlyOpus?: boolean; powerLevel?: 'weak' | 'off' | 'mini' | 'medium' | 'max'; planFirst?: boolean; thinking?: boolean; sessionId?: string; attachments?: Array<{ name: string; type: string; base64: string }>; framework?: string; frameworkExplicit?: boolean; frameworkResolved?: boolean; importUrl?: string; deployProvider?: string; chatRole?: 'planner' | 'advisor'; appSignature?: boolean }) => {
       if (running) return;
       // V4-1a — remember this turn's shape so an interrupted build can auto-continue itself
       // (attachments/importUrl deliberately dropped: the continue-turn resumes from durable files).
@@ -992,6 +992,9 @@ export function useAgentV3Build(): UseAgentV3Build {
             chatRole: opts?.chatRole || undefined,
             attachments: opts?.attachments && opts.attachments.length > 0 ? opts.attachments : undefined,
             framework: opts?.framework || undefined,
+            // Bidirectional-selection (admin 2026-07-20): true when the framework was a DELIBERATE pick
+            // (picker or a reopened session) → the server honours it over chat-text detection.
+            frameworkExplicit: opts?.frameworkExplicit === true ? true : undefined,
             importUrl: opts?.importUrl || undefined,
             // R5 §5.1 — the hosting provider the user chose for a deploy turn (no lock-in).
             deployProvider: opts?.deployProvider || undefined,

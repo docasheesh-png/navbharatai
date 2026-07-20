@@ -31,6 +31,7 @@ import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
+import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
 import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
 import { canSteerMidBuild, showTeamHq, teamHqModel, formatElapsed } from './fullTeam';
@@ -263,6 +264,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   }, [prompt, composerExpanded]);
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
+  // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
+  // choice then always wins over chat-text detection on the server (admin bidirectional-selection law
+  // 2026-07-20). Stays false for a brand-new default session, so chat can still auto-select the framework.
+  const [frameworkExplicit, setFrameworkExplicit] = useState(false);
+  // The user picked a framework in the picker → mark it explicit so the server honours it over chat text.
+  const pickFramework = useCallback((id: string) => { setFramework(id); setFrameworkExplicit(true); }, []);
+  // A pending framework conflict (admin 2026-07-20): the user PICKED framework A but their message NAMES a
+  // different framework B — confirm which one BEFORE building, never silently build the wrong stack.
+  // `launch(fw)` re-runs the held build with the chosen framework (resolved, so it won't re-prompt).
+  const [fwConflict, setFwConflict] = useState<{ picked: string; detected: string; launch: (fw: string) => void } | null>(null);
+  const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -726,7 +738,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // Apply only if the user hasn't already switched away meanwhile.
       if (!restored || restored.messages.length === 0 || sessionIdRef.current !== sid) return;
       // Adopt the durable framework so a reopened non-Vite session's follow-up build stays correct.
-      if (restored.framework) setFramework(restored.framework);
+      if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
       // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
       // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
       if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
@@ -928,13 +940,27 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // starts, so the build reads the user's latest hand edits — never a stale file set. Best-effort:
     // a flush failure must never block the build (the syncer swallows its own errors).
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-    start(msgText, {
-      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments, framework, appSignature: appSignaturePref(),
+    // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
+    // nor the server re-prompts on the same conflict.
+    const launch = (fw: string, resolved: boolean) => start(msgText, {
+      userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments,
+      framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
       chatRole: chatMode === 'build' ? undefined : chatMode,
     });
+    // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
+    // one framework but the message NAMES a different one — pause and ask which to use instead of building
+    // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
+    const sel = chatMode === 'build'
+      ? resolveFrameworkSelection({ picked: framework, explicit: frameworkExplicit, prompt: msgText })
+      : { status: 'ok' as const, framework };
+    if (sel.status === 'conflict') {
+      setFwConflict({ picked: sel.picked, detected: sel.detected, launch: (fw: string) => launch(fw, true) });
+      return;
+    }
+    launch(sel.framework, false);
   };
 
   // FULL TEAM mid-build steering (Fix 60, admin 2026-07-13): on the 'max' tier the composer stays
@@ -1078,7 +1104,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
-    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+    start('continue', { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.done, state.resumable, running]);
 
@@ -1112,7 +1138,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
-      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, appSignature: appSignaturePref() });
+      start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
       void refreshQueue();
     } finally {
       queueClaimInFlightRef.current = false;
@@ -1407,7 +1433,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         rehydratedWsRef.current = '';                          // re-arm file rehydrate for the opened workspace
         // Adopt the session's durable framework so a follow-up build/edit/deploy on a reopened
         // non-Vite session doesn't silently reset to vite-react (the framework-reset defect).
-        if (restored.framework) setFramework(restored.framework);
+        if (restored.framework) { setFramework(restored.framework); setFrameworkExplicit(true); }
         // REATTACH-ON-REOPEN (test #5): if THIS session's build is still running server-side (the
         // user closed the tab/browser mid-build — the build keeps going by design), detect it now
         // so the auto-resume effect re-attaches its live stream immediately — instead of the user
@@ -1851,7 +1877,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setUserMsgs((c) => [...c, { role: 'user', text: `🚀 Deploy to ${providerName}`, ts: Date.now() }]);
     start(
       'Deploy this app to a permanent public live URL. Run "npm run build" first, then call the deploy tool, and finish by giving me the live link.',
-      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, deployProvider: prov, appSignature: appSignaturePref() },
+      { userId, email, onlyOpus, powerLevel, planFirst: false, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, deployProvider: prov, appSignature: appSignaturePref() },
     );
   };
 
@@ -2656,6 +2682,30 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 </div>
               </div>
             )}
+            {fwConflict && (
+              <div className="px-3 py-2.5 bg-indigo-950/50 border border-indigo-800 rounded">
+                <div className="flex items-center gap-2 text-xs text-indigo-200 mb-1">
+                  <AlertCircle className="w-4 h-4" /> Which framework should I use?
+                </div>
+                <div className="text-[11px] text-zinc-400 mb-2">
+                  You selected <b className="text-zinc-200">{fwName(fwConflict.picked)}</b>, but your message mentions <b className="text-zinc-200">{fwName(fwConflict.detected)}</b>. Pick one — I&apos;ll build with it.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => { setFramework(fwConflict.detected); setFrameworkExplicit(true); fwConflict.launch(fwConflict.detected); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white"
+                  >Use {fwName(fwConflict.detected)} (from your message)</button>
+                  <button
+                    onClick={() => { setFramework(fwConflict.picked); setFrameworkExplicit(true); fwConflict.launch(fwConflict.picked); setFwConflict(null); }}
+                    className="px-3 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+                  >Keep {fwName(fwConflict.picked)} (your selection)</button>
+                  <button
+                    onClick={() => setFwConflict(null)}
+                    className="px-3 py-1 text-xs rounded bg-transparent hover:bg-white/5 text-zinc-500"
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
             {state.done && (typeof state.billedInr === 'number' || typeof state.billedUsd === 'number') && (
               <div className="flex items-center gap-1 text-[11px] text-zinc-500" title="Customer bill (INR)">
                 <Rocket className="w-3 h-3" />{' '}
@@ -3424,7 +3474,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <FrameworkPicker value={framework} onChange={setFramework} />
+            <FrameworkPicker value={framework} onChange={pickFramework} />
             <button
               onClick={() => setShowFrameworkPicker(false)}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all"

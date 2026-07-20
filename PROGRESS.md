@@ -19759,3 +19759,40 @@ Clock). Regression test (`TirangaLoader.test.tsx`) locks render branches + the s
 stale test that asserted `animate-spin` (ActivityTimelineRow) was updated to assert the loader's canvas. Gate
 green: frontend `tsc --noEmit` clean, `npm run build` OK, bundle within budget. Note: coverage only measures
 `src/server/**`, so the frontend component doesn't affect the coverage gate.
+
+## 2026-07-20 — Domain-vertical breadth sweep: 18 packaged, invariant-enforcing backends (generate_*)
+
+Extended AgentV3's builder breadth with a long, conflict-free conveyor of packaged DOMAIN VERTICALS — each a
+pure `XGenerator.ts` emitting a dependency-free service + Express router + README, wired at all three points
+(`ToolDispatcher` case + import, `ToolCatalog` def + `CATALOG_TOOL_NAMES`, `AppKnowledgeBase` bullet) and
+guarded by the `ToolWiring.test.ts` structural check. Every vertical enforces a REAL invariant proven by a
+materialize-and-execute test (write the emitted service source to a temp file, `import()` it, run the business
+rule) — never a stub. Shipped this session (all merged to `main`, each its own PR, CI-green-then-merge):
+
+- `generate_blog` (#1704) — publish state-machine (draft↔published↔archived) + unique-slug generation; public feed = published-only.
+- `generate_reviews` (#1705) — rating integrity: 1..5 bounds, one review per (item,user) (resubmit updates), exact aggregate (avg+count+distribution).
+- `generate_loyalty` (#1706) — points-wallet ledger integrity: balance = sum(earned,not-expired) − sum(redeemed), never negative; no overdraft; append-only audit; per-earn expiry.
+- `generate_referrals` (#1708) — attribution integrity: one unique code per user, refer-once (self/unknown/double rejected), credit-once (idempotent complete).
+- `generate_comments` (#1709) — thread integrity: reply needs an existing parent, computed depth, soft-delete tombstones a parent-with-replies (children survive) / hard-removes a leaf.
+- `generate_messaging` (#1712) — conversation integrity: canonical participant-pair key ((a,b)==(b,a), no dup), exact per-participant unread, monotonic read cursor.
+- `generate_listings` (#1714) — marketplace sale integrity: lifecycle draft→active→sold/removed, sell-once (no double-sale, no self-purchase), active-only search, sold=immutable.
+- `generate_job_board` (#1715) — hiring: apply-once per candidate/job, open-jobs-only, application state-machine applied→screening→interview→offer→hired/rejected. (Distinct from generate_jobs = background queue.)
+- `generate_wishlist` (#1716) — favorites/likes idempotent membership: favorite-once (no double entry), idempotent remove, deterministic toggle, exact per-item count; wishlist/likes/bookmarks via a collection namespace.
+- `generate_addresses` (#1718) — address book at-most-one-default: first=default, setDefault unsets previous, delete-default promotes newest remaining, last delete leaves none; per-user.
+- `generate_coupons` (#1720) — discount-code redemption integrity: total + per-user redemption caps (counted exactly), expiry/active/min-order gates, percent (capped at order total) / fixed (>=0) discount math; validate() checks without counting, redeem() records.
+
+(Earlier same-session recipes already logged: dev-guide, TOTP, maintenance, request-id, soft-delete, api-versioning, etc.)
+
+**Anti-conflict discipline (the fix for the earlier #1665/#1667/#1668/#1671 KB-anchor pileup):** each vertical
+wires at a DISTINCT anchor next to a thematically-related existing entry, and only ONE KB-touching branch is in
+flight at a time — build the generator+test as NEW files while the prior PR is in CI, then wire after it merges.
+Result: 18 verticals, zero merge conflicts. Verification gate every push: `tsc -p tsconfig.server.json`
+(sonic optional-dep errors filtered) + the per-recipe test + `ToolWiring.test.ts` + `offlineAssistant.test.ts`.
+
+**Engine slice earlier this session:** requirement-aware building (`AGENTV3_REQUIREMENT_AWARE`, #1692/#1695/#1697)
+— on a fresh build of an ambiguous DOMAIN prompt the engine proactively INCLUDES the domain's implicit features,
+friction-free (no clarifying round-trip). Flag set `on` in Cloud Run by the admin (recorded in CLAUDE.md, #1698).
+
+**Play Store checkpoint:** this vertical cluster is a milestone boundary, so a fresh signed `.aab` was built —
+`android-aab.yml` run #39 GREEN on `main` (`versionCode` 39). Admin action remaining: download `app-release.aab`
+from that run and upload to Play Console (Claude cannot download the artifact or upload to Play).

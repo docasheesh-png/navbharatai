@@ -131,4 +131,23 @@ describe('detectSilentDbFailure — exit 0 that hides a DB-unreachable failure (
   it('does NOT flag a null exit code (still-running / not settled)', () => {
     expect(detectSilentDbFailure({ command: 'npx prisma migrate dev', exitCode: null, stdout: 'P1001' })).toBe(false);
   });
+
+  // LedgerLoop autopsy 2026-07-20: a Prisma SCHEMA-validation error makes the health-check print
+  // "did not come up on port 5432", which the first cut mislabeled as DB_UNREACHABLE. The DB is fine —
+  // the schema is wrong. Must NOT be flagged (the schema-repair path owns it).
+  it('does NOT flag a Prisma schema-validation error even though the health-check mentions port 5432', () => {
+    const schemaErr = [
+      'Error: Prisma schema validation - (validate wasm)',
+      'auditLogs    AuditLog[]',
+      'Validation Error Count: 3',
+      '[Context: validate]',
+      '[health-check] dev server did not come up on port 5432 after automatic recovery. Root cause: Prisma schema validation',
+    ].join('\n');
+    expect(detectSilentDbFailure({ command: 'npx prisma migrate dev --name init', exitCode: 0, stdout: schemaErr })).toBe(false);
+  });
+
+  it('STILL flags a genuine P1001 even if a schema marker also appears (connectivity wins)', () => {
+    const both = 'Validation Error Count: 1\nError: P1001: Can\'t reach database server at `localhost:5432`';
+    expect(detectSilentDbFailure({ command: 'npx prisma migrate dev', exitCode: 0, stdout: both })).toBe(true);
+  });
 });

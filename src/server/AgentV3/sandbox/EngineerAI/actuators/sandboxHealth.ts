@@ -65,9 +65,21 @@ export function resolveThrownCommandExit(err: unknown): number {
 const DB_UNREACHABLE_PATTERNS: RegExp[] = [
   /\bP1001\b/i,                                   // Prisma: "Can't reach database server"
   /can'?t\s+reach\s+database\s+server/i,
-  /did\s+not\s+come\s+up\s+on\s+port\s+5432/i,    // our health-check's Postgres-port giveup line
   /database\s+server\s+.*(is\s+not\s+running|not\s+reachable|unreachable)/i,
   /connection\s+refused.*:\s*5432|:\s*5432.*connection\s+refused/i,
+];
+
+// A Prisma SCHEMA-validation failure (broken relations, missing @id/enum) is NOT a DB-connectivity
+// problem — the DB is fine, the schema is wrong (LedgerLoop autopsy 2026-07-20). Our health-check
+// wrapper unhelpfully prints "did not come up on port 5432" for ANY dev-server boot failure, including
+// a schema error, so that string alone must never be treated as DB-unreachable. When these markers are
+// present the failure is the schema, and DB_UNREACHABLE would be a false, misleading verdict.
+const SCHEMA_VALIDATION_MARKERS: RegExp[] = [
+  /Validation Error Count:/i,
+  /\[Context:\s*validate\]/i,
+  /Prisma schema validation/i,
+  /Error validating (?:model|field|datasource)/i,
+  /is missing an opposite relation field/i,
 ];
 
 /** True when a command is DB-provisioning/ORM-related (prisma / migrate / seed / psql / drizzle / pg). */
@@ -89,6 +101,9 @@ export function detectSilentDbFailure(sig: { command?: string; exitCode: number 
   if (sig.exitCode !== 0) return false;              // a real nonzero exit is handled elsewhere
   if (!isDbRelatedCommand(sig.command)) return false;
   const out = `${sig.stdout || ''}\n${sig.stderr || ''}`;
+  // A schema-validation failure is NOT a connectivity failure — the DB is reachable, the schema is wrong.
+  // Never mislabel it DB_UNREACHABLE (the schema-repair self-heal + honest SANDBOX_CMD path own that case).
+  if (SCHEMA_VALIDATION_MARKERS.some((re) => re.test(out)) && !/\bP1001\b/i.test(out)) return false;
   return DB_UNREACHABLE_PATTERNS.some((re) => re.test(out));
 }
 

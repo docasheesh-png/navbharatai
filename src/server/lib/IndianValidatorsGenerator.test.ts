@@ -5,8 +5,8 @@ describe('generateIndianValidatorsIntegration', () => {
   const c = generateIndianValidatorsIntegration();
   const server = c.files['server/lib/indianValidators.ts'];
 
-  it('emits all seven validators, dependency-free and server-side', () => {
-    for (const fn of ['isValidPAN', 'isValidGSTIN', 'isValidAadhaar', 'isValidIFSC', 'isValidPincode', 'isValidUPI', 'isValidIndianMobile']) {
+  it('emits all seven validators + the mobile normalizer, dependency-free and server-side', () => {
+    for (const fn of ['isValidPAN', 'isValidGSTIN', 'isValidAadhaar', 'isValidIFSC', 'isValidPincode', 'isValidUPI', 'isValidIndianMobile', 'normalizeIndianMobile']) {
       expect(server).toContain(`export function ${fn}(`);
     }
     expect(server).not.toContain('import ');
@@ -33,9 +33,9 @@ describe('generateIndianValidatorsIntegration', () => {
     expect(server).toContain('/^[1-9][0-9]{5}$/');               // PIN code
   });
 
-  it('never writes .env.example and only the server file', () => {
+  it('ships an emitted regression test and never writes .env.example', () => {
     expect(c.files['.env.example']).toBeUndefined();
-    expect(Object.keys(c.files)).toEqual(['server/lib/indianValidators.ts']);
+    expect(Object.keys(c.files).sort()).toEqual(['server/lib/indianValidators.test.ts', 'server/lib/indianValidators.ts']);
     expect(c.instructions.toLowerCase()).toContain('checksum');
   });
 });

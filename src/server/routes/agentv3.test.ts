@@ -1550,6 +1550,23 @@ describe('enforceNoClaude — the UNBREAKABLE weak-module guard (admin rule 2026
     const out = enforceNoClaude(weird, true).map((r) => r.name);
     expect(out).toEqual(['GLM', 'CLAUDE_HAIKU']); // Sonnet gone; mid-chain Haiku moved to the end
   });
+
+  // REGRESSION (admin 2026-07-20, verbatim: "weak module me claude ka only haiku use hona chahiye. sonnet
+  // never!!"): the vertex-peer reorder (AGENTV3_VERTEX_PEER) assembles the chain as
+  // [...floorRunners, ...fallback, claude, ...withBackstop] = GLM → KIMI → VERTEX → GEMINI → CLAUDE → CLAUDE_HAIKU,
+  // with the Sonnet/Opus 'CLAUDE' runner MID-chain (not at the tail as the old baseChain had it). Even so — and
+  // even on the leak path where a heal gate set noClaude WITHOUT cheapOnly, so the build took this !cheapOnly
+  // vertex-peer branch — enforceNoClaude must still strip that mid-chain CLAUDE and keep ONLY the pinned Haiku last.
+  it('the vertex-peer chain shape (CLAUDE mid-chain) still yields NO Sonnet/Opus for a weak build', () => {
+    const vertexPeerChain = [
+      { name: 'GLM' }, { name: 'KIMI' }, { name: 'VERTEX' }, { name: 'GEMINI' },
+      { name: 'CLAUDE' }, { name: 'CLAUDE_HAIKU' },
+    ];
+    const out = enforceNoClaude(vertexPeerChain, true).map((r) => r.name);
+    expect(out).toEqual(['GLM', 'KIMI', 'VERTEX', 'GEMINI', 'CLAUDE_HAIKU']);
+    expect(out).not.toContain('CLAUDE'); // Sonnet/Opus never — the admin's "sonnet never!!"
+    expect(out[out.length - 1]).toBe('CLAUDE_HAIKU'); // only Haiku, and last
+  });
 });
 
 describe('planRunnerChainNames — the plan phase respects WEAK ⇒ NO CLAUDE (audit fix 2026-07-13)', () => {

@@ -1350,6 +1350,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_timesheet',
+      description:
+        'Add a real time-tracking / timesheet backend to the app (server/timesheet/) — a packaged domain ' +
+        'vertical for freelancing, agencies, attendance and any billable-hours app. The real guarantee is ' +
+        'SESSION INTEGRITY: a user has AT MOST ONE open (running) entry — clocking in while already clocked in ' +
+        'is rejected, clocking out with nothing running is rejected, and clocking out computes an exact duration ' +
+        '(endedAt − startedAt, never negative). Totals sum the CLOSED entries (optionally per project). Emits a ' +
+        'dependency-free Timesheet (clockIn, clockOut, openEntry, addManual, list, totalMs) + an Express router ' +
+        '(POST /time/clock-in → 409 if already running, POST /time/clock-out → 409 if nothing running, GET ' +
+        '/time/:user/open, POST /time/manual, GET /time/:user (?project=) → entries + totalMs, DELETE /time/:id). ' +
+        'Take user from the auth session in production. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2423,6 +2437,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_addresses',
   'generate_coupons',
   'generate_kanban',
+  'generate_timesheet',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -152,6 +152,7 @@ import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
 import { generateKanbanIntegration } from '../lib/KanbanGenerator';
+import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3635,6 +3636,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('kanban starter');
         const kbDeps = kbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a kanban board backend:\n${kbWritten.join('\n')}\nAdd the dependencies: ${kbDeps}\n\n${kbcfg.instructions}`;
+      }
+
+      case 'generate_timesheet': {
+        // Breadth recipe (domain vertical) — time tracking (server/timesheet/): a real Timesheet with SESSION
+        // INTEGRITY (at most one open entry per user + exact duration) + an Express router. Pure gen in
+        // TimesheetGenerator.ts.
+        const tscfg = generateTimesheetIntegration();
+        const tsWritten: string[] = [];
+        for (const [path, content] of Object.entries(tscfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('timesheet starter');
+        const tsDeps = tscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a time-tracking backend:\n${tsWritten.join('\n')}\nAdd the dependencies: ${tsDeps}\n\n${tscfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

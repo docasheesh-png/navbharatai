@@ -1135,6 +1135,19 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_events',
+      description:
+        'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
+        'workshops, webinars and community events. The real guarantee is CAPACITY ENFORCEMENT + a WAITLIST: an ' +
+        'event never confirms more attendees than its capacity, overflow RSVPs go to a FIFO waitlist, and ' +
+        'cancelling a confirmed seat AUTO-PROMOTES the first waitlisted attendee. Emits a dependency-free ' +
+        'EventService (createEvent, rsvp, cancelRsvp, attendees, seatsLeft) + an Express router (POST /events, ' +
+        'GET /events/:id (+ seatsLeft), GET /events/:id/attendees, POST /events/:id/rsvp → 409 on duplicate, ' +
+        'DELETE /rsvps/:id) + a README. In-memory by default — swap the store for your DB. Pairs with the OTP/' +
+        'notification/email recipes.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2193,6 +2206,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_booking',
   'generate_inventory',
   'generate_crm',
+  'generate_events',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

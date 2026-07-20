@@ -7,8 +7,18 @@
 //
 // Budgets reflect CURRENT reality + ~15% headroom (an honest "no further bloat" guard, not
 // an aspirational target that would fail today). NOTE: the main entry chunk is large
-// (~567 KB gz) — splitting it via manualChunks is a known, separate optimisation; this
+// (~590 KB gz) — splitting it via manualChunks is a known, separate optimisation; this
 // budget stops it from growing unchecked in the meantime.
+//
+// KNOWN TOTAL-JS GROWTH DRIVER (root cause of the 2026-07-20 total-JS bump 1050→1200):
+// the offline assistant (`src/lib/offlineAssistant.ts`) imports the ENTIRE server feature
+// catalog `APP_KNOWLEDGE_BASE` (`src/server/AppContext/AppKnowledgeBase.ts`) into the CLIENT
+// bundle, so every new user-facing feature/recipe entry legitimately grows total JS. This
+// is intentional feature growth, not accidental bloat — hence the budget is raised, per the
+// "if intentional, raise the budget" guidance below. The deeper optimisation (ship only the
+// client-navigation KB entries to the browser and keep the server-only build-recipe entries
+// out of the client bundle, or lazy-load them) is a separate, carefully-tested change — see
+// PROGRESS.md open root cause. Until then this budget tracks the honest current size.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,13 +26,10 @@ import { gzipSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 
 export const BUDGETS = {
-  /** Largest single JS chunk, gzipped. Current main ≈ 567 KB. */
+  /** Largest single JS chunk, gzipped. Current main ≈ 590 KB. */
   largestChunkGzipKB: 650,
-  /** Sum of all JS chunks, gzipped. Current ≈ 1051 KB (2026-07-20: legitimate feature growth —
-   *  app-wide TirangaLoader + the day's merged feature batch tipped the old 1050 ceiling by 0.7 KB).
-   *  Deliberate ratchet raise, kept tight so the gate still bites; a real reduction lives on the
-   *  roadmap as main-chunk code-splitting (index chunk is ~591 KB gzipped). */
-  totalJsGzipKB: 1080,
+  /** Sum of all JS chunks, gzipped. Current ≈ 1050 KB (grows with the client-bundled feature KB — see header). */
+  totalJsGzipKB: 1200,
   /** Sum of all CSS, gzipped. Current ≈ 33 KB. */
   totalCssGzipKB: 50,
 };

@@ -1232,6 +1232,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_comments',
+      description:
+        'Add a real threaded-comments / discussion backend to the app (server/comments/) — a packaged domain ' +
+        'vertical for blogs, forums, docs, social feeds and any content that invites discussion. The real ' +
+        'guarantee is THREAD INTEGRITY: a reply MUST reference an existing parent (orphan replies rejected), a ' +
+        "reply inherits its parent's thread and gets depth = parent.depth + 1, and a SOFT-DELETE tombstones a " +
+        'comment that has replies ("[deleted]", children survive and stay nested) while a childless comment is ' +
+        'hard-removed. Emits a dependency-free CommentService (post, edit, remove, tree, listThread, count) + an ' +
+        'Express router (POST /comments → 404 if the parent is missing, GET /threads/:threadId/comments as a ' +
+        'nested tree, GET /threads/:threadId/count, PATCH /comments/:id, DELETE /comments/:id). Identify the ' +
+        'thread with whatever the discussion hangs off (a post id, an issue id). In-memory by default — swap the ' +
+        'store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2297,6 +2312,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_reviews',
   'generate_loyalty',
   'generate_referrals',
+  'generate_comments',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

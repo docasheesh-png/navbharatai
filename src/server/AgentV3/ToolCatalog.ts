@@ -1203,6 +1203,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_loyalty',
+      description:
+        'Add a real loyalty / points-wallet backend to the app (server/loyalty/) — a packaged domain vertical ' +
+        'for retail, apps, memberships and any rewards programme. The real guarantee is LEDGER INTEGRITY: a ' +
+        "member's balance is ALWAYS exactly sum(earned, not expired) − sum(redeemed) and can never go negative " +
+        '(a redeem beyond the balance is rejected), and every change is an append-only ledger entry ' +
+        '(earn/redeem/expire) for a full audit history. Optional per-earn point expiry is supported. Emits a ' +
+        'dependency-free LoyaltyService (earn, redeem, balance, expireDue, history) + an Express router (POST ' +
+        '/loyalty/earn, POST /loyalty/redeem → 409 on insufficient balance, GET /loyalty/:member/balance, GET ' +
+        '/loyalty/:member/history). Take member from the authenticated session in production. In-memory by ' +
+        'default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2266,6 +2280,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_polls',
   'generate_blog',
   'generate_reviews',
+  'generate_loyalty',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

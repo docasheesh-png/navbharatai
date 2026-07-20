@@ -141,6 +141,7 @@ import { generateSubscriptionIntegration } from '../lib/SubscriptionGenerator';
 import { generatePollsIntegration } from '../lib/PollsGenerator';
 import { generateBlogIntegration } from '../lib/BlogGenerator';
 import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
+import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3432,6 +3433,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('reviews starter');
         const revDeps = revcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a reviews/ratings backend:\n${revWritten.join('\n')}\nAdd the dependencies: ${revDeps}\n\n${revcfg.instructions}`;
+      }
+
+      case 'generate_loyalty': {
+        // Breadth recipe (domain vertical) — loyalty/points-wallet (server/loyalty/): a real LoyaltyService
+        // with LEDGER INTEGRITY (balance = sum(earned) − sum(redeemed), never negative; no overdraft) + an
+        // Express router. Pure gen in LoyaltyGenerator.ts.
+        const loycfg = generateLoyaltyIntegration();
+        const loyWritten: string[] = [];
+        for (const [path, content] of Object.entries(loycfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          loyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('loyalty starter');
+        const loyDeps = loycfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a loyalty/points-wallet backend:\n${loyWritten.join('\n')}\nAdd the dependencies: ${loyDeps}\n\n${loycfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

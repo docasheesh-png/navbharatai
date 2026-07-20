@@ -155,6 +155,7 @@ import { generateKanbanIntegration } from '../lib/KanbanGenerator';
 import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
 import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
 import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
+import { generateTagsIntegration } from '../lib/TagsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3695,6 +3696,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('waitlist starter');
         const wtDeps = wtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a launch-waitlist backend:\n${wtWritten.join('\n')}\nAdd the dependencies: ${wtDeps}\n\n${wtcfg.instructions}`;
+      }
+
+      case 'generate_tags': {
+        // Breadth recipe (domain vertical) — tags / taxonomy (server/tags/): a real TagService with TAG
+        // INTEGRITY (canonical dedup + idempotent attach + rename-cascade/merge + exact counts) + an Express
+        // router. Pure gen in TagsGenerator.ts.
+        const tgcfg = generateTagsIntegration();
+        const tgWritten: string[] = [];
+        for (const [path, content] of Object.entries(tgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('tags starter');
+        const tgDeps = tgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a tags/taxonomy backend:\n${tgWritten.join('\n')}\nAdd the dependencies: ${tgDeps}\n\n${tgcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

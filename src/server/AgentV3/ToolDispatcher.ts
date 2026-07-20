@@ -143,6 +143,7 @@ import { generateBlogIntegration } from '../lib/BlogGenerator';
 import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
 import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
 import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
+import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3472,6 +3473,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('referrals starter');
         const refDeps = refcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a referral/invite backend:\n${refWritten.join('\n')}\nAdd the dependencies: ${refDeps}\n\n${refcfg.instructions}`;
+      }
+
+      case 'generate_comments': {
+        // Breadth recipe (domain vertical) — threaded comments (server/comments/): a real CommentService with
+        // THREAD INTEGRITY (reply needs an existing parent, computed depth, soft-delete keeps children) + an
+        // Express router. Pure gen in CommentsGenerator.ts.
+        const cmtcfg = generateCommentsIntegration();
+        const cmtWritten: string[] = [];
+        for (const [path, content] of Object.entries(cmtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cmtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('comments starter');
+        const cmtDeps = cmtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a threaded-comments backend:\n${cmtWritten.join('\n')}\nAdd the dependencies: ${cmtDeps}\n\n${cmtcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

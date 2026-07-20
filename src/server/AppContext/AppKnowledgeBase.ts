@@ -1813,12 +1813,12 @@ NOTE: Does NOT build apps (use Pro Chat or Engineer AI for that).`,
   },
   {
     id: 'settings_logs',
-    name: 'Logs',
-    path: 'Settings → App Settings → Logs  (also IDE → Logs tab)',
-    description: 'View build logs, runtime errors, and server output for debugging. Shows the last N lines of stdout/stderr from the workspace.',
-    howToUse: 'Settings → Logs (or IDE → Logs tab) to inspect recent build and runtime output.',
-    relatedFeatures: ['ide', 'settings_terminal'],
-    keywords: ['logs', 'log', 'debug', 'build log', 'runtime log', 'errors', 'output', 'log kahan'],
+    name: 'Logs (Settings)',
+    path: 'Settings → App Settings → Logs',
+    description: 'The REAL live logs of the app you are building, in two sections: (1) BUILD LOG — the actual progress events of your NavBharatAI Pro v5.0 build (narration, files created/updated, build finished), replayed from the durable live channel and updating live while a build runs; (2) RUNTIME ERRORS — errors captured from your app\'s own browser console in the Preview, so you can see exactly what broke at runtime. It watches the SAME workspace as Pro v5.0, Code Studio, Files and Preview. Honest empty states: before any build it says no activity is recorded yet — nothing is simulated.',
+    howToUse: 'Settings → App Settings → Logs. Start or continue a build in NavBharatAI Pro v5.0 chat and watch its live progress here; open the Preview to have any runtime console error recorded into the Runtime errors section (tap refresh to re-check).',
+    relatedFeatures: ['ide', 'settings_terminal', 'pro_chat'],
+    keywords: ['logs', 'log', 'debug', 'build log', 'runtime log', 'errors', 'output', 'log kahan', 'console errors', 'app ka log'],
   },
 
   // ─── HISTORY ──────────────────────────────────────────────────────────────

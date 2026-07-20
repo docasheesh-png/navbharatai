@@ -574,6 +574,7 @@ const CURATED_NAV: Record<string, NavTarget> = {
   connections: { view: 'settings', settingsScreen: 'connections' },
   secrets: { view: 'settings', settingsScreen: 'secrets' },
   settings_terminal: { view: 'settings', settingsScreen: 'shell' },
+  settings_logs: { view: 'settings', settingsScreen: 'logs' },
 };
 
 /** The direct-navigation target for a feature: its own KB `nav` first, else the curated fallback, else

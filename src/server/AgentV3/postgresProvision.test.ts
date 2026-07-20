@@ -6,6 +6,12 @@ import {
   postgresEnvLines,
   schemaTargetsSqlite,
   revertSqliteToPostgres,
+  postgresWatchdogCommand,
+  postgresPreflightProbeCommand,
+  shouldPreflightPostgres,
+  canAttemptPostgresRevival,
+  POSTGRES_WATCHDOG_MARKER,
+  POSTGRES_MAX_REVIVALS,
 } from './postgresProvision';
 
 describe('sandboxPostgresEnabled — default ON, off only via explicit flag', () => {
@@ -101,5 +107,47 @@ describe('postgresEnvLines', () => {
     expect(postgresEnvLines('')).toEqual({});
     expect(postgresEnvLines('   ')).toEqual({});
     expect(postgresEnvLines(null)).toEqual({});
+  });
+});
+
+describe('Postgres liveness — watchdog + preflight + bounded revival (last-5-reports class fix 2026-07-20)', () => {
+  // THE CLASS: five consecutive build reports (#14 MediConnect → #18 EstateNest) all died on some flavour
+  // of "the sandbox Postgres was reaped between touchpoints", and every prior fix was reactive/once-only.
+
+  it('watchdog command is duplicate-guarded, self-restarting, and detached', () => {
+    const cmd = postgresWatchdogCommand();
+    expect(cmd).toContain(`pgrep -f ${POSTGRES_WATCHDOG_MARKER}`); // never stack two watchdogs
+    expect(cmd).toContain('pg_isready');                            // liveness check, not a blind restart
+    expect(cmd).toContain('pg_ctlcluster');                         // the restart that actually works in E2B
+    expect(cmd).toContain('nohup');                                 // survives the provisioning command
+    expect(cmd).toContain('setsid');                                // detached from the caller's session
+    expect(cmd).toContain('WATCHDOG_ARMED');                        // observable arm confirmation
+    // The marker must ride as $0 so pgrep -f can see it on the running shell.
+    expect(cmd).toContain(`done' ${POSTGRES_WATCHDOG_MARKER}`);
+  });
+
+  it('preflight probe prints PG_UP / PG_DOWN and can never fail the build (|| fallback)', () => {
+    const cmd = postgresPreflightProbeCommand();
+    expect(cmd).toContain('pg_isready');
+    expect(cmd).toContain('PG_UP');
+    expect(cmd).toContain('PG_DOWN');
+  });
+
+  it('preflight fires only for a provisioned, not-dead, live-DB command — and not right after provisioning', () => {
+    const base = { provisioned: true, confirmedDead: false, needsLiveDb: true, provisionedAtMs: 0, nowMs: 60_000 };
+    expect(shouldPreflightPostgres(base)).toBe(true);
+    expect(shouldPreflightPostgres({ ...base, provisioned: false })).toBe(false);
+    expect(shouldPreflightPostgres({ ...base, confirmedDead: true })).toBe(false);
+    expect(shouldPreflightPostgres({ ...base, needsLiveDb: false })).toBe(false);
+    // Freshly provisioned (verified ready seconds ago) → probing again is pure waste.
+    expect(shouldPreflightPostgres({ ...base, provisionedAtMs: 55_000 })).toBe(false);
+  });
+
+  it('revival is bounded but NOT once-only (the FleetOps/EstateNest lesson: restarts genuinely work)', () => {
+    expect(canAttemptPostgresRevival(0)).toBe(true);
+    expect(canAttemptPostgresRevival(1)).toBe(true);  // the old once-only flag forbade this second revival
+    expect(canAttemptPostgresRevival(POSTGRES_MAX_REVIVALS)).toBe(false); // budget spent → honest SQLite degrade
+    expect(canAttemptPostgresRevival(-1)).toBe(false);
+    expect(canAttemptPostgresRevival(NaN)).toBe(false);
   });
 });

@@ -77,7 +77,7 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
-import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
+import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
@@ -405,10 +405,14 @@ export class ToolDispatcher {
   private secretsEnvWritten = false;
   /** Set once a local Postgres has been provisioned for this build's `provider="postgresql"` schema. */
   private postgresProvisioned = false;
+  /** When the provision (or last successful revival) completed — gates the preflight probe so a freshly
+   *  verified DB isn't immediately re-probed. */
+  private postgresProvisionedAt = 0;
   /** Set once this app is known to target PostgreSQL — locks the datasource against a silent SQLite downgrade. */
   private postgresIntended = false;
-  /** We attempted ONE mid-build Postgres re-provision after it died (bounded — never loop). */
-  private postgresReprovisionAttempted = false;
+  /** Mid-build Postgres revivals attempted so far (bounded by POSTGRES_MAX_REVIVALS — a 60-min two-window
+   *  build can see the sandbox reap Postgres more than once; once-only forced a needless SQLite downgrade). */
+  private postgresReprovisionAttempts = 0;
   /** Postgres died mid-build and could NOT be brought back — the lock RELEASES so the app can fall to SQLite. */
   private postgresConfirmedDead = false;
 
@@ -477,8 +481,12 @@ export class ToolDispatcher {
     if (!schemaTargetsPostgres(schema)) return;
     this.postgresIntended = true;    // lock the datasource against a later silent SQLite downgrade
     this.postgresProvisioned = true; // attempt once regardless of outcome — never reinstall on every migrate
+    this.postgresProvisionedAt = Date.now();
     try {
       this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ Provisioning a local PostgreSQL in the sandbox so your database can be created and migrated…', ts: Date.now() });
+      // NOTE: the E2B provisionBackend arms the in-sandbox keepalive watchdog itself (single choke
+      // point) — every provisioning path (first provision, mid-build revival, preview-boot revival)
+      // gets the keepalive without each caller re-wiring it.
       const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-provision');
       const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
       if (Object.keys(lines).length > 0) {
@@ -1784,6 +1792,30 @@ export class ToolDispatcher {
         // autopsy): without this the from-scratch build hit P1001 at localhost:5432 and downgraded to a
         // broken SQLite schema. Best-effort + once-per-build; a failure degrades to an honest DB error.
         await this.ensureSandboxPostgres(effectiveCommand);
+        // PREFLIGHT (last-5-reports class fix, 2026-07-20): a provisioned Postgres is routinely reaped by
+        // the sandbox between touchpoints — five consecutive reports hit some flavour of this. Instead of
+        // letting the command FAIL with P1001 and reviving reactively (a full failed-command cycle plus
+        // the LLM turns spent reading the error), probe liveness for a millisecond BEFORE a live-DB
+        // command and revive first, so the command runs ONCE against a live DB. Shares the bounded
+        // revival budget with the reactive net below; entirely best-effort — a probe/revive failure just
+        // leaves today's reactive behaviour.
+        if (shouldPreflightPostgres({
+          provisioned: this.postgresProvisioned,
+          confirmedDead: this.postgresConfirmedDead,
+          needsLiveDb: commandNeedsLiveDatabase(effectiveCommand),
+          provisionedAtMs: this.postgresProvisionedAt,
+          nowMs: Date.now(),
+        })) {
+          try {
+            const probe = await this.actuator.runCommand(this.workspaceId, postgresPreflightProbeCommand());
+            if (/\bPG_DOWN\b/.test(probe.stdout) && canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+              this.postgresReprovisionAttempts += 1;
+              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database had gone to sleep — restarting PostgreSQL before your database step…', ts: Date.now() });
+              await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-preflight-revive');
+              this.postgresProvisionedAt = Date.now();
+            }
+          } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
+        }
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
@@ -1921,8 +1953,8 @@ export class ToolDispatcher {
           this.postgresProvisioned && !this.postgresConfirmedDead &&
           looksLikeDbUnreachable(`${stdout}\n${stderr}`)
         ) {
-          if (!this.postgresReprovisionAttempted && typeof this.actuator.provisionBackend === 'function') {
-            this.postgresReprovisionAttempted = true;
+          if (canAttemptPostgresRevival(this.postgresReprovisionAttempts) && typeof this.actuator.provisionBackend === 'function') {
+            this.postgresReprovisionAttempts += 1;
             try {
               this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
               const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
@@ -1935,16 +1967,20 @@ export class ToolDispatcher {
               const retry = await this.actuator.runCommand(this.workspaceId, command);
               if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
                 ({ exitCode, stdout, stderr } = retry);
+                this.postgresProvisionedAt = Date.now(); // revival verified — reset the preflight gate
                 this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
               } else {
+                // The revival itself could not bring the DB back — another attempt would repeat the same
+                // failure, so this is genuinely dead (not merely reaped). Confirm + release the lock now.
                 this.postgresConfirmedDead = true;
               }
             } catch {
               this.postgresConfirmedDead = true;
             }
           } else {
-            // Already re-provisioned once (or no provisioner) and it's STILL unreachable → give up on
-            // Postgres for this preview and let the app fall to SQLite (the lock now releases).
+            // Revival budget exhausted (POSTGRES_MAX_REVIVALS) or no provisioner, and it's STILL
+            // unreachable → give up on Postgres for this preview and let the app fall to SQLite
+            // (the lock now releases).
             this.postgresConfirmedDead = true;
           }
           if (this.postgresConfirmedDead) {

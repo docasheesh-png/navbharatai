@@ -46,6 +46,22 @@ describe('analyzeRequirementGaps', () => {
     expect(shouldSurfaceRequirementGaps(analyzeRequirementGaps('make me a thing'))).toBe(false);
   });
 
+  it('detects the appended verticals (education / logistics / restaurant)', () => {
+    expect(analyzeRequirementGaps('build an LMS for a coaching institute').domain).toBe('education');
+    expect(analyzeRequirementGaps('a courier delivery tracking app with driver assignment').domain).toBe('logistics');
+    expect(analyzeRequirementGaps('a restaurant POS with menu and KOT').domain).toBe('restaurant');
+    // and they surface real gaps for the builder
+    expect(buildRequirementGuidance(analyzeRequirementGaps('build a school management system'))).toContain('education');
+    expect(analyzeRequirementGaps('a school management system').likelyMissing).toContain('assignments & grading');
+  });
+
+  it('appended domains never change an existing classification (first match wins)', () => {
+    // These matched a prior domain BEFORE the append and must still match the same one.
+    expect(analyzeRequirementGaps('Build a hospital management system').domain).toBe('healthcare');
+    expect(analyzeRequirementGaps('an online store with a cart and checkout').domain).toBe('ecommerce');
+    expect(analyzeRequirementGaps('a booking app for salon slots').domain).toBe('booking');
+  });
+
   it('buildRequirementGuidance produces INCLUDE guidance for a domain gap, empty for a generic prompt', () => {
     const g = buildRequirementGuidance(analyzeRequirementGaps('build a hospital system'));
     expect(g).toContain('REQUIREMENT AWARENESS');

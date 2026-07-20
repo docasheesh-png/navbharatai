@@ -136,6 +136,7 @@ import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateBookingIntegration } from '../lib/BookingGenerator';
 import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateCrmIntegration } from '../lib/CrmGenerator';
+import { generateEventsIntegration } from '../lib/EventsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3334,6 +3335,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('crm starter');
         const crmDeps = crmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a CRM / lead-pipeline backend:\n${crmWritten.join('\n')}\nAdd the dependencies: ${crmDeps}\n\n${crmcfg.instructions}`;
+      }
+
+      case 'generate_events': {
+        // Breadth recipe (domain vertical) — events/RSVP (server/events/): a real EventService with CAPACITY
+        // enforcement + a waitlist (auto-promote on cancel) + an Express router. Pure gen in EventsGenerator.ts.
+        const evcfg = generateEventsIntegration();
+        const evWritten: string[] = [];
+        for (const [path, content] of Object.entries(evcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          evWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('events starter');
+        const evDeps = evcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an events/RSVP backend:\n${evWritten.join('\n')}\nAdd the dependencies: ${evDeps}\n\n${evcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

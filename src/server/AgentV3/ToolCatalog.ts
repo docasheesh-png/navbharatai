@@ -1805,6 +1805,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_soft_delete',
+      description:
+        'Add real soft delete (trash & restore) to the app (server/lib/softDelete.ts): dependency-free and ' +
+        'storage-agnostic. Instead of hard-deleting a record, softDelete(record) stamps deletedAt so it can be ' +
+        'RESTORED (undo delete / a Trash bin / audit-friendly retention); restore(record) brings it back, ' +
+        'isDeleted(record) checks it, and activeOnly/trashedOnly filter a list. For SQL, add a nullable ' +
+        'deleted_at column and use activeWhere() ("deleted_at IS NULL") / trashedWhere(). Pairs with the ' +
+        'audit-log recipe. No dependency, no key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_qr',
       description:
         'Add real QR-code generation to the app (server/lib/qr.ts, qrcode): a server generateQr(text) → PNG ' +
@@ -2199,6 +2210,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_pdf',
   'generate_csv',
   'generate_audit',
+  'generate_soft_delete',
   'generate_image',
   'generate_mobile_export',
   'generate_desktop_export',

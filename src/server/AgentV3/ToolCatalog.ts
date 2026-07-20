@@ -929,6 +929,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_totp',
+      description:
+        'Add real authenticator-app two-factor auth (TOTP, RFC 6238) to the app (server/lib/totp.ts): a ' +
+        'dependency-free (node:crypto) base32 secret generator, an otpauth:// provisioning URI to show as a ' +
+        'QR code (pair with generate_qr) for Google Authenticator / Authy / 1Password, and a constant-time ' +
+        'verify with a ±1-step clock-drift window. This is app-based 2FA — distinct from generate_otp, which ' +
+        'is SMS/phone one-time codes. No API key, no dependency. Use to add a second factor to login.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_indian_validators',
       description:
         'Add real Indian identity/format validators to the app (server/lib/indianValidators.ts): dependency-' +
@@ -2119,6 +2129,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_realtime',
   'generate_search',
   'generate_otp',
+  'generate_totp',
   'generate_indian_validators',
   'generate_analytics',
   'generate_map',

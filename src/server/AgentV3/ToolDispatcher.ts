@@ -486,7 +486,7 @@ export class ToolDispatcher {
    * never wrongly fails a real build on an internal error.
    */
   async assessBuildReadiness(): Promise<ReadinessReport> {
-    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [] };
+    const permissive: ReadinessReport = { score: 100, ready: true, blockers: [], warnings: [], tier: 'enterprise' };
     try {
       // OVERALL TIMEOUT (audit P0-C): the readiness gate runs AFTER the last agent turn, so the
       // build's wall-clock deadline can no longer interrupt it. Without this bound a single stalled

@@ -580,12 +580,12 @@ export class AgentRunner {
           // with an honest summary of the blockers. The work is preserved (files/preview still
           // exist) — we simply refuse to claim success that wasn't earned ("Preview is EARNED").
           // When escalation is active, this ok:false is exactly what triggers a stronger retry.
-          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+          let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
           if (ok && readinessGate && expectsArtifacts && totalToolUses > 0) {
             try {
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
-              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+              buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
               if (!readiness.ready) {
                 ok = false;
                 const blockers = readiness.blockers.length
@@ -804,11 +804,11 @@ export class AgentRunner {
         let summary = ok
           ? `Step limit reached (${stepCap}) — stopping here. Your files are saved; send another message to continue.`
           : `Step limit reached (${stepCap}). Stopped without completing.`;
-        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[] } | undefined;
+        let buildHealth: { score: number; ready: boolean; blockers: string[]; warnings: string[]; tier: string } | undefined;
         if (ok && readinessGate) {
           try {
             const readiness = await dispatcher.assessBuildReadiness();
-            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings };
+            buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
             if (readiness.ready) {
               summary = `Step limit reached (${stepCap}) — but the app itself is verified READY (score ${readiness.score}/100). Files are saved; send another message to keep improving it.`;
             } else {
@@ -830,7 +830,7 @@ export class AgentRunner {
                   }), 150_000, 'endgame-repair');
                   if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
                     const after = await dispatcher.assessBuildReadiness();
-                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings };
+                    buildHealth = { score: after.score, ready: after.ready, blockers: after.blockers, warnings: after.warnings, tier: after.tier };
                     if (after.ready) {
                       ok = true;
                       summary = `Step limit reached (${stepCap}) — endgame repair then fixed the remaining ${verdict.errorsBefore} compile error(s) (${verdict.deterministicFixes.length} mechanically, ${verdict.llmFilesWritten} file(s) via one batch pass) and the app is verified READY (score ${after.score}/100).`;

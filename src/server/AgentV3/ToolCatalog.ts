@@ -1335,6 +1335,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_kanban',
+      description:
+        'Add a real kanban board / task board backend to the app (server/kanban/) — a packaged domain vertical ' +
+        'for project management, issue tracking and any "columns of cards" UI. The real guarantee is BOARD ' +
+        'INTEGRITY: a card lives in exactly one column with a stable contiguous position (0,1,2,…); adding and ' +
+        'moving re-index the affected columns so positions never collide or gap; and an optional per-column WIP ' +
+        'LIMIT rejects an add/move that would overflow the column. moveCard clamps the target position to the ' +
+        'destination length. Emits a dependency-free KanbanService (addColumn, addCard, moveCard, updateCard, ' +
+        'removeCard, board) + an Express router (POST /columns, GET /boards/:boardId, POST /columns/:columnId/' +
+        'cards → 409 at WIP limit, PATCH /cards/:id/move → 409 if destination full, PATCH/DELETE /cards/:id). ' +
+        'Distinct from generate_support_tickets (ticket status machine). In-memory by default — swap the store ' +
+        'for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2407,6 +2422,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_wishlist',
   'generate_addresses',
   'generate_coupons',
+  'generate_kanban',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

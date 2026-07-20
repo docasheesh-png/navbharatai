@@ -380,11 +380,97 @@ export function generateTerraformCloudRun(opts: IaCOptions = {}): Record<string,
   return { 'terraform/main.tf': mainTf, 'terraform/variables.tf': variablesTf, 'terraform/outputs.tf': outputsTf };
 }
 
-/** All IaC artifacts as one path→content map (k8s manifests + Helm chart + Terraform). */
+/** Ansible playbook that deploys the app as a Docker container to operator-provided SSH hosts.
+ *  Real + deterministic: pulls the image and runs it with a port mapping, env, restart policy and a
+ *  healthcheck via community.docker. HONEST: it deploys to hosts YOU provide over SSH — it does not
+ *  provision the servers themselves (that is Terraform's job). */
+export function generateAnsiblePlaybook(opts: IaCOptions = {}): Record<string, string> {
+  const r = resolve(opts);
+  const healthUrl = `http://localhost:${r.port}${r.healthPath}`;
+  const envLines = r.env.length
+    ? ['        env:', ...r.env.map((e) => `          ${e.name}: ${JSON.stringify(e.value)}`)]
+    : [];
+
+  const playbook = [
+    '---',
+    `# Deploy ${r.name} as a Docker container to the target hosts.`,
+    '# Requires the Docker collection:  ansible-galaxy collection install community.docker',
+    `- name: Deploy ${r.name}`,
+    '  hosts: web',
+    '  become: true',
+    '  vars:',
+    `    image: ${JSON.stringify(r.image)}`,
+    `    container_name: ${JSON.stringify(r.name)}`,
+    `    host_port: ${r.port}`,
+    `    container_port: ${r.port}`,
+    '  tasks:',
+    '    - name: Ensure Docker is installed',
+    '      ansible.builtin.package:',
+    '        name: docker.io',
+    '        state: present',
+    '',
+    '    - name: Pull the application image',
+    '      community.docker.docker_image:',
+    '        name: "{{ image }}"',
+    '        source: pull',
+    '        force_source: true',
+    '',
+    '    - name: Run the application container',
+    '      community.docker.docker_container:',
+    '        name: "{{ container_name }}"',
+    '        image: "{{ image }}"',
+    '        state: started',
+    '        recreate: true',
+    '        restart_policy: unless-stopped',
+    '        ports:',
+    '          - "{{ host_port }}:{{ container_port }}"',
+    ...envLines,
+    '        healthcheck:',
+    `          test: ["CMD", "wget", "-qO-", ${JSON.stringify(healthUrl)}]`,
+    '          interval: 30s',
+    '          timeout: 5s',
+    '          retries: 3',
+    '',
+  ].join('\n');
+
+  const inventory = [
+    '[web]',
+    '# Add your server(s) here, for example:',
+    '# app-1 ansible_host=203.0.113.10 ansible_user=ubuntu',
+    '',
+  ].join('\n');
+
+  const readme = [
+    `# Ansible deploy — ${r.name}`,
+    '',
+    'This playbook deploys the app as a Docker container to hosts **you** provide over SSH.',
+    '',
+    '```bash',
+    'ansible-galaxy collection install community.docker',
+    '# edit inventory.ini with your server(s), then:',
+    'ansible-playbook -i inventory.ini playbook.yml',
+    '```',
+    '',
+    `It pulls \`${r.image}\` and runs it with a \`${r.port}\` port mapping and a healthcheck on \`${r.healthPath}\`.`,
+    '',
+    'HONEST SCOPE: this deploys onto servers you already have (SSH). It does **not** provision the servers',
+    '— for that, use the Terraform target (`terraform/`) or your cloud provider.',
+    '',
+  ].join('\n');
+
+  return {
+    'ansible/playbook.yml': playbook,
+    'ansible/inventory.ini': inventory,
+    'ansible/README.md': readme,
+  };
+}
+
+/** All IaC artifacts as one path→content map (k8s manifests + Helm chart + Terraform + Ansible). */
 export function generateIaC(opts: IaCOptions = {}): Record<string, string> {
   return {
     'k8s/manifests.yaml': generateK8sManifests(opts),
     ...generateHelmChart(opts),
     ...generateTerraformCloudRun(opts),
+    ...generateAnsiblePlaybook(opts),
   };
 }

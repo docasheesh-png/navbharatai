@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Globe, ExternalLink, ChevronLeft, CheckCircle2, Info, Copy, Check, Loader2, RefreshCw } from 'lucide-react';
+import { TirangaLoader } from '../ui/TirangaLoader';
 
 /**
  * ConnectDomainPanel — connect a user's own custom domain (e.g. from Hostinger
@@ -135,7 +136,7 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
               disabled={!domainValid || busy}
               className="px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-sm font-medium flex items-center gap-1.5 shrink-0"
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+              {busy ? <TirangaLoader className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
               {busy ? 'Starting…' : 'Connect'}
             </button>
           </div>
@@ -196,7 +197,7 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
               <div className="flex items-center gap-2 min-w-0">
                 {result.active
                   ? <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                  : <Loader2 className="w-4 h-4 text-amber-400 shrink-0 animate-spin" />}
+                  : <TirangaLoader className="w-4 h-4 text-amber-400 shrink-0" />}
                 <span className={`text-[11px] truncate ${result.active ? 'text-green-200' : 'text-amber-200/90'}`}>
                   {result.active
                     ? `Live! ${result.hostname} is connected with HTTPS.`
@@ -209,7 +210,7 @@ export const ConnectDomainPanel: React.FC<ConnectDomainPanelProps> = ({ onBack }
                   disabled={checking}
                   className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] font-medium disabled:opacity-40"
                 >
-                  {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Check
+                  {checking ? <TirangaLoader className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />} Check
                 </button>
               )}
             </div>

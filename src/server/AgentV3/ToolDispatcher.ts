@@ -160,6 +160,7 @@ import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
+import { generateCsrfIntegration } from '../lib/CsrfGenerator';
 import { generateSlugIntegration } from '../lib/SlugGenerator';
 import { generateValidationIntegration } from '../lib/ValidationGenerator';
 import { generateSanitizeHtmlIntegration } from '../lib/SanitizeHtmlGenerator';
@@ -4189,6 +4190,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('cors config');
         return `Wired safe CORS:\n${coWritten.join('\n')}\n(No npm dependency needed — plain response headers.)\n\n${cocfg.instructions}`;
+      }
+
+      case 'generate_csrf': {
+        // U-4 recipe — CSRF protection (double-submit cookie) at server/lib/csrf.ts. Dependency-free
+        // (node:crypto), constant-time compare. Pure generator in CsrfGenerator.ts. No env keys.
+        const csrfcfg = generateCsrfIntegration();
+        const csrfWritten: string[] = [];
+        for (const [path, content] of Object.entries(csrfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          csrfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('csrf protection');
+        return `Wired CSRF protection (double-submit cookie):\n${csrfWritten.join('\n')}\n(No npm dependency — node:crypto, constant-time compare; guard cookie-session mutating routes.)\n\n${csrfcfg.instructions}`;
       }
 
       case 'generate_slug': {

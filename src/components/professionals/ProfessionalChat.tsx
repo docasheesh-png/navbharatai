@@ -5,6 +5,7 @@ import { AttachMenu } from '../AttachMenu';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
 import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
+import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -64,6 +65,10 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
   const [paywall, setPaywall] = useState<null | 'paywall' | 'login'>(null);
   const [buying, setBuying] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  // Composer auto-grow (admin 2026-07-20): starts at 1 line, grows while typing (max-h-32 = 128px),
+  // snaps back to 1 line when send() clears the input.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (!input && composerRef.current) resetGrow(composerRef.current); }, [input]);
 
   const refreshPass = React.useCallback(() => { fetchPassStatus().then((p) => setPass(p)).catch(() => {}); }, []);
   // Load pass/quota state on mount and whenever the signed-in user changes (also picks up a pass that
@@ -214,8 +219,9 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
           buttonClassName="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 border border-white/10 text-[#c9d1d9] flex items-center justify-center"
         />
         <textarea
+          ref={composerRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { setInput(e.target.value); autoGrow(e.target, 128); }}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           onPaste={(e) => {
             const items: DataTransferItem[] = e.clipboardData ? Array.from(e.clipboardData.items) : [];

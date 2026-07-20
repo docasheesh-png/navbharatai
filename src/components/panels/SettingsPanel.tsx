@@ -321,9 +321,13 @@ export function SettingsPanel({
         </button>
       </div>
 
-      {/* Settings Content Area */}
+      {/* Settings Content Area.
+          The ROOT screen widens on desktop (lg+) and flows its section cards into a multi-column
+          masonry grid (see the root motion.div) so a wide screen no longer shows the narrow,
+          stretched-mobile column. Sub-screens (General, Connections, …) are designed for a single
+          reading column, so they stay capped at max-w-xl. */}
       <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0d1117]">
-        <div className="max-w-xl mx-auto p-4 sm:p-6 pb-20">
+        <div className={cn("mx-auto p-4 sm:p-6 pb-20", settingsScreen === 'root' ? "max-w-xl lg:max-w-5xl xl:max-w-6xl" : "max-w-xl")}>
           <AnimatePresence mode="wait">
             {settingsScreen === 'root' && (
               <motion.div
@@ -331,7 +335,10 @@ export function SettingsPanel({
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="space-y-4"
+                /* Mobile: a single stacked column (space-y-4). Desktop (lg+): the section cards flow
+                   into a 2-column (lg) / 3-column (xl) masonry so the wide screen is filled attractively
+                   instead of showing one narrow mobile-style list. break-inside-avoid keeps each card whole. */
+                className="space-y-4 lg:space-y-0 lg:columns-2 xl:columns-3 lg:gap-4 [&>*]:break-inside-avoid lg:[&>*]:mb-4"
               >
                 {/* G2: User profile card */}
                 {user && (

@@ -76,6 +76,7 @@ import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
@@ -143,6 +144,8 @@ import { generateBlogIntegration } from '../lib/BlogGenerator';
 import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
 import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
 import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
+import { generateCommentsIntegration } from '../lib/CommentsGenerator';
+import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -1792,7 +1795,9 @@ export class ToolDispatcher {
         // LATEST — Prisma 7's breaking config/seed (or vue-router 5's Vite-7 peer) then bricks the build.
         // Only bare package tokens in an install sub-command are pinned; `npx prisma generate` and
         // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
-        const effectiveCommand = pinKnownDepsInInstallCommand(command);
+        // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
+        // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
+        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command));
         // Inject the user's own vault secrets (Settings → Secrets & Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);
@@ -3472,6 +3477,44 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('referrals starter');
         const refDeps = refcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a referral/invite backend:\n${refWritten.join('\n')}\nAdd the dependencies: ${refDeps}\n\n${refcfg.instructions}`;
+      }
+
+      case 'generate_comments': {
+        // Breadth recipe (domain vertical) — threaded comments (server/comments/): a real CommentService with
+        // THREAD INTEGRITY (reply needs an existing parent, computed depth, soft-delete keeps children) + an
+        // Express router. Pure gen in CommentsGenerator.ts.
+        const cmtcfg = generateCommentsIntegration();
+        const cmtWritten: string[] = [];
+        for (const [path, content] of Object.entries(cmtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cmtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('comments starter');
+        const cmtDeps = cmtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a threaded-comments backend:\n${cmtWritten.join('\n')}\nAdd the dependencies: ${cmtDeps}\n\n${cmtcfg.instructions}`;
+      }
+
+      case 'generate_messaging': {
+        // Breadth recipe (domain vertical) — direct messaging (server/messaging/): a real MessagingService with
+        // CONVERSATION INTEGRITY (canonical participant pairing, exact unread, monotonic read cursor) + an
+        // Express router. Pure gen in MessagingGenerator.ts.
+        const msgcfg = generateMessagingIntegration();
+        const msgWritten: string[] = [];
+        for (const [path, content] of Object.entries(msgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          msgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('messaging starter');
+        const msgDeps = msgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a direct-messaging backend:\n${msgWritten.join('\n')}\nAdd the dependencies: ${msgDeps}\n\n${msgcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

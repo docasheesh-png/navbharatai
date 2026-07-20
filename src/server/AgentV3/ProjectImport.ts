@@ -353,6 +353,60 @@ export function detectImportedFramework(files: Record<string, string>): string {
 }
 
 /**
+ * The set of meta-framework ids whose scaffold/toolchain differs FUNDAMENTALLY from vite-react — the
+ * class where a wrong `vite-react` label is catastrophic (the builder fights the scaffold, the preview
+ * boots on the wrong command/port, the analyzers run against the wrong framework). Detecting one of
+ * these from the real files must OVERRIDE a stale `vite-react` label.
+ */
+const META_FRAMEWORKS = new Set(['nextjs', 'nuxt', 'remix', 'sveltekit', 'astro', 'angular']);
+
+/**
+ * Detect the framework of an EXISTING workspace from its real files, for correcting a stale/wrong label
+ * on a continue/edit turn (PulseBoard autopsy 2026-07-20: a Next.js app was scaffolded/labelled
+ * `vite-react`, so the builder burned ~15 min reconciling package.json vs Next.js code, the preview
+ * booted with Vite assumptions, and the report mislabelled the framework). Unlike `detectImportedFramework`
+ * (package.json deps only — which LAGS while the builder is still converting the app), this ALSO reads
+ * STRUCTURAL signals (a `next.config`/`nuxt.config`/… file, or an app-router layout + route-handler
+ * pair under `app/`) so a half-converted app is still recognised. Returns a META-framework id ONLY when
+ * a confident signal is present, else null (the caller then keeps the current label — this NEVER downgrades
+ * a real framework to vite-react on a weak signal). Pure + unit-testable.
+ */
+export function detectFrameworkFromWorkspace(files: Record<string, string>): string | null {
+  if (!files || typeof files !== 'object') return null;
+  const paths = Object.keys(files);
+  if (paths.length === 0) return null;
+  // 1) DEPENDENCY signal (strongest when present): a real meta-framework dep in package.json.
+  const byDeps = detectImportedFramework(files);
+  if (META_FRAMEWORKS.has(byDeps)) return byDeps;
+  // 2) CONFIG-FILE signal (definitive even when package.json still lags — the exact PulseBoard case):
+  //    a framework's own config file is unambiguous. Mirrors isViteReactTarget's "next.config ⇒ Next.js".
+  const hasFile = (re: RegExp) => paths.some((p) => re.test(p));
+  if (hasFile(/(?:^|\/)next\.config\.[cm]?[jt]s$/i)) return 'nextjs';
+  if (hasFile(/(?:^|\/)nuxt\.config\.[cm]?[jt]s$/i)) return 'nuxt';
+  if (hasFile(/(?:^|\/)astro\.config\.[cm]?[jt]s$/i)) return 'astro';
+  if (hasFile(/(?:^|\/)svelte\.config\.[cm]?[jt]s$/i)) return 'sveltekit';
+  if (hasFile(/(?:^|\/)remix\.config\.[cm]?[jt]s$/i)) return 'remix';
+  if (hasFile(/(?:^|\/)angular\.json$/i)) return 'angular';
+  // 3) STRUCTURE signal for Next.js App Router (a config file can be absent on a fresh app): a file
+  //    UNDER an `app/` (or `src/app/`) directory whose basename is `layout.*` PLUS one that is `route.*`
+  //    is the unmistakable App-Router shape. Required TOGETHER so a stray `layout.tsx` elsewhere in a
+  //    Vite app never false-flips. Uses path segments (not a regex with `/` in a char class).
+  const underAppDir = (p: string, base: RegExp): boolean => {
+    const segs = p.split('/');
+    const i = segs.indexOf('app');
+    if (i === -1) return false;            // no `app/` segment
+    if (i > 1) return false;               // must be at repo root or directly under one dir
+    if (i === 1 && segs[0] !== 'src') return false; // the only allowed parent is `src/`
+    if (segs.length - 1 <= i) return false; // must be a file BELOW app/, not `app` itself
+    return base.test(segs[segs.length - 1]);
+  };
+  const hasAppLayout = paths.some((p) => underAppDir(p, /^layout\.[jt]sx?$/i));
+  const hasRouteHandler = paths.some((p) => underAppDir(p, /^route\.[jt]s$/i));
+  if (hasAppLayout && hasRouteHandler) return 'nextjs';
+  return null;
+}
+
+/**
  * Validate that an extracted project is something v5.0 can actually run — fail FAST and honestly
  * (before any sandbox time is spent) instead of producing a mystery dead preview later.
  */

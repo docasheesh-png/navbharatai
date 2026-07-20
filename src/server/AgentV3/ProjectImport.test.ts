@@ -13,7 +13,7 @@ import {
   envTemplateNote,
   assetMimeFor,
   parseDataUri,
-  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously } from './ProjectImport';
+  IMPORT_MAX_FILES, devScriptRunsNodeServer, findUnresolvedLocalImports, fixMispathLocalImports, shouldRetryImportAnonymously, detectFrameworkFromWorkspace } from './ProjectImport';
 
 async function makeZip(entries: Record<string, string>): Promise<Buffer> {
   const zip = new JSZip();
@@ -137,6 +137,49 @@ describe('detectImportedFramework', () => {
   });
   it('next wins over react (Next.js apps depend on both)', () => {
     expect(detectImportedFramework({ 'package.json': pkg({ next: '14', react: '18' }) })).toBe('nextjs');
+  });
+
+  describe('detectFrameworkFromWorkspace — correct a stale label on a continue turn (PulseBoard autopsy 2026-07-20)', () => {
+    const vitePkg = pkg({ react: '18', 'react-dom': '18', vite: '5' });
+    it('THE PulseBoard case: Next.js CODE + config but package.json STILL says Vite → nextjs (structure wins)', () => {
+      // The exact drift: the label/package.json lagged as vite-react while the app was already Next.js.
+      const files = {
+        'package.json': vitePkg,              // still the vite scaffold — deps LAG the code
+        'next.config.js': 'module.exports = {}',
+        'src/app/layout.tsx': 'export default function L(){return null}',
+        'src/app/api/ingest/route.ts': 'export function POST(){}',
+      };
+      expect(detectFrameworkFromWorkspace(files)).toBe('nextjs');
+    });
+    it('a real next dependency alone → nextjs (dependency signal)', () => {
+      expect(detectFrameworkFromWorkspace({ 'package.json': pkg({ next: '14', react: '18' }) })).toBe('nextjs');
+    });
+    it('app-router SHAPE (layout + route handler) with no config file → nextjs', () => {
+      expect(detectFrameworkFromWorkspace({
+        'package.json': vitePkg,
+        'app/dashboard/layout.tsx': 'export default function L(){}',
+        'app/api/stats/route.ts': 'export function GET(){}',
+      })).toBe('nextjs');
+    });
+    it('other framework config files are recognised', () => {
+      expect(detectFrameworkFromWorkspace({ 'package.json': vitePkg, 'nuxt.config.ts': '' })).toBe('nuxt');
+      expect(detectFrameworkFromWorkspace({ 'package.json': vitePkg, 'astro.config.mjs': '' })).toBe('astro');
+      expect(detectFrameworkFromWorkspace({ 'package.json': vitePkg, 'svelte.config.js': '' })).toBe('sveltekit');
+      expect(detectFrameworkFromWorkspace({ 'package.json': vitePkg, 'angular.json': '{}' })).toBe('angular');
+    });
+    it('NEVER false-flips a genuine Vite React app (returns null → caller keeps the label)', () => {
+      expect(detectFrameworkFromWorkspace({
+        'package.json': vitePkg,
+        'vite.config.ts': '',
+        'src/App.tsx': 'export default function App(){}',
+        'src/components/layout.tsx': 'export const Layout = () => null', // a stray "layout" is NOT app-router
+      })).toBeNull();
+      expect(detectFrameworkFromWorkspace({})).toBeNull();
+      expect(detectFrameworkFromWorkspace({ 'src/App.tsx': 'x' })).toBeNull();
+    });
+    it('a lone app-router layout WITHOUT a route handler does not flip (needs both signals)', () => {
+      expect(detectFrameworkFromWorkspace({ 'package.json': vitePkg, 'src/app/layout.tsx': 'x' })).toBeNull();
+    });
   });
   it('falls back sensibly without/with broken package.json', () => {
     expect(detectImportedFramework({ 'index.html': '<html></html>' })).toBe('vanilla');

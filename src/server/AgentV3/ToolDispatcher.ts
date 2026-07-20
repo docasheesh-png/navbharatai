@@ -156,6 +156,7 @@ import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
 import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
 import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
 import { generateTagsIntegration } from '../lib/TagsGenerator';
+import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3715,6 +3716,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('tags starter');
         const tgDeps = tgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a tags/taxonomy backend:\n${tgWritten.join('\n')}\nAdd the dependencies: ${tgDeps}\n\n${tgcfg.instructions}`;
+      }
+
+      case 'generate_experiments': {
+        // Breadth recipe (domain vertical) — A/B testing (server/experiments/): a real ExperimentService with
+        // DETERMINISTIC STICKY ASSIGNMENT (pure hash bucketing + weighted variants + exposure counts) + an
+        // Express router. Pure gen in ExperimentsGenerator.ts.
+        const excfg = generateExperimentsIntegration();
+        const exWritten: string[] = [];
+        for (const [path, content] of Object.entries(excfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          exWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('experiments starter');
+        const exDeps = excfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an A/B testing backend:\n${exWritten.join('\n')}\nAdd the dependencies: ${exDeps}\n\n${excfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

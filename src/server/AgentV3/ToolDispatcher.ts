@@ -77,6 +77,7 @@ import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAn
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
+import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres, postgresPreflightProbeCommand, shouldPreflightPostgres, canAttemptPostgresRevival } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
@@ -6107,9 +6108,12 @@ function testFileHint(filePath: string): string {
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {
-  const v = input[key];
-  if (typeof v !== 'string') throw new Error(`Missing/invalid string argument: ${key}`);
-  return v;
+  // MALFORMED-CALL REPAIR (CrewHub autopsy 2026-07-20: 9 wasted turns on `{"file": …}` instead of
+  // `{"path": …}`): accept a well-known alias when the canonical key is absent, and when nothing
+  // matches, throw an INSTRUCTIVE error that teaches the model the exact retry shape.
+  const resolved = resolveStringArg(input, key);
+  if (resolved) return resolved.value;
+  throw new Error(missingArgMessage(input, key));
 }
 
 function reqNum(input: Record<string, unknown>, key: string): number {

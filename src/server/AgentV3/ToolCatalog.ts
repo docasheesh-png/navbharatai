@@ -1483,6 +1483,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_cart',
+      description:
+        'Add a real shopping-cart backend to the app (server/cart/) — a packaged domain vertical, the ' +
+        'foundational ecommerce primitive. The real guarantee is CART INTEGRITY: adding the same product MERGES ' +
+        'quantities into ONE line (never a duplicate line), setting a line to 0 (or removing it) drops it, ' +
+        'quantities never go negative, and the cart total is ALWAYS the exact sum of unitPrice × qty in INTEGER ' +
+        'minor units (paise/cents) so money never drifts on floating point. Emits a dependency-free CartService ' +
+        '(add, setQty, remove, clear, view) + an Express router (GET /api/cart/:userId, POST ' +
+        '/api/cart/:userId/items, PATCH /api/cart/:userId/items/:productId, DELETE the line or the whole cart). ' +
+        'Distinct from generate_inventory (stock), generate_orders (placed order) and generate_payment (charge). ' +
+        'In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2565,6 +2579,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_feedback',
   'generate_consent',
   'generate_activity_feed',
+  'generate_cart',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

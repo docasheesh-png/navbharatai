@@ -162,6 +162,7 @@ import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateFeedbackIntegration } from '../lib/FeedbackGenerator';
 import { generateConsentIntegration } from '../lib/ConsentGenerator';
 import { generateActivityFeedIntegration } from '../lib/ActivityFeedGenerator';
+import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3817,6 +3818,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('activity feed starter');
         const afDeps = afcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an activity-feed backend:\n${afWritten.join('\n')}\nAdd the dependencies: ${afDeps}\n\n${afcfg.instructions}`;
+      }
+
+      case 'generate_cart': {
+        // Breadth recipe (domain vertical) — shopping cart (server/cart/): a real CartService whose core
+        // guarantee is CART INTEGRITY (adding the same product MERGES quantities into one line, and the total
+        // is the EXACT sum of unitPrice×qty in integer minor units) + an Express router. Pure gen in
+        // CartGenerator.ts.
+        const crtcfg = generateCartIntegration();
+        const crtWritten: string[] = [];
+        for (const [path, content] of Object.entries(crtcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          crtWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('cart starter');
+        const crtDeps = crtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a shopping-cart backend:\n${crtWritten.join('\n')}\nAdd the dependencies: ${crtDeps}\n\n${crtcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

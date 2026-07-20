@@ -495,7 +495,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         'Find WHERE the app fails to compile — and type-check every language. It parses every frontend ' +
         'JS/TS/JSX/TSX file and reports the EXACT `file:line:column` of any SYNTAX error (an unbalanced ' +
         'or mismatched tag, a missing `)`/`}`, a duplicate declaration), then compiles the other ' +
-        'languages present (Python, Java). ALWAYS call this to locate a compile/syntax error — it gives ' +
+        'languages present (Python, Java, Go). ALWAYS call this to locate a compile/syntax error — it gives ' +
         'you the precise location in one step. NEVER hand-count `<div>` tags or braces with grep/awk/' +
         'python; that wastes steps and misses the real spot. Takes no arguments. Run it before declaring ' +
         'a build verified and fix each reported location.',

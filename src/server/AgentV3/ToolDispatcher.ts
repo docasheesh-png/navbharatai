@@ -2617,10 +2617,10 @@ export class ToolDispatcher {
       }
 
       case 'typecheck': {
-        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) so a
-        // polyglot app's non-TS code is type/compile-checked too. Detection + parsing are pure
-        // (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a missing toolchain
-        // reports "could not run", never a fake pass.
+        // B6 — cross-language TYPE-CHECK beyond tsc: run mypy (Python) + javac/Maven/Gradle (Java) +
+        // `go build ./...` (Go) so a polyglot app's non-TS code is type/compile-checked too. Detection +
+        // parsing are pure (crossLangTypecheck.ts); this wires them to the sandbox actuator. Honest: a
+        // missing toolchain reports "could not run", never a fake pass.
         const files = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
         // FRONTEND SYNTAX LOCATOR (deep-test 2026-07-18). A model verifying "does it compile?" runs
         // `tsc` by hand — but `tsc | head` masks the exit code and tsc never crisply pinpoints a JSX PARSE
@@ -2657,8 +2657,8 @@ export class ToolDispatcher {
           if (failing.length) getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${failing.map((o) => `${o.lang} ${o.errorCount} error(s)`).join(', ')}.`);
           crossLang = typecheckSummary(outcomes);
         }
-        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java sources to check.');
-        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python or Java sources detected — nothing beyond the tsc gate.';
+        if (syntaxHeader) return syntaxHeader + (crossLang || 'Frontend syntax checked above (esbuild). No Python/Java/Go sources to check.');
+        return crossLang || 'typecheck: frontend parses clean (esbuild); no Python, Java, or Go sources detected — nothing beyond the tsc gate.';
       }
 
       case 'code_graph': {

@@ -1110,6 +1110,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_inventory',
+      description:
+        'Add a real inventory/stock backend to the app (server/inventory/) — a packaged domain vertical for ' +
+        'retail/e-commerce. The real guarantee is NO OVERSELLING: reserve() rejects when stock is insufficient ' +
+        'and never lets on-hand go negative. Emits a dependency-free InventoryService (setStock / restock / ' +
+        'reserve / release / isLowStock / list) + an Express router (GET /stock, GET/PUT /stock/:sku, POST ' +
+        '/stock/:sku/reserve → 409 if insufficient, POST /stock/:sku/release) + a README. In-memory by default ' +
+        '— swap the store for your DB (same contracts). Pairs with the payment/notification/audit recipes for a ' +
+        'full order flow.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_pagination',
       description:
         'Add real, DoS-safe list pagination to the app (server/lib/pagination.ts): dependency-free ' +
@@ -2153,6 +2165,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_migration',
   'generate_crud',
   'generate_booking',
+  'generate_inventory',
   'generate_graphql',
   'generate_pagination',
   'generate_rbac',

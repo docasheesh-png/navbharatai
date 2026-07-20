@@ -134,6 +134,7 @@ import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimit
 import { generateApiVersionIntegration } from '../lib/ApiVersionGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
 import { generateBookingIntegration } from '../lib/BookingGenerator';
+import { generateInventoryIntegration } from '../lib/InventoryGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
@@ -3259,6 +3260,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('booking starter');
         const bkDeps = bkcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a booking/appointment backend:\n${bkWritten.join('\n')}\nAdd the dependencies: ${bkDeps}\n\n${bkcfg.instructions}`;
+      }
+
+      case 'generate_inventory': {
+        // Breadth recipe (domain vertical) — inventory/stock (server/inventory/): a real InventoryService with
+        // NO-OVERSELL reserve + an Express router. Pure generator in InventoryGenerator.ts.
+        const invcfg = generateInventoryIntegration();
+        const invWritten: string[] = [];
+        for (const [path, content] of Object.entries(invcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          invWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('inventory starter');
+        const invDeps = invcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an inventory/stock backend:\n${invWritten.join('\n')}\nAdd the dependencies: ${invDeps}\n\n${invcfg.instructions}`;
       }
 
       case 'generate_graphql': {

@@ -212,6 +212,7 @@ import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
+import { containsSymbol } from './codemodScope';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
 
@@ -5089,15 +5090,28 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_rename: failed to list workspace files.';
         }
-        // Read all TS/TSX source files (capped at 50 for performance).
+        // SCOPED read (default, T3): read code files but KEEP only those referencing the symbol as a
+        // whole token, so a repo-wide rename is COMPLETE on 200/1000/5000-file apps — not silently capped
+        // at 50 (which left files 51…N with the OLD name → a broken build reported as success). Kill
+        // switch AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of codeFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip unreadable file */ }
+        let renameSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) { // hard I/O bound; the AST cost stays on the shortlist
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, oldName)) continue;
+              if (fileContents.length >= 2000) { renameSkipped++; continue; } // safety cap → honest report, never a silent drop
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await renameSymbol(fileContents, oldName, newName);
         if (!result.ok) return `codemod_rename failed: ${result.error}`;
@@ -5109,7 +5123,10 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
-        return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        return renameSkipped > 0
+          ? `${renameBase}\n⚠️ ${renameSkipped} more matching file(s) exceeded the safety cap — re-run codemod_rename to finish them.`
+          : renameBase;
       }
 
       case 'codemod_add_prop': {
@@ -5123,14 +5140,27 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_add_prop: failed to list workspace files.';
         }
+        // SCOPED read (default, T3): only files referencing the component as a whole token — so adding a
+        // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch
+        // AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const tsxFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of tsxFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip */ }
+        let addPropSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) {
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, componentName)) continue;
+              if (fileContents.length >= 2000) { addPropSkipped++; continue; }
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
         if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
@@ -5141,7 +5171,10 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
-        return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        return addPropSkipped > 0
+          ? `${addPropBase}\n⚠️ ${addPropSkipped} more matching file(s) exceeded the safety cap — re-run codemod_add_prop to finish them.`
+          : addPropBase;
       }
 
       case 'codemod_move_file': {

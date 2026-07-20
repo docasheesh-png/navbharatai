@@ -973,6 +973,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_graphql',
+      description:
+        'Add a real runnable GraphQL API to the app (server/graphql/schema.ts + yoga.ts, graphql + ' +
+        'graphql-yoga). Emits a schema-first setup with a WORKING example (a Query health/items/item, a typed ' +
+        'Item, and an addItem Mutation with input validation) plus a one-line-mountable yoga handler (Express: ' +
+        'app.use(yoga.graphqlEndpoint, yoga)). GraphiQL explorer is on in dev. Use when the user wants a ' +
+        'GraphQL (not REST) backend; extend the SDL + resolvers and swap the demo store for your DB. No env key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_crud',
       description:
         'Generate a COMPLETE REST CRUD resource for one entity on Prisma: a zod validation schema, plus an ' +
@@ -1977,6 +1987,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_auth',
   'generate_migration',
   'generate_crud',
+  'generate_graphql',
   'generate_pagination',
   'generate_rbac',
   'generate_ids',

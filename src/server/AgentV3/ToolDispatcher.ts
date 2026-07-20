@@ -128,6 +128,7 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
+import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateIdIntegration } from '../lib/IdGenerator';
@@ -3107,6 +3108,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint(`crud resource (${crudName})`);
         const crudDeps = crud.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
+      }
+
+      case 'generate_graphql': {
+        // Roadmap BUILD-NOW #8 — a real runnable GraphQL API (graphql + graphql-yoga): schema + mountable
+        // yoga handler with an example Query/Mutation. Pure generator in GraphqlGenerator.ts. No env keys.
+        const gql = generateGraphqlIntegration();
+        const gqlWritten: string[] = [];
+        for (const [path, content] of Object.entries(gql.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gqlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graphql api');
+        const gqlDeps = gql.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a GraphQL API:\n${gqlWritten.join('\n')}\nAdd the dependencies: ${gqlDeps}\n\n${gql.instructions}`;
       }
 
       case 'generate_pagination': {

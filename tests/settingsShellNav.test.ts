@@ -33,6 +33,25 @@ describe('Settings Terminal — KB entry + Offline AI navigation', () => {
     expect(nav!.settingsScreen).toBe(screen);
   });
 
+  it('settings_logs KB entry exists and describes the REAL logs surface', () => {
+    const entry = kb('settings_logs');
+    expect(entry).toBeTruthy();
+    // The entry must describe reality: real build events + captured runtime errors, honest empties.
+    expect(entry!.description).toMatch(/REAL live logs/i);
+    expect(entry!.description).toMatch(/BUILD LOG/);
+    expect(entry!.description).toMatch(/RUNTIME ERRORS/);
+    expect(entry!.description).toMatch(/nothing is simulated/i);
+    expect(entry!.path).toContain('Settings → App Settings → Logs');
+  });
+
+  it('Offline AI navFor(settings_logs) opens the logs settings screen (working button)', () => {
+    const entry = kb('settings_logs');
+    const nav = navFor(entry!);
+    expect(nav).toEqual({ view: 'settings', settingsScreen: 'logs' });
+    const screen: SettingsScreen = 'logs';
+    expect(nav!.settingsScreen).toBe(screen);
+  });
+
   it('removed tiles stay removed: settings_git points to the sidebar, not a settings screen', () => {
     const entry = kb('settings_git');
     expect(entry).toBeTruthy();

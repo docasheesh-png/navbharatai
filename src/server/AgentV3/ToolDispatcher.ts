@@ -153,6 +153,7 @@ import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
 import { generateKanbanIntegration } from '../lib/KanbanGenerator';
 import { generateTimesheetIntegration } from '../lib/TimesheetGenerator';
+import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3655,6 +3656,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('timesheet starter');
         const tsDeps = tscfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a time-tracking backend:\n${tsWritten.join('\n')}\nAdd the dependencies: ${tsDeps}\n\n${tscfg.instructions}`;
+      }
+
+      case 'generate_leaderboard': {
+        // Breadth recipe (domain vertical) — leaderboard / rankings (server/leaderboard/): a real
+        // LeaderboardService with RANK INTEGRITY (best-kept score + deterministic earlier-achiever tie-break) +
+        // an Express router. Pure gen in LeaderboardGenerator.ts.
+        const lbcfg = generateLeaderboardIntegration();
+        const lbWritten: string[] = [];
+        for (const [path, content] of Object.entries(lbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          lbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('leaderboard starter');
+        const lbDeps = lbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a leaderboard backend:\n${lbWritten.join('\n')}\nAdd the dependencies: ${lbDeps}\n\n${lbcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

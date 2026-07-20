@@ -1364,6 +1364,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_leaderboard',
+      description:
+        'Add a real leaderboard / rankings backend to the app (server/leaderboard/) — a packaged domain vertical ' +
+        'for games, gamification, sales contests, quizzes and any ranked score. The real guarantee is RANK ' +
+        'INTEGRITY: submit() keeps each player BEST score (a lower resubmit never downgrades and never resets ' +
+        'the tie-break time); ranking is score DESC with a deterministic tie-break (whoever reached the score ' +
+        'earlier ranks higher), so top()/rankOf()/around() are exact, 1-based and stable. Multiple boards are ' +
+        'isolated by a board name. Emits a dependency-free LeaderboardService (submit, top, rankOf, entryOf, ' +
+        'around, size, remove) + an Express router (POST /leaderboard/scores, GET /leaderboard?n=&board=, GET ' +
+        '/leaderboard/:player?k=&board= → entry+rank+neighbours (404 if not ranked), DELETE /leaderboard/:player). ' +
+        'Take player from the auth session in production. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2438,6 +2452,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_coupons',
   'generate_kanban',
   'generate_timesheet',
+  'generate_leaderboard',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

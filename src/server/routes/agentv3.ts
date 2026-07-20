@@ -4881,7 +4881,9 @@ export function registerAgentV3Routes(app: Express): void {
         emit({ type: 'narration', agent: 'architect', text: pauseMsg.narration, ts: Date.now() });
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
-        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, ...(dl ? { diagnostics: dl } : {}) });
+        // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
+        // pause while this strictly increases across windows, so a big full-stack app finishes unattended.
+        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
       }
       // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has

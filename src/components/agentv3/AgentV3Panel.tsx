@@ -522,6 +522,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const autoContinueRef = useRef(0);
   const planContinuesRef = useRef(0);
   const lastPlanRemainingRef = useRef<number | null>(null);
+  // FleetOps 2026-07-20 — progress-driven wall-clock auto-continue: a big full-stack app needs several
+  // 30-min windows. noProgressRef = consecutive pauses that added NO new files (a stuck build → stop
+  // after PAUSE_CONTINUE_MAX); lastFilesWrittenRef = files at the previous pause, to detect real progress.
+  const noProgressRef = useRef(0);
+  const lastFilesWrittenRef = useRef<number | null>(null);
   useEffect(() => {
     if (serverBuildRunning && !running && !autoResumedRef.current) {
       autoResumedRef.current = true;
@@ -826,6 +831,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     autoContinueRef.current = 0;
     planContinuesRef.current = 0;
     lastPlanRemainingRef.current = null;
+    noProgressRef.current = 0;
+    lastFilesWrittenRef.current = null;
     // Preserve the previous turn's agent replies BEFORE start() resets the live
     // build state — otherwise the prior reply (which lives only in state.narration)
     // disappears from the thread the moment the next message begins.
@@ -978,11 +985,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     // SPM-3: one pure decision for both loops — the classic bounded deadline-pause continue AND
     // the project-mode module chain (continues only while planRemaining strictly decreases, with
     // a fresh pause budget per completed module and an absolute backstop).
+    const filesWritten = typeof state.filesWritten === 'number' ? state.filesWritten : undefined;
+    const madeProgress = typeof filesWritten === 'number'
+      && (lastFilesWrittenRef.current == null || filesWritten > lastFilesWrittenRef.current);
     const decision = decideAutoContinue({
       planRemaining: state.planRemaining,
       lastPlanRemaining: lastPlanRemainingRef.current,
       pauseContinues: autoContinueRef.current,
       planContinues: planContinuesRef.current,
+      filesWritten,
+      lastFilesWritten: lastFilesWrittenRef.current,
+      noProgressPauses: noProgressRef.current,
     });
     if (typeof state.planRemaining === 'number') lastPlanRemainingRef.current = state.planRemaining;
     if (!decision.proceed) {
@@ -994,9 +1007,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       }
       return;
     }
-    if (decision.isPlanContinue) planContinuesRef.current += 1;
-    if (decision.resetPauseBudget) autoContinueRef.current = 0;
-    else autoContinueRef.current += 1;
+    if (decision.isPlanContinue) {
+      planContinuesRef.current += 1;
+      if (decision.resetPauseBudget) autoContinueRef.current = 0;
+      else autoContinueRef.current += 1;
+    } else {
+      // Classic wall-clock pause: keep the ABSOLUTE counter climbing (backstop), and reset/advance the
+      // no-progress streak by whether this window actually added files. lastFilesWrittenRef tracks the
+      // high-water mark so a later smaller scan can't look like "no progress".
+      autoContinueRef.current += 1;
+      noProgressRef.current = madeProgress ? 0 : noProgressRef.current + 1;
+      if (typeof filesWritten === 'number') lastFilesWrittenRef.current = Math.max(lastFilesWrittenRef.current ?? 0, filesWritten);
+    }
     // Preserve the paused turn's replies into history before start() resets the live state.
     if (state.narration.length > 0) {
       setAgentHistory((h) => [

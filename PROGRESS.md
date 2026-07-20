@@ -19689,3 +19689,24 @@ Weak-module guarantee re-verified after the chain reorder (admin: "weak me only 
 enforceNoClaude strips mid-chain CLAUDE from the vertex-peer shape too — locked by a regression test.
 All merged CI-green; full suite 8198 tests / 804 files at the end of the batch. Engine-side work only —
 no collision with the parallel recipes/capabilities session.
+
+---
+
+## 2026-07-20 (cont.) — Engine work begins: requirement-gaps in the build report (#1692)
+
+Admin unblocked engine work (autopsy agent free). Redundancy check first: the ANALYSIS half of the #1 item
+(bounded ask_user) already exists — RequirementGapAnalyzer.ts (T1.4) does domain detection + likely-missing
+features + clarifying-question generation, wired as the analyze_requirements tool. Its header notes the only
+deliberate follow-up is the interactive pause-and-ask loop.
+
+- **#1692** — safe first engine slice: auto-run analyzeRequirementGaps(prompt) at build start and record the
+  detected domain + likely-missing features + clarifying questions into the ADMIN-ONLY build report
+  (code REQUIREMENT_GAPS). Additive + best-effort (try/catch), zero build-flow change, no user surface, and a
+  new pure/tested shouldSurfaceRequirementGaps() gate keeps it high-signal (a clear/generic prompt records
+  nothing). Verified: server tsc clean + agentv3 route suite (247) + ToolWiring + analyzer (6) = 256 passed.
+
+**OPEN — needs admin UX decision (blocked, not skipped):** the INTERACTIVE ask_user gate (ask 2-4 scoping
+questions before building an ambiguous prompt). It changes the build-entry control flow (admin is sensitive to
+build-friction: 'text reply > build app') + needs frontend + a UX choice (pre-build clarify message vs a
+structured question card vs report-only). Deliberately NOT wired blind per safeguard #3 — awaiting the admin's
+UX call + a default-off/canary flag. Slice 1 (#1692) de-risks it by surfacing the analyzer output on real builds.

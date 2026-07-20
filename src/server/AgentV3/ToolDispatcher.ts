@@ -148,6 +148,7 @@ import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
+import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3555,6 +3556,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('job board starter');
         const jbDeps = jbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a job-board / applicant-tracking backend:\n${jbWritten.join('\n')}\nAdd the dependencies: ${jbDeps}\n\n${jbcfg.instructions}`;
+      }
+
+      case 'generate_wishlist': {
+        // Breadth recipe (domain vertical) — wishlist / favorites / likes (server/favorites/): a real
+        // FavoritesService with IDEMPOTENT MEMBERSHIP (favorite-once + exact count) + an Express router.
+        // Pure gen in WishlistGenerator.ts.
+        const wlcfg = generateWishlistIntegration();
+        const wlWritten: string[] = [];
+        for (const [path, content] of Object.entries(wlcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          wlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('wishlist starter');
+        const wlDeps = wlcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a wishlist/favorites backend:\n${wlWritten.join('\n')}\nAdd the dependencies: ${wlDeps}\n\n${wlcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

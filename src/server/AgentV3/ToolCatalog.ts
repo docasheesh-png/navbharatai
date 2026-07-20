@@ -1348,6 +1348,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_http_client',
+      description:
+        'Add a resilient HTTP client to the app (server/lib/http.ts): dependency-free ' +
+        'fetchJson(url, { timeoutMs, headers, method, body }) that fixes the three classic bare-fetch bugs — ' +
+        'it adds a REAL timeout (default 10s, AbortController) so a dead upstream fails fast instead of hanging ' +
+        'the request forever, throws HttpError on any non-2xx status (native fetch resolves on 4xx/5xx, a ' +
+        'silent bug), and returns parsed JSON. Use it for every server-side call to a third-party API; wrap ' +
+        'with generate_retry for automatic backoff. Native fetch + AbortController, no dependency, no env keys.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_idempotency',
       description:
         'Add real idempotency to the app (server/lib/idempotency.ts): a dependency-free Express middleware + ' +
@@ -1965,6 +1976,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_captcha',
   'generate_cache',
   'generate_retry',
+  'generate_http_client',
   'generate_idempotency',
   'generate_newsletter',
   'generate_email_template',

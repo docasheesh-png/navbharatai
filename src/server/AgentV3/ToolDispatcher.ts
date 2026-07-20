@@ -149,6 +149,7 @@ import { generateModerationIntegration, isModerationProvider } from '../lib/Mode
 import { generateCaptchaIntegration } from '../lib/CaptchaGenerator';
 import { generateCacheIntegration, isCacheProvider } from '../lib/CacheGenerator';
 import { generateRetryIntegration } from '../lib/RetryGenerator';
+import { generateHttpClientIntegration } from '../lib/HttpClientGenerator';
 import { generateIdempotencyIntegration } from '../lib/IdempotencyGenerator';
 import { generateNewsletterIntegration, isNewsletterProvider } from '../lib/NewsletterGenerator';
 import { generateEmailTemplateIntegration } from '../lib/EmailTemplateGenerator';
@@ -3968,6 +3969,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('retry backoff');
         return `Wired retry with backoff:\n${rtWritten.join('\n')}\n(No npm dependency needed — plain backoff + jitter.)\n\n${rtcfg.instructions}`;
+      }
+
+      case 'generate_http_client': {
+        // U-4 recipe — resilient HTTP client (server/lib/http.ts): fetchJson with a real timeout + HttpError on
+        // non-2xx. Dependency-free (native fetch + AbortController). Pure generator in HttpClientGenerator.ts.
+        const httpcfg = generateHttpClientIntegration();
+        const httpWritten: string[] = [];
+        for (const [path, content] of Object.entries(httpcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          httpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('http client');
+        return `Wired resilient HTTP client:\n${httpWritten.join('\n')}\n(No npm dependency — native fetch + AbortController; pairs with generate_retry.)\n\n${httpcfg.instructions}`;
       }
 
       case 'generate_idempotency': {

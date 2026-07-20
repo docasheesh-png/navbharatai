@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Flag, X, MessageSquare, Send, Loader2 } from 'lucide-react';
+import { TirangaLoader } from './ui/TirangaLoader';
 import { cn } from '../lib/utils';
 import { db, auth } from '../App';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -89,7 +90,7 @@ export const MessageContent = ({ text, sender, user }: { text: string; sender: '
             disabled={isSubmitting}
             className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {isSubmitting ? <><Loader2 className="w-3 h-3 animate-spin" /> Submitting...</> : 'Submit Report'}
+            {isSubmitting ? <><TirangaLoader className="w-3 h-3" /> Submitting...</> : 'Submit Report'}
           </button>
         </form>
       </div>

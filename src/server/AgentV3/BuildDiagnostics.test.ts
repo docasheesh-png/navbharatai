@@ -378,6 +378,18 @@ describe('deriveRootCause (P-REPORT.3 — the root cause, not buried in 180 mixe
     expect(rc).not.toMatch(/tsc/); // must NOT surface the raw "tsc → exit -1" as if the app failed to compile
   });
 
+  it('an unresolved ERROR outranks an earlier unresolved WARNING (EstateNest: DB error, not the read_file warning)', () => {
+    // Real EstateNest timeline: two benign architect read_file-not-found WARNINGS (reading a file before it
+    // was written — build continued fine) appear BEFORE the terminal DB_UNREACHABLE ERROR. The old
+    // first-match order blamed "useAuth.ts does not exist"; severity must lead so the real killer wins.
+    const issues = [
+      { ts: 1, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: "Tool call failed: path 'src/hooks/useAuth.ts' does not exist", autoResolved: false },
+      { ts: 2, phase: 'tool' as const, severity: 'warning' as const, code: 'TOOL_ERROR', message: "Tool call failed: path 'src/types/index.ts' does not exist", autoResolved: false },
+      { ts: 3, phase: 'build' as const, severity: 'error' as const, code: 'DB_UNREACHABLE', message: 'prisma migrate → the database was NOT reachable (P1001).', autoResolved: false },
+    ];
+    expect(deriveRootCause({ issues, ok: false })).toContain('database was NOT reachable');
+  });
+
   it('a REAL app error still wins over a co-occurring sandbox-unavailable event', () => {
     const issues = [
       { ts: 1, phase: 'build' as const, severity: 'error' as const, code: 'SANDBOX_CMD_FAILED', message: '$ npm run build → exit 1 (TS2304)', autoResolved: false },

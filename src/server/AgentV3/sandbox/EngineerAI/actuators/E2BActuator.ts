@@ -804,6 +804,20 @@ export class E2BActuator implements IEngineerActuator {
           const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
         }
+        // DB reaped/never-started (EstateNest autopsy 2026-07-20): a from-scratch Prisma+Postgres app can
+        // preview many minutes after the build began, by which point the sandbox Postgres has been reaped —
+        // `npm run dev` then crashes on boot with P1001 and a blind restart can never revive it. Restart the
+        // DB itself (provisionBackend is idempotent: it re-runs `pg_ctlcluster … start` in the same sandbox,
+        // fast when Postgres is already installed) BEFORE relaunching, so the dev server can connect. The
+        // .env DATABASE_URL written when the DB was first provisioned still points at the same local Postgres.
+        if (diag.recovery === 'reprovision_db') {
+          try {
+            await this.provisionBackend(workspaceId, ['db']);
+            stdout += ' (PostgreSQL restarted).';
+          } catch {
+            stdout += ' (PostgreSQL restart reported errors — retrying anyway).';
+          }
+        }
         // Free the port before every restart (reinstall / kill_port_retry / plain_retry all need it clean).
         await sandbox.commands.run(buildPreKillPortCommand(port), { timeoutMs: 5000 }).catch(() => {});
         portUp = await launchAndWait(20);
@@ -1195,22 +1209,39 @@ const {chromium}=require('playwright');
     if (features.includes('db')) {
       // Install PostgreSQL if missing, then start it and create the app database.
       // The output marker "DB_URL:<url>" is parsed below — avoids fragile log scraping.
+      // Idempotent: installs Postgres only if missing, (re)starts the cluster, then POLLS pg_isready until
+      // the server actually accepts connections before declaring success. The readiness poll (not a flat
+      // `sleep 2`) is what makes this reliable both on first provision AND as a boot-time restart of a
+      // reaped Postgres (EstateNest autopsy 2026-07-20) — a slow start is waited for instead of abandoned,
+      // and the "DB_URL:" marker is emitted ONLY when the DB is genuinely reachable, so a failed start is
+      // not masked as ready. `createdb` is retried after readiness so the app database always exists.
       const pgResult = await sandbox.commands.run(
-        `set -e
-if ! which psql > /dev/null 2>&1; then
+        `if ! which psql > /dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq 2>&1 | tail -2
   apt-get install -y -qq postgresql 2>&1 | tail -5
 fi
 PG_VER=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
-pg_ctlcluster "$PG_VER" main status 2>/dev/null || pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3
-sleep 2
-su postgres -c "createdb myapp 2>/dev/null || true"
-echo "DB_URL:postgresql://postgres@localhost:5432/myapp"`,
+pg_ctlcluster "$PG_VER" main start 2>&1 | tail -3 || true
+for i in $(seq 1 20); do
+  if pg_isready -h localhost -p 5432 -q 2>/dev/null; then break; fi
+  pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
+  sleep 1
+done
+if pg_isready -h localhost -p 5432 -q 2>/dev/null; then
+  su postgres -c "createdb myapp 2>/dev/null || true"
+  echo "DB_URL:postgresql://postgres@localhost:5432/myapp"
+else
+  echo "DB_NOT_READY"
+fi`,
         { timeoutMs: 120_000 },
       ).catch(() => null);
 
       const match = pgResult?.stdout?.match(/DB_URL:(postgresql:\/\/\S+)/);
+      // Only trust a DB_URL the sandbox confirmed reachable. If the poll never saw pg_isready succeed
+      // (DB_NOT_READY / null result), fall back to the canonical URL so the .env still points at the
+      // local Postgres — the downstream P1001 detector (dev-server reprovision + mid-build lock-release)
+      // then handles a genuinely-dead DB honestly rather than this masking a failure as ready.
       dbUrl = match?.[1] ?? 'postgresql://postgres@localhost:5432/myapp';
     }
 

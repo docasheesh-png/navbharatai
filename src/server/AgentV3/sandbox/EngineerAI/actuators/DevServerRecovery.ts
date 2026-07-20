@@ -16,6 +16,7 @@ export type DevServerFailureCause =
   | 'missing_module'  // an import/dependency isn't installed ("Cannot find module 'X'")
   | 'missing_script'  // the launch command names a script package.json doesn't have ("Missing script: dev")
   | 'port_in_use'     // the target port is occupied (EADDRINUSE)
+  | 'db_unreachable'  // the app's database isn't running in the sandbox (Prisma P1001 / ECONNREFUSED :5432)
   | 'code_error'      // a syntax/transform error in the generated source — a restart can NEVER fix it
   | 'out_of_memory'   // the process was OOM-killed ("JavaScript heap out of memory" / "Killed")
   | 'crash'           // the process exited/crashed with no more specific signal
@@ -25,6 +26,7 @@ export type DevServerFailureCause =
 export type DevServerRecovery =
   | 'reinstall'       // run `npm install`, then restart
   | 'kill_port_retry' // free the port, then restart
+  | 'reprovision_db'  // restart PostgreSQL in the sandbox (it was reaped/never started), then restart
   | 'code_fix'        // surface the exact error to the agent — the SOURCE must change, not a restart
   | 'plain_retry'     // just restart once (transient crash / OOM)
   | 'give_up';        // bounded attempts exhausted — report the root cause honestly
@@ -133,6 +135,7 @@ function recoveryFor(cause: DevServerFailureCause): DevServerRecovery {
     case 'missing_module': return 'reinstall';
     case 'missing_script': return 'code_fix'; // restarting re-runs the same wrong command forever — the LAUNCH COMMAND must change
     case 'port_in_use': return 'kill_port_retry';
+    case 'db_unreachable': return 'reprovision_db'; // a blind restart can never revive a reaped Postgres — restart the DB itself
     case 'code_error': return 'code_fix'; // a restart cannot fix a syntax error — the source must change
     case 'out_of_memory': return 'plain_retry';
     case 'crash': return 'plain_retry';
@@ -177,6 +180,22 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
   if (/\bModule not found\b/i.test(text)) return make('missing_module', 'A module could not be resolved — reinstalling dependencies and restarting.');
   if (/\b(?:vite|next|tsc|tsx|node|npm)\b\s*:\s*(?:command\s+)?not found/i.test(text) || /command not found/i.test(text)) {
     return make('missing_module', 'A required CLI was not found — reinstalling dependencies and restarting.');
+  }
+
+  // 2.5) Database not reachable — the app's Postgres isn't running in the sandbox (Prisma P1001, or a raw
+  //    connection refused on the Postgres port). A blind restart can NEVER revive a reaped/never-started
+  //    Postgres — the DB itself must be (re)started, so this is its OWN cause, caught BEFORE the generic
+  //    crash branch (P1001's line also contains "Error:", which would otherwise mis-classify it as a plain
+  //    crash and waste both attempts on futile restarts). EstateNest autopsy 2026-07-20: a from-scratch
+  //    Prisma+Postgres app previewed ~13 min after the build began, by which point the provisioned Postgres
+  //    had been reaped, so `npm run dev` crashed on boot with P1001 and the preview never came up.
+  if (/\bP1001\b/i.test(text)
+    || /can'?t reach database server/i.test(text)
+    || /(?:ECONNREFUSED|connection refused)[^\n]*(?::|\bport\s*)5432\b/i.test(text)
+    // Postgres' own multi-line "could not connect to server: Connection refused … port 5432?" — the two
+    // halves straddle a newline, so match their presence anywhere in the (bounded) tail rather than inline.
+    || (/could not connect to (?:server|database)/i.test(text) && /\b5432\b/.test(text))) {
+    return make('db_unreachable', "The app's database isn't running in the sandbox (Postgres was reaped or never started) — restarting PostgreSQL and retrying.");
   }
 
   // 3) Code error in the generated source — a restart can NEVER fix this; the agent must edit the code.

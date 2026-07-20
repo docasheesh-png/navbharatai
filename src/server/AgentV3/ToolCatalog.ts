@@ -1048,6 +1048,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       },
     },
     {
+      name: 'generate_api_versioning',
+      description:
+        'Add real API versioning to the app (server/lib/apiVersion.ts): a dependency-free Express middleware ' +
+        'that resolves the client-requested version from the X-API-Version header (or the standard ' +
+        'Accept-Version), accepts "v2" or "2", falls back to a default when none is sent, and rejects an ' +
+        'unknown version with 406 + the supported list. The resolved version is on req.apiVersion (branch on ' +
+        'it, or mount separate v1/v2 routers) and echoed on the response. Lets the app evolve its API without ' +
+        'breaking existing clients. No dependency, no key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_graphql',
       description:
         'Add a real runnable GraphQL API to the app (server/graphql/schema.ts + yoga.ts, graphql + ' +
@@ -2170,6 +2181,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_sms',
   'generate_password',
   'generate_ratelimit',
+  'generate_api_versioning',
   'generate_error_tracking',
   'generate_feature_flags',
   'generate_ai',

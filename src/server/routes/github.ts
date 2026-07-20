@@ -1,6 +1,40 @@
 import path from 'path';
 import axios from 'axios';
 import type { Express, Request, Response } from 'express';
+import { sendSafeError } from '../lib/httpError';
+
+/**
+ * SAFETY (never break — admin 2026-07-20): update a branch ref to a new commit WITHOUT force.
+ * A plain (non-force) ref update lets GitHub REJECT a non-fast-forward (422) instead of silently
+ * overwriting newer commits — so a concurrent push from another device/session can never destroy
+ * the user's work. On rejection we return an honest 409 telling them to sync first. Shared by both
+ * push routes so the guarantee can't drift between them.
+ */
+async function updateBranchRefSafely(
+  res: Response,
+  args: { owner: string; repo: string; branch: string; sha: string; headers: Record<string, string> },
+): Promise<boolean> {
+  const { owner, repo, branch, sha, headers } = args;
+  try {
+    await axios.patch(
+      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+      { sha, force: false },
+      { headers },
+    );
+    return true;
+  } catch (patchErr: any) {
+    const status = patchErr?.response?.status;
+    if (status === 422 || status === 409) {
+      // Non-fast-forward: the remote branch has newer commits than the base we built on.
+      res.status(409).json({
+        error: 'The GitHub branch has newer commits than your last sync. Import/pull the latest changes first, then push again — this protects your repository from losing work.',
+        nonFastForward: true,
+      });
+      return false;
+    }
+    throw patchErr;
+  }
+}
 
 /**
  * GitHub data-API routes (fetch repo tree, read file, list branches, push,
@@ -130,15 +164,14 @@ export function registerGithubRoutes(app: Express): void {
         parents: [lastCommitSha]
       }, { headers });
 
-      await axios.patch(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
-        sha: commitRes.data.sha,
-        force: true
-      }, { headers });
+      // SAFE ref update (no force) — a non-fast-forward is rejected, never clobbered.
+      const ok = await updateBranchRefSafely(res, { owner, repo, branch, sha: commitRes.data.sha, headers });
+      if (!ok) return; // the safe updater already sent the 409
 
       res.json({ success: true, sha: commitRes.data.sha });
     } catch (err: any) {
       console.error('Push Error:', err.response?.data || err.message);
-      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message });
+      sendSafeError(res, err.response?.status || 500, err.response?.data?.message || 'Push to GitHub failed. Please try again.', err, 'github push');
     }
   });
 
@@ -292,10 +325,9 @@ export function registerGithubRoutes(app: Express): void {
       const newCommitSha = commitRes.data.sha;
       console.log(`[PUSH_ENHANCED] Commit created: ${newCommitSha}. Updating branch head ref...`);
 
-      await axios.patch(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`, {
-        sha: newCommitSha,
-        force: true
-      }, { headers });
+      // SAFE ref update (no force) — a concurrent push can never be silently overwritten.
+      const refOk = await updateBranchRefSafely(res, { owner, repo, branch, sha: newCommitSha, headers });
+      if (!refOk) return; // the safe updater already sent the 409 non-fast-forward message
 
       const repoUrl = `https://github.com/${owner}/${repo}`;
       console.log(`[PUSH_ENHANCED] Push successful to ${repoUrl}! Branch: ${branch}, SHA: ${newCommitSha}`);
@@ -309,12 +341,9 @@ export function registerGithubRoutes(app: Express): void {
         branch: branch
       });
     } catch (err: any) {
-      console.error('[PUSH_ENHANCED] Fatal deployment pipeline crash:', err.response?.data || err.message);
-      res.status(err.response?.status || 500).json({
-        error: err.response?.data?.message || err.message,
-        githubMessage: err.response?.data?.message || null,
-        details: err.response?.data || null
-      });
+      console.error('[PUSH_ENHANCED] push failed:', err.response?.data || err.message);
+      // Do NOT echo the raw GitHub response body to the client; route through the safe error helper.
+      sendSafeError(res, err.response?.status || 500, err.response?.data?.message || 'Push to GitHub failed. Please try again.', err, 'github push-enhanced');
     }
   });
 }

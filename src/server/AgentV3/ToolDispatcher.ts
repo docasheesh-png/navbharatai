@@ -129,6 +129,7 @@ import { generateSmsIntegration, isSmsProvider } from '../lib/SmsGenerator';
 import { generatePasswordIntegration } from '../lib/PasswordGenerator';
 import { generateRateLimitIntegration, isRateLimitStore } from '../lib/RateLimitGenerator';
 import { generateCrudResource } from '../lib/CrudGenerator';
+import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateIdIntegration } from '../lib/IdGenerator';
@@ -161,6 +162,7 @@ import { generateMoneyFormatIntegration } from '../lib/MoneyFormatGenerator';
 import { generateWeatherIntegration, isWeatherProvider } from '../lib/WeatherGenerator';
 import { generateDateTimeIntegration } from '../lib/DateTimeGenerator';
 import { generateNotifyIntegration, isNotifyProvider } from '../lib/NotifyGenerator';
+import { generateNotificationCenterIntegration } from '../lib/NotificationCenterGenerator';
 import { generateEnvValidation } from '../lib/EnvValidationGenerator';
 import { generateCorsIntegration } from '../lib/CorsGenerator';
 import { generateCsrfIntegration } from '../lib/CsrfGenerator';
@@ -212,6 +214,7 @@ import type { DeployFn } from './Deployment';
 import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
+import { containsSymbol } from './codemodScope';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
 
@@ -3110,6 +3113,24 @@ export class ToolDispatcher {
         return `Wired a CRUD resource for ${crudName}:\n${crudWritten.join('\n')}\nAdd the dependencies: ${crudDeps}\n\n${crud.instructions}`;
       }
 
+      case 'generate_graphql': {
+        // Roadmap BUILD-NOW #8 — a real runnable GraphQL API (graphql + graphql-yoga): schema + mountable
+        // yoga handler with an example Query/Mutation. Pure generator in GraphqlGenerator.ts. No env keys.
+        const gql = generateGraphqlIntegration();
+        const gqlWritten: string[] = [];
+        for (const [path, content] of Object.entries(gql.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gqlWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('graphql api');
+        const gqlDeps = gql.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a GraphQL API:\n${gqlWritten.join('\n')}\nAdd the dependencies: ${gqlDeps}\n\n${gql.instructions}`;
+      }
+
       case 'generate_pagination': {
         // U-4 recipe — safe list pagination (server/lib/pagination.ts): parsePagination (clamps limit/page,
         // DoS-safe) + pageMeta. Dependency-free. Pure generator in PaginationGenerator.ts. No env keys.
@@ -4275,6 +4296,23 @@ export class ToolDispatcher {
         return `Wired ${noProvider} team notifications:\n${noWritten.join('\n')}\n(No npm dependency needed — the incoming webhook is called with the built-in fetch.)\n\n${nocfg.instructions}`;
       }
 
+      case 'generate_notification_center': {
+        // Roadmap BUILD-NOW #10 — in-app notification CENTER (dependency-free React: provider + bell + badge).
+        // Distinct from generate_notify (OUTBOUND channel). Pure generator in NotificationCenterGenerator.ts.
+        const ncfg = generateNotificationCenterIntegration();
+        const ncWritten: string[] = [];
+        for (const [path, content] of Object.entries(ncfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          ncWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('notification center');
+        return `Wired an in-app notification center:\n${ncWritten.join('\n')}\n(No npm dependency — React Context + localStorage.)\n\n${ncfg.instructions}`;
+      }
+
       case 'generate_env_validation': {
         // U-4 recipe — real fail-fast env validator (server/lib/env.ts). Adds no env keys, no .env.example.
         // Pure generator in EnvValidationGenerator.ts.
@@ -5090,15 +5128,28 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_rename: failed to list workspace files.';
         }
-        // Read all TS/TSX source files (capped at 50 for performance).
+        // SCOPED read (default, T3): read code files but KEEP only those referencing the symbol as a
+        // whole token, so a repo-wide rename is COMPLETE on 200/1000/5000-file apps — not silently capped
+        // at 50 (which left files 51…N with the OLD name → a broken build reported as success). Kill
+        // switch AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const codeFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of codeFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip unreadable file */ }
+        let renameSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) { // hard I/O bound; the AST cost stays on the shortlist
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, oldName)) continue;
+              if (fileContents.length >= 2000) { renameSkipped++; continue; } // safety cap → honest report, never a silent drop
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await renameSymbol(fileContents, oldName, newName);
         if (!result.ok) return `codemod_rename failed: ${result.error}`;
@@ -5110,7 +5161,10 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
-        return result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
+        return renameSkipped > 0
+          ? `${renameBase}\n⚠️ ${renameSkipped} more matching file(s) exceeded the safety cap — re-run codemod_rename to finish them.`
+          : renameBase;
       }
 
       case 'codemod_add_prop': {
@@ -5124,14 +5178,27 @@ export class ToolDispatcher {
         } catch {
           return 'codemod_add_prop: failed to list workspace files.';
         }
+        // SCOPED read (default, T3): only files referencing the component as a whole token — so adding a
+        // prop reaches every definition + call site across a large repo, not a blind first-50. Kill switch
+        // AGENTV3_CODEMOD_SCOPED=off restores the exact legacy 50-file behaviour.
         const CODE = /\.(t|j)sx?$/;
         const SKIP = /(node_modules|dist|build|coverage|\.next|\.git)/;
-        const tsxFiles = files.filter((f) => CODE.test(f) && !SKIP.test(f)).slice(0, 50);
+        const codeFilesAll = files.filter((f) => CODE.test(f) && !SKIP.test(f));
         const fileContents: CodemodeFile[] = [];
-        for (const f of tsxFiles) {
-          try {
-            fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) });
-          } catch { /* skip */ }
+        let addPropSkipped = 0;
+        if (process.env.AGENTV3_CODEMOD_SCOPED === 'off') {
+          for (const f of codeFilesAll.slice(0, 50)) {
+            try { fileContents.push({ path: f, content: await this.actuator.readFile(this.workspaceId, f) }); } catch { /* skip */ }
+          }
+        } else {
+          for (const f of codeFilesAll.slice(0, 6000)) {
+            try {
+              const content = await this.actuator.readFile(this.workspaceId, f);
+              if (!containsSymbol(content, componentName)) continue;
+              if (fileContents.length >= 2000) { addPropSkipped++; continue; }
+              fileContents.push({ path: f, content });
+            } catch { /* skip unreadable file */ }
+          }
         }
         const result = await addComponentProp(fileContents, componentName, propName, propType, defaultValue);
         if (!result.ok) return `codemod_add_prop failed: ${result.error}`;
@@ -5142,7 +5209,10 @@ export class ToolDispatcher {
           } catch { /* best-effort */ }
         }
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
-        return result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
+        return addPropSkipped > 0
+          ? `${addPropBase}\n⚠️ ${addPropSkipped} more matching file(s) exceeded the safety cap — re-run codemod_add_prop to finish them.`
+          : addPropBase;
       }
 
       case 'codemod_move_file': {

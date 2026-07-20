@@ -76,7 +76,7 @@ import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
-import { prismaRepairHint } from './prismaRepairHint';
+import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
 import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
@@ -134,11 +134,13 @@ import { generatePaginationIntegration } from '../lib/PaginationGenerator';
 import { generateRbac } from '../lib/RbacGenerator';
 import { generateIdIntegration } from '../lib/IdGenerator';
 import { generateAdmin } from '../lib/AdminGenerator';
+import { generateSettingsScaffoldIntegration } from '../lib/SettingsScaffoldGenerator';
 import { generateDashboard } from '../lib/DashboardGenerator';
 import { generateBackup } from '../lib/BackupGenerator';
 import { analyzeRequirementGaps, renderRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import { generateI18n } from '../lib/I18nGenerator';
 import { generateUiStates } from '../lib/UiStatesGenerator';
+import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
 import { generateSsoIntegration } from '../lib/SsoGenerator';
 import { generateAbac } from '../lib/AbacGenerator';
@@ -1806,6 +1808,36 @@ export class ToolDispatcher {
             }
           } catch { /* self-heal is best-effort — the original failure is still reported */ }
         }
+        // PRISMA-CLI-NOT-INSTALLED SELF-HEAL (Bazaar-era autopsy 2026-07-20): a `prisma generate` (or any
+        // prisma command) fails because the `prisma` CLI is NOT in node_modules — either package.json never
+        // declared it, or a sandbox recycle wiped node_modules. `npx prisma generate` then tries to
+        // auto-FETCH the latest (`prisma@7.8.0`) and, being non-interactive, aborts with
+        // "npx canceled due to missing packages and no YES option". The model brute-forced this ~13 times
+        // over ~10 MINUTES before it finally ran `npm install -D prisma` — burning the build's whole
+        // window so the app shipped incomplete (59 files planned, ~43 built). Deterministic close: on that
+        // exact "prisma package missing" signal, install prisma + @prisma/client (pinned to ^6 by
+        // pinKnownDepsInInstallCommand — never v7) and retry the original command ONCE. Mirrors the other
+        // prisma self-heals; best-effort, never blocks. Kill switch reuses AGENTV3_PRISMA_HINT=off.
+        if (
+          exitCode !== 0 &&
+          process.env.AGENTV3_PRISMA_HINT !== 'off' &&
+          /\bprisma\b/.test(command) &&
+          isPrismaCliMissingError(`${stdout}\n${stderr}`)
+        ) {
+          try {
+            const dirMatch = /^\s*cd\s+([^\s&;|]+)\s*&&/.exec(command);
+            const cd = dirMatch ? `cd ${dirMatch[1]} && ` : '';
+            const installCmd = pinKnownDepsInInstallCommand(`${cd}npm install -D prisma @prisma/client`);
+            const inst = await this.actuator.runCommand(this.workspaceId, installCmd);
+            if (inst.exitCode === 0) {
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (retry.exitCode === 0) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '🔧 The database toolkit wasn\'t installed yet — installed it and re-ran the step successfully.', ts: Date.now() });
+              }
+            }
+          } catch { /* self-heal is best-effort — the original failure is still reported */ }
+        }
         // PRISMA CLIENT-NOT-GENERATED SELF-HEAL (TaskForge fresh-build autopsy 2026-07-18): a seed step
         // (`prisma db seed`, `tsx prisma/seed.ts`, `ts-node seed`, `node dist/seed.js`, …) that RUNS BEFORE
         // `prisma generate` fails with "@prisma/client did not initialize yet — please run `prisma generate`"
@@ -3248,6 +3280,23 @@ export class ToolDispatcher {
         return `Wired an admin page for ${adminName}:\n${adminWritten.join('\n')}\n\n${admin.instructions}`;
       }
 
+      case 'generate_settings': {
+        // Roadmap BUILD-NOW #10 (other half) — a settings scaffold (dependency-free React): a persisted
+        // SettingsProvider that APPLIES the theme + a SettingsPage. Pure generator in SettingsScaffoldGenerator.ts.
+        const st = generateSettingsScaffoldIntegration();
+        const stWritten: string[] = [];
+        for (const [path, content] of Object.entries(st.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          stWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('settings scaffold');
+        return `Wired a settings scaffold:\n${stWritten.join('\n')}\n(No npm dependency — React Context + localStorage; applies the theme.)\n\n${st.instructions}`;
+      }
+
       case 'generate_dashboard': {
         // T1.3 recipe — a stats dashboard (GET /api/dashboard/stats aggregation + React tiles page).
         // Pure generator in DashboardGenerator.ts; reuses generate_crud's prisma client + error handler.
@@ -3334,6 +3383,24 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ui-states');
         return `Wired a UI-states pack:\n${uiWritten.join('\n')}\n\n${ui.instructions}`;
+      }
+
+      case 'generate_state': {
+        // Roadmap BUILD-NOW #9 — GLOBAL state management (Zustand store + selector hooks). Distinct from
+        // generate_ui_states' LOCAL useOptimisticList. Pure generator in FrontendStateGenerator.ts. No env keys.
+        const fs = generateFrontendStateIntegration();
+        const fsWritten: string[] = [];
+        for (const [path, content] of Object.entries(fs.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          fsWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('global state store');
+        const fsDeps = fs.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired global state management:\n${fsWritten.join('\n')}\nAdd the dependency: ${fsDeps}\n\n${fs.instructions}`;
       }
 
       case 'generate_image_optimization': {

@@ -210,6 +210,7 @@ import { applyPreviewDomain } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
 import { loadUserVaultSecrets } from '../lib/secrets';
+import { userDatabaseContext, DB_PROVIDER_MARKER } from '../AgentV3/userDatabaseContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies } from '../AgentV3/DependencyReconciler';
 import { ensureViteReactFoundation } from '../AgentV3/FrameworkFoundation';
@@ -5702,8 +5703,16 @@ export function registerAgentV3Routes(app: Express): void {
       // into the .env of the app they build, so an app that needs an API key runs with the real key the
       // user stored — without ever pasting it into chat. Loaded from the user's ENCRYPTED vault only
       // (loadUserVaultSecrets never reads process.env, so NavBharatAI's platform keys can never leak in).
+      // Captured into `vaultSecrets` so the connected-database context (below) can also read it.
+      let vaultSecrets: Record<string, string> = {};
       try {
-        if (userId) dispatcher.setUserSecrets(await loadUserVaultSecrets(userId));
+        if (userId) {
+          vaultSecrets = await loadUserVaultSecrets(userId);
+          // ENGINEER_DB_PROVIDER is an internal marker (which DB the user connected), not an app secret —
+          // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
+          const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
+          dispatcher.setUserSecrets(appEnv);
+        }
       } catch { /* best-effort — a vault-load failure just means the app runs without injected keys */ }
       dispatcherForFlush = dispatcher; // let the finally flush the final checkpoint
 
@@ -5780,6 +5789,14 @@ export function registerAgentV3Routes(app: Express): void {
         const entityContext = entityRequirementsContext(extractEntities(prompt));
         if (entityContext) architectSystem = `${entityContext}\n\n---\n\n${architectSystem}`;
       } catch { /* entity extraction is best-effort — a failure leaves the prompt unchanged */ }
+      // Connected-database context (admin 2026-07-20): if the user connected their OWN database in
+      // Settings → Database, tell the builder to USE it (exact env-var names + real SDK) and never
+      // scaffold a new/different one. Reads the vault secrets loaded above. Additive + best-effort —
+      // '' when no DB is connected, so plain builds and prompt-regression tests are unaffected.
+      try {
+        const dbContext = userDatabaseContext(vaultSecrets);
+        if (dbContext) architectSystem = `${dbContext}\n\n---\n\n${architectSystem}`;
+      } catch { /* connected-DB context is best-effort — a failure leaves the prompt unchanged */ }
       // P-AI.3 — Dialogue phase: give the agent a posture for this turn's lifecycle stage (debugging /
       // requirements / planning / deploy). hasExistingFiles ≈ isEditMode (an established project).
       // Additive + best-effort: '' for the baseline build phase, so existing turns are unchanged.

@@ -136,6 +136,21 @@ export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
   return g.domain !== 'general' && (g.likelyMissing.length > 0 || g.clarifyingQuestions.length > 0);
 }
 
+/** Build a concise, bounded guidance block that tells the BUILDER to proactively INCLUDE the features a
+ *  domain almost always needs but the prompt left implicit — so a rich request never gets a shallow app,
+ *  with NO clarifying round-trip (friction-free requirement awareness). Returns '' when there is nothing
+ *  worth adding (no domain, or nothing missing), so a clear/generic prompt is left exactly as-is. Pure. */
+export function buildRequirementGuidance(g: RequirementGaps): string {
+  if (!shouldSurfaceRequirementGaps(g)) return '';
+  const feats = g.likelyMissing.slice(0, 6);
+  if (feats.length === 0) return '';
+  return [
+    `[REQUIREMENT AWARENESS — this looks like a ${g.domain} app]`,
+    `A production ${g.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
+    ...feats.map((f) => `- ${f}`),
+  ].join('\n');
+}
+
 /** Render the gaps as a compact, human-readable block the planner/agent can act on. Pure. */
 export function renderRequirementGaps(g: RequirementGaps): string {
   const nf = Object.entries(g.nonFunctional).filter(([, v]) => v).map(([k]) => k);

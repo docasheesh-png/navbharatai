@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
-import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps } from '../lib/RequirementGapAnalyzer';
+import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -741,6 +741,17 @@ export function readinessGateEnabled(): boolean {
  */
 export function lintGateEnabled(): boolean {
   return process.env.AGENTV3_LINT_GATE === 'on';
+}
+
+/**
+ * Requirement-aware build (admin-approved option A, 2026-07-20). Default OFF — when 'on', a fresh build of an
+ * ambiguous DOMAIN prompt gets a bounded guidance block telling the builder to proactively INCLUDE the
+ * features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital, …),
+ * so a rich request never yields a shallow app. FRICTION-FREE: no clarifying round-trip (the admin's
+ * "text reply > build app" rule). Flag off leaves the build prompt byte-identical to today.
+ */
+export function requirementAwareBuildEnabled(): boolean {
+  return process.env.AGENTV3_REQUIREMENT_AWARE === 'on';
 }
 
 /**
@@ -6109,6 +6120,20 @@ export function registerAgentV3Routes(app: Express): void {
       // prompt ride the user turn instead, so the model still receives every one — just not in the
       // cached system prefix. '' (flag off) leaves buildPrompt exactly as today.
       if (cachePrefixPreamble) buildPrompt = `${cachePrefixPreamble}\n\n---\n\n${buildPrompt}`;
+
+      // REQUIREMENT-AWARE BUILD (admin-approved option A, 2026-07-20; flag AGENTV3_REQUIREMENT_AWARE, default
+      // OFF): on a FRESH build of an ambiguous domain prompt, proactively tell the builder to INCLUDE the
+      // features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital,
+      // …) — so a rich request never gets a shallow app. FRICTION-FREE: NO clarifying round-trip (the admin's
+      // "text reply > build app" rule) — the build just comes out richer. Only fires for a new build (never an
+      // edit) of a detected domain with genuinely-missing features; a clear/generic prompt yields '' guidance,
+      // and with the flag off this whole block is inert, leaving buildPrompt byte-identical to today.
+      if (requirementAwareBuildEnabled() && intent === 'new_build' && !isEditMode) {
+        try {
+          const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt));
+          if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
+        } catch { /* requirement guidance is best-effort — never affect the build */ }
+      }
 
       // MEMORY FIX 1 (Claude-level continuity): inject the current PROJECT CONTEXT — the real
       // file list + the project map + recent requests — so a follow-up like "continue" KNOWS what

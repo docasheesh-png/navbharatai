@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps } from './RequirementGapAnalyzer';
+import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from './RequirementGapAnalyzer';
 
 describe('analyzeRequirementGaps', () => {
   it('detects healthcare and flags likely-missing RBAC/audit/EMR for a bare prompt', () => {
@@ -44,5 +44,19 @@ describe('analyzeRequirementGaps', () => {
     expect(shouldSurfaceRequirementGaps(analyzeRequirementGaps('build a hospital system'))).toBe(true);
     // No domain detected → general → nothing domain-specific to surface (keeps the report high-signal).
     expect(shouldSurfaceRequirementGaps(analyzeRequirementGaps('make me a thing'))).toBe(false);
+  });
+
+  it('buildRequirementGuidance produces INCLUDE guidance for a domain gap, empty for a generic prompt', () => {
+    const g = buildRequirementGuidance(analyzeRequirementGaps('build a hospital system'));
+    expect(g).toContain('REQUIREMENT AWARENESS');
+    expect(g).toContain('healthcare');
+    expect(g).toContain('INCLUDE them by default');
+    expect(g).toContain('role-based access (staff / doctor / admin)');
+    // friction-free: it instructs to build, never to ask
+    expect(g).toContain('skip it silently rather than asking');
+    // caps at 6 features so the guidance never bloats the prompt
+    expect((g.match(/^- /gm) || []).length).toBeLessThanOrEqual(6);
+    // a generic prompt gets NO guidance (build path stays exactly as today)
+    expect(buildRequirementGuidance(analyzeRequirementGaps('make me a thing'))).toBe('');
   });
 });

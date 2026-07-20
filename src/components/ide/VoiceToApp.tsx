@@ -4,7 +4,6 @@ import {
   MicOff,
   Trash2,
   Zap,
-  Loader2,
   CheckCircle2,
   AlertCircle,
   ChevronDown,
@@ -12,10 +11,15 @@ import {
   Languages,
   Info,
 } from 'lucide-react';
-import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface VoiceToAppProps {
-  onAppGenerated?: (code: string, prompt: string) => void;
+  /**
+   * Hands the spoken/edited prompt to the REAL build engine (NavBharatAI Pro v5.0): the app switches
+   * to the Pro chat with the composer prefilled, and pressing Send starts a genuine live build.
+   * This replaced a dead POST /api/generate call (the route never existed on the server, so the old
+   * "Apna App Banao" button always errored — a display-only feature, admin autopsy 2026-07-20).
+   */
+  onBuildViaV5: (prompt: string) => void;
 }
 
 const QUICK_PROMPTS = ['Todo App', 'Calculator', 'Quiz Game', 'Weather App', 'Restaurant Menu'];
@@ -30,7 +34,7 @@ const TIPS = [
   'Jitna specific utna better result',
 ];
 
-export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
+export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onBuildViaV5 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [interimText, setInterimText] = useState('');
   const [finalText, setFinalText] = useState('');
@@ -38,7 +42,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
   const [lang, setLang] = useState<'hi-IN' | 'en-US'>('hi-IN');
   const [activeEnhancers, setActiveEnhancers] = useState<string[]>([]);
   const [enhancersOpen, setEnhancersOpen] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [speechSupported] = useState(() =>
     typeof window !== 'undefined' &&
@@ -153,29 +157,17 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
     );
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     const prompt = buildFullPrompt();
     if (!prompt) return;
-    setStatus('generating');
-    setErrorMsg('');
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, agent: 'navbharatai' }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const code: string = data.code || data.result || '';
-      setStatus('success');
-      onAppGenerated?.(code, prompt);
-    } catch (err: any) {
-      setStatus('error');
-      setErrorMsg(err?.message || 'Something went wrong');
+    // Stop the mic before leaving this view, then hand the prompt to the real engine.
+    if (isRecording) {
+      try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
+      setIsRecording(false);
     }
+    setStatus('success');
+    setErrorMsg('');
+    onBuildViaV5(prompt);
   };
 
   const charCount = editablePrompt.length;
@@ -189,7 +181,7 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
             Voice to App
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Bol do — AI banayega aapka apna app
+            Bol do — NavBharatAI Pro v5.0 banayega aapka apna app
           </p>
         </div>
 
@@ -324,26 +316,17 @@ export const VoiceToApp: React.FC<VoiceToAppProps> = ({ onAppGenerated }) => {
 
               <button
                 onClick={handleGenerate}
-                disabled={!editablePrompt.trim() || status === 'generating'}
+                disabled={!editablePrompt.trim()}
                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/30 disabled:cursor-not-allowed px-4 py-3 text-sm font-semibold text-white transition-colors"
               >
-                {status === 'generating' ? (
-                  <>
-                    <TirangaLoader className="w-4 h-4" />
-                    Generating…
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4" />
-                    Apna App Banao
-                  </>
-                )}
+                <Zap className="w-4 h-4" />
+                Apna App Banao
               </button>
 
               {status === 'success' && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2.5 text-green-400 text-sm">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                  App ready! Preview tab me dekho
+                  Prompt Pro v5.0 chat me taiyaar hai — Send dabao, real build shuru hogi
                 </div>
               )}
 

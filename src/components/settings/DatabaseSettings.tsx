@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Database, ExternalLink, CheckCircle2, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Database, ExternalLink, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 
 type DbProvider = 'supabase' | 'firebase' | 'mongodb' | 'neon' | 'appwrite' | 'other';
 
@@ -107,94 +107,87 @@ interface DatabaseSettingsProps {
   userId: string;
 }
 
+// The ONLY thing kept in localStorage now (SECURITY): the chosen provider marker — never the
+// real credential values (those live ONLY in the encrypted Secrets & Keys vault).
+interface DbMarker { provider: DbProvider; platformName?: string }
+
+function readMarker(userId: string): DbMarker | null {
+  try {
+    const stored = localStorage.getItem(`engineer_db_${userId}`);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as Partial<DbConfig>;
+    if (!parsed?.provider) return null;
+    return { provider: parsed.provider, ...(parsed.platformName ? { platformName: parsed.platformName } : {}) };
+  } catch { return null; }
+}
+
 export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
-  const [provider, setProvider] = useState<DbProvider>(() => {
-    try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return (JSON.parse(stored) as DbConfig).provider;
-    } catch {}
-    return 'supabase';
-  });
-
-  const [formCreds, setFormCreds] = useState<Record<string, string>>(() => {
-    try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return (JSON.parse(stored) as DbConfig).credentials ?? {};
-    } catch {}
-    return {};
-  });
-
+  const [provider, setProvider] = useState<DbProvider>(() => readMarker(userId)?.provider ?? 'supabase');
+  // Credential inputs are NEVER pre-filled from storage — real values live encrypted in Secrets & Keys.
+  const [formCreds, setFormCreds] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [activeMarker, setActiveMarker] = useState<DbMarker | null>(() => readMarker(userId));
 
-  const [activeConfig, setActiveConfig] = useState<DbConfig | null>(() => {
+  // SECURITY MIGRATION (A): if an older build left plaintext credentials in localStorage, purge them
+  // now — keep only the provider marker. The real values already live encrypted in Secrets & Keys.
+  useEffect(() => {
     try {
-      const stored = localStorage.getItem(`engineer_db_${userId}`);
-      if (stored) return JSON.parse(stored) as DbConfig;
-    } catch {}
-    return null;
-  });
+      const raw = localStorage.getItem(`engineer_db_${userId}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<DbConfig>;
+      if (parsed && (parsed as any).credentials) {
+        const marker: DbMarker = { provider: parsed.provider as DbProvider, ...(parsed.platformName ? { platformName: parsed.platformName } : {}) };
+        localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(marker));
+      }
+    } catch { /* best-effort cleanup */ }
+  }, [userId]);
 
   const handleSave = async () => {
     const providerDef = DB_PROVIDERS.find(p => p.id === provider);
     if (!providerDef) return;
 
-    const credentials: Record<string, string> = {};
+    // Only the fields the user actually filled THIS time. A blank field means "keep the existing
+    // encrypted value" — we never overwrite a saved secret with an empty string.
+    const enteredCreds: Record<string, string> = {};
     for (const field of providerDef.fields) {
-      credentials[field.key] = formCreds[field.key] ?? '';
+      const v = (formCreds[field.key] ?? '').trim();
+      if (v) enteredCreds[field.key] = v;
     }
 
-    const newConfig: DbConfig = {
-      provider,
-      credentials,
-      ...(provider === 'other' && formCreds.platformName ? { platformName: formCreds.platformName } : {}),
-    };
+    // SECURITY (A): persist ONLY the provider marker locally — never the credential values.
+    const marker: DbMarker = { provider, ...(provider === 'other' && (formCreds.platformName ?? '').trim() ? { platformName: formCreds.platformName.trim() } : {}) };
+    try { localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(marker)); } catch {}
+    setActiveMarker(marker);
 
-    // Persist to localStorage — EngineerAIChat reads from here to pass in request body
-    try {
-      localStorage.setItem(`engineer_db_${userId}`, JSON.stringify(newConfig));
-    } catch {}
-    setActiveConfig(newConfig);
-
-    // Sync to Firestore Secrets & Keys (upsert: delete old matching entries, add new ones)
+    // Sync to the encrypted Secrets & Keys vault (upsert only the values the user entered + the
+    // provider marker; blank fields are left untouched so nothing is accidentally wiped).
     setSaving(true);
     try {
       const existingRes = await fetch(`/api/secrets/${userId}`);
       const existing: { id: string; secret_name: string }[] = existingRes.ok ? await existingRes.json() : [];
 
-      const envKeys = buildEnvKeys(provider, credentials);
-      const managedNames = [...Object.keys(envKeys), 'ENGINEER_DB_PROVIDER'];
+      const envKeys = buildEnvKeys(provider, enteredCreds);
+      const upserts: { name: string; value: string }[] = [{ name: 'ENGINEER_DB_PROVIDER', value: provider }];
+      for (const [name, value] of Object.entries(envKeys)) if (value) upserts.push({ name, value });
 
-      // Soft-delete any previously saved secrets with the same names
-      await Promise.all(
-        existing
-          .filter(s => managedNames.includes(s.secret_name))
-          .map(s => fetch(`/api/secrets/${userId}/${s.id}`, { method: 'DELETE' }))
-      );
+      // Upsert each: delete any existing secret with that name, then write the new value.
+      for (const u of upserts) {
+        await Promise.all(
+          existing.filter(s => s.secret_name === u.name).map(s => fetch(`/api/secrets/${userId}/${s.id}`, { method: 'DELETE' }))
+        );
+        await fetch(`/api/secrets/${userId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret_name: u.name, secret_value: u.value }),
+        });
+      }
 
-      // Save provider name so the agent can read which SDK to scaffold
-      await fetch(`/api/secrets/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ secret_name: 'ENGINEER_DB_PROVIDER', secret_value: provider }),
-      });
-
-      // Save each non-empty env var as an encrypted secret
-      await Promise.all(
-        Object.entries(envKeys)
-          .filter(([, v]) => v)
-          .map(([name, value]) =>
-            fetch(`/api/secrets/${userId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ secret_name: name, secret_value: value }),
-            })
-          )
-      );
-
-      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys and available to Engineer AI.');
+      // Clear the sensitive inputs from memory once they are safely in the encrypted vault.
+      setFormCreds({});
+      setSavedMsg('Saved! Credentials are encrypted in Secrets & Keys — NavBharatAI Pro v5.0 uses them automatically when it builds your app.');
     } catch {
-      setSavedMsg('Saved locally. Could not sync to Secrets & Keys — check your connection.');
+      setSavedMsg('Could not reach Secrets & Keys — check your connection and try again.');
     } finally {
       setSaving(false);
       setTimeout(() => setSavedMsg(''), 6000);
@@ -202,6 +195,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
   };
 
   const currentDef = DB_PROVIDERS.find(p => p.id === provider);
+  const hasSavedConfig = !!activeMarker && activeMarker.provider === provider;
 
   return (
     <div className="space-y-6">
@@ -218,7 +212,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           <div>
             <h3 className="font-black text-white text-sm uppercase tracking-wider">Your Database</h3>
             <p className="text-[10px] text-[#8b949e] font-medium mt-0.5">
-              Credentials are encrypted in Secrets &amp; Keys. Engineer AI injects them into your app's .env automatically — NavBharatAI never uses them for itself.
+              Credentials are encrypted in Secrets &amp; Keys. NavBharatAI Pro v5.0 detects your connected database and wires that exact provider into your app&apos;s .env automatically — it never creates a new one, and NavBharatAI never uses your database for itself.
             </p>
           </div>
         </div>
@@ -236,6 +230,16 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
             ))}
           </select>
         </div>
+
+        {/* Security note: fields start blank on purpose — saved values live encrypted, not in the browser. */}
+        {hasSavedConfig && (
+          <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-indigo-500/5 border border-indigo-500/15">
+            <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-[#8b949e] leading-relaxed">
+              This database is saved. For your security, values aren&apos;t shown here — leave a field <span className="text-white font-semibold">blank to keep its current value</span>, or type a new one to update it.
+            </p>
+          </div>
+        )}
 
         {/* Per-provider credential fields */}
         <div className="space-y-4">
@@ -286,11 +290,11 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
         )}
 
         {/* Active config indicator */}
-        {activeConfig && (
+        {activeMarker && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-white/3 border border-white/5">
             <div className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
             <p className="text-sm text-[#8b949e]">
-              Active: <span className="text-white font-bold">{DB_PROVIDERS.find(p => p.id === activeConfig.provider)?.label ?? activeConfig.provider}</span>
+              Active: <span className="text-white font-bold">{DB_PROVIDERS.find(p => p.id === activeMarker.provider)?.label ?? activeMarker.provider}</span>
             </p>
           </div>
         )}
@@ -310,7 +314,7 @@ export function DatabaseSettings({ userId }: DatabaseSettingsProps) {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">3.</span>
-            When Engineer AI builds your app, it scaffolds the SDK file and injects your keys into <code className="text-indigo-300">.env</code> automatically.
+            When <strong className="text-white">NavBharatAI Pro v5.0</strong> builds your app, it detects this connected database, wires that exact provider&apos;s SDK, and injects your keys into <code className="text-indigo-300">.env</code> automatically — it never creates a new or different database.
           </li>
           <li className="flex items-start gap-2">
             <span className="text-indigo-400 font-bold shrink-0">4.</span>

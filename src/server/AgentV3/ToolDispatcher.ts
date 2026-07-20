@@ -145,6 +145,7 @@ import { generateReviewsIntegration } from '../lib/ReviewsGenerator';
 import { generateLoyaltyIntegration } from '../lib/LoyaltyGenerator';
 import { generateReferralsIntegration } from '../lib/ReferralsGenerator';
 import { generateCommentsIntegration } from '../lib/CommentsGenerator';
+import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3495,6 +3496,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('comments starter');
         const cmtDeps = cmtcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a threaded-comments backend:\n${cmtWritten.join('\n')}\nAdd the dependencies: ${cmtDeps}\n\n${cmtcfg.instructions}`;
+      }
+
+      case 'generate_messaging': {
+        // Breadth recipe (domain vertical) — direct messaging (server/messaging/): a real MessagingService with
+        // CONVERSATION INTEGRITY (canonical participant pairing, exact unread, monotonic read cursor) + an
+        // Express router. Pure gen in MessagingGenerator.ts.
+        const msgcfg = generateMessagingIntegration();
+        const msgWritten: string[] = [];
+        for (const [path, content] of Object.entries(msgcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          msgWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('messaging starter');
+        const msgDeps = msgcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a direct-messaging backend:\n${msgWritten.join('\n')}\nAdd the dependencies: ${msgDeps}\n\n${msgcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

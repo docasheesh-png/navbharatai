@@ -6,6 +6,7 @@ import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { auth } from '../../lib/firebase';
 import { fetchPassStatus, buyProfessionalPass, type PassStatus } from './professionalPass';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 /**
  * Generic, config-driven chat UI for the "Professional AI" framework. One
@@ -177,6 +178,10 @@ export function ProfessionalChat({ config, userId }: { config: ProfessionalChatC
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+        {(() => {
+          const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+          return lastUser ? <AppUpdateChatNotice userText={lastUser.content} /> : null;
+        })()}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-[#161b22] border border-white/10 text-[#c9d1d9]'}`}>

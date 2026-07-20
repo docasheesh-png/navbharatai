@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import { AttachMenu } from '../AttachMenu';
 import axios from 'axios';
 import { AgentProgress, BuildStep } from './AgentProgress';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 
 import { ThemeMode } from '../../lib/theme';
@@ -1015,6 +1016,12 @@ export const AIChat: React.FC<AIChatProps> = ({
       )}
 
       <div className={cn("flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar overflow-x-hidden")} ref={scrollRef}>
+        {/* App-update notice — first message once the user has chatted, in their language (native app,
+            update available). See AppUpdateChatNotice; renders nothing otherwise. */}
+        {(() => {
+          const lastUser = [...messages].reverse().find((m: any) => m?.sender === 'user');
+          return lastUser ? <AppUpdateChatNotice userText={String(lastUser.text ?? '')} /> : null;
+        })()}
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
         {restoredMessages && restoredMessages.length > 0 && (
           <div className="mb-6 bg-indigo-950/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">

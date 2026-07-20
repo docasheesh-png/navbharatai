@@ -15,6 +15,7 @@ import {
 } from '../../lib/offlineMemory';
 import { loadChat, saveChat, clearChat, type PersistedChatMsg } from '../../lib/offlineChatStore';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
+import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 
 // Lookup maps to rehydrate a reloaded bot turn's cards from their stored ids (kept out of the component
 // body so they're built once).
@@ -320,6 +321,10 @@ export const OfflineAI: React.FC<OfflineAIProps> = ({ onNavigate }) => {
           </div>
         ) : (
           <div className="max-w-2xl mx-auto space-y-3">
+            {(() => {
+              const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+              return lastUser ? <AppUpdateChatNotice userText={lastUser.text} /> : null;
+            })()}
             {messages.map((m) => (
               <div key={m.id} className={`flex items-start gap-2.5 ${m.role === 'user' ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-1 duration-200`}>
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ring-1 ring-white/10 ${m.role === 'user' ? 'bg-zinc-700' : 'bg-gradient-to-br from-indigo-500 to-violet-600'}`}>

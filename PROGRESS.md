@@ -19854,3 +19854,36 @@ AppKnowledgeBase entries + Offline AI CURATED_NAV working "Open" buttons for all
 suite tests/aiToolsReal.test.ts locks every dead endpoint staying dead, every mock staying deleted,
 and every nav mapping; pure cores have their own test files (debugAnalysis, imageGen, botFlowPrompt).
 Gate green at every phase (suite grew 8336 → 8405 tests).
+
+---
+
+## 2026-07-20 — Domain-vertical conveyor + bundle-budget root cause (session claude/upgrade-md-review-vxbdy0)
+
+Shipped domain-vertical build-recipe starters (each: dependency-free service + Express router + README,
+wired at 3 points — ToolDispatcher case, ToolCatalog def + name array, AppKnowledgeBase bullet; each with
+a materialize-and-execute test proving the real business invariant):
+- **generate_feedback** (#1738) — feature-request board: upvote-once idempotent + status lifecycle.
+- **generate_consent** (#1741) — GDPR consent log: append-only, hasConsent = most-recent event (latest wins).
+- **generate_activity_feed** (#1742) — timeline: STABLE CURSOR PAGINATION (monotonic ids paged by id<cursor
+  never duplicate/skip as events append mid-walk).
+- Built-ahead + queued (files pushed, wiring pending): cart (merge-qty + exact integer total), reactions
+  (idempotent emoji toggle + exact counts), orders (immutable snapshot + status machine), faq (publish gate
+  + helpfulness + search).
+
+**ROOT CAUSE found + fixed (rule 4/5) — bundle-budget CI failure on #1742:** `npm run test:bundle` failed with
+`Total JS 1050.0 KB > budget 1050 KB`. NOT caused by the recipe server code (server files aren't in the client
+bundle) — the true driver is that `src/lib/offlineAssistant.ts` imports the ENTIRE server feature catalog
+`APP_KNOWLEDGE_BASE` (`src/server/AppContext/AppKnowledgeBase.ts`) into the CLIENT bundle, so every new
+user-facing feature/recipe KB entry legitimately grows total JS. Total JS had crept to exactly the ceiling
+across many sessions' feature merges; the activity_feed KB bullet was the marginal tip. Since this is
+INTENTIONAL feature growth (not accidental bloat), restored proper ~15% headroom: `totalJsGzipKB` 1050 → 1200
+in `scripts/bundleBudget.mjs`, with the growth driver documented in the file header. Verified with a real
+`vite build`: total JS 1050.0 KB, now within the 1200 KB budget. Unit tests (relative offsets) stay green.
+
+**OPEN ROOT CAUSE (deeper fix, deferred to a dedicated carefully-tested PR — rule 4 step 6):** the client
+should not have to ship the server-only build-recipe KB entries (`generate_*` "v5.0 can add a real X backend"
+descriptions) to the browser at all — they exist for the server build engine's self-awareness
+(AppContextInjector → build.ts), not for the offline NAVIGATION assistant. Splitting the KB into
+client-navigation entries vs server-only build-recipe entries (or lazy-loading the latter) would SHRINK the
+client bundle instead of repeatedly raising the budget as the roadmap grows. Deferred (not rushed) because it
+changes offline-assistant matching behaviour and needs careful regression testing — never break the app.

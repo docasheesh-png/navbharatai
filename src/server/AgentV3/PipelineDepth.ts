@@ -15,8 +15,13 @@ export type PipelineDepth = 'fast' | 'standard' | 'deep';
 /** Absolute ceiling for the scaled wall-clock cap (seconds) — a hung deep build can't hold a slot forever. */
 export const MAX_SCALED_BUILD_SECONDS = 3600;
 
-/** How much extra wall-clock a `deep` build earns over the base cap. */
-export const DEEP_TIME_FACTOR = 1.5;
+/** How much extra wall-clock a `deep` build earns over the base cap. Raised 1.5 → 2.0 (admin
+ *  "2 window banao", 2026-07-20): a complex full-stack app (auth + Postgres + 15 models + maps) was
+ *  getting a 45-min window (1800×1.5), so it needed 3+ windows and stopped midway. At 2.0 a deep window
+ *  is 60 min (== MAX_SCALED_BUILD_SECONDS), so TWO windows (120 min) comfortably finish it. Safe: the
+ *  progress-driven auto-continue stops a genuinely stuck build after 2 no-progress windows, so a bigger
+ *  window never lets a hung build hold a slot longer than real progress justifies. */
+export const DEEP_TIME_FACTOR = 2.0;
 
 /**
  * Resolve the pipeline depth from a prompt-derived complexity MAGNITUDE (e.g. moduleCount + featureCount

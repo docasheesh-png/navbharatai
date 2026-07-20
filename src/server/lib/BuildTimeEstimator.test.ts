@@ -4,7 +4,18 @@ import {
   complexityFromPrompt,
   type HistoricalBuild,
 } from './BuildTimeEstimator';
-import { resolvePipelineDepth } from '../AgentV3/PipelineDepth';
+import { resolvePipelineDepth, scaleBuildSeconds, DEEP_TIME_FACTOR } from '../AgentV3/PipelineDepth';
+
+describe('scaleBuildSeconds — a deep full-stack app gets a 60-min window (admin "2 window banao")', () => {
+  it('deep window is 60 min so TWO windows (120 min) finish a complex app', () => {
+    expect(DEEP_TIME_FACTOR).toBe(2.0);
+    expect(scaleBuildSeconds(1800, 'deep')).toBe(3600); // 60 min (== MAX_SCALED_BUILD_SECONDS)
+  });
+  it('fast/standard windows are unchanged (simple apps stay fast)', () => {
+    expect(scaleBuildSeconds(1800, 'fast')).toBe(1800);
+    expect(scaleBuildSeconds(1800, 'standard')).toBe(1800);
+  });
+});
 
 describe('BuildTimeEstimator (P-PME.4)', () => {
   describe('complexityFromPrompt', () => {

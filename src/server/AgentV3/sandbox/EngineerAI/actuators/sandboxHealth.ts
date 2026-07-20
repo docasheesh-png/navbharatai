@@ -97,6 +97,20 @@ function isDbRelatedCommand(command: string | undefined): boolean {
  * mis-flagged. Only meaningful when the command claims success (exitCode 0) — a real nonzero exit is
  * already handled by the normal failure path. Pure + unit-testable.
  */
+/**
+ * True when command output shows the database is genuinely UNREACHABLE (a live-connectivity failure),
+ * regardless of exit code — used to trigger a mid-build Postgres RE-PROVISION when the provisioned DB
+ * died (FleetOps autopsy 2026-07-20: the sandbox Postgres was reaped ~2.5 min after provisioning). Keyed
+ * on the unambiguous connectivity signals only (P1001 / can't reach server / connection refused :5432);
+ * a schema-validation failure is deliberately NOT included. Pure.
+ */
+export function looksLikeDbUnreachable(text: string | null | undefined): boolean {
+  if (typeof text !== 'string' || !text) return false;
+  return /\bP1001\b/i.test(text)
+    || /can'?t\s+reach\s+database\s+server/i.test(text)
+    || /connection\s+refused.*:\s*5432|:\s*5432.*connection\s+refused/i.test(text);
+}
+
 export function detectSilentDbFailure(sig: { command?: string; exitCode: number | null; stdout?: string; stderr?: string }): boolean {
   if (sig.exitCode !== 0) return false;              // a real nonzero exit is handled elsewhere
   if (!isDbRelatedCommand(sig.command)) return false;

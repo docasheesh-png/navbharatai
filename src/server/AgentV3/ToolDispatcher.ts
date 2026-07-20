@@ -122,6 +122,7 @@ import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } f
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
 import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
+import { generateTotpIntegration } from '../lib/TotpGenerator';
 import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGenerator';
 import { generateAnalyticsIntegration, isAnalyticsProvider } from '../lib/AnalyticsGenerator';
 import { generateMapIntegration, isMapProvider } from '../lib/MapGenerator';
@@ -3913,6 +3914,24 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('otp integration');
         const otpDepLine = ocfg.dependency ? `\nAdd the dependency: ${ocfg.dependency.name}@${ocfg.dependency.version}` : '\n(No npm dependency needed — MSG91 v5 is called with the built-in fetch.)';
         return `Wired ${oProvider} phone-OTP:\n${otpWritten.join('\n')}${otpDepLine}\n\n${ocfg.instructions}`;
+      }
+
+      case 'generate_totp': {
+        // Breadth recipe — RFC 6238 authenticator-app 2FA (server/lib/totp.ts): dependency-free node:crypto
+        // secret + otpauth:// URI + constant-time verify with drift window. Distinct from generate_otp (SMS).
+        // Pure generator in TotpGenerator.ts. No env keys.
+        const totp = generateTotpIntegration();
+        const totpWritten: string[] = [];
+        for (const [path, content] of Object.entries(totp.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          totpWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('totp 2fa');
+        return `Wired authenticator-app 2FA (TOTP):\n${totpWritten.join('\n')}\n(No npm dependency needed — RFC 6238 via node:crypto.)\n\n${totp.instructions}`;
       }
 
       case 'generate_indian_validators': {

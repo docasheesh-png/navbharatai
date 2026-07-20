@@ -78,6 +78,7 @@ import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
 import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { prismaRepairHint } from './prismaRepairHint';
 import { sandboxPostgresEnabled, commandNeedsLiveDatabase, schemaTargetsPostgres, postgresEnvLines, schemaTargetsSqlite, revertSqliteToPostgres } from './postgresProvision';
+import { looksLikeDbUnreachable } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { extractMissingPrismaExports, isEnumConsumerFile, fixDanglingEnumConsumer } from './prismaEnumConsumers';
 import type { BackendProvisionResult } from './sandbox/EngineerAI/actuators/IEngineerActuator';
 import { nextBuildRepairHint, nextMiddlewareCorrectPath } from './frameworkBuildHints';
@@ -389,6 +390,10 @@ export class ToolDispatcher {
   private postgresProvisioned = false;
   /** Set once this app is known to target PostgreSQL — locks the datasource against a silent SQLite downgrade. */
   private postgresIntended = false;
+  /** We attempted ONE mid-build Postgres re-provision after it died (bounded — never loop). */
+  private postgresReprovisionAttempted = false;
+  /** Postgres died mid-build and could NOT be brought back — the lock RELEASES so the app can fall to SQLite. */
+  private postgresConfirmedDead = false;
 
   /** Set by the composition root from the user's decrypted vault (Settings → Secrets & Keys). */
   setUserSecrets(env: Record<string, string>): void {
@@ -494,6 +499,9 @@ export class ToolDispatcher {
   private applyPostgresProviderLock(path: string, content: string): string {
     if (!/(^|\/)schema\.prisma$/.test(path) || typeof content !== 'string') return content;
     if (!sandboxPostgresEnabled()) return content;
+    // If Postgres died in the sandbox and could not be restarted, the lock RELEASES — forcing a dead DB
+    // is an unwinnable loop (FleetOps autopsy). Let the SQLite fallback through so the app can still run.
+    if (this.postgresConfirmedDead) return content;
     if (schemaTargetsPostgres(content)) { this.postgresIntended = true; return content; }
     if (this.postgresIntended && schemaTargetsSqlite(content)) {
       const { content: fixed, reverted } = revertSqliteToPostgres(content);
@@ -1830,6 +1838,48 @@ export class ToolDispatcher {
                 }
               }
             } catch { /* self-heal is best-effort — the original failure is still reported */ }
+          }
+        }
+        // POSTGRES DIED MID-BUILD → RE-PROVISION ONCE, then RELEASE the lock (FleetOps autopsy 2026-07-20).
+        // The sandbox Postgres we provisioned was reaped ~2.5 min into the build (P1001). The builder could
+        // not restart it (`pg_ctl`/`pg_ctlcluster` are exit 127 in its shell), and the provider-LOCK then
+        // forced ~4 min of futile postgres retries until the builder escaped via `sed`. The correct
+        // behaviour: (1) the ENGINE re-provisions Postgres via the actuator (the mechanism that actually
+        // works), retry once; (2) if it STILL can't come back, mark it confirmed-dead so the lock releases
+        // and the app degrades to SQLite gracefully instead of an unwinnable loop. Bounded to ONE re-provision.
+        if (
+          this.postgresProvisioned && !this.postgresConfirmedDead &&
+          looksLikeDbUnreachable(`${stdout}\n${stderr}`)
+        ) {
+          if (!this.postgresReprovisionAttempted && typeof this.actuator.provisionBackend === 'function') {
+            this.postgresReprovisionAttempted = true;
+            try {
+              this.events?.emit({ type: 'narration', agent: 'architect', text: '🗄️ The database went away — restarting PostgreSQL in the sandbox…', ts: Date.now() });
+              const prov = await withTimeout(this.actuator.provisionBackend(this.workspaceId, ['db']), 130_000, 'sandbox-postgres-reprovision');
+              const lines = postgresEnvLines(prov?.envVars?.DATABASE_URL ?? prov?.dbUrl);
+              if (Object.keys(lines).length > 0) {
+                let existing = '';
+                try { existing = await withTimeout(this.actuator.readFile(this.workspaceId, '.env'), 5_000, 'env-read'); } catch { existing = ''; }
+                await this.actuator.writeFile(this.workspaceId, '.env', mergeDotEnv(existing, lines)).catch(() => {});
+              }
+              const retry = await this.actuator.runCommand(this.workspaceId, command);
+              if (!looksLikeDbUnreachable(`${retry.stdout}\n${retry.stderr}`)) {
+                ({ exitCode, stdout, stderr } = retry);
+                this.events?.emit({ type: 'narration', agent: 'architect', text: '✅ Database is back — re-ran the step against PostgreSQL.', ts: Date.now() });
+              } else {
+                this.postgresConfirmedDead = true;
+              }
+            } catch {
+              this.postgresConfirmedDead = true;
+            }
+          } else {
+            // Already re-provisioned once (or no provisioner) and it's STILL unreachable → give up on
+            // Postgres for this preview and let the app fall to SQLite (the lock now releases).
+            this.postgresConfirmedDead = true;
+          }
+          if (this.postgresConfirmedDead) {
+            getWorkspaceMemory(this.workspaceId).recordAudit('postgres confirmed dead in sandbox — releasing the provider lock so the app can use SQLite for the preview');
+            this.events?.emit({ type: 'narration', agent: 'architect', text: '⚠️ NavBharatAI couldn\'t keep PostgreSQL running in the preview sandbox, so the live preview will use SQLite. Your PostgreSQL setup still applies when you deploy to your own database.', ts: Date.now() });
           }
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).

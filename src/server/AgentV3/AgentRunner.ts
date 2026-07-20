@@ -269,6 +269,10 @@ export class AgentRunner {
     // build-end. Default-OFF admin flag (AGENTV3_OBSERVABILITY_INJECT=on); read here directly (self-contained,
     // advisory-adjacent). Purely additive + persisted via the durable write path; it NEVER blocks a build.
     const observabilityInject = process.env.AGENTV3_OBSERVABILITY_INJECT === 'on';
+    // P-PIPE — build-end PRETTIER advisory. Default-OFF admin flag (AGENTV3_PRETTIER_GATE=on); read here
+    // directly (self-contained, advisory-only). When on, it appends a non-blocking "N file(s) need
+    // formatting" note to a successful build's summary — it NEVER blocks or fails a build.
+    const prettierGate = process.env.AGENTV3_PRETTIER_GATE === 'on';
     const maxBuildMs = this.opts.maxBuildMs;
     // E4 — per-turn / per-tool hard caps so a single hung call can't block the build. Defaults are
     // generous ceilings (no legitimate turn/tool reaches them); 0 disables an individual cap.
@@ -628,6 +632,15 @@ export class AgentRunner {
             } catch { /* advisory gate is best-effort — never fails a build */ }
           }
 
+          // P-PIPE — build-end prettier formatting advisory. Advisory-only: appends to a successful build's
+          // summary, NEVER blocks (a formatting nit must not fail a working app). Best-effort — swallowed.
+          if (ok && prettierGate && expectsArtifacts && totalToolUses > 0) {
+            try {
+              const advisory = await dispatcher.assessPrettierGate();
+              if (advisory) summary = `${summary}\n\n${advisory}`;
+            } catch { /* advisory gate is best-effort — never fails a build */ }
+          }
+
           // Cap-4 injection — add a /health route to an Express entry that lacks one (durable write).
           // Purely additive; never blocks. Best-effort — a failure is swallowed.
           if (ok && observabilityInject && expectsArtifacts && totalToolUses > 0) {
@@ -858,6 +871,13 @@ export class AgentRunner {
         if (ok && depHealthGate && expectsArtifacts && totalToolUses > 0) {
           try {
             const advisory = await dispatcher.assessDependencyHealthGate();
+            if (advisory) summary = `${summary}\n\n${advisory}`;
+          } catch { /* advisory gate is best-effort — never fails a build */ }
+        }
+        // P-PIPE — build-end prettier advisory also applies at the step-cap exit (advisory-only, never blocks).
+        if (ok && prettierGate && expectsArtifacts && totalToolUses > 0) {
+          try {
+            const advisory = await dispatcher.assessPrettierGate();
             if (advisory) summary = `${summary}\n\n${advisory}`;
           } catch { /* advisory gate is best-effort — never fails a build */ }
         }

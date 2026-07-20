@@ -1679,6 +1679,17 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_request_id',
+      description:
+        'Add a real correlation-id (request-id) middleware to the app (server/lib/requestId.ts): dependency-' +
+        'free (node:crypto), it reuses a SAFE inbound X-Request-Id (from a trusted proxy) or mints a UUID, puts ' +
+        'it on req.id, and echoes it on the response header — so every log line and downstream call for one ' +
+        'request shares one id and can be traced end to end. An unsafe/oversized header value is ignored; set ' +
+        'trustInbound:false to always mint fresh. Mount it first, pairs with generate_logging/generate_tracing. ' +
+        'No dependency, no key.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_file_upload',
       description:
         'Add real file-upload validation to the app (server/lib/upload.ts): a dependency-free ' +
@@ -2186,6 +2197,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_sanitize_html',
   'generate_markdown',
   'generate_logging',
+  'generate_request_id',
   'generate_file_upload',
   'generate_graceful_shutdown',
   'generate_maintenance',

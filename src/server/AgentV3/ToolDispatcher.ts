@@ -165,6 +165,7 @@ import { generateMarkdownIntegration } from '../lib/MarkdownGenerator';
 import { generateQrIntegration } from '../lib/QrGenerator';
 import { generatePdfIntegration } from '../lib/PdfGenerator';
 import { generateCsvIntegration } from '../lib/CsvGenerator';
+import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -4269,6 +4270,23 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('csv import/export');
         return `Wired CSV import/export:\n${csvWritten.join('\n')}\nAdd the dependency: ${csvcfg.dependency.name}@${csvcfg.dependency.version}\n\n${csvcfg.instructions}`;
+      }
+
+      case 'generate_audit': {
+        // U-4 recipe — tamper-evident hash-chained audit log (server/lib/audit.ts). Dependency-free
+        // (node:crypto), storage-agnostic. Pure generator in AuditLogGenerator.ts. No env keys.
+        const auditcfg = generateAuditLogIntegration();
+        const auditWritten: string[] = [];
+        for (const [path, content] of Object.entries(auditcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          auditWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('audit log');
+        return `Wired tamper-evident audit log:\n${auditWritten.join('\n')}\n(No npm dependency — node:crypto hash chain; you back it with your own DB store.)\n\n${auditcfg.instructions}`;
       }
 
       case 'generate_image': {

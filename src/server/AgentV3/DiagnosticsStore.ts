@@ -446,6 +446,40 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
 }
 
 /**
+ * Upsert an IN-PROGRESS build's report into the workspace history, keyed by `startedAt` (the same key
+ * `saveDiagnosticsHistory` uses), so a settle later OVERWRITES this same entry with the final version.
+ *
+ * ROOT CAUSE this closes (CrewHub 2026-07-20, admin: "puri build report save nahi ho rahi"): a multi-turn
+ * build whose turns get INTERRUPTED — "Load failed", a sandbox recycle, a disconnect, a credit cut —
+ * never reaches the settle path, and `saveDiagnosticsHistory` refuses any report with `endedAt` unset. So
+ * every un-settled turn was missing from the history, and the whole-session download (`scope=session`,
+ * which stitches the history) came back with only a fragment — often a single mid-build snapshot. This
+ * captures each turn into history AS IT RUNS (throttled by the caller), so the full "0 → done" record
+ * survives regardless of how any single turn ended. Best-effort — never throws, never blocks the build.
+ */
+export async function upsertDiagnosticsHistoryProgress(workspaceId: string, report: BuildDiagnosticsReport): Promise<void> {
+  if (!workspaceId || !report || typeof report.startedAt !== 'number') return;
+  if (process.env.VITEST) return; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
+  try {
+    let stored = trimReportForStorage(report);
+    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
+      const furtherTrimmedIssues = (stored.issues ?? []).slice(-200);
+      stored = { ...stored, commands: undefined, llmCalls: undefined, issues: furtherTrimmedIssues, problems: capProblems(furtherTrimmedIssues.filter((i) => i.severity !== 'info')) };
+    }
+    const db = getDb();
+    if (!db) return; // the latest-doc + per-user paths still hold this report; the archive entry is optional here
+    await persistWithRetry(async () => {
+      await db
+        .collection(COLLECTION)
+        .doc(workspaceId)
+        .collection(HISTORY_SUBCOLLECTION)
+        .doc(String(report.startedAt))
+        .set({ report: stored, savedAt: Date.now(), inProgress: report.endedAt === undefined }, { merge: false });
+    });
+  } catch { /* best-effort — the settle-time saveDiagnosticsHistory still backstops a clean finish */ }
+}
+
+/**
  * List a workspace's past builds, most-recent-first, metadata only (cheap for a picker/list UI).
  * Ordered by document id (the stringified `startedAt` epoch-ms — lexicographic order matches numeric
  * order for same-length epoch-ms strings) so no composite index on a nested field is ever needed.

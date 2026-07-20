@@ -244,7 +244,7 @@ import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from '../AgentV3/CheckpointStore';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
+import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
@@ -5107,6 +5107,11 @@ export function registerAgentV3Routes(app: Express): void {
           if (flushDecision(_lastDiagFlushAt, now, DIAG_FLUSH_MS) === 'flush-now') {
             _lastDiagFlushAt = now;
             saveDiagnostics(workspaceId, r).catch(() => {}); // durable — survives an instance rotation mid-build
+            // Also upsert THIS turn into the session history AS IT RUNS (CrewHub 2026-07-20): a turn that
+            // gets interrupted before settle (Load failed / sandbox recycle / disconnect) would otherwise
+            // be missing from the whole-session download. Keyed by startedAt, so the settle later overwrites
+            // it with the final version — every turn of a multi-turn build is captured. Best-effort.
+            upsertDiagnosticsHistoryProgress(workspaceId, r).catch(() => {});
           }
         },
       });

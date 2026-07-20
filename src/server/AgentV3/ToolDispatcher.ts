@@ -157,6 +157,7 @@ import { generateLeaderboardIntegration } from '../lib/LeaderboardGenerator';
 import { generateWaitlistIntegration } from '../lib/WaitlistGenerator';
 import { generateTagsIntegration } from '../lib/TagsGenerator';
 import { generateExperimentsIntegration } from '../lib/ExperimentsGenerator';
+import { generateShortLinksIntegration } from '../lib/ShortLinksGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3735,6 +3736,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('experiments starter');
         const exDeps = excfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an A/B testing backend:\n${exWritten.join('\n')}\nAdd the dependencies: ${exDeps}\n\n${excfg.instructions}`;
+      }
+
+      case 'generate_short_links': {
+        // Breadth recipe (domain vertical) — URL shortener (server/shortlinks/): a real ShortLinkService with
+        // LINK INTEGRITY (unique codes + exact click counts + expiry/disable) + an Express router. Pure gen in
+        // ShortLinksGenerator.ts.
+        const slcfg = generateShortLinksIntegration();
+        const slWritten: string[] = [];
+        for (const [path, content] of Object.entries(slcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          slWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('short links starter');
+        const slDeps = slcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a URL-shortener backend:\n${slWritten.join('\n')}\nAdd the dependencies: ${slDeps}\n\n${slcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

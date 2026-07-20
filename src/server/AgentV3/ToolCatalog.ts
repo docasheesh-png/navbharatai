@@ -1175,6 +1175,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_blog',
+      description:
+        'Add a real blog / CMS backend to the app (server/blog/) — a packaged domain vertical for content ' +
+        'sites, marketing pages, docs and any publish-workflow app. The real guarantees are a publish ' +
+        'STATE-MACHINE (draft↔published↔archived, invalid jumps rejected), UNIQUE-slug generation from the ' +
+        'title (de-duplicated: hello, hello-2, hello-3), and a public feed that returns PUBLISHED posts only ' +
+        '(drafts/archived stay private). Emits a dependency-free BlogService (createPost, publish, unpublish, ' +
+        'archive, getBySlug, listPublished, listAll) + an Express router (POST /posts, GET /posts, GET ' +
+        '/posts/published, GET /posts/slug/:slug → 404 unless published, PATCH /posts/:id, PATCH ' +
+        '/posts/:id/status → 409 on an invalid transition). Editing a title never changes the slug so ' +
+        'permalinks stay stable. In-memory by default — swap the store for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2236,6 +2250,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_events',
   'generate_subscriptions',
   'generate_polls',
+  'generate_blog',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

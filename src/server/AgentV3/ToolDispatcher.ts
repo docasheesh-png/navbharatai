@@ -151,6 +151,7 @@ import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
 import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
+import { generateKanbanIntegration } from '../lib/KanbanGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3615,6 +3616,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('coupons starter');
         const cpDeps = cpcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a coupons/discount-codes backend:\n${cpWritten.join('\n')}\nAdd the dependencies: ${cpDeps}\n\n${cpcfg.instructions}`;
+      }
+
+      case 'generate_kanban': {
+        // Breadth recipe (domain vertical) — kanban board (server/kanban/): a real KanbanService with BOARD
+        // INTEGRITY (contiguous card ordering + per-column WIP limit) + an Express router. Pure gen in
+        // KanbanGenerator.ts.
+        const kbcfg = generateKanbanIntegration();
+        const kbWritten: string[] = [];
+        for (const [path, content] of Object.entries(kbcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          kbWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('kanban starter');
+        const kbDeps = kbcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a kanban board backend:\n${kbWritten.join('\n')}\nAdd the dependencies: ${kbDeps}\n\n${kbcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

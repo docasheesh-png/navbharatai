@@ -50,23 +50,15 @@ interface PlatformOption {
   defaultBuildDir: string;
 }
 
+// ONLY genuinely-wired targets are offered (absolute rule #2 — real features only). The 13 other
+// "cloud deploy" platforms were non-functional shells (deployCapability === 'unavailable') that still
+// collected real secrets (AWS keys, service-account JSON) into localStorage and never used them — a
+// fake feature + a security exposure. They are removed here. Real one-click deploy to a live URL now
+// lives in NavBharatAI Pro v5.0's Deploy button; real repo push lives in v5.0's repo dialog too.
+// (New real providers will be added back only when each has a genuine, tested integration.)
 const DEPLOY_PLATFORMS: PlatformOption[] = [
   { id: 'github', name: 'GitHub Sync & Pages', icon: Github, color: 'text-white', bgHover: 'hover:bg-white/5', desc: 'Push commits directly to public/private remote repos.', defaultBuildDir: 'dist' },
-  { id: 'firebase', name: 'Firebase Hosting', icon: Cloud, color: 'text-amber-500', bgHover: 'hover:bg-amber-500/10', desc: 'Deploy high-performance static sites & Cloud Functions.', defaultBuildDir: 'public' },
-  { id: 'vercel', name: 'Vercel App', icon: Layers, color: 'text-stone-300', bgHover: 'hover:bg-stone-500/15', desc: 'Zero-config global edge deployments with serverless routes.', defaultBuildDir: 'dist' },
-  { id: 'netlify', name: 'Netlify Cloud', icon: Globe, color: 'text-teal-400', bgHover: 'hover:bg-teal-400/10', desc: 'Production site hosting with instant cache invalidation.', defaultBuildDir: 'dist' },
-  { id: 'cloudflare', name: 'Cloudflare Pages', icon: Server, color: 'text-orange-400', bgHover: 'hover:bg-orange-500/10', desc: 'Build jamstack applications distributed on global CDN.', defaultBuildDir: 'dist' },
-  { id: 'gcloud', name: 'Google Cloud Run', icon: Cpu, color: 'text-blue-400', bgHover: 'hover:bg-blue-500/10', desc: 'Run server-side compiled containers on auto-scaling clusters.', defaultBuildDir: 'dist' },
-  { id: 'docker', name: 'Docker Hub Registry', icon: Play, color: 'text-[#2496ed]', bgHover: 'hover:bg-blue-600/10', desc: 'Build & package standard OCI images for portable runtimes.', defaultBuildDir: 'dist' },
-  { id: 'render', name: 'Render Web Services', icon: RefreshCcw, color: 'text-fuchsia-400', bgHover: 'hover:bg-fuchsia-500/10', desc: 'Continuous hosting for Node full-stack applications.', defaultBuildDir: 'dist' },
-  { id: 'railway', name: 'Railway App', icon: Terminal, color: 'text-pink-400', bgHover: 'hover:bg-pink-500/10', desc: 'Instant database and multi-service cloud container host.', defaultBuildDir: 'dist' },
-  { id: 'aws', name: 'AWS Amplify', icon: Cloud, color: 'text-yellow-500', bgHover: 'hover:bg-yellow-500/10', desc: 'Secure AWS backend and web app deployment console.', defaultBuildDir: 'dist' },
-  { id: 'supabase', name: 'Supabase Edge', icon: Layout, color: 'text-emerald-400', bgHover: 'hover:bg-emerald-500/10', desc: 'PostgreSQL integrated static and edge function pipeline.', defaultBuildDir: 'dist' },
-  { id: 'digitalocean', name: 'DigitalOcean App Platform', icon: Server, color: 'text-indigo-400', bgHover: 'hover:bg-indigo-500/10', desc: 'High availability scalable cloud deployments.', defaultBuildDir: 'dist' },
-  { id: 'heroku', name: 'Heroku Dynos', icon: Layers, color: 'text-purple-400', bgHover: 'hover:bg-purple-500/10', desc: 'Classic managed cloud Platform as a Service (PaaS).', defaultBuildDir: 'dist' },
-  { id: 'surge', name: 'Surge.sh CLI', icon: Globe, color: 'text-cyan-400', bgHover: 'hover:bg-cyan-500/10', badge: 'Fastest', desc: 'Deploy single-command static paths directly onto the web.', defaultBuildDir: 'dist' },
   { id: 'static', name: 'Static Export Store', icon: Download, color: 'text-stone-400', bgHover: 'hover:bg-stone-400/10', desc: 'Bundle static client bundle into a portable zip file.', defaultBuildDir: 'dist' },
-  { id: 'remote', name: 'Custom Remote Git', icon: GitBranch, color: 'text-red-400', bgHover: 'hover:bg-red-500/10', desc: 'Push commits to custom git endpoints over Secure Shell (SSH).', defaultBuildDir: 'dist' }
 ];
 
 export const GitPanel: React.FC<GitPanelProps> = ({
@@ -276,7 +268,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({
   };
 
   // DevOps States
-  const [selectedPlatform, setSelectedPlatform] = useState<string>(() => localStorage.getItem('v_deploy_platform') || 'github');
+  const [selectedPlatform, setSelectedPlatform] = useState<string>(() => {
+    // Only allow a currently-offered (real) platform; a stale value for a removed fake platform
+    // falls back to GitHub so its old credential form can never re-appear.
+    const stored = (() => { try { return localStorage.getItem('v_deploy_platform'); } catch { return null; } })();
+    return DEPLOY_PLATFORMS.some(p => p.id === stored) ? (stored as string) : 'github';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [showPlatformDropdown, setShowPlatformDropdown] = useState(false);
   
@@ -576,8 +573,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({
     const tidPush = setTimeout(async () => {
       setDeployStatus('building');
       setActiveStep(2);
-      addLogLine('⚡ Instantiating git engine process...', 200);
-      addLogLine(`🐋 Creating and pushing commits to remote heads/${currentGithubConfig.branch || 'main'}...`, 600);
+      // Describe only what actually happens (one real API call), not a fabricated pipeline.
+      addLogLine(`📤 Uploading ${Object.keys(files || {}).length} files to GitHub (branch ${currentGithubConfig.branch || 'main'})...`, 200);
 
       try {
         const response = await fetch('/api/github/push-enhanced', {
@@ -1536,7 +1533,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({
                   {deployStatus === 'building' && (
                     <div className="flex items-center gap-1.5 text-amber-500 animate-pulse font-bold text-[8.5px] pt-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
-                      PIPELINE ACTIVE... EXECUTING DOCKER BUILD ENGINE
+                      UPLOADING FILES TO GITHUB...
                     </div>
                   )}
                   <div ref={consoleEndRef} />

@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, enforceNotBanned } from '../lib/authMiddleware';
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
+import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps } from '../lib/RequirementGapAnalyzer';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -5091,6 +5092,28 @@ export function registerAgentV3Routes(app: Express): void {
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+
+      // Requirement-gap analysis (T1.4 → engine slice): auto-run the existing analyzer at build start and
+      // record the detected domain, the features that domain usually needs but the prompt left implicit, and
+      // the clarifying questions into the ADMIN-ONLY build report — so every autopsy shows what the request
+      // left ambiguous (rule 5). Pure + best-effort; changes NO build flow and touches NO user-facing surface.
+      // (The interactive "pause and ask the user" gate is a separate, admin-gated follow-up.) Only records
+      // when a real domain is detected AND something is genuinely missing/askable, to keep the report high-signal.
+      try {
+        const reqGaps = analyzeRequirementGaps(prompt);
+        if (shouldSurfaceRequirementGaps(reqGaps)) {
+          buildDiag.record({
+            phase: 'build',
+            severity: 'info',
+            code: 'REQUIREMENT_GAPS',
+            message: `Requirement analysis: domain=${reqGaps.domain}, ${reqGaps.likelyMissing.length} likely-missing feature(s), ${reqGaps.clarifyingQuestions.length} clarifying question(s) the engine assumed sensible defaults for.`,
+            detail: renderRequirementGaps(reqGaps),
+            autoResolved: true,
+          });
+        }
+      } catch {
+        /* requirement analysis is best-effort — never let it affect the build */
+      }
 
       // UNBREAKABLE weak-module no-Claude chokepoint (admin absolute rule, 2026-07-13). Bind a no-Claude
       // zone to THIS build's async context now that we know its tier (nothing calls Claude before here).

@@ -129,6 +129,13 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   };
 }
 
+/** Whether the analyzed gaps are worth surfacing — a real domain was detected AND there is something
+ *  genuinely missing or worth confirming. Keeps the build report (and any future clarification pass)
+ *  high-signal: a generic/clear prompt with no domain gaps produces no noise. Pure. */
+export function shouldSurfaceRequirementGaps(g: RequirementGaps): boolean {
+  return g.domain !== 'general' && (g.likelyMissing.length > 0 || g.clarifyingQuestions.length > 0);
+}
+
 /** Render the gaps as a compact, human-readable block the planner/agent can act on. Pure. */
 export function renderRequirementGaps(g: RequirementGaps): string {
   const nf = Object.entries(g.nonFunctional).filter(([, v]) => v).map(([k]) => k);

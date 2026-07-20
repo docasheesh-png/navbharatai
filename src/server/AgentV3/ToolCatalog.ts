@@ -1468,6 +1468,49 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_activity_feed',
+      description:
+        'Add a real activity feed / timeline backend to the app (server/activity/) — a packaged domain vertical ' +
+        'for a social feed, an activity stream, a per-project event log or a notification timeline. The real ' +
+        'guarantee is STABLE CURSOR PAGINATION: every event gets a monotonic sequence id and the feed is paged ' +
+        'newest-first by "id < cursor", so paging a live feed NEVER duplicates or skips an item even when new ' +
+        'events are appended between page fetches (the classic offset-pagination bug this prevents). Emits a ' +
+        'dependency-free ActivityFeedService (record, feed, actorFeed, markSeen, unseenCount) + an Express ' +
+        'router (POST /api/activity, GET /api/activity ?cursor&limit, GET /api/activity/actor/:actor, GET ' +
+        '/api/activity/unseen ?viewer, POST /api/activity/seen). Distinct from generate_audit (tamper-evident ' +
+        'log) and generate_notification_center. In-memory by default — swap the array for your DB (an ' +
+        'auto-increment id column plays the sequence-id role).',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_cart',
+      description:
+        'Add a real shopping-cart backend to the app (server/cart/) — a packaged domain vertical, the ' +
+        'foundational ecommerce primitive. The real guarantee is CART INTEGRITY: adding the same product MERGES ' +
+        'quantities into ONE line (never a duplicate line), setting a line to 0 (or removing it) drops it, ' +
+        'quantities never go negative, and the cart total is ALWAYS the exact sum of unitPrice × qty in INTEGER ' +
+        'minor units (paise/cents) so money never drifts on floating point. Emits a dependency-free CartService ' +
+        '(add, setQty, remove, clear, view) + an Express router (GET /api/cart/:userId, POST ' +
+        '/api/cart/:userId/items, PATCH /api/cart/:userId/items/:productId, DELETE the line or the whole cart). ' +
+        'Distinct from generate_inventory (stock), generate_orders (placed order) and generate_payment (charge). ' +
+        'In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'generate_reactions',
+      description:
+        'Add a real emoji-reactions backend to the app (server/reactions/) — a packaged domain vertical for ' +
+        'reacting (👍 ❤️ 😂 …) to any post, comment, message or media. The real guarantee is REACTION ' +
+        'INTEGRITY: a user reaction to a given (target, emoji) is an idempotent TOGGLE (re-reacting with the ' +
+        'same emoji removes it — never a double count), and a user holds AT MOST ONE emoji per target (a new ' +
+        'emoji replaces the old), so per-emoji counts are always exact. Emits a dependency-free ReactionService ' +
+        '(react, unreact, hasReacted, countFor, summary) + an Express router (POST /api/reactions/:targetId ' +
+        '{userId, emoji} → toggle, DELETE /api/reactions/:targetId, GET /api/reactions/:targetId ?viewer=). ' +
+        'Emoji are validated against an allow-list. Distinct from generate_feedback (a single-upvote board) and ' +
+        'generate_polls (fixed-option voting). In-memory by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2549,6 +2592,9 @@ export const CATALOG_TOOL_NAMES = [
   'generate_short_links',
   'generate_feedback',
   'generate_consent',
+  'generate_activity_feed',
+  'generate_cart',
+  'generate_reactions',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

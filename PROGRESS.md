@@ -19519,3 +19519,55 @@ moment the API recovered). Combined `main` re-verified locally after the batch: 
 turned a would-be duplicate into a real bug fix. No `.aab` rebuilt — this batch is backend generator
 capability only (invisible to the Capacitor web-app shell), so a store build would be over-building per the
 Play-release judgement rule.
+
+---
+
+## 2026-07-20 — Roadmap reconciliation → ROADMAP_REMAINING.md (all sources compiled, code-verified) + engine-quality ships
+
+**Deliverable: one code-verified "what's actually left" file — `ROADMAP_REMAINING.md`.** The four roadmap
+sources (ROADMAP.md Tier 0-5 + this file's 30-category gap ledger) were cross-matched against the LIVE code by
+four parallel investigators (Tier 1 / Tier 2 / Tier 3+ledger / Tier 4-5+non-goals). **Done items and
+non-goals/downgrades were REMOVED** — it is the upgrade-only worklist, in one place (admin: "sab ek jagah lao,
+jo ho chuka / downgrade karega woh hata do"). Buckets:
+- **🟢 BUILD NOW** (code-tractable, no infra): bounded `ask_user` clarification tool (admin's #1 category),
+  GLM/Kimi prompt-cache stable prefixes (AP-5), Cap-4 cost-alert thresholds, daily-spend quota gauge,
+  network-request capture for the auto-fix loop (B5 remainder), runtime route/API/auth/DB smoke-hitter, +
+  breadth recipes (more languages Rust/Rails/Laravel/C, deploy targets AWS/Azure/Railway/Render, GraphQL,
+  state-management, settings+notification-center, design-to-code, Ansible IaC, CI `--ignore-scripts`,
+  pure-code polish).
+- **🔵 LARGER** (multi-PR, still code): full-builder frontend/backend parallelism + merged heal pass (AP-4,
+  20→5-7 min), cross-restart build resume (AP-3/T1-session-rehydrate), 1000-file codemod, template gallery
+  (AP-10), P-INTEG/MCP/SDK.
+- **🔒 BLOCKED** (infra/keys/decision — code half where present is DONE): signed native binaries,
+  Lighthouse/Web-Vitals+axe over live preview, GA-2 out-of-process workers, GA-4 sandbox skip+cache, GA-16
+  runtime profiler, embeddings, WebContainers, KMS/Armor/Redis/monitoring, DB auto-create, escalation/
+  power-effort/cost-ladder DEFAULT-ON flips (code shipped; needs measurement + billing sign-off), GLM key-pool
+  keys (parseKeyPool done; buy+set env).
+- **🚫 EXCLUDED** (non-goal / downgrade): **AP-9 requirement-matcher tightening** (the roadmap itself flags it a
+  trust DOWNGRADE — false negatives hide skipped features → breaks the honesty moat; DO NOT build), BYOK,
+  local execution / VS Code-JetBrains ext / local `nbai` CLI, PowerShell/CMD/ZSH, legacy AppMakerLab, Kafka/
+  K8s/gRPC/HSM/SAML-at-infra/GPU/multi-region-DB, "Bucket C" earned-over-time, all Tier-5 north-star vision.
+
+**Stale-roadmap correction (code-anchored):** ~90% of the old ROADMAP.md ❌/🟡 marks are actually DONE.
+Verified-DONE (do NOT rebuild): T1-autofix-loop, T1-auth-scaffold, T1-budget-ux, T1-costladder-on, B5 classifier
+(#1656 RuntimeErrorClassify.ts), B6 Go typecheck (#1655), C7/C8 codemods, GA-5/6/7/8/10/13/14/15/16, D11/D12,
+dependency reconciler, task-dependency DAG, CSRF/ABAC/SSO/i18n/metrics/tracing/admin/dashboard/rbac/backup/
+pagination/cache/image-opt/crud/migration-schema-depth/maturity-tier grading/find_code_smells, UT-1/2/3 wrappers.
+
+**Engine-quality ships this session (all merged, CI-green):**
+- **B6 (#1655)** — Go added to the live cross-language typecheck (`crossLangTypecheck.ts`: `go build ./...`);
+  deleted the drifted dead `crossLangCheck.ts` duplicate (root-cause: two impls, only python+java wired).
+- **B5 (#1656)** — `RuntimeErrorClassify.ts`: buckets captured runtime errors (react-render/hooks, null-deref,
+  CORS, network, hydration, env, …) with targeted repair hints (CORS→generate_cors) into `buildRepairPrompt`.
+- **Prettier build-end advisory (#1657)** — `PrettierGate.ts`, default-OFF `AGENTV3_PRETTIER_GATE`, non-blocking.
+- **White-Label fix (#1658)** — `redactProviderError` now actually strips AI vendor/model names (GLM/Kimi/
+  Claude/Sonnet/Opus/Gemini/Grok + model ids → "NavBharatAI"/"the model"); it was only stripping E2B/secrets
+  before, so a real LLM error routed to the user's chat would have leaked the vendor. + §4 invariant test.
+- **Test-hardening (#1660)** — locked two untested pure backstops: `extractJson` (LLM-JSON extractor — the
+  silent-failure/lastIndexOf trap) + `httpError` (`toSafeClientMessage` secret + vendor redaction).
+- **Recipe/fix batch (#1646-1650, #1644)** — http-client, UPI, audit-log, webhook-sender, rupeesInWords
+  root-cause fix, systemPrompt recipe-map (recorded above).
+
+**Note:** the FleetOps (App-complex) build-report autopsy is owned by a SEPARATE session/agent — not touched
+here (no duplication, no engine-file collision). This session stayed on roadmap-reconciliation + isolated
+engine-quality/test work. `ROADMAP_REMAINING.md` is the live "what's next"; ROADMAP.md stays the historical ledger.

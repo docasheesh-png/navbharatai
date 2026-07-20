@@ -4874,11 +4874,15 @@ export function registerAgentV3Routes(app: Express): void {
           : null;
         emit({ type: 'result', ok: true, summary: buildResultRef.summary || 'Built your app — your files are saved.', steps: buildResultRef.steps ?? 0, billedUsd: watchdogBilledUsd, billedInr, ...(watchdogWalletDebit && watchdogWalletDebit.tokensDebited > 0 ? { walletTokensDebited: watchdogWalletDebit.tokensDebited, walletTokenBalance: watchdogWalletDebit.tokenBalance } : {}), ...(watchdogCostBreakdown ? { costBreakdown: watchdogCostBreakdown } : {}), ...(dl ? { diagnostics: dl } : {}) });
       } else {
-        // RC-4 (admin 2026-07-06): HONEST pause wording. The old line claimed "It was likely almost
-        // done" — an unverified guess that is false for a big build that timed out early. Report only the
-        // real progress fact we have: how many files were written so far (writtenFiles.size).
+        // SEAMLESS WINDOW TRANSITION (admin "sabkuch automatically hona chahiye, user ko pata bhi na
+        // lage", 2026-07-20): a wall-clock pause that will be AUTO-CONTINUED must be INVISIBLE — no
+        // "time limit reached" chat bubble. We deliberately do NOT emit a pause narration here. The
+        // client's decideAutoContinue speaks only when it genuinely STOPS (budget/backstop/no-progress),
+        // showing an honest message THEN; while it keeps auto-continuing it stays silent, so a multi-
+        // window build reads as one continuous build. The `summary` is kept on the result for the record
+        // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
+        // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = deadlinePauseMessage(writtenFiles.size);
-        emit({ type: 'narration', agent: 'architect', text: pauseMsg.narration, ts: Date.now() });
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
         // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock

@@ -108,4 +108,24 @@ describe('createRevealPacer — the honest drip', () => {
     pacer.push(file(1)); pacer.push(file(2)); pacer.push(file(3));
     expect(out).toHaveLength(3);
   });
+
+  it('a BULK file_changed burst (write_files_batch) drips one row per interval — real names, real order', () => {
+    const fc = (path: string) => ({ type: 'file_changed', change: { path, kind: 'create' } });
+    const { pacer, out, advance } = harness(600);
+    pacer.push(fc('src/App.tsx')); pacer.push(fc('src/Header.tsx')); pacer.push(fc('src/Footer.tsx'));
+    expect(out).toHaveLength(1); // burst no longer flashes all at once
+    advance(600); expect(out).toHaveLength(2);
+    advance(600); expect(out).toHaveLength(3);
+    expect(out.map((e) => (e as { change: { path: string } }).change.path))
+      .toEqual(['src/App.tsx', 'src/Header.tsx', 'src/Footer.tsx']);
+  });
+
+  it('an INTERACTIVE prompt (permission_request / clarify) flushes past the drip instantly', () => {
+    const fc = (path: string) => ({ type: 'file_changed', change: { path, kind: 'create' } });
+    const { pacer, out } = harness(600);
+    pacer.push(fc('a.ts')); pacer.push(fc('b.ts')); pacer.push(fc('c.ts'));
+    expect(out).toHaveLength(1);
+    pacer.push({ type: 'permission_request' });
+    expect(out).toHaveLength(4); // queue flushed + the gate dispatched — the user is never kept waiting
+  });
 });

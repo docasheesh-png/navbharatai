@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { createRevealPacer } from '../components/agentv3/revealPacer';
+import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
@@ -1000,15 +1001,23 @@ export function useAgentV3Build(): UseAgentV3Build {
       // false; see the comment on the reader loop below). Bumping here means a stale event from an
       // ABANDONED build can never land on the session the user switched to.
       const gen = ++generationRef.current;
-      // Reset only the TRANSIENT build state for the new turn (narration, todos, plan,
+      // Reset only the TRANSIENT build state for the new turn (narration, plan,
       // agents, done/health). PRESERVE the durable project view — files, workspace, live
       // preview and repo — so a follow-up/retry message does NOT blank the user's files to
       // 0 the instant Send is pressed. The build's file_changed events upsert by path, so
       // keeping the existing list shows no duplicates and the project stays visible.
+      // ALSO preserved (admin 2026-07-21):
+      //  • the settled turn's ACTIVITY → archived into activityLog (deactivated), so the finished
+      //    build's action rows + diff decorations stay in the chat instead of vanishing on the
+      //    next send/auto-continue ("app banne ke bad diff gayab" root cause);
+      //  • TODOS → the plan stays on screen across the send gap; the server's merged
+      //    todo_updated (todoMerge.ts) then folds the new turn into the SAME plan.
       setState((prev) => ({
         ...initialAgentV3State(),
         files: prev.files,
         diffs: prev.diffs,
+        activityLog: carryOverActivity(prev.activityLog, prev.activity),
+        todos: prev.todos,
         workspaceId: prev.workspaceId,
         previewUrl: prev.previewUrl,
         repoUrl: prev.repoUrl,

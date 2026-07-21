@@ -134,6 +134,11 @@ export interface AgentV3ClientState {
   narration: NarrationLine[];
   /** Live "working…" activity log (the expandable indicator) — ordered, capped, real events only. */
   activity: ActivityEntry[];
+  /** PRIOR turns' activity (admin 2026-07-21 — "diff gayab na ho"): each new send used to wipe
+   *  `activity`, so the finished build's action rows ("Created 33 files +812 -0" + its diffs)
+   *  vanished from the chat. The hook archives the settled turn's entries here (deactivated,
+   *  capped) so the chat timeline keeps decorating past prose forever within the session. */
+  activityLog: ActivityEntry[];
   /** File explorer surface — current change set. */
   files: FileChange[];
   /** Todo surface (editable in P4). */
@@ -219,6 +224,7 @@ export function initialAgentV3State(): AgentV3ClientState {
   return {
     narration: [],
     activity: [],
+    activityLog: [],
     files: [],
     todos: [],
     diffs: {},

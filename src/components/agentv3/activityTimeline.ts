@@ -182,6 +182,20 @@ export function actionGroupOpen(userOverride: boolean | null, active: boolean): 
   return userOverride ?? active;
 }
 
+/** Cap on the archived cross-turn activity log (memory bound for very long sessions). */
+export const ACTIVITY_LOG_CAP = 600;
+
+/**
+ * Archive a settled turn's activity into the cross-turn log (admin 2026-07-21 — "diff gayab na ho"):
+ * called by the hook when a NEW build starts, so the previous turn's action rows (files created,
+ * diff stats) stay anchored in the chat instead of vanishing. Entries are deactivated (their build
+ * is over — a spinner would be a lie) and the whole log is capped to the newest entries.
+ */
+export function carryOverActivity(prevLog: ActivityEntry[], prevActivity: ActivityEntry[]): ActivityEntry[] {
+  const settled = prevActivity.map((e) => (e.active ? { ...e, active: false } : e));
+  return [...prevLog, ...settled].slice(-ACTIVITY_LOG_CAP);
+}
+
 /** Detail rows for an expanded group: real entries, minus tool lines that duplicate a file event. */
 export function detailEntries(entries: ActivityEntry[]): ActivityEntry[] {
   const filePaths = new Set<string>();

@@ -18,16 +18,26 @@
 /** A per-file completion line as the engine narrates it: "✓ <path> (n/m)". */
 export const FILE_REVEAL_RE = /^✓ \S+ \(\d+\/\d+\)$/;
 
-/** True for a narration wire event carrying a per-file completion line. */
+/**
+ * True for a wire event that reveals ONE file to the user — paced so files land in the feed
+ * one by one instead of in bursts. Two kinds qualify:
+ *   • the narration completion line "✓ <path> (n/m)" (fast-lane per-file tick), and
+ *   • the `file_changed` event itself (admin 2026-07-21: bulk writes — e.g. write_files_batch
+ *     emitting 10 files in one loop — used to flash all their activity rows at once; pacing the
+ *     event spreads the real rows out one per interval, real names, real order).
+ */
 export function isFileRevealEvent(e: unknown): boolean {
   const ev = e as { type?: string; text?: string } | null;
+  if (ev?.type === 'file_changed') return true;
   return ev?.type === 'narration' && typeof ev.text === 'string' && FILE_REVEAL_RE.test(ev.text.trim());
 }
 
-/** Wire-event types that must always flush the queue and dispatch immediately (build-terminal). */
+/** Wire-event types that must always flush the queue and dispatch immediately: build-terminal
+ * events, plus INTERACTIVE prompts (an approval gate / clarify card pauses or addresses the user —
+ * it must never sit behind presentation pacing). */
 export function isFlushEvent(e: unknown): boolean {
   const t = (e as { type?: string } | null)?.type;
-  return t === 'result' || t === 'done' || t === 'error';
+  return t === 'result' || t === 'done' || t === 'error' || t === 'permission_request' || t === 'clarify';
 }
 
 export interface RevealPacer<E> {

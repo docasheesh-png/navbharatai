@@ -127,6 +127,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [roleBusy, setRoleBusy] = useState(false);
   const roleAbortRef = useRef<AbortController | null>(null);
   const [roleProposedSteps, setRoleProposedSteps] = useState<{ role: 'planner' | 'advisor'; steps: string[] } | null>(null);
+  // Roadmap chip (admin 2026-07-21): the proposed plan/fixes render as a tiny pill above the composer
+  // (never a block over the chat). Open = the expandable sheet; dismissedKey hides a specific proposal
+  // (keyed by its steps) until a NEW one arrives.
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [roadmapDismissedKey, setRoadmapDismissedKey] = useState<string | null>(null);
   // 3 SEPARATE PAGES (admin 2026-07-06): Build / Plan / Advise are 3 tabs, ONE shared session + project
   // memory but their OWN visible thread. The Build tab is the existing thread (userMsgs + agentHistory +
   // live state.narration); Plan/Advise each keep their own messages here so switching tabs shows a
@@ -246,13 +251,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // Composer: auto-growing textarea + expand/minimize + device-aware Enter behaviour.
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExpanded, setComposerExpanded] = useState(false);
-  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build starts; ticks every
-  // second while the premium card is visible. Reset when the build ends so the next starts at 0s.
+  // Fix 60 — Team HQ elapsed clock (Full Team tier): anchored when a build STARTS; ticks every
+  // second while the premium card is visible. FREEZE-ON-STOP (admin 2026-07-21 — "time reset ho
+  // jata hai, error ane par nahi hona chahiye"): the old effect zeroed the clock the moment
+  // `running` flipped false, so an error event wiped the elapsed time on screen. Now the clock
+  // only re-anchors on the false→true transition (a genuinely new build); an error/completion
+  // freezes the last real value instead of erasing it.
   const buildStartRef = useRef<number>(0);
+  const prevRunningRef = useRef(false);
   const [teamElapsedMs, setTeamElapsedMs] = useState(0);
   useEffect(() => {
-    if (!running) { buildStartRef.current = 0; setTeamElapsedMs(0); return; }
-    if (buildStartRef.current === 0) buildStartRef.current = Date.now();
+    const wasRunning = prevRunningRef.current;
+    prevRunningRef.current = running;
+    if (!running) return; // freeze — never zero a real elapsed time on stop/error
+    if (!wasRunning || buildStartRef.current === 0) {
+      buildStartRef.current = Date.now();
+      setTeamElapsedMs(0);
+    }
     if (powerLevel !== 'max') return;
     const t = setInterval(() => setTeamElapsedMs(Date.now() - buildStartRef.current), 1000);
     return () => clearInterval(t);
@@ -558,8 +573,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // install`", real +N/-M from the actual patches) in one glanceable, expandable row, instead of
   // the old flat spam of per-file ticks and ⏱ heartbeats. Pure grouping in activityTimeline.ts.
   // Build actions (activity/diffs) decorate ONLY the Build tab; the read-only Plan/Advise pages render a
-  // clean conversation.
-  const chatBlocks = buildChatBlocks(convo, chatMode === 'build' ? state.activity : [], chatMode === 'build' ? state.diffs : {});
+  // clean conversation. Prior turns' archived activity (activityLog) is included so a finished build's
+  // action rows + diff stats stay in the chat forever within the session (admin 2026-07-21 — no vanish).
+  const chatBlocks = buildChatBlocks(
+    convo,
+    chatMode === 'build' ? [...state.activityLog, ...state.activity] : [],
+    chatMode === 'build' ? state.diffs : {},
+  );
 
   // All checkpoints across the session (prior turns + the live build), deduped by
   // sha so the History tab keeps showing earlier checkpoints across messages.
@@ -2685,7 +2705,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {(running || state.activity.length > 0) && (
-              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+              <WorkingIndicator activity={state.activity} running={running} />
             )}
             {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
                 sensible defaults for these; the user MAY refine any of them with a follow-up message, or
@@ -2717,40 +2737,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 </div>
               </div>
             )}
-            {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
-                app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}
-            {activeProposedSteps && activeProposedSteps.steps.length > 0 && (
-              <div className="px-3 py-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
-                    {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
-                    disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
-                    className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
-                  >
-                    {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
-                  </button>
-                </div>
-                {activeProposedSteps.steps.map((s, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
-                    <button
-                      type="button"
-                      onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
-                      disabled={addedSteps.has(s)}
-                      title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
-                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
-                    >
-                      {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                    </button>
-                    <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
-                  </div>
-                ))}
-                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
-              </div>
-            )}
+            {/* FIX #6 → COMPACT (admin 2026-07-21 — "roadmap screen se hatao, chhota button bana do"):
+                the proposed plan/fixes no longer render as a block here (it used to pin itself after
+                the last AI message and hide the responses). It now lives as a small chip just above
+                the composer — see the sticky footer below. */}
             {billingBlock && (
               // Paid-public (billing PR 5): credits ran out → the build was refused BEFORE it started, so
               // "Fix with AI" (the code-error treatment) would be wrong. This is its own actionable card:
@@ -2958,21 +2948,83 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             {(() => {
               const pending = queueItems.filter((i) => i.status === 'pending').length;
               const runningQ = queueItems.some((i) => i.status === 'running');
-              if (pending === 0 && !runningQ) return null;
+              // Roadmap chip (admin 2026-07-21): the Plan/Advise proposed steps live HERE as a tiny
+              // pill instead of a block glued under the last AI message — zero extra space when absent,
+              // one 6px-tall row when present, chat never hidden.
+              const roadmap = activeProposedSteps && activeProposedSteps.steps.length > 0
+                && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') ? activeProposedSteps : null;
+              if (pending === 0 && !runningQ && !roadmap) return null;
               return (
-                <div className="px-3 pt-1.5 flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
-                    title="This app's command queue — steps run one at a time"
-                    className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
-                  >
-                    <Clock className="w-3 h-3" />
-                    Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
-                  </button>
+                <div className="px-3 pt-1.5 flex items-center gap-1.5">
+                  {roadmap && (
+                    <button
+                      type="button"
+                      onClick={() => setRoadmapOpen((v) => !v)}
+                      title={`${roadmap.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} — tap to review & queue`}
+                      className={`flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold border ${roadmapOpen ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-950/60 border-indigo-800 text-indigo-300 hover:text-white'}`}
+                    >
+                      🗺 {roadmap.role === 'planner' ? 'Plan' : 'Fixes'} · {roadmap.steps.length}
+                    </button>
+                  )}
+                  {(pending > 0 || runningQ) && (
+                    <button
+                      type="button"
+                      onClick={() => { setQueueOpen((v) => !v); void refreshQueue(); }}
+                      title="This app's command queue — steps run one at a time"
+                      className="ml-auto flex items-center gap-1 px-2 h-6 rounded-full text-[10px] font-semibold bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white"
+                    >
+                      <Clock className="w-3 h-3" />
+                      Queue {pending > 0 ? `${pending} pending` : ''}{runningQ ? (pending > 0 ? ' · 1 running' : '1 running') : ''}
+                    </button>
+                  )}
                 </div>
               );
             })()}
+            {/* Roadmap sheet — the proposed steps, expanded ONLY on tap (scrolls internally; the chat
+                behind stays fully visible the rest of the time). Queue-all / per-step add / dismiss. */}
+            {roadmapOpen && activeProposedSteps && activeProposedSteps.steps.length > 0
+              && roadmapDismissedKey !== activeProposedSteps.steps.join('\n') && (
+              <div className="mx-3 mt-1.5 p-2.5 bg-indigo-950/40 border border-indigo-900/60 rounded space-y-1.5 max-h-44 overflow-y-auto">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-300">
+                    {activeProposedSteps.role === 'planner' ? 'Proposed plan' : 'Proposed fixes'} · {activeProposedSteps.steps.length} step{activeProposedSteps.steps.length > 1 ? 's' : ''}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => addStepsToQueue(activeProposedSteps.steps.filter((s) => !addedSteps.has(s)), activeProposedSteps.role)}
+                      disabled={activeProposedSteps.steps.every((s) => addedSteps.has(s))}
+                      className="text-[11px] font-medium text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded px-2 py-0.5"
+                    >
+                      {activeProposedSteps.steps.every((s) => addedSteps.has(s)) ? 'All queued ✓' : 'Queue all'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRoadmapDismissedKey(activeProposedSteps.steps.join('\n')); setRoadmapOpen(false); setRoleProposedSteps(null); }}
+                      title="Dismiss this roadmap"
+                      className="text-zinc-500 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {activeProposedSteps.steps.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
+                    <button
+                      type="button"
+                      onClick={() => addStepsToQueue([s], activeProposedSteps.role)}
+                      disabled={addedSteps.has(s)}
+                      title={addedSteps.has(s) ? 'Queued' : 'Add this step to the build queue'}
+                      className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded border border-indigo-700 text-indigo-300 hover:text-white hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-transparent"
+                    >
+                      {addedSteps.has(s) ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                    </button>
+                    <span className="whitespace-pre-wrap break-words">{i + 1}. {s}</span>
+                  </div>
+                ))}
+                <div className="text-[10px] text-zinc-500">Queued steps run one at a time in the Build chat — you approve, it executes.</div>
+              </div>
+            )}
             {queueOpen && queueItems.length > 0 && (
               <div className="mx-3 mt-1.5 p-2 bg-zinc-900/80 border border-zinc-800 rounded space-y-1 max-h-40 overflow-y-auto">
                 {queueItems.map((item) => (
@@ -3327,7 +3379,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               Same real WorkingIndicator (current action + elapsed + expandable real activity log). */}
           {(running || state.activity.length > 0) && (
             <div className="sm:hidden shrink-0 px-3 py-1.5 border-b border-zinc-800 bg-zinc-950">
-              <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+              <WorkingIndicator activity={state.activity} running={running} />
             </div>
           )}
 
@@ -3880,13 +3932,6 @@ function activityIcon(e: ActivityEntry): string {
   return '⚙️';
 }
 
-function fmtClock(ts: number): string {
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
-}
 
 function fmtElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -3901,23 +3946,17 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, todos, running }: { activity: ActivityEntry[]; todos: TodoItem[]; running: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+function WorkingIndicator({ activity, running }: { activity: ActivityEntry[]; running: boolean }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const mountTsRef = useRef(Date.now());
-  const logRef = useRef<HTMLDivElement | null>(null);
 
-  // Tick the elapsed clock only while running (a finished build's time is frozen).
+  // Tick the elapsed clock only while running. On stop (done OR error) the time FREEZES at the
+  // last real value — it is derived from the activity timestamps, so it can never reset to 0.
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, [running]);
-
-  // Auto-scroll the expanded log to the newest entry (like a terminal/chat).
-  useEffect(() => {
-    if (expanded && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [expanded, activity.length]);
 
   const startTs = activity.length ? activity[0].ts : mountTsRef.current;
   const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
@@ -3925,50 +3964,19 @@ function WorkingIndicator({ activity, todos, running }: { activity: ActivityEntr
 
   // Current action: the newest still-in-flight tool, else the newest entry.
   const current = [...activity].reverse().find((a) => a.active) ?? activity[activity.length - 1];
-  const headText = running
-    ? (current ? current.text : 'working…')
-    : `Done · ${activity.length} step${activity.length === 1 ? '' : 's'}`;
 
-  const doneTodos = todos.filter((t) => t.status === 'done').length;
-
+  // Admin 2026-07-21 ("sari file last me time ke sath dikhane se behatar — chat me hi dikhe; last me
+  // bas time"): the per-step log that used to expand here duplicated the chat's action rows, where
+  // every file already streams live. The indicator is now a single honest line — the live current
+  // action + clock while running, just "Done · <time>" once finished.
   return (
     <div className="text-xs text-zinc-500 w-full max-w-[90%]">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-2 w-full text-left hover:text-zinc-300 transition-colors"
-        aria-expanded={expanded}
-        title={expanded ? 'Hide activity' : 'Show what the build is doing'}
-      >
+      <div className="flex items-center gap-2 w-full text-left">
         {running ? <WavingTiranga size={16} /> : <span className="text-emerald-400">✓</span>}
-        <span className="truncate flex-1">{running && current ? activityIcon(current) + ' ' : ''}{headText}</span>
+        <span className="truncate flex-1">{running ? `${current ? `${activityIcon(current)} ${current.text}` : 'working…'}` : 'Done'}</span>
         {running && current?.active && <span className="inline-block w-1 h-3 bg-current animate-pulse shrink-0" />}
         <span className="shrink-0 tabular-nums text-zinc-600">{elapsed}</span>
-        {activity.length > 0 && (expanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />)}
-      </button>
-
-      {expanded && activity.length > 0 && (
-        <div className="mt-1.5 ml-1 border-l border-zinc-800 pl-2.5">
-          <div ref={logRef} className="max-h-52 overflow-auto space-y-1 pr-1">
-            {activity.map((a) => (
-              <div key={a.id} className="flex items-start gap-2 leading-relaxed">
-                <span className="text-zinc-600 tabular-nums shrink-0">{fmtClock(a.ts)}</span>
-                <span className="shrink-0">{activityIcon(a)}</span>
-                <span className={`flex-1 break-words ${a.active ? 'text-zinc-300' : a.ok === false ? 'text-red-400' : 'text-zinc-500'}`}>
-                  {a.text}
-                  {a.active && <span className="inline-block w-1 h-3 ml-1 bg-current animate-pulse align-middle" />}
-                  {!a.active && a.ok === false && ' ✗'}
-                </span>
-              </div>
-            ))}
-          </div>
-          {todos.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-zinc-800 text-zinc-600">
-              Tasks: {doneTodos}/{todos.length} done
-            </div>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

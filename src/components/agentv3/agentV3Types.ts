@@ -80,6 +80,9 @@ export type AgentV3WireEvent =
   // A read-only role chat (planner/advisor) proposed concrete build steps — shown for the USER to
   // approve into the executor's queue (never auto-enqueued).
   | { type: 'proposed_steps'; role: 'planner' | 'advisor'; steps: string[]; ts: number }
+  // ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for — shown as a
+  // dismissible card the user MAY answer via a follow-up; the build never waits for it.
+  | { type: 'clarify'; domain: string; questions: string[]; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   | { type: 'error'; message: string; ts: number; diagnostics?: unknown }
   | { type: 'result'; ok: boolean; summary: string; steps: number; billedUsd: number; billedInr?: number; costBreakdown?: CostBreakdown; diagnostics?: unknown; resumable?: boolean; budgetReached?: boolean; tokens?: number; planRemaining?: number; filesWritten?: number; walletTokensDebited?: number; walletTokenBalance?: number; readiness?: BuildHealth; buildId?: string; promptHash?: string };
@@ -154,6 +157,9 @@ export interface AgentV3ClientState {
   /** Steps a read-only role chat (planner/advisor) proposed this turn — the user approves them into
    *  the executor's queue via the queue UI (never auto-enqueued). */
   proposedSteps?: { role: 'planner' | 'advisor'; steps: string[] };
+  /** ASK-USER (opt-in): non-blocking clarifications the engine assumed defaults for on a fresh domain
+   *  build — the panel shows a dismissible card; the build never waits for an answer. */
+  pendingClarify?: { domain: string; questions: string[] };
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The sandbox workspace id for this build (enables History → restore). */

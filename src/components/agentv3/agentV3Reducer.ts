@@ -206,6 +206,10 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
     case 'proposed_steps':
       return { ...state, proposedSteps: { role: event.role, steps: event.steps } };
 
+    case 'clarify':
+      // Non-blocking: just record the questions for the panel to surface. The build keeps streaming.
+      return { ...state, pendingClarify: { domain: event.domain, questions: event.questions } };
+
     case 'permission_request':
       return {
         ...state,

@@ -20632,3 +20632,46 @@ and append on an empty file. Full ToolDispatcher suite green (153), server tsc c
 **Also noted (self-healed, not this PR):** another tool-call JSON truncation ("Unterminated string in JSON at
 position 65536" = a 64 KB tool-arg cut-off) and a sandbox recycle (27 files restored from the durable store)
 — both recovered; the truncation-class prevention (chunked large writes) remains the larger open item.
+
+---
+
+## 2026-07-21 — PREVIEW TAKEOVER bug: NavBharatAI Pro v5.0 showing INSIDE the in-browser preview
+
+**Report (admin, screenshot + description):** on 2-3 recent builds the In-browser preview intermittently
+showed **"NavBharatAI Pro v5.0" (the platform app itself) INSIDE the preview** instead of the built app.
+Correlated with a "multi-tenant SaaS admin dashboard" (login/role-gated) prompt. The build report cannot
+capture it (it is a client-side preview-rendering issue; `previewErrors: 0`).
+
+**Root cause (found in code):** the in-browser preview renders the generated app in a **same-origin
+`<iframe srcDoc>`** (`allow-same-origin` is required so the app's dynamic `import()` of the CDN React build
+works). A srcdoc document inherits the PARENT (platform) document's URL as its base — so an ABSOLUTE
+navigation inside the generated app (`location.assign('/')`, an auth/role redirect, `<a href="/login">`, a
+GET form to `/`) resolves to the **NavBharatAI platform origin** and loads the platform SPA (NavBharatAI Pro
+v5.0) INTO the preview iframe. Intermittent by nature — only apps that redirect (login/auth/role-gated
+dashboards) trigger it, which is exactly the SaaS-dashboard case.
+
+**Fix:** new pure module `src/server/runtime/previewNavGuard.ts` + wired into the single preview choke point
+`renderPreview()` (covers React + Vue + static). `injectPreviewNavGuard(html)` injects a tiny, best-effort,
+idempotent `<script>` at the top of every preview document that neutralizes exactly the cross-document
+navigations to the PLATFORM origin: it overrides `location.assign`/`replace` and intercepts `<a>` clicks +
+GET form submits whose target is a same-origin DIFFERENT document. In-page hash navigation, client routing
+via `history.pushState`, same-document, and any external-origin link are all left untouched. The decision is
+a pure, unit-tested `shouldBlockPreviewNav(target, baseUri, origin)` mirrored by the runtime script.
+
+**Tests:** 12 cases in `previewNavGuard.test.ts` — blocks `/`, `/login`, absolute platform URLs; allows
+hash changes, same-document, external sites; injection placement/idempotency/no-op; script contents. Server
+tsc clean, frontend tsc clean, runtime suite green.
+
+**Honest bound (rule 6):** the guard cannot intercept a DIRECT `window.location.href = '/'` setter (the
+`location` object is not reconfigurable) — the one residual escape. Complete isolation is the cross-origin
+preview (`VITE_PREVIEW_ORIGIN`), where `/` resolves to the empty preview origin, not the platform; this guard
+is the same-origin mitigation covering the common redirect mechanisms.
+
+## 2026-07-21 — SaaS-dashboard "continue" build report (0eefd4f8) autopsy — no NEW root cause
+
+A separate report the admin sent alongside the preview bug: a **"continue"** build (`ok:None`, weak/free
+tier GLM→Haiku) that was actually editing a RESTAURANT app (Menu/Orders/useOrders — a different workspace
+than the SaaS prompt shown). 5 unresolved = cheap-model tool-use flails (1 no-arg tool call, 4 `edit_file`
+old_string-not-found) — all already carry good steering messages and self-heal via retry; plus a
+self-healed sandbox recycle (32 files restored from the durable store). No new fixable root cause — an
+incomplete cheap-tier continue, not an engine defect.

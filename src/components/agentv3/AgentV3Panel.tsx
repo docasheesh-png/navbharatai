@@ -10,6 +10,7 @@ import {
   Star, Search,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { HostingChooser } from './HostingChooser';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -1894,6 +1895,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
+  const [showHostingChooser, setShowHostingChooser] = useState(false);
 
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
   useEffect(() => {
@@ -2345,6 +2348,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
+      {showHostingChooser && (
+        <HostingChooser
+          providers={configuredProviders}
+          busy={running}
+          onClose={() => setShowHostingChooser(false)}
+          onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
+        />
+      )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
@@ -2526,31 +2537,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}
-          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL.
-              When more than one hosting provider is configured, a chooser lets the user pick
-              WHERE to deploy (no lock-in); with only one, the button alone keeps it simple. */}
-          {configuredProviders.length > 1 && (
-            <select
-              value={deployProvider}
-              onChange={(e) => setDeployProvider(e.target.value)}
-              disabled={running}
-              title="Choose where to deploy (no lock-in)"
-              className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-            >
-              {configuredProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          )}
+          {/* R5 §5.1 + Hosting Phase 1 — one "Publish" button opens the Hosting chooser: host on
+              NavBharatAI (our free one-click hosting) OR bring your own provider (no lock-in). */}
           <button
-            onClick={deployLive}
+            onClick={() => setShowHostingChooser(true)}
             data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Rocket className="w-3.5 h-3.5" />
-            Deploy
+            Publish
           </button>
           {liveUrl && (
             <a
@@ -3595,29 +3592,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
                 )}
-                {configuredProviders.length > 1 && (
-                  <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200">
-                    <Rocket className="w-4 h-4 shrink-0 text-emerald-400/70" />
-                    <span className="flex-1 text-left">Deploy to</span>
-                    <select
-                      value={deployProvider}
-                      onChange={(e) => setDeployProvider(e.target.value)}
-                      disabled={running}
-                      className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-                    >
-                      {configuredProviders.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
                 <button
-                  onClick={() => { setMobileSheet(null); deployLive(); }}
+                  onClick={() => { setMobileSheet(null); setShowHostingChooser(true); }}
                   disabled={running || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
-                  <span className="flex-1 text-left">Deploy — publish to a permanent live URL</span>
+                  <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
                 </button>
                 {liveUrl && (
                   <a

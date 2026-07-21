@@ -660,8 +660,18 @@ export class BuildDiagnostics {
         // failure phrase can classify a narration as a problem.
         const tForMatch = t.replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
           .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
-        if (statusLike && /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch)) {
-          this.record({ phase: 'build', severity: /\b(error|failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch) ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
+        const problemWord = /\b(error|failed|cannot|could not|not responding|isn'?t available|unavailable|retry|retrying|stuck|timed out|blocked request|closed port|won'?t come up|no files|warning)\b/i.test(tForMatch);
+        // A genuine FAILURE VERB (not the bare noun "error") is what makes a note a real problem — and an
+        // ERROR-severity one. "error"/"errors" as a NOUN the agent is working on is not itself a failure.
+        const failureVerb = /\b(failed|cannot|could not|unavailable|timed out)\b/i.test(tForMatch);
+        // REMEDIATION INTENT is progress, not a failure (PaisaTrack "fix all error" autopsy 2026-07-21:
+        // "Now I'll fix both errors: … Fix the TypeScript type error" was recorded severity=error on a
+        // SUCCESSFUL build, inflating the count to "1 error" under an "All Errors Fixed!" summary). When a
+        // note is the agent fixing/removing/resolving something and carries NO real failure verb, it is a
+        // build STEP, not a problem.
+        const remediationIntent = /\b(fix(?:ing|ed|es)?|remov(?:e|es|ing|ed)|resolv(?:e|es|ing|ed)|correct(?:s|ing|ed)?|clean(?:s|ing|ed)?\s+up|delet(?:e|es|ing|ed))\b/i.test(tForMatch);
+        if (statusLike && problemWord && !(remediationIntent && !failureVerb)) {
+          this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });
         } else {
           this.record({ phase: 'build', severity: 'info', code: 'AGENT_STEP', message: t.slice(0, 400), autoResolved: true });
         }
@@ -701,15 +711,31 @@ export class BuildDiagnostics {
     }
     this.pending.clear();
     // When the build ULTIMATELY SUCCEEDED, any intermediate failure it recovered from is resolved by
-    // definition. TOOL_ERROR / nudge / empty-retry were already back-filled; SANDBOX_CMD_FAILED must be
-    // too (PaisaTrack autopsy 2026-07-19: 6 intermediate `tsc → exit -1` failures the agent then FIXED —
-    // the final tsc passed — still showed as "6 unresolved" on an ok:true build, a false verdict).
-    for (const issue of this.issues) {
-      if ((issue.code === 'TOOL_ERROR' || issue.code === 'NO_BUILD_NUDGE' || issue.code === 'EMPTY_BUILD_RETRY' || issue.code === 'SANDBOX_CMD_FAILED') && ok) {
-        issue.autoResolved = true;
-      }
-    }
+    // definition (see resolveRecoveredOnSuccess). This is also applied at serialization time (toReport),
+    // so a finalize path that bypasses finish() still yields an honest report.
+    this.resolveRecoveredOnSuccess();
     this.notify();
+  }
+
+  /**
+   * Mark every RECOVERABLE-ON-SUCCESS issue (a failed tool call, a "no build" nudge, an empty-build
+   * retry, a sandbox command that exited non-zero) as resolved WHEN the build ultimately succeeded —
+   * because a successful build recovered from them by definition. Idempotent and gated on ok, so it is
+   * safe to run more than once and at serialization time.
+   *
+   * ROOT CAUSE this centralization closes (PaisaTrack "fix all error" autopsy 2026-07-21): the build
+   * SUCCEEDED (app live, `ok:true`) yet the downloaded report showed "3 unresolved" TOOL_ERRORs (a
+   * truncated large tool-call — "Unterminated string in JSON" — and two benign `npm run build | grep -i
+   * error` exit-1 no-match probes) AND named one of them as the build's `rootCause`. The one-shot
+   * back-fill in finish() had not taken effect for that serialized report (a finalize path bypassed it).
+   * Making the truth a property of SERIALIZATION, not a single mutation, guarantees a successful build
+   * never reports a recovered transient as an unresolved failure or as its root cause.
+   */
+  private resolveRecoveredOnSuccess(): void {
+    if (this.ok !== true) return;
+    for (const issue of this.issues) {
+      if (isRecoverableOnSuccess(issue.code)) issue.autoResolved = true;
+    }
   }
 
   /**
@@ -791,6 +817,9 @@ export class BuildDiagnostics {
   }
 
   report(): BuildDiagnosticsReport {
+    // Normalize recovered-on-success issues at SERIALIZATION time, so counts, issues[] and the derived
+    // rootCause are all consistent even when a finalize path bypassed finish()'s back-fill. Idempotent.
+    this.resolveRecoveredOnSuccess();
     const errors = this.issues.filter((i) => i.severity === 'error').length;
     const warnings = this.issues.filter((i) => i.severity === 'warning').length;
     const autoResolved = this.issues.filter((i) => i.autoResolved).length;
@@ -953,6 +982,20 @@ export function isTestOnlyTypecheckFailure(command: string, stdout?: string, std
   return paths.every(isTestFilePath);                               // excuse ONLY if every one is a test file
 }
 
+/**
+ * Codes for an intermediate failure the agent USUALLY RECOVERS FROM — a failed tool call, a "no build"
+ * nudge, an empty-build retry, or a sandbox command that exited non-zero. On a build that ULTIMATELY
+ * SUCCEEDED these are resolved by definition, so they must not be counted as unresolved or chosen as the
+ * root cause. Single source of truth shared by the finish() back-fill, the serialization normalization,
+ * and deriveRootCause — so all three agree. Pure.
+ */
+const RECOVERABLE_ON_SUCCESS: ReadonlySet<string> = new Set([
+  'TOOL_ERROR', 'NO_BUILD_NUDGE', 'EMPTY_BUILD_RETRY', 'SANDBOX_CMD_FAILED',
+]);
+export function isRecoverableOnSuccess(code: string): boolean {
+  return RECOVERABLE_ON_SUCCESS.has(code);
+}
+
 export function deriveRootCause(input: {
   issues: readonly BuildIssue[];
   errors?: readonly CapturedError[];
@@ -970,6 +1013,10 @@ export function deriveRootCause(input: {
   // Sandbox-unavailability is INFRA, never the app's fault — exclude it from the app-problem pick so a
   // dead sandbox can't masquerade as "tsc failed" (ShopSphere autopsy). It is surfaced honestly below.
   const isInfra = (i: BuildIssue): boolean => i.code === 'SANDBOX_UNAVAILABLE';
+  // On a SUCCESSFUL build a recovered-transient (TOOL_ERROR / retry / non-zero sandbox probe) is NOT the
+  // root cause — the build recovered from it (PaisaTrack "fix all error" autopsy 2026-07-21: an ok:true
+  // build reported "Unterminated string in JSON" as its rootCause). Exclude those on ok:true.
+  const excluded = (i: BuildIssue): boolean => isInfra(i) || (ok === true && isRecoverableOnSuccess(i.code));
   // Pick the TERMINAL cause, not merely the FIRST noisy one. An unresolved ERROR outranks an unresolved
   // WARNING even when the warning appears earlier in the timeline (EstateNest autopsy 2026-07-20: two
   // benign architect `read_file`-not-found WARNINGS — reading a file before it was written, build
@@ -977,10 +1024,12 @@ export function deriveRootCause(input: {
   // old first-match order blamed "useAuth.ts does not exist" instead of the database. Severity now leads
   // the pick so the report names the real killer.)
   const problem =
-    issues.find((i) => i.severity === 'error' && !i.autoResolved && !isInfra(i))
-    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !isInfra(i))
-    ?? issues.find((i) => i.severity === 'error' && !isInfra(i))
-    ?? issues.find((i) => i.severity !== 'info' && !isInfra(i));
+    issues.find((i) => i.severity === 'error' && !i.autoResolved && !excluded(i))
+    ?? issues.find((i) => i.severity !== 'info' && !i.autoResolved && !excluded(i))
+    // The autoResolved-INCLUSIVE fallbacks exist only to surface SOMETHING on a build that did NOT
+    // succeed; a successful build must never report a recovered/auto-resolved item as its root cause.
+    ?? (ok === true ? undefined : (issues.find((i) => i.severity === 'error' && !excluded(i))
+      ?? issues.find((i) => i.severity !== 'info' && !excluded(i))));
   if (problem) return problem.message;
   if (ok === true) return 'Build completed successfully with no problems recorded.';
   // No app-level problem was captured, but the sandbox went away mid-build → name the infra honestly

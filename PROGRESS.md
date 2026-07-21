@@ -20373,3 +20373,49 @@ Final push of the signature-`method` rollout on the EXPERT_METHOD_LAYER foundati
 - **Batch 6 (service/utility/misc, 18):** driving, homerepair, vehicle, sports, events, productivity, relationship, disability, techbuy, translate, babynames, astronomy, disaster, environment, festival, hygiene, safety, volunteer.
 
 **MILESTONE: every config-driven professional (Teacher + 72) now works like a top expert with a real, step-by-step signature method** — e.g. Lawyer=IRAC, CA=classify→provision→worked-calc, Kisan=agronomy+IPM, Astrologer=entertainment-framed+free-will, Safety=empower-not-fearmonger, Translate=meaning-not-word-for-word. Each method also bakes in the domain's safety boundaries and honesty rules (medical→doctor, legal→advocate, no fabrication, no dose/diagnosis, scam warnings). All 72 carry a `method` field; Teacher keeps its inline concept-mastery method. The test is REGISTRY-WIDE: every professional must have a deep method or CI fails, so the invariant can't regress. Gate: frontend tsc ✅, server tsc ✅, vitest 6921 ✅. Combined with the earlier work, every professional is now a real personal AI agent (memory + intake) AND a real expert (depth + signature method).
+
+---
+
+## 2026-07-21 — PaisaTrack "fix all error" autopsy: a SUCCESSFUL build must never report false failures (honesty DNA fix)
+
+**Report:** PaisaTrack (expense tracker), prompt "fix the all error", free/weak tier (GLM+Kimi, noClaude).
+The build **SUCCEEDED** — app live at the e2b URL, `ok:true`, summary "✅ All Errors Fixed!". YET the
+downloaded diagnostics report was dishonest:
+- `rootCause: "Tool call failed: Unterminated string in JSON at position 98299"` — a truncated large
+  tool-call the agent RETRIED and recovered from, wrongly named as the build's root cause on a *successful*
+  build.
+- `counts.unresolved: 3` — the truncated tool-call plus two benign `npm run build | grep -i error` exit-1
+  probes (grep exit 1 = "no errors found" = SUCCESS), all shown as unresolved failures.
+- `counts.errors: 1` — the narration "Now I'll fix both errors: … fix the TypeScript type error" recorded
+  severity=error because the bare noun "error" matched, inflating a clean build to "1 error".
+
+**5-bucket ledger:** ✅ self-healed: 130 (incl. the retried truncated tool-call, the sandbox data-loss
+restore of 20 files from the durable store). 🔀 worked-around: the flagship-vs-cheap provider fallbacks
+(12 GLM failures → Kimi/retry) — normal resilience. ⏭️ skipped: 0. ❌ still-broken **in the app**: 0 — the
+app works. The real defects were all in the **report's honesty**, exactly the class rule 5 targets.
+
+**Missing subsystem:** the "recovered-on-success" truth lived only in a one-shot `finish()` back-fill that a
+finalize/serialize path could bypass — so it was not a guaranteed property of the report.
+
+**Root-cause fix (DNA, single source of truth):**
+- New exported `isRecoverableOnSuccess(code)` + `RECOVERABLE_ON_SUCCESS` set (TOOL_ERROR / NO_BUILD_NUDGE /
+  EMPTY_BUILD_RETRY / SANDBOX_CMD_FAILED) — shared by all three consumers so they can never disagree.
+- `resolveRecoveredOnSuccess()` now runs at **serialization time** (inside `report()`), not only in
+  `finish()` — idempotent, gated on `ok===true` — so counts, `issues[]` and the derived root cause are
+  honest even when a finalize path skips `finish()` (the exact bug that produced this report).
+- `deriveRootCause` is now **ok-aware**: on `ok:true` it excludes recovered-on-success codes AND never uses
+  the autoResolved-inclusive fallbacks, so a successful build reports "Build completed successfully" instead
+  of a recovered transient. A GENUINE unresolved non-recoverable error (e.g. DB_UNREACHABLE) still wins.
+- Narration classifier: a **remediation** note ("Now I'll fix…", "Removed the unused import") with no real
+  failure verb is now an info AGENT_STEP, not a severity=error AGENT_NOTE; the bare noun "error" no longer
+  forces error severity (only a real failure verb does).
+
+**Regression tests:** 12 new cases in `BuildDiagnostics.test.ts` — the exact PaisaTrack inputs (ok:true +
+"Unterminated string in JSON" + exit-1 → 0 unresolved, success root cause), the bypassed-finalize
+serialization path, a genuine error still winning on ok:true, ok-undefined/false behaviour unchanged, and
+the remediation-narration downgrade. Full AgentV3 suite green (3676), frontend + server tsc clean.
+
+**Noted (not this PR — self-healed, larger effort):** the underlying 🥵 struggle was a ~98KB single
+tool-call argument hitting max_tokens ("Unterminated string in JSON"), driving 12 GLM failures before the
+retry recovered. Preventing it (chunked large-file writes / lower per-call file size) is a separate,
+larger engine change; the honesty fix above ensures it is always reported truthfully meanwhile.

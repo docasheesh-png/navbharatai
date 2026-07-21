@@ -1285,6 +1285,28 @@ describe('applyEdit (edit_file matching with whitespace-tolerant fallback)', () 
     expect(() => applyEdit('dup\ndup', 'dup', 'x')).toThrow(/not unique/);
   });
 
+  // Connectly Edit #1 autopsy 2026-07-21: the model called edit_file with an EMPTY old_string to ADD
+  // styles to Navbar.css. An empty string matches at every position → the old code threw
+  // "not unique (1377 matches)" and the model flailed read→append for turns. Empty = append.
+  it('APPENDS when old_string is empty (adds new_string to the end, with a separating newline)', () => {
+    const r = applyEdit('.navbar { color: red; }', '', '\n.avatar { width: 32px; }');
+    expect(r.updated).toBe('.navbar { color: red; }\n\n.avatar { width: 32px; }');
+    expect(r.matchedOld).toBe('');
+    expect(r.note).toMatch(/append/i);
+  });
+
+  it('empty old_string never throws "not unique" (the exact Connectly failure)', () => {
+    expect(() => applyEdit('a'.repeat(1377), '', 'X')).not.toThrow();
+  });
+
+  it('append on a file already ending in newline does not double the newline', () => {
+    expect(applyEdit('body {}\n', '', 'h1 {}').updated).toBe('body {}\nh1 {}');
+  });
+
+  it('append on an empty file is just the new content', () => {
+    expect(applyEdit('', '', 'first content').updated).toBe('first content');
+  });
+
   it('falls back to a whitespace-flexible match when exact fails', () => {
     // File has single-space indent; supplied old_string has different spacing.
     const file = 'if (a) {\n  doThing();\n}';

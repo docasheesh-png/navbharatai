@@ -174,6 +174,7 @@ import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
 import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
 import { generateGiftCardsIntegration } from '../lib/GiftCardsGenerator';
 import { generateTeamsIntegration } from '../lib/TeamsGenerator';
+import { generateStatusPageIntegration } from '../lib/StatusPageGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4066,6 +4067,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('teams starter');
         const tmDeps = tmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a teams / workspaces backend:\n${tmWritten.join('\n')}\nAdd the dependencies: ${tmDeps}\n\n${tmcfg.instructions}`;
+      }
+
+      case 'generate_status_page': {
+        // Breadth recipe (domain vertical) — public status page (server/status/): a real StatusPageService whose
+        // core guarantee is DERIVED OVERALL STATUS (worst component status) + an APPEND-ONLY INCIDENT TIMELINE
+        // (a resolved incident can't be updated) + an Express router. Pure gen in StatusPageGenerator.ts.
+        const spcfg = generateStatusPageIntegration();
+        const spWritten: string[] = [];
+        for (const [path, content] of Object.entries(spcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          spWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('status page starter');
+        const spDeps = spcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a public status-page backend:\n${spWritten.join('\n')}\nAdd the dependencies: ${spDeps}\n\n${spcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

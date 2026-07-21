@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   siteIdForWorkspace,
   normalizeDomain,
   customDomainRecords,
   customDomainStatus,
+  firebaseCustomDomainsEnabled,
 } from './firebaseCustomDomain';
 
 describe('firebaseCustomDomain — pure helpers', () => {
@@ -80,6 +81,26 @@ describe('firebaseCustomDomain — pure helpers', () => {
 
     it('returns [] when there are no required updates', () => {
       expect(customDomainRecords({ customDomainId: 'x.com' })).toEqual([]);
+    });
+  });
+
+  describe('firebaseCustomDomainsEnabled', () => {
+    const prev = process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS;
+    afterEach(() => {
+      if (prev === undefined) delete process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS;
+      else process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS = prev;
+    });
+    it('is OFF by default and for falsy values', () => {
+      delete process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS;
+      expect(firebaseCustomDomainsEnabled()).toBe(false);
+      process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS = 'off';
+      expect(firebaseCustomDomainsEnabled()).toBe(false);
+    });
+    it('is ON only for on/true/1', () => {
+      for (const v of ['on', 'true', '1', 'ON', 'True']) {
+        process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS = v;
+        expect(firebaseCustomDomainsEnabled()).toBe(true);
+      }
     });
   });
 

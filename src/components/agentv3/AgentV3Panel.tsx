@@ -579,6 +579,25 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       setUnsending(false);
     }
   };
+  // EDIT (Slice 2) — take the message back (same full purge as Unsend) AND drop its text into the
+  // composer so the user can re-write and send again. Only prefill on a genuine purge, so a failed
+  // take-back can't leave the message both in the thread AND in the composer.
+  const handleEdit = async (ts: number, text: string) => {
+    if (unsending) return;
+    setUnsending(true);
+    try {
+      let purged = true;
+      if (state.workspaceId) purged = await unsend();
+      else stop();
+      if (!purged) return; // keep the message; never a fake "edited"
+      setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
+      setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
+      setPrompt(text); // load the taken-back text back into the composer to re-write
+      setTimeout(() => composerRef.current?.focus(), 0);
+    } finally {
+      setUnsending(false);
+    }
+  };
 
   // Auto-scroll the chat to the newest message.
   useEffect(() => {
@@ -2548,12 +2567,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
               </div>
             )}
-            {chatBlocks.map((b) => b.kind === 'msg'
-              ? <Bubble key={b.key} msg={b.msg}
-                  onUnsend={lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending
-                    ? () => { void handleUnsend(b.msg.ts); }
-                    : undefined} />
-              : <ActionGroupRow key={b.key} block={b} />)}
+            {chatBlocks.map((b) => {
+              if (b.kind !== 'msg') return <ActionGroupRow key={b.key} block={b} />;
+              const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
+              return <Bubble key={b.key} msg={b.msg}
+                onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}
+                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined} />;
+            })}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
             )}
@@ -3854,16 +3874,16 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
-function Bubble({ msg, onUnsend }: { msg: ChatMsg; onUnsend?: () => void }) {
+function Bubble({ msg, onUnsend, onEdit }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void }) {
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
         <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
         </div>
-        {/* Copy / fold on every user message; Unsend attaches ONLY to the LAST user message (slice 2). */}
+        {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
-          <MessageActions text={msg.text} onUnsend={onUnsend} />
+          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} />
         </div>
       </div>
     );

@@ -3,6 +3,7 @@ import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, ve
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -8084,6 +8085,23 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ A syntax error remains in the final build — the app won't compile yet. Your files are saved; send a follow-up and I'll finish the fix.`, ts: Date.now() });
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
+      }
+
+      // AP-4 slice 1 (read-only): record the frontend/backend file partition as an admin advisory. This
+      // writes nothing and parallelizes nothing — it is the load-bearing evidence for a future, flag-gated
+      // parallel FE/BE build (safe only when the two sides own DISJOINT files). Best-effort; never affects
+      // the build. `partitionable` on real builds is the signal that unblocks the next slice.
+      if (result && result.ok && writtenFiles.size > 0) {
+        try {
+          const fbPart = partitionFrontendBackend([...writtenFiles.keys()]);
+          buildDiag.record({
+            phase: 'build',
+            severity: 'info',
+            code: 'FE_BE_PARTITION',
+            message: partitionSummary(fbPart),
+            autoResolved: true,
+          });
+        } catch { /* partition analysis is best-effort — never blocks a build */ }
       }
 
       // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED

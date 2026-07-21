@@ -1137,6 +1137,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_hospital_erp',
+      description:
+        'Add a real Hospital-ERP / EMR backend to the app (server/hospital/) — a packaged domain vertical for a ' +
+        'clinic or hospital. THREE real guarantees: (1) NO DOUBLE-BOOKING — bookAppointment() rejects any ' +
+        'appointment overlapping an existing non-cancelled one for the same doctor (router → 409); (2) RBAC — a ' +
+        'role→permission matrix gates patient-record writes (admin/doctor/nurse write, receptionist read-only; ' +
+        '403 on a blocked write); (3) AUDIT — every record write appends an immutable audit entry. Emits a ' +
+        'dependency-free HospitalService (patients, encounter notes, appointments, audit trail) + an Express ' +
+        'router (GET/POST /patients, GET /patients/:id, GET/POST /patients/:id/notes, GET/POST /appointments → ' +
+        '409 on double-book, PATCH /appointments/:id/status, GET /audit) + a README. In-memory by default — swap ' +
+        'the Maps for your DB. Pairs with the auth/RBAC/audit recipes. Use for hospital / clinic / EMR prompts.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_events',
       description:
         'Add a real events / RSVP backend to the app (server/events/) — a packaged domain vertical for meetups, ' +
@@ -2748,6 +2762,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_booking',
   'generate_inventory',
   'generate_crm',
+  'generate_hospital_erp',
   'generate_events',
   'generate_subscriptions',
   'generate_polls',

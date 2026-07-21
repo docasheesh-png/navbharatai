@@ -20774,3 +20774,30 @@ replaceState. Server + frontend tsc clean, runtime suite green.
 **Missing subsystem:** a "dependency-tree integrity guard during a build" — nothing stopped a destructive dep mutation from breaking a working preview.
 
 **DNA fix (PR — this change):** new pure, unit-tested `src/server/AgentV3/DependencyMutationGuard.ts`, wired into the ToolDispatcher `bash` case (before the risk classifier, after destructive-source). BLOCKS during a build: the `npm/pnpm/yarn/bun audit fix` family (with or without `--force`), and installing a CORE tool (vite/react/react-dom/typescript/next/@vitejs/plugin-react/@types…) at a MOVING tag (`@latest`/`@next`/`@canary`/…). Zero false positives — normal installs, pinned numeric versions, `npm ci`, read-only `npm audit`, non-core `@latest` all pass. The blocked agent gets an actionable redirect ("preview sandbox — audits don't apply; keep pinned versions; install only the missing package"). 11 regression tests lock the exact failure + siblings + boundaries. Sibling coverage: origin is the agent's own `bash` tool call (ToolDispatcher choke point); route `fast-install`/`fast-reconcile` also flow through it. (Open/secondary: the Team-page non-convergence loop is bounded only by the generic `AGENTV3_MAX_BUILD_SECONDS` + step budget, not a dependency-aware loop-breaker — recorded for a later slice.)
+
+---
+
+## 2026-07-21 — Roadmap conveyor resumes: false-success verdict (restored note) + Hospital-ERP recipe
+
+**(a) False-success verdict fix — MERGED as PR #1812** (note restored; the entry was dropped from the
+branch to break a PROGRESS.md merge-race, the code+tests merged intact). Root cause from a real free-tier
+"fix network error" build: the engine cached the architect's optimistic `ok:true` / "console clean"
+BEFORE the reviewer ran; the reviewer then found 2 CRITICALs (a placeholder API URL = the reported network
+error + a wrong null-check) and the C9 auto-fix was cut off mid-repair by the 120s advisory cap — so a
+broken app shipped `ok:true` and was BILLED ₹125. Fix: a shared `reviewCriticalsUnresolved` holder (set
+on reviewer criticals, cleared only on a verified fix) makes BOTH exits (deadline finalizer + normal
+settle) honest — `ok:false` + honest summary + FREE via the "working app or free" guard + resumable so the
+next window fixes it. SIBLING fixed same PR: a FINAL build that doesn't compile (`OUTCOME_SYNTAX_ERROR`)
+now also flips `ok:false` + free (`finalSyntaxErrorSummary`) instead of billing a non-compiling app.
+
+**(b) Hospital-ERP / EMR domain recipe (`generate_hospital_erp`, `HospitalErpGenerator.ts`)** — roadmap
+remaining #12 (packaged domain verticals; CRM already shipped). A real, dependency-free
+`server/hospital/` starter with THREE testable guarantees: (1) no doctor double-booking (409, a cancelled
+appt frees the slot), (2) RBAC on patient-record writes (admin/doctor/nurse write, receptionist
+read-only; 403), (3) immutable audit log on every write. Wired as a tool + KB entry; 7 unit tests execute
+the emitted domain logic (CRM-recipe pattern). Server tsc + ToolCatalog/Dispatcher (154) green.
+
+**Roadmap honesty correction (rule 3):** "more framework languages" (Rust/Ruby/PHP/C++) is
+**reclassified 🔒 blocked** — the fullstack E2B template has Node/Python/Java/Go runtimes ONLY, so those
+frameworks can't actually run in the sandbox; adding them would be a fake feature. Needs the template
+rebuilt+republished with the runtimes (admin infra). Recorded in `ROADMAP_REMAINING.md`.

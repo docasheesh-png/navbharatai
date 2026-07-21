@@ -20071,3 +20071,44 @@ HealthRegistry}` pipeline; `routes/appmaker.ts` + `routes/products.ts` + `contro
 - **Big apps:** `AGENTV3_BLUEPRINT=on` (coherence; simple apps skip it, so no waste).
 - Only `STREAMING_PREVIEW` gave *speed*; heal/vaccine/redteam trade a little time for *reliability* — they serve
   the "100% preview / error-proof" half of the goal, not the "faster" half (that's the Speed-2.0 plan's pillars).
+
+---
+
+## 2026-07-21 — Session milestone: message-actions, security/cost analyzers, requirement breadth, resume + parallelism groundwork
+
+A continuous branch → gate → PR → CI-green → merge conveyor. Every item below is real, fully wired,
+unit-tested, and shipped through the normal cycle (no half-work; two absolute rules held).
+
+**Merged this session:**
+1. **Unsend + Edit (#1767)** — take back / re-write the LAST message, purged across ALL memory layers.
+   New pure `unsend.ts` (`unsendKeepCount`/`isUserPromptMessage`, correctly skips tool_result `user`
+   turns) + owner-guarded `POST /api/agentv3/unsend` that stops any in-flight build, truncates the
+   durable transcript, and purges the workspace episodic-memory turn. Client: ✕ Unsend + ✏️ Edit on the
+   newest user message (Edit reloads the text into the composer). Files are NOT rolled back (honest scope;
+   Git/History checkpoints do that). End-to-end test proves the message is gone from transcript AND recall.
+2. **SRI analyzer (#1769)** — `SriAnalysis.ts` flags a third-party `<script src=https://cdn…>` without an
+   `integrity=` hash (supply-chain gap the server-header analyzer doesn't cover). High-precision (scripts
+   only, absolute cross-origin only), advisory-only in the `evaluate` suite.
+3. **Cap-4 cost-alert (#1771)** — `costAlert.ts` + report wire: an admin-only, env-gated (`AGENTV3_COST_ALERT_USD`,
+   default off) "⚠️ COST ALERT" line when a build's charge crosses a threshold. Additive — never changes
+   billing (moat: billing honesty untouched); admin-only via the report's billing block.
+4. **AP-3 slice 1 (#1773)** — cross-restart resume: an honest "this build didn't finish" banner + one-click
+   Continue on reopen, driven by durable `status==='running'` + no live build (`isUnfinishedBuild`, pure +
+   tested). Zero change to the build loop / SIGTERM / billing — the AgentRunner already patches a terminal
+   status at every normal exit, so the signal is truthful. Continue reuses the normal send path.
+
+**In CI at checkpoint (merge on green):**
+5. **Requirement-awareness breadth (#1775)** — 5 more friction-free domain verticals (fintech, real-estate,
+   fitness, events, jobs) in `RequirementGapAnalyzer`. Append-only; first-match-wins keeps every prior
+   classification byte-identical (regression-locked). Serves the admin's #1 category with no clarifying
+   round-trip.
+6. **AP-4 slice 1 (#1777)** — read-only frontend/backend file-partition advisory (`frontendBackendPartition.ts`
+   + `FE_BE_PARTITION` report record). The load-bearing evidence for future safe FE/BE parallel builds: proves
+   a disjoint partition exists per build. Writes nothing, parallelizes nothing → zero build-loop risk.
+   Conservative classification (ambiguous → shared); root-caused a pre-merge bug (index.ts/main.tsx are NOT
+   backend entries — Vite's src/main.tsx is the frontend entry).
+
+**Open follow-ups (approved direction "all"):** AP-3 slice 2 (explicit interrupted marker on SIGTERM →
+opt-in auto-continue), AP-4 slice 2 (flag-gated FE/BE parallel dispatch conditioned on a proven-disjoint
+partition; the heal-gate-merge is a separate track), and the bounded interactive `ask_user` tool (opt-in,
+never blocks the friction-free fast path).

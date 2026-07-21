@@ -68,6 +68,7 @@ import { registerRepoAnalystRoutes } from './src/server/routes/repoAnalyst';
 // legacy /api/build pipeline (routes/build.ts) and must not be deleted with it.
 import { registerAgentV3Routes } from './src/server/routes/agentv3';
 import { registerDomainsRoutes } from './src/server/routes/domains';
+import { registerNbaiDomainsRoutes } from './src/server/routes/nbaiDomains';
 import { registerZipRoutes } from './src/server/routes/zip';
 import { registerPreviewRoutes } from './src/server/routes/preview';
 import { registerBuildRoutes } from './src/server/routes/build';
@@ -542,6 +543,8 @@ setInterval(() => {
 
   // Custom-domain connect (Cloudflare for SaaS).
   registerDomainsRoutes(app);
+  // Firebase-native custom-domain connect (Slice 2; gated by AGENTV3_FIREBASE_CUSTOM_DOMAINS).
+  registerNbaiDomainsRoutes(app);
 
   // Wallet / sync / payment / admin / secrets / anthropic / zip routes (Phase 1 extractions).
   registerWalletRoutes(app);

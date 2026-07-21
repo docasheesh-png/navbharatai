@@ -242,3 +242,13 @@ export function firebaseHostingConfigured(): boolean {
   // IAM role here; a missing role surfaces as an honest error at call time, never a fake success.
   return true;
 }
+
+/**
+ * Master flag for the Firebase-native custom-domain feature (Slice 2). OFF by default so merging the
+ * code changes nothing in production until the admin deliberately enables it AND runs the one live
+ * test. When off: the connect routes return an honest "not enabled" and the deploy path never
+ * publishes to a dedicated site (byte-identical to today).
+ */
+export function firebaseCustomDomainsEnabled(): boolean {
+  return /^(on|true|1)$/i.test((process.env.AGENTV3_FIREBASE_CUSTOM_DOMAINS || '').trim());
+}

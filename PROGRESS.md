@@ -20498,3 +20498,41 @@ session reopen — the durable transcript stores prose only (`conversationToEven
 activity/diff events), so `openConversation` rebuilds a bare thread. Real fix = persisting a compact
 activity/diff summary into the durable conversation record (server SessionTimeline already records
 events; needs a bounded replay slice on the transcript read path). Follow-up slice.
+
+## 2026-07-21 — Hosting: Firebase-native custom domains — Slice 2 (backend: deploy-to-site + connect routes + flag)
+
+Builds on Slice 1's tested primitive. All flag-gated behind `AGENTV3_FIREBASE_CUSTOM_DOMAINS` (OFF by
+default) → merging this changes production behaviour by **zero bytes** until the admin deliberately enables
+it and runs the one live test (respects "never break" + the admin's standing safety requirement: nobody uses
+our hosting/space without it being real + gated).
+
+**Shipped (this PR):**
+- `Deployment.ts` — refactored the upload path into ONE shared `publishVersion()` (no drift between the two
+  publish flows) and added **`deployToSite(workspaceId, files)`**: creates-or-reuses the workspace's dedicated
+  Firebase site (`ensureSite`) and releases the build to that site's LIVE channel → `https://<siteId>.web.app`.
+  This is the durable home a Firebase-native custom domain attaches to (a preview channel can't carry one).
+  The existing `deployStatic` (channel publish, the default free `.web.app`) is byte-for-byte unchanged; its
+  9 tests still pass, proving the refactor is behaviour-preserving.
+- `firebaseDomainLink.ts` — server store linking a connected domain → its workspace (`custom_domains`,
+  `provider:'firebase'`). Fail-open reads (`workspaceHasFirebaseDomain`) so a store hiccup never breaks a
+  deploy — the honest cost is a domain that serves the app only after the next publish.
+- `routes/nbaiDomains.ts` — `POST /api/domains/nbai/connect` + `GET /api/domains/nbai/status`, registered in
+  `server.ts`. STRICT owner gate (the VERIFIED uid must own the real `agentv3-<uid>-…` workspace — attaching
+  provisions a real Firebase resource against our project, so it must not be spoofable). Honest 503 when the
+  feature flag is off; honest error (never a fake "connected") when the SA lacks the role/API.
+- Deploy hook (agentv3.ts) — when the user publishes on our `firebase` hosting AND the flag is on AND the
+  workspace has a connected domain, the same build is ALSO published to the dedicated site so the domain
+  serves the fresh app. Best-effort: a failure is logged but NEVER fails the primary `.web.app` publish.
+
+**Honest boundary (rule 6):** the live Firebase multi-site + customDomains API is not exercisable from the dev
+sandbox — the pure logic is unit-tested (flag parsing, record/status mappers, site-id, refactor-preservation),
+but the end-to-end connect needs the admin's live test once the UI lands and the flag is on.
+
+**Slice 3 (next):** the workspace-scoped connect UI. Firebase-native domains are per-app, so the connect
+surface belongs in the Publish flow (HostingChooser), threaded with the workspaceId — NOT the global
+`ConnectDomainPanel` (which has no workspace). `AppKnowledgeBase` updated when that user-facing surface lands.
+
+**New env knob:** `AGENTV3_FIREBASE_CUSTOM_DOMAINS` (`on`/`true`/`1` to enable; unset/`off` = today's behaviour).
+
+**Verification (slice 2):** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · targeted vitest ✅
+(firebaseCustomDomain 10/10 + Deployment 9/9).

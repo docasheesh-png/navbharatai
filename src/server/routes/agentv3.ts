@@ -203,6 +203,9 @@ function sessionCostCapUsd(): number {
 import { deploymentStore, withDeploymentPersistence, isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { sandboxStore, sandboxResumeEnabled } from '../AgentV3/SandboxStore';
 import { getDeployProvider, DEFAULT_DEPLOY_PROVIDER, deployProviderStatus } from '../AgentV3/DeployProviders';
+import { FirebaseHostingDeployer } from '../AgentV3/Deployment';
+import { firebaseCustomDomainsEnabled } from '../lib/firebaseCustomDomain';
+import { workspaceHasFirebaseDomain } from '../lib/firebaseDomainLink';
 // Side-effect imports: each provider self-registers into the DeployProviders registry on load.
 import '../AgentV3/VercelProvider';
 import '../AgentV3/NetlifyProvider';
@@ -5868,7 +5871,24 @@ export function registerAgentV3Routes(app: Express): void {
       const chosenProviderId = typeof req.body?.deployProvider === 'string' ? req.body.deployProvider : DEFAULT_DEPLOY_PROVIDER;
       const deployProvider = getDeployProvider(chosenProviderId) ?? getDeployProvider(DEFAULT_DEPLOY_PROVIDER) ?? getDeployProvider('firebase')!;
       const deploy = withDeploymentPersistence(
-        (ws, files) => deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy }),
+        async (ws, files) => {
+          const url = await deployProvider.deploy(ws, files, { userId, githubToken: githubTokenForDeploy });
+          // Firebase-NATIVE custom domain (Slice 2, gated by AGENTV3_FIREBASE_CUSTOM_DOMAINS): when
+          // the user publishes on OUR hosting (firebase) AND this workspace has a connected custom
+          // domain, ALSO publish the same build to the workspace's dedicated Firebase site so the
+          // domain serves the fresh app. Best-effort: a failure here is logged but NEVER fails the
+          // primary publish (the `.web.app` URL is already live) — honest degradation, no breakage.
+          if (chosenProviderId === 'firebase' && firebaseCustomDomainsEnabled()) {
+            try {
+              if (await workspaceHasFirebaseDomain(ws)) {
+                await new FirebaseHostingDeployer().deployToSite(ws, files);
+              }
+            } catch (e) {
+              console.warn('[agentv3] custom-domain site publish failed (primary publish is live):', e);
+            }
+          }
+          return url;
+        },
         userId,
         chosenProviderId, // Phase 0 hosting quota: classify first-party (platform-paid) vs BYO
       );

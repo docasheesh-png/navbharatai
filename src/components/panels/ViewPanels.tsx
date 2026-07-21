@@ -349,10 +349,7 @@ export function ViewPanels({
       {/* Phase 5 — Screenshot to Code */}
       {activeView === 'screenshot' && (
         <div className="flex-1 h-full overflow-hidden">
-          <ScreenshotToCode onCodeGenerated={(code: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <ScreenshotToCode onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)} />
         </div>
       )}
 

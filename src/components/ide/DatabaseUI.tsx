@@ -15,6 +15,12 @@ import { cn } from '../../lib/utils';
 interface DatabaseUIProps {
   userId?: string;
   userTier?: string;
+  /** Admin gate (admin autopsy 2026-07-21): this is a RAW console over NavBharatAI's production
+   *  Firestore — it must never be a normal user-facing tool. Non-admins get an honest card pointing
+   *  to their own app's database (Settings → Database / BYOD) instead of the internal console. */
+  isAdmin?: boolean;
+  /** Navigate the user to Settings → Database (their real, own-app database). */
+  onOpenAppDatabase?: () => void;
 }
 
 interface DocRow {
@@ -63,7 +69,40 @@ function previewFields(data: Record<string, unknown>): [string, string][] {
   return entries.map(([k, v]) => [k, formatValue(v)]);
 }
 
-export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier }) => {
+/**
+ * Admin-only gate (admin autopsy 2026-07-21): a RAW console over NavBharatAI's production Firestore
+ * must never be a normal user-facing tool. Non-admins get an honest card pointing to their own app's
+ * database (Settings → Database / BYOD). Kept as a thin wrapper so the console's hooks only mount for
+ * admins (no conditional-hooks violation). The real data boundary remains firestore.rules.
+ */
+export const DatabaseUI: React.FC<DatabaseUIProps> = ({ userId, userTier, isAdmin, onOpenAppDatabase }) => {
+  if (!isAdmin) {
+    return (
+      <div className="h-full flex items-center justify-center bg-[#0d1117] text-white p-6">
+        <div className="max-w-md text-center space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-600/15 border border-indigo-600/25 flex items-center justify-center text-2xl">🗄️</div>
+          <h2 className="text-lg font-black text-white">Your app&apos;s database</h2>
+          <p className="text-sm text-[#8b949e] leading-relaxed">
+            This internal console is for platform admins only. To connect and manage <span className="text-white">your own app&apos;s</span> database
+            (Supabase, Firebase, MongoDB, Neon, Appwrite…), use <span className="text-white">Settings → Database</span> — your credentials are
+            stored encrypted and wired into the apps NavBharatAI Pro v5.0 builds for you.
+          </p>
+          {onOpenAppDatabase && (
+            <button
+              onClick={onOpenAppDatabase}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-colors"
+            >
+              Open Settings → Database
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return <DatabaseConsole userId={userId} userTier={userTier} />;
+};
+
+const DatabaseConsole: React.FC<{ userId?: string; userTier?: string }> = ({ userId, userTier }) => {
   const [selectedCollection, setSelectedCollection] = useState<string>('');
   const [customCollection, setCustomCollection] = useState('');
   const [docs, setDocs] = useState<DocRow[]>([]);

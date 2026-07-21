@@ -486,7 +486,7 @@ export function ViewPanels({
       {/* Phase 8 — Monetization Wizard */}
       {activeView === 'monetize' && (
         <div className="flex-1 h-full overflow-hidden">
-          <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <MonetizationWizard generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

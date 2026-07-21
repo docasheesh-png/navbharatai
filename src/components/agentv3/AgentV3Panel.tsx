@@ -81,13 +81,15 @@ const V3_EXT_COLOR: Record<string, string> = {
 let lastAppliedResumeNonce = 0;
 
 export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSync, onBeforeBuild, onOpenInIDE, onPreviewState, pendingFix, pendingDeploy, filesPanel, focusMode, mobileFooter, onFooterApi }: { userId?: string; email?: string; resume?: { sessionId: string; messages: ChatMsg[]; nonce: number } | null; freshOpenNonce?: number; onFilesSync?: (files: Record<string, string>) => void; onBeforeBuild?: () => Promise<void>; onOpenInIDE?: (path: string) => void; onPreviewState?: (s: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean }) => void; pendingFix?: { text: string; nonce: number } | null; pendingDeploy?: { provider: string; nonce: number } | null; filesPanel?: FilesPanelProps; focusMode?: boolean; mobileFooter?: boolean; onFooterApi?: (api: V3FooterApi | null) => void }) {
-  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
+  const { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume: resumeBuild, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock } = useAgentV3Build();
   // B7 — hydrate the composer from any unsent draft persisted before a reload (see composerDraft.ts).
   const [prompt, setPrompt] = useState(() => loadDraft());
   // "Ship to main" / "Revert" (own-repo storage, slice 2): in-flight + last honest note for the bar.
   const [shipping, setShipping] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  // UNSEND (Slice 2) — true while a take-back purge is in flight (disables the button, prevents double-fire).
+  const [unsending, setUnsending] = useState(false);
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -550,6 +552,33 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     }
     return out;
   })();
+
+  // UNSEND (Slice 2) — the LAST user message can be taken back: stop any in-flight build AND purge it
+  // from the server transcript + workspace memory, then drop it (and its reply) from the visible thread.
+  // Only the newest user message is unsendable (its reply is always the live `narration`, never yet
+  // flushed to agentHistory — so removing it can't strand an orphaned reply). Build lane only.
+  const lastUserTs = chatMode === 'build'
+    ? (() => { for (let i = convo.length - 1; i >= 0; i--) if (convo[i].role === 'user') return convo[i].ts; return null; })()
+    : null;
+  const handleUnsend = async (ts: number) => {
+    if (unsending) return;
+    setUnsending(true);
+    try {
+      // A message that reached the server (has a workspace) is purged server-side; a purely-local one
+      // (no workspaceId yet — it never persisted) is just halted locally. Either way the reply lives in
+      // `narration`, which unsend()/stop() clears.
+      let purged = true;
+      if (state.workspaceId) purged = await unsend();
+      else stop();
+      // On failure the message is NOT removed (it stays visible — honest, no fake "unsent"); the user
+      // can simply try again. Never claim a purge that didn't happen.
+      if (!purged) return;
+      setUserMsgs((prev) => prev.filter((m) => m.ts < ts));
+      setAgentHistory((prev) => prev.filter((m) => m.ts < ts));
+    } finally {
+      setUnsending(false);
+    }
+  };
 
   // Auto-scroll the chat to the newest message.
   useEffect(() => {
@@ -2520,7 +2549,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               </div>
             )}
             {chatBlocks.map((b) => b.kind === 'msg'
-              ? <Bubble key={b.key} msg={b.msg} />
+              ? <Bubble key={b.key} msg={b.msg}
+                  onUnsend={lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending
+                    ? () => { void handleUnsend(b.msg.ts); }
+                    : undefined} />
               : <ActionGroupRow key={b.key} block={b} />)}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
@@ -3822,16 +3854,16 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
-function Bubble({ msg }: { msg: ChatMsg }) {
+function Bubble({ msg, onUnsend }: { msg: ChatMsg; onUnsend?: () => void }) {
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
         <div className="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm break-words">
           <FoldableMessage text={msg.text} className="whitespace-pre-wrap" />
         </div>
-        {/* Copy / fold on every user message (Edit + Unsend attach only to the LAST user message — slice 2). */}
+        {/* Copy / fold on every user message; Unsend attaches ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
-          <MessageActions text={msg.text} />
+          <MessageActions text={msg.text} onUnsend={onUnsend} />
         </div>
       </div>
     );

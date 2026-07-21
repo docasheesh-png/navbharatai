@@ -68,6 +68,10 @@ on:
         description: 'Include native "Sign in with Apple" (default ON — it is a shipped capability; untick only to intentionally build without it)'
         type: boolean
         default: true
+      changelog:
+        description: 'TestFlight "What to Test" note for this build (optional — defaults to the build number)'
+        type: string
+        default: ''
 
 jobs:
   build-ios:
@@ -359,6 +363,12 @@ jobs:
           IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
           IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
           DO_UPLOAD: ${{ inputs.upload }}
+          # Optional TestFlight delivery controls. IOS_CHANGELOG = the "What to Test" note testers see
+          # (defaults to the build number). IOS_TESTFLIGHT_GROUPS (a repo secret) = comma-separated EXTERNAL
+          # TestFlight group names; when set, each build is submitted + notified to those external testers.
+          # Unset ⇒ internal testers only, who receive every processed build automatically.
+          IOS_CHANGELOG: ${{ inputs.changelog }}
+          IOS_TESTFLIGHT_GROUPS: ${{ secrets.IOS_TESTFLIGHT_GROUPS }}
           # Opt-in native Apple sign-in: when true, the Fastfile enables the App-ID capability via produce
           # before sigh so the profile includes com.apple.developer.applesignin.
           APPLE_SIGNIN: ${{ inputs.apple_signin }}

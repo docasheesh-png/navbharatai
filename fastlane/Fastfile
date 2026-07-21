@@ -127,11 +127,37 @@ platform :ios do
     )
 
     if ENV["DO_UPLOAD"] == "true"
-      upload_to_testflight(
+      # WAIT for Apple to finish processing so a green run means the build is GENUINELY available in
+      # TestFlight — not merely "uploaded". THE ROOT CAUSE of "build succeeded but no update shows in
+      # TestFlight": skip_waiting:true (the old value) returned success the instant the binary was
+      # accepted for transfer, BEFORE Apple processed it — so a build that later failed processing, or
+      # never became available to testers, still showed a green run with nothing to diagnose. Waiting
+      # turns that silent gap into an honest pass/fail (the upload itself is unchanged; only the
+      # confirmation is added). Apple processing is usually a few minutes.
+      changelog = ENV["IOS_CHANGELOG"].to_s.strip
+      changelog = "Latest NavBharatAI build (##{ENV['GITHUB_RUN_NUMBER']})." if changelog.empty?
+
+      opts = {
         api_key: api_key,
-        skip_waiting_for_build_processing: true,
         ipa: File.join(ENV.fetch("RUNNER_TEMP"), "NavBharatAI.ipa"),
-      )
+        skip_waiting_for_build_processing: false,
+        changelog: changelog,
+      }
+
+      # Internal testers (App Store Connect users, incl. the account owner) receive every PROCESSED build
+      # automatically — no group or review needed, which is why waiting-for-processing above is usually all
+      # it takes for the update to appear. EXTERNAL testers are different: a build only reaches them once it
+      # is assigned to an external group AND passes Beta App Review. Set IOS_TESTFLIGHT_GROUPS (a
+      # comma-separated list of your TestFlight external group names) to have each build submitted +
+      # notified to those testers automatically. Unset ⇒ internal-only (today's behavior).
+      groups = ENV["IOS_TESTFLIGHT_GROUPS"].to_s.split(",").map(&:strip).reject(&:empty?)
+      unless groups.empty?
+        opts[:distribute_external] = true
+        opts[:groups] = groups
+        opts[:notify_external_testers] = true
+      end
+
+      upload_to_testflight(opts)
     end
   end
 end

@@ -5,6 +5,7 @@ import {
   BarChart2
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ interface HistoryEntry {
 
 interface PerformanceAnalyzerProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
 }
 
 // ─── Analysis Logic ───────────────────────────────────────────────────────────
@@ -452,19 +455,24 @@ function MiniBarChart({ history }: { history: HistoryEntry[] }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ generatedCode }) => {
+export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ generatedCode, files }) => {
+  // Resolve the REAL app HTML (admin autopsy 2026-07-21): prefer the bundled preview, else the
+  // workspace index.html; the "Waiting for magic…" placeholder counts as no app yet, so the manual
+  // Paste fallback and empty state show correctly instead of scoring the placeholder.
+  const appSource = resolveAppSource(generatedCode, files);
+  const realApp = hasAnalysableApp(appSource);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pasteModal, setPasteModal] = useState(false);
   const [pasteValue, setPasteValue] = useState('');
-  const [codeToAnalyze, setCodeToAnalyze] = useState<string | undefined>(generatedCode);
+  const [codeToAnalyze, setCodeToAnalyze] = useState<string | undefined>(realApp ? appSource.html : undefined);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Sync prop changes
+  // Sync prop changes — analyse the real app source, or nothing when there is no built app yet.
   useEffect(() => {
-    setCodeToAnalyze(generatedCode);
-  }, [generatedCode]);
+    setCodeToAnalyze(realApp ? appSource.html : undefined);
+  }, [realApp, appSource.html]);
 
   // Load history from localStorage
   useEffect(() => {
@@ -551,7 +559,7 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             <BarChart2 size={13} />
             Run PageSpeed Test
           </a>
-          {!generatedCode && (
+          {!realApp && (
             <button
               onClick={() => setPasteModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#30363d] text-[#e6edf3] hover:bg-[#21262d] transition-colors"
@@ -589,9 +597,9 @@ export const PerformanceAnalyzer: React.FC<PerformanceAnalyzerProps> = ({ genera
             <div className="flex flex-col items-center justify-center h-full gap-4 py-16">
               <Gauge size={56} className="text-[#30363d]" />
               <p className="text-sm text-[#8b949e] text-center max-w-xs leading-relaxed">
-                Generated code analyze karne ke liye pehle app banao ya code paste karo
+                {realApp ? 'Tap "Analyze Karo" to score your app.' : (appSourceGuidance(appSource.kind) + ' Ya code paste karo.')}
               </p>
-              {!generatedCode && (
+              {!realApp && (
                 <button
                   onClick={() => setPasteModal(true)}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 transition-colors"

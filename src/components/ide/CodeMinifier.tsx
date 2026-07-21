@@ -14,11 +14,14 @@ import {
   GitMerge,
   Code2,
 } from 'lucide-react';
+import { resolveAppSource } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CodeMinifierProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
   onOptimized?: (code: string) => void;
 }
 
@@ -102,6 +105,9 @@ function minifyJS(js: string, opts: JSOptions): string {
 function minifyHTML(html: string, htmlOpts: HTMLOpts, cssOpts: CSSOptions, jsOpts: JSOptions): string {
   let out = html;
   if (htmlOpts.removeComments) out = out.replace(/<!--[\s\S]*?-->/g, '');
+  // removeEmptyAttributes — real now (was a no-op checkbox, admin autopsy 2026-07-21): strip
+  // attributes whose value is an empty string (e.g. class="" alt='').
+  if (htmlOpts.removeEmptyAttributes) out = out.replace(/\s+[a-zA-Z_:][-a-zA-Z0-9_:.]*=(?:""|'')/g, '');
   if (htmlOpts.minifyInlineCSS)
     out = out.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (_, css) =>
       `<style>${minifyCSS(css, cssOpts)}</style>`
@@ -168,8 +174,12 @@ function saveHistory(entries: HistoryEntry[]) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOptimized }) => {
-  const [inputCode, setInputCode] = useState(generatedCode ?? '');
+export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, files, onOptimized }) => {
+  // Seed the editor with the REAL app source (admin autopsy 2026-07-21): prefer the bundled preview,
+  // else the workspace index.html; the "Waiting for magic…" placeholder is treated as empty so the
+  // user starts from their actual code (or a blank editor to paste into) — not the placeholder.
+  const initialSource = resolveAppSource(generatedCode, files);
+  const [inputCode, setInputCode] = useState(initialSource.html);
   const [outputCode, setOutputCode] = useState('');
   const [codeType, setCodeType] = useState<CodeType>('all');
   const [copied, setCopied] = useState(false);
@@ -206,12 +216,14 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
 
   const [advOpts, setAdvOpts] = useState<AdvancedOptions>({
     gzipEstimation: false,
-    addSourceMapComment: true,
+    addSourceMapComment: false,
   });
 
   useEffect(() => {
-    if (generatedCode) setInputCode(generatedCode);
-  }, [generatedCode]);
+    const resolved = resolveAppSource(generatedCode, files);
+    if (resolved.html) setInputCode(resolved.html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatedCode, files]);
 
   const originalSize = new Blob([inputCode]).size;
   const minifiedSize = outputCode ? new Blob([outputCode]).size : 0;
@@ -227,8 +239,6 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
     else if (detected === 'css') result = minifyCSS(inputCode, cssOpts);
     else result = minifyJS(inputCode, jsOpts);
 
-    if (advOpts.addSourceMapComment && detected === 'js')
-      result += '\n//# sourceMappingURL=app.js.map';
 
     setOutputCode(result);
 
@@ -625,7 +635,8 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
               <HtmlCheck k="removeComments" label="Remove comments" />
               <HtmlCheck k="removeWhitespace" label="Remove whitespace" />
               <HtmlCheck k="removeEmptyAttributes" label="Remove empty attrs" />
-              <HtmlCheck k="inlineCSS" label="Inline CSS" />
+              {/* 'Inline CSS' checkbox removed (admin autopsy 2026-07-21): it was a no-op — the
+                  minifier never inlined external stylesheets. Honest tools only expose real options. */}
               <HtmlCheck k="minifyInlineCSS" label="Minify inline CSS" />
               <HtmlCheck k="minifyInlineJS" label="Minify inline JS" />
             </div>
@@ -634,8 +645,9 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
               <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide mb-1">CSS</p>
               <CssCheck k="removeComments" label="Remove comments" />
               <CssCheck k="removeWhitespace" label="Remove whitespace" />
-              <CssCheck k="collapseShorthand" label="Collapse shorthand" />
-              <CssCheck k="removeUnusedSelectors" label="Remove unused (exp.)" />
+              {/* 'Collapse shorthand' + 'Remove unused' checkboxes removed (admin autopsy 2026-07-21):
+                  both were no-ops (never applied by minifyCSS). Safe shorthand collapsing / dead-rule
+                  removal need real CSS parsing — not shipped as a fake toggle. */}
               <CssCheck k="normalizeColors" label="Normalize colors" />
             </div>
             {/* JS */}
@@ -643,7 +655,8 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
               <p className="text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-1">JS</p>
               <JsCheck k="removeComments" label="Remove comments" />
               <JsCheck k="removeWhitespace" label="Remove whitespace" />
-              <JsCheck k="renameVariables" label="Rename variables (aggressive)" />
+              {/* 'Rename variables (aggressive)' removed (admin autopsy 2026-07-21): a no-op, and safe
+                  identifier renaming needs a real JS parser (regex renaming would corrupt code). */}
               <JsCheck k="removeConsoleLog" label="Remove console.log" />
               <JsCheck k="removeDebugger" label="Remove debugger" />
             </div>
@@ -657,17 +670,10 @@ export const CodeMinifier: React.FC<CodeMinifierProps> = ({ generatedCode, onOpt
                   onChange={(e) => setAdvOpts((p) => ({ ...p, gzipEstimation: e.target.checked }))}
                   className="accent-indigo-500"
                 />
-                Gzip estimation
+                Gzip estimation (approx.)
               </label>
-              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={advOpts.addSourceMapComment}
-                  onChange={(e) => setAdvOpts((p) => ({ ...p, addSourceMapComment: e.target.checked }))}
-                  className="accent-indigo-500"
-                />
-                Add source map comment
-              </label>
+              {/* 'Add source map comment' removed (admin autopsy 2026-07-21): it appended a
+                  //# sourceMappingURL=app.js.map pointing at a file that never exists — misleading. */}
             </div>
           </div>
         )}

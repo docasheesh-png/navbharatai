@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
 import { recordRun, isFlaky, loadHistory, serializeHistory, type TestRunHistory, FLAKY_STORAGE_KEY } from '../../lib/flakyTests';
 
 interface TestPanelProps {
@@ -115,6 +116,12 @@ const StatusIcon: React.FC<{ status: TestCase['status'] }> = ({ status }) => {
 };
 
 export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) => {
+  // Resolve the REAL app to test (admin autopsy 2026-07-21): the retired `generatedCode` sits at the
+  // "Waiting for magic…" placeholder in v5.0, so tests used to run against the placeholder. Prefer the
+  // bundled preview, else the workspace's index.html; treat the placeholder as "no app yet".
+  const appSource = resolveAppSource(generatedCode, files);
+  const appHtml = appSource.html;
+  const canRun = hasAnalysableApp(appSource);
   const [tests, setTests] = useState<TestCase[]>(makeInitialTests);
   const [running, setRunning] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -157,10 +164,10 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
   }, [handleMessage]);
 
   const runAllTests = () => {
-    if (!generatedCode) return;
+    if (!canRun || !appHtml) return;
     setRunning(true);
     setTests(prev => prev.map(t => ({ ...t, status: 'running', output: undefined, duration: undefined })));
-    const src = buildIframeSrc(generatedCode, tests);
+    const src = buildIframeSrc(appHtml, tests);
     setIframeSrc(src);
   };
 
@@ -240,10 +247,10 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
         </button>
         <button
           onClick={runAllTests}
-          disabled={running || !generatedCode}
+          disabled={running || !canRun}
           className={cn(
             'flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors',
-            generatedCode && !running
+            canRun && !running
               ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
               : 'bg-[#30363d] text-gray-500 cursor-not-allowed'
           )}
@@ -256,11 +263,11 @@ export const TestPanel: React.FC<TestPanelProps> = ({ generatedCode, files }) =>
         </button>
       </div>
 
-      {/* No code warning */}
-      {!generatedCode && (
+      {/* No app warning — honest, actionable guidance (build first / open Preview to bundle). */}
+      {!canRun && (
         <div className="flex items-center gap-2 px-3 py-2 bg-yellow-900/20 border-b border-yellow-800/30 text-yellow-400 text-xs shrink-0">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          Generate an app first to enable test execution.
+          {appSourceGuidance(appSource.kind)}
         </div>
       )}
 

@@ -256,6 +256,22 @@ describe('architectSystemPrompt / planSystemPrompt sanity', () => {
     expect(p).toContain('edit_file');
   });
 
+  it('AP-4: parallel-build flag makes fix-dispatch guidance parallel-aware; default is byte-identical serial', () => {
+    const off = architectSystemPrompt();
+    const offExplicit = architectSystemPrompt(undefined, { parallelBuild: false });
+    const on = architectSystemPrompt(undefined, { parallelBuild: true });
+    // Default / off: original serial-writer guidance, no parallel-fix wording.
+    expect(off).toContain('one file at a time, so fixes never collide');
+    expect(off).not.toContain('per-file write lock');
+    // Off must be byte-identical whether the flag is omitted or explicitly false (cache-prefix stable).
+    expect(offExplicit).toBe(off);
+    // On: different-file fixes may dispatch together; same-file still serial.
+    expect(on).toContain('per-file write lock');
+    expect(on).toContain('DIFFERENT files can go together');
+    expect(on).toContain('SAME file');
+    expect(on).not.toContain('one file at a time, so fixes never collide');
+  });
+
   it('plan prompt instructs planning only (no file writes yet)', () => {
     const p = planSystemPrompt();
     expect(p.toLowerCase()).toContain('plan');

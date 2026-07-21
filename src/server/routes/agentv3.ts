@@ -5916,7 +5916,7 @@ export function registerAgentV3Routes(app: Express): void {
       // targeted edit_file patches — never rebuilding everything from scratch.
       // Best-effort: a listFiles failure falls back to the edit prefix without a
       // tree, and a non-edit turn uses the normal architect prompt unchanged.
-      let architectSystem = architectSystemPrompt(framework);
+      let architectSystem = architectSystemPrompt(framework, { parallelBuild });
       // Capture the pure static body BEFORE any per-request context block is prepended below, so the
       // cache-prefix optimization (AGENTV3_CACHE_PREFIX, applied before the runner is built) can split
       // the volatile prefix back out and keep this large static body as a stable Anthropic cache prefix.

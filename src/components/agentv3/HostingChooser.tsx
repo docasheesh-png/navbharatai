@@ -12,8 +12,10 @@
 // never target a host that isn't set up. Pricing here is intentionally simple + honest (static = Free);
 // it is the single place to change when the admin sets real numbers.
 
-import { Rocket, X, Globe, Server } from 'lucide-react';
+import { useState } from 'react';
+import { Rocket, X, Globe, Server, Link2 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { NbaiDomainConnect } from './NbaiDomainConnect';
 
 export interface HostingProvider {
   id: string;
@@ -29,13 +31,21 @@ export interface HostingChooserProps {
   onClose: () => void;
   /** A build/deploy is already running — disable the actions. */
   busy: boolean;
+  /** The current workspace — required to connect a per-app custom domain. */
+  workspaceId?: string;
+  /** Whether the Firebase-native "connect your own domain" surface is live (server flag). */
+  customDomainsEnabled?: boolean;
 }
 
 const NBAI_HOST_ID = 'firebase'; // our platform-paid static host = "NavBharatAI hosting"
 
-export function HostingChooser({ providers, onDeploy, onClose, busy }: HostingChooserProps) {
+export function HostingChooser({ providers, onDeploy, onClose, busy, workspaceId, customDomainsEnabled }: HostingChooserProps) {
+  const [view, setView] = useState<'choose' | 'domain'>('choose');
   const hasOurHosting = providers.some((p) => p.id === NBAI_HOST_ID && p.configured);
   const byo = providers.filter((p) => p.configured && p.id !== NBAI_HOST_ID);
+  // "Connect your own domain" is offered only when the server feature is on AND we have a workspace
+  // to attach it to AND our hosting is available (a Firebase custom domain lives on our site).
+  const canConnectDomain = !!customDomainsEnabled && !!workspaceId && hasOurHosting;
 
   return (
     <div
@@ -56,6 +66,12 @@ export function HostingChooser({ providers, onDeploy, onClose, busy }: HostingCh
           </button>
         </div>
 
+        {view === 'domain' && workspaceId ? (
+          <div className="p-4">
+            <NbaiDomainConnect workspaceId={workspaceId} onBack={() => setView('choose')} />
+          </div>
+        ) : (
+        <>
         <div className="p-4 grid gap-3 sm:grid-cols-2">
           {/* Path 1 — Host on NavBharatAI */}
           <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-4 flex flex-col gap-2.5">
@@ -79,6 +95,15 @@ export function HostingChooser({ providers, onDeploy, onClose, busy }: HostingCh
               {busy ? <TirangaLoader className="w-4 h-4" /> : <Rocket className="w-3.5 h-3.5" />}
               Publish on NavBharatAI
             </button>
+            {canConnectDomain && (
+              <button
+                onClick={() => setView('domain')}
+                className="w-full py-1.5 rounded-lg border border-emerald-800/60 hover:border-emerald-600 text-emerald-300 hover:text-emerald-200 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                Connect your own domain
+              </button>
+            )}
           </div>
 
           {/* Path 2 — Host elsewhere (BYO) */}
@@ -125,6 +150,8 @@ export function HostingChooser({ providers, onDeploy, onClose, busy }: HostingCh
             <span>Publish anywhere — it&apos;s always the same app you built.</span>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

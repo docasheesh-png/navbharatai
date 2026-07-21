@@ -1940,6 +1940,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // only CONFIGURED providers are offered so a deploy can never target an unconfigured host.
   const [providers, setProviders] = useState<Array<{ id: string; name: string; configured: boolean; requirement: string }>>([]);
   const [deployProvider, setDeployProvider] = useState<string>('firebase');
+  // Slice 3: whether the Firebase-native "connect your own domain" surface is live (server flag).
+  const [customDomainsEnabled, setCustomDomainsEnabled] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -1953,6 +1955,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         if (!cancelled && Array.isArray(data?.providers)) {
           setProviders(data.providers);
           if (typeof data.default === 'string') setDeployProvider(data.default);
+          if (typeof data.customDomains === 'boolean') setCustomDomainsEnabled(data.customDomains);
         }
       } catch { /* best-effort — default to Firebase */ }
     })();
@@ -2372,6 +2375,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         <HostingChooser
           providers={configuredProviders}
           busy={running}
+          workspaceId={state.workspaceId}
+          customDomainsEnabled={customDomainsEnabled}
           onClose={() => setShowHostingChooser(false)}
           onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
         />

@@ -44,4 +44,27 @@ describe('HostingChooser — the two-path Publish surface', () => {
     expect(html).toMatch(/Publish on NavBharatAI[\s\S]*/);
     expect(html).toContain('disabled');
   });
+
+  it('offers "Connect your own domain" ONLY when the feature is enabled + a workspace + our hosting', () => {
+    const providers = [P('firebase', 'Firebase Hosting', true)];
+    // off by default → not offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false} />,
+    )).not.toContain('Connect your own domain');
+    // enabled + workspace → offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false}
+        workspaceId="agentv3-u1-s1" customDomainsEnabled />,
+    )).toContain('Connect your own domain');
+    // enabled but NO workspace → not offered (a domain is per-app)
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={providers} onDeploy={() => {}} onClose={() => {}} busy={false}
+        customDomainsEnabled />,
+    )).not.toContain('Connect your own domain');
+    // enabled + workspace but our hosting NOT configured → not offered
+    expect(renderToStaticMarkup(
+      <HostingChooser providers={[P('vercel', 'Vercel', true)]} onDeploy={() => {}} onClose={() => {}} busy={false}
+        workspaceId="agentv3-u1-s1" customDomainsEnabled />,
+    )).not.toContain('Connect your own domain');
+  });
 });

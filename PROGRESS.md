@@ -20536,3 +20536,33 @@ surface belongs in the Publish flow (HostingChooser), threaded with the workspac
 
 **Verification (slice 2):** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · targeted vitest ✅
 (firebaseCustomDomain 10/10 + Deployment 9/9).
+
+## 2026-07-21 — Hosting: Firebase-native custom domains — Slice 3 (workspace-scoped connect UI)
+
+Completes the user-facing surface. Firebase-native domains are PER-APP (the domain attaches to this
+workspace's dedicated Firebase site), so the connect UI lives inside the per-workspace **Publish flow**
+(HostingChooser), NOT the global `ConnectDomainPanel` (which has no workspace) — that panel stays the
+Cloudflare-for-SaaS flow, untouched.
+
+**Shipped:**
+- `deploy-providers` endpoint now returns `customDomains: firebaseCustomDomainsEnabled()` so the client
+  only offers the domain surface when the server flag is on.
+- `NbaiDomainConnect.tsx` — workspace-scoped connect flow: enter domain → `POST /api/domains/nbai/connect`
+  → shows the EXACT Firebase DNS records (copy buttons) → "Check" polls `/status` until ownership + host +
+  SSL are all active. Honest pending/active states (never a fake "connected"); auth via the Firebase ID token.
+- `HostingChooser` — gains `workspaceId` + `customDomainsEnabled` props and a "Connect your own domain" button
+  under "Host on NavBharatAI", shown ONLY when the feature is on AND there is a workspace AND our hosting is
+  configured (a Firebase custom domain lives on our site). Opens the connect view in-modal; 5 tests lock the
+  offer conditions.
+- `AppKnowledgeBase` — the PUBLISH/HOSTING CHOOSER entry now documents "Connect your own domain" (DNS records
+  + auto HTTPS + "publish once after connecting").
+
+**Still flag-gated:** the whole feature stays behind `AGENTV3_FIREBASE_CUSTOM_DOMAINS` (off by default). With
+the flag off the client never fetches `customDomains:true`, so the button never appears and behaviour is
+byte-identical to today.
+
+**Admin live test (once the flag is on):** publish an app on NavBharatAI → open Publish → "Connect your own
+domain" → enter a real domain → add the shown DNS records at the registrar → "Check" until live (Firebase
+issues SSL). This is the one step that can only be verified against the live Firebase project, not the dev sandbox.
+
+**Verification (slice 3):** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` ✅ 8776/8776.

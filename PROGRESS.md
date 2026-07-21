@@ -20014,3 +20014,60 @@ Signed release `.aab` #40 built green at the quiz checkpoint (ready for admin Pl
 (~140 tools) and each new vertical is more niche; the highest-leverage remaining roadmap work is the
 admin-confirmed-but-not-yet-implemented Model Routing Policy slices (per-tier free ladder, mode-aware judge,
 free-tier heal-gate re-route, power-mode judge+plan→Opus), which stay gated on explicit admin go-ahead.
+
+## 2026-07-20 — AUDIT + activation: "built but not wired" dormant-capability sweep (admin: "kitne cheeze hai jo hai par wired nahi")
+
+After the admin set `AGENTV3_STREAMING_PREVIEW=on` (confirmed live at `routes/agentv3.ts:6754` — the flag now
+activates the real `onFilesReady` early-preview emit), ran a full code-anchored audit for capabilities that
+EXIST but aren't active/reachable. Findings + this PR's activations.
+
+### The audit (three buckets, file-evidenced)
+- **A — Dormant FLAGS (real + tested, env OFF):** `AGENTV3_STREAMING_PREVIEW` (now ON ✅), `AGENTV3_FEATURE_HEAL`
+  (FeaturePresence.ts:216), `AGENTV3_VACCINE` (testRunner.ts:155), `AGENTV3_BLUEPRINT` (agentv3.ts:5918),
+  `AGENTV3_REDTEAM` (FuzzProbe.ts:248), `AGENTV3_CHEAP_FLOOR_ALL_TIERS` (agentv3.ts:1566), `PRO_AGENTIC_ENGINE`
+  (build.ts:231), `VITE_APK_DOWNLOAD_URL` (frontend). These are deliberately opt-in (each adds an extra
+  pass/cost/risk) — not forgotten wiring.
+- **B — Genuinely ORPHANED features (built, never mounted/rendered):** `lib/engineerQuota.ts` (per-user daily
+  build cost guard — no importer), `components/notes/*` (Notes feature — not routed), `routes/appmaker.ts`
+  (`registerAppmakerRoutes` commented out at `server.ts:46,486`), `components/CheckoutButton.tsx` (redundant).
+- **C — Dead / SUPERSEDED by AgentV3 (do NOT revive — CLAUDE.md "never revive the legacy pipeline"):** the
+  AppMakerLab orchestrator/engine cluster, `BuildEngine/` engine classes, the old `AI/*Agent` pipeline, plus
+  retired UI. All have test-only importers (or none).
+- ✅ **Recipe generators (130+) are ALL fully wired** — `ToolWiring.test.ts` guards it in CI. No gap there.
+
+### Shipped in this PR (the safe, high-value activations)
+1. **`engineerQuota` WIRED (bucket B #1 — a cost guard that wasn't guarding).** `consumeEngineerQuota` now runs
+   on both Engineer-AI build entrypoints (`/api/build` + `/api/build-stream`, `routes/build.ts`), keyed to the
+   VERIFIED Firebase uid. Anti-abuse: default 50 builds/user/day, **fails OPEN** on any Firestore hiccup (never
+   blocks a legit build), anon users governed by the IP limiter. Added an explicit kill switch:
+   `ENGINEER_DAILY_LIMIT=off` (or `0`) → no cap; a positive N tunes it. Over-limit returns an honest 429 / SSE
+   error, never a fake. Test-locked (`engineerQuota.test.ts`) on the never-block invariants.
+2. **FEATURE_HEAL + VACCINE gained a percentage CANARY** (mirrors the escalation rollout so every canary
+   behaves identically). New shared pure helper `inFlagRollout(on, pctRaw, key)` in `escalationRollout.ts`;
+   `featureHealEnabled(workspaceId)` / `vaccineEnabled(workspaceId)` now honour `AGENTV3_FEATURE_HEAL_PCT` /
+   `AGENTV3_VACCINE_PCT` (keyed by workspaceId). **Backward-compatible by construction:** flag off → off; on +
+   no PCT → 100% (identical to today). So the admin can measure on N% of builds before a global ramp. Tested.
+3. **Dead-code cleanup (bucket C, the zero-risk subset only):** deleted 8 confirmed-dead files with zero
+   importers/renders/tests — `AI/verify_manager.ts`, `AI/verify_analyzer.ts`, and retired UI
+   `AgentV3Launcher`, `VertexDebug`, `ide/VertexTestChat`, `EngineBuilder`, `CheckoutButton`,
+   `ReportProblemComponent`. Verified no dynamic mount in main.tsx/routers before deletion.
+
+### OPEN — dead-code cleanup backlog (recorded, NOT deleted here; needs a considered per-file PR with its tests)
+The larger legacy clusters still carry TEST coverage, so deleting them means removing/retargeting those tests —
+a deliberate change, not a drive-by. Candidates: `AppMakerLab/{AppMakerOrchestrator, *GenerationEngine,
+BlueprintInferenceEngine, DeploymentEngine, jobs/store/FirestoreJobStore, RequirementsParserAdapter,
+PlanningParserAdapter, ManifestMapper, repair/*, autorepair/RepairScorer, vcs/LocalGitProvider}`; the
+`BuildEngine/{BuildVerifier, RepairEngine, DependencyResolver, FeatureComposer, BuildManifestGenerator}`
+classes; the old `AI/{PlanningAgent, RequirementsAgent, ProjectStructureAgent, FeatureImplementationAgent,
+HealthRegistry}` pipeline; `routes/appmaker.ts` + `routes/products.ts` + `controllers/productController.ts`;
+`components/{ChessBoard, notes/*, VertexDebug}`, `game/Engine.ts`; `TokenUsageManager.ts`,
+`ObservabilityManager.ts`, `project/{ProjectMigrator, RequirementSpec}.ts`, `lib/loadTestStats.ts`,
+`AgentV3/BakeoffMetrics.ts`. All superseded by AgentV3 — clean up, never revive.
+
+### Admin recommendations (what to turn on)
+- **Highest value, safe:** `AGENTV3_FEATURE_HEAL=on` (kills "asked-for feature missing"; extra cost only when
+  something's actually missing) and `AGENTV3_VACCINE=on` (runs the app's own generated tests — reliability).
+  Use the new `_PCT` canary to dip in first if desired.
+- **Big apps:** `AGENTV3_BLUEPRINT=on` (coherence; simple apps skip it, so no waste).
+- Only `STREAMING_PREVIEW` gave *speed*; heal/vaccine/redteam trade a little time for *reliability* — they serve
+  the "100% preview / error-proof" half of the goal, not the "faster" half (that's the Speed-2.0 plan's pillars).

@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { buildRateLimiter, requireUserMatch, verifyFirebaseToken, enforceNotBanned } from '../lib/authMiddleware';
+import { consumeEngineerQuota } from '../lib/engineerQuota';
 import { runBuild } from '../project/BuildPipeline';
 import { runProEngine } from '../EngineerAI/ProEngineRunner';
 import { runUnifiedBuild, isUnifiedEngineEnabled } from '../project/UnifiedBuildOrchestrator';
@@ -276,6 +277,18 @@ export function registerBuildRoutes(app: Express): void {
         return res.status(400).json({ error: 'prompt (string) is required' });
       }
 
+      // Per-user daily build quota — an anti-abuse cost guard (a single user can't spin unlimited
+      // sandboxes + model calls). Attributed to the VERIFIED Firebase uid only; fails OPEN on any
+      // infra hiccup; env-tunable via ENGINEER_DAILY_LIMIT (default 50/day, `off` disables). Anon
+      // users are governed by the IP rate-limiter above instead.
+      const quotaUid = resolveAttributionUserId(await verifyFirebaseToken(req));
+      if (quotaUid) {
+        const q = await consumeEngineerQuota(quotaUid);
+        if (!q.allowed) {
+          return res.status(429).json({ error: `Daily build limit reached (${q.used}/${q.limit}). It resets at 00:00 UTC.` });
+        }
+      }
+
       // Model call backed by the shared aiCalls layer — multi-provider with fallback.
       const memory = parseMemory(req.body);
       const callModel: ModelCall = makeResilientModelCall(userKey);
@@ -386,6 +399,17 @@ export function registerBuildRoutes(app: Express): void {
       // SECURITY: attribute cost/history to the VERIFIED Firebase identity only — never the
       // client-supplied req.body.userId (spoofable → griefing a victim's cost/quota/history).
       const reqUserId: string | undefined = resolveAttributionUserId(await verifyFirebaseToken(req));
+
+      // Per-user daily build quota (same anti-abuse cost guard as /api/build; fails open,
+      // env-tunable ENGINEER_DAILY_LIMIT). Refuse over-limit with an honest terminal SSE event.
+      if (reqUserId) {
+        const q = await consumeEngineerQuota(reqUserId);
+        if (!q.allowed) {
+          send({ type: 'error', message: `Daily build limit reached (${q.used}/${q.limit}). It resets at 00:00 UTC.` });
+          cleanup();
+          return res.end();
+        }
+      }
 
       // Foundations (G1) — best-effort lifecycle events (never block the build).
       sid = typeof req.body?.sessionId === 'string' && req.body.sessionId ? req.body.sessionId : 'pro';

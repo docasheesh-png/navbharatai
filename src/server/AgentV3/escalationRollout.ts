@@ -39,6 +39,22 @@ export function inEscalationRollout(key: string | undefined, pct: number): boole
   return rolloutBucket(key) < pct;
 }
 
+/**
+ * Generic percentage-canary gate for ANY on/off feature flag (same semantics as escalation, reused so
+ * every canary behaves identically). PURE + backward-compatible by construction:
+ *   • on=false                    → false (feature off)
+ *   • on=true, pctRaw empty/unset → true  (100% — identical to a plain global "on")
+ *   • on=true, pctRaw=N           → N% of builds, chosen deterministically by `key` (a stable id such
+ *                                    as the workspaceId), so a project is consistently in or out.
+ */
+export function inFlagRollout(on: boolean, pctRaw: string | undefined, key: string | undefined): boolean {
+  if (!on) return false;
+  if (pctRaw == null || String(pctRaw).trim() === '') return true;
+  const n = Number(pctRaw);
+  if (!Number.isFinite(n)) return true; // flag explicitly on but malformed PCT → full rollout
+  return inEscalationRollout(key, Math.max(0, Math.min(100, Math.floor(n))));
+}
+
 /** The measurement cohort this build belongs to. Pure. */
 export type EscalationCohort = 'off' | 'in' | 'out';
 

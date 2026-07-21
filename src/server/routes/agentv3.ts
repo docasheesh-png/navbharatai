@@ -7492,7 +7492,7 @@ export function registerAgentV3Routes(app: Express): void {
               // Budget-gated + abortable; if the control still isn't there, the honest FEATURE_COVERAGE
               // warning below still stands. Never blocks or fails a build.
               if (
-                coverage.missing.length > 0 && featureHealEnabled() && !abort.signal.aborted
+                coverage.missing.length > 0 && featureHealEnabled(workspaceId) && !abort.signal.aborted
                 && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
               ) {
                 events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${coverage.missing.join(', ')}. Adding it now…`, ts: Date.now() });
@@ -7567,11 +7567,11 @@ export function registerAgentV3Routes(app: Express): void {
       // deletes/skips a test) and re-runs. No suite → honest no-op. Best-effort, budget-gated, abortable —
       // never blocks or hangs a build.
       if (
-        vaccineEnabled() && expectsArtifacts && result.ok && !abort.signal.aborted
+        vaccineEnabled(workspaceId) && expectsArtifacts && result.ok && !abort.signal.aborted
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
       ) {
         try {
-          const vaxHealMax = featureHealEnabled() ? 1 : 0; // repair only when the heal budget is opted in
+          const vaxHealMax = featureHealEnabled(workspaceId) ? 1 : 0; // repair only when the heal budget is opted in
           for (let attempt = 0; attempt <= vaxHealMax && !abort.signal.aborted; attempt++) {
             const files = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
             let pkgRaw: string | undefined;
@@ -7654,7 +7654,7 @@ export function registerAgentV3Routes(app: Express): void {
           if (findings.length > 0) {
             buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'FUZZ_ROBUSTNESS', message: fuzzSummary(findings), autoResolved: false });
             // Opt-in bounded heal — harden the source, then trust the next build/preview to re-verify.
-            if (featureHealEnabled() && !abort.signal.aborted && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)) {
+            if (featureHealEnabled(workspaceId) && !abort.signal.aborted && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)) {
               events.emit({ type: 'narration', agent: 'architect', text: `🛡️ Red-team crashed ${findings.length} input(s) on hostile input — hardening validation now…`, ts: Date.now() });
               try {
                 const rtRunner = new AgentRunner({

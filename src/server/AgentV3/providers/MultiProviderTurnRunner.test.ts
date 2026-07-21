@@ -408,6 +408,47 @@ describe('cheap-floor combined design (admin 2026-07-07): size gate + prompt die
     expect(cooldowns.until('GLM')).toBe(0); // success cleared the shared state for everyone
   });
 
+  // === ESCALATING RE-PROBE BENCH (restaurant-build autopsy 2026-07-21) ============================
+  // 32 GLM 429s in one 27-min build DESPITE the shared cooldown: the bench was FIXED 60s, so an
+  // all-build-long saturated provider was re-probed (and 429'd) roughly once a minute — a steady drip
+  // the 8-in-120s breaker never sees. Each failed re-probe must DOUBLE the bench (capped), and a
+  // success must reset it to the base window.
+
+  it('ESCALATING BENCH — each failed re-probe doubles the window (60s → 120s → 240s), capped', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    let t = 1_000_000;
+    c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 60_000);        // episode 1 — base window
+    t += 61_000; c.strike('GLM', t);                 // re-probe after expiry fails again
+    expect(c.until('GLM')).toBe(t + 120_000);       // episode 2 — doubled
+    t += 121_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 240_000);       // episode 3 — doubled again
+    t += 241_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 480_000);       // episode 4
+    t += 481_000; c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 600_000);       // episode 5 — capped at cooldownMaxMs, never beyond
+  });
+
+  it('ESCALATING BENCH — concurrent stragglers inside an active bench do NOT escalate (one burst = one episode)', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    const t = 1_000_000;
+    c.strike('GLM', t);                              // the fast lane's 8 concurrent turns all 429 together
+    for (let i = 1; i <= 7; i++) c.strike('GLM', t + i);
+    expect(c.until('GLM')).toBe(t + 60_000);        // still the base window — the burst is ONE episode
+    c.strike('GLM', t + 61_000);                     // the first genuine re-probe failure after expiry
+    expect(c.until('GLM')).toBe(t + 61_000 + 120_000); // only now does it double
+  });
+
+  it('ESCALATING BENCH — a success resets the escalation to the base window', () => {
+    const c = createRateLimitCooldowns(60_000, 1, {}, 600_000);
+    let t = 1_000_000;
+    c.strike('GLM', t); t += 61_000;
+    c.strike('GLM', t); t += 121_000;                // two episodes → next would be 240s
+    c.clear('GLM');                                  // the provider answered — recovered
+    c.strike('GLM', t);
+    expect(c.until('GLM')).toBe(t + 60_000);        // fresh start at the base window
+  });
+
   it('SHARED COOLDOWN — per bench NAME: one throttled key does not cool the rest of the pool', async () => {
     const cooldowns = createRateLimitCooldowns(60_000, 2);
     const now = () => 1_000_000;

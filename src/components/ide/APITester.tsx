@@ -59,10 +59,13 @@ const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const LS_KEY = 'navbharatai_api_history';
 const MAX_HISTORY = 20;
 
+// Quick tests point at REAL same-origin NavBharatAI endpoints (admin autopsy 2026-07-21) — the old
+// presets hit http://localhost:3000, a dev-only host that 404s for every deployed user. Relative
+// URLs resolve against the app's own origin, so these return live data on web and in the app.
 const QUICK_TESTS: { label: string; method: HttpMethod; url: string; body?: string }[] = [
-  { label: 'Test /api/health', method: 'GET', url: 'http://localhost:3000/api/health' },
-  { label: 'Test /api/ai-chat', method: 'POST', url: 'http://localhost:3000/api/ai-chat', body: '{"message":"Hello"}' },
-  { label: 'Test /api/sda-chat', method: 'POST', url: 'http://localhost:3000/api/sda-chat', body: '{"message":"Hello"}' },
+  { label: 'GET /api/capabilities', method: 'GET', url: '/api/capabilities' },
+  { label: 'GET /api/release/gate', method: 'GET', url: '/api/release/gate' },
+  { label: 'GET /api/knowledge-base', method: 'GET', url: '/api/knowledge-base' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -177,6 +180,9 @@ const APITester: React.FC<APITesterProps> = () => {
   const [copied, setCopied] = useState(false);
   const [methodOpen, setMethodOpen] = useState(false);
   const [showRawHeaders, setShowRawHeaders] = useState(false);
+  // Route via the SSRF-guarded server proxy (default ON) so cross-origin APIs work despite browser
+  // CORS. Turn off for a direct browser fetch (same-origin or CORS-enabled endpoints).
+  const [useProxy, setUseProxy] = useState(true);
 
   useEffect(() => { saveHistory(history); }, [history]);
 
@@ -200,39 +206,55 @@ const APITester: React.FC<APITesterProps> = () => {
       activeHeaders['Authorization'] = `Bearer ${authToken.trim()}`;
     }
 
-    const init: RequestInit = { method, headers: activeHeaders };
-    if (['POST', 'PUT', 'PATCH'].includes(method) && body.trim()) {
-      init.body = body.trim();
-    }
-
+    const reqBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && body.trim() ? body.trim() : undefined;
+    // Same-origin / relative URLs have no CORS problem and the proxy needs an absolute URL — always
+    // fetch those directly. The proxy is only for cross-origin absolute URLs.
+    const sameOrigin = finalUrl.startsWith('/') || (typeof window !== 'undefined' && finalUrl.startsWith(window.location.origin));
+    const routeViaProxy = useProxy && !sameOrigin;
     const start = performance.now();
     try {
-      const res = await fetch(finalUrl, init);
+      let status: number, statusText: string, resHeaders: Record<string, string>, resBody: string, truncated = false;
+      if (routeViaProxy) {
+        // Route through NavBharatAI's SSRF-guarded server proxy so cross-origin APIs (which the
+        // browser would block with CORS) actually return a response. The server fetches, we render.
+        const pr = await fetch('/api/devtools/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: finalUrl, method, headers: activeHeaders, body: reqBody }),
+        });
+        const data = await pr.json().catch(() => null);
+        if (!pr.ok || !data) throw new Error((data && data.error) || `Proxy error (${pr.status}).`);
+        status = data.status; statusText = data.statusText || ''; resHeaders = data.headers || {};
+        resBody = String(data.body ?? ''); truncated = !!data.truncated;
+      } else {
+        // Direct browser fetch (same-origin or a CORS-enabled API).
+        const init: RequestInit = { method, headers: activeHeaders };
+        if (reqBody !== undefined) init.body = reqBody;
+        const res = await fetch(finalUrl, init);
+        status = res.status; statusText = res.statusText; resHeaders = {};
+        res.headers.forEach((v, k) => { resHeaders[k] = v; });
+        resBody = await res.text();
+      }
       const elapsed = Math.round(performance.now() - start);
-      const resHeaders: Record<string, string> = {};
-      res.headers.forEach((v, k) => { resHeaders[k] = v; });
-      const resBody = await res.text();
-
       setResponse({
-        status: res.status,
-        statusText: res.statusText,
+        status,
+        statusText,
         headers: resHeaders,
-        body: tryPrettyJson(resBody),
+        body: tryPrettyJson(resBody) + (truncated ? '\n\n…(response truncated at 5 MB)' : ''),
         time: elapsed,
       });
-
       addToHistory({ name: saveName || finalUrl, method, url: finalUrl, headers, body });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(
-        msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('network')
-          ? `Network error: ${msg}\n\nThis may be a CORS issue. Ensure the server allows requests from this origin, or use a proxy.`
+        !routeViaProxy && (msg.toLowerCase().includes('cors') || msg.toLowerCase().includes('failed to fetch'))
+          ? `Network/CORS error: ${msg}\n\nTip: turn ON "Route via NavBharatAI" to bypass CORS.`
           : `Request failed: ${msg}`
       );
     } finally {
       setLoading(false);
     }
-  }, [url, method, params, headers, body, authToken, saveName, addToHistory]);
+  }, [url, method, params, headers, body, authToken, saveName, addToHistory, useProxy]);
 
   const handleQuickTest = (qt: typeof QUICK_TESTS[0]) => {
     setMethod(qt.method);
@@ -376,6 +398,17 @@ const APITester: React.FC<APITesterProps> = () => {
             <Save size={16} />
           </button>
         </div>
+
+        {/* CORS bypass toggle — route cross-origin requests through NavBharatAI's SSRF-guarded proxy. */}
+        <label className="flex items-center gap-2 mt-2 text-[11px] text-gray-400 cursor-pointer select-none w-fit" title="Cross-origin APIs are blocked by the browser (CORS). Routing through NavBharatAI's server fetches them for you.">
+          <input
+            type="checkbox"
+            checked={useProxy}
+            onChange={(e) => setUseProxy(e.target.checked)}
+            className="accent-indigo-500"
+          />
+          Route via NavBharatAI (bypass CORS)
+        </label>
 
         {/* Save request input */}
         {showSaveInput && (

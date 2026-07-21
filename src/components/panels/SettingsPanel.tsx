@@ -137,7 +137,7 @@ function MotionModeControl() {
     { id: 'system',   label: 'System',  hint: 'Follow your OS setting' },
   ];
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 mb-4">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
         <div>
@@ -174,7 +174,7 @@ function FontScaleControl() {
   const set = (next: number) => setScale(applyFontScale(next));
   const pct = Math.round(scale * 100);
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🔠</div>
@@ -231,7 +231,7 @@ function AppSignatureToggle() {
     });
   };
   return (
-    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="flex items-center justify-between p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center shrink-0">
           <Heart className="w-5 h-5 text-indigo-400" />
@@ -1256,8 +1256,8 @@ export function SettingsPanel({
                     </div>
 
                     <div className="p-2 bg-[#0d1117] border border-white/10 rounded-[2rem] flex items-center h-[72px] shadow-inner">
-                       <span className="flex-1 text-[11px] font-mono text-indigo-400 truncate px-6">navbharat.ai/s/project-592</span>
-                       <button className="h-full px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
+                       <span className="flex-1 min-w-0 text-[11px] font-mono text-indigo-400 truncate px-3 sm:px-6">navbharat.ai/s/project-592</span>
+                       <button className="h-full shrink-0 px-4 sm:px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
                           <div className="relative z-10">Copy Link</div>
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
                         </button>
@@ -1353,7 +1353,7 @@ export function SettingsPanel({
                        </div>
                     </div>
 
-                    <div className="bg-amber-500/5 border border-amber-500/20 p-6 rounded-[1.5rem] flex gap-4 items-start shadow-inner">
+                    <div className="bg-amber-500/5 border border-amber-500/20 p-4 sm:p-6 rounded-2xl sm:rounded-[1.5rem] flex gap-3 sm:gap-4 items-start shadow-inner">
                        <div className="p-2 bg-amber-500/20 rounded-lg">
                           <Zap className="w-4 h-4 text-amber-500" />
                         </div>

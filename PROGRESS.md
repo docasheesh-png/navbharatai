@@ -20071,3 +20071,65 @@ HealthRegistry}` pipeline; `routes/appmaker.ts` + `routes/products.ts` + `contro
 - **Big apps:** `AGENTV3_BLUEPRINT=on` (coherence; simple apps skip it, so no waste).
 - Only `STREAMING_PREVIEW` gave *speed*; heal/vaccine/redteam trade a little time for *reliability* — they serve
   the "100% preview / error-proof" half of the goal, not the "faster" half (that's the Speed-2.0 plan's pillars).
+
+## 2026-07-21 — DECISION + DESIGN: "NavBharatAI Hosting" — a dedicated hosting option (our plan OR BYO, 100% synced)
+
+Admin decision (2026-07-21): build a **dedicated Hosting option** where the user chooses — **take NavBharatAI's
+own hosting plan (with our pricing shown)** OR **host anywhere else (bring their own provider)** — and **both
+paths stay 100% in sync**. This is the Hybrid model (Option C) from the hosting analysis. It is a DELIBERATE,
+admin-approved evolution of the current BYO-only law (below), scoped as a phased build so the app never breaks
+and no fake feature ever ships (rules 1 & 2).
+
+### What we already have (code-verified, the substrate)
+- **Static/frontend hosting on OUR OWN infra already works**: `DeployProviders.ts` `firebase` uses the *platform*
+  Google Cloud service account ("Always available") → NavBharatAI already publishes static apps on its own
+  Firebase Hosting, platform-paid.
+- **BYO providers already wired**: Vercel, Netlify, Cloudflare Pages, GitHub Pages (`*Provider.ts`).
+- **Billing substrate**: `UserCostStore` + wallet + the REAL-COST + tiered-markup model; `engineerQuota` (daily
+  cost guard, just wired); custom domains (`ConnectDomainPanel` + Cloudflare); provider anonymization (white-label).
+- **Preview**: in-browser (esm.sh, sandbox-free) + E2B sandbox.
+
+### The gap vs Replit (what we do NOT have yet)
+Persistent, always-on **full-stack** hosting (a running backend + database) on NavBharatAI's OWN infra, billed to
+the user. Today full-stack apps only PREVIEW in an ephemeral E2B sandbox; for real persistence the user brings
+their own backend/DB (the BYO law: "user apps run on the user's own accounts", CLAUDE.md). Static apps are the
+part already hosted on our infra.
+
+### The design — a dedicated Hosting chooser
+When a build is ready to publish, a **Hosting** surface offers two paths side by side:
+1. **Host on NavBharatAI (our plan)** — managed, one-click, our pricing shown, custom domain + SSL. Static ships
+   today on our Firebase; full-stack ships in Phase 2 (own GCP Cloud Run per app + managed DB).
+2. **Host elsewhere (BYO)** — connect the user's Vercel / Netlify / Cloudflare / Firebase / GitHub Pages and we
+   deploy there with THEIR credentials (their bill, their account).
+
+### THE 100%-SYNC LAW (the admin's hard requirement)
+The **workspace files are the single source of truth.** Whatever target(s) the user picks — our hosting, a BYO
+provider, or BOTH at once — every publish deploys the SAME built artifact, and any re-build/edit re-deploys to
+ALL connected targets so they can never drift. A `deployTargets[]` record per workspace tracks each connected
+target + its last-deployed content hash; a deploy is a pure fan-out over that list from one artifact. "In sync"
+is therefore true BY CONSTRUCTION, not by reconciliation.
+
+### Pricing model (framework — ADMIN SETS THE NUMBERS; not inventable by Claude, rule 2 + it's real money)
+- **Static / frontend on our infra**: near-zero marginal cost → a free or low flat tier.
+- **Full-stack on our infra ("NavBharatAI Cloud")**: REAL compute/storage cost × markup (same honest model as
+  AgentV3 billing: real cost + tiered markup, wallet-debited, failed/again never charged). Needs the Phase-2 infra
+  before any "buy hosting" button is shown — until then it honestly shows "coming soon · use BYO for now" (rule 2:
+  no fake plan that doesn't provision a real server).
+- **BYO**: free from us (user pays their own provider).
+
+### Phasing (each phase real, tested, gated, shipped via the cycle — no fakes)
+- **Phase 1 (buildable now, no new infra):** the Hosting chooser UI + the `deployTargets[]` single-source-of-truth
+  sync engine, wired to the 5 EXISTING providers (our Firebase = "NavBharatAI static hosting"; the rest = BYO).
+  Static apps fully work today; the chooser + 100%-sync are real from day one. Full-stack own-infra shows the
+  honest "coming soon" state. **Needs from admin: the static-tier pricing (free? ₹?).**
+- **Phase 2 (infra + billing):** "NavBharatAI Cloud" full-stack — one Cloud Run service (or container) per user
+  app on our GCP, a managed DB option, per-app isolation, engineerQuota-style spend caps + abuse control, and the
+  real-cost×markup billing. This is the Replit-parity paid tier and the one that changes the BYO law. **Needs from
+  admin: the full-stack pricing + a green light to spend real GCP compute on user apps.**
+- **Phase 3:** custom-domain + SSL automation on our hosting, autoscale/cold-start polish, usage dashboard.
+
+### Guardrails
+- No fake hosting: a paid button appears only when it provisions a REAL persistent server (rule 2).
+- White-label + billing honesty preserved (the moat): real bill, provider-anonymous to the user.
+- Own-infra full-stack MUST ship with hard spend caps + isolation before public exposure (rule 1; safeguard #3).
+- BYO stays first-class forever — power users keep full control of their own cloud.

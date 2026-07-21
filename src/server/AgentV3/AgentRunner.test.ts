@@ -433,6 +433,21 @@ describe('AgentRunner parallel tool execution (capped)', () => {
     expect(isParallelSafeToolUse({ id: '7', name: 'write_file', input: {} })).toBe(false);
     expect(isParallelSafeToolUse({ id: '8', name: 'bash', input: {} })).toBe(false);
   });
+
+  it('AP-4 flag: frontend/backend writer sub-agents are parallel-eligible ONLY when parallelBuild is on', () => {
+    const fe = { id: 'a', name: 'task', input: { role: 'frontend' } } as const;
+    const be = { id: 'b', name: 'task', input: { role: 'backend' } } as const;
+    // default (flag off) — writers stay serial, exactly as before
+    expect(isParallelSafeToolUse(fe)).toBe(false);
+    expect(isParallelSafeToolUse(be, { parallelBuild: false })).toBe(false);
+    // flag on — the two writer roles become parallel-eligible
+    expect(isParallelSafeToolUse(fe, { parallelBuild: true })).toBe(true);
+    expect(isParallelSafeToolUse(be, { parallelBuild: true })).toBe(true);
+    // a NON-partitioned writer role (tester) stays serial even with the flag on (only FE/BE are gated)
+    expect(isParallelSafeToolUse({ id: 'c', name: 'task', input: { role: 'tester' } }, { parallelBuild: true })).toBe(false);
+    // read-only roles are unaffected by the flag
+    expect(isParallelSafeToolUse({ id: 'd', name: 'task', input: { role: 'qa' } }, { parallelBuild: false })).toBe(true);
+  });
 });
 
 describe('AgentRunner — empty-build detection (fake-success fix)', () => {

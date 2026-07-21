@@ -4,6 +4,8 @@ import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/i
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
+import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
+import { PathWriteLock } from '../AgentV3/pathWriteLock';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -4564,7 +4566,13 @@ export function registerAgentV3Routes(app: Express): void {
     events.subscribe((e) => emit(e), false);
     const state = new WorkspaceState(events);
 
-    const actuator = buildActuator();
+    // AP-4 (flag-gated): when parallel building is ON, wrap the actuator so concurrent frontend/backend
+    // sub-agents can't clobber each other on the SAME file path (same-path writes serialize; disjoint
+    // paths run concurrently — the speedup). Off by default ⇒ the raw actuator, byte-identical to today.
+    const rawActuator = buildActuator();
+    const parallelBuild = parallelBuildEnabled();
+    const buildWriteLock = new PathWriteLock();
+    const actuator = parallelBuild ? lockedActuator(rawActuator, buildWriteLock) : rawActuator;
     const workspaceId = deriveWorkspaceId(userId, req.body?.sessionId);
     // Phase G1 — git as the third organ: durably persist every real git checkpoint as it is emitted,
     // so the commit timeline survives sandbox recycling and is visible across sessions/devices (not just
@@ -6149,6 +6157,9 @@ export function registerAgentV3Routes(app: Express): void {
         dispatcher,
         state,
         events,
+        // AP-4 (flag-gated, default off): let frontend/backend WRITER sub-agents dispatch in parallel.
+        // Paired with the lockedActuator write-lock above, so concurrent same-path writes can't clobber.
+        parallelBuild,
         // Billing accounting fix: the ONE build-level sink, shared by the main runner and every
         // runner that spreads baseRunnerOpts (escalation/retry/heal/fix/critFix) so all their tokens
         // are billed even when their `result` is later discarded.

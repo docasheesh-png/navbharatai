@@ -20566,3 +20566,40 @@ domain" → enter a real domain → add the shown DNS records at the registrar �
 issues SSL). This is the one step that can only be verified against the live Firebase project, not the dev sandbox.
 
 **Verification (slice 3):** `npx tsc --noEmit` ✅ · `npx tsc -p tsconfig.server.json` ✅ · `npx vitest run` ✅ 8776/8776.
+
+---
+
+## 2026-07-21 — Connectly Build #1 autopsy: recover a file a cheap model wrote as TEXT and got truncated
+
+**Report:** Connectly (simple one-page site), free/weak tier (GLM+Kimi, noClaude). Build `ok:true` — app
+built — but the preview had a **PREVIEW_ERROR: "Missing file … src/index.css (imported by src/main.tsx)"**,
+so the site shipped UNSTYLED. `rootCause` = `LLM_TRUNCATED` ("kimi, finish=max_tokens"). The kimi turn's
+`responsePreview` was `<<<FILE src/index.css>>>\n:root { … ` — kimi hit its **8000-token output ceiling**
+mid-file.
+
+**5-bucket ledger:** ✅ self-healed 190. 🔀 worked-around: GLM 13 fails → Kimi (normal fallback). ⏭️ 0.
+❌ still-broken: **1 — `src/index.css` missing** (the truncated-text file was lost → unstyled site).
+🥵 struggle: the max_tokens truncation (same class as the PaisaTrack #1810 note), now a REAL defect.
+
+**Root cause (DNA):** the main agentic loop writes files ONLY from write_file/write_files_batch TOOL calls.
+A cheap model that emits a file as a `<<<FILE path>>>…` TEXT block (kimi did, then hit its token ceiling)
+has that text treated as narration — the file is NEVER written. The existing truncation guard only
+re-parsed JS/TS files written via tool calls (esbuild), so it could not see a file written as text, nor a
+non-JS file like CSS. So the lost `index.css` slipped through.
+
+**Fix:** new pure module `TruncationRecovery.ts`:
+- `textMarkerFilePaths(turnText)` — the paths a truncated turn tried to write as `<<<FILE>>>` TEXT (via
+  the same safe `parseFileBlocks`), which the main loop never saved.
+- `truncationRecoverySteer({ brokenJs, textMarkerPaths })` — one steer naming BOTH the JS parse-failures
+  (existing) AND the lost text-marker files, telling the model to rewrite each COMPLETELY with the
+  write_file TOOL (never as text) and keep responses small (one file per response if large). De-duped/bounded.
+The AgentRunner truncation guard now calls it, so a file lost to a text-mode truncation is rewritten on the
+very next turn instead of shipping missing.
+
+**Tests:** 9 new cases in `TruncationRecovery.test.ts` — the exact Connectly cut-off `index.css` block, the
+broken-JS case, both-sources de-dup, unsafe-path rejection, and the null (nothing-to-recover) path. Server
+tsc clean; AgentRunner suite (47) still green; frontend tsc clean.
+
+**Noted:** `rootCause = LLM_TRUNCATED` on this `ok:true` build ran on the pre-#1810 engine; the honesty fix
+(#1810) already routes a recovered transient away from rootCause — but here the truncation caused a REAL
+missing file, which THIS fix now recovers at the source.

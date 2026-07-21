@@ -14,6 +14,7 @@ import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
 import { redactProvidersText } from '../lib/providerRedaction';
+import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -1066,6 +1067,10 @@ export function renderDiagnosticsText(r: BuildDiagnosticsReport): string {
       lines.push(`Charged to user: ${r.billing.walletTokensDebited.toLocaleString()} wallet tokens debited`);
     }
     if (r.billing.zeroBillReason) lines.push(`Why free : ${r.billing.zeroBillReason}`);
+    // Cap-4 cost-alerting: surface an unusually expensive build (admin-only, env-gated, default off).
+    // Additive — never changes the charged amount above, only flags it when it crosses the threshold.
+    const costAlert = costAlertAdvisory(r.billing.billedUsd, costAlertThresholdUsd());
+    if (costAlert) lines.push(costAlert);
   }
   if (r.providerFailures && Object.keys(r.providerFailures).length > 0) {
     const failures = Object.entries(r.providerFailures)

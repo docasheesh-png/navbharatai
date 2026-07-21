@@ -75,9 +75,10 @@ const RULES: Rule[] = [
   {
     category: {
       id: 'http-status', label: 'API returned an error status', priority: 3,
-      hint: 'The server responded with a 4xx/5xx. Check the endpoint path, method, and request body; a 401/403 usually means auth is missing, a 404 a wrong URL, a 5xx a backend bug.',
+      hint: 'The server responded with a 4xx/5xx. Check the endpoint path, method, and request body; a 401/403 usually means auth is missing, a 404 a wrong URL, a 5xx a backend bug. For a captured "HTTP 5xx from <url>" the request itself succeeded but the backend threw — fix the failing route/handler (and its error handling), not the client call.',
     },
-    match: /status(?: code)? of (4\d\d|5\d\d)|\b(4\d\d|5\d\d) \(|request failed with status/i,
+    // Matches app messages ("...status of 500", "500 (") AND the browser-daemon capture ("HTTP 500 from <url>").
+    match: /status(?: code)? of (4\d\d|5\d\d)|\b(4\d\d|5\d\d) \(|request failed with status|\bHTTP (4\d\d|5\d\d)\b/i,
   },
   {
     category: {

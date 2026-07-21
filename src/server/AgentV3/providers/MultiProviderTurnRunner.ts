@@ -302,9 +302,20 @@ export interface CircuitBreakerOptions {
   breakerEscalationWindowMs?: number;
 }
 
-export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, breaker: CircuitBreakerOptions = {}): RateLimitCooldowns {
+export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, breaker: CircuitBreakerOptions = {}, cooldownMaxMs?: number): RateLimitCooldowns {
   const strikes = new Map<string, number>();
   const untilMs = new Map<string, number>();
+  // ESCALATING RE-PROBE BENCH (restaurant-build autopsy 2026-07-21, 32 GLM failures): the short cooldown
+  // used to be FIXED — bench 60s, re-probe, 429, bench 60s again, forever. On a long build against a
+  // saturated provider that is a steady drip of ~1 wasted probe per minute (27 min → ~30 failures), and the
+  // singles never reach the breaker's 8-in-120s trip. Track BENCH EPISODES per name: each time the bench
+  // re-arms within 2× the base window of the previous bench expiring (the genuine failed-re-probe drip),
+  // the window doubles (60s → 120s → 240s → …, capped at `cooldownMaxMs`, default 10×base). A rare 429
+  // long after the previous bench is NOT linked and starts fresh at the base window. Strikes landing
+  // while ALREADY benched (the fast lane's concurrent stragglers) extend nothing and do NOT escalate —
+  // one burst is one episode. Any success resets episodes to zero.
+  const benchEpisodes = new Map<string, number>();
+  const capMs = Math.max(cooldownMs, cooldownMaxMs ?? cooldownMs * 10);
   // Circuit breaker: rolling strike timestamps + the long "breaker open" expiry per name.
   const strikeTimes = new Map<string, number[]>();
   const breakerUntil = new Map<string, number>();
@@ -322,7 +333,20 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
     strike(name, nowMs) {
       const n = (strikes.get(name) ?? 0) + 1;
       strikes.set(name, n);
-      if (cooldownMs > 0 && n >= benchAfter) untilMs.set(name, nowMs + cooldownMs);
+      if (cooldownMs > 0 && n >= benchAfter) {
+        const prevUntil = untilMs.get(name) ?? 0;
+        if (prevUntil <= nowMs) {
+          // (Re-)arming after expiry (or for the first time). Escalate ONLY when this failure is LINKED
+          // to the previous bench — it landed within 2× the base window of that bench expiring (the
+          // genuine "re-probe failed again" drip). A rare, spread-out 429 from an otherwise-quiet
+          // provider is NOT linked and starts fresh at the base window (no creeping punishment).
+          const linked = prevUntil > 0 && nowMs - prevUntil <= cooldownMs * 2;
+          const episodes = linked ? (benchEpisodes.get(name) ?? 0) + 1 : 1;
+          benchEpisodes.set(name, episodes);
+          untilMs.set(name, nowMs + Math.min(cooldownMs * Math.pow(2, episodes - 1), capMs));
+        }
+        // else: already benched — a concurrent straggler; keep the current window (no escalation).
+      }
       if (breakerOn) {
         // Keep only strikes inside the rolling window, add this one, and trip if the rate crosses.
         const recent = (strikeTimes.get(name) ?? []).filter((t) => t >= nowMs - windowMs);
@@ -346,17 +370,21 @@ export function createRateLimitCooldowns(cooldownMs = 60_000, benchAfter = 2, br
       }
     },
     clear(name) {
-      // A success clears the SHORT cooldown + consecutive streak. The breaker is deliberately STICKY —
-      // one call sneaking through does not prove a saturated provider recovered; it re-opens only by
-      // time (breakerMs), so the build stays off the throttled provider instead of re-storming it.
+      // A success clears the SHORT cooldown + consecutive streak + the escalation episodes (a recovered
+      // provider starts fresh at the base window). The breaker is deliberately STICKY — one call sneaking
+      // through does not prove a saturated provider recovered; it re-opens only by time (breakerMs), so
+      // the build stays off the throttled provider instead of re-storming it.
       strikes.delete(name);
       untilMs.delete(name);
+      benchEpisodes.delete(name);
     },
     reset() {
       strikes.clear();
       untilMs.clear();
+      benchEpisodes.clear();
       strikeTimes.clear();
       breakerUntil.clear();
+      tripTimes.clear();
     },
   };
 }
@@ -411,9 +439,17 @@ export function rateLimitBenchAfter(): number {
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
 }
 
+/** Cap (ms) on the escalating re-probe bench (base × 2^episodes, capped here). Env-tunable
+ *  (`AGENTV3_RATE_LIMIT_COOLDOWN_MAX_MS`); default 10× the base cooldown (60s base → 10 min cap). */
+function rateLimitCooldownMaxMs(): number {
+  const n = Number((process.env.AGENTV3_RATE_LIMIT_COOLDOWN_MAX_MS ?? '').trim());
+  return Number.isFinite(n) && n > 0 ? n : rateLimitCooldownMs() * 10;
+}
+
 /** The production singleton — one shared memory across every runner instance in the process. Carries the
- *  short cooldown AND the per-build circuit breaker (default-on; `AGENTV3_CIRCUIT_BREAKER=off` disables). */
-export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs(), rateLimitBenchAfter(), circuitBreakerConfig());
+ *  short cooldown (with the escalating re-probe bench) AND the per-build circuit breaker (default-on;
+ *  `AGENTV3_CIRCUIT_BREAKER=off` disables). */
+export const sharedRateLimitCooldowns: RateLimitCooldowns = createRateLimitCooldowns(rateLimitCooldownMs(), rateLimitBenchAfter(), circuitBreakerConfig(), rateLimitCooldownMaxMs());
 
 /**
  * Build a TurnRunner that tries each runner in `chain` order and returns the first that

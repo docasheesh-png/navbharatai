@@ -3,7 +3,7 @@
 // button that does nothing (the "real features only" rule). Kept tiny + presentational.
 
 import { useState } from 'react';
-import { Copy, Check, ThumbsUp, ThumbsDown, Flag, X, Pencil } from 'lucide-react';
+import { Copy, Check, ThumbsUp, ThumbsDown, Flag, X, Pencil, Star } from 'lucide-react';
 
 export type MessageReaction = 'up' | 'down' | 'report';
 
@@ -18,9 +18,12 @@ export interface MessageActionsProps {
   onUnsend?: () => void;
   /** Slice 2 — take the message back AND load its text into the composer to edit + re-send. Absent → hidden. */
   onEdit?: () => void;
+  /** Save this message's prompt as a reusable starter template (on-device). Absent → the button is hidden. */
+  onSaveTemplate?: () => void;
 }
 
-export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit }: MessageActionsProps) {
+export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit, onSaveTemplate }: MessageActionsProps) {
+  const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -49,6 +52,17 @@ export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit }:
             <Flag className="w-3.5 h-3.5" />
           </button>
         </>
+      )}
+      {onSaveTemplate && (
+        <button
+          type="button"
+          onClick={() => { onSaveTemplate(); setSaved(true); setTimeout(() => setSaved(false), 1500); }}
+          title="Save as template — reuse this prompt to start a future app"
+          aria-label="Save as template"
+          className={`${btn} ${saved ? 'text-emerald-400' : 'hover:text-amber-300'}`}
+        >
+          {saved ? <Check className="w-3.5 h-3.5" /> : <Star className="w-3.5 h-3.5" />}
+        </button>
       )}
       {onEdit && (
         <button type="button" onClick={onEdit} title="Edit — take this message back and re-write it" aria-label="Edit" className={`${btn} hover:text-indigo-300`}>

@@ -113,6 +113,8 @@ export { scanSri, scanProjectSri, sriSummary } from './SriAnalysis';
 export type { SriIssue } from './SriAnalysis';
 export { scanCsp, scanProjectCsp, cspSummary } from './CspMetaAnalysis';
 export type { CspIssue } from './CspMetaAnalysis';
+export { scanCommentLanguage, scanProjectCommentLanguage, commentLanguageSummary } from './CommentLanguageAnalysis';
+export type { CommentLanguageIssue } from './CommentLanguageAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
 export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';

@@ -175,6 +175,7 @@ import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
 import { generateGiftCardsIntegration } from '../lib/GiftCardsGenerator';
 import { generateTeamsIntegration } from '../lib/TeamsGenerator';
 import { generateStatusPageIntegration } from '../lib/StatusPageGenerator';
+import { generateSurveyIntegration } from '../lib/SurveyGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4086,6 +4087,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('status page starter');
         const spDeps = spcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a public status-page backend:\n${spWritten.join('\n')}\nAdd the dependencies: ${spDeps}\n\n${spcfg.instructions}`;
+      }
+
+      case 'generate_survey': {
+        // Breadth recipe (domain vertical) — multi-question survey (server/surveys/): a real SurveyService whose
+        // core guarantee is SCHEMA-VALIDATED RESPONSES + EXACT AGGREGATION (typed questions, invalid responses
+        // rejected, per-question tallies) + an Express router. Pure gen in SurveyGenerator.ts.
+        const svcfg = generateSurveyIntegration();
+        const svWritten: string[] = [];
+        for (const [path, content] of Object.entries(svcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          svWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('survey starter');
+        const svDeps = svcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a survey backend:\n${svWritten.join('\n')}\nAdd the dependencies: ${svDeps}\n\n${svcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

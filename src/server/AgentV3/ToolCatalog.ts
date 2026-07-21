@@ -1673,6 +1673,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_survey',
+      description:
+        'Add a real multi-question survey / questionnaire backend to the app (server/surveys/) — a packaged ' +
+        'domain vertical for user research, NPS and feedback drives. The real guarantee is SCHEMA-VALIDATED ' +
+        'RESPONSES + EXACT AGGREGATION: a survey has typed questions (single_choice|multi_choice|rating|text), a ' +
+        'submitted response is validated against that schema (required questions answered, choice answers ' +
+        'reference real options, rating 1..5) so an invalid response is REJECTED — never stored, and aggregate() ' +
+        'tallies each question EXACTLY (option counts, rating average, text answers). Emits a dependency-free ' +
+        'SurveyService (create, get, submit, responseCount, aggregate) + an Express router (POST /api/surveys, ' +
+        'GET /api/surveys/:id, POST /api/surveys/:id/responses, GET /api/surveys/:id/results). Distinct from ' +
+        'generate_polls (a single fixed-option question) and generate_quiz (graded right/wrong answers). ' +
+        'In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2768,6 +2783,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_gift_cards',
   'generate_teams',
   'generate_status_page',
+  'generate_survey',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

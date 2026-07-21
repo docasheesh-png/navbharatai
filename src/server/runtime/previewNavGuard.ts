@@ -12,6 +12,11 @@
 // the platform origin (never touching in-page hash navigation, client-side routing via history.pushState,
 // or links to external sites). Best-effort and wrapped so it can NEVER break the previewed app.
 //
+// It ALSO normalizes the initial path to '/' (blank-body autopsy 2026-07-21): the same srcdoc-inherits-the-
+// platform-URL root cause means a client router (BrowserRouter) reads the platform path (/build/xyz), matches
+// none of the app's routes, and renders a BLANK body under a rendered navbar. Resetting to '/' before the app
+// mounts makes the index route match, so the app's home content renders.
+//
 // NOTE (rule 6 — honest bound): it cannot intercept a DIRECT `window.location.href = '/'` setter assignment
 // (the `location` object is not reconfigurable), which is the one residual escape. The complete isolation is
 // the cross-origin preview (VITE_PREVIEW_ORIGIN), where '/' resolves to the empty preview origin, not the
@@ -40,6 +45,11 @@ export function shouldBlockPreviewNav(target: string, baseUri: string, origin: s
 export function previewNavGuardScript(): string {
   return (
     `<script>/*${NAV_GUARD_MARKER}*/(function(){try{` +
+    // PREVIEW ROUTE NORMALIZE (blank-body autopsy 2026-07-21): a srcdoc inherits the PLATFORM path
+    // (e.g. /build/xyz). A client router (react-router BrowserRouter) reads that path, matches NONE of the
+    // app's routes ('/', '/about', …) and renders NOTHING — a blank body under a rendered navbar. Reset the
+    // path to '/' BEFORE the app mounts so the index route matches. history.replaceState = no reload.
+    `try{if(location.pathname&&location.pathname!=="/"){history.replaceState(null,"","/"+location.search+location.hash);}}catch(e){}` +
     `var H=location.origin;` +
     `function L(u){try{var t=new URL(u,document.baseURI);if(t.origin!==H)return false;` +
     `var b=(document.baseURI||"").split("#")[0];return t.href.split("#")[0]!==b;}catch(e){return false}}` +

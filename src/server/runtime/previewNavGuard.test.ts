@@ -72,4 +72,11 @@ describe('injectPreviewNavGuard', () => {
     expect(s).toMatch(/addEventListener\("submit"/);
     expect(s).toMatch(/preventDefault/);
   });
+
+  it('the runtime script normalizes the initial path to "/" so a client router matches the index route', () => {
+    const s = previewNavGuardScript();
+    // Reset the inherited platform path (/build/xyz) to "/" via replaceState (no reload) before the app mounts.
+    expect(s).toMatch(/location\.pathname!=="\/"/);
+    expect(s).toMatch(/history\.replaceState\(null,"","\/"/);
+  });
 });

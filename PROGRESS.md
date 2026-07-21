@@ -20718,3 +20718,41 @@ the existing pacer/circuit-breaker stack. The loop breaker is the one NEW system
 **Tests:** 11 cases in `RepeatProbeGuard.test.ts` — signature stability/distinctness/bounding, steer exactly
 once at threshold, distinct calls not false-tripped, custom threshold, combined turn steer, malformed input,
 flags. AgentRunner suite (47) green; server + frontend tsc clean.
+
+---
+
+## 2026-07-21 — Connectly blank-body autopsy (report 5e16fc27): srcdoc route mismatch → blank content under the navbar
+
+**Full 5-bucket ledger (152 issues, ok:true, weak/free tier):**
+- ✅ Self-healed (~140): 46 TOOL_DONE, 26 AGENT_STEP, timeline; 2 SANDBOX_CMD_FAILED (`tsc` exit 2 → later
+  exit 0, fixed); 3 TOOL_ERROR recovered; 1 DATA_LOSS restore (29 files from the durable store); 6
+  PROVIDER_FALLBACK recovered; 1 PREVIEW_PUBLISHED.
+- 🔀 Worked-around (6): GLM failed 14× → fell back to Kimi (429 storm — covered by the pacer/circuit stack).
+- ⏭️ Skipped (0).
+- ❌ **Still-broken (1) — the report MISSED it:** the app rendered a NAVBAR but a **BLANK BODY**. The report
+  said "Build completed successfully" and the model narrated "✅ Preview verified — renders correctly", yet
+  the screenshot shows empty content under the navbar.
+- 🥵 Struggle: "Unknown tool: write" (cheap model called `write`, not `write_file`); "Unterminated string in
+  JSON at position 65536" ×2 (a write_file arg truncated at 64 KB); malformed index.html meta tags with
+  ellipsis (a truncation artifact the model then fixed); the GLM 429 storm.
+
+**Root cause of the blank body (same srcdoc family as #1820):** the In-browser preview renders the app in a
+same-origin `<iframe srcDoc>` whose document inherits the PLATFORM path (e.g. /build/xyz). A client router
+(react-router `BrowserRouter`) reads that path, matches NONE of the app's routes ('/', '/about', '/profile')
+and renders nothing — so the routed BODY is blank while the navbar (outside `<Routes>`) renders. The
+preview-verify passed because the navbar's visible text alone satisfied its "has content" check
+(`analyzePreviewHtml`), which is why the report falsely read "renders correctly".
+
+**Fix:** extended the preview guard (`previewNavGuard.ts`, injected by `renderPreview` into every preview) to
+NORMALIZE the initial path to '/' before the app mounts — `history.replaceState(null,"","/"+search+hash)`
+when `location.pathname !== "/"` (no reload). The client router now reads '/', the index route matches, and
+the home content renders. Safe/no-op when already at '/'; preserves search + hash (hash routing untouched).
+Complements #1820 (which blocks the navigation-escape symptom of the same root cause).
+
+**Tests:** +2 cases in `previewNavGuard.test.ts` (13 total) asserting the script resets a non-'/' path via
+replaceState. Server + frontend tsc clean, runtime suite green.
+
+**Honest open items (rule 6, not this PR):** (1) `analyzePreviewHtml` should detect a CHROME-ONLY render
+(navbar has text but the main content region is empty) so a genuinely-blank-body app can never read
+"renders correctly" — deferred (needs a precise, false-positive-safe heuristic). (2) alias the cheap-model
+`write` → `write_file`. (3) the 64 KB tool-arg truncation ("position 65536") — the larger chunked-write item.

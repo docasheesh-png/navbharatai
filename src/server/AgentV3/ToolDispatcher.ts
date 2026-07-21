@@ -269,6 +269,7 @@ import { reviewEdit, formatReviewResult } from './PostEditReviewer';
 import { renameSymbol, addComponentProp } from './CodemodeExecutor';
 import type { CodemodeFile } from './CodemodeExecutor';
 import { containsSymbol } from './codemodScope';
+import { codemodTruncationNote } from './codemodTruncation';
 import { getEmbeddingStore } from './EmbeddingSearch';
 import { redactSecrets, redactDeep } from './SecretRedactor';
 
@@ -6318,9 +6319,8 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`codemod rename ${oldName} → ${newName}`);
         const renameBase = result.summary || `Renamed "${oldName}" → "${newName}" in ${result.changes.length} file(s).`;
-        return renameSkipped > 0
-          ? `${renameBase}\n⚠️ ${renameSkipped} more matching file(s) exceeded the safety cap — re-run codemod_rename to finish them.`
-          : renameBase;
+        const renameNote = codemodTruncationNote('codemod_rename', renameSkipped);
+        return renameNote ? `${renameBase}\n${renameNote}` : renameBase;
       }
 
       case 'codemod_add_prop': {
@@ -6366,9 +6366,8 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint(`codemod add prop ${propName} to ${componentName}`);
         const addPropBase = result.summary || `Added prop "${propName}" to ${componentName} in ${result.changes.length} file(s).`;
-        return addPropSkipped > 0
-          ? `${addPropBase}\n⚠️ ${addPropSkipped} more matching file(s) exceeded the safety cap — re-run codemod_add_prop to finish them.`
-          : addPropBase;
+        const addPropNote = codemodTruncationNote('codemod_add_prop', addPropSkipped);
+        return addPropNote ? `${addPropBase}\n${addPropNote}` : addPropBase;
       }
 
       case 'codemod_move_file': {

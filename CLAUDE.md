@@ -296,7 +296,9 @@ the code (it is actually read somewhere) on 2026-07-11.
   (⚡ KEY POOL, 2026-07-13: `GLM_API_KEY` and `KIMI_API_KEY` now accept a COMMA-separated LIST of keys —
   `GLM_API_KEY=key1,key2,key3` — for 429-rotation. A 429 on one key fails over to the same model on the
   next key before dropping quality. A single key = today's behaviour. Buy the extra keys, then just set the
-  comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".)
+  comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".
+  ✅ **LIVE 2026-07-21: the admin SET the GLM comma-pool in Cloud Run** (multiple Z.ai keys) as part of the
+  GLM-429-storm response — key rotation is now genuinely active in prod.)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
 - **GitHub storage:** `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
   `GITHUB_ORG`, `GITHUB_STORAGE_ENABLED`, `GITHUB_PR_MODE`
@@ -326,7 +328,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   domain with genuine gaps; the analyzer covers healthcare/ecommerce/social/saas/booking/education/logistics/
   restaurant. The same analysis is also recorded in the admin build report (code `REQUIREMENT_GAPS`, #1692).
   Flag off ⇒ build prompt byte-identical to today. Pure decision in `RequirementGapAnalyzer.ts`; PRs #1692/
-  #1695/#1697. Set `off`/unset to disable.)
+  #1695/#1697. Set `off`/unset to disable.),
+  `AGENTV3_RATE_PACER` (set `on` by the admin 2026-07-21, GLM-429-storm response — wakes the PROACTIVE
+  per-provider token-bucket + AIMD adaptive-concurrency pacer (`RateLimitPacer.ts`, built 2026-07-18 but
+  default-OFF until now): calls are paced UNDER each provider's rate so most 429s never happen, and a
+  429/timeout HALVES concurrency (recovers, then ramps back). Tunables: `AGENTV3_PACER_RATE_PER_SEC` (8),
+  `AGENTV3_PACER_BURST` (8), `AGENTV3_PACER_MIN_CONCURRENCY` (2), `AGENTV3_PACER_MAX_CONCURRENCY` (8).
+  Set `off`/unset to disable. Works WITH the reactive stack: escalating 429 re-probe bench (#1801),
+  GLM↔KIMI floor balance (#1802, kill switch `AGENTV3_FLOOR_BALANCE=off`), circuit breaker
+  (`AGENTV3_CIRCUIT_BREAKER`, default on), and the GLM key-pool.)
 - **Sonic Chat (Amazon Nova Sonic voice — EXPERIMENTAL, route `/sonic`, admin 2026-07-13):**
   `SONIC_CHAT_ENABLED`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (= `us-east-1`),
   plus optional `SONIC_MODEL_ID` / `SONIC_VOICE_ID`. All set in Cloud Run 2026-07-13. The feature is

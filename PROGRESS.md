@@ -20284,3 +20284,51 @@ does not rebuild what exists):**
 all env-gated or advisory (never blocks a build). The clean, code-only, high-precision analyzer vein is now
 largely exhausted — remaining roadmap value is concentrated in infra-unblocks (admin) and larger multi-PR
 architectural work (ask_user gate, design-to-code, parallel-build deepening) that needs deliberate scoping.
+
+---
+
+## 2026-07-21 (later) — Restaurant-build forensic autopsy (rule 5) → GLM-429 storm killed at 3 layers + honest file-reveal UX
+
+**The evidence:** the admin ran the requested full-stack test build (restaurant management + GST billing,
+44 files, `buildId e4c483bb`) and sent the diagnostics JSON. Ledger: 367 events, 0 errors, 17 warnings,
+2 unresolved; ✅ 3 genuine self-heals (JS→TS rename, missing import, missing dep); 🥵 the build ran 27+ min
+against an 11-min estimate. Dominant root cause: **GLM 429'd 32×** ("service temporarily overloaded"),
+`builtBy: KIMI` (GLM 21 / KIMI 73 / VERTEX 1 deliveries) — every remaining defect (fast-lane 240s timeout →
+BUILD_FAILED handoff, the Vertex `max_tokens` truncation, the salvage-path read miss) was downstream of the
+429 latency. Secondary root cause: **domain misclassified restaurant→ecommerce** (first-match-wins let
+ecommerce's `\border\b` steal the prompt).
+
+**Shipped fixes (each: root-cause + regression tests + CI green + merged):**
+1. **#1800 — best-scoring domain selection** (`RequirementGapAnalyzer`): among all matching domains, the one
+   with the highest feature-signal overlap wins (array order breaks ties, so existing classifications change
+   ONLY when a later domain is strictly more specific). The real failing prompt now → `restaurant`; a genuine
+   online store still → `ecommerce`.
+2. **#1801 — escalating 429 re-probe bench** (`createRateLimitCooldowns`): the short cooldown was FIXED 60s →
+   a saturated GLM was re-probed (and 429'd) ~once a minute all build long — the exact 32-failure drip, which
+   the 8-in-120s circuit breaker structurally never sees. Now each bench re-arm LINKED to the previous one
+   (within 2× base of expiry) doubles the window (60→120→240→… cap `AGENTV3_RATE_LIMIT_COOLDOWN_MAX_MS`,
+   default 10× base); a rare spread-out 429 starts fresh; a success resets; concurrent stragglers = one
+   episode. ~32 wasted probes collapse to ~5.
+3. **#1802 — floor balance** (admin directive "GLM par pura load na dalo — 4 me smartly divide"):
+   `cheapBuildFloorRunners` alternates the GLM↔KIMI lead per construction (~50/50 first-attempt spread);
+   health-awareness comes free from the shared cooldowns; Vertex/Gemini/Haiku stay strictly error-only
+   backstops (cost order + no-Claude ladder untouched). Supersedes the fixed GLM-first order (2026-07-01) per
+   the newer directive; kill switch `AGENTV3_FLOOR_BALANCE=off`.
+4. **#1803 — honest file-by-file reveal** (admin: "user ko ek ek file banti dikhe"): an order-preserving
+   pacing queue (`revealPacer.ts`) between the NDJSON stream and the reducer drips burst `✓ file (n/m)` lines
+   at 600ms. HONESTY: only real events, exact order, terminal events flush instantly, deep backlog drains 4×,
+   nothing ever dropped. Backend build speed untouched.
+
+**Admin infra actions (same session, hand-to-hand):** `AGENTV3_RATE_PACER=on` set in Cloud Run (wakes the
+already-built proactive token-bucket + AIMD pacer) and the **GLM key-pool** (comma-separated Z.ai keys) set —
+both recorded in the CLAUDE.md env registry.
+
+**Honestly recorded, not silently dropped (rule 6):**
+- The fast lane running on a complex app is BY DESIGN (manifest lane > free-form loop) — its timeout here was
+  a symptom of the 429 latency, not a gating bug. Not changed.
+- Vertex `max_tokens` truncation + the salvage-path read miss are low-frequency downstream symptoms; the final
+  syntax re-verify gate already catches a truncated file that breaks parsing. Watch the next real build report
+  before adding machinery.
+- Remaining approved-but-unshipped slices from the admin's directive: **hedged text requests** (GLM-vs-Kimi
+  race for fast-lane text calls, flag-gated canary) and **micro-file batching** in SimpleBuilder — planned
+  follow-ups now that the 3-layer fix + pacer + key-pool should be measured on a real build first.

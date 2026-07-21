@@ -1613,6 +1613,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_pageviews',
+      description:
+        'Add a real self-hosted page-view / visit counter to the app (server/pageviews/) — a packaged domain ' +
+        'vertical, privacy-friendly and storing nothing with any third party. The real guarantee is ' +
+        'UNIQUE-VISITOR DEDUP: every hit increments a page total, but a given visitor counts toward the page ' +
+        'unique count only ONCE PER DAY — the visitor is a SALTED HASH of IP+User-Agent (the raw IP is never ' +
+        'stored, non-reversible), so it is privacy-preserving. Plus a top-pages ranking. Emits a dependency-free ' +
+        'PageViewService (node:crypto) with record / stats / topPages / siteTotal + an Express router (POST ' +
+        '/api/views {path}, GET /api/views/stats ?path=, GET /api/views/top ?limit=). Distinct from ' +
+        'generate_analytics (sends events to a 3rd-party like PostHog/Mixpanel) — this keeps all counts on your ' +
+        'own server. In-memory by default — swap the Maps for your DB; set a stable PAGEVIEW_SALT in production.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2704,6 +2718,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_announcements',
   'generate_collections',
   'generate_contact_form',
+  'generate_pageviews',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

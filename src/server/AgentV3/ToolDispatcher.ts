@@ -171,6 +171,7 @@ import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
 import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator';
 import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
 import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
+import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4004,6 +4005,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('contact form starter');
         const cfDeps = cfcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a contact-form backend:\n${cfWritten.join('\n')}\nAdd the dependencies: ${cfDeps}\n\n${cfcfg.instructions}`;
+      }
+
+      case 'generate_pageviews': {
+        // Breadth recipe (domain vertical) — self-hosted page-view counter (server/pageviews/): a real
+        // PageViewService whose core guarantee is UNIQUE-VISITOR DEDUP (total counts every hit; a salted-hash
+        // visitor counts unique only once per day; raw IP never stored) + an Express router. Pure gen in
+        // PageViewsGenerator.ts.
+        const pvcfg = generatePageViewsIntegration();
+        const pvWritten: string[] = [];
+        for (const [path, content] of Object.entries(pvcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          pvWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('pageviews starter');
+        const pvDeps = pvcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a self-hosted page-view counter:\n${pvWritten.join('\n')}\nAdd the dependencies: ${pvDeps}\n\n${pvcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

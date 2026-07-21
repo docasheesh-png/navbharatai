@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, balanceFloorLead, _resetFloorLeadCounter, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -416,9 +416,9 @@ describe('parseKeyPool — provider key rotation pool (ROADMAP Tier-4)', () => {
 });
 
 describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admin: 1st call not Claude)', () => {
-  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL'];
+  const ENV = ['AGENTV3_CHEAP_FLOOR', 'GLM_API_KEY', 'GLM_BASE_URL', 'GLM_MODEL', 'KIMI_API_KEY', 'KIMI_BASE_URL', 'KIMI_MODEL', 'BEDROCK_API_KEY', 'BEDROCK_REGION', 'BEDROCK_GLM_MODEL', 'AGENTV3_FREE_GLM_MODEL', 'AGENTV3_FREE_KIMI_MODEL', 'AGENTV3_FLOOR_BALANCE'];
   let saved: Record<string, string | undefined>;
-  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } });
+  beforeEach(() => { saved = {}; for (const k of ENV) { saved[k] = process.env[k]; delete process.env[k]; } _resetFloorLeadCounter(); });
   afterEach(() => { for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
 
   it('returns [] when flag unset AND no keys — still byte-for-byte the Claude path (safe with no keys)', () => {
@@ -457,6 +457,47 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     process.env.KIMI_API_KEY = 'kimi-test-key';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'KIMI']);
   });
+  // FLOOR BALANCE (admin directive 2026-07-21 — "GLM par pura load na dalo, smartly divide"): the
+  // GLM↔KIMI lead alternates per construction so first-attempt load spreads across both cheap coders.
+  it('FLOOR BALANCE — the lead alternates GLM → KIMI → GLM across constructions (both keys present)', () => {
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    const first = cheapBuildFloorRunners();
+    const second = cheapBuildFloorRunners();
+    const third = cheapBuildFloorRunners();
+    expect(first[0].name).toBe('GLM');   // construction 1 — GLM leads (today's order)
+    expect(second[0].name).toBe('KIMI'); // construction 2 — KIMI leads (the load-divide)
+    expect(third[0].name).toBe('GLM');   // construction 3 — back to GLM
+    // The SAME rung set every time — only the order rotates; nothing is dropped or added.
+    const names = (rs: typeof first) => rs.map((r) => r.name).sort();
+    expect(names(second)).toEqual(names(first));
+    expect(names(third)).toEqual(names(first));
+  });
+  it('FLOOR BALANCE — kill switch AGENTV3_FLOOR_BALANCE=off restores the fixed GLM-first order', () => {
+    process.env.AGENTV3_FLOOR_BALANCE = 'off';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    process.env.KIMI_API_KEY = 'kimi-test-key';
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM'); // no alternation when off
+  });
+  it('FLOOR BALANCE — a single-provider floor never rotates (nothing to balance)', () => {
+    process.env.AGENTV3_CHEAP_FLOOR = 'glm';
+    process.env.GLM_API_KEY = 'glm-test-key';
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+    expect(cheapBuildFloorRunners()[0].name).toBe('GLM');
+  });
+  it('balanceFloorLead (pure) — kimiFirst moves the KIMI block ahead of GLM; identity otherwise', () => {
+    const rs = [
+      { name: 'GLM', runner: {} as never }, { name: 'GLM#2', runner: {} as never, reportAs: 'GLM' },
+      { name: 'KIMI', runner: {} as never },
+    ];
+    expect(balanceFloorLead(rs, false)).toBe(rs); // identity — no reorder, same reference
+    expect(balanceFloorLead(rs, true).map((r) => r.name)).toEqual(['KIMI', 'GLM', 'GLM#2']);
+    // Single-provider input: identity even when kimiFirst (nothing to swap).
+    const glmOnly = [{ name: 'GLM', runner: {} as never }];
+    expect(balanceFloorLead(glmOnly, true)).toBe(glmOnly);
+  });
+
   // KEY POOL / ROTATION (ROADMAP Tier-4 — GLM 429-saturation lever from deep-test App #9/#10).
   it('a comma-separated GLM_API_KEY pool emits a rung PER (model × key), model-major/key-minor', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'glm';
@@ -533,7 +574,7 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     expect(cheapBuildFloorRunners({ free: true }).map((r) => r.name)).toEqual(['GLM', 'GLM']);
   });
 
-  it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, GLM first (admin decision, 2026-07-01)', () => {
+  it('"both"/"on" makes GLM and KIMI "friends" — both ladders included, lead ALTERNATING (2026-07-21 load-divide supersedes the fixed GLM-first of 2026-07-01)', () => {
     process.env.AGENTV3_CHEAP_FLOOR = 'both';
     process.env.GLM_API_KEY = 'glm-test-key';
     process.env.GLM_MODEL = 'glm-4.7'; // pin to 1 rung each for a clean, exact assertion
@@ -541,8 +582,10 @@ describe('cheapBuildFloorRunners — GLM/Kimi cheap floor LEADS by default (admi
     process.env.KIMI_MODEL = 'kimi-k2.7-code';
     expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
 
+    // 2nd construction: the floor-balance rotation now leads KIMI (the admin's "GLM par pura load na
+    // dalo" divide) — both ladders always present, only the lead swaps.
     process.env.AGENTV3_CHEAP_FLOOR = 'on';
-    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['GLM', 'KIMI']);
+    expect(cheapBuildFloorRunners().map((r) => r.name)).toEqual(['KIMI', 'GLM']);
   });
 
   it('with "both" set, GLM alone still works if only GLM has a key (KIMI independently no-ops) — and vice versa', () => {

@@ -394,19 +394,23 @@ export function MultiCloudDeploy({ generatedCode }: MultiCloudDeployProps = {}) 
               ))}
             </div>
             <div style={{ ...cardStyle }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Deployment Checklist</div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Deployment Readiness</div>
+              {/* Honest readiness (admin autopsy 2026-07-21): each item reflects REAL state — the old
+                  checklist hardcoded 'Build successful / SSL / CDN' to always-green regardless of any
+                  actual deploy. */}
               {[
-                { label: 'Build runs successfully', done: true },
+                { label: 'App built and ready', done: !!generatedCode },
                 { label: 'Environment variables configured', done: Object.keys(envVars).length > 0 },
-                { label: 'Custom domain ready', done: false },
-                { label: 'SSL certificate enabled', done: true },
-                { label: 'CDN configured', done: true },
+                { label: 'Custom domain connected', done: false },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
                   {item.done ? <CheckCircle2 size={14} color="#4ade80" /> : <AlertCircle size={14} color="#f59e0b" />}
                   <span style={{ fontSize: 12, color: item.done ? '#e2e8f0' : '#94a3b8' }}>{item.label}</span>
                 </div>
               ))}
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 10, lineHeight: 1.5 }}>
+                HTTPS/SSL and CDN are provided automatically by your chosen host (Vercel, Netlify, Cloudflare, Firebase, …).
+              </p>
             </div>
           </div>
         )}

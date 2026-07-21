@@ -461,9 +461,10 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
 
   const startBuild = useCallback(() => {
     if (!validate()) return;
-    setBuildState('building');
-    setBuildStepIdx(0);
-
+    // Generate the Android project CONFIG FILES synchronously (admin autopsy 2026-07-21). The old
+    // code ran a 650ms fake "build" timer even though nothing is compiled here — a browser cannot
+    // build or sign an APK/AAB. The real signed .aab is produced by the repo's CI workflow (see the
+    // honest note in the 'done' panel). No fake progress theatre.
     const files: GeneratedFile[] = [
       { name: 'AndroidManifest.xml', content: generateManifest(info, perms) },
       { name: 'build.gradle', content: generateBuildGradle(info) },
@@ -472,28 +473,19 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
         : []),
       { name: 'README.md', content: generateReadme(info, buildConfig.method, buildConfig.twaUrl) },
     ];
-
-    let idx = 0;
-    const interval = setInterval(() => {
-      idx += 1;
-      if (idx >= BUILD_STEPS.length) {
-        clearInterval(interval);
-        setBuildStepIdx(BUILD_STEPS.length - 1);
-        setBuildState('done');
-        setGeneratedFiles(files);
-      } else {
-        setBuildStepIdx(idx);
-      }
-    }, 650);
+    setGeneratedFiles(files);
+    setBuildStepIdx(BUILD_STEPS.length - 1);
+    setBuildState('done');
   }, [info, perms, buildConfig, validate]);
 
   const downloadAll = useCallback(() => {
+    // Honest filename: this is a plain-text bundle of the config files, not a real .zip / .apk.
     const combined = generatedFiles.map((f) => `\n\n===== ${f.name} =====\n\n${f.content}`).join('');
     const blob = new Blob([combined], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${info.packageName}-android-package.zip.txt`;
+    a.download = `${info.packageName}-android-config.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }, [generatedFiles, info.packageName]);
@@ -814,7 +806,7 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
                     className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-semibold text-base"
                   >
                     <Package size={18} />
-                    Generate Package
+                    Generate config files
                   </button>
                 </div>
               )}
@@ -858,8 +850,18 @@ export const APKBuilder: React.FC<APKBuilderProps> = ({ appName }) => {
               {buildState === 'done' && (
                 <div className="space-y-4">
                   <div className="text-center py-3">
-                    <div className="text-4xl mb-1">🎉</div>
-                    <p className="text-green-400 font-semibold">Package ready! Neeche files download karein.</p>
+                    <div className="text-4xl mb-1">📄</div>
+                    <p className="text-green-400 font-semibold">Config files ready — download below.</p>
+                  </div>
+
+                  {/* Honest note (admin autopsy 2026-07-21): this generates the Android project config
+                      files; it does NOT compile or sign an APK/AAB (a browser can't). The real signed
+                      .aab comes from CI. */}
+                  <div className="rounded-xl p-3 border border-indigo-500/20 bg-indigo-500/5 text-[11px] text-white/60 leading-relaxed">
+                    <span className="text-indigo-300 font-semibold">To get a real installable app: </span>
+                    the signed <code className="text-white/80">.aab</code> is built by the repo&apos;s CI —
+                    Actions → &ldquo;Build Android App Bundle (.aab, signed)&rdquo; → Run workflow. It needs a
+                    one-time signing keystore set by an admin; the admin then uploads the .aab to Play Console.
                   </div>
 
                   {generatedFiles.map((f) => (

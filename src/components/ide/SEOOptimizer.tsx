@@ -14,11 +14,14 @@ import {
   Eye,
   Tag as TagIcon,
 } from 'lucide-react';
+import { resolveAppSource } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SEOOptimizerProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
   appName?: string;
   onCodeUpdate?: (html: string) => void;
 }
@@ -716,7 +719,11 @@ const ScoreSidebar: React.FC<{ meta: MetaFormData; og: OGFormData; pages: Sitema
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appName, onCodeUpdate }) => {
+export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, files, appName, onCodeUpdate }) => {
+  // Analyse the REAL app (admin autopsy 2026-07-21): the retired generatedCode is the "Waiting for
+  // magic…" placeholder in v5.0, so auto-extract used to read the placeholder's title/text. Resolve
+  // the real source; appHtml is '' when there's no built app (so the auto-extract guards go false).
+  const appHtml = resolveAppSource(generatedCode, files).html;
   const [tab, setTab] = useState(0);
   const { copied, copy } = useCopy();
 
@@ -800,7 +807,7 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
         </div>
 
         {/* Apply to App button */}
-        {onCodeUpdate && generatedCode && (
+        {onCodeUpdate && appHtml && (
           <div className="flex-shrink-0 px-5 py-2 border-b border-white/10 bg-blue-500/5">
             <button
               onClick={() => {
@@ -825,8 +832,8 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
                   og.twitterHandle ? `<meta property="twitter:site" content="${og.twitterHandle}" />` : '',
                 ].filter(Boolean).join('\n');
 
-                // Inject into generatedCode — replace existing tags or add before </head>
-                let newHtml = generatedCode;
+                // Inject into the real app HTML — replace existing tags or add before </head>
+                let newHtml = appHtml;
                 // Remove existing title + seo meta tags
                 newHtml = newHtml.replace(/<title[^>]*>.*?<\/title>/gi, '');
                 newHtml = newHtml.replace(/<meta\s+name=["'](title|description|keywords|robots|author)["'][^>]*>/gi, '');
@@ -851,13 +858,13 @@ export const SEOOptimizer: React.FC<SEOOptimizerProps> = ({ generatedCode, appNa
         {/* Tab content */}
         <div className="flex-1 overflow-hidden p-4">
           {tab === 0 && (
-            <MetaTab meta={meta} setMeta={setMeta} generatedCode={generatedCode} copy={copy} copied={copied} />
+            <MetaTab meta={meta} setMeta={setMeta} generatedCode={appHtml} copy={copy} copied={copied} />
           )}
           {tab === 1 && (
             <OGTab og={og} setOG={setOG} metaTitle={meta.pageTitle} metaDesc={meta.description} copy={copy} copied={copied} />
           )}
           {tab === 2 && (
-            <SitemapTab pages={pages} setPages={setPages} generatedCode={generatedCode} copy={copy} copied={copied} />
+            <SitemapTab pages={pages} setPages={setPages} generatedCode={appHtml} copy={copy} copied={copied} />
           )}
           {tab === 3 && (
             <RobotsTab robots={robotsCfg} setRobots={setRobotsCfg} copy={copy} copied={copied} />

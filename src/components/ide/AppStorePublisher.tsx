@@ -470,7 +470,9 @@ export function AppStorePublisher({ generatedCode }: Props) {
                 <label className="text-xs text-white/50">Full Description (max 4000 chars)</label>
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] ${data.fullDesc.length > 4000 ? 'text-red-400' : 'text-white/30'}`}>{data.fullDesc.length}/4000</span>
-                  <button onClick={generateDescription} className="text-[10px] text-rose-400 hover:text-rose-300 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-lg">✨ AI Generate</button>
+                  {/* Honest label (admin autopsy 2026-07-21): this fills a template from your fields —
+                      it is not an AI generation. */}
+                  <button onClick={generateDescription} className="text-[10px] text-rose-400 hover:text-rose-300 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-lg">Fill template</button>
                 </div>
               </div>
               <textarea
@@ -573,23 +575,24 @@ export function AppStorePublisher({ generatedCode }: Props) {
               </div>
 
               {/* Keyword Analysis Table */}
+              {/* The fabricated Volume/Competition/Relevance table was removed (admin autopsy
+                  2026-07-21): those numbers were computed from the row index (i%3, i%2, 10-i), not any
+                  real ASO data source — showing invented metrics as real is dishonest. We list the
+                  chosen keywords honestly; real search-volume data needs a paid ASO API we don't have. */}
               <div className="bg-[#161b22] border border-white/5 rounded-xl overflow-hidden">
-                <div className="grid grid-cols-4 px-3 py-2 border-b border-white/5 text-[9px] text-white/30 uppercase tracking-wider">
-                  <span>Keyword</span><span>Volume</span><span>Competition</span><span>Relevance</span>
+                <div className="px-3 py-2 border-b border-white/5 text-[9px] text-white/30 uppercase tracking-wider">Selected keywords</div>
+                {data.selectedKeywords.length === 0 ? (
+                  <div className="px-3 py-2 text-[10px] text-white/40">No keywords added yet.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5 px-3 py-2.5">
+                    {data.selectedKeywords.map((kw) => (
+                      <span key={kw} className="text-[10px] text-white/70 bg-white/5 border border-white/10 rounded-full px-2 py-0.5">{kw}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="px-3 py-2 border-t border-white/5 text-[9px] text-white/30 leading-relaxed">
+                  Tip: keep your strongest keywords in the app title &amp; subtitle. Live search-volume data isn&apos;t available here.
                 </div>
-                {data.selectedKeywords.slice(0, 6).map((kw, i) => {
-                  const vol = i % 3 === 0 ? 'High' : i % 3 === 1 ? 'Medium' : 'Low';
-                  const comp = i % 2 === 0 ? 'Low' : 'Medium';
-                  const rel = 10 - i;
-                  return (
-                    <div key={kw} className="grid grid-cols-4 px-3 py-2 border-b border-white/5 text-[10px]">
-                      <span className="text-white/60 truncate">{kw}</span>
-                      <span className={vol === 'High' ? 'text-emerald-400' : vol === 'Medium' ? 'text-amber-400' : 'text-red-400'}>{vol}</span>
-                      <span className={comp === 'Low' ? 'text-emerald-400' : 'text-amber-400'}>{comp}</span>
-                      <span className="text-white/60">{rel}/10</span>
-                    </div>
-                  );
-                })}
               </div>
             </div>
 
@@ -631,6 +634,17 @@ export function AppStorePublisher({ generatedCode }: Props) {
                 <p className="text-xs text-white/40">{readiness}% checklist complete — {CHECKLIST_GROUPS.flatMap(g => g.items).filter(i => data.checklist[i.key]).length} / {CHECKLIST_GROUPS.flatMap(g => g.items).length} items done</p>
               </div>
               <div className="ml-auto text-2xl font-bold text-white">{readiness}%</div>
+            </div>
+
+            {/* Honest publishing path (admin autopsy 2026-07-21): this tool PREPARES your store
+                listing (metadata + ASO + checklist + JSON export) — it does not upload to the stores.
+                Real publishing needs signed builds + your store credentials. */}
+            <div className="rounded-xl p-4 border border-indigo-500/20 bg-indigo-500/5 text-xs text-white/60 leading-relaxed">
+              <p className="text-indigo-300 font-semibold mb-1">How publishing actually works</p>
+              This tool prepares your listing (metadata, ASO, checklist) and exports it as JSON. The
+              actual signed builds are produced by the repo&apos;s CI: <span className="text-white/80">Actions → &ldquo;Build Android App Bundle (.aab, signed)&rdquo;</span> for Google Play and
+              <span className="text-white/80"> &ldquo;Build iOS App (.ipa)&rdquo;</span> for the App Store. Those need one-time signing keys &amp; store
+              credentials set by an admin — then the admin uploads the build to Play Console / App Store Connect.
             </div>
 
             {/* Checklist Groups */}

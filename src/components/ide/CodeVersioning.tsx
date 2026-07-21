@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GitBranch, GitCommit, Clock, RotateCcw, Save, Trash2, Check, X, Download, Plus, Edit2, GitMerge } from 'lucide-react';
+import { filesHaveRealContent, isPlaceholderHtml } from '../../lib/workspaceSource';
 
 interface Version {
   id: string;
@@ -13,6 +14,10 @@ interface Version {
 
 interface Props {
   generatedCode: string;
+  /** The v5-synced workspace files — the REAL app to snapshot/restore (admin autopsy 2026-07-21).
+   *  Versioning used to snapshot only `generatedCode`, which is the retired placeholder in v5.0, so
+   *  Save stayed disabled and restore pushed an empty string. Now a version carries the file set. */
+  files?: Record<string, string>;
   onRestore: (code: string) => void;
   onRestoreFiles?: (files: Record<string, string>) => void;
 }
@@ -42,7 +47,12 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Props) {
+export function CodeVersioning({ generatedCode, files, onRestore, onRestoreFiles }: Props) {
+  // A snapshot is worth saving when there's a REAL app: either a bundled preview (non-placeholder
+  // generatedCode) or real workspace files. `snapFiles` is what a version stores/restores.
+  const snapFiles = filesHaveRealContent(files) ? files : undefined;
+  const hasApp = !!snapFiles || !isPlaceholderHtml(generatedCode);
+  const snapFingerprint = snapFiles ? JSON.stringify(snapFiles) : generatedCode;
   const [versions, setVersions] = useState<Version[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [autosave, setAutosave] = useState(false);
@@ -68,35 +78,39 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
   };
 
   useEffect(() => {
-    if (!autosave || !generatedCode.trim()) return;
+    if (!autosave || !hasApp) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       const last = versions[0];
-      if (last && last.code === generatedCode) return;
+      // Dedup on the real fingerprint (files when present, else code) so identical states don't stack.
+      if (last && (last.files ? JSON.stringify(last.files) : last.code) === snapFingerprint) return;
       const v: Version = {
         id: Date.now().toString(),
         name: `Auto v${versions.length + 1}`,
         code: generatedCode,
+        files: snapFiles,
         timestamp: Date.now(),
         label: 'auto',
-        size: generatedCode.length,
+        size: snapFingerprint.length,
       };
       const updated = [v, ...versions].slice(0, MAX_VERSIONS);
       persist(updated);
     }, 3000);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [generatedCode, autosave]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapFingerprint, autosave, hasApp]);
 
   const saveSnapshot = () => {
-    if (!generatedCode.trim()) return;
+    if (!hasApp) return;
     const name = newName.trim() || `Version ${versions.length + 1}`;
     const v: Version = {
       id: Date.now().toString(),
       name,
       code: generatedCode,
+      files: snapFiles,
       timestamp: Date.now(),
       label: '',
-      size: generatedCode.length,
+      size: snapFingerprint.length,
     };
     const updated = [v, ...versions].slice(0, MAX_VERSIONS);
     persist(updated);
@@ -169,7 +183,7 @@ export function CodeVersioning({ generatedCode, onRestore, onRestoreFiles }: Pro
             <span className="text-xs text-white/40">{versions.length} versions</span>
             <button
               onClick={() => setShowNameInput(true)}
-              disabled={!generatedCode.trim()}
+              disabled={!hasApp}
               className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               <Plus className="w-3 h-3" /> Save

@@ -119,6 +119,8 @@ export interface ViewPanelsProps {
    *  `framework` + `running` (2026-07-01) let the sidebar PreviewSurface reach feature parity with
    *  the in-panel one (auto-resume + framework-aware Diagnose). */
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
+  /** Snapshot of the files taken before the last v5.0 build — the Diff Viewer's "previous version". */
+  previousFiles?: Record<string, string>;
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
   /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
@@ -141,7 +143,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, onV3FixError, onBuildViaV5Prompt, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -300,6 +302,7 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <DiffViewer
             files={files}
+            previousFiles={previousFiles}
             onResolveConflicts={(fileName: string, resolved: string) => {
               // P-DEV.4 — write the marker-free resolved content back to the workspace + refresh preview.
               const next = { ...(files as Record<string, string>), [fileName]: resolved };
@@ -483,6 +486,7 @@ export function ViewPanels({
         <div className="flex-1 h-full overflow-hidden">
           <CodeVersioning
             generatedCode={generatedCode}
+            files={files as Record<string, string>}
             onRestore={(c: string) => setGeneratedCode(c)}
             onRestoreFiles={(f: any) => { setFiles(f as any); updatePreview(f as any); setIsAppBuilt(true); setHasGeneratedCode(true); addToast('Version restored ✓', 'success'); }}
           />

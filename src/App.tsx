@@ -1968,6 +1968,9 @@ export default function App() {
   // A deploy requested from the Git panel for a specific real provider → v5.0 runs its real
   // build+deploy pipeline for it (see AgentV3Panel pendingDeploy).
   const [v3DeployRequest, setV3DeployRequest] = useState<{ provider: string; nonce: number } | null>(null);
+  // Snapshot of the workspace files taken right BEFORE each v5.0 build (admin autopsy 2026-07-21) —
+  // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
+  const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
 
   const resumeSession = (session: ChatSession) => {
     // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
@@ -2603,7 +2606,7 @@ export default function App() {
               /* Phase S3 conflict guard: before a v5.0 build starts, force-flush any pending IDE edits to
                  the durable store so the build never runs on a stale file set (and so the user's latest
                  hand edits are what v5.0 reads/acknowledges). Best-effort — never blocks the build. */
-              onBeforeBuild={() => workspaceSyncerRef.current?.flush() ?? Promise.resolve()}
+              onBeforeBuild={() => { setPreviousFiles({ ...files }); return workspaceSyncerRef.current?.flush() ?? Promise.resolve(); }}
               onOpenInIDE={(path: string) => { setActiveFile(path); toggleTab('studio'); }}
               onPreviewState={setV3Preview}
               pendingFix={v3PendingFix}
@@ -3320,6 +3323,7 @@ export default function App() {
 
           <ViewPanels
             v3Preview={v3Preview}
+            previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: `The in-browser preview failed to build with this error:\n\n${errText}\n\nPlease find the cause in the project files and fix it so the app builds and runs.`, nonce: Date.now() })}
             onBuildViaV5Prompt={(text) => { setV3PendingFix({ text, nonce: Date.now() }); toggleTab('nbi_pro_chat'); }}
             problems={problems}

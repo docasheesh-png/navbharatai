@@ -14,6 +14,7 @@ import { PARALLEL_WRITER_ROLES } from './parallelBuild';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
+import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -750,10 +751,15 @@ export class AgentRunner {
               }
             }
             const broken = Object.keys(written).length > 0 ? await findSyntaxErrors(written) : [];
-            if (broken.length > 0) {
-              const list = broken.map((b) => `${b.path}${b.line ? `:${b.line}` : ''} — ${b.message}`).join('\n');
-              events.emit({ type: 'narration', agent: agentRole, text: `⚠️ The last response was cut off at the token limit and ${broken.length} file(s) it wrote do not parse — rewriting them before moving on.`, ts: Date.now() });
-              truncationSteer = `[TRUNCATION GUARD] Your previous response hit the max-token limit and the following file(s) you wrote in it are syntactically BROKEN (they do not parse):\n${list}\n\nRewrite each listed file COMPLETELY with write_file before doing anything else. Keep each response small enough not to hit the token limit again.`;
+            // Connectly autopsy 2026-07-21: a cheap model that wrote a file as a `<<<FILE …>>>` TEXT block
+            // (not a write_file tool call) and hit its token ceiling loses that file entirely — the main
+            // loop only writes tool calls. Recover those lost/partial text-marker files too, not just the
+            // JS parse-failures. (A path also written via a tool call is not "lost", so exclude it.)
+            const writtenPaths = new Set(Object.keys(written));
+            const textLost = textMarkerFilePaths(turn.text).filter((p) => !writtenPaths.has(p));
+            truncationSteer = truncationRecoverySteer({ brokenJs: broken, textMarkerPaths: textLost });
+            if (truncationSteer) {
+              events.emit({ type: 'narration', agent: agentRole, text: truncationRecoveryNarration(broken.length, textLost.length), ts: Date.now() });
             }
           } catch { /* the guard is best-effort — it must never break a build */ }
         }

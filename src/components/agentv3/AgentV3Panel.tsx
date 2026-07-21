@@ -95,6 +95,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // one-click Continue instead of silently resetting. Set on reopen; cleared once a build starts or the
   // user dismisses/continues.
   const [interruptedResume, setInterruptedResume] = useState(false);
+  // ASK-USER (opt-in): dismiss state for the non-blocking clarify card. Reset whenever a NEW clarify
+  // arrives so a fresh build's questions always show; the build itself never waits on this.
+  const [clarifyDismissed, setClarifyDismissed] = useState(false);
+  useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -2626,6 +2630,36 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
             )}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+            )}
+            {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
+                sensible defaults for these; the user MAY refine any of them with a follow-up message, or
+                dismiss. It never pauses the build (honours "text reply > build app"). */}
+            {state.pendingClarify && !clarifyDismissed && state.pendingClarify.questions.length > 0 && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-indigo-100">
+                <div className="flex items-start gap-2">
+                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">Building your {state.pendingClarify.domain} app — a few things I assumed</div>
+                    <div className="text-indigo-200/80 text-xs mt-0.5">
+                      I’m already building with sensible defaults. Want to adjust any of these? Just reply below — no need to wait.
+                    </div>
+                    <ul className="mt-1.5 space-y-1">
+                      {state.pendingClarify.questions.map((q, i) => (
+                        <li key={i} className="text-xs text-indigo-100/90 flex gap-1.5"><span className="text-indigo-400">•</span><span>{q}</span></li>
+                      ))}
+                    </ul>
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setClarifyDismissed(true)}
+                        className="px-2.5 py-1 rounded-md text-indigo-200/80 text-xs hover:text-indigo-100 hover:bg-white/5 transition-colors"
+                      >
+                        Looks good — dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
             {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
                 app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}

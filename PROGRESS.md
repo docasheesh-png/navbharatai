@@ -20332,3 +20332,35 @@ both recorded in the CLAUDE.md env registry.
 - Remaining approved-but-unshipped slices from the admin's directive: **hedged text requests** (GLM-vs-Kimi
   race for fast-lane text calls, flag-gated canary) and **micro-file batching** in SimpleBuilder — planned
   follow-ups now that the 3-layer fix + pacer + key-pool should be measured on a real build first.
+
+---
+
+## 2026-07-21 — LearnLoop autopsy: SQLite scalar-list guard (DNA fix, branch `claude/ai-teacher-student-profiles-8bg002`)
+
+**Report:** LearnLoop LMS (full-stack Vite + Express + Prisma/SQLite) build FAILED (`ok:none`,
+`rootCause: BUILD_FAILED`). Autopsy decisive blockers were the Prisma-7 datasource skew (P1012 loop) — now
+already closed by prior sessions' `^6` pin + install-command pin + package.json pin + `--legacy-peer-deps` —
+PLUS a schema-modeling class that NO guard fixed: **scalar lists on SQLite**. The builder modelled
+`attachments String[]` (and enum lists rewritten to `String[]` by `stripPrismaSqliteEnums` line 48, which
+deliberately "kept shape"). SQLite's connector does not support lists of primitive types, so
+`prisma validate` / `prisma generate` fails with *"Field '…' can't be a list. The current connector does not
+support lists of primitive types"*, looping the DB setup.
+
+**Root-cause fix (DNA level, class not instance):** new pure guard `fixPrismaSqliteScalarList(path, content)`
+in `FullStackGuards.ts`. On a SQLite datasource it collapses every scalar list field (`<name> <Scalar>[]`,
+for the nine Prisma primitive scalars) to a single nullable `String?` (Prisma's own SQLite guidance — store
+serialized) and drops the now-invalid `@default([...])`. RELATION lists (`Lesson[]`, `User[]`) are left
+untouched because only the scalar type tokens are matched — relations are valid on SQLite. Runs AFTER
+`stripPrismaSqliteEnums` in `applyFullStackGuards`, so an enum LIST it turned into `String[]` is also
+collapsed (line 48's leftover invalid shape is now finished off). No-op for Postgres/MySQL (they support
+scalar lists) and non-schema files. Flag-gated by the existing `AGENTV3_FULLSTACK_GUARDS` kill switch.
+
+**Regression tests:** 7 new cases in `FullStackGuards.test.ts` encoding the exact LearnLoop inputs —
+`String[]`→`String?`, `Int[]/Float[]/Boolean[]/Json[]` + `@default([])` drop, relation lists preserved,
+enum-list→`String?` end-to-end, Postgres/non-schema/no-list no-ops, and full `applyFullStackGuards` ride.
+Whole file green (35 tests); `tsc --noEmit` (frontend) + `tsc -p tsconfig.server.json` clean.
+
+**Still open (out of this PR's mechanical reach):** one-to-one relations missing `@unique`, and a field
+referencing an undefined model (LearnLoop's `Certificate`) — these need a real `prisma validate` preflight
+that surfaces exact errors to a heal pass, not a blind mechanical rewrite (can't invent a missing model). The
+Prisma-7 skew, npm ERESOLVE / legacy-peer-deps, and the GLM 429 storm are already closed by prior sessions.

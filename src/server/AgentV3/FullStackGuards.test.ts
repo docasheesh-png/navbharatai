@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stripPrismaSqliteEnums,
+  fixPrismaSqliteScalarList,
   fixCjsDefaultImport,
   fixPrismaDateStringDefault,
   fixPrismaSeedRunner,
@@ -92,6 +93,58 @@ describe('stripPrismaSqliteEnums', () => {
     const opt = SQLITE_SCHEMA.replace('status TaskStatus @default(TODO)', 'status TaskStatus?');
     const out = stripPrismaSqliteEnums('prisma/schema.prisma', opt);
     expect(out).toMatch(/status\s+String\?/);
+  });
+});
+
+// LearnLoop autopsy 2026-07-21: on a SQLite datasource the builder modelled `attachments String[]` etc.
+// SQLite has NO scalar lists → `prisma validate` failed ("can't be a list. The current connector does not
+// support lists of primitive types"), looping DB setup. The guard collapses every scalar list to `String?`
+// (a serialized string) while leaving relation lists — which ARE valid on SQLite — untouched.
+describe('fixPrismaSqliteScalarList — SQLite has no scalar lists (LearnLoop autopsy)', () => {
+  const P = 'prisma/schema.prisma';
+  const wrap = (fields: string) =>
+    `datasource db {\n  provider = "sqlite"\n  url = env("DATABASE_URL")\n}\nmodel Lesson {\n${fields}\n}`;
+
+  it('rewrites a String[] scalar list to String?', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  id String @id\n  attachments String[]'));
+    expect(out).toMatch(/attachments\s+String\?/);
+    expect(out).not.toMatch(/attachments\s+String\[\]/);
+  });
+
+  it('rewrites Int[]/Float[]/Boolean[]/Json[] scalar lists and drops @default([])', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  scores Int[]\n  tags String[] @default([])\n  flags Boolean[]'));
+    expect(out).toMatch(/scores\s+String\?/);
+    expect(out).toMatch(/flags\s+String\?/);
+    expect(out).toMatch(/tags\s+String\?/);
+    expect(out).not.toContain('@default([])');
+  });
+
+  it('LEAVES a relation list (Model[]) alone — relations are valid on SQLite', () => {
+    const out = fixPrismaSqliteScalarList(P, wrap('  id String @id\n  students User[]\n  quizzes Quiz[]'));
+    expect(out).toMatch(/students\s+User\[\]/);
+    expect(out).toMatch(/quizzes\s+Quiz\[\]/);
+  });
+
+  it('finishes the job for an enum LIST: stripPrismaSqliteEnums makes it String[], scalar-list makes it String?', () => {
+    const schema = `datasource db {\n  provider = "sqlite"\n  url = env("DATABASE_URL")\n}\nenum Tag {\n  A\n  B\n}\nmodel Post {\n  id String @id\n  tags Tag[]\n}`;
+    const after = fixPrismaSqliteScalarList(P, stripPrismaSqliteEnums(P, schema));
+    expect(after).not.toContain('Tag[]');
+    expect(after).not.toContain('String[]');
+    expect(after).toMatch(/tags\s+String\?/);
+  });
+
+  it('is a no-op for POSTGRES (supports scalar lists), non-schema files, and a schema with no scalar list', () => {
+    const pg = wrap('  attachments String[]').replace('"sqlite"', '"postgresql"');
+    expect(fixPrismaSqliteScalarList(P, pg)).toBe(pg);
+    expect(fixPrismaSqliteScalarList('src/App.tsx', wrap('  attachments String[]'))).toBe(wrap('  attachments String[]'));
+    const clean = wrap('  id String @id\n  title String');
+    expect(fixPrismaSqliteScalarList(P, clean)).toBe(clean);
+  });
+
+  it('rides applyFullStackGuards end-to-end (no scalar list survives on a SQLite schema)', () => {
+    const out = applyFullStackGuards(P, wrap('  id String @id\n  attachments String[]'));
+    expect(out).not.toContain('String[]');
+    expect(out).toMatch(/attachments\s+String\?/);
   });
 });
 

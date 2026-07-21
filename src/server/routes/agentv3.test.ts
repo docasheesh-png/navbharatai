@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, type RunningBuild } from './agentv3';
+import { deriveWorkspaceId, resolveJudgeKind, healRunnerRoutingOpts, agentV3KeyDiag, providerDebugTag, conversationAccess, needsFallbackConversationPersist, tierToGeminiBuildModel, selectBuildModel, isLargeExistingProject, shouldRouteStrongModel, oneShotDevPort, escalationEnabled, shouldEscalateBuild, escalationGate, userMonthlyCapUsd, checkMonthlyCap, readinessGateEnabled, maxBuildSeconds, buildMaxTokensPerTurn, maxBuildBudgetUsd, sandboxDiag, resolveClaudeFirst, planGrokEnabled, raceTimeout, cheapBuildFloorRunners, cheapFloorAllowedForTier, cheapFloorAllowedForUser, cheapFloorDecision, pickPreviewErrorBase, geminiLastResortEnabled, vertexPeerBuildEnabled, dominantProvider, fastLaneProviderLabel, parseModelLadder, parseKeyPool, chatWorkspaceContextLine, parseDevServerHealthCheck, isBuildRunningForWorkspace, shouldReclaimBuildLock, buildSandboxUnavailableInProd, resolveBuildIdentity, entitlementEmail, workspaceOwnershipOk, conversationIdForWorkspace, candidateConversationIds, resolveIdentityWithFallback, verifiedWorkspaceReadOk, shutdownGraceMs, rebuildGuardFlipsToEdit, shouldConfirmRebuild, zeroBillForUnrenderedPreview, emptyBuildFailureSummary, failedImportPromptNote, enforceNoClaude, planRunnerChainNames, steerAllowedForBuild, sanitizeSteerMessage, redactProviderError, sandboxUnavailableNotice, statusEntitlement, isReportAdmin, type RunningBuild } from './agentv3';
 import { analyzeRequest } from '../AgentV3/RequestAnalyser';
 import { haikuModel, sonnetModel, opusModel } from '../AgentV3/models';
 import { isAgentV3FreeUser, buildRequiresSignIn } from '../AgentV3/featureFlag';
@@ -1740,5 +1740,28 @@ describe('T0-9 — destructive write routes require a VERIFIED workspace owner (
     const fn = SRC.slice(i, i + 260);
     expect(fn).toContain('verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)');
     expect(fn).not.toContain('req.body?.userId'); // never reads a claimed identity
+  });
+});
+
+describe('isReportAdmin (Fix 68) — only the admin sees raw provider names in the build report', () => {
+  const save = process.env.AGENTV3_REPORT_ADMINS;
+  afterEach(() => { if (save === undefined) delete process.env.AGENTV3_REPORT_ADMINS; else process.env.AGENTV3_REPORT_ADMINS = save; });
+
+  it('defaults to the known admins (case-insensitive) and fails closed on unknown/empty', () => {
+    delete process.env.AGENTV3_REPORT_ADMINS;
+    expect(isReportAdmin('aashishcpmt09@gmail.com')).toBe(true);
+    expect(isReportAdmin('AASHISHCPMT09@GMAIL.COM')).toBe(true);
+    expect(isReportAdmin('doc.asheesh@icloud.com')).toBe(true);
+    expect(isReportAdmin('random.user@example.com')).toBe(false); // a normal user → anonymized view
+    expect(isReportAdmin('')).toBe(false);
+    expect(isReportAdmin(null)).toBe(false);
+    expect(isReportAdmin(undefined)).toBe(false);
+  });
+
+  it('honours an explicit AGENTV3_REPORT_ADMINS override', () => {
+    process.env.AGENTV3_REPORT_ADMINS = 'ops@navbharatai.in, second@navbharatai.in';
+    expect(isReportAdmin('ops@navbharatai.in')).toBe(true);
+    expect(isReportAdmin('second@navbharatai.in')).toBe(true);
+    expect(isReportAdmin('aashishcpmt09@gmail.com')).toBe(false); // override replaces the default list
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, type BuildDiagnosticsReport } from './BuildDiagnostics';
+import { BuildDiagnostics, renderDiagnosticsText, renderSessionDiagnosticsText, capSessionReports, formatProviderDelivery, deriveRootCause, capProblems, isExpectedNonzeroExit, isUnconfiguredTscFileProbe, isTestOnlyTypecheckFailure, isClaudeModel, userFacingReport, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import type { AgentEvent } from './types';
 
 describe('isClaudeModel (pure helper)', () => {
@@ -1036,5 +1036,74 @@ describe('AGENT_NOTE — benign compounds are never problems', () => {
     const notes = d.report().issues.filter((i) => i.code === 'AGENT_NOTE');
     expect(notes).toHaveLength(1);
     expect(notes[0].severity).toBe('error');
+  });
+});
+
+describe('userFacingReport (Fix 68) — a non-admin user sees NO provider/model name anywhere', () => {
+  const FORBIDDEN = /\b(glm|kimi|claude|anthropic|sonnet|opus|haiku|gemini|vertex|grok|xai|openai|gpt|deepseek|moonshot|z\.?ai|bedrock)\b|(glm|kimi|claude|gemini|grok|gpt)[-/][\w.:-]+|\bE2B\b/i;
+
+  // A report with a real provider/model name planted in EVERY provider-bearing field.
+  const raw = {
+    schema: 'navbharatai.v3.build-diagnostics/1',
+    startedAt: 1000,
+    endedAt: 2000,
+    ok: true,
+    prompt: 'build me a Claude-style chat app', // the USER's own words — must survive verbatim
+    framework: 'react',
+    model: 'claude-opus-4-8',
+    summary: 'Built by GLM with 2 Claude (Sonnet) fallbacks; Gemini vision used.',
+    rootCause: 'Provider GLM failed (429 from Z.ai), fell back to claude-opus-4-8.',
+    review: 'Kimi (Moonshot) flagged a bug; Vertex confirmed.',
+    counts: { total: 3, errors: 1, warnings: 1, autoResolved: 1, unresolved: 0 },
+    builtBy: 'GLM',
+    providerDelivery: { GLM: 18, CLAUDE: 2 },
+    providerFailures: { GLM: 3, VERTEX: 1 },
+    providerTokens: { GLM: { inputTokens: 100, outputTokens: 50 }, CLAUDE: { inputTokens: 10, outputTokens: 5 } },
+    cacheReadInputTokens: 42,
+    issues: [
+      { ts: 1, phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'Provider GLM failed — falling back to claude-sonnet-4-6', autoResolved: true, detail: 'xai grok timed out' },
+    ],
+    problems: [
+      { ts: 1, phase: 'provider', severity: 'warning', code: 'PROVIDER_FALLBACK', message: 'kimi-k2.7-code unavailable, Vertex fallback', autoResolved: true },
+    ],
+    errors: [{ ts: 1, phase: 'build', message: 'openai gpt-4o quota exceeded', stack: 'at anthropic.sdk (claude.ts)' }],
+    previewErrors: [{ ts: 1, source: 'in-browser', message: 'gemini-2.5-pro rate limited' }],
+    dataLossEvents: [{ ts: 1, cause: 'GLM sandbox recycled', detail: 'bedrock region reset' }],
+    generatedFiles: [{ path: 'src/App.tsx', content: 'export const App = () => null;' }],
+    llmCalls: [{ ts: 1, provider: 'GLM', model: 'glm-5.2', ok: true }],
+    commands: [{ ts: 1, command: 'npm i @anthropic-ai/sdk', output: 'ok' }],
+    billing: { billedUsd: 1, realCostUsd: 0.04, provider: 'GLM' },
+    manifest: { routing: { model: 'claude-opus-4-8', provider: 'CLAUDE' } },
+  } as unknown as BuildDiagnosticsReport;
+
+  it('THE INVARIANT: the entire user-facing report JSON contains no provider/model/infra name', () => {
+    const view = userFacingReport(raw);
+    // Scan every string in the serialized user view — but exclude the user's own prompt (their words are theirs).
+    const scrubbed = { ...view, prompt: undefined };
+    expect(JSON.stringify(scrubbed)).not.toMatch(FORBIDDEN);
+  });
+
+  it('OMITS the admin-only provider/forensic sections entirely', () => {
+    const view = userFacingReport(raw) as Record<string, unknown>;
+    for (const k of ['model', 'providerDelivery', 'builtBy', 'providerFailures', 'providerTokens', 'cacheReadInputTokens', 'llmCalls', 'commands', 'billing', 'manifest']) {
+      expect(view[k], `leaked admin-only field ${k}`).toBeUndefined();
+    }
+  });
+
+  it('KEEPS the user-relevant, provider-free content (their prompt + their generated files + counts + ok)', () => {
+    const view = userFacingReport(raw);
+    expect(view.prompt).toBe('build me a Claude-style chat app'); // verbatim — not corrupted
+    expect(view.generatedFiles?.[0].path).toBe('src/App.tsx');
+    expect(view.counts.errors).toBe(1);
+    expect(view.ok).toBe(true);
+    expect(view.framework).toBe('react');
+    // scrubbed prose still conveys the problem, just without the vendor name
+    expect(view.rootCause).toMatch(/failed|fell back|NavBharatAI|the model/i);
+  });
+
+  it('is idempotent and safe on a minimal report', () => {
+    const minimal = { schema: 'navbharatai.v3.build-diagnostics/1', startedAt: 1, counts: { total: 0, errors: 0, warnings: 0, autoResolved: 0, unresolved: 0 }, issues: [], problems: [] } as BuildDiagnosticsReport;
+    const once = userFacingReport(minimal);
+    expect(JSON.stringify(userFacingReport(once))).toBe(JSON.stringify(once));
   });
 });

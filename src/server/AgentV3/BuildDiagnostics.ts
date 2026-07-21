@@ -13,6 +13,7 @@
 import type { AgentEvent } from './types';
 import { manifestSummaryLine, type BuildManifestV1 } from './BuildManifest';
 import { isDeadSandboxSignal, detectSilentDbFailure } from './sandbox/EngineerAI/actuators/sandboxHealth';
+import { redactProvidersText } from '../lib/providerRedaction';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -1226,4 +1227,64 @@ export function renderSessionDiagnosticsText(reports: readonly BuildDiagnosticsR
     return `${banner}\n${promptLine}\n\n${renderDiagnosticsText(r)}`;
   });
   return head.join('\n') + '\n' + bodies.join('\n') + '\n';
+}
+
+/**
+ * Fix 68 (White-Label Law §3, CLAUDE.md) — the ADMIN-ONLY build diagnostics report names the real providers
+ * ("Provider GLM failed", providerTokens, llmCalls provider/model, builtBy, manifest routing). A NORMAL end
+ * user must NEVER see which backend AI/infra did the work. This returns a provider-ANONYMOUS view of the report
+ * for non-admin users, built by ALLOW-LIST (any field not explicitly copied is simply absent — safe by
+ * construction, so a new provider-bearing field added later cannot silently leak). The forensic/provider-only
+ * sections are OMITTED entirely; the remaining free text (summary, root cause, reviewer notes, issue messages,
+ * captured errors) is scrubbed through the shared redactor so a vendor/model name embedded in prose is gone too.
+ * The user's OWN content — their prompt and their generated app files — is kept verbatim (echoing the user's own
+ * words is not a provider leak, and scrubbing their source would corrupt it).
+ */
+export function userFacingReport(report: BuildDiagnosticsReport): BuildDiagnosticsReport {
+  const scrub = (s: string | undefined): string | undefined => (s === undefined ? undefined : redactProvidersText(s));
+  const scrubIssue = (i: BuildIssue): BuildIssue => ({
+    ts: i.ts,
+    phase: i.phase,
+    severity: i.severity,
+    code: i.code, // a machine code like PROVIDER_FALLBACK is a generic category, not a vendor name
+    message: redactProvidersText(i.message),
+    autoResolved: i.autoResolved,
+    ...(i.detail !== undefined ? { detail: redactProvidersText(i.detail) } : {}),
+    ...(i.repeatCount !== undefined ? { repeatCount: i.repeatCount } : {}),
+  });
+  const out: BuildDiagnosticsReport = {
+    schema: report.schema,
+    startedAt: report.startedAt,
+    counts: report.counts,
+    issues: report.issues.map(scrubIssue),
+    problems: report.problems.map(scrubIssue),
+    // Optional, user-relevant, provider-free fields — kept verbatim.
+    ...(report.buildId !== undefined ? { buildId: report.buildId } : {}),
+    ...(report.promptHash !== undefined ? { promptHash: report.promptHash } : {}),
+    ...(report.sessionId !== undefined ? { sessionId: report.sessionId } : {}),
+    ...(report.workspaceId !== undefined ? { workspaceId: report.workspaceId } : {}),
+    ...(report.prompt !== undefined ? { prompt: report.prompt } : {}),         // the user's own words
+    ...(report.framework !== undefined ? { framework: report.framework } : {}),
+    ...(report.endedAt !== undefined ? { endedAt: report.endedAt } : {}),
+    ...(report.ok !== undefined ? { ok: report.ok } : {}),
+    ...(report.priorFailedBuilds !== undefined ? { priorFailedBuilds: report.priorFailedBuilds } : {}),
+    ...(report.generatedFiles !== undefined ? { generatedFiles: report.generatedFiles } : {}), // the user's own code
+    // Free text that we author — scrubbed of any provider/model name.
+    ...(report.summary !== undefined ? { summary: scrub(report.summary) } : {}),
+    ...(report.rootCause !== undefined ? { rootCause: scrub(report.rootCause) } : {}),
+    ...(report.review !== undefined ? { review: scrub(report.review) } : {}),
+    ...(report.errors !== undefined
+      ? { errors: report.errors.map((e) => ({ ts: e.ts, phase: e.phase, message: redactProvidersText(e.message), ...(e.stack !== undefined ? { stack: redactProvidersText(e.stack) } : {}) })) }
+      : {}),
+    ...(report.previewErrors !== undefined
+      ? { previewErrors: report.previewErrors.map((p) => ({ ts: p.ts, source: p.source, message: redactProvidersText(p.message) })) }
+      : {}),
+    ...(report.dataLossEvents !== undefined
+      ? { dataLossEvents: report.dataLossEvents.map((d) => ({ ts: d.ts, cause: redactProvidersText(d.cause), detail: redactProvidersText(d.detail) })) }
+      : {}),
+  };
+  // Explicitly OMITTED (admin-only / provider-identifying): model, providerDelivery, builtBy, providerFailures,
+  // providerTokens, cacheReadInputTokens, llmCalls, commands, billing, manifest. Because `out` is built by
+  // allow-list, they are absent by construction — the user-facing billing surface is userCostBreakdown, not this.
+  return out;
 }

@@ -20164,3 +20164,38 @@ entries → no change needed.
 
 **Verification (both PRs):** `npx tsc --noEmit` ✅ · `npx vitest run` ✅ **8642/8642 passed (870 files)** ·
 CI green before each merge (hard gate).
+
+---
+
+## 2026-07-21 — AP-4 parallel-build: shipped the safety primitive + recorded the EXACT integration requirements (rule 6)
+
+Shipped this checkpoint (12 PRs, all CI-green + merged): Unsend+Edit (#1767), SRI analyzer (#1769),
+Cap-4 cost-alert (#1771), AP-3 resume slice 1 (#1773), requirement-domain verticals (#1775), AP-4 FE/BE
+partition (#1777), PROGRESS milestone (#1778), ask_user clarify (#1779), starter templates (#1780),
+save-as-template (#1782), codemod truncation + stale-doc fix (#1784), AP-4 per-path write-lock (#1787).
+Plus a green signed `.aab` release (run 29803798019). All three admin-approved directions (AP-3, AP-4
+groundwork, ask_user) delivered.
+
+**AP-4 parallel FE/BE build — the honest boundary (why the final slice is NOT a naive predicate flip).**
+Investigation of the sub-agent architecture (`SubAgent.ts:16-19`, `makeSubAgentSpawn`) found that a spawned
+sub-agent **shares FOUR mutable surfaces with its siblings**: (1) the sandbox `actuator`, (2) the
+`WorkspaceState`, (3) the workspace memory / project graph (`getWorkspaceMemory`), and (4) the event stream.
+Today `isParallelSafeToolUse` (`AgentRunner.ts:177-192`) keeps `frontend`/`backend` **serial**, so none of
+these are ever mutated concurrently. Enabling parallel writer sub-agents therefore requires making ALL FOUR
+concurrency-safe, not just file writes:
+- **(1) file writes — DONE:** `PathWriteLock` (#1787) serializes same-path writes; different paths run
+  concurrently. Provable no-op under a single writer. It must wrap the SHARED `actuator.writeFile` (both the
+  parent dispatcher and every child dispatcher hold the same `actuator` instance, so one wrapper covers all).
+- **(2) WorkspaceState + (3) project graph/memory — OPEN, the real blocker:** two sub-agents interleaving
+  `state` / `indexFile` / graph mutations can corrupt logical invariants (JS is single-threaded so there is no
+  data race, but async interleaving can still violate ordering assumptions). These need either per-agent
+  scratch state merged at a barrier, or a mutation lock, before parallel writers are safe.
+- **(4) event stream:** already tolerant of interleaved events (the reducer is order-tolerant), but sub-agent
+  terminal-event isolation (already handled in `SubAgent.ts`) must extend to the parallel case.
+
+**The remaining slice (needs a live canary — admin step):** wrap the shared actuator with the lock behind
+`AGENTV3_PARALLEL_BUILD` (default off); make (2)+(3) concurrency-safe; flip `isParallelSafeToolUse` for
+`frontend`/`backend` ONLY when the flag is on; measure the real speedup on a large multi-file build in a live
+E2B sandbox before any wide rollout. Correctness of (1) and the predicate is unit-testable; the (2)/(3)
+safety + the speedup are what require the live test. Shipping the predicate flip WITHOUT (2)/(3) would
+corrupt the project graph on a real parallel build — so it is deliberately NOT done unverified (rule 2).

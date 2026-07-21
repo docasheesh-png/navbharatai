@@ -173,6 +173,7 @@ import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
 import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
 import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
 import { generateGiftCardsIntegration } from '../lib/GiftCardsGenerator';
+import { generateTeamsIntegration } from '../lib/TeamsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4046,6 +4047,25 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('gift cards starter');
         const gcDeps = gccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a gift-card / store-credit backend:\n${gcWritten.join('\n')}\nAdd the dependencies: ${gcDeps}\n\n${gccfg.instructions}`;
+      }
+
+      case 'generate_teams': {
+        // Breadth recipe (domain vertical) — teams / workspaces (server/teams/): a real TeamService whose core
+        // guarantee is MEMBERSHIP INTEGRITY (multi-workspace membership with per-workspace roles, single-use
+        // invites, a workspace always keeps at least one owner) + an Express router. Pure gen in TeamsGenerator.ts.
+        const tmcfg = generateTeamsIntegration();
+        const tmWritten: string[] = [];
+        for (const [path, content] of Object.entries(tmcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          tmWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('teams starter');
+        const tmDeps = tmcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a teams / workspaces backend:\n${tmWritten.join('\n')}\nAdd the dependencies: ${tmDeps}\n\n${tmcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

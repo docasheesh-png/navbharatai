@@ -109,6 +109,8 @@ export { scanGracefulShutdown, gracefulShutdownSummary } from './GracefulShutdow
 export type { ShutdownIssue, ShutdownSeverity } from './GracefulShutdownAnalysis';
 export { scanSecurityHeaders, securityHeadersSummary } from './SecurityHeadersAnalysis';
 export type { SecurityHeaderIssue, SecurityHeaderSeverity } from './SecurityHeadersAnalysis';
+export { scanSri, scanProjectSri, sriSummary } from './SriAnalysis';
+export type { SriIssue } from './SriAnalysis';
 export { analyzeDependencies, dependencySummary, normalizeImportToPackage } from './DependencyAnalysis';
 export type { DependencyIssue, DependencySeverity } from './DependencyAnalysis';
 export { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';

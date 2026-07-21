@@ -168,6 +168,7 @@ import { generateOrdersIntegration } from '../lib/OrdersGenerator';
 import { generateFaqIntegration } from '../lib/FaqGenerator';
 import { generateQuizIntegration } from '../lib/QuizGenerator';
 import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
+import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3941,6 +3942,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('availability starter');
         const avDeps = avcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired an opening-hours backend:\n${avWritten.join('\n')}\nAdd the dependencies: ${avDeps}\n\n${avcfg.instructions}`;
+      }
+
+      case 'generate_announcements': {
+        // Breadth recipe (domain vertical) — site announcements/banners (server/announcements/): a real
+        // AnnouncementService whose core guarantee is SCHEDULED VISIBILITY + DISMISS-ONCE (a banner is active
+        // only inside its [startsAt,endsAt] window, and a user who dismisses it never sees it again) + an
+        // Express router. Pure gen in AnnouncementsGenerator.ts.
+        const ancfg = generateAnnouncementsIntegration();
+        const anWritten: string[] = [];
+        for (const [path, content] of Object.entries(ancfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          anWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('announcements starter');
+        const anDeps = ancfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a site-announcements backend:\n${anWritten.join('\n')}\nAdd the dependencies: ${anDeps}\n\n${ancfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

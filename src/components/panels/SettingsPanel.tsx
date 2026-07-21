@@ -307,7 +307,8 @@ export function SettingsPanel({
         {settingsScreen !== 'root' && (
           <button
             onClick={() => setSettingsScreen('root')}
-            className="p-2 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
+            aria-label="Back to Settings"
+            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
           >
             <ChevronRight className="w-5 h-5 rotate-180" />
           </button>
@@ -322,7 +323,8 @@ export function SettingsPanel({
         </div>
         <button
           onClick={() => toggleTab('nbi_chat')}
-          className="ml-auto p-2 hover:bg-white/5 rounded-xl text-[#8b949e] transition-all"
+          aria-label="Close Settings"
+          className="ml-auto p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] transition-all"
         >
           <X className="w-5 h-5" />
         </button>
@@ -378,7 +380,7 @@ export function SettingsPanel({
                       { id: 'desktop', label: '💻 Desktop' },
                     ].map(m => (
                       <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
-                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
+                        className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20 active:bg-white/5'}`}>
                         {m.label}
                       </button>
                     ))}
@@ -489,7 +491,11 @@ export function SettingsPanel({
                       <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
                       <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Mobile-friendly tiles (admin 2026-07-21): a comfortable ≥52px tap target, labels
+                        WRAP instead of truncating (so "Insights & Webhooks"/"Screenshot→Code" read fully on
+                        a phone), and the icon is visible at rest (no hover on touch). 2 columns fit a phone
+                        fine because each group is small. */}
+                    <div className="grid grid-cols-2 gap-2.5">
                       {group.items.map(item => (
                         <button
                           key={item.id}
@@ -498,10 +504,10 @@ export function SettingsPanel({
                             else if ((item as any).nav) { setActiveView(item.id as any); }
                             else { setSettingsScreen(item.id as any); }
                           }}
-                          className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
+                          className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
                         >
-                          <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                          <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-colors truncate">{item.label}</span>
+                          <item.icon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                          <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
                         </button>
                       ))}
                     </div>

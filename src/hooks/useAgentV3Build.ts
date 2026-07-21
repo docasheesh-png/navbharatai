@@ -701,7 +701,16 @@ export function useAgentV3Build(): UseAgentV3Build {
     resumeInFlightRef.current = true;
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     const gen = ++generationRef.current;  // this resume is now the authoritative generation
-    setState(initialAgentV3State());   // the replayed buffer rebuilds the live state
+    // The replayed buffer rebuilds the CURRENT build's live state — but it only replays THIS
+    // build's events, so state that outlives a single turn must survive the reconnect (admin
+    // 2026-07-21, same vanish class as the send-reset): prior turns' archived action rows
+    // (activityLog), the diff decorations, and the running plan all stay.
+    setState((prev) => ({
+      ...initialAgentV3State(),
+      activityLog: prev.activityLog,
+      diffs: prev.diffs,
+      todos: prev.todos,
+    }));
     // NOTE (root-cause fix 2026-07-05, IMG_5709): the optimistic "re-attached live" `notice` is NOT
     // emitted here anymore. It is a PROMISE that a live build exists — printing it before /attach
     // confirms one is exactly what produced the contradiction "re-attached live" + "No running build

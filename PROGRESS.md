@@ -20675,3 +20675,46 @@ than the SaaS prompt shown). 5 unresolved = cheap-model tool-use flails (1 no-ar
 old_string-not-found) — all already carry good steering messages and self-heal via retry; plus a
 self-healed sandbox recycle (32 files restored from the durable store). No new fixable root cause — an
 incomplete cheap-tier continue, not an engine defect.
+
+---
+
+## 2026-07-21 — FULL autopsy of report 0eefd4f8 (5th-rule ledger) + Step-3 fix: repeated-probe LOOP BREAKER
+
+**Honesty note:** the first pass on this report was a shallow "no new root cause" — it did NOT build the
+mandatory 5-bucket itemized ledger (5th absolute rule). Corrected here with the full forensic tally.
+
+**Context:** a "continue" build of a restaurant app (Menu/Orders), free/WEAK tier. GLM delivered, then
+FAILED → fell back to Haiku. Build ended **ok:None (never converged)**, generatedFiles:0. 207 issues total.
+
+**Step 1 — 5-bucket ledger (all 207):**
+- ✅ Self-healed (~197): 55 TOOL_DONE, 15 SANDBOX_CMD (tsc all exit 0), timeline (58 TOOL_CALL, 50
+  AGENT_STEP, 14 HEARTBEAT, 7 EVENT, 1 CHEAP_FLOOR_DECISION); **1 sandbox RECYCLE — 32 files lost from the
+  ephemeral sandbox, fully restored from the durable store** (self-healed).
+- 🔀 Worked-around (1): a GLM turn FAILED → fell back to Haiku (deferred debt: why GLM failed).
+- ⏭️ Skipped (0).
+- ❌ Still-broken (1): the build did NOT converge (ok:None) — this run ended incomplete.
+- 🥵 Struggle (5 tool-fails + a loop): 1× tool call with NO arguments (cheap-model malformation);
+  4× `edit_file: old_string not found` (AdminMenuPage/MenuPage/OrderDetailPage/useOrders). **The real
+  struggle:** the weak model ran the SAME `grep "from '../types'"` ~6 times (every one exit 1 = no match)
+  plus repeated `tsc` — hunting a type-import problem that DID NOT EXIST — and never converged.
+
+**Step 2 — MISSING SUBSYSTEM:** a "repeated-identical-failing-probe" LOOP DETECTOR. The engine let the model
+re-issue the exact same empty grep ~6× without ever noticing it wasn't making progress. Nothing steered it
+to change approach → step budget burned → ok:None.
+
+**Step 3 — DNA fix (the loop breaker):** new pure module `RepeatProbeGuard.ts`, wired into AgentRunner's turn
+loop. It keys each tool call by `tool name + canonical(input)` (key-order-independent, long bodies bounded),
+counts identical calls per build run, and when the SAME call repeats to a threshold (default 3, env
+`AGENTV3_LOOP_GUARD_THRESHOLD`) injects ONE corrective steer ("you've run this identical call N times with
+the same result — change approach: an empty search means it doesn't exist; read_file before re-editing; do
+not repeat this call"). Steers ONCE per signature, NEVER blocks a build, best-effort (never throws), flag
+`AGENTV3_LOOP_GUARD` (default ON, `=off` kills it). Rides the same steer channel as the truncation guard.
+
+**Other ledger items — honest disposition:** edit_file empty-old_string already fixed (#1816); edit_file
+"not found" already mitigated (nearestEditRegion 1-retry); no-arg tool call already mitigated (steering
+message); sandbox recycle is infra (durable-store self-heal). The GLM-failure worked-around is covered by
+the existing pacer/circuit-breaker stack. The loop breaker is the one NEW systemic fix this autopsy warranted.
+
+**Tests:** 11 cases in `RepeatProbeGuard.test.ts` — signature stability/distinctness/bounding, steer exactly
+once at threshold, distinct calls not false-tripped, custom threshold, combined turn steer, malformed input,
+flags. AgentRunner suite (47) green; server + frontend tsc clean.

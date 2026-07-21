@@ -15,6 +15,7 @@ import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
 import { textMarkerFilePaths, truncationRecoverySteer, truncationRecoveryNarration } from './TruncationRecovery';
+import { newRepeatProbeState, collectRepeatProbeSteer, loopGuardEnabled, loopGuardThreshold } from './RepeatProbeGuard';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -424,6 +425,12 @@ export class AgentRunner {
     };
 
     let steps = 0;
+    // LOOP BREAKER (repeated-probe autopsy 2026-07-21): one state per build run. When the model re-issues
+    // the EXACT same non-progressing tool call to the threshold, inject a corrective steer so it changes
+    // approach instead of looping to the step cap (a weak build ran the same empty grep ~6 times → ok:None).
+    const repeatProbe = newRepeatProbeState();
+    const loopGuardOn = loopGuardEnabled();
+    const loopThreshold = loopGuardThreshold();
     try {
       // eslint-disable-next-line no-labels
       stepResumeLoop: for (;;) {
@@ -763,7 +770,11 @@ export class AgentRunner {
             }
           } catch { /* the guard is best-effort — it must never break a build */ }
         }
-        messages.push({ role: 'user', content: truncationSteer ? [...resultBlocks, { type: 'text', text: truncationSteer }] : resultBlocks });
+        // LOOP BREAKER — steer the model off a repeated non-progressing call (best-effort; never blocks).
+        const loopSteer = loopGuardOn ? collectRepeatProbeSteer(repeatProbe, turn.toolUses, loopThreshold) : null;
+        if (loopSteer) events.emit({ type: 'narration', agent: agentRole, text: '⚠️ Noticed a repeated step that isn\'t making progress — nudging a change of approach.', ts: Date.now() });
+        const steer = [truncationSteer, loopSteer].filter(Boolean).join('\n\n') || null;
+        messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.

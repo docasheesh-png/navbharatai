@@ -21,6 +21,7 @@ import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterA
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES } from './starterTemplates';
+import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -100,6 +101,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // arrives so a fresh build's questions always show; the build itself never waits on this.
   const [clarifyDismissed, setClarifyDismissed] = useState(false);
   useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
+  // Save-as-template: the user's own reusable starters (on-device), shown beside the built-in ones.
+  const [savedTpls, setSavedTpls] = useState<SavedTemplate[]>(() => loadSavedTemplates());
+  const handleSaveTemplate = (text: string) => setSavedTpls(saveTemplate('', text));
+  const handleRemoveTemplate = (id: string) => setSavedTpls(removeSavedTemplate(id));
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -2589,6 +2594,38 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
                 {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
                     composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {/* The user's OWN saved templates (on-device) — shown first when present. Each is a one-tap
+                    prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
+                {chatMode === 'build' && savedTpls.length > 0 && (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Your templates</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {savedTpls.map((t) => (
+                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-amber-200 overflow-hidden">
+                          <button
+                            type="button"
+                            title={t.prompt}
+                            onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                            className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 hover:bg-amber-500/15 transition-colors"
+                          >
+                            <span aria-hidden>🔖</span>{t.label}
+                          </button>
+                          <button
+                            type="button"
+                            title="Remove this template"
+                            aria-label="Remove template"
+                            onClick={() => handleRemoveTemplate(t.id)}
+                            className="px-1.5 py-1 text-amber-400/70 hover:text-red-400 hover:bg-white/5 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
                 {chatMode === 'build' && (
                   <div className="mt-5">
                     <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
@@ -2614,7 +2651,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
               return <Bubble key={b.key} msg={b.msg}
                 onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}
-                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined} />;
+                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined}
+                onSaveTemplate={b.msg.role === 'user' ? () => handleSaveTemplate(b.msg.text) : undefined} />;
             })}
             {/* AP-3 (cross-restart resume) — an honest offer to finish a build a server restart cut off
                 mid-flight. Shows only when the reopened build's durable status was 'running' AND there is
@@ -3979,7 +4017,7 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
-function Bubble({ msg, onUnsend, onEdit }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void }) {
+function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void; onSaveTemplate?: () => void }) {
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
@@ -3988,7 +4026,7 @@ function Bubble({ msg, onUnsend, onEdit }: { msg: ChatMsg; onUnsend?: () => void
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
-          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} />
+          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} onSaveTemplate={onSaveTemplate} />
         </div>
       </div>
     );

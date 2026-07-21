@@ -124,6 +124,73 @@ const DOMAINS: DomainDef[] = [
       { label: 'staff roles & shifts', re: /staff|role|waiter|cashier|shift/i },
     ],
   },
+  // Appended (2026-07-21) — more high-demand SMB verticals. Placed AFTER every domain above so first-match-
+  // wins keeps all existing classifications byte-identical (e.g. "rent/ticket" still resolve to booking).
+  {
+    key: 'fintech',
+    re: /fintech|\bwallet\b|\bupi\b|\bloan\b|lending|\bbank(ing)?\b|\bemi\b|insurance|remittance|payout|\bledger\b|expense track|budgeting|neobank|\bkyc\b/i,
+    features: [
+      { label: 'KYC / identity verification', re: /kyc|verif|identity|aadhaar|pan|document/i },
+      { label: 'transaction ledger + statements', re: /ledger|transaction|statement|history|balance/i },
+      { label: 'secure auth + 2FA', re: /2fa|otp|two.?factor|mfa|biometric|pin/i },
+      { label: 'fraud / limit checks', re: /fraud|limit|risk|suspicious|block/i },
+      { label: 'audit log', re: /audit|log|track changes/i },
+      { label: 'payments / transfers', re: /pay|payment|transfer|deposit|withdraw|payout/i },
+      { label: 'roles (admin / user)', re: /role|rbac|permission|admin/i },
+    ],
+  },
+  {
+    key: 'real-estate',
+    re: /real.?estate|property|realty|\blisting\b|apartment|\bflat\b|\bvilla\b|broker|landlord|mortgage|homes?\s+for\s+(sale|rent)/i,
+    features: [
+      { label: 'property listings + photos', re: /listing|property|photo|image|gallery|media/i },
+      { label: 'search & filters (price / location / beds)', re: /search|filter|location|price|bedroom|\bbhk\b/i },
+      { label: 'map view', re: /map|location|nearby|geo/i },
+      { label: 'agent / owner contact + inquiry', re: /contact|inquir|enquir|lead|agent|owner/i },
+      { label: 'saved searches / favorites', re: /save|favorite|favourite|wishlist|shortlist/i },
+      { label: 'roles (buyer / seller / agent / admin)', re: /role|rbac|buyer|seller|agent|admin/i },
+      { label: 'mortgage / EMI calculator', re: /mortgage|emi|loan|calculat/i },
+    ],
+  },
+  {
+    key: 'fitness',
+    re: /fitness|\bgym\b|workout|\btrainer\b|\byoga\b|wellness|nutrition|\bcalorie|exercise|bodybuild|crossfit|\bpilates\b/i,
+    features: [
+      { label: 'membership plans + billing', re: /member|plan|subscri|billing|fee|pay/i },
+      { label: 'class / session scheduling', re: /class|session|schedul|slot|calendar|book/i },
+      { label: 'trainer assignment', re: /trainer|coach|instructor|assign/i },
+      { label: 'progress / goal tracking', re: /progress|goal|track|weight|metric|analytics/i },
+      { label: 'roles (member / trainer / admin)', re: /role|rbac|member|trainer|admin|staff/i },
+      { label: 'attendance / check-in', re: /attendance|check.?in|visit|entry/i },
+      { label: 'reminders / notifications', re: /remind|notif|alert|sms|email/i },
+    ],
+  },
+  {
+    key: 'events',
+    re: /\bevent\b|conference|festival|concert|meetup|webinar|\bexpo\b|\bgala\b|seminar|\bsummit\b/i,
+    features: [
+      { label: 'event listings + agenda / schedule', re: /listing|agenda|schedul|program|session|speaker/i },
+      { label: 'ticket types + capacity', re: /ticket|capacity|seat|tier|pass/i },
+      { label: 'registration / RSVP', re: /regist|rsvp|sign.?up|attend/i },
+      { label: 'QR check-in', re: /qr|check.?in|scan|entry|badge/i },
+      { label: 'payments', re: /pay|payment|checkout|stripe|razorpay/i },
+      { label: 'attendee management + roles', re: /attendee|organi[sz]er|role|admin|guest/i },
+      { label: 'reminders / notifications', re: /remind|notif|alert|email|sms/i },
+    ],
+  },
+  {
+    key: 'jobs',
+    re: /\bjob\b|recruit|hiring|\bcareers?\b|applicant|\bresume\b|\bcv\b|vacancy|employer|candidate|\bats\b|job.?board|placement/i,
+    features: [
+      { label: 'job postings + search / filters', re: /post|listing|search|filter|categor|location/i },
+      { label: 'applications + resume upload', re: /appl|resume|\bcv\b|upload|attach/i },
+      { label: 'candidate pipeline / stages', re: /pipeline|stage|shortlist|screen|status|track/i },
+      { label: 'employer & candidate roles', re: /role|employer|recruiter|candidate|admin/i },
+      { label: 'interview scheduling', re: /interview|schedul|slot|calendar/i },
+      { label: 'notifications (status updates)', re: /notif|alert|email|update/i },
+      { label: 'admin dashboard & reports', re: /admin|dashboard|report|analytics/i },
+    ],
+  },
 ];
 
 const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [

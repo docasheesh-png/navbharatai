@@ -55,11 +55,26 @@ describe('analyzeRequirementGaps', () => {
     expect(analyzeRequirementGaps('a school management system').likelyMissing).toContain('assignments & grading');
   });
 
+  it('detects the 2026-07-21 verticals (fintech / real-estate / fitness / events / jobs)', () => {
+    expect(analyzeRequirementGaps('a mobile wallet app with UPI and KYC').domain).toBe('fintech');
+    expect(analyzeRequirementGaps('a real estate property listing portal').domain).toBe('real-estate');
+    expect(analyzeRequirementGaps('a gym membership and workout tracking app').domain).toBe('fitness');
+    expect(analyzeRequirementGaps('an app to manage a tech conference').domain).toBe('events');
+    expect(analyzeRequirementGaps('a recruitment platform for hiring candidates').domain).toBe('jobs');
+    // and they surface real, domain-specific gaps for the builder
+    expect(analyzeRequirementGaps('a neobank wallet').likelyMissing).toContain('KYC / identity verification');
+    expect(analyzeRequirementGaps('a property portal').likelyMissing).toContain('mortgage / EMI calculator');
+    expect(buildRequirementGuidance(analyzeRequirementGaps('a gym app'))).toContain('fitness');
+  });
+
   it('appended domains never change an existing classification (first match wins)', () => {
     // These matched a prior domain BEFORE the append and must still match the same one.
     expect(analyzeRequirementGaps('Build a hospital management system').domain).toBe('healthcare');
     expect(analyzeRequirementGaps('an online store with a cart and checkout').domain).toBe('ecommerce');
     expect(analyzeRequirementGaps('a booking app for salon slots').domain).toBe('booking');
+    // "rent" and "ticket" still resolve to booking (owned it before real-estate/events were appended).
+    expect(analyzeRequirementGaps('an app to rent equipment by the hour').domain).toBe('booking');
+    expect(analyzeRequirementGaps('a ticket reservation app').domain).toBe('booking');
   });
 
   it('buildRequirementGuidance produces INCLUDE guidance for a domain gap, empty for a generic prompt', () => {

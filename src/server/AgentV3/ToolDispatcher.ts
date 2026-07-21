@@ -41,6 +41,7 @@ import { scanSecurityHeaders, securityHeadersSummary } from './SecurityHeadersAn
 import { scanProjectSri, sriSummary } from './SriAnalysis';
 import { scanProjectCsp, cspSummary } from './CspMetaAnalysis';
 import { scanProjectCommentLanguage, commentLanguageSummary } from './CommentLanguageAnalysis';
+import { scanProjectUploadValidation, uploadValidationSummary } from './UploadValidationAnalysis';
 import {
   scanCompliance, complianceSummary,
   detectsPiiCollection, detectsTracker, detectsConsentUI, looksLikePrivacyPolicy,
@@ -1133,6 +1134,23 @@ export class ToolDispatcher {
     }
   }
 
+  /**
+   * Best-effort upload-validation pass: a multer file-upload endpoint with no fileFilter / MIME check
+   * (accepts ANY file type — a path to stored-XSS / malware hosting). Advisory (lowers score, never
+   * blocks). Any failure degrades to no issues.
+   */
+  private collectUploadValidationIssues(sources: EvalSourceFile[]): ReturnType<typeof scanProjectUploadValidation> {
+    try {
+      const record: Record<string, string> = {};
+      for (const { path, content } of sources) {
+        if (typeof content === 'string') record[path] = content;
+      }
+      return scanProjectUploadValidation(record);
+    } catch {
+      return [];
+    }
+  }
+
   private collectSecurityConfigIssues(sources: EvalSourceFile[]): SecConfigIssue[] {
     const CODE = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
@@ -2211,6 +2229,9 @@ export class ToolDispatcher {
         // Best-effort comment-language pass: Hindi/Devanagari in code COMMENTS (standard violation).
         // Hindi UI text is never flagged. Advisory (lowers score, never blocks).
         const commentLangIssues = this.collectCommentLanguageIssues(snap.sources);
+        // Best-effort upload-validation pass: a multer upload with no fileFilter/MIME check accepts any
+        // file type (stored-XSS / malware). Advisory (lowers score, never blocks).
+        const uploadIssues = this.collectUploadValidationIssues(snap.sources);
         // Best-effort trust/safety/compliance pass (Layer 77 "Bharosa") — never throws.
         const complianceIssues = this.collectComplianceIssues(snap.sources);
         // Calibrated build confidence (Layer 74 "Sahyog") — an honest synthesis of
@@ -2357,6 +2378,7 @@ export class ToolDispatcher {
         if (sriIssues.length) extra.push({ severity: 'medium', label: `${sriIssues.length} third-party <script> without an integrity hash (SRI)` });
         if (cspIssues.length) extra.push({ severity: 'medium', label: `${cspIssues.length} static-SPA page(s) with third-party scripts but no Content-Security-Policy` });
         if (commentLangIssues.length) extra.push({ severity: 'medium', label: `${commentLangIssues.length} non-English code comment(s) (professional-English standard)` });
+        if (uploadIssues.length) extra.push({ severity: 'medium', label: `${uploadIssues.length} file-upload endpoint(s) with no MIME/type validation (multer, no fileFilter)` });
         if (portBindings.length) extra.push({ severity: 'medium', label: `${portBindings.length} hardcoded server port(s) (use process.env.PORT)` });
         if (viteEnv.length) extra.push({ severity: 'medium', label: `${viteEnv.length} non-VITE_ import.meta.env reference(s) (undefined in the browser)` });
         if (asyncPatterns.length) extra.push({ severity: 'medium', label: `${asyncPatterns.length} forEach(async …) loop(s) that do not await` });
@@ -2583,7 +2605,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
       }
 
       case 'update_todo': {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
+import { createRevealPacer } from '../components/agentv3/revealPacer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
@@ -378,8 +379,12 @@ export function useAgentV3Build(): UseAgentV3Build {
     let buffer = '';
     let gotEvent = false;
     let rawSample = '';
+    // FILE-REVEAL PACING (admin 2026-07-21): burst-completed "✓ file (n/m)" lines drip into the feed
+    // one-by-one (order-preserving, real events only; a terminal event flushes instantly). The build
+    // itself is untouched — this paces only what the user SEES. See revealPacer.ts for the honesty rules.
+    const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)));
     for (;;) {
-      if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+      if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -395,10 +400,10 @@ export function useAgentV3Build(): UseAgentV3Build {
           if (rawSample.length < 400) rawSample += trimmed + '\n';
           continue;
         }
-        if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+        if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
         gotEvent = true;
         lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity
-        setState((prev) => agentV3Reducer(prev, event));
+        pacer.push(event);
         // TERMINAL EVENT → clear `running` immediately on a re-attached/resumed stream too, so a build
         // whose post-result cleanup keeps the stream open never leaves the UI stuck "building" after the
         // result is in. Key ONLY on `result` (build-terminal, once per build) — NOT `done`, which
@@ -411,6 +416,7 @@ export function useAgentV3Build(): UseAgentV3Build {
         }
       }
     }
+    pacer.flush(); // stream closed — reveal anything still queued immediately (nothing is ever dropped)
     if (!gotEvent) {
       const sample = (rawSample || buffer).trim();
       setError(
@@ -1138,8 +1144,10 @@ export function useAgentV3Build(): UseAgentV3Build {
         // streaming (reset() no longer waits for `running` to go false) — abort() ends the fetch, but
         // any event already in-flight when that happens must still be dropped, exactly like
         // pumpStream/subscribeLive, or it silently repopulates the session the user just switched to.
+        // FILE-REVEAL PACING (admin 2026-07-21): same honest drip as the attach stream — see revealPacer.ts.
+        const pacer = createRevealPacer<AgentV3WireEvent>((e) => setState((prev) => agentV3Reducer(prev, e)));
         for (;;) {
-          if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+          if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -1155,10 +1163,10 @@ export function useAgentV3Build(): UseAgentV3Build {
               if (rawSample.length < 400) rawSample += trimmed + '\n';
               continue;
             }
-            if (isStale(gen)) { try { await reader.cancel(); } catch { /* best-effort */ } return; }
+            if (isStale(gen)) { pacer.discard(); try { await reader.cancel(); } catch { /* best-effort */ } return; }
             gotEvent = true;
             lastEventTsRef.current = Date.now(); // WATCHDOG — mark stream activity (incl. 15s pings)
-            setState((prev) => agentV3Reducer(prev, event));
+            pacer.push(event);
             // TERMINAL EVENT → stop "running" the INSTANT the build's `result` arrives, instead of
             // waiting for the stream to physically CLOSE. The server holds the stream open (15s pings)
             // through the post-result cleanup/finally (checkpoint flush, durable saves), so waiting for
@@ -1176,6 +1184,8 @@ export function useAgentV3Build(): UseAgentV3Build {
             }
           }
         }
+
+        pacer.flush(); // stream closed — reveal anything still queued immediately (nothing is ever dropped)
 
         // If the stream produced no usable events, surface what came back so a
         // silent failure (e.g. an HTML error page, or an empty body) is visible. Skipped if the user

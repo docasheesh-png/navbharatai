@@ -451,8 +451,32 @@ same way a green Cloud Run deploy is — it is not optional cleanup.
   **admin** downloads `app-release.aab` and uploads it to Play Console (Play App Signing handles
   the final signing). Automating the Play upload (a Play service-account + `r0adz0/upload-google-play`
   step) is a future infra item — until it exists, the upload is the admin's manual step.
-- The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa`); the same
-  discipline applies when an Apple release channel is set up.
+- The iOS counterpart is `.github/workflows/ios-ipa.yml` (App Store `.ipa` → TestFlight); the same
+  discipline applies. Trigger it via the GitHub MCP `actions_run_trigger` on `ios-ipa.yml`, ref `main`,
+  with input `upload: true` to ship straight to TestFlight (leave it off for a signing dry-run artifact).
+
+### iOS release — durable facts (admin-verified 2026-07-21, so no session re-litigates them)
+- **The persistent distribution cert IS set up and ACTIVE.** The admin has configured the repo secrets
+  `IOS_DIST_CERT_P12_BASE64` + `IOS_DIST_CERT_PASSWORD` (verified 2026-07-21). So the Fastfile takes the
+  `import_certificate` path (reuses ONE cert every run) — NOT `cert()` per run. **Apple's 2-distribution-
+  cert cap is permanently solved; do NOT tell the admin to "activate the p12" or revoke certs before a
+  build — it's already done.** (Confirm from a build log: the fastlane summary shows `import_certificate`,
+  not `cert`.) The cert inside that p12 must never be revoked on the Apple portal or the p12 breaks.
+- **Build number auto-increments** = `CFBundleVersion` stamped with `GITHUB_RUN_NUMBER` (Apple rejects a
+  re-used build number). **Export compliance** is pre-answered (`ITSAppUsesNonExemptEncryption=false` in
+  Info.plist) so no per-upload popup. Both are in the workflow — don't re-add them.
+- **"Uploaded" ≠ "available in TestFlight".** The upload now WAITS for Apple to finish processing
+  (`skip_waiting_for_build_processing: false`), so a green run means the build genuinely reached
+  TestFlight (a processing failure now fails loudly instead of a silent green). **INTERNAL testers**
+  (App Store Connect users, incl. the account owner) get every processed build automatically — no group
+  or review. **EXTERNAL testers** need the build assigned to a group + Beta App Review: set the repo
+  secret `IOS_TESTFLIGHT_GROUPS` (comma-separated external group names) and the Fastfile auto-submits +
+  notifies them. The `changelog` workflow input sets the "What to Test" note (defaults to the build #).
+  Root cause of a past "build succeeded but no update showed" report: the old `skip_waiting:true`
+  reported success before processing, hiding failures.
+- Claude CANNOT see App Store Connect. If a build uploaded green but a tester sees no update, the real
+  diagnostic is the build's status in App Store Connect → TestFlight (Processing / Ready to Test /
+  Missing Compliance / errored) — that check is the admin's (rule 6).
 
 ## The autonomous phase cycle (mandatory — how every roadmap phase ships)
 

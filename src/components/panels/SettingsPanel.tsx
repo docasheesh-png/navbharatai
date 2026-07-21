@@ -742,7 +742,7 @@ export function SettingsPanel({
                 </div>
 
                 {/* Brain Engine Card */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl overflow-hidden relative">
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
                        <Cpu className="w-6 h-6 text-indigo-400" />
@@ -802,7 +802,7 @@ export function SettingsPanel({
                 </div>
 
                 {/* Workspace Panels Toggle */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl">
                    <div className="flex items-center gap-4 mb-6">
                       <div className="w-12 h-12 bg-emerald-600/10 rounded-2xl flex items-center justify-center">
                          <Monitor className="w-6 h-6 text-emerald-400" />
@@ -884,7 +884,7 @@ export function SettingsPanel({
                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Run real commands in your app&apos;s sandbox</p>
                 </div>
                 {user ? (
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
                     <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
                       <RealTerminal
                         workspaceId={getAgentV3WorkspaceId(user.uid)}
@@ -917,7 +917,7 @@ export function SettingsPanel({
                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Live build log &amp; runtime errors of your app</p>
                 </div>
                 {user ? (
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
                     <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading logs…</div>}>
                       <WorkspaceLogs
                         workspaceId={getAgentV3WorkspaceId(user.uid)}
@@ -945,7 +945,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Sync your external services</p>
                  </div>
 
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
                     <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                       <Github className="w-24 h-24 text-white" />
                     </div>
@@ -1074,7 +1074,7 @@ export function SettingsPanel({
                  </div>
 
                  {/* G3 — E2B API key: unlocks real cloud VM for Pro builds */}
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-5">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-5">
                     <div className="flex items-center gap-5">
                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all ${userE2bKey ? 'bg-green-600/10 border-green-500/30' : 'bg-white/5 border-white/5'}`}>
                           <Cpu className={`w-7 h-7 ${userE2bKey ? 'text-green-400' : 'text-[#484f58]'}`} />
@@ -1101,7 +1101,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
                     <div className="flex items-center gap-5">
                        <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center border border-white/5">
                           <Database className="w-7 h-7 text-indigo-400" />
@@ -1137,7 +1137,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] overflow-hidden shadow-2xl">
                     <div className="p-6 border-b border-white/5 bg-white/2 flex items-center gap-4">
                        <Search className="w-4 h-4 text-[#484f58]" />
                        <input
@@ -1196,7 +1196,7 @@ export function SettingsPanel({
                    <motion.div
                      initial={{ opacity: 0, y: 20 }}
                      animate={{ opacity: 1, y: 0 }}
-                     className="bg-indigo-600 border border-white/20 rounded-[2.5rem] p-8 space-y-6 shadow-3xl relative overflow-hidden"
+                     className="bg-indigo-600 border border-white/20 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6 shadow-3xl relative overflow-hidden"
                    >
                       <div className="absolute top-0 right-0 p-8 opacity-10">
                         <GitBranchIcon className="w-24 h-24 text-white" />
@@ -1244,7 +1244,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Collaborate with the world</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center gap-5">
                        <div className="w-16 h-16 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center border border-indigo-600/20">
                           <Globe className="w-8 h-8 text-indigo-400" />
@@ -1283,7 +1283,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Contribute to the project</p>
                 </div>
 
-                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-[3rem] p-10 space-y-10 text-center relative overflow-hidden group shadow-3xl">
+                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-3xl sm:rounded-[3rem] p-5 sm:p-10 space-y-6 sm:space-y-10 text-center relative overflow-hidden group shadow-3xl">
                    <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-500/30 shadow-2xl mx-auto group-hover:scale-110 transition-all duration-700">
                      <Heart className="w-10 h-10 text-indigo-400 group-hover:animate-bounce-slow" />
                    </div>
@@ -1300,15 +1300,15 @@ export function SettingsPanel({
                    </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 transition-colors">
                         <HardDrive className="w-6 h-6 text-emerald-400 group-hover:text-white" />
                      </div>
                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest">ZIP Export</h4>
                      <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Source Files</p>
                    </button>
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-amber-600 transition-colors">
                         <Smartphone className="w-6 h-6 text-amber-500 group-hover:text-white" />
                      </div>
@@ -1332,7 +1332,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage team access & safety</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center justify-between">
                        <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Collaborators</h4>
                        <button className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors border-b border-indigo-500/20 pb-0.5">+ Invite Pro</button>
@@ -1411,9 +1411,9 @@ export function SettingsPanel({
                       </div>
                     )}
                     {/* Build Stats */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6">
                       <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         {[
                           { label: 'Total Builds', value: adminLiveMetrics.builds?.total ?? 0, color: 'text-white' },
                           { label: 'Success Rate', value: `${Math.round((adminLiveMetrics.builds?.successRate ?? 0) * 100)}%`, color: (adminLiveMetrics.builds?.successRate ?? 0) >= 0.8 ? 'text-emerald-400' : 'text-amber-400' },
@@ -1428,7 +1428,7 @@ export function SettingsPanel({
                       </div>
                     </div>
                     {/* AI Cost by Provider */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
                         <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
@@ -1462,7 +1462,7 @@ export function SettingsPanel({
                   </div>
                 )}
                 {!adminLiveMetrics && !loadingAdminMetrics && (
-                  <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-4">
+                  <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-4">
                     <BarChart2 className="w-10 h-10 text-[#484f58]" />
                     <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
                   </div>

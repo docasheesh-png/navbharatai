@@ -6698,6 +6698,8 @@ export interface EditResult {
 /**
  * Apply one edit_file replacement with a whitespace-tolerant fallback.
  *
+ *  0. APPEND: an EMPTY `old_string` is the model's signal to ADD content (not to
+ *     search) — append `new_string` to the END of the file.
  *  1. EXACT: if `oldStr` occurs exactly once, replace it. More than once →
  *     ambiguous, throw (the model must add surrounding context).
  *  2. FLEXIBLE: if `oldStr` is not found exactly (0 matches), retry treating any
@@ -6709,6 +6711,15 @@ export interface EditResult {
  * used to make error messages specific.
  */
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
+  // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
+  // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
+  // the old code reported `not unique (1377 matches)` and the model then flailed read→append for several
+  // turns. An empty old_string has one sensible meaning — append the new content to the end of the file.
+  // Deterministic + SAFE: an empty old_string previously only ERRORED, so no working behaviour changes.
+  if (oldStr === '') {
+    const sep = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+    return { updated: existing + sep + newStr, matchedOld: '', note: 'empty old_string → appended new_string to the end of the file' };
+  }
   const exact = existing.split(oldStr).length - 1;
   if (exact === 1) {
     // Slice-concatenate (NOT String.replace) so a `$` in newStr is inserted LITERALLY. JS's

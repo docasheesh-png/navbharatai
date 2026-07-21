@@ -20573,3 +20573,32 @@ tsc clean; AgentRunner suite (47) still green; frontend tsc clean.
 **Noted:** `rootCause = LLM_TRUNCATED` on this `ok:true` build ran on the pre-#1810 engine; the honesty fix
 (#1810) already routes a recovered transient away from rootCause — but here the truncation caused a REAL
 missing file, which THIS fix now recovers at the source.
+
+---
+
+## 2026-07-21 — Connectly Edit #1 autopsy: empty edit_file old_string now APPENDS (kills the read→append flail)
+
+**Report:** Connectly Edit #1 (add profile system + react-router). HEALTHY build — `ok:true`,
+`rootCause: "Build completed successfully with no problems recorded."`, **0 unresolved, 0 preview errors**,
+GLM-only (31 turns, 1 fallback). The honesty + truncation fixes are holding. Mining it (rule 5) surfaced
+one real recurring STRUGGLE, all self-healed but wasteful:
+
+**🥵 struggle — the edit_file "append" flail.** The model wanted to ADD styles to `src/components/Navbar.css`
+and called `edit_file` with an EMPTY `old_string`. `applyEdit` splits on the search string, so an empty
+string "matches" at every character → it threw `old_string is not unique in Navbar.css (1377 matches)`
+(1377 = the file's char count). The model narrated "an empty string is not a unique target" and then flailed
+read_file → manual append for several turns.
+
+**Root-cause fix (DNA):** `applyEdit` now treats an EMPTY `old_string` as **APPEND** — it adds `new_string`
+to the end of the file (with a separating newline only when the file doesn't already end in one). This is the
+one sensible meaning of "edit with no anchor", it removes the flail, and it is SAFE by construction: an empty
+old_string previously only ERRORED, so no working behaviour changes. The returned note tells the model
+exactly what happened ("empty old_string → appended…").
+
+**Regression tests:** 4 new cases in `ToolDispatcher.test.ts` — append with separating newline, the exact
+Connectly "1377-char empty old_string never throws", no double-newline when the file already ends in `\n`,
+and append on an empty file. Full ToolDispatcher suite green (153), server tsc clean.
+
+**Also noted (self-healed, not this PR):** another tool-call JSON truncation ("Unterminated string in JSON at
+position 65536" = a 64 KB tool-arg cut-off) and a sandbox recycle (27 files restored from the durable store)
+— both recovered; the truncation-class prevention (chunked large writes) remains the larger open item.

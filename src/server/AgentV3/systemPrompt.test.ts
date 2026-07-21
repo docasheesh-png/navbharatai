@@ -39,6 +39,18 @@ describe('Prisma relation guidance (deep-test App #10 — 7 wasted `prisma gener
   });
 });
 
+describe('ErrorBoundary class-field guidance (build autopsy 2026-07-21 — 6 rewrites in one edit turn)', () => {
+  it('gives the canonical constructor-based ErrorBoundary and names the useDefineForClassFields cause', () => {
+    const p = architectSystemPrompt();
+    expect(p).toContain('ERROR BOUNDARY');
+    expect(p).toContain('useDefineForClassFields');
+    expect(p).toContain('constructor');
+    expect(p).toContain('getDerivedStateFromError');
+    // it must steer AWAY from the thrash (functional-component workaround / repeated rewrites)
+    expect(p).toContain('do NOT loop');
+  });
+});
+
 describe('Node-only backend libs in frontend guidance (deep-test App #12 — jsonwebtoken in the browser)', () => {
   it('forbids jsonwebtoken/bcrypt/etc. in browser code and keeps JWT sign/verify server-side', () => {
     const p = architectSystemPrompt();

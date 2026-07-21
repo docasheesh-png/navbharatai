@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escalationRolloutPercent, rolloutBucket, inEscalationRollout, escalationCohort } from './escalationRollout';
+import { escalationRolloutPercent, rolloutBucket, inEscalationRollout, escalationCohort, inFlagRollout } from './escalationRollout';
 
 // T1-escalation-on: the safe percentage canary. Pure — assert backward-compat + deterministic bucketing.
 
@@ -80,5 +80,30 @@ describe('escalationCohort — the telemetry A/B label', () => {
       expect(escalationCohort(key, env)).toBe(expected); // labels must match gate behaviour
     }
     expect(escalationCohort(undefined, env)).toBe('out'); // no key at partial PCT → out (conservative)
+  });
+});
+
+describe('inFlagRollout — the shared feature-flag percentage canary (feature-heal / vaccine reuse this)', () => {
+  const key = 'ws-abc-123';
+  it('off flag → always false regardless of PCT', () => {
+    expect(inFlagRollout(false, undefined, key)).toBe(false);
+    expect(inFlagRollout(false, '100', key)).toBe(false);
+  });
+  it('on + no PCT → 100% (byte-identical to a plain global "on")', () => {
+    expect(inFlagRollout(true, undefined, key)).toBe(true);
+    expect(inFlagRollout(true, '', key)).toBe(true);
+    expect(inFlagRollout(true, '  ', key)).toBe(true);
+  });
+  it('on + malformed PCT → full rollout (never silently disables an explicitly-on flag)', () => {
+    expect(inFlagRollout(true, 'abc', key)).toBe(true);
+  });
+  it('on + 0% → false, on + 100% → true', () => {
+    expect(inFlagRollout(true, '0', key)).toBe(false);
+    expect(inFlagRollout(true, '100', key)).toBe(true);
+  });
+  it('on + partial PCT is deterministic by key (matches rolloutBucket)', () => {
+    expect(inFlagRollout(true, '50', key)).toBe(rolloutBucket(key) < 50);
+    // no key under a partial rollout → conservatively OUT
+    expect(inFlagRollout(true, '50', undefined)).toBe(false);
   });
 });

@@ -7,6 +7,7 @@
 // runCommand(); nothing here executes anything itself.
 
 import { detectPackageManager, pmRun, pmExec } from '../lib/packageManager';
+import { inFlagRollout } from './escalationRollout';
 
 export type TestFramework =
   | 'vitest'
@@ -152,8 +153,10 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
  * same opt-in discipline as the runtime auto-fix and feature-heal loops. It NEVER blocks a build: when
  * no suite exists it is an honest no-op, and a failing suite is a WARNING finding, not a hard fail.
  */
-export function vaccineEnabled(): boolean {
-  return process.env.AGENTV3_VACCINE === 'on';
+export function vaccineEnabled(rolloutKey?: string): boolean {
+  // Optional percentage canary: AGENTV3_VACCINE_PCT=N enables it for N% of builds (keyed by workspaceId).
+  // Unset PCT = 100% (a plain global "on"). Same rollout infra as escalation/feature-heal.
+  return inFlagRollout(process.env.AGENTV3_VACCINE === 'on', process.env.AGENTV3_VACCINE_PCT, rolloutKey);
 }
 
 /** An agent-facing repair instruction for a failing test suite (used only when a heal pass runs). */

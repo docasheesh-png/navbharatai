@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentV3Reducer } from '../components/agentv3/agentV3Reducer';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
-import { conversationToEvents, conversationToUserMessages, type PersistedConversation } from '../components/agentv3/agentV3History';
+import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../App';
@@ -84,7 +84,7 @@ export interface UseAgentV3Build {
    * own restored messages so the panel can re-display them too. Returns null if nothing was loaded.
    * No-op while a build is running. Best-effort: any failure resolves null and leaves state untouched.
    */
-  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null>;
+  loadConversation: (opts?: { userId?: string; email?: string; id?: string }) => Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string; unfinished?: boolean } | null>;
   conversationLoadDiag: () => string | null;
   /**
    * List the user's saved v5.0 conversations (metadata only) for the history menu.
@@ -524,7 +524,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   // Allowed even while a build is actively streaming HERE (opening a different saved conversation is
   // navigation, same as "+ New chat" — see reset()/start()'s generation-guard comments). Detaches from
   // whatever's currently attached; the underlying server build, if any, keeps running in the background.
-  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string } | null> => {
+  const loadConversation = useCallback(async (opts?: { userId?: string; email?: string; id?: string }): Promise<{ messages: UserChatMsg[]; workspaceId?: string; framework?: string; unfinished?: boolean } | null> => {
     if (opts) { userIdRef.current = opts.userId; emailRef.current = opts.email; }
     lastLoadDiagRef.current = null;
     try {
@@ -607,7 +607,13 @@ export function useAgentV3Build(): UseAgentV3Build {
       // restored workspaceId so the panel can adopt the SAME session id → a follow-up continues
       // this exact project/memory, AND the durable framework so a reopened non-Vite session's next
       // build doesn't silently reset to vite-react (the framework-reset defect from the reopen audit).
-      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework };
+      // AP-3 (cross-restart resume): a build whose durable status is still 'running' on reopen — with no
+      // live build anywhere (the panel checks serverBuildRunning) — was cut off before it could settle
+      // (a server restart/crash mid-build). The AgentRunner patches a terminal status at EVERY normal exit
+      // (complete/error/stopped), so 'running' + not-live is a TRUTHFUL "unfinished" signal, never a
+      // cleanly-finished build. The panel uses it to honestly offer a one-click Continue.
+      const unfinished = isUnfinishedBuild(conv);
+      return { messages: conversationToUserMessages(conv), workspaceId: conv.workspaceId, framework: conv.framework, unfinished };
     } catch (e) {
       lastLoadDiagRef.current = `network/exception while loading (${e instanceof Error ? e.message : String(e)})`;
       return null; // best-effort — never disrupt the panel on a load failure

@@ -32,7 +32,9 @@ const ComponentLibrary  = _lz(() => import('../ide/ComponentLibrary'),   'Compon
 const SEOOptimizer      = _lz(() => import('../ide/SEOOptimizer'),       'SEOOptimizer');
 const APKBuilder        = _lz(() => import('../ide/APKBuilder'),         'APKBuilder');
 const FigmaImporter     = _lz(() => import('../ide/FigmaImporter'),      'FigmaImporter');
-const CustomDomain      = _lz(() => import('../ide/CustomDomain'),       'CustomDomain');
+// Custom Domain now uses the REAL Cloudflare-backed panel (admin autopsy 2026-07-21) — the old
+// ide/CustomDomain wizard faked a "domain is live" state without any SSL/ownership verification.
+const ConnectDomainPanel = _lz(() => import('./ConnectDomainPanel'),     'ConnectDomainPanel');
 const TeamCollaboration = _lz(() => import('../ide/TeamCollaboration'),  'TeamCollaboration');
 const PWANotifications  = _lz(() => import('../ide/PWANotifications'),   'PWANotifications');
 const CodeMinifier      = _lz(() => import('../ide/CodeMinifier'),       'CodeMinifier');
@@ -122,6 +124,10 @@ export interface ViewPanelsProps {
   v3Preview?: { previewUrl?: string; workspaceId?: string; framework?: string; running?: boolean };
   /** Snapshot of the files taken before the last v5.0 build — the Diff Viewer's "previous version". */
   previousFiles?: Record<string, string>;
+  /** Whether the current user is a platform admin — gates the raw prod-DB console (DatabaseUI). */
+  isAdmin?: boolean;
+  /** Open Settings → Database (the user's own-app / BYOD database). */
+  onOpenAppDatabase?: () => void;
   /** "Fix with AI" clicked from the sidebar preview — prefills the v5.0 chat with the error. */
   onV3FixError?: (errText: string) => void;
   /** Hand a build prompt to the REAL engine: prefills the Pro v5.0 composer and switches to that
@@ -144,7 +150,7 @@ export function ViewPanels({
   sessions, currentSessionId, togglePin, currentProSessionId,
   previewHistory, fileUploadConflict, resolveFileConflict, handleFilesUpload,
   downloadAppZip, setActiveFile, wallet, setShowVishwakarmaUnlockModal, setShowAuth,
-  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, onV3FixError, onBuildViaV5Prompt, problems = [],
+  zipSizeModal, setZipSizeModal, v3Preview, previousFiles, isAdmin, onOpenAppDatabase, onV3FixError, onBuildViaV5Prompt, problems = [],
 }: ViewPanelsProps) {
   return (
     <>
@@ -318,7 +324,7 @@ export function ViewPanels({
       {/* Phase 3 — Database UI */}
       {activeView === 'database' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DatabaseUI userId={user?.uid} userTier={activeAgent} />
+          <DatabaseUI userId={user?.uid} userTier={activeAgent} isAdmin={isAdmin} onOpenAppDatabase={onOpenAppDatabase} />
         </div>
       )}
 
@@ -420,7 +426,7 @@ export function ViewPanels({
       {/* Phase 6 — SEO Optimizer */}
       {activeView === 'seo' && (
         <div className="flex-1 h-full overflow-hidden">
-          <SEOOptimizer generatedCode={generatedCode} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <SEOOptimizer generatedCode={generatedCode} files={files as Record<string, string>} appName="NavBharatAI App" onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -441,10 +447,11 @@ export function ViewPanels({
         </div>
       )}
 
-      {/* Phase 7 — Custom Domain */}
+      {/* Custom Domain — the REAL Cloudflare-backed connect flow (honest pending/active/not-configured
+          states via /api/domains/*), replacing the old wizard that faked "your domain is live". */}
       {activeView === 'domain' && (
-        <div className="flex-1 h-full overflow-hidden">
-          <CustomDomain />
+        <div className="flex-1 h-full overflow-y-auto">
+          <ConnectDomainPanel onBack={() => toggleTab('studio')} />
         </div>
       )}
 
@@ -479,7 +486,7 @@ export function ViewPanels({
       {/* Phase 8 — Monetization Wizard */}
       {activeView === 'monetize' && (
         <div className="flex-1 h-full overflow-hidden">
-          <MonetizationWizard generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <MonetizationWizard generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

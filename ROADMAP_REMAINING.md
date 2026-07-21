@@ -91,8 +91,12 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
   mid-build process restart CONTINUES instead of restarting. Substrate exists (`CheckpointStore`,
   `FirestoreWorkspaceMemoryStore`, `GitManager`); the resume wiring does not. *Higher-risk — touches the
   build loop; scope carefully.*
-- **1000+ file codemod (lift the ~50-file cap)** — chunked repo-wide refactor path for very large apps
-  (`CodemodeExecutor` bounded to ~50 files today). Serves ERP/large-SaaS.
+- **~~1000+ file codemod (lift the ~50-file cap)~~ — ✅ the 50-cap is DONE (stale audit line).** The codemod
+  path is relevance-scoped with a 2000-file per-pass safety cap + honest truncation ("re-run ~N more times
+  to finish", converges); the old blind first-50 survives only behind `AGENTV3_CODEMOD_SCOPED=off`
+  (`ToolDispatcher.ts` codemod handlers; `codemodScope.ts`; PROGRESS.md T3 Phase 1, 2026-07-19). REMAINING
+  (narrow): Phase 2 = auto-loop the chunks when the *relevant* shortlist itself exceeds 2000 files, so a
+  mega-refactor finishes in one call instead of N re-runs — rare (needs >2000 files containing one symbol).
 - **Template gallery + save-build-as-template** — a curated 20–30 starter gallery + "pick then chat to
   customize" + save-as-template. Mostly frontend + a `/templates` listing endpoint (AP-10). Kills cold-start,
   drives weak-tier cost ≈ 0.

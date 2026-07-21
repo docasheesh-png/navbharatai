@@ -3,6 +3,7 @@ import { buildRateLimiter, workspaceRateLimiter, inbrowserPreviewRateLimiter, ve
 import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
 import { redactProviderError } from '../lib/providerRedaction';
 import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import {
   isAgentV3Enabled,
   agentV3Status,
@@ -6263,6 +6264,21 @@ export function registerAgentV3Routes(app: Express): void {
         } catch { /* requirement guidance is best-effort — never affect the build */ }
       }
 
+      // ASK-USER clarify (opt-in, friction-free resolution of the admin's #1 category). On a FRESH domain
+      // build, surface the clarifications the engine ALREADY assumed sensible defaults for as a NON-BLOCKING,
+      // dismissible card — the build proceeds immediately (it NEVER waits for an answer, honouring the
+      // "text reply > build app" rule), and the user can adjust any assumption via a normal follow-up. Only
+      // fires for a new build of a detected domain with real askable gaps. Flag-gated OFF (AGENTV3_ASK_USER):
+      // when unset the emit never happens, so the stream is byte-identical to today. Best-effort.
+      if (process.env.AGENTV3_ASK_USER === 'on' && intent === 'new_build' && !isEditMode) {
+        try {
+          const g = analyzeRequirementGaps(prompt);
+          if (shouldSurfaceRequirementGaps(g) && g.clarifyingQuestions.length > 0) {
+            emit({ type: 'clarify', domain: g.domain, questions: g.clarifyingQuestions.slice(0, 3), ts: Date.now() });
+          }
+        } catch { /* clarify is best-effort — never affects the build */ }
+      }
+
       // MEMORY FIX 1 (Claude-level continuity): inject the current PROJECT CONTEXT — the real
       // file list + the project map + recent requests — so a follow-up like "continue" KNOWS what
       // it is building and resumes, instead of the amnesiac "what would you like me to continue
@@ -8084,6 +8100,23 @@ export function registerAgentV3Routes(app: Express): void {
             events.emit({ type: 'narration', agent: 'architect', text: `⚠️ A syntax error remains in the final build — the app won't compile yet. Your files are saved; send a follow-up and I'll finish the fix.`, ts: Date.now() });
           }
         } catch { /* final syntax re-verify is best-effort — never blocks a build */ }
+      }
+
+      // AP-4 slice 1 (read-only): record the frontend/backend file partition as an admin advisory. This
+      // writes nothing and parallelizes nothing — it is the load-bearing evidence for a future, flag-gated
+      // parallel FE/BE build (safe only when the two sides own DISJOINT files). Best-effort; never affects
+      // the build. `partitionable` on real builds is the signal that unblocks the next slice.
+      if (result && result.ok && writtenFiles.size > 0) {
+        try {
+          const fbPart = partitionFrontendBackend([...writtenFiles.keys()]);
+          buildDiag.record({
+            phase: 'build',
+            severity: 'info',
+            code: 'FE_BE_PARTITION',
+            message: partitionSummary(fbPart),
+            autoResolved: true,
+          });
+        } catch { /* partition analysis is best-effort — never blocks a build */ }
       }
 
       // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED

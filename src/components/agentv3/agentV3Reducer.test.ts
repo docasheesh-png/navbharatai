@@ -18,6 +18,14 @@ describe('agentV3Reducer — folds wire events into surface state', () => {
     expect(s.proposedSteps).toEqual({ role: 'planner', steps: ['Build login', 'Add API'] });
   });
 
+  it('records a non-blocking clarify (ask-user) card without touching build progress', () => {
+    let s = initialAgentV3State();
+    expect(s.pendingClarify).toBeUndefined();
+    s = agentV3Reducer(s, { type: 'clarify', domain: 'healthcare', questions: ['Does it need offline entry?', 'Who are the roles?'], ts: 1 });
+    expect(s.pendingClarify).toEqual({ domain: 'healthcare', questions: ['Does it need offline entry?', 'Who are the roles?'] });
+    expect(s.done).toBe(false); // clarify never ends or blocks the build
+  });
+
   it('tracks the live AI-team card from a tool_call then clears active on result', () => {
     let s = initialAgentV3State();
     s = agentV3Reducer(s, {

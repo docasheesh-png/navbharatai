@@ -10,6 +10,7 @@ import {
   Star, Search,
 } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { HostingChooser } from './HostingChooser';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
@@ -20,6 +21,8 @@ import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
+import { STARTER_TEMPLATES } from './starterTemplates';
+import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
 import { checkAttachmentSizes } from '../../lib/attachmentLimits';
 import { historyOpen404Action } from './historyOpenPolicy';
 import { v3SessionStorageKey, readStickySession, clientWorkspaceId } from './v3SessionContinuity';
@@ -90,6 +93,19 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [shipNote, setShipNote] = useState<string | null>(null);
   // UNSEND (Slice 2) — true while a take-back purge is in flight (disables the button, prevents double-fire).
   const [unsending, setUnsending] = useState(false);
+  // AP-3 (cross-restart resume) — a reopened build whose durable status is still 'running' with no live
+  // build was cut off before it could finish (a server restart/crash mid-build). We honestly offer a
+  // one-click Continue instead of silently resetting. Set on reopen; cleared once a build starts or the
+  // user dismisses/continues.
+  const [interruptedResume, setInterruptedResume] = useState(false);
+  // ASK-USER (opt-in): dismiss state for the non-blocking clarify card. Reset whenever a NEW clarify
+  // arrives so a fresh build's questions always show; the build itself never waits on this.
+  const [clarifyDismissed, setClarifyDismissed] = useState(false);
+  useEffect(() => { if (state.pendingClarify) setClarifyDismissed(false); }, [state.pendingClarify]);
+  // Save-as-template: the user's own reusable starters (on-device), shown beside the built-in ones.
+  const [savedTpls, setSavedTpls] = useState<SavedTemplate[]>(() => loadSavedTemplates());
+  const handleSaveTemplate = (text: string) => setSavedTpls(saveTemplate('', text));
+  const handleRemoveTemplate = (id: string) => setSavedTpls(removeSavedTemplate(id));
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -797,6 +813,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
       // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
       if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+      setInterruptedResume(restored.unfinished === true); // AP-3 — offer Continue if a restart cut it off
       // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
       // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
       // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
@@ -943,6 +960,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
+    setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
     // "continue" after a stall starts a fresh progress-monotone chain.
@@ -1279,6 +1297,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setRestoreNote('');
     setShipNote(null);
     setBilled(false);
+    setInterruptedResume(false); // AP-3 — a fresh/other session never inherits an unfinished-build offer
     // Composer extras + workspace view: back to the defaults a truly new chat starts with. The
     // preview surface unmounts (previewEverOpened=false), so no stale iframe can survive; its own
     // workspaceId-keyed clear (PreviewSurface) covers the mounted case too.
@@ -1494,6 +1513,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         // so the auto-resume effect re-attaches its live stream immediately — instead of the user
         // discovering it via a "build already running" error when they try to type.
         if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+        // AP-3: honestly flag a build that a restart cut off mid-flight (durable status still 'running').
+        // The banner itself only renders when there's ALSO no live build (serverBuildRunning === false).
+        setInterruptedResume(restored.unfinished === true);
         // Cross-cutover continuity: a pre-cutover session continued after the server became the
         // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
         // When that legacy copy is provably disjoint from the server transcript, show it in front;
@@ -1873,6 +1895,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   // R5 §5.1 — the app's permanent LIVE deployment URL (Firebase Hosting). Restored durably from the
   // server so it survives a reconnect/new session, not just the current build stream.
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
+  // Hosting Phase 1 — the "Publish" chooser (host on NavBharatAI vs bring-your-own), opened from Deploy.
+  const [showHostingChooser, setShowHostingChooser] = useState(false);
 
   // Fetch the persisted live URL whenever the workspace changes or a build/deploy finishes.
   useEffect(() => {
@@ -2324,6 +2348,14 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
 
   return (
     <div className="flex flex-col h-full max-h-full w-full min-h-0 bg-zinc-950 text-zinc-100">
+      {showHostingChooser && (
+        <HostingChooser
+          providers={configuredProviders}
+          busy={running}
+          onClose={() => setShowHostingChooser(false)}
+          onDeploy={(id) => { setShowHostingChooser(false); deployLive(id); }}
+        />
+      )}
       {/* Header: title + New, and the workspace tab pills (open/collapse the workspace) */}
       <div className="shrink-0 border-b border-zinc-800">
         {/* In focus mode the fixed Exit-Focus button lives at the top-right corner (App.tsx). Reserve
@@ -2505,31 +2537,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               <ExternalLink className="w-3 h-3 opacity-60" />
             </a>
           )}
-          {/* R5 §5.1 — one-click deploy: publish the built app to a PERMANENT public URL.
-              When more than one hosting provider is configured, a chooser lets the user pick
-              WHERE to deploy (no lock-in); with only one, the button alone keeps it simple. */}
-          {configuredProviders.length > 1 && (
-            <select
-              value={deployProvider}
-              onChange={(e) => setDeployProvider(e.target.value)}
-              disabled={running}
-              title="Choose where to deploy (no lock-in)"
-              className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-            >
-              {configuredProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          )}
+          {/* R5 §5.1 + Hosting Phase 1 — one "Publish" button opens the Hosting chooser: host on
+              NavBharatAI (our free one-click hosting) OR bring your own provider (no lock-in). */}
           <button
-            onClick={deployLive}
+            onClick={() => setShowHostingChooser(true)}
             data-tour="deploy"
             disabled={running || !state.workspaceId}
             title="Publish your app to a permanent public live URL (it stays online after the sandbox stops)"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-emerald-700/60 text-emerald-300 hover:text-white hover:border-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Rocket className="w-3.5 h-3.5" />
-            Deploy
+            Publish
           </button>
           {liveUrl && (
             <a
@@ -2571,6 +2589,58 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   : chatMode === 'advisor'
                   ? <>🔍 <b className="text-zinc-300">Advise</b> — read-only. Ask for an audit, bug/security scan or a comparison; nothing is built. Approve fixes into the queue.</>
                   : <>Say hi, or describe an app to build —<br />e.g. “build a todo app with categories”.</>}
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {/* The user's OWN saved templates (on-device) — shown first when present. Each is a one-tap
+                    prompt with a remove (×). Saved via the 🔖 action on any message you sent. */}
+                {chatMode === 'build' && savedTpls.length > 0 && (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Your templates</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {savedTpls.map((t) => (
+                        <span key={t.id} className="group/tpl inline-flex items-center rounded-full border border-amber-600/40 bg-amber-500/10 text-xs text-amber-200 overflow-hidden">
+                          <button
+                            type="button"
+                            title={t.prompt}
+                            onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                            className="flex items-center gap-1 pl-2.5 pr-1.5 py-1 hover:bg-amber-500/15 transition-colors"
+                          >
+                            <span aria-hidden>🔖</span>{t.label}
+                          </button>
+                          <button
+                            type="button"
+                            title="Remove this template"
+                            aria-label="Remove template"
+                            onClick={() => handleRemoveTemplate(t.id)}
+                            className="px-1.5 py-1 text-amber-400/70 hover:text-red-400 hover:bg-white/5 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Cold-start killer: one-tap RICH starters. Tapping drops a detailed prompt into the
+                    composer to customise — it never auto-builds (the user stays in control). Build tab only. */}
+                {chatMode === 'build' && (
+                  <div className="mt-5">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-600 mb-2">Or start from a template</div>
+                    <div className="flex flex-wrap justify-center gap-1.5 max-w-md mx-auto">
+                      {STARTER_TEMPLATES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          title={t.prompt}
+                          onClick={() => { setPrompt(t.prompt); setTimeout(() => composerRef.current?.focus(), 0); }}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-zinc-700 bg-zinc-900/60 text-xs text-zinc-300 hover:border-indigo-500/60 hover:text-indigo-200 hover:bg-indigo-500/10 transition-colors"
+                        >
+                          <span aria-hidden>{t.icon}</span>{t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {chatBlocks.map((b) => {
@@ -2578,10 +2648,74 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
               const isLastUser = lastUserTs !== null && b.msg.role === 'user' && b.msg.ts === lastUserTs && !unsending;
               return <Bubble key={b.key} msg={b.msg}
                 onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}
-                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined} />;
+                onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined}
+                onSaveTemplate={b.msg.role === 'user' ? () => handleSaveTemplate(b.msg.text) : undefined} />;
             })}
+            {/* AP-3 (cross-restart resume) — an honest offer to finish a build a server restart cut off
+                mid-flight. Shows only when the reopened build's durable status was 'running' AND there is
+                no live build anywhere (serverBuildRunning false) and nothing is streaming here. Files, plan
+                and memory were all saved durably, so Continue picks up from where it stopped. */}
+            {interruptedResume && !serverBuildRunning && !running && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">This build didn’t finish</div>
+                    <div className="text-amber-200/80 text-xs mt-0.5">
+                      It was interrupted before it could complete (usually a server restart). Your files, plan and progress are all saved — continue to finish the remaining steps.
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void send({ text: 'Continue the build from where it left off and finish the remaining steps.', importUrl: '' }); }}
+                        className="px-2.5 py-1 rounded-md bg-amber-500 text-zinc-950 text-xs font-medium hover:bg-amber-400 transition-colors"
+                      >
+                        Continue building
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInterruptedResume(false)}
+                        className="px-2.5 py-1 rounded-md text-amber-200/80 text-xs hover:text-amber-100 hover:bg-white/5 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
+            )}
+            {/* ASK-USER (opt-in) — a NON-BLOCKING clarify card. The engine is already building with
+                sensible defaults for these; the user MAY refine any of them with a follow-up message, or
+                dismiss. It never pauses the build (honours "text reply > build app"). */}
+            {state.pendingClarify && !clarifyDismissed && state.pendingClarify.questions.length > 0 && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-sm text-indigo-100">
+                <div className="flex items-start gap-2">
+                  <Bot className="w-4 h-4 mt-0.5 shrink-0 text-indigo-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">Building your {state.pendingClarify.domain} app — a few things I assumed</div>
+                    <div className="text-indigo-200/80 text-xs mt-0.5">
+                      I’m already building with sensible defaults. Want to adjust any of these? Just reply below — no need to wait.
+                    </div>
+                    <ul className="mt-1.5 space-y-1">
+                      {state.pendingClarify.questions.map((q, i) => (
+                        <li key={i} className="text-xs text-indigo-100/90 flex gap-1.5"><span className="text-indigo-400">•</span><span>{q}</span></li>
+                      ))}
+                    </ul>
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setClarifyDismissed(true)}
+                        className="px-2.5 py-1 rounded-md text-indigo-200/80 text-xs hover:text-indigo-100 hover:bg-white/5 transition-colors"
+                      >
+                        Looks good — dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
             {/* FIX #6 — a role chat (Plan/Advise) proposed steps: the USER approves them into this
                 app's queue (never auto-enqueued). The Build chat then runs them in order, hands-free. */}
@@ -3458,29 +3592,13 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     <ExternalLink className="w-3 h-3 opacity-60" />
                   </a>
                 )}
-                {configuredProviders.length > 1 && (
-                  <div className="flex items-center gap-3 px-4 py-2.5 text-sm text-zinc-200">
-                    <Rocket className="w-4 h-4 shrink-0 text-emerald-400/70" />
-                    <span className="flex-1 text-left">Deploy to</span>
-                    <select
-                      value={deployProvider}
-                      onChange={(e) => setDeployProvider(e.target.value)}
-                      disabled={running}
-                      className="text-xs px-1.5 py-1 rounded border border-emerald-700/60 bg-zinc-900 text-emerald-300 disabled:opacity-40"
-                    >
-                      {configuredProviders.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
                 <button
-                  onClick={() => { setMobileSheet(null); deployLive(); }}
+                  onClick={() => { setMobileSheet(null); setShowHostingChooser(true); }}
                   disabled={running || !state.workspaceId}
                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-300 hover:bg-zinc-800 disabled:opacity-40 touch-manipulation"
                 >
                   <Rocket className="w-4 h-4 shrink-0" />
-                  <span className="flex-1 text-left">Deploy — publish to a permanent live URL</span>
+                  <span className="flex-1 text-left">Publish — host on NavBharatAI or your own provider</span>
                 </button>
                 {liveUrl && (
                   <a
@@ -3880,7 +3998,7 @@ function TypewriterText({ text, streaming }: { text: string; streaming?: boolean
   return <>{streaming ? text.slice(0, Math.min(shown, text.length)) : text}</>;
 }
 
-function Bubble({ msg, onUnsend, onEdit }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void }) {
+function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUnsend?: () => void; onEdit?: () => void; onSaveTemplate?: () => void }) {
   if (msg.role === 'user') {
     return (
       <div className="group flex flex-col items-end">
@@ -3889,7 +4007,7 @@ function Bubble({ msg, onUnsend, onEdit }: { msg: ChatMsg; onUnsend?: () => void
         </div>
         {/* Copy / fold on every user message; Edit + Unsend attach ONLY to the LAST user message (slice 2). */}
         <div className="mt-0.5 pr-1 opacity-70 group-hover:opacity-100 transition-opacity">
-          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} />
+          <MessageActions text={msg.text} onUnsend={onUnsend} onEdit={onEdit} onSaveTemplate={onSaveTemplate} />
         </div>
       </div>
     );

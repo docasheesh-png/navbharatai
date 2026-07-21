@@ -20112,3 +20112,55 @@ unit-tested, and shipped through the normal cycle (no half-work; two absolute ru
 opt-in auto-continue), AP-4 slice 2 (flag-gated FE/BE parallel dispatch conditioned on a proven-disjoint
 partition; the heal-gate-merge is a separate track), and the bounded interactive `ask_user` tool (opt-in,
 never blocks the friction-free fast path).
+
+## 2026-07-21 — Settings tool-groups honesty march COMPLETE — Monetization & Team group (+ prod-DB security gate)
+
+Closed the final group of the multi-session **Settings tool-groups audit** (admin: "ye bas naam ke hai,
+koi kaam nahi karte … sabko theek karo, working condition me lao" — applied group by group). Every fake,
+placeholder, or provider-leaking surface in Settings is now either genuinely wired or honestly removed.
+This entry covers the last group (**Monetization & Team**), shipped as two PRs. Absolute rule #2 (real
+features only — no "looks done but does nothing"), the white-label law (an end user never sees a vendor/
+model name), and safeguard #5 (tsc + vitest gate) all held.
+
+**Merged this checkpoint:**
+1. **DatabaseUI prod-DB security gate (#1781)** — the Dev-Tools "Database" tile mounted a **raw read/write
+   console over NavBharatAI's PRODUCTION Firestore (`navbharat-prod`), shipped to every signed-in user with
+   no authorization gate** (the `userTier` prop was accepted but never checked). It is NOT the Bring-Your-
+   Own-Database feature (that is the separate, real Settings → Database). Fix: `DatabaseUI` is now a thin
+   **admin gate** — non-admins get an honest card pointing to Settings → Database; the raw console + its
+   Firestore hooks only mount for admins, split into an inner `DatabaseConsole` so there is **no conditional-
+   hooks violation**. `isAdmin` + `onOpenAppDatabase` threaded App → ViewPanels → DatabaseUI. (The real data
+   boundary — `firestore.rules` default-deny + owner-scoping — was already solid; this removes the user-facing
+   footgun on top of it.) ⚠️ **Recorded open root cause (flagged, NOT changed — live-DB breakage risk):**
+   `firestore.rules:46` lets ANY signed-in user READ `/users/{userId}`; likely intentional for profile/social
+   lookups but over-permissive if the doc holds PII. Needs a deliberate admin decision + a rules deploy.
+2. **Monetize / Team / Analytics honesty (#1783)** — removed every remaining fake/leaking surface in the group:
+   - **AppAnalytics** — dropped fabricated hero trend badges (`+12% this week` …, never computed), "Most Used
+     Features" (hardcoded 45/30/15/10), and "Tips & Insights" (fabricated "Evening 6–9 PM" / "E-commerce 40%").
+     Removed the **"AI Model Usage Breakdown"** card — it both **leaked vendor names (Gemini/Claude/Groq) to end
+     users (white-label violation)** and fabricated the split via `|| 60/25/15` fallbacks; dropped the magic
+     fallbacks + `StackedModelBar`. Recent Sessions now brands the engine "NavBharatAI" instead of rendering the
+     raw `modelUsed` id. The real backend cards (build perf / reliability MTTD-MTTR / SLO / activity chart from
+     real localStorage history) are untouched.
+   - **TeamCollaboration** — removed the mock activity feed (`DEFAULT_ACTIVITIES` — fabricated "Priya Sharma
+     edited a file" …), the fake "Project Share Link" card (dead `/shared/<random>` URL with **no resolver
+     anywhere** — the real share path is the `/?join=<token>` invite; plus non-persisted expiry/access toggles,
+     a hand-drawn ASCII QR, and a `setTimeout` "regenerate"), and the non-functional Notifications toggles (no
+     backend consumes them). Kept every real surface: invites (real links via `/api/team/invite`), members +
+     role changes (real RBAC), `MentionInbox`, `TeamLibraryPanel`, live presence.
+   - **MonetizationWizard** — "Inject into App" now resolves the **real** app source (`resolveAppSource`) and
+     injects before `</body>`; honest amber "Build an app first" when there's no app (was flashing fake
+     "Injected!" onto the retired `generatedCode` placeholder). Touches only the user's own gateway keys — never
+     NavBharatAI's wallet/payments.
+   - **WhitelabelBranding** — renamed "White-label Branding" → honest **"Brand Kit Generator"** (it exports a
+     CSS/meta/Tailwind snippet to paste in; it does not auto-apply to the built app).
+
+   Net: 5 files, **+69 / −499** (mostly deletions of fabricated data). No new backend needed — the fix is
+   removing fakes and routing the real ones through the shared placeholder-aware `resolveAppSource`.
+
+**AppKnowledgeBase:** verified (not assumed) — the removed cards were never advertised, the `team_collaboration`
+entry describes only the kept invite/RBAC flow, and `live_collaboration` is a separate real feature. No stale
+entries → no change needed.
+
+**Verification (both PRs):** `npx tsc --noEmit` ✅ · `npx vitest run` ✅ **8642/8642 passed (870 files)** ·
+CI green before each merge (hard gate).

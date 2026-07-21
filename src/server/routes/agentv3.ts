@@ -3535,6 +3535,9 @@ export function registerAgentV3Routes(app: Express): void {
     res.json({
       providers: deployProviderStatus({ userId, githubToken: hasGithub ? 'present' : undefined }),
       default: DEFAULT_DEPLOY_PROVIDER,
+      // Slice 3: tells the client whether the Firebase-native "connect your own domain" surface is
+      // live, so the Publish flow only offers it when the backend feature flag is on.
+      customDomains: firebaseCustomDomainsEnabled(),
     });
   });
 

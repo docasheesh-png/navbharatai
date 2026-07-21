@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks, actionGroupOpen } from './activityTimeline';
+import { isProgressNoise, parseFileTick, diffStats, summarizeActions, detailEntries, buildChatBlocks, actionGroupOpen, carryOverActivity, ACTIVITY_LOG_CAP } from './activityTimeline';
 import type { ActivityEntry } from './agentV3Types';
 
 const tool = (id: string, ts: number, text: string, extra: Partial<ActivityEntry> = {}): ActivityEntry =>
@@ -150,5 +150,35 @@ describe('actionGroupOpen — live per-file progress is shown inline while build
   it('a user tap overrides either way and sticks — even against the active state', () => {
     expect(actionGroupOpen(false, true)).toBe(false); // user collapsed a running group
     expect(actionGroupOpen(true, false)).toBe(true);  // user re-opened a finished group
+  });
+});
+
+describe('carryOverActivity — a settled turn\'s action rows survive the next send (admin 2026-07-21)', () => {
+  it('archives the previous activity after the log, deactivating in-flight spinners', () => {
+    const log = [file('a', 1, 'created src/App.tsx')];
+    const prev = [file('b', 2, 'created src/Api.ts'), tool('c', 3, 'running: npm run dev', { active: true })];
+    const out = carryOverActivity(log, prev);
+    expect(out.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+    expect(out.find((e) => e.id === 'c')?.active).toBe(false); // that build is over — no live spinner
+  });
+
+  it('the diff-vanish regression: archived entries still produce action rows between old prose', () => {
+    const log = carryOverActivity([], [file('f1', 10, 'created src/App.tsx')]);
+    // Turn 2's thread: old prose at ts 5, the archived file row at ts 10, new prose at ts 20.
+    const msgs = [
+      { role: 'agent' as const, text: 'Building your app…', ts: 5 },
+      { role: 'agent' as const, text: 'Done! Preview is live.', ts: 20 },
+    ];
+    const blocks = buildChatBlocks(msgs, log, { 'src/App.tsx': '+++ b/src/App.tsx\n+hello' });
+    const actions = blocks.filter((b) => b.kind === 'actions');
+    expect(actions).toHaveLength(1); // the finished build's row is still decorating the chat
+    expect((actions[0] as { stats: { plus: number } }).stats.plus).toBe(1); // its real diff stats too
+  });
+
+  it('caps the archive at ACTIVITY_LOG_CAP newest entries', () => {
+    const many = Array.from({ length: ACTIVITY_LOG_CAP + 50 }, (_, i) => file(`f${i}`, i, `created f${i}.ts`));
+    const out = carryOverActivity(many, [file('last', 9_999, 'created last.ts')]);
+    expect(out).toHaveLength(ACTIVITY_LOG_CAP);
+    expect(out[out.length - 1].id).toBe('last');
   });
 });

@@ -5800,6 +5800,29 @@ export function registerAgentV3Routes(app: Express): void {
         });
       }
 
+      // PLAN CONTINUITY (admin 2026-07-21 — "plan reset na ho, ek hi plan complete ho"): MEMORY
+      // FIX 4 saves the final plan durably as a PLAN_STATE note at build end, but the LOAD half
+      // was only ever wired into the resume endpoint — every new build turn started from an EMPTY
+      // WorkspaceState, so a continuation turn (auto-continue / "continue" / a queued step) showed
+      // a fresh 0/N plan instead of the one the user was watching. Seed the workspace with the
+      // saved plan when it is UNFINISHED, so x/y keeps climbing across turns until the app is done;
+      // a fully-done plan is retired and a new request starts clean. With merge-on-update
+      // (todoMerge.ts) the model's next update_todo folds INTO this seeded plan — finished items
+      // stay, stale pending items prune, new steps append. Best-effort, never blocks a build.
+      try {
+        const findPlanNote = (eps: Array<{ kind?: string; text?: string }> | undefined) =>
+          eps?.slice().reverse().find((e) => e.kind === 'note' && typeof e.text === 'string' && e.text.startsWith('PLAN_STATE'));
+        let planSeedNote = findPlanNote(getWorkspaceMemory(workspaceId).snapshot().episodes);
+        if (!planSeedNote) {
+          const coldSnap = await loadWorkspaceMemory(workspaceId).catch(() => null);
+          planSeedNote = findPlanNote(coldSnap?.episodes);
+        }
+        const savedPlan = planSeedNote ? parsePlanState(planSeedNote.text) : [];
+        if (savedPlan.length > 0 && savedPlan.some((t) => t.status === 'pending' || t.status === 'in_progress')) {
+          state.setTodos(savedPlan);
+        }
+      } catch { /* plan continuity is best-effort — never blocks a build */ }
+
       // Remember the build request in project memory (episodic — the team can
       // recall what was asked for during the build).
       getWorkspaceMemory(workspaceId).recordRequest(prompt);

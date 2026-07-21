@@ -138,7 +138,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     },
     {
       name: 'update_todo',
-      description: 'Replace the build todo list shown to the user. Use this to plan and track progress.',
+      description: 'Update the ONE running build plan shown to the user. Send the full list with statuses updated and new items appended — never a fresh shorter plan (completed items always stay; the workspace keeps finished work even if you omit it).',
       input_schema: {
         type: 'object',
         properties: {

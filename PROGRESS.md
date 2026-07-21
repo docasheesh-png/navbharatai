@@ -20419,3 +20419,39 @@ the remediation-narration downgrade. Full AgentV3 suite green (3676), frontend +
 tool-call argument hitting max_tokens ("Unterminated string in JSON"), driving 12 GLM failures before the
 retry recovered. Preventing it (chunked large-file writes / lower per-call file size) is a separate,
 larger engine change; the honesty fix above ensures it is always reported truthfully meanwhile.
+
+## 2026-07-21 — Pro v5.0 chat build-UX overhaul (admin's 6-point directive) — session claude/pro5-chat-ux
+
+The admin reported 6 UX problems in the v5.0 build chat (non-technical users can't follow it). Each
+was root-caused, not patched:
+
+1. **Plan reset ("x/y complete hote hi a/b restart")** — THREE stacked root causes killed:
+   `update_todo` replaced the whole list → `WorkspaceState.setTodos` now MERGES via the new pure
+   `todoMerge.ts` (done kept forever, stale pending pruned, new appended — x/y monotonic);
+   `computePlanProgress`'s per-file positional tick stomped agent-marked done items back to pending →
+   done is never downgraded (+ spinner moves to first pending); PLAN_STATE was durably SAVED at build
+   end (MEMORY FIX 4) but never LOADED at build start → an unfinished plan now seeds the next turn's
+   WorkspaceState (a finished plan retires). Prompt + `update_todo` description state the ONE-PLAN contract.
+2. **Diff/action-rows vanish after a build** — every new send (queue step / auto-continue / next
+   message) wiped `state.activity`, so the finished build's "Created N files +X −Y" rows and diff
+   decorations disappeared while prose survived. New `activityLog` archives the settled turn
+   (deactivated, capped 600, pure `carryOverActivity` — regression-tested) and the chat renders
+   log + live. The reconnect path (`resume()`) preserved the same class (activityLog/diffs/todos).
+3. **Timer reset on error** — the Team-HQ clock zeroed the moment `running` flipped false (incl.
+   `error`); it now freezes on stop and re-anchors only on a genuine false→true build start.
+4. **File bursts** — bulk `file_changed` (write_files_batch loop) flashed all rows at once; the
+   reveal pacer now paces them too (one real row per interval, real names, real order; interactive
+   `permission_request`/`clarify` flush past the queue instantly).
+5. **Steps+time footer** — the expandable per-step log duplicated the chat's action rows; the
+   WorkingIndicator is now one honest line (live action + clock while running; "Done · time" after).
+6. **Roadmap overlay hiding replies** — Plan/Advise proposed steps moved from a block glued under
+   the last AI message to a tiny chip above the composer (expandable sheet: queue-all / per-step /
+   dismiss; zero space when absent).
+Plus: system prompt now mandates plain-language progress notes (done → doing → next, user's own
+language, no jargon/file-path dumps) for non-technical users.
+
+**OPEN root cause (recorded, not silently dropped):** action rows/diffs still don't survive a FULL
+session reopen — the durable transcript stores prose only (`conversationToEvents` replays no
+activity/diff events), so `openConversation` rebuilds a bare thread. Real fix = persisting a compact
+activity/diff summary into the durable conversation record (server SessionTimeline already records
+events; needs a bounded replay slice on the transcript read path). Follow-up slice.

@@ -1414,6 +1414,30 @@ export function vertexPeerBuildEnabled(flag: string | undefined): boolean {
   return v !== '0' && v !== 'off';
 }
 
+// FLOOR BALANCE (admin directive 2026-07-21, restaurant-build autopsy: "GLM par pura load na dalo —
+// GLM+Kimi+Vertex+Haiku me smartly divide"): alternate which cheap provider LEADS on each runner
+// construction, so first-attempt load spreads ~50/50 across GLM and KIMI instead of GLM eating every
+// first call (that build: 32 GLM 429s while KIMI sat second on every attempt). SMART, not equal —
+// the shared 429 cooldown/bench already skips an unhealthy provider regardless of order, so this
+// rotation only spreads load between HEALTHY providers; Vertex/Gemini/Haiku remain strictly error-only
+// backstops (the cost order and the weak-tier no-Claude ladder are unchanged — only the GLM↔KIMI lead
+// swaps). Kill switch: AGENTV3_FLOOR_BALANCE=off restores the fixed GLM-first order.
+let floorLeadCounter = 0;
+/** Test-only: reset the lead-alternation counter so ordering assertions are deterministic. */
+export function _resetFloorLeadCounter(): void { floorLeadCounter = 0; }
+
+/** Pure reorder: when `kimiFirst`, the KIMI rung block leads and the GLM block follows (any other rungs
+ *  keep their relative position after both). Identity when either block is absent or `kimiFirst` is false. */
+export function balanceFloorLead(runners: NamedRunner[], kimiFirst: boolean): NamedRunner[] {
+  if (!kimiFirst) return runners;
+  const base = (e: NamedRunner): string => e.reportAs ?? e.name;
+  const glm = runners.filter((e) => base(e) === 'GLM');
+  const kimi = runners.filter((e) => base(e) === 'KIMI');
+  if (glm.length === 0 || kimi.length === 0) return runners;
+  const rest = runners.filter((e) => base(e) !== 'GLM' && base(e) !== 'KIMI');
+  return [...kimi, ...glm, ...rest];
+}
+
 export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[] {
   // DEFAULT = 'on' (admin 2026-07-12, "1st call claude nahi chahiye — jaisa CLAUDE.md me save hai"):
   // per the confirmed Model Routing Policy the FIRST build call must be the flagship cheap coder
@@ -1512,7 +1536,13 @@ export function cheapBuildFloorRunners(opts?: { free?: boolean }): NamedRunner[]
     const region = (process.env.BEDROCK_REGION || 'us-west-2').trim();
     add('BEDROCK-GLM', process.env.BEDROCK_API_KEY, `https://bedrock-runtime.${region}.amazonaws.com/openai/v1`, parseModelLadder(process.env.BEDROCK_GLM_MODEL, ['zai.glm-5']));
   }
-  return runners;
+  // FLOOR BALANCE (see the block above cheapBuildFloorRunners): alternate the GLM↔KIMI lead per
+  // construction, only when BOTH providers are actually present (a single-provider floor never rotates
+  // and never consumes the counter). Default ON per the admin's 2026-07-21 load-divide directive.
+  const balanceOn = (process.env.AGENTV3_FLOOR_BALANCE ?? 'on').trim().toLowerCase() !== 'off';
+  const baseOf = (e: NamedRunner): string => e.reportAs ?? e.name;
+  const hasBoth = runners.some((e) => baseOf(e) === 'GLM') && runners.some((e) => baseOf(e) === 'KIMI');
+  return balanceFloorLead(runners, balanceOn && hasBoth && floorLeadCounter++ % 2 === 1);
 }
 
 /**

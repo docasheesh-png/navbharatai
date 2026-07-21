@@ -90,6 +90,11 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
   const [shipNote, setShipNote] = useState<string | null>(null);
   // UNSEND (Slice 2) — true while a take-back purge is in flight (disables the button, prevents double-fire).
   const [unsending, setUnsending] = useState(false);
+  // AP-3 (cross-restart resume) — a reopened build whose durable status is still 'running' with no live
+  // build was cut off before it could finish (a server restart/crash mid-build). We honestly offer a
+  // one-click Continue instead of silently resetting. Set on reopen; cleared once a build starts or the
+  // user dismisses/continues.
+  const [interruptedResume, setInterruptedResume] = useState(false);
   // Paid-public (billing PR 5): whether THIS user is on paid billing (server-reported: paid-public flag
   // ON and not on the free-list) and, if so, their live wallet balance in ₹. Both stay off/null for
   // admin/free-list users and while the flag is off — so no money UI shows until billing actually applies.
@@ -797,6 +802,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
       // REATTACH-ON-REOPEN: same as the ☰-menu open path — a build still running for this
       // session (closed mid-build) re-attaches its live stream instead of 409-ing on send.
       if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+      setInterruptedResume(restored.unfinished === true); // AP-3 — offer Continue if a restart cut it off
       // Cross-cutover continuity: if the seeded legacy thread is provably disjoint from the server
       // transcript (a pre-cutover chat continued later), keep it IN FRONT of the server messages;
       // if it overlaps (old build sessions — both stores hold copies), drop it: server wins.
@@ -943,6 +949,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     const text = (override?.text ?? prompt).trim();
     const sendFiles = override ? [] : files;
     if ((!text && sendFiles.length === 0) || running) return;
+    setInterruptedResume(false); // AP-3 — a new build/turn resolves any "unfinished build" offer
     // A fresh user message resets the Layer-3 auto-continue budgets for the new turn — the pause
     // budget, the plan-continue count, AND the plan-progress watermark (SPM-3), so a typed
     // "continue" after a stall starts a fresh progress-monotone chain.
@@ -1279,6 +1286,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     setRestoreNote('');
     setShipNote(null);
     setBilled(false);
+    setInterruptedResume(false); // AP-3 — a fresh/other session never inherits an unfinished-build offer
     // Composer extras + workspace view: back to the defaults a truly new chat starts with. The
     // preview surface unmounts (previewEverOpened=false), so no stale iframe can survive; its own
     // workspaceId-keyed clear (PreviewSurface) covers the mounted case too.
@@ -1494,6 +1502,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
         // so the auto-resume effect re-attaches its live stream immediately — instead of the user
         // discovering it via a "build already running" error when they try to type.
         if (restored.workspaceId) void checkRunning({ userId, email, workspaceId: restored.workspaceId });
+        // AP-3: honestly flag a build that a restart cut off mid-flight (durable status still 'running').
+        // The banner itself only renders when there's ALSO no live build (serverBuildRunning === false).
+        setInterruptedResume(restored.unfinished === true);
         // Cross-cutover continuity: a pre-cutover session continued after the server became the
         // only transcript writer has its old turns ONLY in the frozen legacy chat_sessions copy.
         // When that legacy copy is provably disjoint from the server transcript, show it in front;
@@ -2580,6 +2591,39 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                 onUnsend={isLastUser ? () => { void handleUnsend(b.msg.ts); } : undefined}
                 onEdit={isLastUser ? () => { void handleEdit(b.msg.ts, b.msg.text); } : undefined} />;
             })}
+            {/* AP-3 (cross-restart resume) — an honest offer to finish a build a server restart cut off
+                mid-flight. Shows only when the reopened build's durable status was 'running' AND there is
+                no live build anywhere (serverBuildRunning false) and nothing is streaming here. Files, plan
+                and memory were all saved durably, so Continue picks up from where it stopped. */}
+            {interruptedResume && !serverBuildRunning && !running && (
+              <div className="mx-auto my-3 max-w-[92%] rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+                  <div className="flex-1">
+                    <div className="font-medium">This build didn’t finish</div>
+                    <div className="text-amber-200/80 text-xs mt-0.5">
+                      It was interrupted before it could complete (usually a server restart). Your files, plan and progress are all saved — continue to finish the remaining steps.
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void send({ text: 'Continue the build from where it left off and finish the remaining steps.', importUrl: '' }); }}
+                        className="px-2.5 py-1 rounded-md bg-amber-500 text-zinc-950 text-xs font-medium hover:bg-amber-400 transition-colors"
+                      >
+                        Continue building
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInterruptedResume(false)}
+                        className="px-2.5 py-1 rounded-md text-amber-200/80 text-xs hover:text-amber-100 hover:bg-white/5 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             {(running || state.activity.length > 0) && (
               <WorkingIndicator activity={state.activity} todos={state.todos} running={running} />
             )}

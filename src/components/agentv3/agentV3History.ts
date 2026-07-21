@@ -30,6 +30,17 @@ export interface PersistedConversation {
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 
+/**
+ * AP-3 (cross-restart resume) — a build was cut off before it could finish iff its durable status is
+ * still `'running'` and it has real content. The AgentRunner patches a TERMINAL status (complete/error/
+ * stopped) at every normal exit, so a reopened conversation still marked `'running'` was killed mid-build
+ * (a server restart/crash). The caller additionally requires no live build (serverBuildRunning false)
+ * before offering Continue — so a build genuinely still running elsewhere is never mislabelled. Pure.
+ */
+export function isUnfinishedBuild(conv: Pick<PersistedConversation, 'status' | 'messages'>): boolean {
+  return conv.status === 'running' && Array.isArray(conv.messages) && conv.messages.length > 0;
+}
+
 /** Extract the visible text from a Claude message's `content` (a string or a block array). */
 export function messageText(content: unknown): string {
   if (typeof content === 'string') return content;

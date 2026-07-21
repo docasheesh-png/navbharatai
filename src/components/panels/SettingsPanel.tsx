@@ -137,7 +137,7 @@ function MotionModeControl() {
     { id: 'system',   label: 'System',  hint: 'Follow your OS setting' },
   ];
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 mb-4">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🇮🇳</div>
         <div>
@@ -174,7 +174,7 @@ function FontScaleControl() {
   const set = (next: number) => setScale(applyFontScale(next));
   const pct = Math.round(scale * 100);
   return (
-    <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center text-lg">🔠</div>
@@ -231,7 +231,7 @@ function AppSignatureToggle() {
     });
   };
   return (
-    <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
+    <div className="flex items-center justify-between p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
       <div className="flex items-center gap-4 min-w-0">
         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center shrink-0">
           <Heart className="w-5 h-5 text-indigo-400" />
@@ -307,7 +307,8 @@ export function SettingsPanel({
         {settingsScreen !== 'root' && (
           <button
             onClick={() => setSettingsScreen('root')}
-            className="p-2 hover:bg-white/5 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
+            aria-label="Back to Settings"
+            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] hover:text-white transition-all border border-white/5"
           >
             <ChevronRight className="w-5 h-5 rotate-180" />
           </button>
@@ -322,7 +323,8 @@ export function SettingsPanel({
         </div>
         <button
           onClick={() => toggleTab('nbi_chat')}
-          className="ml-auto p-2 hover:bg-white/5 rounded-xl text-[#8b949e] transition-all"
+          aria-label="Close Settings"
+          className="ml-auto p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-white/5 active:bg-white/10 rounded-xl text-[#8b949e] transition-all"
         >
           <X className="w-5 h-5" />
         </button>
@@ -378,7 +380,7 @@ export function SettingsPanel({
                       { id: 'desktop', label: '💻 Desktop' },
                     ].map(m => (
                       <button key={m.id} onClick={() => setDeviceMode(m.id as any)}
-                        className={`py-2 rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20'}`}>
+                        className={`py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all border ${deviceMode === m.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-[#0d1117] border-white/5 text-[#8b949e] hover:border-white/20 active:bg-white/5'}`}>
                         {m.label}
                       </button>
                     ))}
@@ -489,7 +491,11 @@ export function SettingsPanel({
                       <group.icon className={`w-3.5 h-3.5 ${group.color}`} />
                       <span className={`text-[10px] font-black uppercase tracking-widest ${group.color}`}>{group.title}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Mobile-friendly tiles (admin 2026-07-21): a comfortable ≥52px tap target, labels
+                        WRAP instead of truncating (so "Insights & Webhooks"/"Screenshot→Code" read fully on
+                        a phone), and the icon is visible at rest (no hover on touch). 2 columns fit a phone
+                        fine because each group is small. */}
+                    <div className="grid grid-cols-2 gap-2.5">
                       {group.items.map(item => (
                         <button
                           key={item.id}
@@ -498,10 +504,10 @@ export function SettingsPanel({
                             else if ((item as any).nav) { setActiveView(item.id as any); }
                             else { setSettingsScreen(item.id as any); }
                           }}
-                          className="flex items-center gap-2 p-2.5 bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 transition-all group text-left"
+                          className="flex items-center gap-2 p-3 min-h-[52px] bg-[#0d1117] border border-white/5 rounded-xl hover:border-indigo-500/30 hover:bg-indigo-600/10 active:bg-indigo-600/20 transition-all group text-left"
                         >
-                          <item.icon className="w-3.5 h-3.5 text-[#484f58] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
-                          <span className="text-[10px] font-bold text-[#8b949e] group-hover:text-white transition-colors truncate">{item.label}</span>
+                          <item.icon className="w-4 h-4 text-[#8b949e] group-hover:text-indigo-400 transition-colors flex-shrink-0" />
+                          <span className="text-[11px] font-bold text-[#8b949e] group-hover:text-white transition-colors leading-tight">{item.label}</span>
                         </button>
                       ))}
                     </div>
@@ -563,7 +569,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Application Identity & Preferences</p>
                 </div>
 
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl space-y-8">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 shadow-2xl space-y-6 sm:space-y-8">
                   <div className="flex flex-col items-center text-center space-y-4">
                      <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl relative group cursor-pointer overflow-hidden">
                         <Bot className="w-10 h-10 text-white group-hover:scale-110 transition-transform" />
@@ -623,12 +629,12 @@ export function SettingsPanel({
                        <textarea
                          id="settings-app-desc"
                          defaultValue="The ultimate specialized AI developer workspace for Bharat."
-                         className="w-full bg-[#0d1117] border border-white/10 rounded-[1.5rem] px-6 py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
+                         className="w-full bg-[#0d1117] border border-white/10 rounded-2xl sm:rounded-[1.5rem] px-4 sm:px-6 py-4 sm:py-5 text-sm font-medium text-[#8b949e] outline-none focus:border-indigo-500 transition-all min-h-[120px] resize-none shadow-inner"
                        />
                      </div>
-                     <div className="flex items-center justify-between p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner">
-                       <div className="flex items-center gap-4">
-                         <div className="w-10 h-10 bg-indigo-600/10 rounded-xl flex items-center justify-center">
+                     <div className="flex items-center justify-between gap-3 p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner">
+                       <div className="flex items-center gap-3 min-w-0">
+                         <div className="w-10 h-10 shrink-0 bg-indigo-600/10 rounded-xl flex items-center justify-center">
                            <Terminal className="w-5 h-5 text-indigo-400" />
                          </div>
                          <div>
@@ -644,9 +650,9 @@ export function SettingsPanel({
                      {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
                      <AppSignatureToggle />
 
-                     <div className="p-6 bg-[#0d1117] border border-white/5 rounded-[1.5rem] shadow-inner space-y-3">
+                     <div className="p-4 sm:p-6 bg-[#0d1117] border border-white/5 rounded-2xl sm:rounded-[1.5rem] shadow-inner space-y-3">
                        <div className="flex items-center gap-3 mb-2">
-                         <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                         <div className="w-10 h-10 shrink-0 bg-amber-500/10 rounded-xl flex items-center justify-center">
                            <Languages className="w-5 h-5 text-amber-400" />
                          </div>
                          <div>
@@ -662,7 +668,7 @@ export function SettingsPanel({
                              <button
                                key={lang}
                                onClick={() => setPreferredLanguage(lang)}
-                               className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30'}`}
+                               className={`px-3 py-2.5 min-h-[44px] rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isActive ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-white/5 border-white/10 text-[#8b949e] hover:border-amber-500/30 active:bg-white/10'}`}
                              >
                                {labels[lang]}
                              </button>
@@ -736,7 +742,7 @@ export function SettingsPanel({
                 </div>
 
                 {/* Brain Engine Card */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl overflow-hidden relative">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl overflow-hidden relative">
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-12 h-12 bg-indigo-600/10 rounded-2xl flex items-center justify-center">
                        <Cpu className="w-6 h-6 text-indigo-400" />
@@ -796,7 +802,7 @@ export function SettingsPanel({
                 </div>
 
                 {/* Workspace Panels Toggle */}
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-6 shadow-2xl">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl">
                    <div className="flex items-center gap-4 mb-6">
                       <div className="w-12 h-12 bg-emerald-600/10 rounded-2xl flex items-center justify-center">
                          <Monitor className="w-6 h-6 text-emerald-400" />
@@ -878,7 +884,7 @@ export function SettingsPanel({
                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Run real commands in your app&apos;s sandbox</p>
                 </div>
                 {user ? (
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
                     <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading terminal…</div>}>
                       <RealTerminal
                         workspaceId={getAgentV3WorkspaceId(user.uid)}
@@ -911,7 +917,7 @@ export function SettingsPanel({
                   <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Live build log &amp; runtime errors of your app</p>
                 </div>
                 {user ? (
-                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[62vh] min-h-[320px]">
+                  <div className="bg-[#161b22] border border-white/10 rounded-2xl overflow-hidden shadow-2xl h-[55vh] sm:h-[62vh] min-h-[300px]">
                     <Suspense fallback={<div className="p-6 text-[10px] font-black uppercase tracking-widest text-[#484f58]">Loading logs…</div>}>
                       <WorkspaceLogs
                         workspaceId={getAgentV3WorkspaceId(user.uid)}
@@ -939,7 +945,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Sync your external services</p>
                  </div>
 
-                <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
+                <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-8 shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all">
                     <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                       <Github className="w-24 h-24 text-white" />
                     </div>
@@ -1068,7 +1074,7 @@ export function SettingsPanel({
                  </div>
 
                  {/* G3 — E2B API key: unlocks real cloud VM for Pro builds */}
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-5">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-5">
                     <div className="flex items-center gap-5">
                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border transition-all ${userE2bKey ? 'bg-green-600/10 border-green-500/30' : 'bg-white/5 border-white/5'}`}>
                           <Cpu className={`w-7 h-7 ${userE2bKey ? 'text-green-400' : 'text-[#484f58]'}`} />
@@ -1095,7 +1101,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex items-center justify-between opacity-50 grayscale pointer-events-none group">
                     <div className="flex items-center gap-5">
                        <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center border border-white/5">
                           <Database className="w-7 h-7 text-indigo-400" />
@@ -1131,7 +1137,7 @@ export function SettingsPanel({
                     </div>
                  </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] overflow-hidden shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] overflow-hidden shadow-2xl">
                     <div className="p-6 border-b border-white/5 bg-white/2 flex items-center gap-4">
                        <Search className="w-4 h-4 text-[#484f58]" />
                        <input
@@ -1190,7 +1196,7 @@ export function SettingsPanel({
                    <motion.div
                      initial={{ opacity: 0, y: 20 }}
                      animate={{ opacity: 1, y: 0 }}
-                     className="bg-indigo-600 border border-white/20 rounded-[2.5rem] p-8 space-y-6 shadow-3xl relative overflow-hidden"
+                     className="bg-indigo-600 border border-white/20 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6 shadow-3xl relative overflow-hidden"
                    >
                       <div className="absolute top-0 right-0 p-8 opacity-10">
                         <GitBranchIcon className="w-24 h-24 text-white" />
@@ -1238,7 +1244,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Collaborate with the world</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center gap-5">
                        <div className="w-16 h-16 bg-indigo-600/10 rounded-[2rem] flex items-center justify-center border border-indigo-600/20">
                           <Globe className="w-8 h-8 text-indigo-400" />
@@ -1250,8 +1256,8 @@ export function SettingsPanel({
                     </div>
 
                     <div className="p-2 bg-[#0d1117] border border-white/10 rounded-[2rem] flex items-center h-[72px] shadow-inner">
-                       <span className="flex-1 text-[11px] font-mono text-indigo-400 truncate px-6">navbharat.ai/s/project-592</span>
-                       <button className="h-full px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
+                       <span className="flex-1 min-w-0 text-[11px] font-mono text-indigo-400 truncate px-3 sm:px-6">navbharat.ai/s/project-592</span>
+                       <button className="h-full shrink-0 px-4 sm:px-8 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-[1.8rem] transition-all shadow-2xl active:scale-95 group overflow-hidden relative">
                           <div className="relative z-10">Copy Link</div>
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform"></div>
                         </button>
@@ -1277,7 +1283,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Contribute to the project</p>
                 </div>
 
-                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-[3rem] p-10 space-y-10 text-center relative overflow-hidden group shadow-3xl">
+                <div className="bg-[radial-gradient(circle_at_top_right,#1e1b4b,transparent)] bg-[#161b22] border border-indigo-500/20 rounded-3xl sm:rounded-[3rem] p-5 sm:p-10 space-y-6 sm:space-y-10 text-center relative overflow-hidden group shadow-3xl">
                    <div className="w-20 h-20 bg-indigo-600/20 rounded-[2rem] flex items-center justify-center border border-indigo-500/30 shadow-2xl mx-auto group-hover:scale-110 transition-all duration-700">
                      <Heart className="w-10 h-10 text-indigo-400 group-hover:animate-bounce-slow" />
                    </div>
@@ -1294,15 +1300,15 @@ export function SettingsPanel({
                    </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-emerald-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-600 transition-colors">
                         <HardDrive className="w-6 h-6 text-emerald-400 group-hover:text-white" />
                      </div>
                      <h4 className="text-[10px] font-black text-white uppercase tracking-widest">ZIP Export</h4>
                      <p className="text-[9px] text-[#484f58] mt-1 font-bold uppercase">Source Files</p>
                    </button>
-                   <button className="p-6 bg-[#161b22] border border-white/5 rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
+                   <button className="p-4 sm:p-6 bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] text-left group hover:border-amber-500/30 transition-all shadow-xl active:scale-95">
                      <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-amber-600 transition-colors">
                         <Smartphone className="w-6 h-6 text-amber-500 group-hover:text-white" />
                      </div>
@@ -1326,7 +1332,7 @@ export function SettingsPanel({
                    <p className="text-[11px] text-[#484f58] font-bold uppercase tracking-[0.2em] mt-1">Manage team access & safety</p>
                 </div>
 
-                 <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-8 shadow-2xl">
+                 <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-8 shadow-2xl">
                     <div className="flex items-center justify-between">
                        <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Collaborators</h4>
                        <button className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest transition-colors border-b border-indigo-500/20 pb-0.5">+ Invite Pro</button>
@@ -1347,7 +1353,7 @@ export function SettingsPanel({
                        </div>
                     </div>
 
-                    <div className="bg-amber-500/5 border border-amber-500/20 p-6 rounded-[1.5rem] flex gap-4 items-start shadow-inner">
+                    <div className="bg-amber-500/5 border border-amber-500/20 p-4 sm:p-6 rounded-2xl sm:rounded-[1.5rem] flex gap-3 sm:gap-4 items-start shadow-inner">
                        <div className="p-2 bg-amber-500/20 rounded-lg">
                           <Zap className="w-4 h-4 text-amber-500" />
                         </div>
@@ -1405,9 +1411,9 @@ export function SettingsPanel({
                       </div>
                     )}
                     {/* Build Stats */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-6">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-6">
                       <h4 className="text-[11px] font-black text-white uppercase tracking-widest">Build Stats</h4>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         {[
                           { label: 'Total Builds', value: adminLiveMetrics.builds?.total ?? 0, color: 'text-white' },
                           { label: 'Success Rate', value: `${Math.round((adminLiveMetrics.builds?.successRate ?? 0) * 100)}%`, color: (adminLiveMetrics.builds?.successRate ?? 0) >= 0.8 ? 'text-emerald-400' : 'text-amber-400' },
@@ -1422,7 +1428,7 @@ export function SettingsPanel({
                       </div>
                     </div>
                     {/* AI Cost by Provider */}
-                    <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 space-y-4">
+                    <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="text-[11px] font-black text-white uppercase tracking-widest">AI Cost by Provider</h4>
                         <span className="text-[11px] font-black text-amber-400">${(adminLiveMetrics.totalCostUsd ?? 0).toFixed(4)} total</span>
@@ -1456,7 +1462,7 @@ export function SettingsPanel({
                   </div>
                 )}
                 {!adminLiveMetrics && !loadingAdminMetrics && (
-                  <div className="bg-[#161b22] border border-white/5 rounded-[2.5rem] p-8 flex flex-col items-center text-center space-y-4">
+                  <div className="bg-[#161b22] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-8 flex flex-col items-center text-center space-y-4">
                     <BarChart2 className="w-10 h-10 text-[#484f58]" />
                     <p className="text-[10px] text-[#484f58]">Admin login required to view metrics.</p>
                   </div>

@@ -257,10 +257,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
-    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter):
-    // a single tight line — the box still auto-grows as the user types (up to maxHeight).
-    const minHeight = 30;
-    const maxHeight = 20 * 5 + 8; // ~5 lines (text-sm line-height 20) + vertical padding (py-1)
+    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
+    // + 2026-07-21 ("resting 1x, not 4x"): rest at EXACTLY one line and grow only a little while typing,
+    // then scroll (long prompts use the Expand button → h-[50vh]). Measured from the element's REAL
+    // computed line-height + padding, so it's a true single line on mobile too (the CSS forces
+    // font-size:16px there, which the old hardcoded 20px line-height math didn't account for).
+    const cs = getComputedStyle(el);
+    const lineH = parseFloat(cs.lineHeight) || 20;
+    const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const minHeight = Math.ceil(lineH + padY);       // 1 line — the resting height (1x)
+    const maxHeight = Math.ceil(lineH * 2 + padY);   // grow up to ~2 lines, then scroll
     el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
   }, [prompt, composerExpanded]);
   // Framework selector + import
@@ -3042,7 +3048,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                       ? '🔍 Advise mode (read-only) — ask for an audit / bug scan / comparison; nothing is built…'
                       : canSteerMidBuild(running, powerLevel, chatMode)
                       ? '⚡ Message the team while they build — they will act on it at the next step…'
-                      : 'Message v5.0… (e.g. “hello”, “build a notes app”, or attach a file)'
+                      : 'Type…'
                   }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -3078,7 +3084,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className="absolute right-9 bottom-0.5 h-7 w-7 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    className="absolute right-9 bottom-0.5 h-6 w-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -3087,26 +3093,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
                   // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
                   <>
-                    <button onClick={stop} title="Stop the build" className="absolute right-9 bottom-0.5 h-7 w-7 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
+                    <button onClick={stop} title="Stop the build" className="absolute right-9 bottom-0.5 h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
                       <Send className="w-4 h-4" />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
+                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-0.5 h-7 w-7 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
                     <Send className="w-4 h-4" />
                   </button>
                 )}

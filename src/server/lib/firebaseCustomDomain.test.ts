@@ -110,3 +110,5 @@ describe('firebaseCustomDomain — pure helpers', () => {
     });
   });
 });
+
+// slice 1 — Firebase-native custom-domain primitive (see firebaseCustomDomain.ts)

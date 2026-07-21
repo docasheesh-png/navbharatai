@@ -3,7 +3,7 @@
 // button that does nothing (the "real features only" rule). Kept tiny + presentational.
 
 import { useState } from 'react';
-import { Copy, Check, ThumbsUp, ThumbsDown, Flag, X } from 'lucide-react';
+import { Copy, Check, ThumbsUp, ThumbsDown, Flag, X, Pencil } from 'lucide-react';
 
 export type MessageReaction = 'up' | 'down' | 'report';
 
@@ -14,11 +14,13 @@ export interface MessageActionsProps {
   onFeedback?: (reaction: MessageReaction) => void;
   /** The reaction the user already gave, to show its active state. */
   reaction?: MessageReaction | null;
-  /** Slice 3 — cancel a just-sent message (stop the build + remove it). Absent → the button is hidden. */
+  /** Slice 2 — cancel a just-sent message (stop the build + remove it). Absent → the button is hidden. */
   onUnsend?: () => void;
+  /** Slice 2 — take the message back AND load its text into the composer to edit + re-send. Absent → hidden. */
+  onEdit?: () => void;
 }
 
-export function MessageActions({ text, onFeedback, reaction, onUnsend }: MessageActionsProps) {
+export function MessageActions({ text, onFeedback, reaction, onUnsend, onEdit }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -47,6 +49,11 @@ export function MessageActions({ text, onFeedback, reaction, onUnsend }: Message
             <Flag className="w-3.5 h-3.5" />
           </button>
         </>
+      )}
+      {onEdit && (
+        <button type="button" onClick={onEdit} title="Edit — take this message back and re-write it" aria-label="Edit" className={`${btn} hover:text-indigo-300`}>
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
       )}
       {onUnsend && (
         <button type="button" onClick={onUnsend} title="Unsend — stop the build and remove this message" aria-label="Unsend" className={`${btn} hover:text-red-400`}>

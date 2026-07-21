@@ -49,6 +49,10 @@ export interface UseAgentV3Build {
    *  durably-saved files back) and reflect the real file list. Returns count + whether it restored. */
   restoreAllFiles: () => Promise<{ ok: boolean; count: number; restored: boolean }>;
   stop: () => void;
+  /** UNSEND — take back the last message: stop any in-flight build AND purge it from the server
+   *  transcript + workspace memory so it never resurfaces. Resolves true when the server confirmed the
+   *  purge (the caller then removes the message from the visible thread). Never throws. */
+  unsend: () => Promise<boolean>;
   reset: () => void;
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
@@ -312,6 +316,51 @@ export function useAgentV3Build(): UseAgentV3Build {
         });
       } catch { /* best-effort */ }
     })();
+  }, []);
+
+  // UNSEND — take back the last message. Stops any in-flight build (same abort + generation-bump as
+  // stop(), so this UI detaches cleanly) then asks the server to purge the message from the durable
+  // transcript AND workspace memory. The panel removes it from the visible thread on a truthy result.
+  const unsend = useCallback(async (): Promise<boolean> => {
+    generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive()
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setRunning(false);
+    setServerBuildRunning(false);
+    setError(null);
+    const workspaceId = workspaceIdRef.current;
+    if (!workspaceId) return false; // no server session yet (a message that never reached the server)
+    try {
+      const res = await fetch('/api/agentv3/unsend', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId }),
+      });
+      if (!res.ok) return false;
+      const j = await res.json().catch(() => null);
+      if (j?.ok !== true) return false;
+      // Purge succeeded — clear the removed turn's LIVE chat output (narration / working feed / agent
+      // cards / pending gates) while PRESERVING the accumulated project surfaces (files, diffs, terminal,
+      // checkpoints, preview, workspaceId, repo). Earlier turns already live in the panel's agentHistory;
+      // only the just-removed turn's response sits in `narration`, so this leaves the thread exactly at
+      // the message before the unsent one. Files aren't rolled back (unsend forgets the message, it does
+      // not time-travel the filesystem — the surfaces reflect reality, honestly).
+      setState((s) => ({
+        ...s,
+        narration: [],
+        activity: [],
+        agents: {},
+        proposedSteps: undefined,
+        pendingPermission: undefined,
+        done: false,
+        ok: undefined,
+        summary: undefined,
+        error: undefined,
+      }));
+      return true;
+    } catch {
+      return false; // network error — the panel keeps the message (never a fake "unsent")
+    }
   }, []);
 
   // Read the NDJSON event stream line by line and fold each event into the reducer. Used by resume()'s
@@ -1261,5 +1310,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, start, respond, restore, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

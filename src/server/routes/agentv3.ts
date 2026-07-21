@@ -247,6 +247,7 @@ import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints } from
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { cssConsistencyError } from '../AgentV3/CssConsistency';
+import { unsendKeepCount } from '../AgentV3/unsend';
 import { planFileGuardian } from '../AgentV3/FileGuardian';
 import { applyVisualTextEdit } from '../AgentV3/VisualEditPatcher';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -2917,6 +2918,91 @@ export function registerAgentV3Routes(app: Express): void {
     }
     activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
     res.json({ stopped: wasRunning });
+  });
+
+  // ── UNSEND — take back the last message (Slice 2) ──
+  // "Unsend" removes the user's most-recent message EVERYWHERE it was recorded, so it never resurfaces:
+  //   1. STOP any in-flight build for it (same verified-identity matching as /stop — never break another
+  //      account's build), and free its lock.
+  //   2. TRUNCATE the durable transcript to just before that prompt — the transcript IS the provider's
+  //      replayed memory, so this is what actually makes the model "forget" it on the next turn/reopen.
+  //   3. PURGE the workspace EPISODIC memory turn (the request episode + every error/fix/note/reflection
+  //      derived from it), then persist — else a cold reopen re-hydrates the unsent message from Firestore.
+  // Owner-only (conversationAccess) + idempotent (a second call finds nothing to remove and still 200s).
+  // A missing memory layer would leave the unsent message "remembered" — a privacy + correctness defect —
+  // so all three layers are purged in the SAME request (real feature, no half-wiring).
+  app.post('/api/agentv3/unsend', async (req: Request, res: Response) => {
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email : null;
+    if (!isAgentV3Enabled(userId, email)) {
+      res.status(404).json({ error: 'NavBharatAI Pro v5.0 is not available for this account.' });
+      return;
+    }
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : null;
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    // SECURITY (mirrors /stop + the conversation routes): resolve the VERIFIED uid, never the claimed
+    // body.userId — an unsend must not be able to purge another account's build by passing its id.
+    const verifiedUid = (await verifiedIdentity(req))?.uid ?? null;
+
+    // 1) Stop any in-flight build for this workspace (abort → close streams → free the lock), exactly
+    //    like /stop. An unsend of a message whose build is still running must first halt that build.
+    const buildKeys = buildKeyCandidates(verifiedUid, workspaceId, perWorkspaceLockEnabled());
+    let stopped = false;
+    for (const key of buildKeys) {
+      const rb = runningBuilds.get(key);
+      if (!rb || rb.ended) continue;
+      if (key === 'anon' && userId && rb.workspaceId && !workspaceSessionsMatch(rb.workspaceId, workspaceId)) continue;
+      rb.abort.abort();
+      endBuild(rb);
+      if (runningBuilds.get(key) === rb) runningBuilds.delete(key);
+      activeBuilds.delete(key);
+      stopped = true;
+      break;
+    }
+    activeBuilds.delete(buildKeys[0]); // always unblock the caller's own key
+
+    try {
+      const store = getConversationStore();
+      let truncated = false;
+      let purgedMemory = false;
+      let forbidden = false;
+      // The transcript + memory live under the workspace id (conversationId === workspaceId, #837); a
+      // legacy v3_<sid> id resolves to its real agentv3-<uid>-<sid> / anon workspace. Purge every
+      // accessible match so no copy of the unsent message survives.
+      for (const cid of candidateConversationIds(workspaceId, verifiedUid)) {
+        const rec = await store.get(cid).catch(() => null);
+        const access = conversationAccess(rec, verifiedUid);
+        if (access === 'forbidden') { forbidden = true; continue; }
+        if (access !== 'ok' || !rec) continue;
+
+        // 2) Truncate the durable transcript to just before the last real user prompt.
+        const keep = unsendKeepCount(rec.messages);
+        if (keep < rec.messages.length) {
+          await store.truncateMessages(cid, keep, { updatedAt: Date.now() }).catch(() => { /* best-effort */ });
+          truncated = true;
+        }
+
+        // 3) Purge the workspace episodic memory turn, then persist so a cold reopen can't rehydrate it.
+        try {
+          const mem = getWorkspaceMemory(cid);
+          await restoreWorkspaceMemory(cid, mem).catch(() => null); // ensure durable episodes are loaded first
+          const removed = mem.removeLastRequestTurn();
+          if (removed.length > 0) {
+            await saveWorkspaceMemory(cid, mem.snapshot()).catch(() => { /* best-effort */ });
+            purgedMemory = true;
+          }
+        } catch { /* memory purge is best-effort — never fail the unsend */ }
+      }
+
+      if (!truncated && !purgedMemory && !stopped && forbidden) {
+        res.status(403).json({ error: 'This build belongs to another account.' });
+        return;
+      }
+      // Idempotent: removed just now, or already gone → 200 either way.
+      res.json({ ok: true, stopped, truncated, purgedMemory });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ── Full Team mid-build steering (Fix 60, admin 2026-07-13) ──

@@ -1627,6 +1627,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_gift_cards',
+      description:
+        'Add a real gift-card / store-credit backend to the app (server/giftcards/) — a packaged domain vertical ' +
+        'for ecommerce. The real guarantee is BALANCE INTEGRITY: a card is issued with a monetary balance in ' +
+        'INTEGER minor units (paise/cents), redeeming DEBITS the balance atomically and can NEVER overdraw (a ' +
+        'redemption for more than the remaining balance is rejected; a partial redemption leaves the EXACT ' +
+        'remainder; sum(redemptions)+balance === original always). Codes are unique (node:crypto); a card can be ' +
+        'deactivated; an expired card cannot be redeemed. Emits a dependency-free GiftCardService (issue, get, ' +
+        'balance, redeem, setActive, list) + an Express router (POST /api/gift-cards, GET /api/gift-cards/:code, ' +
+        'POST /api/gift-cards/:code/redeem, PATCH /api/gift-cards/:code). Distinct from generate_coupons (a ' +
+        'discount, not a stored balance) and generate_loyalty (earned points). In-memory by default — swap the ' +
+        'Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2719,6 +2734,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_collections',
   'generate_contact_form',
   'generate_pageviews',
+  'generate_gift_cards',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

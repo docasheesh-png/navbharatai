@@ -1,0 +1,73 @@
+import type { Express, Request, Response } from 'express';
+import { rateLimiter } from '../lib/authMiddleware';
+import { validateBody, vobject, vstring, vboolean } from '../lib/validate';
+import { runVisionChain } from '../lib/visionChain';
+
+/**
+ * Screenshot → build prompt — the REAL /api/screenshot/to-prompt route (admin autopsy 2026-07-21).
+ *
+ * POST /api/screenshot/to-prompt
+ *   body: { image (base64, no data: prefix), imageType, style?, framework?, includeJs? }
+ *   → { prompt }   (a detailed build spec derived by really reading the screenshot)
+ *
+ * The Screenshot→Code tile POSTed to /api/generate-from-image, which never existed — and the client
+ * masked every failure with a hardcoded FALLBACK_CODE stub, so it always emitted the same canned page
+ * regardless of the screenshot (a rule-2 deception). This route genuinely reads the uploaded
+ * screenshot with the vision chain (GLM → Vertex → Gemini → Grok, Free-tier: no Claude) and returns a
+ * precise build prompt; the client then hands that prompt to NavBharatAI Pro v5.0, which builds the
+ * real app. WHITE-LABEL: the prompt never names the underlying vision provider.
+ */
+const MAX_IMAGE_B64 = 12_000_000; // ~9 MB decoded
+
+const schema = vobject({
+  image: vstring({ max: MAX_IMAGE_B64 }),
+  imageType: vstring({ optional: true, max: 100 }),
+  style: vstring({ optional: true, max: 40 }),
+  framework: vstring({ optional: true, max: 40 }),
+  includeJs: vboolean({ optional: true }),
+});
+
+/** Build the vision instruction that turns a UI screenshot into a build spec. Pure. */
+export function buildScreenshotPrompt(style?: string, framework?: string, includeJs?: boolean): string {
+  const styleLine = style ? `Target styling: ${style}.` : 'Target styling: Tailwind CSS.';
+  const fwLine = framework ? `Target framework: ${framework}.` : 'Target framework: plain HTML.';
+  const jsLine = includeJs ? 'Include the interactive behaviour (buttons, inputs, toggles) you can infer.' : 'Static layout is enough unless interactivity is obvious.';
+  return `You are looking at a SCREENSHOT of a user interface. Produce a precise BUILD SPECIFICATION an app builder can implement to recreate it faithfully.
+
+Describe, in clear ordered detail:
+- Overall layout & structure (header, nav, sections, grid/columns, footer).
+- Every visible component (buttons, cards, forms, inputs, lists, tables, images, icons) and where it sits.
+- The exact text content you can read in the screenshot.
+- Colours (approximate hex), typography (size/weight hierarchy), spacing and rounded/shadow styling.
+- Responsive intent (how it should adapt on mobile).
+
+${styleLine} ${fwLine} ${jsLine}
+
+Output ONLY the build instructions as a single detailed prompt — no preamble, no code, no markdown fences.`;
+}
+
+const s2pLimiter = () => rateLimiter({ name: 'screenshot-to-prompt', authed: 40, anon: 10, noun: 'screenshot conversions' });
+
+export function registerScreenshotToPromptRoutes(app: Express): void {
+  app.post('/api/screenshot/to-prompt', s2pLimiter(), validateBody(schema), async (req: Request, res: Response) => {
+    const body = req.body as { image?: string; imageType?: string; style?: string; framework?: string; includeJs?: boolean };
+    const image = typeof body.image === 'string' ? body.image.trim() : '';
+    if (!image) { res.status(400).json({ error: 'A screenshot image is required.' }); return; }
+    const type = typeof body.imageType === 'string' && body.imageType.startsWith('image/') ? body.imageType : 'image/png';
+    try {
+      const result = await runVisionChain(
+        [{ name: 'screenshot', type, base64: image }],
+        { prompt: buildScreenshotPrompt(body.style, body.framework, body.includeJs), allowClaude: false },
+      );
+      const prompt = result?.text?.trim();
+      if (!prompt) {
+        // No fabricated result — an unreadable screenshot is reported honestly.
+        res.status(502).json({ error: 'Could not read the screenshot — please try a clearer image.' });
+        return;
+      }
+      res.json({ prompt });
+    } catch {
+      res.status(503).json({ error: 'NavBharatAI\'s vision engine is briefly busy — please try again.' });
+    }
+  });
+}

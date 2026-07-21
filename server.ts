@@ -37,6 +37,7 @@ import { registerExplainCodeRoutes } from './src/server/routes/explainCode';
 import { registerDebugRoutes } from './src/server/routes/debug';
 import { registerImageGenRoutes } from './src/server/routes/imageGen';
 import { registerDevtoolsProxyRoutes } from './src/server/routes/devtoolsProxy';
+import { registerScreenshotToPromptRoutes } from './src/server/routes/screenshotToPrompt';
 import { registerCodeReviewRoutes } from './src/server/routes/codeReview';
 import { getSecretValue } from './src/server/lib/secrets';
 import { verifyPaymentInternal } from './src/server/lib/payments';
@@ -589,6 +590,7 @@ setInterval(() => {
   registerDebugRoutes(app); // AI Debugger — real free-tier AI error analysis (POST /api/debug)
   registerImageGenRoutes(app); // AI Image Gen — real image generation on our own key (POST /api/image/generate)
   registerDevtoolsProxyRoutes(app); // API Tester — SSRF-guarded server proxy (POST /api/devtools/proxy)
+  registerScreenshotToPromptRoutes(app); // Screenshot→Code — vision → build prompt (POST /api/screenshot/to-prompt)
   registerCodeReviewRoutes(app); // P-DEV.11 — inline code review comments (/api/workspace/:workspaceId/review)
   registerZipRoutes(app, chatLimiter);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).

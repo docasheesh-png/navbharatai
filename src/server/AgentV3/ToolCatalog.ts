@@ -1553,6 +1553,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_availability',
+      description:
+        'Add a real availability / opening-hours backend to the app (server/availability/) — a packaged domain ' +
+        'vertical for a shop, clinic, restaurant or support desk (are you open right now?). The real guarantee ' +
+        'is CORRECT OPEN/CLOSED RESOLUTION: weekly recurring windows per weekday (multiple a day), OVERNIGHT ' +
+        'windows that cross midnight (close <= open runs into the next day), and date-specific EXCEPTIONS that ' +
+        'override the weekly schedule for one date (closed, or special hours) — isOpenAt(date) resolves all of ' +
+        'that exactly, and nextOpenFrom(date) finds the next opening. Emits a dependency-free ' +
+        'AvailabilityService (setWeekly, setException, isOpenAt, nextOpenFrom, weeklySchedule) + an Express ' +
+        'router (GET /api/availability, PUT /api/availability/weekly/:weekday, PUT /api/availability/exceptions, ' +
+        'GET /api/availability/open ?at=). Distinct from generate_booking (reserves discrete slots) and ' +
+        'generate_scheduler (runs cron jobs). In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2640,6 +2655,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_orders',
   'generate_faq',
   'generate_quiz',
+  'generate_availability',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

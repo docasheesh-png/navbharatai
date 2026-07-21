@@ -167,6 +167,7 @@ import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
 import { generateOrdersIntegration } from '../lib/OrdersGenerator';
 import { generateFaqIntegration } from '../lib/FaqGenerator';
 import { generateQuizIntegration } from '../lib/QuizGenerator';
+import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3920,6 +3921,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('quiz starter');
         const qzDeps = qzcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a quiz / assessment backend:\n${qzWritten.join('\n')}\nAdd the dependencies: ${qzDeps}\n\n${qzcfg.instructions}`;
+      }
+
+      case 'generate_availability': {
+        // Breadth recipe (domain vertical) — availability / opening hours (server/availability/): a real
+        // AvailabilityService whose core guarantee is CORRECT OPEN/CLOSED RESOLUTION (weekly windows + date
+        // exceptions + OVERNIGHT spans that cross midnight) + an Express router. Pure gen in
+        // AvailabilityGenerator.ts.
+        const avcfg = generateAvailabilityIntegration();
+        const avWritten: string[] = [];
+        for (const [path, content] of Object.entries(avcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          avWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('availability starter');
+        const avDeps = avcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired an opening-hours backend:\n${avWritten.join('\n')}\nAdd the dependencies: ${avDeps}\n\n${avcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

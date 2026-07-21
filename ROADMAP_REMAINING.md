@@ -27,9 +27,12 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
    questions BEFORE building (multi-tenant? RBAC? offline? which DB?), bounded so it never over-asks or
    breaks the fast default path. OPEN (grep: no `ask_user` tool; `DialogueStateManager` has a requirements
    phase but no interactive gate). *The admin's #1-priority category. Coherent + bounded → not a downgrade.*
-2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — byte-identical stable system/prefix blocks for the
-   cheap providers. OPEN (grep: `cache_control` only in `ClaudeClient.ts`, none in `AgentV3/providers/`).
-   Real speed + cost win on the cheap floor that leads every free/paid build.
+2. **Prompt-cache stable prefixes for GLM/Kimi (AP-5)** — the stable-prefix STRUCTURE is **already built**
+   (`systemPromptCache.ts` + `AGENTV3_CACHE_PREFIX`: it splits the volatile prefix out and keeps the large
+   static body as a byte-stable prefix; the 2026-07-21 AP-4 fix-dispatch change preserves that byte-stability
+   when its flag is off). REMAINING = per-provider cache MARKERS in the GLM/Kimi adapters. ⚠️ **Held (moat +
+   unverifiable):** the provider adapters are part of the routing moat ("CONFIRM WITH ADMIN BEFORE CHANGING"),
+   and the benefit is unmeasurable without provider cache-hit telemetry — do NOT change autonomously.
 3. **~~Cap-4 cost-alerting thresholds~~ — ✅ DONE (verified 2026-07-21).** `costAlert.ts`
    (`costAlertThresholdUsd` / `costAlertAdvisory`, env `AGENTV3_COST_ALERT_USD`) is wired into
    `BuildDiagnostics.ts` — a build whose spend crosses the threshold records an advisory. (Prior #1771.)
@@ -92,13 +95,17 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
 ---
 
 ## 🔵 LARGER — real upgrade, but multi-PR / architectural (scope before starting)
-- **Full-builder frontend/backend sub-agent parallelism + merged heal pass (AP-4)** — the builder does not
-  yet auto-run frontend/backend sub-agents in parallel, and the heal gates (integrity/preview/C9/runtime)
-  each fire their own LLM round instead of one merged pass. Big **speed** win (medium app 20 → 5–7 min).
-- **Cross-restart build resume (AP-3 / T1-session-rehydrate)** — durable checkpoint of plan+todo state so a
-  mid-build process restart CONTINUES instead of restarting. Substrate exists (`CheckpointStore`,
-  `FirestoreWorkspaceMemoryStore`, `GitManager`); the resume wiring does not. *Higher-risk — touches the
-  build loop; scope carefully.*
+- **~~Full-builder frontend/backend sub-agent parallelism (AP-4)~~ — ✅ parallel-build DONE (2026-07-21).**
+  The parallel FE/BE dispatch primitive shipped in #1790 (`isParallelSafeToolUse` for writer roles under a
+  per-path `PathWriteLock`, flag `AGENTV3_PARALLEL_BUILD`), and #1798 made the architect's fix-dispatch
+  guidance parallel-aware (byte-identical when the flag is off). Flip the flag in prod + measure to enable.
+  ⚠️ **The "merged heal pass" sub-idea is DELIBERATELY NOT DONE (declined 2026-07-21, rule 3):** the 5
+  post-build heal passes fire *conditionally* (a clean build triggers none) and carry genuine render-ordering
+  deps + billing/moat threading — a merge is high-risk / low-reward. Revisit only with a specific admin call.
+- **~~Cross-restart build resume (AP-3 / T1-session-rehydrate)~~ — ✅ DONE (verified 2026-07-21, task #57).**
+  `CheckpointStore` (save/load) + `SandboxStore` sandbox-resume + server-restart AUTO-resume (honest
+  "server is restarting — your build resumes automatically" narration) + D7 plan/todo restore on cold reopen
+  are all wired in `routes/agentv3.ts`. The "resume wiring does not exist" audit line is stale.
 - **~~1000+ file codemod (lift the ~50-file cap)~~ — ✅ the 50-cap is DONE (stale audit line).** The codemod
   path is relevance-scoped with a 2000-file per-pass safety cap + honest truncation ("re-run ~N more times
   to finish", converges); the old blind first-50 survives only behind `AGENTV3_CODEMOD_SCOPED=off`
@@ -110,7 +117,11 @@ if user-facing, via branch → verification gate → PR → CI green → merge. 
   drives weak-tier cost ≈ 0.
 - **P-INTEG: OAuth-connector framework + credential vault + plugin/MCP/SDK** — a generic OAuth connector
   framework + secret vault + plugin/MCP registry. OPEN, large (per-service recipes exist; no generic
-  framework). *Note: a user-facing local `nbai` CLI is a 🚫 non-goal — the SDK/MCP half is fine.*
+  framework). *Note: a user-facing local `nbai` CLI is a 🚫 non-goal — the SDK/MCP half is fine.* ⚠️ **Partly
+  infra-gated (rule 2):** the framework + vault + registry CODE is buildable, but a *working* OAuth connector
+  needs a REGISTERED OAuth app per provider (client-id/secret + redirect-URI) — that is admin infra. Building
+  a vault/registry with no working connector would ship an empty shell; do it only alongside real OAuth-app
+  credentials, or behind an explicit "not available yet" state.
 - **Scaling / server-load / DB-growth estimators** — quantitative estimates (tradeoff critique exists; no
   numbers). Lower value.
 

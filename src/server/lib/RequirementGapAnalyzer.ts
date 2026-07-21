@@ -198,10 +198,30 @@ const GENERIC_FEATURES: Array<{ label: string; re: RegExp }> = [
   { label: 'admin panel', re: /admin|dashboard|manage|backend/i },
 ];
 
+/** How specifically a domain fits the prompt: the count of its FEATURE signals present in the text. Used to
+ *  pick the BEST-fitting domain rather than merely the FIRST in array order — so a generic domain (ecommerce's
+ *  broad "order"/"inventory") can no longer STEAL a more-specific one. Pure. */
+function domainFeatureScore(domain: DomainDef, text: string): number {
+  let score = 0;
+  for (const f of domain.features) if (f.re.test(text)) score++;
+  return score;
+}
+
 /** Analyze a build prompt for its likely domain, missing features, NFRs and clarifying questions. Pure. */
 export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   const text = String(prompt || '');
-  const domain = DOMAINS.find((d) => d.re.test(text));
+  // Pick the BEST-matching domain among all whose headline regex fires, scored by how many of its feature
+  // signals the prompt hits. Array order breaks ties (`>=` keeps the earlier one), so EVERY existing
+  // classification stays byte-identical unless a LATER domain is STRICTLY more specific — the fix for the
+  // real misclassification (deep-test 2026-07-21): a restaurant POS ("menu / KOT / table / GST billing")
+  // resolved to 'ecommerce' because ecommerce's `\border\b` matched "orders" first, so the build was handed
+  // ecommerce implicit features (cart/checkout/refunds) instead of restaurant ones. Pure + deterministic.
+  const domain = DOMAINS
+    .filter((d) => d.re.test(text))
+    .reduce<DomainDef | undefined>(
+      (best, d) => (best && domainFeatureScore(best, text) >= domainFeatureScore(d, text) ? best : d),
+      undefined,
+    );
   const feats = domain ? domain.features : GENERIC_FEATURES;
 
   const mentioned: string[] = [];

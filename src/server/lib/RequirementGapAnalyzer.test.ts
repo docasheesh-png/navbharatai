@@ -55,6 +55,26 @@ describe('analyzeRequirementGaps', () => {
     expect(analyzeRequirementGaps('a school management system').likelyMissing).toContain('assignments & grading');
   });
 
+  it('best-score selection: a restaurant POS that mentions "orders" is restaurant, NOT ecommerce (deep-test 2026-07-21)', () => {
+    // The real failing build: a restaurant management + billing system. It says "take an order (KOT)",
+    // "orders history" and "billing", so first-match-wins resolved it to 'ecommerce' (ecommerce's \border\b
+    // fired first) — and the build was handed ecommerce implicit features (cart/checkout/refunds) instead of
+    // menu/KOT/GST. Best-feature-score selection must pick the more-specific 'restaurant'.
+    const g = analyzeRequirementGaps(
+      'Build a restaurant management & billing system: a table floor view, menu management with dishes and ' +
+      'categories, take an order (KOT) for a table, generate a GST bill with CGST + SGST, an orders history ' +
+      'page, and Owner vs Waiter roles.',
+    );
+    expect(g.domain).toBe('restaurant');
+  });
+
+  it('does NOT over-correct: a genuine online store still resolves to ecommerce', () => {
+    const g = analyzeRequirementGaps(
+      'An online store with a product catalog, shopping cart, checkout, payments and order tracking.',
+    );
+    expect(g.domain).toBe('ecommerce');
+  });
+
   it('detects the 2026-07-21 verticals (fintech / real-estate / fitness / events / jobs)', () => {
     expect(analyzeRequirementGaps('a mobile wallet app with UPI and KYC').domain).toBe('fintech');
     expect(analyzeRequirementGaps('a real estate property listing portal').domain).toBe('real-estate');

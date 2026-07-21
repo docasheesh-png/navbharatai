@@ -45,13 +45,46 @@ export function stripPrismaSqliteEnums(path: string, content: string): string {
     // Keep the field name + attributes; swap only the type token to String.
     const fieldRe = new RegExp(`^(\\s*\\w+\\s+)${name}(\\??|\\[\\])(\\s|$)`, 'gm');
     out = out.replace(fieldRe, (_all, head: string, mod: string, tail: string) => {
-      const t = mod === '[]' ? 'String[]' : `String${mod}`; // SQLite has no scalar lists either, but keep shape
+      const t = mod === '[]' ? 'String[]' : `String${mod}`; // an enum LIST becomes String[] here; fixPrismaSqliteScalarList (below) then collapses the unsupported scalar list to a single String
       return `${head}${t}${tail}`;
     });
     // `@default(TODO)` → `@default("TODO")` (an enum default becomes a String default).
     out = out.replace(new RegExp(`@default\\(\\s*([A-Z_][A-Z0-9_]*)\\s*\\)`, 'g'), '@default("$1")');
   }
   return out;
+}
+
+/** The nine Prisma primitive SCALAR types. A `[]` of one of these is a "scalar list". */
+const PRISMA_SCALARS = ['String', 'Boolean', 'Int', 'BigInt', 'Float', 'Decimal', 'DateTime', 'Json', 'Bytes'];
+
+/**
+ * SQLITE HAS NO SCALAR LISTS (LearnLoop autopsy 2026-07-21). The builder modelled `attachments String[]`
+ * / `tags String[]` / `scores Int[]` on a SQLite datasource — but SQLite's connector does not support
+ * lists of primitive types, so `prisma validate` / `prisma generate` fails with
+ * "Field 'attachments' in model 'X' can't be a list. The current connector does not support lists of
+ * primitive types." This looped the whole DB setup and, together with the Prisma-7 skew, sank the build.
+ *
+ * The mechanical, always-valid fix (Prisma's own SQLite guidance): store the list as ONE serialized
+ * `String?` field and (de)serialize in app code. This guard rewrites every SCALAR list field
+ * (`<name> <Scalar>[]`) to `<name> String?` and drops any now-invalid `@default([...])` on that line.
+ * RELATION lists (`lessons Lesson[]`, `students User[]`) are LEFT ALONE — those are valid on SQLite —
+ * because only the nine Prisma primitive scalar type tokens are matched (a relation uses a model name,
+ * never a scalar keyword). Runs AFTER stripPrismaSqliteEnums, so an enum-list it rewrote to `String[]`
+ * is collapsed here too. No-op for a non-SQLite datasource or a schema with no scalar list. Pure.
+ */
+export function fixPrismaSqliteScalarList(path: string, content: string): string {
+  if (!isPrismaSchema(path) || typeof content !== 'string') return content;
+  if (!/datasource\s+\w+\s*\{[^}]*provider\s*=\s*["']sqlite["'][^}]*\}/s.test(content)) return content;
+  // A model field line whose type is `<Scalar>[]` (with optional trailing attributes). [ \t] only, so the
+  // match stays on ONE field line and never crosses into the next.
+  const scalarAlt = PRISMA_SCALARS.join('|');
+  const fieldRe = new RegExp(`^([ \\t]*\\w+[ \\t]+)(?:${scalarAlt})\\[\\]([ \\t]*[^\\n]*)$`, 'gm');
+  return content.replace(fieldRe, (all, head: string, attrs: string) => {
+    if (/@relation\b/.test(attrs)) return all; // defensive: never touch an explicit relation
+    // A scalar list becomes a single nullable String; a `@default([...])` is invalid on a scalar → drop it.
+    const cleaned = attrs.replace(/@default\(\s*\[[^\]]*\]\s*\)/g, '').replace(/[ \t]+$/, '');
+    return `${head}String?${cleaned}`;
+  });
 }
 
 /**
@@ -217,5 +250,5 @@ export function dedupeSameModuleImports(path: string, content: string): string {
 /** Apply every full-stack write-time guard in order. Flag-gated; a disabled flag is a pure pass-through. */
 export function applyFullStackGuards(path: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
   if (!fullStackGuardsEnabled(env)) return content;
-  return dedupeSameModuleImports(path, fixPrismaSeedRunner(path, ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, stripPrismaSqliteEnums(path, content))))));
+  return dedupeSameModuleImports(path, fixPrismaSeedRunner(path, ensureViteTypeModule(path, fixCjsDefaultImport(path, fixPrismaDateStringDefault(path, fixPrismaSqliteScalarList(path, stripPrismaSqliteEnums(path, content)))))));
 }

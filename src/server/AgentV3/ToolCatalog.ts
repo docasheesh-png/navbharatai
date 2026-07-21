@@ -1657,6 +1657,22 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_status_page',
+      description:
+        'Add a real public status / incident page to the app (server/status/) — a packaged domain vertical (like ' +
+        'status.example.com). The real guarantee is DERIVED OVERALL STATUS + an APPEND-ONLY INCIDENT TIMELINE: ' +
+        'each service component has a health status (operational|degraded|partial_outage|major_outage) and the ' +
+        'overall system status is DERIVED as the WORST component status; an incident carries an append-only ' +
+        'timeline of updates (investigating→identified→monitoring→resolved) — resolving stamps resolvedAt and a ' +
+        'resolved incident can no longer be updated. Emits a dependency-free StatusPageService (addComponent, ' +
+        'setComponentStatus, overallStatus, openIncident, addUpdate, snapshot, incidentHistory) + an Express ' +
+        'router (GET /api/status, GET /api/status/incidents, POST /api/status/components, PATCH ' +
+        '/api/status/components/:id, POST /api/status/incidents, POST /api/status/incidents/:id/updates). ' +
+        'Distinct from generate_announcements (dismissible banners) and generate_support_tickets (a private ' +
+        'ticket queue). In-memory by default — swap the Maps for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2751,6 +2767,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_pageviews',
   'generate_gift_cards',
   'generate_teams',
+  'generate_status_page',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

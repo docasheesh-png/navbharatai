@@ -172,6 +172,7 @@ import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator'
 import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
 import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
 import { generatePageViewsIntegration } from '../lib/PageViewsGenerator';
+import { generateGiftCardsIntegration } from '../lib/GiftCardsGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -4025,6 +4026,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('pageviews starter');
         const pvDeps = pvcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a self-hosted page-view counter:\n${pvWritten.join('\n')}\nAdd the dependencies: ${pvDeps}\n\n${pvcfg.instructions}`;
+      }
+
+      case 'generate_gift_cards': {
+        // Breadth recipe (domain vertical) — gift cards / store credit (server/giftcards/): a real
+        // GiftCardService whose core guarantee is BALANCE INTEGRITY (a monetary balance in integer minor units;
+        // redeem debits atomically and can never overdraw; exact remainder) + an Express router. Pure gen in
+        // GiftCardsGenerator.ts.
+        const gccfg = generateGiftCardsIntegration();
+        const gcWritten: string[] = [];
+        for (const [path, content] of Object.entries(gccfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('gift cards starter');
+        const gcDeps = gccfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a gift-card / store-credit backend:\n${gcWritten.join('\n')}\nAdd the dependencies: ${gcDeps}\n\n${gccfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

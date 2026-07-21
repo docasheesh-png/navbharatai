@@ -8,6 +8,7 @@ import type { AgentMode } from '../../types';
 import type { ThemeMode } from '../../lib/theme';
 import type { PreviewProblem } from '../../lib/previewProblems';
 import { getAgentV3WorkspaceId } from '../../lib/agentv3Workspace';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
 import type { User as FirebaseUser } from 'firebase/auth';
 
 // ── Lazy-loaded view components ─────────────────────────────────────────────
@@ -400,7 +401,19 @@ export function ViewPanels({
       {activeView === 'components' && (
         <div className="flex-1 h-full overflow-hidden">
           <ComponentLibrary onInsert={(html: string) => {
-            setGeneratedCode(generatedCode ? generatedCode.replace('</body>', html + '\n</body>') : html);
+            // Insert into the REAL app (admin autopsy 2026-07-21), not the "Waiting for magic…"
+            // placeholder (where .replace('</body>') silently no-op'd and the snippet vanished).
+            const src = resolveAppSource(generatedCode, files as Record<string, string>);
+            if (!hasAnalysableApp(src)) { addToast(appSourceGuidance(src.kind), 'info'); return; }
+            const merged = src.html.includes('</body>')
+              ? src.html.replace('</body>', html + '\n</body>')
+              : src.html + '\n' + html;
+            if (src.kind === 'files') {
+              const next = { ...(files as Record<string, string>), 'index.html': merged };
+              setFiles(next as any); updatePreview(next as any);
+            } else {
+              setGeneratedCode(merged);
+            }
             toggleTab('preview');
           }} />
         </div>
@@ -461,7 +474,7 @@ export function ViewPanels({
       {/* Phase 8 — Dark Mode Generator */}
       {activeView === 'darkmode' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DarkModeGenerator generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DarkModeGenerator generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 
@@ -578,7 +591,7 @@ export function ViewPanels({
 
       {activeView === 'designsys' && (
         <div className="flex-1 h-full overflow-hidden">
-          <DesignSystem generatedCode={generatedCode} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
+          <DesignSystem generatedCode={generatedCode} files={files as Record<string, string>} onCodeUpdate={(c: string) => setGeneratedCode(c)} />
         </div>
       )}
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutTemplate, Layers, Palette, Type, Copy, Check, Plus, Trash2, Download, Eye, Code, Sparkles, RefreshCw, Sliders } from 'lucide-react';
+import { resolveAppSource, hasAnalysableApp, appSourceGuidance } from '../../lib/workspaceSource';
 
 interface ColorToken {
   name: string;
@@ -117,9 +118,11 @@ const COMPONENT_PREVIEWS = [
 interface DesignSystemProps {
   onCodeUpdate?: (html: string) => void;
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app to inject tokens into (admin autopsy 2026-07-21). */
+  files?: Record<string, string>;
 }
 
-export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps = {}) {
+export function DesignSystem({ onCodeUpdate, generatedCode, files }: DesignSystemProps = {}) {
   const [tokens, setTokens] = useState<DesignTokens>(() => {
     try { return JSON.parse(localStorage.getItem('navbharat_design_tokens') || JSON.stringify(DEFAULT_TOKENS)); } catch { return DEFAULT_TOKENS; }
   });
@@ -304,9 +307,12 @@ export function DesignSystem({ onCodeUpdate, generatedCode }: DesignSystemProps 
                 {onCodeUpdate && (
                   <button
                     onClick={() => {
+                      // Inject into the REAL app (admin autopsy 2026-07-21), not the placeholder.
+                      const resolved = resolveAppSource(generatedCode, files);
+                      if (!hasAnalysableApp(resolved)) { alert(appSourceGuidance(resolved.kind)); return; }
                       const css = generateCSS();
                       const styleTag = `<style id="nb-design-tokens">\n${css}\n</style>`;
-                      let newHtml = generatedCode || '';
+                      let newHtml = resolved.html;
                       if (newHtml.includes('<style id="nb-design-tokens">')) {
                         newHtml = newHtml.replace(/<style id="nb-design-tokens">[\s\S]*?<\/style>/, styleTag);
                       } else if (newHtml.includes('</head>')) {

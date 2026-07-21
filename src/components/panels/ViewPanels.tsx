@@ -362,6 +362,7 @@ export function ViewPanels({
               const firstPage = Object.values(pages)[0];
               if (firstPage) { setGeneratedCode(firstPage as string); toggleTab('preview'); }
             }}
+            onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
           />
         </div>
       )}
@@ -433,10 +434,10 @@ export function ViewPanels({
       {/* Phase 7 — Figma Importer */}
       {activeView === 'figma' && (
         <div className="flex-1 h-full overflow-hidden">
-          <FigmaImporter onCodeGenerated={(code: string) => {
-            setGeneratedCode(code);
-            toggleTab('preview');
-          }} />
+          <FigmaImporter
+            onCodeGenerated={(code: string) => { setGeneratedCode(code); toggleTab('preview'); }}
+            onBuildViaV5={(prompt: string) => onBuildViaV5Prompt?.(prompt)}
+          />
         </div>
       )}
 

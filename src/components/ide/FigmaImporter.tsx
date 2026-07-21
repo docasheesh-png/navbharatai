@@ -23,6 +23,9 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 
 interface FigmaImporterProps {
   onCodeGenerated?: (code: string) => void;
+  /** Hand the imported design + a refine instruction to the REAL engine (Pro v5.0). Replaces the old
+   *  "Refine with AI" call to /api/generate, which never existed (admin autopsy 2026-07-21). */
+  onBuildViaV5?: (prompt: string) => void;
 }
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -65,7 +68,7 @@ interface ExtractedAssets {
   fonts: Array<{ family: string; size: number; weight: number }>;
 }
 
-const FIGMA_API = 'https://api.figma.com/v1';
+// (Figma is now reached through the server proxy /api/figma/proxy — no direct browser call.)
 const HISTORY_KEY = 'navbharatai_figma_history';
 
 const extractFileKey = (url: string): string | null => {
@@ -195,7 +198,7 @@ const saveHistory = (fileKey: string) => {
   localStorage.setItem(HISTORY_KEY, JSON.stringify([fileKey, ...prev].slice(0, 3)));
 };
 
-export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated }) => {
+export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated, onBuildViaV5 }) => {
   const [figmaUrl, setFigmaUrl] = useState('');
   const [token, setToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -251,14 +254,21 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
     setGeneratedCode('');
 
     try {
-      const res = await fetch(`${FIGMA_API}/files/${fileKey}`, {
-        headers: { 'X-Figma-Token': token },
+      // Route through NavBharatAI's server-side Figma proxy (admin autopsy 2026-07-21): a direct
+      // browser call to api.figma.com is CORS-blocked, so the import never worked. The proxy fetches
+      // server-side with your token and returns the file JSON (with Figma's status for 403/404).
+      const res = await fetch('/api/figma/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileKey, token }),
       });
-      if (res.status === 403) throw new Error('Token invalid hai — Figma settings mein check karo');
-      if (res.status === 404) throw new Error('File nahi mili — URL dobara check karo');
-      if (!res.ok) throw new Error(`Figma API error: ${res.status}`);
+      const payload = await res.json().catch(() => null);
+      const figmaStatus = payload?.status ?? res.status;
+      if (figmaStatus === 403) throw new Error('Token invalid hai — Figma settings mein check karo');
+      if (figmaStatus === 404) throw new Error('File nahi mili — URL dobara check karo');
+      if (!res.ok || !payload?.data) throw new Error((payload && payload.error) || `Figma API error: ${figmaStatus}`);
 
-      const data = await res.json() as any;
+      const data = payload.data as any;
       const pages: FigmaPage[] = (data.document?.children || []).map((page: any) => ({
         id: page.id,
         name: page.name,
@@ -276,12 +286,7 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
       saveHistory(fileKey);
       setHistory(loadHistory());
     } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network')) {
-        setConnectionError('Figma API reach nahi ho pa rahi. CORS issue? Token check karo. Proxy endpoint /api/figma-proxy try karo.');
-      } else {
-        setConnectionError(msg || 'Connection fail ho gayi');
-      }
+      setConnectionError(err?.message || 'Connection fail ho gayi — thodi der baad try karo.');
       setConnectionStatus('error');
     }
   }, [figmaUrl, token]);
@@ -330,29 +335,15 @@ export const FigmaImporter: React.FC<FigmaImporterProps> = ({ onCodeGenerated })
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleAiRefine = async () => {
+  const handleAiRefine = () => {
     if (!aiPrompt.trim() || !generatedCode) return;
-    setIsRefining(true);
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Refine this HTML/CSS code as per instruction:\n\nInstruction: ${aiPrompt}\n\nCode:\n${generatedCode}`,
-        }),
-      });
-      if (!res.ok) throw new Error('AI refinement failed');
-      const data = await res.json() as any;
-      const refined = data.code || data.result || data.output || generatedCode;
-      setGeneratedCode(refined);
-      onCodeGenerated?.(refined);
-      setAiPrompt('');
-      setAiRefineOpen(false);
-    } catch {
-      // keep existing code on failure
-    } finally {
-      setIsRefining(false);
-    }
+    // Hand the imported design + instruction to the REAL engine (Pro v5.0) — the old /api/generate
+    // call never existed, so refine silently did nothing. Send there builds/refines the real app.
+    onBuildViaV5?.(
+      `Build a working app from this Figma-imported design, applying this instruction: ${aiPrompt.trim()}\n\nDESIGN (HTML/CSS):\n${generatedCode}`,
+    );
+    setAiPrompt('');
+    setAiRefineOpen(false);
   };
 
   const statusBadge = () => {

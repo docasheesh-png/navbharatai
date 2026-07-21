@@ -37,6 +37,9 @@ interface NavConfig {
 interface MultiPageBuilderProps {
   initialCode?: string;
   onExport?: (pages: Record<string, string>) => void;
+  /** Hand a page's spec to the REAL engine (Pro v5.0). Replaces the dead /api/generate "AI Generate"
+   *  call (admin autopsy 2026-07-21). */
+  onBuildViaV5?: (prompt: string) => void;
 }
 
 // ─── Default HTML templates ───────────────────────────────────────────────────
@@ -310,7 +313,7 @@ function MenuItem({ icon, label, onClick, danger = false }: { icon: React.ReactN
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode, onExport }) => {
+export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode, onExport, onBuildViaV5 }) => {
   const MAX_PAGES = 10;
 
   const defaultPages: Page[] = [
@@ -423,25 +426,13 @@ export const MultiPageBuilder: React.FC<MultiPageBuilderProps> = ({ initialCode,
 
   // ── AI Generate ──────────────────────────────────────────────────────────────
 
-  async function handleAIGenerate() {
-    setGenerating(true);
-    try {
-      const prompt = `Generate HTML for a ${activePage.name} page that matches this site: ${siteDescription}`;
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = await res.json();
-      const generated: string = data.code || data.html || data.content || data.result || '';
-      if (generated) {
-        updatePage(activePageId, { code: generated });
-      }
-    } catch {
-      // Silently fail — user can try again
-    } finally {
-      setGenerating(false);
-    }
+  function handleAIGenerate() {
+    // Hand this page's spec to the REAL engine (Pro v5.0) — the old /api/generate call never existed,
+    // so this button used to spin and silently do nothing (admin autopsy 2026-07-21). The manual
+    // multi-page editor + export below stay fully local and real.
+    onBuildViaV5?.(
+      `Build a "${activePage.name}" page for this website: ${siteDescription}. Match the style of the site's other pages.`,
+    );
   }
 
   // ── Nav preview ──────────────────────────────────────────────────────────────
@@ -769,8 +760,8 @@ function ContentTab({ page, onCodeChange, onTitleChange, onAIGenerate, generatin
             cursor: generating ? 'not-allowed' : 'pointer',
           }}
         >
-          {generating ? <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <ChevronRight size={12} />}
-          {generating ? 'Generating…' : 'AI Generate'}
+          <ChevronRight size={12} />
+          Build in Pro v5.0
         </button>
 
         <button

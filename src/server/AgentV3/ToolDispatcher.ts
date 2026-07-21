@@ -166,6 +166,7 @@ import { generateCartIntegration } from '../lib/CartGenerator';
 import { generateReactionsIntegration } from '../lib/ReactionsGenerator';
 import { generateOrdersIntegration } from '../lib/OrdersGenerator';
 import { generateFaqIntegration } from '../lib/FaqGenerator';
+import { generateQuizIntegration } from '../lib/QuizGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3899,6 +3900,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('faq starter');
         const fqDeps = fqcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a FAQ / knowledge-base backend:\n${fqWritten.join('\n')}\nAdd the dependencies: ${fqDeps}\n\n${fqcfg.instructions}`;
+      }
+
+      case 'generate_quiz': {
+        // Breadth recipe (domain vertical) — quiz / assessment (server/quizzes/): a real QuizService whose core
+        // guarantee is GRADING INTEGRITY (a submission is scored against the stored key into an EXACT score +
+        // pass/fail, and the correct-answer key is never exposed to the taker) + an Express router. Pure gen in
+        // QuizGenerator.ts.
+        const qzcfg = generateQuizIntegration();
+        const qzWritten: string[] = [];
+        for (const [path, content] of Object.entries(qzcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          qzWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('quiz starter');
+        const qzDeps = qzcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a quiz / assessment backend:\n${qzWritten.join('\n')}\nAdd the dependencies: ${qzDeps}\n\n${qzcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

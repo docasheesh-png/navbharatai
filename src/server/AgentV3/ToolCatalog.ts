@@ -1539,6 +1539,20 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_quiz',
+      description:
+        'Add a real quiz / assessment backend to the app (server/quizzes/) — a packaged domain vertical for ' +
+        'edtech, training or knowledge checks. The real guarantee is GRADING INTEGRITY: a submission is scored ' +
+        'against the stored answer key into an EXACT score (points earned / total) plus per-question ' +
+        'correctness, a configurable pass mark decides pass/fail, and the correct-answer key is NEVER exposed to ' +
+        'the taker (the public view strips it; only server-side grading reads it). Each question is validated to ' +
+        'have exactly one correct option. Emits a dependency-free QuizService (create, get, publicView, grade) + ' +
+        'an Express router (POST /api/quizzes to create — guard with auth, GET /api/quizzes/:id taker view ' +
+        'without the key, POST /api/quizzes/:id/submit to grade). Distinct from generate_polls (opinion tally, ' +
+        'no right answer) and generate_feedback. In-memory by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2625,6 +2639,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_reactions',
   'generate_orders',
   'generate_faq',
+  'generate_quiz',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

@@ -193,7 +193,7 @@ import { recordDebt } from '../AppMakerLab/intelligence/TechnicalDebtTracker';
 import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates } from '../AgentV3/ContextReranker';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
+import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewCriticalUnresolvedSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, type RuntimeError } from '../AgentV3/AutoFix';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -4999,7 +4999,11 @@ export function registerAgentV3Routes(app: Express): void {
       // (the quality review / preview-heal / console-autofix / memory persist), finalize as SUCCESS —
       // NOT a misleading "paused, type continue". The user's app is done; the advisory extras are
       // optional. This is the #1 cause of "Build paused at the time limit" appearing on a finished app.
-      const ok = !!buildResultRef && buildResultRef.ok === true;
+      // NOT a clean success if the reviewer found [CRITICAL]s the auto-fix never verifiably resolved
+      // (this is exactly the case the advisory cap fires on — it fired mid-"🔧 fixing them now…"). An
+      // unresolved-critical build finalizes as the resumable NOT-ok path below: billedUsd:0 (no charge
+      // for a broken app) + auto-continue so the next window actually fixes the criticals.
+      const ok = !!buildResultRef && buildResultRef.ok === true && reviewCriticalsUnresolved.length === 0;
       // Fix 67 — a build finalized by the wall-clock / advisory cap must bill via the SAME real-cost
       // path as the normal settle (Fix 65), NOT the old flat formula, and must record its per-provider
       // tokens + billing INTO the report (set BEFORE report() below). Root cause: this path used
@@ -5116,6 +5120,16 @@ export function registerAgentV3Routes(app: Express): void {
     // Visible to the deadline timer above so it can finalize a finished build as SUCCESS instead of
     // "paused". Set the moment a build lane produces a successful result (before advisory post-work).
     let buildResultRef: { ok: boolean; summary: string; steps?: number; billedUsd?: number } | null = null;
+    // FALSE-SUCCESS GUARD (deep-test 2026-07-21): `buildResultRef` above captures the architect's
+    // OPTIMISTIC success BEFORE the post-build reviewer validates it. When the reviewer then finds
+    // [CRITICAL] issues that are NOT verifiably fixed (the C9 auto-fix never ran, failed, or — the real
+    // case — got cut off mid-repair by the advisory cap), nothing here downgraded the verdict, so BOTH
+    // exit paths (the deadline finalizer above and the normal settle below) shipped `ok:true` + the
+    // stale "console clean" summary AND billed for a broken app. This holder is set the moment the
+    // reviewer reports unfixed criticals and cleared only when the auto-fix pass verifiably completes;
+    // both exits consult it so an unresolved-critical build is honestly NOT-ok (→ free via the existing
+    // "working app or free" guard, and resumable on the finalizer path so the next window fixes them).
+    let reviewCriticalsUnresolved: string[] = [];
     // DURABLE FILE CAPTURE, hoisted here (not just inside the build-execution block below) so BOTH the
     // deadline-timeout handler above and the crash catch below — a plain `try{}`/`catch{}` block is its
     // own separate scope from an inner `const` — can see and durably flush it. Records the exact content
@@ -8130,6 +8144,13 @@ export function registerAgentV3Routes(app: Express): void {
             ? selectAutoFixableWarnings(review?.issues ?? []).map((i) => i.message.trim()).filter(Boolean)
             : [];
           const autoFixItems = [...criticals, ...warningFixes];
+          // FALSE-SUCCESS GUARD: a real build turn (never an import/survey turn, where findings stay
+          // advisory by design) whose reviewer found [CRITICAL]s is NOT-ok until they are verifiably
+          // fixed. Set the holder NOW (before the bounded fix pass) so the verdict is honest even if
+          // the fix can't run — no headroom, aborted, or (the real bug) cut off mid-repair by the
+          // advisory cap. Warnings never gate success (only true criticals do). Cleared only on a
+          // verifiably-completed fix pass below.
+          if (criticals.length > 0 && !isImportTurn) reviewCriticalsUnresolved = criticals.slice();
           // NEVER on an import/survey turn (2026-07-07): the user said "do not change any files yet",
           // the reviewer found criticals in the IMPORTED code, and this pass went and edited the
           // project anyway — a direct instruction violation. On import turns the findings stay
@@ -8148,7 +8169,11 @@ export function registerAgentV3Routes(app: Express): void {
             });
             try {
               const fix = await raceTimeout(critFixRunner.run(judgeRepairPrompt(prompt, autoFixItems)), 120_000, 'reviewer-autofix');
-              if (fix.ok) result = fix;
+              // Only a verifiably-COMPLETED repair pass clears the false-success guard. A failed/thrown
+              // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
+              // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
+              // future slice could re-review to confirm the criticals are actually gone.)
+              if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
               // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
               // TURN's writes (on an edit turn that's a handful of files), and the old
               // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
@@ -8216,6 +8241,22 @@ export function registerAgentV3Routes(app: Express): void {
       if (result && result.ok) {
         const emptyFail = emptyBuildFailureSummary(expectsArtifacts, writtenFiles.size, sandboxUnavailable);
         if (emptyFail) result = { ...result, ok: false, summary: emptyFail };
+      }
+
+      // FALSE-SUCCESS GUARD (normal settle) — mirror the deadline finalizer's check. A build whose
+      // post-build reviewer found [CRITICAL]s that the C9 auto-fix did NOT verifiably resolve (it failed
+      // or was skipped within budget) is NOT a success: flip to ok:false with an HONEST, actionable
+      // summary so (a) the summary never lies ("✅ console clean") over a broken app, (b) billing is free
+      // via the "working app or free" guard below (it keys on !result.ok), and (c) build health can't say
+      // READY (the OUTCOME_REVIEW_CRITICAL blocker below + ok:false both force ready:false). The specific
+      // findings stay in the ADMIN-only diagnostics (white-label — the user sees only the honest count).
+      if (result && result.ok && reviewCriticalsUnresolved.length > 0) {
+        const n = reviewCriticalsUnresolved.length;
+        result = { ...result, ok: false, summary: reviewCriticalUnresolvedSummary(n) };
+        if (buildResultRef) buildResultRef = { ...buildResultRef, ok: false };
+        try {
+          buildDiag.record({ phase: 'build', severity: 'error', code: 'OUTCOME_REVIEW_CRITICAL', message: `${n} reviewer [CRITICAL] finding(s) were not verifiably fixed — the app is not fully working:\n- ${reviewCriticalsUnresolved.join('\n- ')}`, autoResolved: false });
+        } catch { /* best-effort */ }
       }
 
       // ── SOFTWARE PROJECT MODE (SPM-2): settle this module's status from the REAL result ──────

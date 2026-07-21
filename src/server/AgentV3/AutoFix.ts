@@ -75,6 +75,32 @@ export function reviewerAutofixOutcome(fixOk: boolean, label: string): ReviewerA
     : { severity: 'warning', code: 'REVIEWER_AUTOFIX_INCOMPLETE', message: `Reviewer auto-fix did NOT complete — ${label} may still be present in the app.`, autoResolved: false };
 }
 
+/**
+ * The HONEST user-facing summary for a build that finished with reviewer-CRITICAL findings that were
+ * NOT verifiably fixed (the auto-fix pass never ran, failed, or was cut off by the wall-clock cap).
+ *
+ * ROOT CAUSE (deep-test 2026-07-21, SaaS-dashboard "fix network error"): the architect captured an
+ * optimistic `{ ok:true, summary:"✅ No runtime errors — Console is clean" }` into `buildResultRef`
+ * BEFORE the reviewer ran; the reviewer then found 2 [CRITICAL]s (a placeholder API URL that IS the
+ * reported network error, + a wrong context null-check) and the C9 auto-fix was cut off mid-repair by
+ * the 120s advisory cap ("🔧 fixing them now…"). Because nothing updated the already-captured verdict,
+ * the deadline finalizer shipped `ok:true` + the "console clean" lie AND billed ₹125 for a broken app —
+ * the failed-build "working app or free" guard never fired (it keys on `!result.ok`). Flipping the
+ * verdict to NOT-ok when criticals remain unresolved makes the summary honest AND makes billing free
+ * (the existing guard), and — on the finalizer path — keeps the build RESUMABLE so the next window
+ * actually fixes the criticals. WHITE-LABEL: never names a provider/model (the specific findings stay
+ * in the ADMIN-only diagnostics); the user only sees the honest count + the action. Pure.
+ */
+export function reviewCriticalUnresolvedSummary(count: number): string {
+  const n = Math.max(1, count);
+  const one = n === 1;
+  return (
+    `Your app is built and saved, but a final code review found ${n} critical issue${one ? '' : 's'} that ` +
+    `${one ? "isn't" : "aren't"} resolved yet — so it isn't fully working. You have NOT been charged for ` +
+    `this build. Reply "fix ${one ? 'it' : 'them'}" (or "continue") and I'll resolve ${one ? 'it' : 'them'} and finish.`
+  );
+}
+
 /** Max repair attempts per build. Default 1, hard-capped at 3 so a flaky error can't loop forever. */
 export function autoFixMaxAttempts(): number {
   const raw = Number(process.env.AGENTV3_AUTOFIX_ATTEMPTS);

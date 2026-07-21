@@ -170,6 +170,7 @@ import { generateQuizIntegration } from '../lib/QuizGenerator';
 import { generateAvailabilityIntegration } from '../lib/AvailabilityGenerator';
 import { generateAnnouncementsIntegration } from '../lib/AnnouncementsGenerator';
 import { generateCollectionsIntegration } from '../lib/CollectionsGenerator';
+import { generateContactFormIntegration } from '../lib/ContactFormGenerator';
 import { generateSupportTicketIntegration } from '../lib/SupportTicketGenerator';
 import { generateGraphqlIntegration } from '../lib/GraphqlGenerator';
 import { generatePaginationIntegration } from '../lib/PaginationGenerator';
@@ -3983,6 +3984,26 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('collections starter');
         const clDeps = clcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
         return `Wired a saved-collections backend:\n${clWritten.join('\n')}\nAdd the dependencies: ${clDeps}\n\n${clcfg.instructions}`;
+      }
+
+      case 'generate_contact_form': {
+        // Breadth recipe (domain vertical) — contact form (server/contact/): a real ContactService whose core
+        // guarantee is VALIDATED CAPTURE + SPAM REJECTION (name/email/message validated, a filled honeypot is
+        // dropped as spam, accepted messages have a new→read→archived lifecycle) + an Express router. Pure gen
+        // in ContactFormGenerator.ts.
+        const cfcfg = generateContactFormIntegration();
+        const cfWritten: string[] = [];
+        for (const [path, content] of Object.entries(cfcfg.files)) {
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          cfWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('contact form starter');
+        const cfDeps = cfcfg.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
+        return `Wired a contact-form backend:\n${cfWritten.join('\n')}\nAdd the dependencies: ${cfDeps}\n\n${cfcfg.instructions}`;
       }
 
       case 'generate_support_tickets': {

@@ -1598,6 +1598,21 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_contact_form',
+      description:
+        'Add a real "Contact us" / lead-capture form backend to the app (server/contact/) — the universal ' +
+        'contact form every site needs. The real guarantee is VALIDATED CAPTURE + SPAM REJECTION: a submission ' +
+        'requires a name, a valid email and a non-empty message (bad input rejected, never silently stored), a ' +
+        'filled hidden HONEYPOT field marks the submission as spam and drops it (bots fill it; humans never see ' +
+        'it), and every accepted message moves through a status lifecycle new → read → archived (or spam). ' +
+        'Emits a dependency-free ContactService (submit, setStatus, list, unreadCount) + an Express router ' +
+        '(public POST /api/contact, admin GET /api/contact ?status=, GET /api/contact/:id, PATCH ' +
+        '/api/contact/:id/status, DELETE /api/contact/:id). Pair with generate_email to notify staff. Distinct ' +
+        'from generate_newsletter (email-only capture) and generate_feedback (a public voting board). In-memory ' +
+        'by default — swap the Map for your DB.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
       name: 'generate_support_tickets',
       description:
         'Add a real support-ticket/helpdesk backend to the app (server/tickets/) — a packaged domain vertical ' +
@@ -2688,6 +2703,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_availability',
   'generate_announcements',
   'generate_collections',
+  'generate_contact_form',
   'generate_support_tickets',
   'generate_graphql',
   'generate_pagination',

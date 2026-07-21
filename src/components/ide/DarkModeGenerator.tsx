@@ -3,6 +3,7 @@ import {
   Moon, Sun, Copy, Download, Check, ChevronDown, ChevronUp,
   Zap, Sliders, RefreshCw, Code2, Layers, PaintBucket
 } from 'lucide-react';
+import { resolveAppSource, hasAnalysableApp } from '../../lib/workspaceSource';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ interface PresetTheme {
 
 export interface DarkModeGeneratorProps {
   generatedCode?: string;
+  /** The v5-synced workspace files — the real app source when the preview isn't bundled. */
+  files?: Record<string, string>;
   onCodeUpdate?: (code: string) => void;
 }
 
@@ -234,8 +237,13 @@ const ColorSwatch: React.FC<{ color: string; size?: number }> = ({ color, size =
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedCode, onCodeUpdate }) => {
-  const [htmlInput, setHtmlInput] = useState(generatedCode ?? '');
+export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedCode, files, onCodeUpdate }) => {
+  // Resolve the REAL app HTML (admin autopsy 2026-07-21): the transform is genuine but used to run on
+  // the "Waiting for magic…" placeholder. Prefer the bundled preview / workspace index.html; treat the
+  // placeholder as "no app" so the paste box + guidance appear instead.
+  const resolved = resolveAppSource(generatedCode, files);
+  const realApp = hasAnalysableApp(resolved);
+  const [htmlInput, setHtmlInput] = useState(realApp ? resolved.html : '');
   const [darkHtml, setDarkHtml] = useState('');
   const [colorMappings, setColorMappings] = useState<ColorMapping[]>([]);
   const [strategy, setStrategy] = useState<Strategy>('css-vars');
@@ -249,12 +257,13 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
   const [generated, setGenerated] = useState(false);
   const [syncScroll, setSyncScroll] = useState(false);
 
-  const sourceHtml = generatedCode ?? htmlInput;
+  const sourceHtml = realApp ? resolved.html : htmlInput;
 
-  // Keep htmlInput in sync if prop changes
+  // Keep the manual-paste input in sync with the REAL app source (not the placeholder).
   useEffect(() => {
-    if (generatedCode) setHtmlInput(generatedCode);
-  }, [generatedCode]);
+    if (realApp) setHtmlInput(resolved.html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realApp, resolved.html]);
 
   const runGenerate = useCallback((html: string, theme: PresetTheme, strat: Strategy) => {
     if (!html.trim()) return;
@@ -342,8 +351,9 @@ export const DarkModeGenerator: React.FC<DarkModeGeneratorProps> = ({ generatedC
         </div>
       </div>
 
-      {/* HTML Input (if no generatedCode prop) */}
-      {!generatedCode && (
+      {/* HTML Input — shown when there's no real app to read (so the placeholder never masquerades
+          as input; the user can paste real HTML instead). */}
+      {!realApp && (
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 12, color: '#8b949e', display: 'block', marginBottom: 6 }}>Paste HTML to convert</label>
           <textarea

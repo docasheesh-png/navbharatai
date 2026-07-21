@@ -144,9 +144,14 @@ const {chromium}=require('playwright');
 // Long-lived browser the agent drives across multiple interaction steps.
 // Launched once in the background; exposes a CDP port that action scripts
 // connect to. The DOM/cookies/current-URL persist between actions.
-// It also attaches console/pageerror/requestfailed listeners to every page
-// (existing and future) and appends runtime errors to CONSOLE_LOG as NDJSON —
+// It also attaches console/pageerror/requestfailed/response listeners to every
+// page (existing and future) and appends runtime errors to CONSOLE_LOG as NDJSON —
 // this is how the agent SEES runtime errors, not just compile/build errors.
+// The 'response' listener captures HTTP 5xx SERVER errors: a fetch/XHR that
+// COMPLETES with a 500 does NOT fire 'requestfailed' (that is transport-only), so
+// a broken API call is otherwise invisible to the auto-fix loop unless the app
+// happens to console.error it. Only 5xx is captured — 4xx (401/403/404) is left
+// out on purpose (auth/probing is routinely intentional and would be noise).
 const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');
 const fs=require('fs');
@@ -160,6 +165,7 @@ function rec(kind,text){ try{ fs.appendFileSync(LOG, JSON.stringify({t:Date.now(
     page.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
     page.on('pageerror',e=>rec('pageerror',e&&e.message||e));
     page.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
+    page.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
   }
   setInterval(()=>{ try{ for(const ctx of browser.contexts()){ for(const p of ctx.pages()){ attach(p); } } }catch(e){} }, 1000);
   setInterval(()=>{}, 1<<30);

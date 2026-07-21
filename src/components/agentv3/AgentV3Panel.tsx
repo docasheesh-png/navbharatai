@@ -257,10 +257,16 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (!el) return;
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
-    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter):
-    // a single tight line — the box still auto-grows as the user types (up to maxHeight).
-    const minHeight = 30;
-    const maxHeight = 20 * 5 + 8; // ~5 lines (text-sm line-height 20) + vertical padding (py-1)
+    // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
+    // + 2026-07-21 ("resting 1x, not 4x"): rest at EXACTLY one line and grow only a little while typing,
+    // then scroll (long prompts use the Expand button → h-[50vh]). Measured from the element's REAL
+    // computed line-height + padding, so it's a true single line on mobile too (the CSS forces
+    // font-size:16px there, which the old hardcoded 20px line-height math didn't account for).
+    const cs = getComputedStyle(el);
+    const lineH = parseFloat(cs.lineHeight) || 20;
+    const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const minHeight = Math.ceil(lineH + padY);       // 1 line — the resting height (1x)
+    const maxHeight = Math.ceil(lineH * 2 + padY);   // grow up to ~2 lines, then scroll
     el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
   }, [prompt, composerExpanded]);
   // Framework selector + import

@@ -19,6 +19,7 @@ import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSe
 import { previewVisible, previewMounted, previewWrapClass, shouldPrewarmPreview } from './previewKeepAlive';
 import { saveLastReport, readLastReport } from './reportCache';
 import { footerSection, previewReadySignal, type V3FooterApi } from './v3FooterApi';
+import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { MessageActions } from './MessageActions';
 import { STARTER_TEMPLATES } from './starterTemplates';
@@ -291,17 +292,23 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
     if (composerExpanded) { el.style.height = ''; return; }
     el.style.height = 'auto';
     // Admin 2026-07-12 (82→44) + 2026-07-13 ("aur vertically chota") + 2026-07-18 (Android ~50% shorter)
-    // + 2026-07-21 ("resting 1x, not 4x"): rest at EXACTLY one line and grow only a little while typing,
-    // then scroll (long prompts use the Expand button → h-[50vh]). Measured from the element's REAL
-    // computed line-height + padding, so it's a true single line on mobile too (the CSS forces
-    // font-size:16px there, which the old hardcoded 20px line-height math didn't account for).
+    // + 2026-07-21 ("resting 1x, not 4x"): rest at EXACTLY one line. + 2026-07-21 ("type/enter karne par
+    // vertical size increase hona chahiye"): but then GROW with the content — the old ~2-line cap made it
+    // barely move, so multi-line typing felt like it wasn't growing at all. It now grows up to ~6 lines and
+    // only then scrolls internally (very long prompts still use the Expand button → h-[50vh]). Measured from
+    // the element's REAL computed line-height + padding, so it's a true single line on mobile too (the CSS
+    // forces font-size:16px there, which the old hardcoded 20px line-height math didn't account for).
     const cs = getComputedStyle(el);
     const lineH = parseFloat(cs.lineHeight) || 20;
     const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-    const minHeight = Math.ceil(lineH + padY);       // 1 line — the resting height (1x)
-    const maxHeight = Math.ceil(lineH * 2 + padY);   // grow up to ~2 lines, then scroll
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
+    // clampComposerHeight (pure, unit-tested): rest at 1 line, grow up to ~6 lines, then scroll.
+    el.style.height = `${clampComposerHeight(el.scrollHeight, lineH, padY)}px`;
   }, [prompt, composerExpanded]);
+  // Composer action buttons (expand / send / stop) vertical placement. RESTING/GROWN composer: vertically
+  // CENTERED — equidistant from the top and bottom border (admin 2026-07-21: "buttons ka center of mass
+  // upper aur lower border se equal distance par ho"), instead of pinned to the lower edge. EXPANDED
+  // editor (h-[50vh]): pinned near the bottom, since centering a button in a half-screen box reads wrong.
+  const composerBtnY = composerExpanded ? 'bottom-2' : 'top-1/2 -translate-y-1/2';
   // Framework selector + import
   const [framework, setFramework] = useState('vite-react');
   // True once the user DELIBERATELY chose a framework (picker) or a reopened session carries one — that
@@ -3327,7 +3334,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                     type="button"
                     onClick={() => setComposerExpanded((v) => !v)}
                     title={composerExpanded ? 'Minimize' : 'Expand'}
-                    className="absolute right-9 bottom-0.5 h-6 w-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800`}
                   >
                     {composerExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                   </button>
@@ -3336,26 +3343,26 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, onFilesSyn
                   // Plan/Advise are read-only lanes: ALWAYS a Send button (even while a build runs) — they
                   // never take the build lock, so they must be sendable anytime. Disabled only while THEIR
                   // own turn is streaming.
-                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => sendRole(chatMode)} disabled={!prompt.trim() || roleBusy} title={roleBusy ? `${chatMode === 'planner' ? 'Planning' : 'Advising'}…` : 'Send'} className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
                     {roleBusy ? <TirangaLoader className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                   </button>
                 ) : canSteerMidBuild(running, powerLevel, chatMode) ? (
                   // FULL TEAM (Fix 60): the composer stays LIVE mid-build — Send messages the working
                   // team (server /steer); Stop moves to the smaller slot so it stays one tap away.
                   <>
-                    <button onClick={stop} title="Stop the build" className="absolute right-9 bottom-0.5 h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80">
+                    <button onClick={stop} title="Stop the build" className={`absolute right-9 ${composerBtnY} h-6 w-6 flex items-center justify-center rounded-lg text-red-400 hover:text-white hover:bg-red-600/80`}>
                       <Square className="w-4 h-4" />
                     </button>
-                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]">
+                    <button onClick={sendSteer} disabled={!prompt.trim()} title="Message the team (they act on it at the next step)" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-fuchsia-600 hover:from-indigo-400 hover:to-fuchsia-500 disabled:opacity-40 rounded-lg text-white shadow-[0_0_12px_rgba(129,80,255,0.45)]`}>
                       <Send className="w-4 h-4" />
                     </button>
                   </>
                 ) : running ? (
-                  <button onClick={stop} title="Stop" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white">
+                  <button onClick={stop} title="Stop" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-lg text-white`}>
                     <Square className="w-4 h-4" />
                   </button>
                 ) : (
-                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className="absolute right-2 bottom-0.5 h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white">
+                  <button onClick={() => { send(); setComposerExpanded(false); }} disabled={!prompt.trim() && files.length === 0} title="Send" className={`absolute right-2 ${composerBtnY} h-6 w-6 flex items-center justify-center bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 rounded-lg text-white`}>
                     <Send className="w-4 h-4" />
                   </button>
                 )}
